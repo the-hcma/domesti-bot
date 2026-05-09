@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Launcher so you can run ``./device_manager`` from the repo root (chmod +x)."""
+
+from __future__ import annotations
+
+from device_manager_cli import main
+
+if __name__ == "__main__":
+    main()

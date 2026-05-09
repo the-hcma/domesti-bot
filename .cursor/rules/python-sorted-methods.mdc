@@ -1,0 +1,24 @@
+---
+description: Alphabetical ordering for methods and module-level functions in Python
+globs: "**/*.py"
+alwaysApply: true
+---
+
+# Sorted functions / methods
+
+Within each `class`, define **methods and `@property` getters in ASCII alphabetical order by name** (the name after `def`). Treat `async def` like `def` for ordering.
+
+Do the same for **module-level functions** (including `async def`). Keep `import` blocks at the top unchanged.
+
+When adding APIs, **insert** definitions in sorted position instead of appending at the bottom.
+
+Dunder methods participate in the same sort (`__init__`, `__str__`, …).
+
+```python
+# Example: member order under strict names
+class Example:
+    def __init__(self) -> None: ...
+    def __str__(self) -> str: ...
+    async def close(self) -> None: ...
+    def fetch(self) -> None: ...
+```

@@ -1,0 +1,9 @@
+gotailwind[cli]
+icecream
+prompt_toolkit>=3.0.43
+pyproj
+pyright
+pytest
+pytest-asyncio
+python-kasa
+soco>=0.30
