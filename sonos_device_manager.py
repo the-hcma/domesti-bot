@@ -4,7 +4,7 @@ Compatible with **S1-era and newer** households that expose the classic Sonos SO
 local network (the same stack SoCo targets). Discovery uses UDP; playback calls are run in a
 thread pool so async callers are not blocked.
 
-Requires the optional ``soco`` dependency (see ``requirements.txt``).
+Requires the optional ``soco`` dependency (see ``pyproject.toml``).
 """
 
 from __future__ import annotations

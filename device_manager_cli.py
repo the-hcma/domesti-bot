@@ -4,9 +4,9 @@ Run::
 
     python device_manager_cli.py
 
-Or from the repo root (after ``chmod +x``)::
+Or from the repo root (after ``chmod +x``); uses ``uv`` when available so the project venv stays in sync::
 
-    ./device_manager
+    ./device-manager
 
 Credentials:
 

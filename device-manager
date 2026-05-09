@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$repo_root"
+
+cli_py="${repo_root}/device_manager_cli.py"
+if [[ ! -f "$cli_py" ]]; then
+  echo "device-manager: missing device_manager_cli.py in ${repo_root}" >&2
+  exit 1
+fi
+
+if command -v uv >/dev/null 2>&1; then
+  exec uv run python "$cli_py" "$@"
+fi
+
+venv_python="${repo_root}/.venv/bin/python"
+if [[ -x "$venv_python" ]]; then
+  exec "$venv_python" "$cli_py" "$@"
+fi
+
+echo "device-manager: install uv (https://docs.astral.sh/uv/) or run 'uv sync' in ${repo_root}" >&2
+exit 1
