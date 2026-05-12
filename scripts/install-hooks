@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Wire this clone's git hooks to the in-repo `scripts/hooks/` directory.
+# Run once after cloning; idempotent.
+set -euo pipefail
+
+cd "$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)"
+
+hooks_dir="scripts/hooks"
+if [[ ! -d "${hooks_dir}" ]]; then
+    echo "error: ${hooks_dir} not found" >&2
+    exit 1
+fi
+
+chmod +x "${hooks_dir}"/* 2>/dev/null || true
+
+current=$(git config --local --default '' core.hooksPath)
+if [[ "${current}" == "${hooks_dir}" ]]; then
+    echo "hooks already wired: core.hooksPath=${current}"
+    exit 0
+fi
+
+git config --local core.hooksPath "${hooks_dir}"
+echo "wired: git config --local core.hooksPath ${hooks_dir}"
+echo "installed hooks:"
+ls -1 "${hooks_dir}"

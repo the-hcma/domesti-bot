@@ -271,7 +271,10 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 > When `docs/GRAPHITE.md` lands in this repo, treat it as the full reference. Until then, follow the conventions below (consistent with the other `the-hcma/*` repos).
 
 - This project uses **Graphite (`gt`)** for branch stacking. All work happens in stacked branches.
-- **Never commit or push directly to `main`.** `main` is updated only via merged PRs. This is also **enforced server-side**: `main` has GitHub branch protection requiring (a) a pull request, (b) at least one approving review (the repo owner counts), and (c) all required status checks to pass before merge. Direct pushes are rejected by the remote with `protected branch hook declined` — that is working as intended, open a PR. The matching Cursor rule lives in `.cursor/rules/pr-workflow.mdc` and applies to every agent session.
+- **Never commit or push directly to `main`.** `main` is updated only via merged PRs. Enforcement layers, in order of strength:
+  - **Client-side pre-push hook** (`scripts/hooks/pre-push`, wired by running `./scripts/install-hooks` once per clone). Aborts any `git push` whose remote ref is `refs/heads/main` with a tutorial message pointing at `gt` / `gh pr create`. Bypass for the rare mirror/rescue case: `git push --no-verify origin main`.
+  - **Cursor rule** (`.cursor/rules/pr-workflow.mdc`, `alwaysApply: true`) tells the agent to refuse any "commit to main" intent and to open a PR instead. Applies to every agent session.
+  - **Server-side branch protection** is the strongest layer but requires GitHub Pro on private repos (or making this repo public). Until either is in place we rely on the two layers above; once enabled, swap in the ruleset documented in `.cursor/rules/pr-workflow.mdc`.
 - **Worktree-per-stack.** Every new stack/PR is created in its own Git worktree via `~/work/ai/repository-helpers/scripts/dev/start-development` so concurrent stacks stay isolated.
 - **Branch / commit creation**: `gt create --all --message "feat: descriptive message"`. Always use full flags (`--all`, `--message`), never the combined `-am`.
 - **Amending an existing PR** (corrections, review fixes, fixups): `gt modify --no-edit` (staged changes only) or `gt modify --all --message "updated msg"`. Do not create new commits on the same branch for these — fold them in.

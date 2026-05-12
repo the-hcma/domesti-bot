@@ -16,8 +16,10 @@ from app.rule_engine import (
 )
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_create_kasa_device():
+    """Real Kasa on LAN; requires a switch aliased ``Basement lamp``."""
     kdm = KasaDeviceManager()
     await kdm.fetch()
     name = "Basement lamp"
