@@ -37,9 +37,30 @@ Use kebab-case slugs that describe the change, prefixed by intent:
 
 Examples: `feat/deferred-discovery-lifespan`, `fix/cast-cache-fast-path`, `refactor/extract-logging-config`.
 
-## Server-side enforcement
+## Enforcement layers
 
-`main` is protected on GitHub via `gh api repos/the-hcma/domesti-bot/branches/main/protection` so direct pushes are rejected by the remote. If a push is rejected with `protected branch hook declined`, that is **working as intended** — open a PR instead.
+1. **Client-side pre-push hook** (`scripts/hooks/pre-push`, installed once per clone via `./scripts/install-hooks`). Refuses any `git push` whose remote ref is `refs/heads/main` with an instructive message. Emergency bypass: `git push --no-verify origin main`.
+2. **This rule** (`alwaysApply: true`) — the agent must never check out `main` to commit, and must never run `git push origin main`.
+3. **Server-side branch protection** is the strongest layer but requires GitHub Pro on private repos. When that's enabled, run:
+   ```bash
+   gh api -X POST repos/the-hcma/domesti-bot/rulesets --input - <<'JSON'
+   {
+     "name": "protect-main", "target": "branch", "enforcement": "active",
+     "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+     "rules": [
+       {"type": "deletion"},
+       {"type": "non_fast_forward"},
+       {"type": "pull_request",
+        "parameters": {"required_approving_review_count": 0,
+                       "dismiss_stale_reviews_on_push": false,
+                       "require_code_owner_review": false,
+                       "require_last_push_approval": false,
+                       "required_review_thread_resolution": false}}
+     ]
+   }
+   JSON
+   ```
+   Then a rejected push will surface as `protected branch hook declined` — working as intended.
 
 ## Exceptions
 

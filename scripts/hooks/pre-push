@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Refuse any direct push to `main`. Use a PR instead.
+#
+# Install once per clone with:
+#   ./scripts/install-hooks
+#
+# Bypass (rarely; e.g. mirroring or post-cherry-pick repair):
+#   git push --no-verify origin main
+#
+# Per `git help githooks`, git invokes pre-push with two args (remote name,
+# remote URL) and feeds one line per ref being pushed on stdin:
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+# Exit non-zero to abort the push.
+set -euo pipefail
+
+protected_branch="main"
+remote_name="${1:-}"
+red=$'\033[31m'; yellow=$'\033[33m'; reset=$'\033[0m'
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    if [[ "${remote_ref}" == "refs/heads/${protected_branch}" ]]; then
+        cat >&2 <<EOF
+
+${red}refusing direct push to ${protected_branch}${reset} (remote: ${remote_name})
+
+${yellow}Open a PR instead:${reset}
+
+  # Graphite (preferred):
+  gt create feat/<slug> --all --message "<title>"
+  gt submit --no-interactive --publish
+
+  # Or plain git + gh:
+  git checkout -b feat/<slug>
+  git add -A && git commit -m "<title>"
+  git push -u origin HEAD
+  gh pr create --title "<title>"
+
+If you really need to bypass (mirroring, repo rescue, etc.):
+  git push --no-verify ${remote_name} ${protected_branch}
+
+EOF
+        exit 1
+    fi
+done
+
+exit 0
