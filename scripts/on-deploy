@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+#
+# scripts/on-deploy - Build hook called by setup-service before starting or
+# restarting the device-manager-server systemd unit.
+#
+# Path convention matches my-tracks/scripts/on-deploy so the shared
+# `~/work/ai/repository-helpers/scripts/setup-service` tool can call it without
+# per-project configuration.
+#
+# Exit-code contract (required by setup-service):
+#   0  — steps were executed; the unit must be restarted to pick up changes.
+#   1  — nothing changed; setup-service may skip the restart.
+#   2+ — unexpected failure; setup-service aborts the deploy.
+#
+# The hook MUST NOT restart the unit itself — that responsibility belongs to
+# setup-service. Doing it here would double-restart in the success path and
+# hide real failures (we'd exit 0 even after a failed restart).
+#
+# Run manually with:
+#   ./scripts/on-deploy           # ordinary deploy hook
+#   ./scripts/on-deploy --force   # ignore the SHA cache and always rebuild
+#
+# Environment:
+#   ON_DEPLOY_SHA_FILE  Optional. Override the per-host SHA cache location
+#                       (default: $HOME/scratch/domesti-bot/on-deploy-sha).
+#
+# No-Python rule: per docs/AGENTS.md, this script must not invoke `python3`
+# for utility work. The .venv may be missing or broken at hook time; that is
+# precisely what this hook is here to fix.
+
+set -euo pipefail
+
+# shellcheck disable=SC2317  # Invoked indirectly via `trap ... ERR` below.
+_on_deploy_fail() {
+    local rc=$?
+    echo ""
+    echo "ERROR: on-deploy failed (exit code $rc)" >&2
+    echo "   line: ${BASH_LINENO[0]:-unknown}" >&2
+    echo "   command: ${BASH_COMMAND:-unknown}" >&2
+    echo ""
+    exit "$rc"
+}
+trap _on_deploy_fail ERR
+
+force_rebuild=false
+for arg in "$@"; do
+    case "$arg" in
+        --force) force_rebuild=true ;;
+        -h|--help)
+            sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
+        *)
+            echo "on-deploy: unknown argument '$arg'" >&2
+            echo "Usage: $0 [--force]" >&2
+            exit 2
+            ;;
+    esac
+done
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd "$script_dir/.." && pwd)"
+cd "$repo_dir"
+
+# Make uv discoverable from minimal (non-login) shells (e.g. systemd's
+# environment when setup-service invokes this hook).
+if [[ -d "$HOME/.local/bin" ]]; then
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "on-deploy: uv is required on PATH (install: https://docs.astral.sh/uv/)" >&2
+    exit 2
+fi
+
+echo "Running on-deploy build steps in ${repo_dir}..."
+
+current_sha=""
+if git -C "$repo_dir" rev-parse --is-inside-work-tree &>/dev/null; then
+    current_sha="$(git -C "$repo_dir" rev-parse HEAD 2>/dev/null || true)"
+fi
+
+sha_file="${ON_DEPLOY_SHA_FILE:-${HOME}/scratch/domesti-bot/on-deploy-sha}"
+mkdir -p "$(dirname "$sha_file")"
+
+# Ensure the Python environment exists. setup-service may invoke on-deploy on
+# a brand-new host or worktree without `.venv/`; the systemd ExecStart shells
+# into `scripts/device-manager-server`, which requires it.
+if [[ ! -d "$repo_dir/.venv" ]]; then
+    echo "  .venv missing — running 'uv sync'..."
+    uv sync
+elif [[ ! -x "$repo_dir/.venv/bin/python3" ]] && [[ ! -x "$repo_dir/.venv/bin/python" ]]; then
+    echo "  .venv has no usable interpreter — recreating..."
+    rm -rf "$repo_dir/.venv"
+    uv sync
+fi
+
+# Clear a stuck "failed" unit state so the next restart isn't reported as
+# failed even on a clean start. Suppress all errors: the unit may not be
+# installed yet (first deploy) or the caller may not have sudo rights.
+unit="device-manager-server.service"
+if command -v systemctl &>/dev/null; then
+    if [[ "$(id -u)" -eq 0 ]]; then
+        systemctl reset-failed "$unit" &>/dev/null || true
+    else
+        sudo -n systemctl reset-failed "$unit" &>/dev/null || true
+    fi
+fi
+
+# Skip the rebuild when the commit being deployed matches the last successful
+# deploy on this host. Exit 1 signals setup-service that no restart is needed.
+if [[ "$force_rebuild" != true && -n "$current_sha" && -f "$sha_file" ]]; then
+    recorded_sha="$(cat "$sha_file")"
+    if [[ "$recorded_sha" == "$current_sha" ]]; then
+        echo "  Already deployed at commit ${current_sha:0:7} — skipping build."
+        echo "on-deploy: no change."
+        exit 1
+    fi
+fi
+
+# Bring the venv exactly in line with the committed lockfile. `--frozen`
+# refuses to mutate uv.lock, which is the right behavior on a deploy box:
+# the build either matches the committed pin or fails loudly.
+echo "  uv sync --frozen"
+uv sync --frozen
+
+# Quick sanity check: import the entrypoint module so a missing dep or
+# Python-syntax breakage fails the hook BEFORE setup-service restarts the unit.
+echo "  Verifying config.serve imports cleanly..."
+uv run python -c "import config.serve"
+
+if [[ -n "$current_sha" ]]; then
+    echo "$current_sha" > "$sha_file"
+fi
+
+echo "on-deploy complete."
+exit 0

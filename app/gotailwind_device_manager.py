@@ -33,10 +33,9 @@ from gotailwind.models import TailwindDoor
 from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
-import kasa_discovery_store
-
-from device_manager import AlreadyInitializedError, DoorDeviceManager, NotInitializedError
-from rule_engine import DoorDevice
+from app import kasa_discovery_store
+from app.device_manager import AlreadyInitializedError, DoorDeviceManager, NotInitializedError
+from app.rule_engine import DoorDevice
 
 # Same browse type as ``tailwind scan`` (gotailwind CLI).
 _MDNS_HTTP_TCP_LOCAL = "_http._tcp.local."

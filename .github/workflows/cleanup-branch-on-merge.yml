@@ -1,0 +1,34 @@
+name: Cleanup Branch on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-merged-branch:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Delete merged branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          # Don't delete main
+          if [ "$BRANCH_NAME" = "main" ]; then
+            echo "ℹ️ Skipping main branch"
+            exit 0
+          fi
+
+          echo "PR was merged, deleting branch ${BRANCH_NAME}..."
+
+          if gh api "repos/${REPOSITORY}/git/refs/heads/${BRANCH_NAME}" -X DELETE 2>/dev/null; then
+            echo "✅ Deleted ${BRANCH_NAME}"
+          else
+            echo "ℹ️ Branch ${BRANCH_NAME} already deleted or doesn't exist"
+          fi

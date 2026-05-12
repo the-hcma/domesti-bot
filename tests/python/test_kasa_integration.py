@@ -35,9 +35,9 @@ import os
 
 import pytest
 
-from device_manager import NotInitializedError
-from kasa_device_manager import KasaDeviceManager
-from rule_engine import SwitchPowerState
+from app.device_manager import NotInitializedError
+from app.kasa_device_manager import KasaDeviceManager
+from app.rule_engine import SwitchPowerState
 
 
 def _kasa_discovery_target_optional() -> str | None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
-from rule_engine import Device, DoorDevice, SpeakerDevice, SwitchDevice
+from app.rule_engine import Device, DoorDevice, SpeakerDevice, SwitchDevice
 
 
 class AlreadyInitializedError(Exception):

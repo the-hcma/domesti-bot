@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
 from enum import StrEnum
 from math import sqrt
-from typing import Any, TypeAlias
+from typing import Any, Generic, TypeVar
 from pyproj import Transformer
 
 # Transform to UTM (a standard meters-based coordinate system)
@@ -192,26 +192,31 @@ class SimulatedSwitchDevice(SwitchDevice):
         self.set_power(True)
 
 
-# Sync / async callables taking a single ``Device``.
-DeviceEffect: TypeAlias = Callable[[Device], Any]
-AsyncDeviceEffect: TypeAlias = Callable[[Device], Coroutine[Any, Any, Any]]
+# Sync / async callables taking a single ``Device`` (or a subclass).
+# Parameterized on the concrete device type so call sites like
+# ``AsyncCallableAction(SimulatedSwitchDevice(...), SimulatedSwitchDevice.turn_on)``
+# type-check without a cast — pyright infers ``D = SimulatedSwitchDevice``
+# from the first argument and the effect signature is consistent with it.
+D = TypeVar("D", bound=Device)
+DeviceEffect = Callable[[D], Any]
+AsyncDeviceEffect = Callable[[D], Coroutine[Any, Any, Any]]
 
 
-class Action(ABC):
+class Action(ABC, Generic[D]):
     """Common binding to a ``Device``. Subclasses define sync or async ``run``."""
 
-    def __init__(self, device: Device) -> None:
+    def __init__(self, device: D) -> None:
         self._device = device
 
     @property
-    def device(self) -> Device:
+    def device(self) -> D:
         return self._device
 
 
-class CallableAction(Action):
+class CallableAction(Action[D]):
     """Synchronous ``(device) ->`` effect invoked by ``run()``."""
 
-    def __init__(self, device: Device, effect: DeviceEffect) -> None:
+    def __init__(self, device: D, effect: DeviceEffect[D]) -> None:
         super().__init__(device)
         self._effect = effect
 
@@ -219,10 +224,10 @@ class CallableAction(Action):
         return self._effect(self._device)
 
 
-class AsyncCallableAction(Action):
+class AsyncCallableAction(Action[D]):
     """Async ``(device) ->`` coroutine awaited by ``run()``."""
 
-    def __init__(self, device: Device, effect: AsyncDeviceEffect) -> None:
+    def __init__(self, device: D, effect: AsyncDeviceEffect[D]) -> None:
         super().__init__(device)
         self._effect = effect
 

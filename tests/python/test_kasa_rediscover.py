@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import kasa_discovery_store
-from kasa_device_manager import KasaDeviceManager
+from app import kasa_discovery_store
+from app.kasa_device_manager import KasaDeviceManager
 
 
 @pytest.mark.asyncio
@@ -30,7 +30,7 @@ async def test_rediscover_uses_udp_not_sqlite_cache(tmp_path) -> None:
     mgr = KasaDeviceManager(discovery_cache_path=db, force_discovery=False)
 
     mock_discover = AsyncMock(return_value={})
-    with patch("kasa_device_manager.Discover.discover", mock_discover):
+    with patch("app.kasa_device_manager.Discover.discover", mock_discover):
         await mgr.rediscover()
 
     mock_discover.assert_awaited()

@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
-from device_manager_cli import (
+from app.device_manager_cli import (
     _ArgCtx,
     _CmdCtx,
     _COMMAND_HELP_LINES,
+    _Theme,
     _collect_label_triples,
     _greedy_resolve_set_display_tokens,
     _normalize_edit_mode_choice,
     _parse_completion_buffer,
+    _print_family_parallel_line,
     _resolve_cli_target,
     _resolve_device_name,
     COMMANDS,
     build_arg_parser,
     split_invocation,
 )
+from app.kasa_device_manager import KasaDeviceManager
 
 
 @pytest.mark.parametrize(
@@ -156,4 +161,73 @@ def test_collect_label_triples_empty_switches() -> None:
     class _EmptyKasa:
         switches = ()
 
-    assert _collect_label_triples(_EmptyKasa(), None) == []
+    # The helper only reads ``.switches`` — duck-type with a stub and cast for pyright.
+    assert _collect_label_triples(cast(KasaDeviceManager, _EmptyKasa()), None) == []
+
+
+def test_print_family_parallel_line_annotates_cache_source(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    theme = _Theme(enabled=False)
+    result = {
+        "skipped": False,
+        "exc": None,
+        "ok": True,
+        "source": "cache",
+        "count": 9,
+    }
+    _print_family_parallel_line(theme, "kasa", result, ok_verb="ready")
+    out = capsys.readouterr().out
+    assert "Kasa: ready (cache, 9 switches)" in out
+
+
+def test_print_family_parallel_line_annotates_lan_discovery_source(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    theme = _Theme(enabled=False)
+    result = {
+        "skipped": False,
+        "exc": None,
+        "ok": True,
+        "source": "discovery",
+        "count": 5,
+    }
+    _print_family_parallel_line(theme, "androidtv", result, ok_verb="ready")
+    out = capsys.readouterr().out
+    assert "Google Cast: ready (LAN discovery, 5 devices)" in out
+
+
+def test_print_family_parallel_line_omits_source_when_none(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Tailwind has no LAN sweep; the renderer must not invent a label."""
+
+    theme = _Theme(enabled=False)
+    result = {
+        "skipped": False,
+        "exc": None,
+        "ok": True,
+        "source": None,
+        "count": 2,
+    }
+    _print_family_parallel_line(theme, "gotailwind", result, ok_verb="ready")
+    out = capsys.readouterr().out
+    assert "GoTailwind: ready (2 doors)" in out
+    assert "cache" not in out
+    assert "LAN discovery" not in out
+
+
+def test_print_family_parallel_line_falls_back_to_bare_ready_without_source_or_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Older bundles (no ``source``/``count`` keys) still render cleanly."""
+
+    theme = _Theme(enabled=False)
+    result = {
+        "skipped": False,
+        "exc": None,
+        "ok": True,
+    }
+    _print_family_parallel_line(theme, "sonos", result, ok_verb="ready")
+    out = capsys.readouterr().out
+    assert out.strip() == "Sonos: ready"

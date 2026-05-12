@@ -9,3 +9,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+
+# Runtime artifacts that should never be committed.
+logs/
+*.log

@@ -23,7 +23,7 @@ email and password for the first handshake; pass ``username`` / ``password`` or
 ``KASA_PASSWORD`` are set. Setting only one of them is treated as an error to avoid
 accidentally sending partial credentials to ``Discover``.
 
-Optional SQLite persistence (see :mod:`kasa_discovery_store`): pass
+Optional SQLite persistence (see :mod:`app.kasa_discovery_store`): pass
 ``discovery_cache_path`` to skip UDP discovery when every cached host reconnects.
 Configs are saved without plaintext credentials (merge ``credentials`` /
 ``KASA_USERNAME`` + ``KASA_PASSWORD`` on load). Use ``force_discovery=True`` to refresh
@@ -39,8 +39,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-import kasa_discovery_store
-
 from kasa import Discover, Device as KDevice
 from kasa.credentials import Credentials
 from kasa.deviceconfig import (
@@ -51,8 +49,9 @@ from kasa.deviceconfig import (
 )
 from kasa.exceptions import AuthenticationError, UnsupportedDeviceError, _ConnectionError
 
-from device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
-from rule_engine import SwitchDevice
+from app import kasa_discovery_store
+from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
+from app.rule_engine import SwitchDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -242,6 +241,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             else None
         )
         self._force_discovery = force_discovery
+        # Set by :meth:`_fetch_impl` to ``"cache"`` (every saved config
+        # reconnected without falling back to UDP) or ``"discovery"`` (full
+        # ``Discover.discover`` broadcast sweep). ``None`` before first fetch.
+        self._last_discovery_source: str | None = None
 
         has_u = bool((username or "").strip())
         has_p = bool((password or "").strip())
@@ -403,11 +406,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     if dev is None:
                         cache_ok = False
                         break
-                    kd = KasaDevice(dev.alias, dev)
+                    kd = KasaDevice(dev.alias or dev.host, dev)
                     alias_map[kd.identifier] = kd
                 if cache_ok:
                     self._finalize_kasa_lookup(alias_map)
                     self._persist_discovery_cache(self._device_name_to_device or {})
+                    self._last_discovery_source = "cache"
                     return
                 for kd in alias_map.values():
                     with contextlib.suppress(Exception):
@@ -436,7 +440,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 finalized = await self._ingest_discovered_device(discovered, qtimeout)
                 if finalized is None:
                     continue
-                kd = KasaDevice(finalized.alias, finalized)
+                kd = KasaDevice(finalized.alias or finalized.host, finalized)
                 alias_map[kd.identifier] = kd
         except BaseException:
             for kd in alias_map.values():
@@ -446,6 +450,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
         self._finalize_kasa_lookup(alias_map)
         self._persist_discovery_cache(self._device_name_to_device or {})
+        self._last_discovery_source = "discovery"
 
     def _finalize_kasa_lookup(self, alias_map: dict[str, KasaDevice]) -> None:
         """Apply SQLite display names (keyed by device host) and rebuild lookup keys."""
@@ -490,6 +495,16 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         await kd._kDevice.update()
         kd.set_power(kd._kDevice.is_on)
         return kd._kDevice.is_on
+
+    @property
+    def last_discovery_source(self) -> str | None:
+        """``"cache"`` or ``"discovery"`` after :meth:`fetch`; ``None`` before.
+
+        The CLI bootstrap reads this to annotate each backend's "ready" line
+        with where the device list came from (SQLite vs. fresh UDP sweep).
+        """
+
+        return self._last_discovery_source
 
     async def rediscover(self) -> None:
         """Drop connections and repopulate switches via UDP discovery (ignore SQLite cache reads).

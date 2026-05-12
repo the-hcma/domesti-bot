@@ -1,0 +1,36 @@
+# systemd unit for the domesti-bot device-manager HTTP API.
+#
+# After substitution, install the rendered unit, for example:
+#   sudo install -m 644 device-manager-server.service /etc/systemd/system/device-manager-server.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now device-manager-server
+#
+# Placeholders (replace entire @@...@@ token including at-signs):
+#   @@REPO_ROOT@@     Absolute path to the repository on the server (e.g. /opt/domesti-bot).
+#   @@SERVICE_USER@@  Unprivileged account to run the process (e.g. domesti).
+#
+# repository-helpers setup-service: substitute @@REPO_ROOT@@ and @@SERVICE_USER@@ (or
+# configure equivalent token mapping) before copying to /etc/systemd/system/.
+#
+# Optional: set DOMESTI_API_KEY in the environment for authenticated clients, or add an
+# EnvironmentFile= line pointing at a root-only file.
+
+[Unit]
+Description=domesti-bot device manager HTTP API (device-manager-server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@@SERVICE_USER@@
+WorkingDirectory=@@REPO_ROOT@@
+ExecStart=@@REPO_ROOT@@/scripts/device-manager-server --listen-host 127.0.0.1 --listen-port 8765
+Restart=on-failure
+RestartSec=5
+
+# Hardening (safe for this workload; adjust if you add writable paths outside the repo).
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

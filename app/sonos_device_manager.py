@@ -1,0 +1,276 @@
+"""Sonos zone control via SoCo (UPnP over the LAN).
+
+Compatible with **S1-era and newer** households that expose the classic Sonos SOAP API on the
+local network (the same stack SoCo targets). Discovery uses UDP; playback calls are run in a
+thread pool so async callers are not blocked.
+
+Cache-first startup mirrors :mod:`app.kasa_device_manager`: when a SQLite
+``discovery_cache_path`` is supplied, :meth:`SonosDeviceManager.fetch` reconnects
+each cached zone by host and verifies ``SoCo.uid`` matches the cached UUID
+before trusting it. The UDP discovery path runs only when the cache is empty,
+the user passes ``force_discovery=True``, or any cached zone fails to reconnect
+/ returns an unexpected UID (e.g. a Sonos rebind after DHCP churn).
+
+Requires the optional ``soco`` dependency (see ``pyproject.toml``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from pathlib import Path
+from typing import Any
+
+from soco import SoCo, discover as soco_discover
+
+from app import kasa_discovery_store
+from app.device_manager import AlreadyInitializedError, NotInitializedError, SpeakerDeviceManager
+from app.rule_engine import SpeakerDevice
+
+_LOGGER = logging.getLogger(__name__)
+
+_SONOS_TRANSPORT_LABELS: dict[str, str] = {
+    "PAUSED_PLAYBACK": "paused",
+    "PLAYING": "playing",
+    "STOPPED": "stopped",
+    "TRANSITIONING": "transitioning",
+}
+
+
+class SonosSpeakerDevice(SpeakerDevice):
+    __slots__ = ("_soco",)
+
+    def __init__(
+        self,
+        identifier: str,
+        soco_zone: Any,
+        *,
+        display_name: str | None = None,
+    ) -> None:
+        super().__init__(identifier, display_name=display_name)
+        self._soco = soco_zone
+
+    async def pause(self) -> None:
+        await asyncio.to_thread(self._soco.pause)
+
+    async def resume(self) -> None:
+        await asyncio.to_thread(self._soco.play)
+
+    def transport_state_summary(self) -> str:
+        """Best-effort playback view from UPnP AV transport (``playing`` / ``paused`` / …)."""
+
+        try:
+            info = self._soco.get_current_transport_info()
+            raw = (info or {}).get("current_transport_state") or ""
+            raw = str(raw).strip()
+        except Exception:
+            return "unknown"
+        if not raw:
+            return "unknown"
+        return _SONOS_TRANSPORT_LABELS.get(
+            raw, raw.replace("_", " ").lower()
+        )
+
+
+class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
+    """Discover zones with SoCo and drive *pause* / *resume* per zone.
+
+    Pass ``discovery_cache_path`` to enable cache-first startup. Set
+    ``force_discovery=True`` to bypass the cache (matches
+    :class:`KasaDeviceManager`).
+    """
+
+    def __init__(
+        self,
+        *,
+        discovery_timeout: float = 5.0,
+        discovery_cache_path: Path | str | None = None,
+        force_discovery: bool = False,
+    ) -> None:
+        self._discovery_timeout = discovery_timeout
+        self._alias_to_device: dict[str, SonosSpeakerDevice] | None = None
+        self._discovery_cache_path = (
+            Path(discovery_cache_path).expanduser().resolve()
+            if discovery_cache_path
+            else None
+        )
+        self._force_discovery = bool(force_discovery)
+        # Set by :meth:`fetch` to ``"cache"`` (every cached zone reconnected
+        # with a matching UID, no UDP traffic) or ``"discovery"`` (full
+        # ``soco_discover`` UDP sweep). ``None`` before the first ``fetch``.
+        self._last_discovery_source: str | None = None
+
+    def _device_for(self, identifier: str) -> SonosSpeakerDevice:
+        if self._alias_to_device is None:
+            raise NotInitializedError
+        d = self._alias_to_device.get(identifier)
+        if d is None:
+            raise ValueError(f"Unknown Sonos zone: {identifier!r}")
+        return d
+
+    def _expand_lookup(self, devices: list[SonosSpeakerDevice]) -> dict[str, SonosSpeakerDevice]:
+        alias_map: dict[str, SonosSpeakerDevice] = {}
+        for sd in devices:
+            alias_map[sd.identifier] = sd
+            label = sd.preferred_label
+            if label != sd.identifier:
+                alias_map[label] = sd
+        return alias_map
+
+    def _finalize(self, devices: list[SonosSpeakerDevice]) -> None:
+        devices.sort(key=lambda d: d.preferred_label.lower())
+        self._alias_to_device = self._expand_lookup(devices)
+
+    def _persist_cache(self, devices: list[SonosSpeakerDevice]) -> None:
+        if self._discovery_cache_path is None:
+            return
+        rows: list[tuple[str, str, str | None]] = []
+        for sd in devices:
+            zone = sd._soco
+            host = (getattr(zone, "ip_address", None) or "").strip()
+            uid = sd.identifier.strip()
+            if not host or not uid:
+                continue
+            display = getattr(zone, "player_name", None)
+            label = (str(display).strip() if display else "") or None
+            rows.append((uid, host, label))
+        kasa_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
+
+    async def _reconnect_from_cache(self) -> list[SonosSpeakerDevice] | None:
+        """Return cached zones if every row reconnects with a matching UID; ``None`` otherwise."""
+
+        if self._discovery_cache_path is None:
+            return None
+        cached = kasa_discovery_store.load_sonos_zones(self._discovery_cache_path)
+        if not cached:
+            return None
+
+        def _probe_one(host: str, expected_uid: str) -> Any | None:
+            try:
+                zone = SoCo(host)
+                # Accessing ``.uid`` triggers a UPnP fetch; if the host moved
+                # or the zone vanished, this raises and we fall back to UDP.
+                actual = (zone.uid or "").strip()
+            except Exception as exc:
+                _LOGGER.debug(
+                    "Sonos cache miss: host=%s expected_uid=%s error=%s",
+                    host,
+                    expected_uid,
+                    exc,
+                )
+                return None
+            if actual != expected_uid:
+                _LOGGER.debug(
+                    "Sonos cache mismatch: host=%s expected_uid=%s actual_uid=%s",
+                    host,
+                    expected_uid,
+                    actual,
+                )
+                return None
+            return zone
+
+        devices: list[SonosSpeakerDevice] = []
+        for uid, host, cached_name in cached:
+            zone = await asyncio.to_thread(_probe_one, host, uid)
+            if zone is None:
+                return None
+            label = (cached_name or "").strip()
+            if not label:
+                try:
+                    label = (getattr(zone, "player_name", None) or "").strip()
+                except Exception:
+                    label = ""
+            devices.append(SonosSpeakerDevice(uid, zone, display_name=label or uid))
+        return devices
+
+    async def disconnect(self) -> None:
+        self._alias_to_device = None
+
+    async def fetch(self) -> None:
+        if self._alias_to_device is not None:
+            raise AlreadyInitializedError
+
+        if not self._force_discovery:
+            cached = await self._reconnect_from_cache()
+            if cached is not None:
+                self._finalize(cached)
+                self._persist_cache(cached)
+                self._last_discovery_source = "cache"
+                return
+
+        # soco's ``discover`` is annotated ``timeout: int``; round our float
+        # timeout up to at least 1 second so sub-second values still produce a
+        # real LAN sweep instead of an immediate empty result.
+        timeout = max(1, int(round(self._discovery_timeout)))
+
+        def _run_discovery() -> set[Any]:
+            found = soco_discover(timeout=timeout)
+            return found if found else set()
+
+        zones = await asyncio.to_thread(_run_discovery)
+        devices: list[SonosSpeakerDevice] = []
+        for z in zones:
+            uid = getattr(z, "uid", None) or str(id(z))
+            name = (getattr(z, "player_name", None) or "").strip() or uid
+            sd = SonosSpeakerDevice(uid, z, display_name=name)
+            devices.append(sd)
+        self._finalize(devices)
+        self._persist_cache(devices)
+        self._last_discovery_source = "discovery"
+
+    def get_device_by_alias(self, identifier: str) -> SonosSpeakerDevice | None:
+        if self._alias_to_device is None:
+            raise NotInitializedError
+        return self._alias_to_device.get(identifier)
+
+    @property
+    def is_cache_warm(self) -> bool:
+        """``True`` when :meth:`fetch` will skip the UDP sweep entirely.
+
+        The bootstrap path uses this to choose a "Loading cached devices…" vs
+        "Discovering devices (parallel)…" banner without committing to a full
+        probe up-front.
+        """
+
+        if self._force_discovery or self._discovery_cache_path is None:
+            return False
+        try:
+            return bool(kasa_discovery_store.load_sonos_zones(self._discovery_cache_path))
+        except Exception:
+            return False
+
+    @property
+    def last_discovery_source(self) -> str | None:
+        """``"cache"`` or ``"discovery"`` after :meth:`fetch`; ``None`` before.
+
+        The CLI bootstrap reads this to annotate each backend's "ready" line so
+        users see whether the device list came from SQLite (no LAN traffic) or
+        a fresh ``soco_discover`` UDP sweep.
+        """
+
+        return self._last_discovery_source
+
+    async def pause(self, identifier: str) -> None:
+        await self._device_for(identifier).pause()
+
+    @property
+    def players(self) -> tuple[SonosSpeakerDevice, ...]:
+        if self._alias_to_device is None:
+            raise NotInitializedError
+        uniq = list({id(p): p for p in self._alias_to_device.values()}.values())
+        uniq.sort(key=lambda p: p.preferred_label.lower())
+        return tuple(uniq)
+
+    async def rediscover(self) -> None:
+        """Force a fresh UDP sweep, ignoring the cache; subsequent ``fetch`` calls keep using the cache."""
+
+        await self.disconnect()
+        previous = self._force_discovery
+        self._force_discovery = True
+        try:
+            await self.fetch()
+        finally:
+            self._force_discovery = previous
+
+    async def resume(self, identifier: str) -> None:
+        await self._device_for(identifier).resume()

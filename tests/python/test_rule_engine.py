@@ -1,8 +1,9 @@
 import pytest
 
 from asyncio import sleep as async_sleep
-from kasa_device_manager import KasaDeviceManager
-from rule_engine import (
+
+from app.kasa_device_manager import KasaDeviceManager
+from app.rule_engine import (
     Action,
     AsyncCallableAction,
     CallableAction,

@@ -33,9 +33,9 @@ import os
 
 import pytest
 
-from device_manager import NotInitializedError
-from gotailwind_device_manager import GotailwindDeviceManager
-from rule_engine import DoorPosition
+from app.device_manager import NotInitializedError
+from app.gotailwind_device_manager import GotailwindDeviceManager
+from app.rule_engine import DoorPosition
 
 
 def _print_discovered_devices(mgr: GotailwindDeviceManager) -> None:

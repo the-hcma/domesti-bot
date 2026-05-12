@@ -1,0 +1,195 @@
+name: CI
+
+on:
+  # Omitting push: main — once a merge queue is enabled it validates the
+  # integrated state itself; a second CI run after merge duplicates work
+  # without adding signal. Until then, PR validation is sufficient.
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches-ignore:
+      - '**/graphite-base/**'
+  schedule:
+    # Weekly full suite — catches new CVEs and regressions between PRs.
+    - cron: '0 7 * * 4'
+  workflow_dispatch:
+
+# Cancel any in-progress run for the same PR when a newer one starts.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Guard
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.set-skip.outputs.skip }}
+    steps:
+      # Fetch PR state with automatic retries so transient GitHub API errors
+      # (e.g. 504) don't fail the Guard job and block the merge queue.
+      - id: pr-state
+        uses: nick-fields/retry@v4
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        with:
+          timeout_seconds: 15
+          max_attempts: 3
+          retry_wait_seconds: 5
+          command: |
+            if [[ -z "$PR_NUMBER" ]]; then exit 0; fi
+            state=$(gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json state -q .state)
+            echo "state=$state" >> "$GITHUB_OUTPUT"
+
+      - id: set-skip
+        env:
+          HEAD_REF: ${{ github.head_ref || github.ref_name }}
+          PR_STATE: ${{ steps.pr-state.outputs.state }}
+        run: |
+          # Skip merge-queue staging branches — the merge queue validates the
+          # integrated state itself; CI there duplicates work.
+          # Skip when the PR is already merged — Graphite pushes a restack
+          # commit to the next branch after a merge lands, which would
+          # otherwise trigger a redundant CI run on an already-validated diff.
+          if [[ "$HEAD_REF" == gtmq_merge_* ]] || [[ "$PR_STATE" == "MERGED" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  typecheck:
+    name: Pyright
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Verify Python version matches .python-version
+        run: |
+          set -euo pipefail
+          current=$(uv run python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          required=$(tr -d '[:space:]' < .python-version | cut -d. -f1,2)
+          if [[ "$current" != "$required" ]]; then
+            echo "❌ Python version mismatch: using $current but .python-version pins $required"
+            exit 1
+          fi
+          echo "✅ Using Python $current"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Pyright
+        run: uv run pyright
+
+  test:
+    name: Pytest (hermetic)
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run pytest (skip integration / LAN hardware tests)
+        run: uv run pytest -m "not integration"
+
+  shellcheck:
+    name: Shellcheck
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Lint shell scripts
+        run: |
+          set -euo pipefail
+          # Convention: shell scripts have no file extension and live under
+          # scripts/. Collect every tracked file in that tree that is not a
+          # Python / docs / config file.
+          mapfile -t targets < <(
+            git ls-files -- scripts \
+              | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$' \
+              || true
+          )
+          if [[ ${#targets[@]} -eq 0 ]]; then
+            echo "No shell scripts found — nothing to lint."
+            exit 0
+          fi
+          printf 'shellcheck: %s\n' "${targets[@]}"
+          shellcheck "${targets[@]}"
+
+  workflow-lint:
+    name: Workflow Lint (actionlint)
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Lint GitHub Actions workflows
+        uses: rhysd/actionlint@v1.7.12
+
+  secret-scan:
+    name: Secret Scan
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')
+          FALLBACK_VERSION=8.30.0
+          VERSION=$(curl -sf https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+            | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v')
+          VERSION=${VERSION:-$FALLBACK_VERSION}
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_${ARCH}.tar.gz" \
+            | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Scan for leaked secrets
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          if [ -n "$BASE" ] && [ -n "$HEAD" ]; then
+            gitleaks detect --source . --log-opts "${BASE}..${HEAD}"
+          else
+            gitleaks detect --source .
+          fi

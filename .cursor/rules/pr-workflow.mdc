@@ -1,0 +1,62 @@
+---
+description: Every change to main must go through a pull request — no direct pushes
+alwaysApply: true
+---
+
+# PR-only workflow (enforced)
+
+**All changes to `main` MUST go through a pull request.** No direct commits, no force pushes, no fast-forward merges from a local branch into `main` that aren't first reviewed as a PR.
+
+## What this means for the agent
+
+When the user asks you to "commit and push" / "ship this" / "land this":
+
+1. **Never** check out `main` and commit there directly.
+2. **Never** run `git push origin main` from a local working copy.
+3. Always:
+   - Create a feature branch with `gt create <branch-name>` (preferred — Graphite stacked-branch workflow) or `git checkout -b <branch-name>`.
+   - Commit on that branch.
+   - Open a PR with `gh pr create` (or `gt submit` for Graphite stacks).
+   - Return the PR URL to the user and stop.
+4. If you discover the working tree is currently on `main` with staged or unstaged changes, **first** move them to a feature branch:
+   ```bash
+   git checkout -b <descriptive-branch-name>   # carries the working changes with you
+   ```
+   then commit.
+
+## Branch-naming convention
+
+Use kebab-case slugs that describe the change, prefixed by intent:
+
+- `feat/<slug>` — new feature
+- `fix/<slug>` — bug fix
+- `refactor/<slug>` — internal reorganization, no behavior change
+- `docs/<slug>` — docs-only
+- `chore/<slug>` — tooling, CI, dependencies
+- `test/<slug>` — test-only
+
+Examples: `feat/deferred-discovery-lifespan`, `fix/cast-cache-fast-path`, `refactor/extract-logging-config`.
+
+## Server-side enforcement
+
+`main` is protected on GitHub via `gh api repos/the-hcma/domesti-bot/branches/main/protection` so direct pushes are rejected by the remote. If a push is rejected with `protected branch hook declined`, that is **working as intended** — open a PR instead.
+
+## Exceptions
+
+There are none for application code. The one mechanical exception is the **initial setup commit that introduces this rule itself** (the commit you are reading the rule in). Every subsequent change is PR-only.
+
+## Quick reference
+
+```bash
+# Start work on a new change (preferred — Graphite):
+gt create feat/<slug>
+# ... edit, test ...
+git add -A && git commit -m "<title>"
+gt submit                                # opens a PR
+
+# Or plain git:
+git checkout -b feat/<slug>
+git add -A && git commit -m "<title>"
+git push -u origin HEAD
+gh pr create --title "<title>" --body "<summary>"
+```

@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+#
+# Start the domesti device-manager HTTP API (FastAPI + uvicorn).
+#
+# Logging strategy mirrors my-tracks (see docs/AGENTS.md): timestamps in the
+# system timezone, a single line per event, optional rotating file output, and
+# `--console` for dual logging during development.
+#
+# Usage:
+#   ./scripts/device-manager-server [OPTIONS] [-- SERVER_OPTIONS]
+#
+# Logging options (handled by the wrapper, forwarded as env vars):
+#   --log-level LEVEL    trace | debug | info | warning | error | critical
+#                        Default: info
+#   --log-file PATH      Write logs to PATH instead of logs/domesti-bot.log
+#   --log-utc            Print log timestamps in UTC instead of local timezone
+#   --console            Output logs to console in addition to file (dual)
+#   --no-log-file        Disable file logging entirely (console only)
+#   -h, --help           Show this help and the upstream Python --help text
+#
+# Everything else is forwarded verbatim to `python -m config.serve` (e.g.
+# --listen-host, --listen-port, discovery flags).
+#
+# Examples:
+#   ./scripts/device-manager-server
+#   ./scripts/device-manager-server --console --log-level debug
+#   ./scripts/device-manager-server --listen-host 127.0.0.1 --listen-port 8765
+#   ./scripts/device-manager-server --no-log-file --log-level debug
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+serve_module="config.serve"
+serve_path="${repo_root}/config/serve.py"
+if [[ ! -f "$serve_path" ]]; then
+  echo "device-manager-server: missing ${serve_path#"${repo_root}/"} in ${repo_root}" >&2
+  exit 1
+fi
+
+log_level="info"
+log_file_override=""
+log_to_console=false
+log_utc=false
+disable_log_file=false
+forwarded_args=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --log-level)
+      [[ $# -ge 2 ]] || { echo "device-manager-server: --log-level requires a value" >&2; exit 2; }
+      log_level=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
+      shift 2
+      ;;
+    --log-level=*)
+      log_level=$(printf '%s' "${1#*=}" | tr '[:upper:]' '[:lower:]')
+      shift
+      ;;
+    --log-file)
+      [[ $# -ge 2 ]] || { echo "device-manager-server: --log-file requires a value" >&2; exit 2; }
+      log_file_override="$2"
+      shift 2
+      ;;
+    --log-file=*)
+      log_file_override="${1#*=}"
+      shift
+      ;;
+    --no-log-file)
+      disable_log_file=true
+      shift
+      ;;
+    --log-utc)
+      log_utc=true
+      shift
+      ;;
+    --console)
+      log_to_console=true
+      shift
+      ;;
+    -h|--help)
+      sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
+      echo
+      echo "--- Upstream options (config.serve) ---"
+      if command -v uv >/dev/null 2>&1; then
+        uv run python -m "$serve_module" --help || true
+      else
+        "${repo_root}/.venv/bin/python" -m "$serve_module" --help || true
+      fi
+      exit 0
+      ;;
+    --)
+      shift
+      while [[ $# -gt 0 ]]; do
+        forwarded_args+=("$1")
+        shift
+      done
+      ;;
+    *)
+      forwarded_args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+case "$log_level" in
+  trace|debug|info|warning|error|critical) ;;
+  *)
+    echo "device-manager-server: invalid --log-level '$log_level'" >&2
+    echo "Valid levels: trace, debug, info, warning, error, critical" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$disable_log_file" == true && -n "$log_file_override" ]]; then
+  echo "device-manager-server: --no-log-file conflicts with --log-file" >&2
+  exit 2
+fi
+
+if [[ "$disable_log_file" == true ]]; then
+  log_file=""
+else
+  if [[ -n "$log_file_override" ]]; then
+    log_file="$log_file_override"
+  else
+    # Mirror the my-tracks convention: per-user scratch tree outside the repo
+    # so log rotation never lands on a tracked file. Matches my-tracks's
+    # default ${HOME}/scratch/my-tracks/my-tracks.log.
+    log_file="${HOME}/scratch/domesti-bot/domesti-bot.log"
+  fi
+  mkdir -p "$(dirname "$log_file")"
+fi
+
+DOMESTI_LOG_LEVEL=$(printf '%s' "$log_level" | tr '[:lower:]' '[:upper:]')
+export DOMESTI_LOG_LEVEL
+if [[ -n "$log_file" ]]; then
+  export LOG_FILE="$log_file"
+else
+  unset LOG_FILE
+fi
+if [[ "$log_utc" == true ]]; then
+  export LOG_UTC=1
+else
+  unset LOG_UTC
+fi
+if [[ "$log_to_console" == true || -z "$log_file" ]]; then
+  export DOMESTI_LOG_CONSOLE=1
+else
+  unset DOMESTI_LOG_CONSOLE
+fi
+
+log_tz="local time"
+[[ "$log_utc" == true ]] && log_tz="UTC"
+
+if [[ -n "$log_file" ]]; then
+  if [[ "$log_to_console" == true ]]; then
+    log_dest="console + ${log_file}"
+  else
+    log_dest="$log_file"
+  fi
+else
+  log_dest="console"
+fi
+
+echo "domesti-bot device-manager-server"
+echo "  Log level:   ${DOMESTI_LOG_LEVEL}  (timestamps: ${log_tz})"
+echo "  Logging to:  ${log_dest}"
+[[ -n "$log_file" && "$log_to_console" != true ]] && echo "  Tip:         pass --console to also stream logs to this terminal"
+echo
+
+if command -v uv >/dev/null 2>&1; then
+  exec uv run python -m "$serve_module" "${forwarded_args[@]}"
+fi
+
+venv_python="${repo_root}/.venv/bin/python"
+if [[ -x "$venv_python" ]]; then
+  exec "$venv_python" -m "$serve_module" "${forwarded_args[@]}"
+fi
+
+echo "device-manager-server: install uv (https://docs.astral.sh/uv/) or run 'uv sync' in ${repo_root}" >&2
+exit 1
