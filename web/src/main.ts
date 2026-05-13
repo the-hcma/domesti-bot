@@ -201,36 +201,35 @@ function renderDevice(
   head.append(stateBadge);
   tile.append(head);
 
+  // Each tile gets a single toggle whose label reflects the *current*
+  // state — clicking it flips the device to the opposite state. For
+  // doors, ``unknown`` (transient OPENING/CLOSING) is treated as
+  // not-open so the next click closes — same default as the controller.
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "tile-toggle";
+  let isActive: boolean;
+  let toggleLabel: string;
+  let excludeText: string;
   if (device.kind === "switch") {
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "tile-toggle";
-    toggle.dataset["on"] = device.state === "on" ? "true" : "false";
-    toggle.setAttribute(
-      "aria-pressed",
-      device.state === "on" ? "true" : "false",
-    );
-    toggle.textContent = device.state === "on" ? "On" : "Off";
+    isActive = device.state === "on";
+    toggleLabel = isActive ? "On" : "Off";
+    excludeText = "Exclude from global all-off";
     toggle.addEventListener("click", () => {
       controller.toggleKasaTile(device);
     });
-    tile.append(toggle);
   } else {
-    // Door tile: a single button that flips between Open and Close based
-    // on the current cached position. ``unknown`` (transient ``OPENING``
-    // / ``CLOSING``) renders as Close — same default as the controller.
-    const op = document.createElement("button");
-    op.type = "button";
-    op.className = "tile-toggle";
-    const isOpen = device.state === "open";
-    op.dataset["on"] = isOpen ? "true" : "false";
-    op.setAttribute("aria-pressed", isOpen ? "true" : "false");
-    op.textContent = isOpen ? "Close" : "Open";
-    op.addEventListener("click", () => {
+    isActive = device.state === "open";
+    toggleLabel = isActive ? "Open" : "Closed";
+    excludeText = "Exclude from global close-all";
+    toggle.addEventListener("click", () => {
       controller.operateTailwindTile(device);
     });
-    tile.append(op);
   }
+  toggle.dataset["on"] = isActive ? "true" : "false";
+  toggle.setAttribute("aria-pressed", isActive ? "true" : "false");
+  toggle.textContent = toggleLabel;
+  tile.append(toggle);
 
   const excludeRow = document.createElement("label");
   excludeRow.className = "tile-exclude";
@@ -242,7 +241,7 @@ function renderDevice(
   });
   excludeRow.append(checkbox);
   const span = document.createElement("span");
-  span.textContent = "Exclude from global all-off";
+  span.textContent = excludeText;
   excludeRow.append(span);
   tile.append(excludeRow);
   return tile;
