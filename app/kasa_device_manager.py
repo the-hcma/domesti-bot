@@ -17,11 +17,16 @@ answers **plain HTTP KLAP on port 80**. We reconnect with ``https=False``, clear
 ``connection_type.https`` is false. On ``AuthenticationError`` or
 ``_ConnectionError``, we retry that LAN profile for ``SmartDevice`` instances, then XOR sweep.
 
-Newer KLAP devices that were linked to the Kasa/Tapo cloud may require your **account**
-email and password for the first handshake; pass ``username`` / ``password`` or
-``credentials=``, or use :meth:`credentials_from_env` when **both** ``KASA_USERNAME`` and
-``KASA_PASSWORD`` are set. Setting only one of them is treated as an error to avoid
-accidentally sending partial credentials to ``Discover``.
+Newer KLAP devices that were linked to the Kasa/Tapo cloud **require** your **account**
+email and password for the LAN KLAP handshake — there is no anonymous LAN mode for
+these devices. Pass ``username`` / ``password`` or ``credentials=``, or use
+:meth:`credentials_from_env` when **both** ``KASA_USERNAME`` and ``KASA_PASSWORD`` are
+set. Setting only one of them is treated as an error to avoid accidentally sending
+partial credentials to ``Discover``. Without credentials, these devices fail the
+initial handshake with :class:`AuthenticationError` and the recovery cascade
+exhausts (HTTP-only KLAP also auths; legacy XOR :9999 is closed on KLAP-only
+hardware); see :func:`_klap_auth_recovery_hint` for the user-facing message
+appended to the ``skipped device`` WARNING.
 
 Optional SQLite persistence (see :mod:`app.kasa_discovery_store`): pass
 ``discovery_cache_path`` to skip UDP discovery when every cached host reconnects.
@@ -64,6 +69,39 @@ from app.device_manager import AlreadyInitializedError, NotInitializedError, Swi
 from app.rule_engine import SwitchDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _klap_auth_recovery_hint(
+    *,
+    initial_exc: BaseException,
+    credentials: Credentials | None,
+) -> str:
+    """Build the actionable suffix for the ``skipped device`` WARNING.
+
+    Newer KLAP-encrypted Tapo/Kasa devices that were linked to the
+    Kasa/Tapo cloud need the **account email + password** for the LAN
+    handshake — TP-Link's protocol has no anonymous LAN mode for these
+    devices. When the initial failure was an :class:`AuthenticationError`
+    we know auth (not network) is the proximate cause, so we point the
+    operator at ``KASA_USERNAME`` / ``KASA_PASSWORD`` (when unset) or
+    flag a likely credential mismatch (when set).
+
+    Returns an empty string for non-auth failures so the message format
+    stays the same for plain network errors.
+    """
+
+    if not isinstance(initial_exc, AuthenticationError):
+        return ""
+    if credentials is None:
+        return (
+            "; this looks like a KLAP device that was linked to the "
+            "Kasa/Tapo cloud — set KASA_USERNAME + KASA_PASSWORD to "
+            "your account credentials and rerun with --force-discovery"
+        )
+    return (
+        "; the configured KASA_USERNAME / KASA_PASSWORD may be wrong "
+        "for this device's KLAP handshake"
+    )
 
 
 def _patch_klap_transport_plain_http_ssl() -> None:
@@ -195,10 +233,13 @@ async def _connect_from_saved_config(
             )
         except Exception as ex:
             _LOGGER.warning(
-                "Kasa: skipped device at %s (%s); recovery failed (%s)",
+                "Kasa: skipped device at %s (%s); recovery failed (%s)%s",
                 cfg.host,
                 type(last_exc).__name__,
                 ex,
+                _klap_auth_recovery_hint(
+                    initial_exc=exc, credentials=credentials
+                ),
             )
             return None
 
@@ -358,10 +399,14 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     )
                 except Exception as ex:
                     _LOGGER.warning(
-                        "Kasa: skipped device at %s (%s); recovery failed (%s)",
+                        "Kasa: skipped device at %s (%s); recovery failed (%s)%s",
                         host,
                         type(last_exc).__name__,
                         ex,
+                        _klap_auth_recovery_hint(
+                            initial_exc=exc,
+                            credentials=self._discovery_credentials,
+                        ),
                     )
                     return None
             return dev
