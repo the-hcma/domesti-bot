@@ -27,6 +27,35 @@ class HttpError extends Error {
     this.status = status;
     this.bodyText = bodyText;
   }
+
+  // ``/v1/ui/state`` returns 503 with two flavors of detail string
+  // (see ``app.api.app._device_state``):
+  //   * "Device discovery still in progress; ..."  → bootstrap, retry
+  //   * "Device discovery failed: ..."             → permanent, surface
+  // The frontend bootstrap loop keeps spinning only while the first
+  // flavor is in play; everything else (other 503 detail, network
+  // error, auth failure, 500, ...) bails out to the error banner.
+  isDiscoveryInProgress(): boolean {
+    if (this.status !== 503) return false;
+    const detail = parseDetail(this.bodyText);
+    return detail.toLowerCase().includes("still in progress");
+  }
+}
+
+function parseDetail(bodyText: string): string {
+  // FastAPI's default ``HTTPException`` serializer returns
+  // ``{"detail": "..."}``; we tolerate a non-JSON body so a future
+  // middleware that wraps the response can't break the loop.
+  try {
+    const parsed: unknown = JSON.parse(bodyText);
+    if (parsed && typeof parsed === "object" && "detail" in parsed) {
+      const d = (parsed as { detail: unknown }).detail;
+      if (typeof d === "string") return d;
+    }
+  } catch {
+    // bodyText wasn't JSON — fall through and search the raw text.
+  }
+  return bodyText;
 }
 
 function apiKeyFromMeta(): string | null {

@@ -33,6 +33,18 @@ class DomestiBotController {
   // user click resets only that tile's grace window.
   private static readonly OPTIMISTIC_GRACE_MS = 8000;
 
+  // Bootstrap retry cadence + deadline used while ``/v1/ui/state``
+  // is still answering 503 "Device discovery still in progress".
+  // Matches the server's ``Retry-After: 2`` hint so we don't poll
+  // faster than the suggested pace. The deadline is a safety belt:
+  // a healthy cold-cache discovery resolves within 20-35s, but
+  // exotic LAN conditions (a stuck mDNS reflector, a dead Tailwind
+  // mDNS browse) can drag it out. After the deadline the user sees
+  // the error banner so a wedged server doesn't masquerade as a
+  // pretty spinner forever.
+  private static readonly BOOTSTRAP_RETRY_MS = 2000;
+  private static readonly BOOTSTRAP_DEADLINE_MS = 90000;
+
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
   private connected = false;
@@ -49,9 +61,52 @@ class DomestiBotController {
   }
 
   async init(): Promise<void> {
-    this.renderShell("Loading device state…");
-    await this.refresh({ showErrorIfNoState: true });
+    // Show a spinner while ``/v1/ui/state`` is still answering 503
+    // "still in progress" — the FastAPI lifespan defers device
+    // discovery so the HTTP server is up well before the first
+    // payload is available. Polling continues every
+    // ``BOOTSTRAP_RETRY_MS`` (matches the server's ``Retry-After``
+    // hint) until we either have state, hit a non-transient error,
+    // or run past ``BOOTSTRAP_DEADLINE_MS``.
+    this.renderLoading("Discovering devices…");
+    await this.bootstrap();
     this.schedulePoll();
+  }
+
+  private async bootstrap(): Promise<void> {
+    const deadline =
+      performance.now() + DomestiBotController.BOOTSTRAP_DEADLINE_MS;
+    while (true) {
+      try {
+        this.state = await api.fetchState();
+        this.connected = true;
+        this.applyPendingPredictionsTo(this.state);
+        this.render();
+        return;
+      } catch (err) {
+        if (err instanceof HttpError && err.isDiscoveryInProgress()) {
+          if (performance.now() >= deadline) {
+            this.renderError(
+              "Device discovery is taking longer than expected",
+              err,
+            );
+            return;
+          }
+          // Keep the spinner up — DOM is already rendered, no need
+          // to repaint every tick. Just wait and retry.
+          await DomestiBotController.sleep(
+            DomestiBotController.BOOTSTRAP_RETRY_MS,
+          );
+          continue;
+        }
+        // Any other error (auth, 500, network, 503 with a different
+        // detail like "Device discovery failed: ...") is permanent
+        // from the bootstrap's point of view; surface it so the user
+        // can read what went wrong.
+        this.renderError("Failed to load device state", err);
+        return;
+      }
+    }
   }
 
   private async onBulkOffFamily(familyId: string): Promise<void> {
@@ -282,24 +337,23 @@ class DomestiBotController {
     return `${familyId}\u0000${deviceId}`;
   }
 
-  private async refresh(
-    opts: { showErrorIfNoState?: boolean } = {},
-  ): Promise<void> {
+  private async refresh(): Promise<void> {
+    // Post-bootstrap refresh. By the time this runs ``init`` has
+    // either populated ``this.state`` (success) or rendered the
+    // error banner (gave up). A null ``this.state`` here would
+    // mean the poll fired before bootstrap finished, which can't
+    // happen with the current sequencing (``schedulePoll`` is
+    // only called after ``bootstrap``).
     try {
       this.state = await api.fetchState();
       this.connected = true;
       this.applyPendingPredictionsTo(this.state);
       this.render();
-    } catch (err) {
+    } catch {
+      // Network blip mid-session — keep the cached tiles, flip the
+      // family frames to red, and let the next tick recover.
       this.connected = false;
-      if (this.state) {
-        // We have a cached snapshot — keep the tiles up and just flip
-        // the family frames to red so the user sees the backend went
-        // away. The poll will recover automatically.
-        this.render();
-      } else if (opts.showErrorIfNoState) {
-        this.renderError("Failed to load device state", err);
-      }
+      if (this.state) this.render();
     }
   }
 
@@ -363,12 +417,30 @@ class DomestiBotController {
     this.root.append(retry);
   }
 
-  private renderShell(message: string): void {
+  private renderLoading(message: string): void {
+    // Initial paint while the FastAPI lifespan is still running
+    // device discovery in the background. Pairs a CSS-only spinner
+    // (see ``.tile-spinner`` in ``index.html``) with a short text
+    // so screen-reader users get a verbal cue too.
     this.root.replaceChildren();
-    const placeholder = document.createElement("p");
-    placeholder.className = "tile-loading";
-    placeholder.textContent = message;
-    this.root.append(placeholder);
+    const row = document.createElement("div");
+    row.className = "tile-loading-row";
+    row.setAttribute("role", "status");
+    row.setAttribute("aria-live", "polite");
+    const spinner = document.createElement("span");
+    spinner.className = "tile-spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "tile-loading";
+    label.textContent = message;
+    row.append(spinner, label);
+    this.root.append(row);
+  }
+
+  private static sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
   }
 
   toggleKasaTile(device: UIDeviceOut): void {
