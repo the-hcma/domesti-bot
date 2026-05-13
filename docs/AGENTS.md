@@ -489,6 +489,10 @@ CI lives in `.github/workflows/`:
 - **`merged-pr-closer.yml`** — closes open PRs whose changes have already landed on `main` (handles Graphite merge-queue cases where child PRs are left open).
 - **`dependabot-auto-merge.yml`** — auto-labels Dependabot PRs with `merge-it`.
 
+Dependabot itself is configured in **`.github/dependabot.yml`**: weekly Monday sweeps across `pip` (root `pyproject.toml`), `npm` (`/web`), and `github-actions` (`/`), all labeled `dependencies` so the auto-merge workflow picks them up. Patch + minor bumps are grouped into a handful of named buckets (`fastapi-stack`, `pytest-stack`, `typescript`, `esbuild`) to keep the PR count down; major bumps continue to land as individual PRs for review.
+
+**`.github/CODEOWNERS`** maps `*` to `@thehcma` — same pattern as the-hcma/fpdf and the-hcma/my-tracks. Adding additional reviewers later is a one-line entry per path glob.
+
 No PR may be merged with a failing CI check.
 
 ---
