@@ -44,6 +44,20 @@
     .tile-header { display: flex; align-items: center; justify-content: flex-end;
       gap: 12px; padding: 0 4px; }
     .tile-loading, .tile-empty { color: var(--muted); padding: 12px; }
+    /* Spinner rendered while the backend is still discovering devices
+       (the FastAPI lifespan defers discovery and ``/v1/ui/state``
+       returns 503 + ``detail: "still in progress"`` until it lands).
+       Replaces the old "Failed to load device state" 503 banner so the
+       first paint reads "still loading" rather than "broken". */
+    .tile-loading-row { display: flex; align-items: center; gap: 12px;
+      padding: 12px; color: var(--muted); }
+    .tile-spinner { width: 18px; height: 18px; flex: 0 0 18px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: tile-spin 0.9s linear infinite; }
+    @keyframes tile-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .tile-spinner { animation: none; border-top-color: var(--muted); }
+    }
     .tile-error { background: var(--danger); color: white; padding: 10px 14px;
       border-radius: 6px; margin-bottom: 12px; }
     .family { background: var(--card); border: 2px solid var(--border);
