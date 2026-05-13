@@ -34,6 +34,7 @@ def test_ensure_schema_upgrades_legacy_database(tmp_path: Path) -> None:
         assert "tailwind_last_host" in names
         assert "kasa_discovered_devices" in names
         assert "sonos_known_zones" in names
+        assert "ui_preferences" in names
     finally:
         conn.close()
 
@@ -264,3 +265,101 @@ def test_sonos_zones_save_drops_empty_uuid_or_host(tmp_path: Path) -> None:
         ("RINCON_OK", "192.168.1.10", "Den"),
         ("RINCON_TRIM", "192.168.1.20", "Trim me"),
     ]
+
+
+def test_ui_preferences_delete_removes_row(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    kasa_discovery_store.upsert_ui_preference(
+        db, backend="kasa", canonical_key="192.168.1.50", exclude_from_global=True
+    )
+    assert kasa_discovery_store.load_ui_preferences(db) == [
+        ("kasa", "192.168.1.50", True),
+    ]
+    kasa_discovery_store.delete_ui_preference(
+        db, backend="kasa", canonical_key="192.168.1.50"
+    )
+    assert kasa_discovery_store.load_ui_preferences(db) == []
+
+
+def test_ui_preferences_distinct_backends_dont_collide(tmp_path: Path) -> None:
+    """``(backend, canonical_key)`` is the composite PK; same key per backend coexists."""
+
+    db = tmp_path / "ui.sqlite"
+    kasa_discovery_store.upsert_ui_preference(
+        db, backend="kasa", canonical_key="left", exclude_from_global=True
+    )
+    kasa_discovery_store.upsert_ui_preference(
+        db, backend="tailwind", canonical_key="left", exclude_from_global=False
+    )
+    rows = kasa_discovery_store.load_ui_preferences(db)
+    assert rows == [
+        ("kasa", "left", True),
+        ("tailwind", "left", False),
+    ]
+
+
+def test_ui_preferences_load_missing_returns_empty(tmp_path: Path) -> None:
+    db = tmp_path / "absent.sqlite"
+    assert kasa_discovery_store.load_ui_preferences(db) == []
+
+
+def test_ui_preferences_load_returns_python_bool_not_int(tmp_path: Path) -> None:
+    """Loader must coerce SQLite's ``INTEGER`` (0/1) to :class:`bool`.
+
+    Avoids subtle bugs in JSON serialization (Pydantic + bool checks) where
+    integer values would slip through and surface in API payloads.
+    """
+
+    db = tmp_path / "ui.sqlite"
+    kasa_discovery_store.upsert_ui_preference(
+        db, backend="kasa", canonical_key="k1", exclude_from_global=True
+    )
+    rows = kasa_discovery_store.load_ui_preferences(db)
+    assert rows == [("kasa", "k1", True)]
+    # ``isinstance(True, int)`` is True in Python (bool subclasses int), so
+    # ``isinstance(..., bool)`` alone isn't enough; assert the exact type.
+    assert type(rows[0][2]) is bool
+
+
+def test_ui_preferences_orders_by_backend_then_key(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    for backend, key in [
+        ("tailwind", "garage-2"),
+        ("kasa", "192.168.1.50"),
+        ("kasa", "192.168.1.10"),
+        ("tailwind", "garage-1"),
+    ]:
+        kasa_discovery_store.upsert_ui_preference(
+            db, backend=backend, canonical_key=key, exclude_from_global=False
+        )
+    rows = kasa_discovery_store.load_ui_preferences(db)
+    assert rows == [
+        ("kasa", "192.168.1.10", False),
+        ("kasa", "192.168.1.50", False),
+        ("tailwind", "garage-1", False),
+        ("tailwind", "garage-2", False),
+    ]
+
+
+def test_ui_preferences_upsert_overwrites_previous_value(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    kasa_discovery_store.upsert_ui_preference(
+        db, backend="kasa", canonical_key="k", exclude_from_global=True
+    )
+    assert kasa_discovery_store.load_ui_preferences(db) == [("kasa", "k", True)]
+    kasa_discovery_store.upsert_ui_preference(
+        db, backend="kasa", canonical_key="k", exclude_from_global=False
+    )
+    assert kasa_discovery_store.load_ui_preferences(db) == [("kasa", "k", False)]
+
+
+def test_ui_preferences_upsert_load_round_trip_default_false(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    kasa_discovery_store.upsert_ui_preference(
+        db,
+        backend="kasa",
+        canonical_key="192.168.1.42",
+        exclude_from_global=False,
+    )
+    rows = kasa_discovery_store.load_ui_preferences(db)
+    assert rows == [("kasa", "192.168.1.42", False)]
