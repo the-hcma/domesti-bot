@@ -1,0 +1,58 @@
+version: 2
+
+# Mirrors the cadence used by the-hcma/my-tracks: weekly Monday sweeps
+# across every ecosystem we actually ship, grouped where the noise is
+# worst, all labeled ``dependencies`` so the existing
+# ``dependabot-auto-merge.yml`` workflow can pick them up. The
+# ``pip`` ecosystem here covers everything declared in the root
+# ``pyproject.toml``; uv re-resolves the lock file on PR via the
+# ``uv sync`` step inside CI, so we don't need a separate ``uv``
+# ecosystem (Dependabot does not yet ship one).
+
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    groups:
+      fastapi-stack:
+        patterns:
+          - "fastapi"
+          - "uvicorn"
+          - "starlette"
+          - "pydantic*"
+      pytest-stack:
+        patterns:
+          - "pytest"
+          - "pytest-*"
+
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      typescript:
+        patterns:
+          - "typescript"
+          - "@types/*"
+      esbuild:
+        patterns:
+          - "esbuild"
+          - "@esbuild/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
