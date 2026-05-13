@@ -20,12 +20,19 @@ import type {
 class HttpError extends Error {
   readonly status: number;
   readonly bodyText: string;
+  // Parsed FastAPI ``{"detail": "..."}`` payload, or the raw body
+  // when the response isn't the JSON-detail shape. Memoised so
+  // callers that read it from multiple places (toast renderer +
+  // logging) don't re-parse on every access. Always a string, never
+  // null — falls back to ``bodyText`` per :func:`parseDetail`.
+  readonly detail: string;
 
   constructor(status: number, bodyText: string) {
     super(`HTTP ${status}: ${bodyText.slice(0, 160)}`);
     this.name = "HttpError";
     this.status = status;
     this.bodyText = bodyText;
+    this.detail = parseDetail(bodyText);
   }
 
   // ``/v1/ui/state`` returns 503 with two flavors of detail string
@@ -37,8 +44,7 @@ class HttpError extends Error {
   // error, auth failure, 500, ...) bails out to the error banner.
   isDiscoveryInProgress(): boolean {
     if (this.status !== 503) return false;
-    const detail = parseDetail(this.bodyText);
-    return detail.toLowerCase().includes("still in progress");
+    return this.detail.toLowerCase().includes("still in progress");
   }
 }
 

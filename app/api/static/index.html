@@ -60,6 +60,33 @@
     }
     .tile-error { background: var(--danger); color: white; padding: 10px 14px;
       border-radius: 6px; margin-bottom: 12px; }
+    /* Recoverable per-action toast — surfaces server-side hints like
+       a Sonos 409 ("queue is empty, pick something to play first").
+       Pinned to the viewport (NOT to ``#app``) so the background poll's
+       ``render()`` doesn't replace it. One at a time: a new toast
+       replaces the current one and resets the 10s auto-dismiss timer.
+       Phone-friendly: the ``calc(100vw - …)`` cap lets the toast hug
+       the screen edge on narrow viewports without ever overflowing. */
+    .action-toast { position: fixed; top: 16px; left: 50%;
+      transform: translateX(-50%); z-index: 1000;
+      max-width: min(480px, calc(100vw - 32px));
+      background: var(--danger); color: white; padding: 10px 14px;
+      border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      display: flex; align-items: flex-start; gap: 12px;
+      animation: action-toast-in 180ms ease-out; }
+    .action-toast-message { flex: 1; line-height: 1.4; }
+    .action-toast-dismiss { background: transparent; color: inherit;
+      border: 0; font-size: 18px; line-height: 1; padding: 0 4px;
+      cursor: pointer; opacity: 0.85; }
+    .action-toast-dismiss:hover, .action-toast-dismiss:focus-visible {
+      opacity: 1; outline: 1px solid currentColor; }
+    @keyframes action-toast-in {
+      from { transform: translate(-50%, -8px); opacity: 0; }
+      to   { transform: translate(-50%, 0);   opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .action-toast { animation: none; }
+    }
     .family { background: var(--card); border: 2px solid var(--border);
       border-radius: 10px; padding: 14px 16px;
       transition: border-color 200ms ease-in-out; }
