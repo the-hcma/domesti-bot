@@ -16,7 +16,13 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import HTMLResponse, Response
 
-from app.api.schemas import CompletionAliasesOut, ExecuteLineIn, ExecuteLineOut
+from app.api.schemas import (
+    CompletionAliasesOut,
+    ExecuteLineIn,
+    ExecuteLineOut,
+    UIStateOut,
+)
+from app.api.ui_state import build_ui_state
 from app.device_manager_cli import (
     DeviceManagersState,
     _Theme,
@@ -252,5 +258,13 @@ def create_app(args: Any) -> FastAPI:
         if api_err:
             return ExecuteLineOut(stdout=out, stderr=err, error=api_err)
         return ExecuteLineOut(stdout=out, stderr=err, error=None)
+
+    @app.get("/v1/ui/state", dependencies=[Depends(_verify_api_key)])
+    async def ui_state(state: DeviceState) -> UIStateOut:
+        # Read-only join of in-memory manager state with the persisted
+        # ``ui_preferences`` SQLite rows. The toggle / bulk-action endpoints
+        # that mutate device state and ``ui_preferences`` land in PR4
+        # (kasa) and PR5 (tailwind).
+        return build_ui_state(state, cache_path=state.cache_path)
 
     return app
