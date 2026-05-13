@@ -148,6 +148,43 @@ jobs:
           printf 'shellcheck: %s\n' "${targets[@]}"
           shellcheck "${targets[@]}"
 
+  web-build:
+    name: Web (typecheck + build)
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          # Match web/package.json#engines.node (>=20).
+          node-version: '20'
+
+      - name: Enable pnpm via corepack
+        # `packageManager` in web/package.json pins the exact pnpm version.
+        run: corepack enable pnpm
+
+      - name: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm run typecheck
+        run: pnpm run typecheck
+
+      - name: pnpm run build
+        run: pnpm run build
+
+      - name: Assert built bundle exists
+        # Catch silent build regressions (e.g. esbuild succeeding with no
+        # output files) — the deploy hook expects this exact path.
+        run: test -f ../app/api/static/dist/main.js
+
   workflow-lint:
     name: Workflow Lint (actionlint)
     needs: guard

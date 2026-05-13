@@ -154,6 +154,21 @@ def test_root_landing_page_is_excluded_from_openapi_schema() -> None:
     assert "/v1/completion-aliases" in paths
 
 
+def test_root_landing_page_references_bundle_and_status_element() -> None:
+    """The landing page must load /static/dist/main.js and expose #bundle-status.
+
+    Both contract points are required for the TypeScript bundle (built by
+    ``pnpm run build`` under ``web/``) to flip the page from "pending" to
+    "loaded" once it executes. Tests in this module deliberately don't run
+    the bundle (no headless browser); they only assert the HTML contract.
+    """
+    client, _app = _client()
+    body = client.get("/").text
+    assert 'src="/static/dist/main.js"' in body
+    assert 'id="bundle-status"' in body
+    assert 'data-state="pending"' in body
+
+
 def test_root_landing_page_returns_html_with_success_marker() -> None:
     client, _app = _client()
     response = client.get("/")
@@ -166,3 +181,26 @@ def test_root_landing_page_returns_html_with_success_marker() -> None:
     assert "/health" in body
     assert "/v1/completion-aliases" in body
     assert "/v1/execute-line" in body
+
+
+def test_static_index_html_is_served_directly_at_static_mount() -> None:
+    """``/static/index.html`` must be reachable through the StaticFiles mount.
+
+    This proves the mount is wired correctly and pinpoints any future
+    breakage to the mount itself rather than the ``/`` handler.
+    """
+    client, _app = _client()
+    response = client.get("/static/index.html")
+    assert response.status_code == 200
+    ctype = response.headers.get("content-type", "")
+    assert ctype.startswith("text/html"), ctype
+    assert 'id="bundle-status"' in response.text
+
+
+def test_static_missing_bundle_returns_clean_404() -> None:
+    """When ``app/api/static/dist/main.js`` is missing (fresh clone, no build),
+    a request must 404 cleanly without crashing the server.
+    """
+    client, _app = _client()
+    response = client.get("/static/dist/does-not-exist.js")
+    assert response.status_code == 404

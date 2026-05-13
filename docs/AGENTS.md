@@ -72,6 +72,15 @@ domesti-bot/
 │   └── verify_google_cast_discovery.py    standalone discovery probe
 ├── production/                           Server-side deploy bits
 │   └── systemd/device-manager-server.service.template
+├── web/                                  Browser TypeScript bundle (see "Web UI" below)
+│   ├── package.json                       pnpm scripts; pinned via `packageManager`
+│   ├── pnpm-lock.yaml                     committed; `pnpm install --frozen-lockfile`
+│   ├── tsconfig.json                      strict TS + Bundler module resolution
+│   ├── build.mjs                          one esbuild call → app/api/static/dist/main.js
+│   └── src/main.ts                        browser entrypoint
+├── app/api/static/                       Files served at `/static/` by FastAPI
+│   ├── index.html                         landing page (loads /static/dist/main.js)
+│   └── dist/                              `pnpm run build` output (gitignored)
 ├── AGENTS.md → docs/AGENTS.md            Symlink so Cursor / agent tools auto-discover at root
 ├── docs/
 │   ├── AGENTS.md                         (this file — canonical location)
@@ -90,6 +99,7 @@ domesti-bot/
 - **Never move** `pyproject.toml`, `pyrightconfig.json`, `uv.lock`, or `.python-version` out of the repo root — IDE and tool discovery walk up from source files and depend on root-level placement.
 - Tests live in `tests/python/` (mirroring my-tracks). Real-hardware integration tests live alongside unit tests but carry the `@pytest.mark.integration` marker. Static fixture data lives in `tests/python/fixtures/`.
 - `tests/bash/` is reserved for future shell-script tests. Keep `.gitkeep` until real tests exist.
+- **Browser code lives in `web/`** (TypeScript). Sources never go in `app/api/static/` — only the build output (`app/api/static/dist/`) does, and that is gitignored. See "Web UI" below.
 
 ---
 
@@ -166,8 +176,47 @@ uv run pytest -m integration           # LAN hardware only
     - failed → `Retry-After: 30` and `detail: "Device discovery failed: <repr(exception)>"`
   - `/health` reports the discovery state in its payload: `{"status": "ok", "service": "domesti-bot", "ready": bool, "discovery": "in_progress" | "ready" | "failed", "error": str | None}`. Programmatic readiness checks (smoke tests, deploy hooks, integration tests) should poll `/health` for `discovery == "ready"` rather than racing on the listen banner.
   - **Do not** re-introduce blocking work into the lifespan. Long-running setup (LAN probes, file rebuilds, cache warming) belongs in `_run_discovery` or a similar background task, gated behind a `app.state.*` readiness flag.
-- **Landing page.** `GET /` serves a small static HTML page (in `app.api.app._LANDING_PAGE_HTML`) confirming the service is up and linking to the JSON endpoints. It is `include_in_schema=False` (kept out of `openapi.json`) and is safe to hit before discovery completes. The HTML is intentionally inline + dependency-free; do not pull in a templating engine or an asset pipeline just to expand this page.
+- **Landing page.** `GET /` reads `app/api/static/index.html` from disk on every request (so dev edits show up without restarting the server) and returns it as `HTMLResponse`, `include_in_schema=False`. The HTML loads `/static/dist/main.js` (the compiled TypeScript bundle) and exposes `<span id="bundle-status">` so the bundle can flip its `data-state` from `pending` to `ready` to confirm it executed. The page is safe to hit before discovery completes (no `_device_state` dependency).
+- **Static assets.** `app/api/static/` is mounted at `/static/` via `StaticFiles`. Source files (HTML, future CSS) live there directly and are committed; the `dist/` subdirectory is gitignored and rebuilt by `pnpm run build` (see "Web UI" below). The mount is unconditional — a missing `dist/main.js` 404s cleanly without breaking `/`.
 - **Favicon.** `GET /favicon.ico` returns `204 No Content` so browser auto-fetches don't generate 404 noise. Do not ship a real icon binary; if branding is needed in the future, prefer an inline SVG behind a separate route.
+
+---
+
+## Web UI
+
+The browser-side dashboard lives in `web/` and is built with **pnpm + esbuild + typescript**. Compiled output is written to `app/api/static/dist/` and served by the Python FastAPI app at `/static/dist/`. The Python server has **no Node dependency at runtime** — Node is required at build time only (locally, in CI, and by `scripts/on-deploy` in production).
+
+**Toolchain pins** (in `web/package.json`):
+
+- `packageManager: "pnpm@10.33.4"` — corepack reads this and installs the exact pnpm version on demand. Do not bump pnpm to v11+ without re-validating `onlyBuiltDependencies` behavior (v11.0/11.1 silently ignored that field for esbuild's postinstall).
+- `engines.node: ">=20"` matches the CI matrix and `web/README.md`.
+- `pnpm.onlyBuiltDependencies: ["esbuild"]` — pnpm v10+ blocks postinstall scripts by default; esbuild needs its native binary downloaded, so it is explicitly allowlisted. Adding a new dep with a postinstall (sharp, better-sqlite3, etc.) requires extending this list **and** justifying it.
+
+**Layout rules**:
+
+- TypeScript sources go under `web/src/`. No browser code lives in `app/api/static/` — that directory is for committed static assets (HTML, future CSS) and the gitignored build output (`dist/`).
+- One `esbuild` call (`web/build.mjs`). No Vite, Webpack, Rollup, or framework-specific dev servers. If a future feature genuinely needs more, that is a documented escalation in this section.
+- `tsconfig.json` is **strict** (`strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`, `isolatedModules`). New code does not opt out without a comment explaining why.
+- No frameworks (React, Vue, Svelte, …) in PR1. The first concrete proposal to add one must call this section out and update it as part of the same PR.
+
+**Day-to-day commands** (run inside `web/`):
+
+```
+pnpm install --frozen-lockfile   # bootstrap deps from pnpm-lock.yaml
+pnpm run typecheck               # tsc --noEmit
+pnpm run build                   # esbuild → ../app/api/static/dist/main.js
+pnpm run watch                   # rebuild on change (dev only)
+pnpm run check                   # typecheck + build (mirrors the CI job)
+```
+
+**CI job** (`.github/workflows/ci.yml#web-build`): installs Node ≥ 20, enables corepack, runs `pnpm install --frozen-lockfile`, then `pnpm run typecheck`, `pnpm run build`, and asserts `app/api/static/dist/main.js` exists. A bundle that builds with no output files (silent esbuild misconfiguration) fails CI on the assertion step rather than mysteriously serving 404 in production.
+
+**Deploy** (`scripts/on-deploy`): the hook checks for `node` + `corepack` on PATH (deploy aborts with exit 2 if either is missing), runs `corepack enable pnpm`, then `pnpm install --frozen-lockfile` and `pnpm run build` inside `web/`. The Python smoke-import (`uv run python -c "import config.serve"`) runs after the bundle build, so a missing bundle does *not* fail the hook (the FastAPI app starts fine without it; users just see a `pending` status pill in the landing page).
+
+**The `dist/` contract**:
+
+- Filename is stable (`main.js` / `main.js.map`); no content hashing in PR1. When tile assets need cache-busting we will add hashed names + a manifest, not before.
+- `app/api/static/index.html` references `/static/dist/main.js` literally. Both filenames are part of the contract — changing one without the other breaks the page.
 
 ---
 
@@ -406,6 +455,7 @@ CI lives in `.github/workflows/`:
   - `Pyright` — `uv run pyright`
   - `Pytest (hermetic)` — `uv run pytest -m "not integration"`
   - `Shellcheck` — every no-extension script under `scripts/`
+  - `Web (typecheck + build)` — `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm run build`, asserts `app/api/static/dist/main.js` exists
   - `Workflow Lint (actionlint)` — validates the YAML in `.github/workflows/`
   - `Secret Scan` — `gitleaks` on the PR diff (full repo on schedule)
 - **`cve-check.yml`** — `pip-audit --strict` daily at 08:00 UTC against the synced uv environment.
@@ -426,6 +476,7 @@ Before every commit (mirrors the CI gates above):
 - [ ] `uv run pytest -m "not integration"` — green, no warnings
 - [ ] `shellcheck` clean on any modified shell scripts
 - [ ] `actionlint` clean on any modified workflow files (`uvx actionlint` or the binary)
+- [ ] If any `web/` source changed: `cd web && pnpm run check` (typecheck + build) is green
 - [ ] No trailing whitespace; empty lines have no whitespace
 - [ ] Imports sorted; all imports at module level
 - [ ] New methods / module-level functions inserted in **alphabetical** position
