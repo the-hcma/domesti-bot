@@ -10,8 +10,15 @@ import type { UIDeviceOut, UIFamilyOut, UIStateOut } from "./types.js";
 const APP_ROOT_ID = "app";
 
 class DomestiBotController {
+  // Background poll cadence: refreshes ``/v1/ui/state`` so the family
+  // frames flip between green (backend reachable) and red (backend
+  // unreachable) without the user having to click anything.
+  private static readonly POLL_MS = 5000;
+
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
+  private connected = false;
+  private pollTimer: number | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -19,12 +26,8 @@ class DomestiBotController {
 
   async init(): Promise<void> {
     this.renderShell("Loading device state…");
-    try {
-      this.state = await api.fetchState();
-      this.render();
-    } catch (err) {
-      this.renderError("Failed to load device state", err);
-    }
+    await this.refresh({ showErrorIfNoState: true });
+    this.schedulePoll();
   }
 
   private async onBulkOffFamily(familyId: string): Promise<void> {
@@ -93,19 +96,38 @@ class DomestiBotController {
     }
   }
 
-  private async refresh(): Promise<void> {
+  private async refresh(
+    opts: { showErrorIfNoState?: boolean } = {},
+  ): Promise<void> {
     try {
       this.state = await api.fetchState();
+      this.connected = true;
       this.render();
     } catch (err) {
-      this.renderError("Failed to refresh device state", err);
+      this.connected = false;
+      if (this.state) {
+        // We have a cached snapshot — keep the tiles up and just flip
+        // the family frames to red so the user sees the backend went
+        // away. The poll will recover automatically.
+        this.render();
+      } else if (opts.showErrorIfNoState) {
+        this.renderError("Failed to load device state", err);
+      }
     }
+  }
+
+  private schedulePoll(): void {
+    if (this.pollTimer !== null) return;
+    this.pollTimer = window.setInterval(() => {
+      void this.refresh();
+    }, DomestiBotController.POLL_MS);
   }
 
   private render(): void {
     const state = this.state;
     if (!state) return;
     this.root.replaceChildren();
+    this.root.dataset["connected"] = this.connected ? "true" : "false";
     if (state.families.length > 0) {
       const header = document.createElement("header");
       header.className = "tile-header";
@@ -128,7 +150,7 @@ class DomestiBotController {
     }
 
     for (const family of state.families) {
-      this.root.append(renderFamily(family, this));
+      this.root.append(renderFamily(family, this, this.connected));
     }
   }
 
@@ -250,10 +272,12 @@ function renderDevice(
 function renderFamily(
   family: UIFamilyOut,
   controller: DomestiBotController,
+  connected: boolean,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "family";
   section.dataset["familyId"] = family.id;
+  section.dataset["connected"] = connected ? "true" : "false";
   section.style.setProperty("--family-color", family.color);
 
   const header = document.createElement("header");

@@ -45,8 +45,11 @@
     .tile-loading, .tile-empty { color: var(--muted); padding: 12px; }
     .tile-error { background: var(--danger); color: white; padding: 10px 14px;
       border-radius: 6px; margin-bottom: 12px; }
-    .family { background: var(--card); border: 1px solid var(--border);
-      border-radius: 10px; padding: 14px 16px; }
+    .family { background: var(--card); border: 2px solid var(--border);
+      border-radius: 10px; padding: 14px 16px;
+      transition: border-color 200ms ease-in-out; }
+    .family[data-connected="true"] { border-color: var(--accent); }
+    .family[data-connected="false"] { border-color: var(--danger); }
     .family-header { display: flex; align-items: center; justify-content: space-between;
       gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
       margin-bottom: 12px; }
