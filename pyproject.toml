@@ -7,7 +7,7 @@ dependencies = [
     "gotailwind[cli]",
     "httpx>=0.28.1",
     "icecream",
-    "prompt_toolkit>=3.0.43",
+    "prompt_toolkit>=3.0.52",
     "pychromecast>=14.0.10",
     "pyproj",
     "pyright",
