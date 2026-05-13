@@ -28,6 +28,16 @@ Optional SQLite persistence (see :mod:`app.kasa_discovery_store`): pass
 Configs are saved without plaintext credentials (merge ``credentials`` /
 ``KASA_USERNAME`` + ``KASA_PASSWORD`` on load). Use ``force_discovery=True`` to refresh
 the cache from the network.
+
+Devices are tracked **by host** (the LAN address), not by alias: users routinely
+give multiple physical outlets the same name in the Kasa/Tapo app (e.g. two
+``"Plug"`` or ``"Lamp"``) and an alias-keyed map silently drops all-but-one.
+The lookup map registers each device under its host (always unique) plus its
+alias / display name when those keys don't collide; collisions emit a WARNING
+and the duplicate stays reachable by host. Existing on-disk caches that were
+written under the alias-keyed dedup may be **incomplete**; pass
+``--force-discovery`` (or call :meth:`rediscover`) once after upgrading to
+rebuild the cache from a fresh UDP sweep.
 """
 
 from __future__ import annotations
@@ -373,15 +383,43 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         kasa_discovery_store.save_configs(self._discovery_cache_path, rows)
 
     def _expand_kasa_lookup(self, devices: list[KasaDevice]) -> dict[str, KasaDevice]:
-        """Register hardware alias and optional ``preferred_label`` for each switch."""
+        """Build the multi-key lookup: host (always) + alias / display name (when unique).
 
-        alias_map: dict[str, KasaDevice] = {}
+        Host is the only identifier guaranteed unique on the LAN, so
+        every device is registered under its host first. Aliases and
+        display names register as *additional* lookup keys; if two
+        devices share an alias (e.g. two outlets the user named ``"Plug"``
+        in the Kasa app) only the first claimant wins that key — the
+        duplicate stays reachable via its host and a warning is logged.
+        """
+
+        lookup: dict[str, KasaDevice] = {}
         for kd in devices:
-            alias_map[kd.identifier] = kd
-            label = kd.preferred_label
-            if label != kd.identifier:
-                alias_map[label] = kd
-        return alias_map
+            host = (kd._kDevice.host or "").strip()
+            if host:
+                lookup[host] = kd
+        for kd in devices:
+            host = (kd._kDevice.host or "").strip()
+            candidate_keys: list[str] = [kd.identifier]
+            if kd.preferred_label != kd.identifier:
+                candidate_keys.append(kd.preferred_label)
+            for key in candidate_keys:
+                if not key or key == host:
+                    continue
+                existing = lookup.get(key)
+                if existing is None:
+                    lookup[key] = kd
+                elif existing is not kd:
+                    _LOGGER.warning(
+                        "Kasa: lookup key %r is shared by %s and %s — the "
+                        "duplicate is reachable by host (%s) only. Rename "
+                        "one of them in the Kasa/Tapo app to disambiguate.",
+                        key,
+                        existing._kDevice.host,
+                        host,
+                        host,
+                    )
+        return lookup
 
     async def _fetch_impl(self, *, force_discovery: bool) -> None:
         qtimeout = (
@@ -390,7 +428,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             else DeviceConfig.DEFAULT_TIMEOUT
         )
 
-        alias_map: dict[str, KasaDevice] = {}
+        # Dedup by ``host`` (the LAN identifier, guaranteed unique by
+        # virtue of being an IP address) rather than by ``alias`` —
+        # users routinely give multiple physical outlets the same name
+        # in the Kasa/Tapo app (e.g. two "Plug" or "Lamp") and the old
+        # alias-keyed map silently dropped all-but-one of them.
+        devices_by_host: dict[str, KasaDevice] = {}
 
         if self._discovery_cache_path is not None and not force_discovery:
             cached = kasa_discovery_store.load_cached_configs(self._discovery_cache_path)
@@ -407,16 +450,16 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                         cache_ok = False
                         break
                     kd = KasaDevice(dev.alias or dev.host, dev)
-                    alias_map[kd.identifier] = kd
+                    devices_by_host[dev.host] = kd
                 if cache_ok:
-                    self._finalize_kasa_lookup(alias_map)
+                    self._finalize_kasa_lookup(devices_by_host)
                     self._persist_discovery_cache(self._device_name_to_device or {})
                     self._last_discovery_source = "cache"
                     return
-                for kd in alias_map.values():
+                for kd in devices_by_host.values():
                     with contextlib.suppress(Exception):
                         await kd._kDevice.disconnect()
-                alias_map = {}
+                devices_by_host = {}
 
         if (
             self._discovery_target is None
@@ -435,20 +478,33 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 discover_kw["timeout"] = self._query_timeout
             devices = await Discover.discover(**discover_kw)
 
+        discovered_count = len(devices)
         try:
             for discovered in devices.values():
                 finalized = await self._ingest_discovered_device(discovered, qtimeout)
                 if finalized is None:
                     continue
                 kd = KasaDevice(finalized.alias or finalized.host, finalized)
-                alias_map[kd.identifier] = kd
+                devices_by_host[finalized.host] = kd
         except BaseException:
-            for kd in alias_map.values():
+            for kd in devices_by_host.values():
                 with contextlib.suppress(Exception):
                     await kd._kDevice.disconnect()
             raise
 
-        self._finalize_kasa_lookup(alias_map)
+        ingested_count = len(devices_by_host)
+        if ingested_count != discovered_count:
+            _LOGGER.warning(
+                "Kasa: discovered %d device(s) on the LAN but only %d "
+                "completed update/recovery; %d skipped (see WARNING logs above).",
+                discovered_count,
+                ingested_count,
+                discovered_count - ingested_count,
+            )
+        else:
+            _LOGGER.info("Kasa: discovered %d device(s)", discovered_count)
+
+        self._finalize_kasa_lookup(devices_by_host)
         self._persist_discovery_cache(self._device_name_to_device or {})
         self._last_discovery_source = "discovery"
 
