@@ -30,6 +30,7 @@ from app.device_state_watcher import (
     DEFAULT_POLL_INTERVAL_S,
     DeviceStateWatcher,
     KasaPollingWatcher,
+    SonosPollingWatcher,
     TailwindPollingWatcher,
     build_default_watchers,
     poll_interval_from_env,
@@ -38,6 +39,7 @@ from app.device_state_watcher import (
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
+from app.sonos_device_manager import SonosDeviceManager
 
 
 def _fake_kasa_mgr(identifiers: list[str]) -> KasaDeviceManager:
@@ -57,6 +59,20 @@ def _fake_kasa_mgr(identifiers: list[str]) -> KasaDeviceManager:
     mgr.switches = tuple(switches)
     mgr.is_on = AsyncMock(return_value=True)
     return cast(KasaDeviceManager, mgr)
+
+
+def _fake_sonos_mgr(identifiers: list[str]) -> SonosDeviceManager:
+    """Build a Mock sonos manager whose ``players`` exposes ``identifier``."""
+
+    players = []
+    for ident in identifiers:
+        sp = MagicMock()
+        sp.identifier = ident
+        players.append(sp)
+    mgr = MagicMock(spec=SonosDeviceManager)
+    mgr.players = tuple(players)
+    mgr.is_playing = AsyncMock(return_value=False)
+    return cast(SonosDeviceManager, mgr)
 
 
 def _fake_tailwind_mgr(identifiers: list[str]) -> GotailwindDeviceManager:
@@ -128,6 +144,41 @@ async def test_kasa_watcher_stops_promptly_when_event_is_set() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sonos_watcher_calls_is_playing_per_zone_per_cycle() -> None:
+    mgr = _fake_sonos_mgr(["RINCON_A", "RINCON_B"])
+    watcher = SonosPollingWatcher(mgr, interval_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await asyncio.sleep(0.05)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    is_playing = cast(AsyncMock, mgr.is_playing)
+    assert is_playing.await_count >= 2
+    seen_idents = {c.args[0] for c in is_playing.await_args_list}
+    assert seen_idents == {"RINCON_A", "RINCON_B"}
+
+
+@pytest.mark.asyncio
+async def test_sonos_watcher_keeps_going_when_one_zone_raises() -> None:
+    mgr = _fake_sonos_mgr(["RINCON_A", "RINCON_B"])
+    cast(AsyncMock, mgr.is_playing).side_effect = [
+        RuntimeError("upnp boom"),
+        False,
+        False,
+        False,
+    ]
+    watcher = SonosPollingWatcher(mgr, interval_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await asyncio.sleep(0.05)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    assert cast(AsyncMock, mgr.is_playing).await_count >= 3
+
+
+@pytest.mark.asyncio
 async def test_tailwind_watcher_calls_is_open_per_door_per_cycle() -> None:
     mgr = _fake_tailwind_mgr(["door-1", "door-2"])
     watcher = TailwindPollingWatcher(mgr, interval_s=0.01)
@@ -162,10 +213,11 @@ async def test_tailwind_watcher_keeps_going_when_one_door_raises() -> None:
     assert cast(AsyncMock, mgr.is_open).await_count >= 3
 
 
-def test_build_default_watchers_omits_tailwind_when_manager_is_none() -> None:
+def test_build_default_watchers_omits_optional_when_managers_are_none() -> None:
     kasa = _fake_kasa_mgr(["host-a"])
     state = MagicMock(spec=DeviceManagersState)
     state.kasa_mgr = kasa
+    state.sonos_mgr = None
     state.tailwind_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
@@ -173,17 +225,33 @@ def test_build_default_watchers_omits_tailwind_when_manager_is_none() -> None:
     assert isinstance(watchers[0], KasaPollingWatcher)
 
 
-def test_build_default_watchers_includes_both_when_both_managers_present() -> None:
+def test_build_default_watchers_includes_every_configured_backend() -> None:
     kasa = _fake_kasa_mgr(["host-a"])
+    sonos = _fake_sonos_mgr(["RINCON_A"])
     tailwind = _fake_tailwind_mgr(["door-1"])
     state = MagicMock(spec=DeviceManagersState)
     state.kasa_mgr = kasa
+    state.sonos_mgr = sonos
     state.tailwind_mgr = tailwind
 
     watchers = build_default_watchers(state, interval_s=5.0)
-    assert len(watchers) == 2
+    assert len(watchers) == 3
     assert isinstance(watchers[0], KasaPollingWatcher)
-    assert isinstance(watchers[1], TailwindPollingWatcher)
+    assert isinstance(watchers[1], SonosPollingWatcher)
+    assert isinstance(watchers[2], TailwindPollingWatcher)
+
+
+def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> None:
+    kasa = _fake_kasa_mgr(["host-a"])
+    sonos = _fake_sonos_mgr(["RINCON_A"])
+    state = MagicMock(spec=DeviceManagersState)
+    state.kasa_mgr = kasa
+    state.sonos_mgr = sonos
+    state.tailwind_mgr = None
+
+    watchers = build_default_watchers(state, interval_s=5.0)
+    assert len(watchers) == 2
+    assert isinstance(watchers[1], SonosPollingWatcher)
 
 
 def test_poll_interval_from_env_defaults_when_unset(

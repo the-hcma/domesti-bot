@@ -31,6 +31,7 @@ from app.api.ui_state import build_ui_state
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
+from app.sonos_device_manager import SonosDeviceManager
 
 
 def _client() -> tuple[TestClient, FastAPI]:
@@ -56,6 +57,29 @@ def _fake_kasa_mgr(devices: list[tuple[str, str, bool]]) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(fakes)
     return cast(KasaDeviceManager, mgr)
+
+
+def _fake_sonos_mgr(
+    zones: list[tuple[str, str, bool | None]],
+) -> SonosDeviceManager:
+    """Return a Mock manager whose ``.players`` is the supplied tuples.
+
+    Each input tuple is ``(identifier, preferred_label, is_playing)``.
+    ``is_playing=None`` simulates a zone the watcher hasn't polled
+    yet; :func:`build_ui_state` must surface that as
+    ``state="unknown"``.
+    """
+
+    fakes: list[Any] = []
+    for ident, label, is_playing in zones:
+        sp = MagicMock()
+        sp.identifier = ident
+        sp.preferred_label = label
+        sp.is_playing = is_playing
+        fakes.append(sp)
+    mgr = MagicMock(spec=SonosDeviceManager)
+    mgr.players = tuple(fakes)
+    return cast(SonosDeviceManager, mgr)
 
 
 def _fake_tailwind_mgr(
@@ -85,12 +109,13 @@ def _fake_tailwind_mgr(
 def _state(
     *,
     kasa_mgr: KasaDeviceManager,
+    sonos_mgr: SonosDeviceManager | None = None,
     tailwind_mgr: GotailwindDeviceManager | None = None,
     cache_path: Path | None = None,
 ) -> DeviceManagersState:
     return DeviceManagersState(
         kasa_mgr=kasa_mgr,
-        sonos_mgr=None,
+        sonos_mgr=sonos_mgr,
         tailwind_mgr=tailwind_mgr,
         androidtv_mgr=None,
         cache_path=cache_path,
@@ -132,6 +157,81 @@ def test_build_ui_state_emits_both_families_in_kasa_then_tailwind_order() -> Non
     assert out.families[1].label == "Garage doors"
     assert out.families[1].color == "#10B981"
     assert out.families[1].devices[0].state == "closed"
+
+
+def test_build_ui_state_emits_sonos_between_kasa_and_tailwind() -> None:
+    """The render order is alphabetical by ``family_id`` — Sonos
+    must slot between Kasa and Tailwind so the page layout stays
+    deterministic when a household has all three backends."""
+
+    state = _state(
+        kasa_mgr=_fake_kasa_mgr([("192.168.1.10", "Desk", True)]),
+        sonos_mgr=_fake_sonos_mgr([("RINCON_AAAA", "Kitchen", True)]),
+        tailwind_mgr=_fake_tailwind_mgr([("door-1", "Left", False, True)]),
+    )
+    out = build_ui_state(state, cache_path=None)
+    assert [f.id for f in out.families] == ["kasa", "sonos", "tailwind"]
+    sonos = out.families[1]
+    assert sonos.label == "Sonos zones"
+    assert sonos.color == "#8B5CF6"
+    assert sonos.devices == [
+        UIDeviceOut(
+            id="RINCON_AAAA",
+            family_id="sonos",
+            label="Kitchen",
+            kind="speaker",
+            state="playing",
+            exclude_from_global=False,
+        )
+    ]
+
+
+def test_build_ui_state_sonos_speaker_state_maps_playing_paused_and_unknown() -> None:
+    state = _state(
+        kasa_mgr=_fake_kasa_mgr([]),
+        sonos_mgr=_fake_sonos_mgr(
+            [
+                ("RINCON_A", "Playing", True),
+                ("RINCON_B", "Paused", False),
+                ("RINCON_C", "Unknown", None),
+            ]
+        ),
+    )
+    out = build_ui_state(state, cache_path=None)
+    by_id = {d.id: d for d in out.families[0].devices}
+    assert by_id["RINCON_A"].state == "playing"
+    assert by_id["RINCON_B"].state == "paused"
+    assert by_id["RINCON_C"].state == "unknown"
+
+
+def test_build_ui_state_sonos_omitted_when_no_zones_discovered() -> None:
+    state = _state(
+        kasa_mgr=_fake_kasa_mgr([("192.168.1.10", "Desk", True)]),
+        sonos_mgr=_fake_sonos_mgr([]),
+    )
+    out = build_ui_state(state, cache_path=None)
+    assert [f.id for f in out.families] == ["kasa"]
+
+
+def test_build_ui_state_sonos_honors_exclude_from_global(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    kasa_discovery_store.upsert_ui_preference(
+        db, backend="sonos", canonical_key="RINCON_A", exclude_from_global=True
+    )
+    state = _state(
+        kasa_mgr=_fake_kasa_mgr([]),
+        sonos_mgr=_fake_sonos_mgr(
+            [
+                ("RINCON_A", "Excluded", True),
+                ("RINCON_B", "Normal", True),
+            ]
+        ),
+        cache_path=db,
+    )
+    out = build_ui_state(state, cache_path=db)
+    by_id = {d.id: d for d in out.families[0].devices}
+    assert by_id["RINCON_A"].exclude_from_global is True
+    assert by_id["RINCON_B"].exclude_from_global is False
 
 
 def test_build_ui_state_kasa_switch_state_maps_is_on_true_to_on_and_false_to_off() -> None:

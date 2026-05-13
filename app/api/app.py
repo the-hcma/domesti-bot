@@ -30,16 +30,20 @@ from app.api.schemas import (
     UIPowerSetIn,
     UIPreferenceIn,
     UIPreferenceOut,
+    UISonosSetIn,
     UIStateOut,
 )
 from app.api.ui_state import (
     build_kasa_device_view,
+    build_sonos_device_view,
     build_tailwind_device_view,
     build_ui_state,
     bulk_close_tailwind_apply,
     bulk_off_global_apply,
     bulk_off_kasa_apply,
+    bulk_pause_sonos_apply,
     find_kasa_by_host,
+    find_sonos_by_identifier,
     find_tailwind_by_identifier,
 )
 from app.device_state_watcher import (
@@ -58,6 +62,7 @@ from app.domesti_bot_cli import (
     execute_line_for_api,
     shutdown_device_managers,
 )
+from app.sonos_device_manager import SonosTransitionUnavailableError
 
 
 _LOGGER = logging.getLogger("app.api")
@@ -385,7 +390,7 @@ def create_app(args: Any) -> FastAPI:
         body: UIPreferenceIn,
         state: DeviceState,
     ) -> UIPreferenceOut:
-        if family_id not in {"kasa", "tailwind"}:
+        if family_id not in {"kasa", "sonos", "tailwind"}:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail=f"Unknown family_id: {family_id}",
@@ -405,6 +410,13 @@ def create_app(args: Any) -> FastAPI:
                 status_code=HTTPStatus.NOT_FOUND,
                 detail=f"Unknown kasa device: {device_id}",
             )
+        if family_id == "sonos":
+            son = state.sonos_mgr
+            if son is None or find_sonos_by_identifier(son, device_id) is None:
+                raise HTTPException(
+                    status_code=HTTPStatus.NOT_FOUND,
+                    detail=f"Unknown sonos device: {device_id}",
+                )
         if family_id == "tailwind":
             tw = state.tailwind_mgr
             if tw is None or all(d.identifier != device_id for d in tw.doors):
@@ -422,6 +434,63 @@ def create_app(args: Any) -> FastAPI:
             family_id=family_id,
             device_id=device_id,
             exclude_from_global=body.exclude_from_global,
+        )
+
+    @app.post(
+        "/v1/ui/sonos/pause-all",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def sonos_pause_all(state: DeviceState) -> UIBulkActionOut:
+        # Family-level bulk: ignores per-device ``exclude_from_global``.
+        # When the Sonos manager is absent (``--no-sonos`` or empty
+        # discovery) returns an empty result rather than 404 so the UI
+        # can call this unconditionally; the family won't be visible
+        # anyway. Already-paused zones drop out without LAN traffic.
+        affected, skipped = await bulk_pause_sonos_apply(state)
+        return UIBulkActionOut(affected=affected, skipped=skipped)
+
+    @app.post(
+        "/v1/ui/sonos/zones/{device_id}/toggle",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def sonos_set_playback(
+        device_id: str,
+        body: UISonosSetIn,
+        state: DeviceState,
+    ) -> UIDeviceActionOut:
+        if state.sonos_mgr is None:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="Sonos manager is not configured on this server",
+            )
+        sp = find_sonos_by_identifier(state.sonos_mgr, device_id)
+        if sp is None:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Unknown sonos device: {device_id}",
+            )
+        try:
+            if body.playing:
+                await sp.resume()
+            else:
+                await sp.pause()
+        except SonosTransitionUnavailableError as exc:
+            # UPnP 701 from Sonos: empty queue, mid-transition, or any
+            # other state the zone can't transition out of right now.
+            # The device has already refreshed its cached
+            # ``is_playing`` from a live UPnP read inside ``pause`` /
+            # ``resume``, so the refreshed view below mirrors reality.
+            # 409 is the right status here — the request was
+            # well-formed but the resource state forbids the action.
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT, detail=str(exc)
+            ) from exc
+        return UIDeviceActionOut(
+            device=build_sonos_device_view(
+                state.sonos_mgr,
+                device_id=device_id,
+                cache_path=state.cache_path,
+            )
         )
 
     @app.post(

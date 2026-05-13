@@ -37,21 +37,23 @@ class UIDeviceOut(BaseModel):
     Field semantics (the front-end renders the tile from these):
 
     * ``id``: stable per-family **canonical key** also used as
-      ``ui_preferences.canonical_key`` (kasa → host IP, tailwind → door
-      identifier, future androidtv → Cast UUID, future sonos → ``RINCON_…``).
-      Pair with ``family_id`` for cross-family uniqueness.
+      ``ui_preferences.canonical_key`` (kasa → host IP, sonos →
+      ``RINCON_…`` UID, tailwind → door identifier, future androidtv →
+      Cast UUID). Pair with ``family_id`` for cross-family uniqueness.
     * ``family_id``: matches the parent :class:`UIFamilyOut.id`. Repeated
       here so the UI can flatten the structure when needed (e.g. building a
       "global off" set without re-walking the tree).
     * ``label``: ``preferred_label`` (display name when the user has set
       one via ``set-display-name`` in the CLI; otherwise the identifier).
-    * ``kind``: ``"switch"`` (kasa, future androidtv) or ``"door"``
-      (tailwind). The UI uses this to pick toggle iconography.
+    * ``kind``: ``"switch"`` (kasa, future androidtv), ``"speaker"``
+      (sonos), or ``"door"`` (tailwind). The UI uses this to pick
+      tile iconography and which action verb to render.
     * ``state``: family-specific cached state — ``"on"`` / ``"off"`` for
-      switches; ``"open"`` / ``"closed"`` for doors. ``"unknown"`` covers
-      transient cases (e.g. a Tailwind door reporting ``OPENING`` /
-      ``CLOSING`` rather than a settled position) so the UI never has to
-      crash on unexpected payloads.
+      switches; ``"playing"`` / ``"paused"`` for speakers; ``"open"`` /
+      ``"closed"`` for doors. ``"unknown"`` covers transient cases (a
+      Tailwind door reporting ``OPENING`` / ``CLOSING``, a Sonos zone
+      we haven't polled yet) so the UI never has to crash on
+      unexpected payloads.
     * ``exclude_from_global``: from the ``ui_preferences`` SQLite table.
       ``False`` (the default) means a global "turn off all" / "close all"
       action will operate on this device; ``True`` means it is skipped.
@@ -61,8 +63,8 @@ class UIDeviceOut(BaseModel):
     id: str = Field(..., description="Stable canonical key within the family.")
     family_id: str = Field(..., description="Parent family id (e.g. ``kasa``).")
     label: str = Field(..., description="Display name; falls back to ``id``.")
-    kind: str = Field(..., description="``switch`` or ``door``.")
-    state: str = Field(..., description="``on``/``off`` (switch) or ``open``/``closed`` (door); ``unknown`` for transient.")
+    kind: str = Field(..., description="``switch``, ``speaker``, or ``door``.")
+    state: str = Field(..., description="``on``/``off`` (switch), ``playing``/``paused`` (speaker), or ``open``/``closed`` (door); ``unknown`` for transient.")
     exclude_from_global: bool = Field(
         default=False,
         description="True → skip this device on global turn-off/close-all.",
@@ -79,7 +81,7 @@ class UIFamilyOut(BaseModel):
     out via ``--no-tailwind`` etc., so there is nothing to render).
     """
 
-    id: str = Field(..., description="Family slug (``kasa`` / ``tailwind`` / future ``sonos`` / ``androidtv``).")
+    id: str = Field(..., description="Family slug (``kasa`` / ``sonos`` / ``tailwind`` / future ``androidtv``).")
     label: str = Field(..., description="Human-facing family name.")
     color: str = Field(..., description="CSS color (hex, e.g. ``#3B82F6``).")
     devices: list[UIDeviceOut] = Field(default_factory=list)
@@ -89,8 +91,8 @@ class UIStateOut(BaseModel):
     """Top-level payload for ``GET /v1/ui/state``.
 
     ``families`` is ordered for deterministic UI rendering: alphabetical by
-    family ``id`` (currently ``kasa``, ``tailwind``). Future families slot
-    into the same order without front-end changes.
+    family ``id`` (currently ``kasa``, ``sonos``, ``tailwind``). Future
+    families slot into the same order without front-end changes.
     """
 
     families: list[UIFamilyOut] = Field(default_factory=list)
@@ -120,9 +122,12 @@ class UIGlobalBulkActionItem(BaseModel):
 class UIGlobalBulkActionOut(BaseModel):
     """Result of ``POST /v1/ui/global/bulk-off``.
 
-    Mixes kasa hosts and tailwind door ids; ``family_id`` disambiguates
-    them. ``skipped`` collects every device with
-    ``exclude_from_global=True``.
+    Mixes kasa hosts, Sonos zone UIDs, and tailwind door ids; the
+    ``family_id`` field disambiguates them. ``skipped`` collects every
+    device with ``exclude_from_global=True``. Sonos zones that were
+    already paused (or in an unknown playback state) are *neither*
+    affected nor skipped — there is nothing for the global action to
+    do to them.
     """
 
     affected: list[UIGlobalBulkActionItem] = Field(default_factory=list)
@@ -144,6 +149,15 @@ class UIPowerSetIn(BaseModel):
     """Body for ``POST /v1/ui/kasa/devices/{device_id}/toggle``."""
 
     on: bool = Field(..., description="``True`` → turn on; ``False`` → turn off.")
+
+
+class UISonosSetIn(BaseModel):
+    """Body for ``POST /v1/ui/sonos/zones/{device_id}/toggle``."""
+
+    playing: bool = Field(
+        ...,
+        description="``True`` → resume (play); ``False`` → pause.",
+    )
 
 
 class UIPreferenceIn(BaseModel):

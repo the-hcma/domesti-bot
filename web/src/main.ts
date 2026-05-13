@@ -117,12 +117,20 @@ class DomestiBotController {
     // labels swap to "Turn it on" / "Open it", and the grace window
     // suppresses any contradictory poll readings that arrive while
     // the devices are still settling.
-    if (familyId !== "kasa" && familyId !== "tailwind") return;
+    if (
+      familyId !== "kasa" &&
+      familyId !== "sonos" &&
+      familyId !== "tailwind"
+    ) {
+      return;
+    }
     this.predictBulkOffForFamily(familyId);
     this.render();
     try {
       if (familyId === "kasa") {
         await api.bulkOffKasa();
+      } else if (familyId === "sonos") {
+        await api.pauseAllSonos();
       } else {
         await api.closeAllTailwind();
       }
@@ -213,6 +221,29 @@ class DomestiBotController {
     }
   }
 
+  private async onToggleSonos(device: UIDeviceOut): Promise<void> {
+    // Symmetric to ``onToggleKasa`` but for Sonos zones. ``unknown``
+    // (zone we haven't polled yet, or a stopped queue) defaults to
+    // ``Resume it`` so the click is meaningful; if the zone is
+    // actually stopped, the SoCo ``play`` call is a no-op rather than
+    // an error. Optimistic prediction follows the action: ``paused``
+    // → predict ``playing``, anything else → predict ``paused``.
+    const nextPlaying = device.state !== "playing";
+    this.predictDeviceState(
+      device.family_id,
+      device.id,
+      nextPlaying ? "playing" : "paused",
+    );
+    this.render();
+    try {
+      await api.toggleSonos(device.id, nextPlaying);
+    } catch (err) {
+      this.clearPendingPrediction(device.family_id, device.id);
+      console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+      await this.refresh();
+    }
+  }
+
   private applyPendingPredictionsTo(state: UIStateOut): void {
     // After a fresh ``fetchState()`` lands, overlay any still-active
     // optimistic predictions onto the canonical snapshot so the user
@@ -287,7 +318,7 @@ class DomestiBotController {
 
   private predictBulkOffGlobal(): void {
     // Spans every family. Mirrors :meth:`predictBulkOffForFamily` for
-    // the global "Turn off / close everything" button.
+    // the global "Turn off / pause / close everything" button.
     if (!this.state) return;
     for (const family of this.state.families) {
       for (const device of family.devices) {
@@ -375,7 +406,7 @@ class DomestiBotController {
       const globalBtn = document.createElement("button");
       globalBtn.type = "button";
       globalBtn.className = "btn btn-danger";
-      globalBtn.textContent = "Turn off / close everything";
+      globalBtn.textContent = "Turn off / pause / close everything";
       globalBtn.disabled = !this.connected;
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
@@ -447,6 +478,10 @@ class DomestiBotController {
     void this.onToggleKasa(device);
   }
 
+  toggleSonosTile(device: UIDeviceOut): void {
+    void this.onToggleSonos(device);
+  }
+
   operateTailwindTile(device: UIDeviceOut): void {
     void this.onOperateTailwind(device);
   }
@@ -465,7 +500,14 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   // kind to. Used by the controller's optimistic-prediction helpers
   // so the UI can show the post-action state before the round-trip
   // (and the post-action poll) lands.
-  return kind === "switch" ? "off" : "closed";
+  switch (kind) {
+    case "switch":
+      return "off";
+    case "speaker":
+      return "paused";
+    case "door":
+      return "closed";
+  }
 }
 
 function renderDevice(
@@ -496,9 +538,10 @@ function renderDevice(
   // derived from the current state. The state badge above already
   // shows the current state; the button shows what'll happen next so
   // the user doesn't have to translate "On" → "click to turn off" in
-  // their head. For doors, ``unknown`` (transient OPENING/CLOSING) is
-  // treated as not-open so the next click closes — same default as the
-  // controller's action handler.
+  // their head. ``unknown`` defaults to the safer destructive action
+  // for each kind: doors close (transient OPENING/CLOSING → next
+  // click closes), speakers pause (stopped queue → next click
+  // pauses, a SoCo no-op).
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "tile-toggle";
@@ -511,6 +554,13 @@ function renderDevice(
     excludeText = "Exclude from global all-off";
     toggle.addEventListener("click", () => {
       controller.toggleKasaTile(device);
+    });
+  } else if (device.kind === "speaker") {
+    isActive = device.state === "playing";
+    actionLabel = isActive ? "Pause it" : "Resume it";
+    excludeText = "Exclude from global pause-all";
+    toggle.addEventListener("click", () => {
+      controller.toggleSonosTile(device);
     });
   } else {
     isActive = device.state === "open";
@@ -560,16 +610,25 @@ function renderFamily(
   heading.textContent = family.label;
   header.append(heading);
 
-  if (family.id === "kasa" || family.id === "tailwind") {
+  if (
+    family.id === "kasa" ||
+    family.id === "sonos" ||
+    family.id === "tailwind"
+  ) {
     const bulkBtn = document.createElement("button");
     bulkBtn.type = "button";
     // Per-family bulk-off is always destructive ("Turn off all" /
-    // "Close all"), so use the same red ``btn-danger`` styling as the
-    // global "Turn off / close everything" button — colors stay consistent
-    // with the green/red rule that drives the state badges and the
-    // per-tile toggles.
+    // "Pause all" / "Close all"), so use the same red ``btn-danger``
+    // styling as the global "Turn off / pause / close everything" button —
+    // colors stay consistent with the green/red rule that drives the
+    // state badges and the per-tile toggles.
     bulkBtn.className = "btn btn-danger";
-    bulkBtn.textContent = family.id === "kasa" ? "Turn off all" : "Close all";
+    bulkBtn.textContent =
+      family.id === "kasa"
+        ? "Turn off all"
+        : family.id === "sonos"
+          ? "Pause all"
+          : "Close all";
     bulkBtn.disabled = !connected;
     bulkBtn.addEventListener("click", () => {
       controller.bulkActionFamilyTile(family.id);
