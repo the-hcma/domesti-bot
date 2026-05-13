@@ -45,6 +45,22 @@ from app.rule_engine import SwitchDevice
 
 _LOGGER = logging.getLogger(__name__)
 
+# TODO(google-cast-on-off): The Cast control path (``turn_on`` /
+# ``turn_off``) currently turns devices on but never reliably turns
+# them off again — observed end-to-end against the household devices.
+# Until that is investigated, ``bootstrap_device_managers`` skips
+# AndroidTV bring-up entirely so a Cast tile never appears in the
+# UI and the REPL ``androidtv`` family is empty. The manager class,
+# discovery helpers, and tests remain in place so the investigation
+# can flip this flag back to ``False`` without recreating scaffolding.
+# When the on/off path is verified, remove this constant *and* the
+# short-circuit in ``app.domesti_bot_cli.bootstrap_device_managers``.
+ANDROIDTV_TEMPORARILY_DISABLED = True
+ANDROIDTV_TEMPORARILY_DISABLED_REASON = (
+    "temporarily disabled — TODO(google-cast-on-off): Cast turn_off path "
+    "is unreliable; investigate before re-enabling"
+)
+
 _DEFAULT_CAST_PORT = 8009
 _STATUS_POLL_SLEEP_S = 0.35
 # Per-device timeout for the no-mDNS cache-fast path. Healthy Chromecasts
