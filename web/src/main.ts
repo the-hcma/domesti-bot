@@ -14,16 +14,35 @@ import type {
 
 const APP_ROOT_ID = "app";
 
+interface PendingPrediction {
+  state: UIDeviceState;
+  expiresAt: number;
+}
+
 class DomestiBotController {
   // Background poll cadence: refreshes ``/v1/ui/state`` so the family
   // frames flip between green (backend reachable) and red (backend
   // unreachable) without the user having to click anything.
   private static readonly POLL_MS = 5000;
 
+  // Grace window during which a click's optimistic prediction
+  // overrides contradicting poll results. Picked to comfortably
+  // outlast (a) Tailwind's transient ``OPENING`` / ``CLOSING`` (~5-8s
+  // typical garage door cycle) and (b) one to two ``POLL_MS`` cycles
+  // for slow-to-settle Kasa relays. Expiration is per-device, so a
+  // user click resets only that tile's grace window.
+  private static readonly OPTIMISTIC_GRACE_MS = 8000;
+
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
   private connected = false;
   private pollTimer: number | null = null;
+  // Keyed by ``familyId\u0000deviceId``. Survives across polls so the
+  // tile keeps showing the predicted state even when the backend
+  // momentarily disagrees (transient OPENING, slow Kasa cloud sync,
+  // etc.). Confirmed predictions (poll state == predicted state)
+  // delete themselves; expired predictions release their hold.
+  private pendingPredictions: Map<string, PendingPrediction> = new Map();
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -36,6 +55,10 @@ class DomestiBotController {
   }
 
   private async onBulkOffFamily(familyId: string): Promise<void> {
+    // A bulk command supersedes any single-tile predictions in that
+    // family — wipe their grace windows so the post-bulk refresh
+    // shows the canonical state without holding onto stale guesses.
+    this.clearPendingPredictionsForFamily(familyId);
     try {
       if (familyId === "kasa") {
         await api.bulkOffKasa();
@@ -51,6 +74,7 @@ class DomestiBotController {
   }
 
   private async onBulkOffGlobal(): Promise<void> {
+    this.clearAllPendingPredictions();
     try {
       await api.bulkOffGlobal();
       await this.refresh();
@@ -89,6 +113,9 @@ class DomestiBotController {
         await api.closeTailwindDoor(device.id);
       }
     } catch (err) {
+      // Action failed → prediction is provably wrong, drop the grace
+      // window for this device so the next refresh shows reality.
+      this.clearPendingPrediction(device.family_id, device.id);
       console.warn(`[domesti-bot] operate ${device.label} failed`, err);
       await this.refresh();
     }
@@ -97,19 +124,73 @@ class DomestiBotController {
   private async onToggleKasa(device: UIDeviceOut): Promise<void> {
     // Optimistic update: predict the post-action state and re-render
     // immediately so the button label flips to the *next* action
-    // without waiting for the round-trip. The continuous state
-    // watcher (see ``app/device_state_watcher.py``) will reconcile
-    // with the canonical reading on its next poll; on action failure
-    // we fall back to a full refresh.
+    // without waiting for the round-trip. The pending prediction
+    // (see ``predictDeviceState``) also holds across polls during a
+    // grace window so a transient backend disagreement doesn't
+    // flicker the label back. On action failure we drop the grace
+    // window and refresh so the user sees what really happened.
     const nextOn = device.state !== "on";
     this.predictDeviceState(device.family_id, device.id, nextOn ? "on" : "off");
     this.render();
     try {
       await api.toggleKasa(device.id, nextOn);
     } catch (err) {
+      this.clearPendingPrediction(device.family_id, device.id);
       console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
       await this.refresh();
     }
+  }
+
+  private applyPendingPredictionsTo(state: UIStateOut): void {
+    // After a fresh ``fetchState()`` lands, overlay any still-active
+    // optimistic predictions onto the canonical snapshot so the user
+    // doesn't see a flicker back to the pre-action label while the
+    // device (or the backend's view of it) is settling.
+    //
+    // Two ways a pending prediction releases its hold:
+    //   * the canonical state matches the prediction → confirmed,
+    //     drop the entry, let real readings flow through;
+    //   * the entry's ``expiresAt`` has passed → grace window over,
+    //     drop the entry and trust whatever the backend reports
+    //     (this is how a genuinely failed action becomes visible).
+    if (this.pendingPredictions.size === 0) return;
+    const now = performance.now();
+    for (const [key, pending] of Array.from(this.pendingPredictions)) {
+      if (pending.expiresAt <= now) this.pendingPredictions.delete(key);
+    }
+    if (this.pendingPredictions.size === 0) return;
+    for (const family of state.families) {
+      for (const device of family.devices) {
+        const key = DomestiBotController.predictionKey(family.id, device.id);
+        const pending = this.pendingPredictions.get(key);
+        if (!pending) continue;
+        if (device.state === pending.state) {
+          this.pendingPredictions.delete(key);
+        } else {
+          device.state = pending.state;
+        }
+      }
+    }
+  }
+
+  private clearPendingPrediction(familyId: string, deviceId: string): void {
+    this.pendingPredictions.delete(
+      DomestiBotController.predictionKey(familyId, deviceId),
+    );
+  }
+
+  private clearPendingPredictionsForFamily(familyId: string): void {
+    // Bulk family actions invalidate any pending per-tile prediction
+    // in that family — the user's latest intent is the bulk command,
+    // and the canonical refresh after the bulk should win immediately.
+    const prefix = `${familyId}\u0000`;
+    for (const key of Array.from(this.pendingPredictions.keys())) {
+      if (key.startsWith(prefix)) this.pendingPredictions.delete(key);
+    }
+  }
+
+  private clearAllPendingPredictions(): void {
+    this.pendingPredictions.clear();
   }
 
   private predictDeviceState(
@@ -117,9 +198,19 @@ class DomestiBotController {
     deviceId: string,
     nextState: UIDeviceState,
   ): void {
-    // Mutate the controller's cached ``state`` in place so the next
-    // ``render()`` reflects the predicted device state. No-op when the
-    // device isn't found (the watcher's next poll will reconcile).
+    // Two effects, both essential:
+    //   1. mutate the cached ``state`` in place so the *immediate*
+    //      next ``render()`` shows the predicted state (snappy UI);
+    //   2. register a pending prediction with an expiry so the *next
+    //      few polls* don't flicker the label back while the device
+    //      / backend are settling. See ``applyPendingPredictionsTo``.
+    this.pendingPredictions.set(
+      DomestiBotController.predictionKey(familyId, deviceId),
+      {
+        state: nextState,
+        expiresAt: performance.now() + DomestiBotController.OPTIMISTIC_GRACE_MS,
+      },
+    );
     if (!this.state) return;
     for (const family of this.state.families) {
       if (family.id !== familyId) continue;
@@ -132,12 +223,19 @@ class DomestiBotController {
     }
   }
 
+  private static predictionKey(familyId: string, deviceId: string): string {
+    // Use NUL as the separator because neither family nor device ids
+    // contain it — keeps the key unambiguous without escape rules.
+    return `${familyId}\u0000${deviceId}`;
+  }
+
   private async refresh(
     opts: { showErrorIfNoState?: boolean } = {},
   ): Promise<void> {
     try {
       this.state = await api.fetchState();
       this.connected = true;
+      this.applyPendingPredictionsTo(this.state);
       this.render();
     } catch (err) {
       this.connected = false;
