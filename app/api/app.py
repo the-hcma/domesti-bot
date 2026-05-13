@@ -7,10 +7,12 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import HTMLResponse, Response
 
@@ -30,62 +32,12 @@ from app.device_manager_cli import (
 
 _LOGGER = logging.getLogger("app.api")
 
-
-_LANDING_PAGE_HTML = """<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>domesti-bot</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    :root {
-      color-scheme: light dark;
-      --fg: #1d1f21;
-      --muted: #5a6171;
-      --accent: #2e7d32;
-      --card: #ffffff;
-      --bg: #f6f7f9;
-      --border: #e1e4e8;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --fg: #e6e6e6;
-        --muted: #a0a6b1;
-        --accent: #7bd389;
-        --card: #1f2226;
-        --bg: #15171a;
-        --border: #2a2e34;
-      }
-    }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
-      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-    main { max-width: 640px; margin: 6vh auto; padding: 24px;
-      background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
-    h1 { margin: 0 0 8px; font-size: 20px; }
-    .ok { color: var(--accent); font-weight: 600; }
-    p { margin: 8px 0; color: var(--muted); }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px; background: var(--bg); border: 1px solid var(--border);
-      border-radius: 4px; padding: 1px 6px; }
-    ul { margin: 12px 0 0; padding-left: 20px; }
-    li { margin: 4px 0; }
-    a { color: inherit; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1><span class="ok">success</span> &mdash; domesti-bot is running</h1>
-    <p>The HTTP API is up. There is no browser UI; this service exposes JSON
-       endpoints for the REPL and external integrations.</p>
-    <ul>
-      <li><a href="/health"><code>GET /health</code></a> &mdash; liveness probe</li>
-      <li><a href="/v1/completion-aliases"><code>GET /v1/completion-aliases</code></a> &mdash; tab-completion data</li>
-      <li><code>POST /v1/execute-line</code> &mdash; run a REPL command line</li>
-    </ul>
-  </main>
-</body>
-</html>
-"""
+# ``app/api/static/`` ships the landing page and (after ``pnpm run build``) the
+# compiled JS bundle under ``dist/``. The directory itself is committed (with a
+# ``.gitkeep``) so the FastAPI mount succeeds even when the bundle has not been
+# built yet; the ``dist/`` subdirectory is gitignored.
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_LANDING_PAGE_PATH = _STATIC_DIR / "index.html"
 
 
 class _AccessLogMiddleware(BaseHTTPMiddleware):
@@ -227,9 +179,29 @@ def create_app(args: Any) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Serve the static landing page + the compiled TypeScript bundle from
+    # ``app/api/static/`` at ``/static/``. Mounted unconditionally — the
+    # directory always exists even when ``dist/`` is empty (CI / a fresh clone
+    # before ``pnpm run build``); broken ``<script>`` references just 404, the
+    # rest of the page still renders.
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
     @app.get("/", include_in_schema=False)
     async def index() -> HTMLResponse:
-        return HTMLResponse(_LANDING_PAGE_HTML)
+        # Read from disk on every request so dev-mode edits to ``index.html``
+        # show up without restarting the server. The file is small (~1.5 KB)
+        # so the I/O cost is negligible.
+        try:
+            html = _LANDING_PAGE_PATH.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            _LOGGER.exception(
+                "[index] landing page missing at %s", _LANDING_PAGE_PATH
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Landing page missing at {_LANDING_PAGE_PATH}",
+            )
+        return HTMLResponse(html)
 
     @app.get("/favicon.ico", include_in_schema=False)
     async def favicon() -> Response:

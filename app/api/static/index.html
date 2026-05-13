@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>domesti-bot</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1d1f21;
+      --muted: #5a6171;
+      --accent: #2e7d32;
+      --pending: #b58900;
+      --card: #ffffff;
+      --bg: #f6f7f9;
+      --border: #e1e4e8;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #e6e6e6;
+        --muted: #a0a6b1;
+        --accent: #7bd389;
+        --pending: #f4c54e;
+        --card: #1f2226;
+        --bg: #15171a;
+        --border: #2a2e34;
+      }
+    }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    main { max-width: 640px; margin: 6vh auto; padding: 24px;
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+    h1 { margin: 0 0 8px; font-size: 20px; }
+    .ok { color: var(--accent); font-weight: 600; }
+    p { margin: 8px 0; color: var(--muted); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 6px; }
+    ul { margin: 12px 0 0; padding-left: 20px; }
+    li { margin: 4px 0; }
+    a { color: inherit; }
+    .bundle-pill {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--pending);
+      vertical-align: middle;
+    }
+    .bundle-pill[data-state="ready"] { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1><span class="ok">success</span> &mdash; domesti-bot is running</h1>
+    <p>The HTTP API is up. There is no full browser UI yet (the tile dashboard
+       lands in later PRs of the <code>web-ui-tiles</code> stack); for now this
+       page just confirms the server and the TypeScript bundle are wired up.</p>
+    <p>Frontend bundle: <span id="bundle-status" class="bundle-pill" data-state="pending">pending</span></p>
+    <ul>
+      <li><a href="/health"><code>GET /health</code></a> &mdash; liveness probe</li>
+      <li><a href="/v1/completion-aliases"><code>GET /v1/completion-aliases</code></a> &mdash; tab-completion data</li>
+      <li><code>POST /v1/execute-line</code> &mdash; run a REPL command line</li>
+    </ul>
+  </main>
+  <script type="module" src="/static/dist/main.js"></script>
+</body>
+</html>

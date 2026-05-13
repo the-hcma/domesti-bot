@@ -62,14 +62,26 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "$script_dir/.." && pwd)"
 cd "$repo_dir"
 
-# Make uv discoverable from minimal (non-login) shells (e.g. systemd's
-# environment when setup-service invokes this hook).
+# Make uv + per-user npm-global discoverable from minimal (non-login) shells
+# (e.g. systemd's environment when setup-service invokes this hook).
 if [[ -d "$HOME/.local/bin" ]]; then
     export PATH="$HOME/.local/bin:$PATH"
+fi
+if [[ -d "$HOME/.npm-global/bin" ]]; then
+    export PATH="$HOME/.npm-global/bin:$PATH"
 fi
 
 if ! command -v uv >/dev/null 2>&1; then
     echo "on-deploy: uv is required on PATH (install: https://docs.astral.sh/uv/)" >&2
+    exit 2
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+    echo "on-deploy: node is required on PATH (install Node.js \u2265 20)" >&2
+    exit 2
+fi
+if ! command -v corepack >/dev/null 2>&1; then
+    echo "on-deploy: corepack is required (ships with Node \u2265 16.10)" >&2
     exit 2
 fi
 
@@ -123,6 +135,20 @@ fi
 # the build either matches the committed pin or fails loudly.
 echo "  uv sync --frozen"
 uv sync --frozen
+
+# Build the browser bundle. The compiled JS is gitignored (web/node_modules/
+# and app/api/static/dist/), so production must rebuild on every deploy.
+# Corepack pins pnpm via the `packageManager` field in web/package.json, so
+# `pnpm` is always the right version regardless of what (if anything) is on
+# PATH globally.
+if [[ -d "$repo_dir/web" ]]; then
+    echo "  corepack enable pnpm"
+    corepack enable pnpm >/dev/null
+    echo "  pnpm install --frozen-lockfile (web/)"
+    (cd "$repo_dir/web" && pnpm install --frozen-lockfile)
+    echo "  pnpm run build (web/)"
+    (cd "$repo_dir/web" && pnpm run build)
+fi
 
 # Quick sanity check: import the entrypoint module so a missing dep or
 # Python-syntax breakage fails the hook BEFORE setup-service restarts the unit.
