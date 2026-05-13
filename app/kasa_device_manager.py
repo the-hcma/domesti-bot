@@ -296,6 +296,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         # reconnected without falling back to UDP) or ``"discovery"`` (full
         # ``Discover.discover`` broadcast sweep). ``None`` before first fetch.
         self._last_discovery_source: str | None = None
+        # Hosts skipped during the most recent ``_fetch_impl`` because the
+        # initial failure was an :class:`AuthenticationError` and every
+        # recovery path exhausted. Read via :attr:`skipped_auth_hosts`;
+        # the REPL ``kasa-creds`` command surfaces this list to suggest
+        # rediscovery with account credentials.
+        self._last_skipped_auth_hosts: list[str] = []
 
         has_u = bool((username or "").strip())
         has_p = bool((password or "").strip())
@@ -408,6 +414,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                             credentials=self._discovery_credentials,
                         ),
                     )
+                    if isinstance(exc, AuthenticationError):
+                        self._last_skipped_auth_hosts.append(host)
                     return None
             return dev
 
@@ -472,6 +480,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             if self._query_timeout is not None
             else DeviceConfig.DEFAULT_TIMEOUT
         )
+        # Reset per-fetch state so subsequent rediscovers don't carry
+        # stale auth-failure markers from a previous attempt that ran
+        # without credentials.
+        self._last_skipped_auth_hosts = []
 
         # Dedup by ``host`` (the LAN identifier, guaranteed unique by
         # virtue of being an IP address) rather than by ``alias`` —
@@ -588,6 +600,17 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             raise NotInitializedError
         return self._device_name_to_device.get(identifier)
 
+    @property
+    def has_credentials(self) -> bool:
+        """``True`` when account creds will be sent to ``Discover.discover``.
+
+        Driven by the constructor (``credentials=`` /
+        ``username``+``password``) or by a subsequent
+        :meth:`set_credentials` call from the REPL.
+        """
+
+        return self._discovery_credentials is not None
+
     async def is_off(self, identifier: str) -> bool:
         return not await self.is_on(identifier)
 
@@ -616,6 +639,45 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
         await self.disconnect()
         await self._fetch_impl(force_discovery=True)
+
+    def set_credentials(
+        self,
+        *,
+        username: str,
+        password: str,
+    ) -> None:
+        """Install Kasa/Tapo account credentials in memory for the next fetch.
+
+        Used by the REPL ``kasa-creds`` command to recover from
+        :class:`AuthenticationError` skips without restarting the
+        process. Validates the same shape as the constructor: both
+        ``username`` and ``password`` must be non-blank after strip,
+        else :class:`ValueError`. Credentials are **not** persisted
+        anywhere — to survive a restart, the user must set
+        ``KASA_USERNAME`` + ``KASA_PASSWORD`` in the environment (or
+        the systemd ``EnvironmentFile=``).
+        """
+
+        un = (username or "").strip()
+        pw = (password or "").strip()
+        if not un or not pw:
+            raise ValueError(
+                "Expected non-empty Kasa account email and password, got "
+                f"username={un!r} password={'<set>' if pw else '<empty>'}"
+            )
+        self._discovery_credentials = Credentials(username=un, password=pw)
+
+    @property
+    def skipped_auth_hosts(self) -> tuple[str, ...]:
+        """Hosts skipped during the last fetch due to KLAP ``AuthenticationError``.
+
+        Sorted by host (stable for assertions and UI display). Empty
+        tuple before the first fetch, after a successful re-fetch that
+        cleared every previously skipped host, or after a fetch that
+        only saw legacy XOR / unauth'd KLAP devices.
+        """
+
+        return tuple(sorted(self._last_skipped_auth_hosts))
 
     async def turn_off(self, identifier: str) -> None:
         await self._device_for(identifier).turn_off()
