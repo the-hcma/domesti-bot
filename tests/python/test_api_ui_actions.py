@@ -36,7 +36,7 @@ from app.api.ui_state import (
     bulk_off_kasa_apply,
     find_kasa_by_host,
 )
-from app.device_manager_cli import DeviceManagersState
+from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 

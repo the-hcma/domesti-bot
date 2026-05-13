@@ -1,4 +1,4 @@
-"""Tests for :mod:`device_manager_cli` parsing (no hardware)."""
+"""Tests for :mod:`domesti_bot_cli` parsing (no hardware)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import cast
 
 import pytest
 
-from app.device_manager_cli import (
+from app.domesti_bot_cli import (
     _ArgCtx,
     _CmdCtx,
     _COMMAND_HELP_LINES,

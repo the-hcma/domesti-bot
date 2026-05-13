@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class ExecuteLineIn(BaseModel):
-    """One REPL line (same syntax as ``device_manager_cli``)."""
+    """One REPL line (same syntax as ``domesti_bot_cli``)."""
 
     line: str = Field(..., min_length=1, description="Full line, e.g. ``turn-off Kitchen``")
 

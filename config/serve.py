@@ -3,7 +3,7 @@
 Logging is installed before uvicorn boots so that uvicorn's internal loggers
 (``uvicorn``, ``uvicorn.error``, ``uvicorn.access``) flow through the same
 formatter and handlers as the application. See :mod:`app.logging_config` for
-the dict-config and ``scripts/device-manager-server`` for the env vars that
+the dict-config and ``scripts/domesti-bot-server`` for the env vars that
 drive it.
 
 **Dev-mode default** (no flags, no env vars): bind to ``127.0.0.1`` on an
@@ -26,7 +26,7 @@ import socket
 import uvicorn
 
 from app.api.app import create_app
-from app.device_manager_cli import build_arg_parser
+from app.domesti_bot_cli import build_arg_parser
 from app.logging_config import apply_logging_from_env
 
 
@@ -90,14 +90,14 @@ def resolve_listen_address(
             port = int(env_port_raw)
         except ValueError as exc:
             raise SystemExit(
-                f"device-manager-server: invalid DOMESTI_LISTEN_PORT={env_port_raw!r}"
+                f"domesti-bot-server: invalid DOMESTI_LISTEN_PORT={env_port_raw!r}"
             ) from exc
     else:
         port = 0
 
     if not 0 <= port <= 65535:
         raise SystemExit(
-            f"device-manager-server: --listen-port out of range (0..65535): {port}"
+            f"domesti-bot-server: --listen-port out of range (0..65535): {port}"
         )
 
     return host, port
@@ -119,12 +119,12 @@ def bind_listen_socket(host: str, port: int) -> socket.socket:
         sock.close()
         if port != 0:
             raise SystemExit(
-                f"device-manager-server: port {host}:{port} is already in use "
+                f"domesti-bot-server: port {host}:{port} is already in use "
                 f"({exc.strerror or exc}). Choose a different --listen-port, "
                 f"or omit --listen-port to let the OS pick a free port."
             ) from exc
         raise SystemExit(
-            f"device-manager-server: failed to bind {host}:0 ({exc.strerror or exc})"
+            f"domesti-bot-server: failed to bind {host}:0 ({exc.strerror or exc})"
         ) from exc
     sock.listen(128)
     sock.set_inheritable(True)

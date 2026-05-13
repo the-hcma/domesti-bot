@@ -2,7 +2,7 @@
   "name": "@domesti-bot/web",
   "version": "0.0.0",
   "private": true,
-  "description": "Browser bundle for the domesti-bot device-manager HTTP API.",
+  "description": "Browser bundle for the domesti-bot HTTP API.",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",

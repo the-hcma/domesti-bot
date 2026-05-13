@@ -2,11 +2,11 @@
 
 Run::
 
-    uv run python -m app.device_manager_cli
+    uv run python -m app.domesti_bot_cli
 
 Or from the repo root (uses ``uv`` when available so the project venv stays in sync)::
 
-    ./scripts/device-manager
+    ./scripts/domesti-bot
 
 Credentials:
 
@@ -43,7 +43,7 @@ Line editing defaults to **Vim**-style keys (prompt_toolkit). Use ``--edit-mode 
 drive devices through the FastAPI service from :mod:`app.api` / ``config/serve.py`` instead
 of local discovery. Optional ``--api-key`` / ``DEVICE_MANAGER_API_KEY`` must match
 ``DOMESTI_API_KEY`` on the server when that env var is set. Run the API with
-``scripts/device-manager-server``.
+``scripts/domesti-bot-server``.
 """
 
 from __future__ import annotations

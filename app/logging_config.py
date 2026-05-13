@@ -8,7 +8,7 @@ Goals (per the conventions documented in ``docs/AGENTS.md``):
 * **File logging** with rotation when ``LOG_FILE`` is set; console logging when ``DOMESTI_LOG_CONSOLE=1``.
 * **Transport tags** in client-activity log messages (``[http]``, future ``[http-tls]`` / ``[ws]``).
 
-The launcher (``scripts/device-manager-server``) exports the environment
+The launcher (``scripts/domesti-bot-server``) exports the environment
 variables; :func:`apply_logging_from_env` installs the dict-config inside the
 Python process before uvicorn boots. Both ``uvicorn``-internal loggers and
 application loggers route through the same handlers, so a single tail follows
@@ -105,7 +105,7 @@ class LocalTimeFormatter(logging.Formatter):
 def apply_logging_from_env() -> dict[str, Any]:
     """Build the dict-config from environment variables and install it.
 
-    Recognized variables (all set by ``scripts/device-manager-server``):
+    Recognized variables (all set by ``scripts/domesti-bot-server``):
 
     * ``DOMESTI_LOG_LEVEL``   — root + ``app`` + uvicorn level (default: ``INFO``).
     * ``LOG_FILE``            — when set, enables rotating file logging at that path.

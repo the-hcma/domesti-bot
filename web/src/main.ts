@@ -18,7 +18,7 @@ import type { UIDeviceOut, UIFamilyOut, UIStateOut } from "./types.js";
 const APP_ROOT_ID = "app";
 const STATUS_ID = "bundle-status";
 
-class AppController {
+class DomestiBotController {
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
 
@@ -201,7 +201,7 @@ function markBundleReady(): void {
 
 function renderDevice(
   device: UIDeviceOut,
-  controller: AppController,
+  controller: DomestiBotController,
 ): HTMLElement {
   const tile = document.createElement("article");
   tile.className = `tile tile-${device.kind}`;
@@ -271,7 +271,7 @@ function renderDevice(
 
 function renderFamily(
   family: UIFamilyOut,
-  controller: AppController,
+  controller: DomestiBotController,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "family";
@@ -312,7 +312,7 @@ function start(): void {
     console.warn(`[domesti-bot] expected #${APP_ROOT_ID} in landing page`);
     return;
   }
-  const controller = new AppController(root);
+  const controller = new DomestiBotController(root);
   void controller.init();
 }
 

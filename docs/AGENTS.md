@@ -11,7 +11,7 @@ This file defines the non-negotiable standards for all contributors (human or AI
   ~/work/ai/repository-helpers/scripts/dev/start-development --refresh
   ~/work/ai/repository-helpers/scripts/dev/start-development
   ```
-  - **`--refresh`** (first): syncs `main` with Graphite (`gt sync`), prunes merged worktrees and branches, pulls latest `main`, and ensures the systemd service (`device-manager-server.service`) is installed and running. Exits immediately — it does **not** prompt for a worktree.
+  - **`--refresh`** (first): syncs `main` with Graphite (`gt sync`), prunes merged worktrees and branches, pulls latest `main`, and ensures the systemd service (`domesti-bot-server.service`) is installed and running. Exits immediately — it does **not** prompt for a worktree.
   - **plain** (second): repeats the sync/cleanup, then prompts you to name a new worktree for the upcoming work. Pass `--worktree <name> --no-interactive` to skip the prompt.
 - Both commands are required. This replaces any manual `gt sync --force` step.
 
@@ -47,7 +47,7 @@ domesti-bot/
 │   ├── __init__.py
 │   ├── androidtv_device_manager.py        Google Cast (pychromecast)
 │   ├── device_manager.py                  Shared base classes for *DeviceManager
-│   ├── device_manager_cli.py              prompt_toolkit REPL + argparse wiring
+│   ├── domesti_bot_cli.py                 prompt_toolkit REPL + argparse wiring
 │   ├── gotailwind_device_manager.py       GoTailwind garage doors
 │   ├── kasa_device_manager.py             TP-Link Kasa / Tapo (python-kasa)
 │   ├── kasa_discovery_store.py            SQLite discovery cache (shared by all)
@@ -66,12 +66,12 @@ domesti-bot/
 │   │   └── fixtures/                      Static fixture trees (e.g. androidtv/)
 │   └── bash/                             Reserved for shell-script tests
 ├── scripts/                              Dev / runtime entrypoints (no `.sh`)
-│   ├── device-manager                     `uv run python -m app.device_manager_cli "$@"`
-│   ├── device-manager-server              `uv run python -m config.serve "$@"`
+│   ├── domesti-bot                        `uv run python -m app.domesti_bot_cli "$@"`
+│   ├── domesti-bot-server                 `uv run python -m config.serve "$@"`
 │   ├── on-deploy                          setup-service build hook (exit 0/1/2+ contract)
 │   └── verify_google_cast_discovery.py    standalone discovery probe
 ├── production/                           Server-side deploy bits
-│   └── systemd/device-manager-server.service.template
+│   └── systemd/domesti-bot-server.service.template
 ├── web/                                  Browser TypeScript bundle (see "Web UI" below)
 │   ├── package.json                       pnpm scripts; pinned via `packageManager`
 │   ├── pnpm-lock.yaml                     committed; `pnpm install --frozen-lockfile`
@@ -156,7 +156,7 @@ uv run pytest -m integration           # LAN hardware only
 
 ## HTTP API
 
-- The FastAPI app is created via `app.api.app.create_app(args)`; the entrypoint is `config/serve.py` (run as `python -m config.serve`, or via `scripts/device-manager-server`).
+- The FastAPI app is created via `app.api.app.create_app(args)`; the entrypoint is `config/serve.py` (run as `python -m config.serve`, or via `scripts/domesti-bot-server`).
 - **Authentication**: when `DOMESTI_API_KEY` is set in the environment, every protected endpoint requires the `X-Domesti-Api-Key` header. If the env var is unset, the API is open (intended for trusted LAN only — never expose unauthenticated to the public internet).
 - **Bind address**: production systemd binds to `127.0.0.1:8765`. Do not change the production unit to `0.0.0.0` without a fronting reverse proxy that handles TLS and auth.
 - **Dev-mode default** (no flags, no env vars): bind to `127.0.0.1` on an **OS-allocated free port** (mirrors `fpdf`'s launcher). The startup banner logs `[http] listening on http://127.0.0.1:<port> (api-key …)` so the developer can paste the URL into a browser. The launcher pre-binds the socket with `config.serve.bind_listen_socket()` *before* lifespan / device discovery runs, so the URL appears at the top of the run rather than after the discovery wait. Use `--listen-port 8765` or `DOMESTI_LISTEN_PORT=8765` to pin a specific port. Precedence: CLI flag → env var → dev default.
@@ -222,7 +222,7 @@ pnpm run check                   # typecheck + build (mirrors the CI job)
 
 ## Shell Scripts
 
-- **No `.sh` extension.** Shell scripts have no file extension. Examples: `scripts/device-manager`, `scripts/device-manager-server`, `scripts/on-deploy`. The shebang line declares the interpreter.
+- **No `.sh` extension.** Shell scripts have no file extension. Examples: `scripts/domesti-bot`, `scripts/domesti-bot-server`, `scripts/on-deploy`. The shebang line declares the interpreter.
 - Use `#!/usr/bin/env bash` and `set -euo pipefail` at the top of every script.
 - **`shellcheck`** is mandatory for all shell scripts. Run `shellcheck <script>` before committing; resolve every finding (or annotate the line with `# shellcheck disable=SCxxxx` plus a comment explaining why).
 - **Non-exported variables are lowercase.** Uppercase is reserved for exported environment variables.
@@ -238,7 +238,7 @@ pnpm run check                   # typecheck + build (mirrors the CI job)
 
 ## Standalone Python CLI Scripts
 
-- Standalone CLI scripts have **no `.py` extension** (kebab-case names like `scripts/device-manager`).
+- Standalone CLI scripts have **no `.py` extension** (kebab-case names like `scripts/domesti-bot`).
 - `chmod +x` them and use shebang `#!/usr/bin/env python3`.
 - They must **auto-activate the uv environment** so they work without manual venv activation:
   ```python
@@ -256,7 +256,7 @@ pnpm run check                   # typecheck + build (mirrors the CI job)
 
   _ensure_uv()
   ```
-- For new CLI tools prefer **Typer** for argument parsing. Existing modules that use `argparse` (e.g. `app/device_manager_cli.py`, `config/serve.py`) may continue to use it for consistency with their current style.
+- For new CLI tools prefer **Typer** for argument parsing. Existing modules that use `argparse` (e.g. `app/domesti_bot_cli.py`, `config/serve.py`) may continue to use it for consistency with their current style.
 
 ---
 
@@ -283,7 +283,7 @@ The strategy mirrors `my-tracks` exactly so tail / grep recipes transfer between
 - **Dual logging**: pass `--console` to keep the file destination *and* mirror to stdout — useful during development.
 - **Levels** are controlled by `--log-level {trace,debug,info,warning,error,critical}` (default `info`). The flag sets `DOMESTI_LOG_LEVEL`, which is applied to the root logger, the `app.*` namespace, and all uvicorn loggers (`uvicorn`, `uvicorn.error`, `uvicorn.access`).
 
-**Launcher flags** (`scripts/device-manager-server`):
+**Launcher flags** (`scripts/domesti-bot-server`):
 
 | Flag | Env var | Notes |
 | --- | --- | --- |
@@ -370,9 +370,9 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 
 ## Server Management (development)
 
-- The server runs as a **systemd service** in production (`device-manager-server.service`), installed via `~/work/ai/repository-helpers/scripts/setup-service` against the template at `production/systemd/device-manager-server.service.template`.
+- The server runs as a **systemd service** in production (`domesti-bot-server.service`), installed via `~/work/ai/repository-helpers/scripts/setup-service` against the template at `production/systemd/domesti-bot-server.service.template`.
 - **During development / testing**: do not start the production server manually. The session-init script (`start-development --refresh`) ensures the background service is running.
-- Manual runs for debugging: `./scripts/device-manager-server` (forwards all flags to `python -m config.serve`).
+- Manual runs for debugging: `./scripts/domesti-bot-server` (forwards all flags to `python -m config.serve`).
 - **Do not curl/HTTP against the running production port (8765) during automated testing.** Tests must exercise the ASGI app directly via `httpx.AsyncClient(app=app)` so they cannot collide with the live server.
 
 ### Discovery Cache (cache-first startup)
@@ -397,7 +397,7 @@ All managers expose a stable identifier (Kasa: alias or host, Cast: UUID, Sonos:
 - `"cache"` — **no broadcast / multicast / SSDP / mDNS traffic** during this fetch. The manager reconnected to every cached endpoint directly (e.g. `SoCo(host).uid` for Sonos, `Discover` with a saved `DeviceConfig` for Kasa, `pychromecast.get_chromecast_from_host` for Cast). A dead cached device is dropped with a warning; we do not fall back to LAN discovery (use `--force-discovery` for that).
 - `"discovery"` — **any LAN sweep ran**, including targeted-mDNS modes that pre-filter by cached hosts. From the user's perspective, "discovery" means traffic hit the network and the wall-clock includes a multicast probe.
 
-The CLI bootstrap renderer (`_print_family_parallel_line` in `app/device_manager_cli.py`) reads this signal — together with the device count — and annotates each backend's "ready" line, e.g.:
+The CLI bootstrap renderer (`_print_family_parallel_line` in `app/domesti_bot_cli.py`) reads this signal — together with the device count — and annotates each backend's "ready" line, e.g.:
 
 ```
 Discovering devices (parallel)…
@@ -407,7 +407,7 @@ Discovering devices (parallel)…
   Sonos: ready (cache, 3 zones)
 ```
 
-This is the canonical user-facing answer to "is this a fresh sweep or a cache hit?" — keep it accurate per-backend. Tailwind has no LAN broadcast (it uses an HTTP API), so its bundle leaves `source` as `None` and the renderer simply omits the source annotation (`GoTailwind: ready (2 doors)`). The renderer is also tolerant of older bundles missing `source`/`count` fields and falls back to bare `ready`; tests in `tests/python/test_device_manager_cli.py` lock both shapes.
+This is the canonical user-facing answer to "is this a fresh sweep or a cache hit?" — keep it accurate per-backend. Tailwind has no LAN broadcast (it uses an HTTP API), so its bundle leaves `source` as `None` and the renderer simply omits the source annotation (`GoTailwind: ready (2 doors)`). The renderer is also tolerant of older bundles missing `source`/`count` fields and falls back to bare `ready`; tests in `tests/python/test_domesti_bot_cli.py` lock both shapes.
 
 When adding a new backend, follow the same pattern: a dedicated table, a `load_<backend>()` and `save_<backend>()` pair in `kasa_discovery_store.py`, a `discovery_cache_path` + `force_discovery` pair on the manager constructor, a cache-first branch at the top of `fetch()`, **and** a `last_discovery_source` signal set in both branches of `fetch()` so the bootstrap line is accurate.
 
@@ -429,7 +429,7 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 2. Add `$HOME/.local/bin` to `PATH` so `uv` is discoverable from `setup-service`'s non-login shell.
 3. Verify `uv` is on `PATH`; exit `2` if missing.
 4. Ensure `.venv/` exists with a usable interpreter — recreate it via `uv sync` if missing or stale (handles brand-new worktrees).
-5. Reset a stuck `device-manager-server.service` failed state (best-effort; ignored if the unit isn't installed yet or sudo isn't available).
+5. Reset a stuck `domesti-bot-server.service` failed state (best-effort; ignored if the unit isn't installed yet or sudo isn't available).
 6. Compare `git rev-parse HEAD` against the per-host SHA cache (`$HOME/scratch/domesti-bot/on-deploy-sha`, overridable via `ON_DEPLOY_SHA_FILE`). If equal and `--force` was not passed → exit `1`.
 7. `uv sync --frozen` — refuse to mutate `uv.lock` on a deploy box; build either matches the committed pin or fails loudly.
 8. Smoke-import `config.serve` so a broken dep or syntax error fails the hook BEFORE `setup-service` restarts the unit.
