@@ -97,17 +97,36 @@ class UIStateOut(BaseModel):
 
 
 class UIBulkActionOut(BaseModel):
-    """Result of a family-level or global bulk action.
+    """Result of a *family-level* bulk action (kasa-all-off / tailwind-close-all).
 
-    * ``affected``: device ids the action successfully fired on.
-    * ``skipped``: device ids the action intentionally bypassed — for the
-      *global* bulk action, this is every device with
-      ``exclude_from_global=True``. (Family-level bulk actions ignore that
-      flag and never populate ``skipped``.)
+    Family endpoints return device ids as plain strings because every entry
+    is implicitly scoped to the URL's family. ``skipped`` is always empty
+    in practice (family bulks ignore ``exclude_from_global``); kept in
+    the signature so callers don't have to special-case the return shape.
     """
 
     affected: list[str] = Field(default_factory=list)
     skipped: list[str] = Field(default_factory=list)
+
+
+class UIGlobalBulkActionItem(BaseModel):
+    """One entry in ``UIGlobalBulkActionOut`` — needs ``family_id`` since the
+    global bulk action spans multiple families."""
+
+    family_id: str
+    device_id: str
+
+
+class UIGlobalBulkActionOut(BaseModel):
+    """Result of ``POST /v1/ui/global/bulk-off``.
+
+    Mixes kasa hosts and tailwind door ids; ``family_id`` disambiguates
+    them. ``skipped`` collects every device with
+    ``exclude_from_global=True``.
+    """
+
+    affected: list[UIGlobalBulkActionItem] = Field(default_factory=list)
+    skipped: list[UIGlobalBulkActionItem] = Field(default_factory=list)
 
 
 class UIDeviceActionOut(BaseModel):

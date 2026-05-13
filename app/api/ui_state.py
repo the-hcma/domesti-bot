@@ -29,7 +29,7 @@ from pathlib import Path
 from app import kasa_discovery_store
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
 from app.device_manager_cli import DeviceManagersState
-from app.gotailwind_device_manager import GotailwindDeviceManager
+from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 from app.rule_engine import DoorPosition, SwitchPowerState
 
@@ -39,6 +39,34 @@ _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("kasa", "Lights & plugs", "#3B82F6"),
     ("tailwind", "Garage doors", "#10B981"),
 )
+
+
+async def _bulk_close_tailwind_apply_impl(
+    mgr: GotailwindDeviceManager,
+    *,
+    excluded: set[str],
+) -> tuple[list[str], list[str]]:
+    """Iterate tailwind doors, close non-excluded ones, return ``(affected, skipped)``.
+
+    Doors that are *already* closed (``is_closed=True``) are still passed
+    to ``close()`` — the underlying tailwind controller treats it as a
+    no-op and the explicit call keeps the success/failure path uniform
+    for the UI. Doors in a transient state (``OPENING`` / ``CLOSING``)
+    are also closed; the controller will queue the new command.
+    """
+
+    affected: list[str] = []
+    skipped: list[str] = []
+    for gd in mgr.doors:
+        key = gd.identifier
+        if key in excluded:
+            skipped.append(key)
+            continue
+        await gd.close()
+        affected.append(key)
+    affected.sort()
+    skipped.sort()
+    return affected, skipped
 
 
 async def _bulk_off_kasa_apply_impl(
@@ -181,6 +209,39 @@ def build_kasa_device_view(
     )
 
 
+def build_tailwind_device_view(
+    mgr: GotailwindDeviceManager,
+    *,
+    device_id: str,
+    cache_path: Path | None,
+) -> UIDeviceOut:
+    """Build a fresh :class:`UIDeviceOut` for one tailwind door after an action.
+
+    Symmetric to :func:`build_kasa_device_view`. Raises :class:`KeyError`
+    when ``device_id`` doesn't match a known door (the route handler maps
+    that to a 404).
+    """
+
+    gd = find_tailwind_by_identifier(mgr, device_id)
+    if gd is None:
+        raise KeyError(device_id)
+    excluded = (
+        _excluded_keys(
+            kasa_discovery_store.load_ui_preferences(cache_path), "tailwind"
+        )
+        if cache_path is not None
+        else set()
+    )
+    return UIDeviceOut(
+        id=device_id,
+        family_id="tailwind",
+        label=gd.preferred_label,
+        kind="door",
+        state=_door_state(gd.is_open, gd.is_closed),
+        exclude_from_global=device_id in excluded,
+    )
+
+
 def build_ui_state(
     state: DeviceManagersState,
     *,
@@ -221,32 +282,67 @@ def build_ui_state(
     return UIStateOut(families=families)
 
 
+async def bulk_close_tailwind_apply(
+    state: DeviceManagersState,
+) -> tuple[list[str], list[str]]:
+    """Family-level "close all tailwind doors" — ignores per-device exclusions.
+
+    Returns ``(affected, skipped)`` where ``affected`` is the door
+    identifiers we called ``close()`` on and ``skipped`` is empty (the
+    family bulk ignores ``exclude_from_global``). When the manager isn't
+    configured (``state.tailwind_mgr is None``), both lists are empty.
+    """
+
+    if state.tailwind_mgr is None:
+        return [], []
+    return await _bulk_close_tailwind_apply_impl(
+        state.tailwind_mgr, excluded=set()
+    )
+
+
 async def bulk_off_global_apply(
     state: DeviceManagersState,
     *,
     cache_path: Path | None,
-) -> tuple[list[str], list[str]]:
-    """Global "turn off all": kasa devices, honoring ``exclude_from_global``.
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Global "turn off / close all": kasa **and** tailwind, honoring exclusions.
 
-    Tailwind close-all lands in PR 5; until then "global" means "every
-    kasa device that isn't individually excluded". When ``cache_path`` is
-    ``None`` (``--no-discovery-cache``) we treat every device as **not**
-    excluded, which matches the read-side behavior of :func:`build_ui_state`.
+    Returns ``(affected, skipped)`` where each entry is a
+    ``(family_id, device_id)`` tuple — ``family_id`` is needed because
+    the global action spans families. When ``cache_path`` is ``None``
+    (``--no-discovery-cache``) we treat every device as **not** excluded,
+    which matches the read-side behavior of :func:`build_ui_state`.
     """
 
-    excluded = _excluded_keys(
+    rows = (
         kasa_discovery_store.load_ui_preferences(cache_path)
         if cache_path is not None
-        else [],
-        "kasa",
+        else []
     )
-    return await _bulk_off_kasa_apply_impl(state.kasa_mgr, excluded=excluded)
+    kasa_excluded = _excluded_keys(rows, "kasa")
+    tailwind_excluded = _excluded_keys(rows, "tailwind")
+    affected: list[tuple[str, str]] = []
+    skipped: list[tuple[str, str]] = []
+    kasa_aff, kasa_skip = await _bulk_off_kasa_apply_impl(
+        state.kasa_mgr, excluded=kasa_excluded
+    )
+    affected.extend(("kasa", k) for k in kasa_aff)
+    skipped.extend(("kasa", k) for k in kasa_skip)
+    if state.tailwind_mgr is not None:
+        tw_aff, tw_skip = await _bulk_close_tailwind_apply_impl(
+            state.tailwind_mgr, excluded=tailwind_excluded
+        )
+        affected.extend(("tailwind", k) for k in tw_aff)
+        skipped.extend(("tailwind", k) for k in tw_skip)
+    affected.sort()
+    skipped.sort()
+    return affected, skipped
 
 
 async def bulk_off_kasa_apply(
     state: DeviceManagersState,
 ) -> tuple[list[str], list[str]]:
-    """Family-level "all kasa off" — :func:`bulk_off_global_apply` minus exclusions.
+    """Family-level "all kasa off" — ignores per-device exclusions.
 
     The user clicked an in-family bulk button, so per-device
     ``exclude_from_global`` is intentionally ignored. ``skipped`` is
@@ -273,4 +369,24 @@ def find_kasa_by_host(mgr: KasaDeviceManager, host: str) -> KasaDevice | None:
     for kd in mgr.switches:
         if (kd._kDevice.host or "").strip() == needle:
             return kd
+    return None
+
+
+def find_tailwind_by_identifier(
+    mgr: GotailwindDeviceManager, device_id: str
+) -> GotailwindDevice | None:
+    """Look up a Tailwind door by its ``identifier`` (the canonical key).
+
+    Mirrors :func:`find_kasa_by_host`. ``mgr.get_device_by_alias`` accepts
+    both the identifier and the display label; we restrict to the
+    identifier here so the UI never accidentally addresses two doors
+    that share a label.
+    """
+
+    needle = device_id.strip()
+    if not needle:
+        return None
+    for gd in mgr.doors:
+        if gd.identifier == needle:
+            return gd
     return None

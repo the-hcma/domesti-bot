@@ -12,6 +12,7 @@
 import type {
   UIBulkActionOut,
   UIDeviceActionOut,
+  UIGlobalBulkActionOut,
   UIPreferenceOut,
   UIStateOut,
 } from "./types.js";
@@ -62,14 +63,31 @@ async function call<T>(
 }
 
 export const api = {
-  bulkOffGlobal(): Promise<UIBulkActionOut> {
-    return call<UIBulkActionOut>("POST", "/v1/ui/global/bulk-off", {});
+  bulkOffGlobal(): Promise<UIGlobalBulkActionOut> {
+    return call<UIGlobalBulkActionOut>("POST", "/v1/ui/global/bulk-off", {});
   },
   bulkOffKasa(): Promise<UIBulkActionOut> {
     return call<UIBulkActionOut>("POST", "/v1/ui/kasa/bulk-off", {});
   },
+  closeAllTailwind(): Promise<UIBulkActionOut> {
+    return call<UIBulkActionOut>("POST", "/v1/ui/tailwind/close-all", {});
+  },
+  closeTailwindDoor(deviceId: string): Promise<UIDeviceActionOut> {
+    return call<UIDeviceActionOut>(
+      "POST",
+      `/v1/ui/tailwind/doors/${encodeURIComponent(deviceId)}/close`,
+      {},
+    );
+  },
   fetchState(): Promise<UIStateOut> {
     return call<UIStateOut>("GET", "/v1/ui/state");
+  },
+  openTailwindDoor(deviceId: string): Promise<UIDeviceActionOut> {
+    return call<UIDeviceActionOut>(
+      "POST",
+      `/v1/ui/tailwind/doors/${encodeURIComponent(deviceId)}/open`,
+      {},
+    );
   },
   setExclude(
     familyId: string,

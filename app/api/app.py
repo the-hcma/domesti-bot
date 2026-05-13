@@ -23,6 +23,8 @@ from app.api.schemas import (
     ExecuteLineOut,
     UIBulkActionOut,
     UIDeviceActionOut,
+    UIGlobalBulkActionItem,
+    UIGlobalBulkActionOut,
     UIPowerSetIn,
     UIPreferenceIn,
     UIPreferenceOut,
@@ -30,10 +32,13 @@ from app.api.schemas import (
 )
 from app.api.ui_state import (
     build_kasa_device_view,
+    build_tailwind_device_view,
     build_ui_state,
+    bulk_close_tailwind_apply,
     bulk_off_global_apply,
     bulk_off_kasa_apply,
     find_kasa_by_host,
+    find_tailwind_by_identifier,
 )
 from app.device_manager_cli import (
     DeviceManagersState,
@@ -275,14 +280,23 @@ def create_app(args: Any) -> FastAPI:
         "/v1/ui/global/bulk-off",
         dependencies=[Depends(_verify_api_key)],
     )
-    async def global_bulk_off(state: DeviceState) -> UIBulkActionOut:
-        # Global "turn off everything" — currently kasa only; tailwind
-        # close-all lands in PR 5. ``exclude_from_global=True`` rows are
-        # honored (they appear in ``skipped``).
+    async def global_bulk_off(state: DeviceState) -> UIGlobalBulkActionOut:
+        # Global "turn off / close everything" — kasa devices get
+        # ``turn_off``, tailwind doors get ``close``. ``exclude_from_global=True``
+        # rows are honored (they appear in ``skipped``).
         affected, skipped = await bulk_off_global_apply(
             state, cache_path=state.cache_path
         )
-        return UIBulkActionOut(affected=affected, skipped=skipped)
+        return UIGlobalBulkActionOut(
+            affected=[
+                UIGlobalBulkActionItem(family_id=fam, device_id=dev)
+                for fam, dev in affected
+            ],
+            skipped=[
+                UIGlobalBulkActionItem(family_id=fam, device_id=dev)
+                for fam, dev in skipped
+            ],
+        )
 
     @app.post(
         "/v1/ui/kasa/bulk-off",
@@ -366,6 +380,74 @@ def create_app(args: Any) -> FastAPI:
             family_id=family_id,
             device_id=device_id,
             exclude_from_global=body.exclude_from_global,
+        )
+
+    @app.post(
+        "/v1/ui/tailwind/close-all",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def tailwind_close_all(state: DeviceState) -> UIBulkActionOut:
+        # Family-level bulk: ignores per-device ``exclude_from_global``.
+        # When the tailwind manager is absent (``--no-tailwind``) returns
+        # an empty result rather than 404 so the UI can call this
+        # unconditionally; the family won't be visible anyway.
+        affected, skipped = await bulk_close_tailwind_apply(state)
+        return UIBulkActionOut(affected=affected, skipped=skipped)
+
+    @app.post(
+        "/v1/ui/tailwind/doors/{device_id}/close",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def tailwind_close_door(
+        device_id: str,
+        state: DeviceState,
+    ) -> UIDeviceActionOut:
+        if state.tailwind_mgr is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Tailwind manager is not configured on this server",
+            )
+        gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
+        if gd is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown tailwind device: {device_id}",
+            )
+        await gd.close()
+        return UIDeviceActionOut(
+            device=build_tailwind_device_view(
+                state.tailwind_mgr,
+                device_id=device_id,
+                cache_path=state.cache_path,
+            )
+        )
+
+    @app.post(
+        "/v1/ui/tailwind/doors/{device_id}/open",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def tailwind_open_door(
+        device_id: str,
+        state: DeviceState,
+    ) -> UIDeviceActionOut:
+        if state.tailwind_mgr is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Tailwind manager is not configured on this server",
+            )
+        gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
+        if gd is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown tailwind device: {device_id}",
+            )
+        await gd.open()
+        return UIDeviceActionOut(
+            device=build_tailwind_device_view(
+                state.tailwind_mgr,
+                device_id=device_id,
+                cache_path=state.cache_path,
+            )
         )
 
     @app.get("/v1/ui/state", dependencies=[Depends(_verify_api_key)])
