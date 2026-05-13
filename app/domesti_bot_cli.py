@@ -65,6 +65,8 @@ from prompt_toolkit.enums import EditingMode
 
 from app import kasa_discovery_store
 from app.androidtv_device_manager import (
+    ANDROIDTV_TEMPORARILY_DISABLED,
+    ANDROIDTV_TEMPORARILY_DISABLED_REASON,
     AndroidTvDeviceManager,
     discover_cast_adb_specs_via_zeroconf,
     _merge_androidtv_host_specs,
@@ -1969,6 +1971,20 @@ async def bootstrap_device_managers(
 
     async def boot_androidtv() -> dict[str, Any]:
         slug = "androidtv"
+        # TODO(google-cast-on-off): Cast turn_off is unreliable in the
+        # field, so the bootstrap path is gated off at the source.
+        # Flip ``ANDROIDTV_TEMPORARILY_DISABLED`` in
+        # ``app.androidtv_device_manager`` (and remove this branch) once
+        # the on/off behavior is verified end-to-end.
+        if ANDROIDTV_TEMPORARILY_DISABLED:
+            return {
+                "slug": slug,
+                "skipped": True,
+                "detail": ANDROIDTV_TEMPORARILY_DISABLED_REASON,
+                "exc": None,
+                "ok": False,
+                "mgr": None,
+            }
         if args.no_androidtv:
             return {
                 "slug": slug,
@@ -2346,7 +2362,12 @@ def build_arg_parser(*, add_help: bool = True) -> argparse.ArgumentParser:
     p.add_argument(
         "--no-androidtv",
         action="store_true",
-        help="Do not discover or control Google Cast targets",
+        help=(
+            "Do not discover or control Google Cast targets. "
+            "Note: Google Cast bring-up is currently disabled regardless "
+            "of this flag — see ANDROIDTV_TEMPORARILY_DISABLED in "
+            "app.androidtv_device_manager (TODO: google-cast-on-off)."
+        ),
     )
     p.add_argument(
         "--query-timeout",
