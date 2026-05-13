@@ -29,6 +29,7 @@ if sys.version_info >= (3, 14):
 
 from gotailwind import Tailwind
 from gotailwind.const import TailwindDoorOperationCommand, TailwindDoorState
+from gotailwind.exceptions import TailwindDoorAlreadyInStateError
 from gotailwind.models import TailwindDoor
 from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
@@ -149,10 +150,21 @@ class GotailwindDevice(DoorDevice):
         self._reported_state = state
 
     async def close(self) -> None:
-        door = await self._tailwind.operate(
-            door=self._door,
-            operation=TailwindDoorOperationCommand.CLOSE,
-        )
+        # ``gotailwind`` raises ``TailwindDoorAlreadyInStateError`` when
+        # the door is already closed (or already in any commanded state).
+        # Our app contract treats close/open as idempotent — a user
+        # clicking "Close" on a closed door, or "Turn everything off"
+        # while some doors are already shut, should succeed. Pin the
+        # cached ``_reported_state`` to the target so the next refresh
+        # reflects what's actually true.
+        try:
+            door = await self._tailwind.operate(
+                door=self._door,
+                operation=TailwindDoorOperationCommand.CLOSE,
+            )
+        except TailwindDoorAlreadyInStateError:
+            self._reported_state = TailwindDoorState.CLOSED
+            return
         self._reported_state = door.state
 
     @property
@@ -168,10 +180,18 @@ class GotailwindDevice(DoorDevice):
         return self._reported_state == TailwindDoorState.OPEN
 
     async def open(self) -> None:
-        door = await self._tailwind.operate(
-            door=self._door,
-            operation=TailwindDoorOperationCommand.OPEN,
-        )
+        # Symmetric with :meth:`close`: swallow
+        # ``TailwindDoorAlreadyInStateError`` so a stale "closed" tile
+        # double-click (or a bulk "open all" hitting a door that's
+        # already open) succeeds as a no-op instead of 500ing.
+        try:
+            door = await self._tailwind.operate(
+                door=self._door,
+                operation=TailwindDoorOperationCommand.OPEN,
+            )
+        except TailwindDoorAlreadyInStateError:
+            self._reported_state = TailwindDoorState.OPEN
+            return
         self._reported_state = door.state
 
 
