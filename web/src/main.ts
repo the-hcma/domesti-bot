@@ -576,6 +576,34 @@ class DomestiBotController {
   }
 }
 
+// Inline-SVG path commands for each family's header icon. Stroke-only,
+// 24×24 viewBox, so a single ``color: var(--family-color)`` on
+// ``.family-icon`` paints the whole silhouette via ``currentColor``.
+// Adding a new family is a one-line addition here plus the existing
+// ``color`` entry in ``app.api.ui_state._FAMILIES``. Shapes are
+// deliberately spartan (lightbulb / speaker cabinet / pitched-roof
+// house with panel lines) so they read clearly at 1.4em.
+const FAMILY_ICON_PATHS: Record<string, readonly string[]> = {
+  kasa: [
+    "M9 18h6",
+    "M10 22h4",
+    "M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z",
+  ],
+  sonos: [
+    "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z",
+    "M12 18a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+    "M12 6.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2z",
+  ],
+  tailwind: [
+    "M3 11l9-7 9 7",
+    "M5 10v11h14V10",
+    "M5 14h14",
+    "M5 17.5h14",
+  ],
+};
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   // What the backend's bulk-off endpoints actually drive each device
   // kind to. Used by the controller's optimistic-prediction helpers
@@ -589,6 +617,35 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
     case "door":
       return "closed";
   }
+}
+
+function createFamilyIcon(familyId: string): SVGElement | null {
+  // Returns a configured ``<svg>`` element for the family header,
+  // or ``null`` if the family doesn't have a registered icon (in
+  // which case the heading just shows its text label — the per-tile
+  // ``border-left`` already carries the family colour). The SVG is
+  // built in the SVG namespace (``createElementNS``) because plain
+  // ``createElement`` would produce HTMLUnknownElement nodes that
+  // browsers won't render as SVG.
+  const paths = FAMILY_ICON_PATHS[familyId];
+  if (!paths) return null;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "family-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  // Purely decorative — the adjacent ``<h3>`` text already labels
+  // the family for screen readers.
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
 }
 
 function renderDevice(
@@ -688,7 +745,13 @@ function renderFamily(
   const header = document.createElement("header");
   header.className = "family-header";
   const heading = document.createElement("h3");
-  heading.textContent = family.label;
+  const icon = createFamilyIcon(family.id);
+  if (icon !== null) {
+    heading.append(icon);
+  }
+  // ``append(textNode)`` (rather than ``textContent =``) so any
+  // already-appended icon survives.
+  heading.append(document.createTextNode(family.label));
   header.append(heading);
 
   if (
