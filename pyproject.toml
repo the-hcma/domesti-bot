@@ -14,7 +14,7 @@ dependencies = [
     "pytest",
     "pytest-asyncio",
     "python-kasa",
-    "soco>=0.30",
+    "soco>=0.31.0",
     "uvicorn[standard]>=0.46.0",
     "zeroconf>=0.148.0",
 ]
