@@ -94,3 +94,51 @@ class UIStateOut(BaseModel):
     """
 
     families: list[UIFamilyOut] = Field(default_factory=list)
+
+
+class UIBulkActionOut(BaseModel):
+    """Result of a family-level or global bulk action.
+
+    * ``affected``: device ids the action successfully fired on.
+    * ``skipped``: device ids the action intentionally bypassed — for the
+      *global* bulk action, this is every device with
+      ``exclude_from_global=True``. (Family-level bulk actions ignore that
+      flag and never populate ``skipped``.)
+    """
+
+    affected: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+
+
+class UIDeviceActionOut(BaseModel):
+    """One refreshed :class:`UIDeviceOut` after a single-device action.
+
+    The endpoint reads the device's cached state *after* the action so the
+    UI can flip the toggle to its new position without re-fetching the
+    full ``GET /v1/ui/state``.
+    """
+
+    device: UIDeviceOut
+
+
+class UIPowerSetIn(BaseModel):
+    """Body for ``POST /v1/ui/kasa/devices/{device_id}/toggle``."""
+
+    on: bool = Field(..., description="``True`` → turn on; ``False`` → turn off.")
+
+
+class UIPreferenceIn(BaseModel):
+    """Body for ``PUT /v1/ui/preferences/{family_id}/{device_id}``."""
+
+    exclude_from_global: bool = Field(
+        ...,
+        description="``True`` excludes the device from any future global bulk action.",
+    )
+
+
+class UIPreferenceOut(BaseModel):
+    """Confirmation echo of a write to ``ui_preferences``."""
+
+    family_id: str
+    device_id: str
+    exclude_from_global: bool

@@ -12,7 +12,9 @@
       --muted: #5a6171;
       --accent: #2e7d32;
       --pending: #b58900;
+      --danger: #b3261e;
       --card: #ffffff;
+      --card-elev: #fafbfc;
       --bg: #f6f7f9;
       --border: #e1e4e8;
     }
@@ -22,48 +24,100 @@
         --muted: #a0a6b1;
         --accent: #7bd389;
         --pending: #f4c54e;
+        --danger: #ff7b72;
         --card: #1f2226;
+        --card-elev: #262a30;
         --bg: #15171a;
         --border: #2a2e34;
       }
     }
     html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
       font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-    main { max-width: 640px; margin: 6vh auto; padding: 24px;
-      background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
-    h1 { margin: 0 0 8px; font-size: 20px; }
-    .ok { color: var(--accent); font-weight: 600; }
+    main { max-width: 960px; margin: 4vh auto; padding: 24px; }
+    h1, h2, h3, h4 { margin: 0; }
+    h1 { font-size: 22px; margin-bottom: 6px; }
+    h2 { font-size: 18px; }
+    h3 { font-size: 15px; }
     p { margin: 8px 0; color: var(--muted); }
+    .ok { color: var(--accent); font-weight: 600; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 13px; background: var(--bg); border: 1px solid var(--border);
       border-radius: 4px; padding: 1px 6px; }
-    ul { margin: 12px 0 0; padding-left: 20px; }
-    li { margin: 4px 0; }
     a { color: inherit; }
-    .bundle-pill {
-      display: inline-block;
-      padding: 1px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      font-size: 12px;
-      color: var(--pending);
-      vertical-align: middle;
+
+    /* Devices panel — populated by /static/dist/main.js */
+    #app { display: flex; flex-direction: column; gap: 18px; margin-bottom: 24px; }
+    .tile-header { display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 0 4px; }
+    .tile-loading, .tile-empty { color: var(--muted); padding: 12px; }
+    .tile-error { background: var(--danger); color: white; padding: 10px 14px;
+      border-radius: 6px; margin-bottom: 12px; }
+    .family { background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px; }
+    .family-header { display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+      margin-bottom: 12px; }
+    .family-header h3::before {
+      content: ""; display: inline-block; width: 10px; height: 10px;
+      background: var(--family-color, var(--muted)); border-radius: 3px;
+      margin-right: 8px; vertical-align: middle;
     }
+    .tile-grid { display: grid; gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+    .tile { background: var(--card-elev); border: 1px solid var(--border);
+      border-left: 3px solid var(--family-color, var(--muted));
+      border-radius: 8px; padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 8px; }
+    .tile-head { display: flex; align-items: center; justify-content: space-between;
+      gap: 6px; }
+    .tile-label { font-size: 14px; font-weight: 600; }
+    .tile-state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--muted); }
+    .tile-state-on { color: var(--accent); }
+    .tile-state-off { color: var(--muted); }
+    .tile-state-open { color: var(--pending); }
+    .tile-state-closed { color: var(--accent); }
+    .tile-state-unknown { color: var(--pending); }
+    .tile-toggle { font: inherit; cursor: pointer;
+      border: 1px solid var(--border); background: var(--card);
+      color: var(--fg); border-radius: 6px; padding: 6px 10px; min-width: 64px; }
+    .tile-toggle[data-on="true"] { background: var(--family-color, var(--accent));
+      color: white; border-color: transparent; }
+    .tile-toggle:focus-visible { outline: 2px solid var(--family-color, var(--accent));
+      outline-offset: 2px; }
+    .tile-note { font-size: 12px; color: var(--muted); margin: 0; }
+    .tile-exclude { display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--muted); cursor: pointer; }
+    .btn { font: inherit; cursor: pointer; border: 1px solid var(--border);
+      background: var(--card); color: var(--fg); border-radius: 6px; padding: 6px 12px; }
+    .btn-danger { background: var(--danger); color: white; border-color: transparent; }
+    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* Bundle pill + dev links footer */
+    .dev-footer { background: var(--card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 16px 20px; }
+    .bundle-pill { display: inline-block; padding: 1px 8px; border-radius: 999px;
+      border: 1px solid var(--border); font-size: 12px; color: var(--pending);
+      vertical-align: middle; }
     .bundle-pill[data-state="ready"] { color: var(--accent); }
+    .dev-footer ul { margin: 12px 0 0; padding-left: 20px; }
+    .dev-footer li { margin: 4px 0; }
   </style>
 </head>
 <body>
   <main>
     <h1><span class="ok">success</span> &mdash; domesti-bot is running</h1>
-    <p>The HTTP API is up. There is no full browser UI yet (the tile dashboard
-       lands in later PRs of the <code>web-ui-tiles</code> stack); for now this
-       page just confirms the server and the TypeScript bundle are wired up.</p>
-    <p>Frontend bundle: <span id="bundle-status" class="bundle-pill" data-state="pending">pending</span></p>
-    <ul>
-      <li><a href="/health"><code>GET /health</code></a> &mdash; liveness probe</li>
-      <li><a href="/v1/completion-aliases"><code>GET /v1/completion-aliases</code></a> &mdash; tab-completion data</li>
-      <li><code>POST /v1/execute-line</code> &mdash; run a REPL command line</li>
-    </ul>
+    <div id="app"></div>
+    <section class="dev-footer">
+      <h2>Endpoints</h2>
+      <p>Frontend bundle: <span id="bundle-status" class="bundle-pill" data-state="pending">pending</span></p>
+      <ul>
+        <li><a href="/health"><code>GET /health</code></a> &mdash; liveness probe</li>
+        <li><a href="/v1/completion-aliases"><code>GET /v1/completion-aliases</code></a> &mdash; tab-completion data</li>
+        <li><code>POST /v1/execute-line</code> &mdash; run a REPL command line</li>
+        <li><a href="/v1/ui/state"><code>GET /v1/ui/state</code></a> &mdash; tile UI state</li>
+      </ul>
+    </section>
   </main>
   <script type="module" src="/static/dist/main.js"></script>
 </body>

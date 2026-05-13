@@ -1,22 +1,24 @@
-"""Build the ``GET /v1/ui/state`` payload from live device managers + SQLite.
+"""Build the ``GET /v1/ui/state`` payload + the per-device / bulk action helpers.
 
 This module is the single place that knows how to map a
 :class:`app.device_manager_cli.DeviceManagersState` (live, in-memory) plus
 the persisted ``ui_preferences`` SQLite rows into the ``UIStateOut`` shape
-returned by the HTTP API.
+returned by the HTTP API, *and* the helpers that mutate device state via
+the kasa stack.
 
-The mapping is intentionally read-only:
+The read path (:func:`build_ui_state`, :func:`build_kasa_device_view`) is
+intentionally network-free: every value comes from cached state set by the
+manager's previous ``fetch()``. Callers that need a fresh reading must
+invoke ``fetch()`` separately.
 
-* It never touches the network — every value comes from cached state set by
-  the manager's previous ``fetch()``. Callers that need a fresh reading
-  must invoke ``fetch()`` separately before calling :func:`build_ui_state`.
-* It never mutates the SQLite store — the preferences read here is
-  ``load_ui_preferences``; the writer paths (toggle endpoints) land in
-  later PRs (PR4 for kasa, PR5 for tailwind).
+The write path (:func:`bulk_off_global_apply`, :func:`bulk_off_kasa_apply`)
+*does* fire ``await kd.turn_off()`` for every targeted device. It does
+**not** mutate ``ui_preferences`` — those are written through
+:mod:`kasa_discovery_store.upsert_ui_preference` from the route handlers.
 
 Family colors and labels are owned by this module so the same palette
 renders identically across the web UI, future native clients, and any
-future embed surface. Each entry in :data:`_FAMILIES` is one row of tiles.
+future embed surface.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from app import kasa_discovery_store
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
 from app.device_manager_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
-from app.kasa_device_manager import KasaDeviceManager
+from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 from app.rule_engine import DoorPosition, SwitchPowerState
 
 # Server-owned UI metadata per family. Order in this list is the rendering
@@ -37,6 +39,49 @@ _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("kasa", "Lights & plugs", "#3B82F6"),
     ("tailwind", "Garage doors", "#10B981"),
 )
+
+
+async def _bulk_off_kasa_apply_impl(
+    mgr: KasaDeviceManager,
+    *,
+    excluded: set[str],
+) -> tuple[list[str], list[str]]:
+    """Iterate kasa switches, turn off non-excluded ones, return ``(affected, skipped)``.
+
+    ``affected`` is the host list the helper called ``turn_off`` on (in
+    sorted order); ``skipped`` is the excluded subset (also sorted). Hosts
+    that are blank/whitespace are dropped silently — they can't be
+    addressed and were already filtered out of :func:`build_ui_state`.
+    """
+
+    affected: list[str] = []
+    skipped: list[str] = []
+    for kd in mgr.switches:
+        host = (kd._kDevice.host or "").strip()
+        if not host:
+            continue
+        if host in excluded:
+            skipped.append(host)
+            continue
+        await kd.turn_off()
+        affected.append(host)
+    affected.sort()
+    skipped.sort()
+    return affected, skipped
+
+
+def _door_state(is_open: bool, is_closed: bool) -> str:
+    if is_open:
+        return DoorPosition.OPEN.value
+    if is_closed:
+        return DoorPosition.CLOSED.value
+    return "unknown"
+
+
+def _excluded_keys(
+    rows: Iterable[tuple[str, str, bool]], backend: str
+) -> set[str]:
+    return {key for be, key, exclude in rows if be == backend and exclude}
 
 
 def _kasa_devices(
@@ -102,18 +147,38 @@ def _tailwind_devices(
     return out
 
 
-def _door_state(is_open: bool, is_closed: bool) -> str:
-    if is_open:
-        return DoorPosition.OPEN.value
-    if is_closed:
-        return DoorPosition.CLOSED.value
-    return "unknown"
+def build_kasa_device_view(
+    mgr: KasaDeviceManager,
+    *,
+    host: str,
+    cache_path: Path | None,
+) -> UIDeviceOut:
+    """Build a fresh :class:`UIDeviceOut` for one kasa device after an action.
 
+    Re-reads the ``ui_preferences`` row each call so a toggle endpoint
+    can return the exclusion flag without the caller hand-passing it.
+    Raises :class:`KeyError` when the host doesn't match a known device
+    (the route handler maps that to a 404).
+    """
 
-def _excluded_keys(
-    rows: Iterable[tuple[str, str, bool]], backend: str
-) -> set[str]:
-    return {key for be, key, exclude in rows if be == backend and exclude}
+    kd = find_kasa_by_host(mgr, host)
+    if kd is None:
+        raise KeyError(host)
+    excluded = (
+        _excluded_keys(
+            kasa_discovery_store.load_ui_preferences(cache_path), "kasa"
+        )
+        if cache_path is not None
+        else set()
+    )
+    return UIDeviceOut(
+        id=host,
+        family_id="kasa",
+        label=kd.preferred_label,
+        kind="switch",
+        state=_switch_state(kd.is_on),
+        exclude_from_global=host in excluded,
+    )
 
 
 def build_ui_state(
@@ -154,3 +219,58 @@ def build_ui_state(
             UIFamilyOut(id=family_id, label=label, color=color, devices=devices)
         )
     return UIStateOut(families=families)
+
+
+async def bulk_off_global_apply(
+    state: DeviceManagersState,
+    *,
+    cache_path: Path | None,
+) -> tuple[list[str], list[str]]:
+    """Global "turn off all": kasa devices, honoring ``exclude_from_global``.
+
+    Tailwind close-all lands in PR 5; until then "global" means "every
+    kasa device that isn't individually excluded". When ``cache_path`` is
+    ``None`` (``--no-discovery-cache``) we treat every device as **not**
+    excluded, which matches the read-side behavior of :func:`build_ui_state`.
+    """
+
+    excluded = _excluded_keys(
+        kasa_discovery_store.load_ui_preferences(cache_path)
+        if cache_path is not None
+        else [],
+        "kasa",
+    )
+    return await _bulk_off_kasa_apply_impl(state.kasa_mgr, excluded=excluded)
+
+
+async def bulk_off_kasa_apply(
+    state: DeviceManagersState,
+) -> tuple[list[str], list[str]]:
+    """Family-level "all kasa off" — :func:`bulk_off_global_apply` minus exclusions.
+
+    The user clicked an in-family bulk button, so per-device
+    ``exclude_from_global`` is intentionally ignored. ``skipped`` is
+    therefore always empty in practice (kept in the signature so callers
+    don't have to special-case the return shape).
+    """
+
+    return await _bulk_off_kasa_apply_impl(state.kasa_mgr, excluded=set())
+
+
+def find_kasa_by_host(mgr: KasaDeviceManager, host: str) -> KasaDevice | None:
+    """Look up a kasa device by its **host** (the canonical key).
+
+    ``KasaDeviceManager.get_device_by_alias`` indexes by
+    :attr:`KasaDevice.identifier` (the kasa-reported alias when present,
+    otherwise the host) — not the host directly. The UI layer only ever
+    receives the host (as ``UIDeviceOut.id``), so it needs this dedicated
+    lookup.
+    """
+
+    needle = host.strip()
+    if not needle:
+        return None
+    for kd in mgr.switches:
+        if (kd._kDevice.host or "").strip() == needle:
+            return kd
+    return None
