@@ -45,10 +45,26 @@ class DomestiBotController {
   private static readonly BOOTSTRAP_RETRY_MS = 2000;
   private static readonly BOOTSTRAP_DEADLINE_MS = 90000;
 
+  // How long a recoverable action error (e.g. Sonos 409 "queue is
+  // empty") stays visible before auto-dismissing. Long enough to
+  // read a one-sentence hint, short enough not to overstay if the
+  // user has already moved on. A subsequent action error replaces
+  // the current toast immediately and restarts the timer; clicking
+  // the ``×`` button dismisses on demand.
+  private static readonly ACTION_ERROR_TOAST_MS = 10000;
+
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
   private connected = false;
   private pollTimer: number | null = null;
+  // The recoverable-action toast lives outside ``#app`` so it
+  // survives the ``replaceChildren()`` calls inside ``render()``.
+  // ``null`` means no toast is currently mounted; the timer is
+  // cleared whenever we dismiss or replace the toast so we don't
+  // accidentally remove a *newer* toast when an older one's timer
+  // fires.
+  private actionErrorToast: HTMLDivElement | null = null;
+  private actionErrorTimer: number | null = null;
   // Keyed by ``familyId\u0000deviceId``. Survives across polls so the
   // tile keeps showing the predicted state even when the backend
   // momentarily disagrees (transient OPENING, slow Kasa cloud sync,
@@ -228,6 +244,16 @@ class DomestiBotController {
     // actually stopped, the SoCo ``play`` call is a no-op rather than
     // an error. Optimistic prediction follows the action: ``paused``
     // → predict ``playing``, anything else → predict ``paused``.
+    //
+    // 409 Conflict from the server means Sonos refused the
+    // transition (UPnP 701 — typically an empty queue: there's
+    // nothing to resume). The server has already refreshed the
+    // zone's cached ``is_playing`` from a live UPnP read before the
+    // 409 escaped, so a follow-up ``refresh()`` will show the tile
+    // in its real state. Beyond that, the user clicked something
+    // that didn't work — surface the server-side detail in the
+    // action-error toast so they understand *why* (and what to do
+    // about it: "Pick something to play from the Sonos app first").
     const nextPlaying = device.state !== "playing";
     this.predictDeviceState(
       device.family_id,
@@ -239,7 +265,11 @@ class DomestiBotController {
       await api.toggleSonos(device.id, nextPlaying);
     } catch (err) {
       this.clearPendingPrediction(device.family_id, device.id);
-      console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+      if (err instanceof HttpError && err.status === 409) {
+        this.renderActionError(err.detail);
+      } else {
+        console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+      }
       await this.refresh();
     }
   }
@@ -425,6 +455,57 @@ class DomestiBotController {
     for (const family of state.families) {
       this.root.append(renderFamily(family, this, this.connected));
     }
+  }
+
+  private dismissActionError(): void {
+    if (this.actionErrorTimer !== null) {
+      window.clearTimeout(this.actionErrorTimer);
+      this.actionErrorTimer = null;
+    }
+    if (this.actionErrorToast !== null) {
+      this.actionErrorToast.remove();
+      this.actionErrorToast = null;
+    }
+  }
+
+  private renderActionError(message: string): void {
+    // Recoverable per-action error (e.g. a Sonos 409 from an empty
+    // queue). Distinct from ``renderError``, which is destructive
+    // and reserved for fatal/bootstrap failures. The toast lives in
+    // ``document.body`` rather than ``this.root`` so it survives
+    // the ``replaceChildren()`` inside ``render()`` — otherwise the
+    // background poll would tear it down as soon as it arrived.
+    // Calling this again *replaces* any current toast and resets
+    // the auto-dismiss timer; we only ever show one at a time so a
+    // burst of failed clicks doesn't pile up a wall of alerts.
+    this.dismissActionError();
+
+    const toast = document.createElement("div");
+    toast.className = "action-toast";
+    // ``role=alert`` + ``aria-live=assertive`` make screen readers
+    // announce immediately; sighted users get the visual toast.
+    toast.setAttribute("role", "alert");
+    toast.setAttribute("aria-live", "assertive");
+
+    const text = document.createElement("span");
+    text.className = "action-toast-message";
+    text.textContent = message;
+
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "action-toast-dismiss";
+    dismiss.setAttribute("aria-label", "Dismiss");
+    dismiss.textContent = "\u00d7";
+    dismiss.addEventListener("click", () => {
+      this.dismissActionError();
+    });
+
+    toast.append(text, dismiss);
+    document.body.append(toast);
+    this.actionErrorToast = toast;
+    this.actionErrorTimer = window.setTimeout(() => {
+      this.dismissActionError();
+    }, DomestiBotController.ACTION_ERROR_TOAST_MS);
   }
 
   private renderError(prefix: string, err: unknown): void {
