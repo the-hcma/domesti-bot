@@ -1,22 +1,13 @@
 // Browser entrypoint for the domesti-bot landing page.
 //
-// PR5 of the `web-ui-tiles` stack: tailwind tiles get the Open / Close
-// controls + the family-level "Close all" button, and the global
-// "Turn everything off" now closes every tailwind door alongside turning
-// every kasa switch off (honoring per-device `exclude_from_global=True`).
-//
-// Earlier PRs in this stack:
-//   PR1 — TypeScript toolchain (pnpm + esbuild + /static mount)
-//   PR2 — `ui_preferences` SQLite table
-//   PR3 — `GET /v1/ui/state` read-only endpoint
-//   PR4 — kasa tile rendering + per-tile toggle + family bulk-off + global
-//         bulk-off + per-tile exclude-from-global checkbox
+// Hydrates the empty ``<div id="app">`` in ``app/api/static/index.html``
+// with the tile UI: one family-section per device family, one tile per
+// device, plus per-family and global bulk actions.
 
 import { api, HttpError } from "./api.js";
 import type { UIDeviceOut, UIFamilyOut, UIStateOut } from "./types.js";
 
 const APP_ROOT_ID = "app";
-const STATUS_ID = "bundle-status";
 
 class DomestiBotController {
   private readonly root: HTMLElement;
@@ -115,12 +106,9 @@ class DomestiBotController {
     const state = this.state;
     if (!state) return;
     this.root.replaceChildren();
-    const header = document.createElement("header");
-    header.className = "tile-header";
-    const h2 = document.createElement("h2");
-    h2.textContent = "Devices";
-    header.append(h2);
     if (state.families.length > 0) {
+      const header = document.createElement("header");
+      header.className = "tile-header";
       const globalBtn = document.createElement("button");
       globalBtn.type = "button";
       globalBtn.className = "btn btn-danger";
@@ -129,10 +117,8 @@ class DomestiBotController {
         void this.onBulkOffGlobal();
       });
       header.append(globalBtn);
-    }
-    this.root.append(header);
-
-    if (state.families.length === 0) {
+      this.root.append(header);
+    } else {
       const empty = document.createElement("p");
       empty.className = "tile-empty";
       empty.textContent =
@@ -190,13 +176,6 @@ class DomestiBotController {
   setExcludeTile(device: UIDeviceOut, excludeFromGlobal: boolean): void {
     void this.onSetExclude(device, excludeFromGlobal);
   }
-}
-
-function markBundleReady(): void {
-  const el = document.getElementById(STATUS_ID);
-  if (!el) return;
-  el.textContent = "loaded";
-  el.dataset["state"] = "ready";
 }
 
 function renderDevice(
@@ -306,7 +285,6 @@ function renderFamily(
 }
 
 function start(): void {
-  markBundleReady();
   const root = document.getElementById(APP_ROOT_ID);
   if (!root) {
     console.warn(`[domesti-bot] expected #${APP_ROOT_ID} in landing page`);
