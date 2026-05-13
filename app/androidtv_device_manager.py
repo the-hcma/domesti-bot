@@ -1,8 +1,11 @@
 """Google Cast targets (Chromecast, Google TV, Nest Audio, …) via **PyChromecast**.
 
 There is **no ADB**. ``is-on`` / cached power treat **active media playback** (playing or
-buffering) as *on* — idle or paused reads as *off* for this proxy. ``turn-off`` sends a Cast
-**STOP** on the default media channel (stops the current receiver session when one exists).
+buffering) as *on* — idle or paused reads as *off* for this proxy. ``turn-off`` sends **STOP**
+when a media session exists, then **quit_app** to tear down the receiver, then
+**disconnect** so the Chromecast fully idles (mirrors common Cast client shutdown). A cached
+host tuple reconnects lazily on the next ``turn-on`` / ``is-on`` / status refresh. Mocks and
+callers without endpoint metadata skip **disconnect** (no way to reconnect).
 ``turn-on`` resumes with **PLAY** only when the session is **paused**; otherwise it is a
 no-op that refreshes status (there is no generic Cast “power on”).
 
@@ -181,20 +184,43 @@ async def discover_cast_adb_specs_via_zeroconf(
 class AndroidTvSwitchDevice(SwitchDevice):
     """Cast-backed switch: *on* means media **playing**; *off* stops playback."""
 
-    __slots__ = ("_cast",)
+    __slots__ = ("_cast", "_connect_timeout", "_host_connect_tuple")
 
     def __init__(
         self,
         identifier: str,
         cast: Chromecast,
         *,
+        connect_timeout: float = 20.0,
         display_name: str | None = None,
+        host_connect_tuple: tuple[str, int, uuid.UUID, str | None, str | None] | None = None,
     ) -> None:
         super().__init__(identifier, display_name=display_name)
         self._cast = cast
+        self._connect_timeout = float(connect_timeout)
+        self._host_connect_tuple = host_connect_tuple
+
+    def _ensure_cast_connected(self) -> None:
+        """Recreate the PyChromecast socket after :meth:`turn_off` disconnected."""
+
+        if self._cast is not None:
+            return
+        tup = self._host_connect_tuple
+        if tup is None:
+            raise RuntimeError(
+                "Expected host_connect_tuple for reconnect after disconnect, got None"
+            )
+        cc = pychromecast.get_chromecast_from_host(
+            tup,
+            tries=1,
+            timeout=self._connect_timeout,
+        )
+        cc.wait(timeout=self._connect_timeout)
+        self._cast = cc
 
     async def refresh_power_state(self) -> None:
         def sync() -> None:
+            self._ensure_cast_connected()
             try:
                 self._cast.media_controller.update_status()
                 time.sleep(_STATUS_POLL_SLEEP_S)
@@ -207,6 +233,7 @@ class AndroidTvSwitchDevice(SwitchDevice):
 
     async def turn_off(self) -> None:
         def sync() -> None:
+            self._ensure_cast_connected()
             try:
                 self._cast.media_controller.update_status()
                 time.sleep(_STATUS_POLL_SLEEP_S)
@@ -216,9 +243,15 @@ class AndroidTvSwitchDevice(SwitchDevice):
                 if self._cast.media_controller.status.media_session_id is not None:
                     self._cast.media_controller.stop(timeout=12.0)
             except Exception as ex:
-                _LOGGER.debug("Cast STOP failed (%s); trying quit_app", ex)
+                _LOGGER.debug("Cast STOP failed (%s); continuing to quit_app", ex)
+            with contextlib.suppress(Exception):
+                self._cast.quit_app(timeout=12.0)
+            if self._host_connect_tuple is not None:
                 with contextlib.suppress(Exception):
-                    self._cast.quit_app(timeout=12.0)
+                    self._cast.disconnect(timeout=3.0)
+                self._cast = None
+                self.set_power(False)
+                return
             try:
                 self._cast.media_controller.update_status()
                 time.sleep(_STATUS_POLL_SLEEP_S)
@@ -231,6 +264,7 @@ class AndroidTvSwitchDevice(SwitchDevice):
 
     async def turn_on(self) -> None:
         def sync() -> None:
+            self._ensure_cast_connected()
             try:
                 self._cast.media_controller.update_status()
                 time.sleep(_STATUS_POLL_SLEEP_S)
@@ -361,6 +395,8 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         seen: set[int] = set()
         for dev in cached.values():
             cast = dev._cast
+            if cast is None:
+                continue
             cid = id(cast)
             if cid in seen:
                 continue
@@ -433,7 +469,14 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
                 )
                 return None
             label = (friendly or "").strip() or uid_str
-            dev = AndroidTvSwitchDevice(uid_str, cc, display_name=label)
+            host_tuple = (host, port, uuid.UUID(uid_str), model_name, friendly)
+            dev = AndroidTvSwitchDevice(
+                uid_str,
+                cc,
+                connect_timeout=self._connection_timeout,
+                display_name=label,
+                host_connect_tuple=host_tuple,
+            )
             try:
                 dev._cast.media_controller.update_status()
                 time.sleep(_STATUS_POLL_SLEEP_S)
@@ -510,7 +553,21 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
                         cc.wait(timeout=self._connection_timeout)
                         uid = str(info.uuid)
                         label = (info.friendly_name or "").strip() or uid
-                        dev = AndroidTvSwitchDevice(uid, cc, display_name=label)
+                        port = int(info.port) if info.port else _DEFAULT_CAST_PORT
+                        host_tuple = (
+                            str(info.host).strip(),
+                            port,
+                            uuid.UUID(uid),
+                            (getattr(info, "model_name", None) or "").strip() or None,
+                            (info.friendly_name or "").strip() or None,
+                        )
+                        dev = AndroidTvSwitchDevice(
+                            uid,
+                            cc,
+                            connect_timeout=self._connection_timeout,
+                            display_name=label,
+                            host_connect_tuple=host_tuple,
+                        )
                         try:
                             dev._cast.media_controller.update_status()
                             time.sleep(_STATUS_POLL_SLEEP_S)

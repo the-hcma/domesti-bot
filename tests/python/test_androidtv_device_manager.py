@@ -533,6 +533,42 @@ async def test_turn_off_calls_stop_when_session_active() -> None:
     dev = AndroidTvSwitchDevice("u1", cast)
     await dev.turn_off()
     cast.media_controller.stop.assert_called_once()
+    cast.quit_app.assert_called_once()
+    cast.disconnect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_turn_off_disconnects_when_host_tuple_then_turn_on_reconnects() -> None:
+    uid = UUID("12345678-1234-5678-1234-567812345678")
+    cast1 = MagicMock()
+    cast1.media_controller.status.media_session_id = None
+    cast1.media_controller.status.player_is_playing = False
+    cast2 = MagicMock()
+    st = MagicMock()
+    st.media_session_id = 1
+    st.player_is_paused = True
+    st.player_is_playing = False
+    cast2.media_controller.status = st
+    dev = AndroidTvSwitchDevice(
+        str(uid),
+        cast1,
+        connect_timeout=1.0,
+        display_name="TV",
+        host_connect_tuple=("10.0.0.1", 8009, uid, None, "TV"),
+    )
+    await dev.turn_off()
+    cast1.media_controller.stop.assert_not_called()
+    cast1.quit_app.assert_called_once()
+    cast1.disconnect.assert_called_once()
+
+    with patch(
+        "app.androidtv_device_manager.pychromecast.get_chromecast_from_host",
+        return_value=cast2,
+    ) as gch:
+        await dev.turn_on()
+    gch.assert_called_once()
+    assert dev._cast is cast2
+    cast2.media_controller.play.assert_called_once()
 
 
 @pytest.mark.asyncio
