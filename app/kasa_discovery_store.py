@@ -51,6 +51,13 @@ CREATE TABLE IF NOT EXISTS sonos_known_zones (
     zone_name TEXT,
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ui_preferences (
+    backend TEXT NOT NULL,
+    canonical_key TEXT NOT NULL,
+    exclude_from_global INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (backend, canonical_key)
+);
 """
 
 
@@ -374,6 +381,33 @@ def load_tailwind_host(path: Path) -> str | None:
         conn.close()
 
 
+def load_ui_preferences(path: Path) -> list[tuple[str, str, bool]]:
+    """Return ``(backend, canonical_key, exclude_from_global)`` rows.
+
+    Backend strings mirror :func:`load_display_names`: ``kasa``, ``tailwind``,
+    ``androidtv``, ``sonos``. Missing file → empty list.
+
+    The ``exclude_from_global`` flag means a global "turn off all" / "close
+    all" action must skip this device. Per-device toggles still operate on
+    excluded devices; family-level bulks may also still operate on them
+    (callers decide; see :mod:`app.api.app` once the tile UI lands).
+    """
+
+    path = path.expanduser().resolve()
+    if not path.is_file():
+        return []
+    ensure_schema(path)
+    conn = sqlite3.connect(path)
+    try:
+        cur = conn.execute(
+            "SELECT backend, canonical_key, exclude_from_global "
+            "FROM ui_preferences ORDER BY backend, canonical_key"
+        )
+        return [(str(b), str(k), bool(int(x))) for b, k, x in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def load_display_names(path: Path) -> list[tuple[str, str, str]]:
     """Rows ``(backend, canonical_key, display_name)`` — backend ``kasa``, ``tailwind``, or ``androidtv``."""
     path = path.expanduser().resolve()
@@ -414,11 +448,61 @@ def upsert_display_name(
         conn.close()
 
 
+def upsert_ui_preference(
+    path: Path,
+    *,
+    backend: str,
+    canonical_key: str,
+    exclude_from_global: bool,
+) -> None:
+    """Insert or replace one ``(backend, canonical_key)`` UI preference row.
+
+    Stored as ``INTEGER 0/1`` because SQLite has no native bool. The
+    :func:`load_ui_preferences` reader converts back to :class:`bool`.
+    """
+
+    conn = open_db(path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO ui_preferences "
+            "(backend, canonical_key, exclude_from_global, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                backend.strip(),
+                canonical_key.strip(),
+                1 if exclude_from_global else 0,
+                time.time(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def delete_display_name(path: Path, *, backend: str, canonical_key: str) -> None:
     conn = open_db(path)
     try:
         conn.execute(
             "DELETE FROM device_display_names WHERE backend = ? AND canonical_key = ?",
+            (backend.strip(), canonical_key.strip()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_ui_preference(path: Path, *, backend: str, canonical_key: str) -> None:
+    """Forget a per-device UI preference row.
+
+    Equivalent to a tile reverting to defaults (``exclude_from_global=False``).
+    Used by future tile-management endpoints; not exercised by the current
+    landing page.
+    """
+
+    conn = open_db(path)
+    try:
+        conn.execute(
+            "DELETE FROM ui_preferences WHERE backend = ? AND canonical_key = ?",
             (backend.strip(), canonical_key.strip()),
         )
         conn.commit()
