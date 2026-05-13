@@ -3,18 +3,42 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import socket
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from config import serve as serve_module
-from config.serve import bind_listen_socket, resolve_listen_address
+from config.serve import (
+    bind_listen_socket,
+    browser_url_for_auto_open,
+    resolve_listen_address,
+)
 
 
 def _ns(host: str | None, port: int | None) -> argparse.Namespace:
     return argparse.Namespace(listen_host=host, listen_port=port)
+
+
+def _ns_with_browser(
+    *, no_browser: bool = False
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        listen_host=None,
+        listen_port=None,
+        no_browser=no_browser,
+    )
+
+
+def _mock_sock(host: str, port: int) -> socket.socket:
+    """Build a Mock socket that reports ``(host, port)`` for ``getsockname()``."""
+
+    sock = MagicMock(spec=socket.socket)
+    sock.getsockname.return_value = (host, port)
+    return sock
 
 
 def test_dev_default_is_loopback_port_zero() -> None:
@@ -147,4 +171,116 @@ class _StubParser:
             listen_port=None,
             no_discovery_cache=True,
             discovery_cache=None,
+            # KeyboardInterrupt path: don't kick off the browser-open
+            # task. ``_FakeServer`` below has no ``started`` attribute
+            # and would crash the open-task otherwise.
+            no_browser=True,
+        )
+
+
+def test_browser_url_for_auto_open_returns_loopback_url_by_default() -> None:
+    sock = _mock_sock("127.0.0.1", 12345)
+    url = browser_url_for_auto_open(_ns_with_browser(), sock, env={})
+    assert url == "http://127.0.0.1:12345/"
+
+
+def test_browser_url_for_auto_open_uses_ipv4_form_for_ipv6_loopback() -> None:
+    # Bound on ``::1`` should still produce the IPv4 URL — every
+    # browser handles it, and IPv6 loopback URLs read awkwardly.
+    sock = _mock_sock("::1", 8765)
+    url = browser_url_for_auto_open(_ns_with_browser(), sock, env={})
+    assert url == "http://127.0.0.1:8765/"
+
+
+def test_browser_url_for_auto_open_returns_none_when_no_browser_flag() -> None:
+    sock = _mock_sock("127.0.0.1", 12345)
+    url = browser_url_for_auto_open(
+        _ns_with_browser(no_browser=True), sock, env={}
+    )
+    assert url is None
+
+
+def test_browser_url_for_auto_open_returns_none_under_systemd() -> None:
+    # systemd sets INVOCATION_ID for every unit; treat that as a signal
+    # to skip auto-open regardless of bind address.
+    sock = _mock_sock("127.0.0.1", 12345)
+    url = browser_url_for_auto_open(
+        _ns_with_browser(), sock, env={"INVOCATION_ID": "abc123"}
+    )
+    assert url is None
+
+
+def test_browser_url_for_auto_open_returns_none_for_wildcard_bind() -> None:
+    # ``0.0.0.0`` is for LAN serving — no single "right" URL to open.
+    sock = _mock_sock("0.0.0.0", 8765)
+    url = browser_url_for_auto_open(_ns_with_browser(), sock, env={})
+    assert url is None
+
+
+def test_browser_url_for_auto_open_returns_none_for_specific_lan_ip() -> None:
+    sock = _mock_sock("192.168.1.50", 8765)
+    url = browser_url_for_auto_open(_ns_with_browser(), sock, env={})
+    assert url is None
+
+
+def test_browser_url_for_auto_open_handles_missing_no_browser_attr() -> None:
+    # Pre-existing callers (e.g. older tests) build a Namespace without
+    # ``no_browser``. ``getattr(args, "no_browser", False)`` must not
+    # raise — the auto-open should default to ON for new-style callers
+    # and stay ON for old-style callers that just don't know about it.
+    sock = _mock_sock("127.0.0.1", 12345)
+    args = argparse.Namespace(listen_host=None, listen_port=None)
+    url = browser_url_for_auto_open(args, sock, env={})
+    assert url == "http://127.0.0.1:12345/"
+
+
+@pytest.mark.asyncio
+async def test_open_browser_after_server_ready_calls_webbrowser_open_when_started() -> None:
+    server: Any = MagicMock()
+    server.started = False
+
+    async def _flip_started() -> None:
+        await asyncio.sleep(0.05)
+        server.started = True
+
+    flip_task = asyncio.create_task(_flip_started())
+    with patch.object(serve_module.webbrowser, "open", return_value=True) as wb_open:
+        await asyncio.wait_for(
+            serve_module._open_browser_after_server_ready(
+                server, "http://127.0.0.1:12345/", timeout_s=1.0
+            ),
+            timeout=2.0,
+        )
+    await flip_task
+    wb_open.assert_called_once_with("http://127.0.0.1:12345/", new=2)
+
+
+@pytest.mark.asyncio
+async def test_open_browser_after_server_ready_gives_up_on_timeout() -> None:
+    server: Any = MagicMock()
+    server.started = False  # stays False forever
+    with patch.object(serve_module.webbrowser, "open") as wb_open:
+        await asyncio.wait_for(
+            serve_module._open_browser_after_server_ready(
+                server, "http://127.0.0.1:12345/", timeout_s=0.1
+            ),
+            timeout=1.0,
+        )
+    wb_open.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_open_browser_after_server_ready_swallows_webbrowser_error() -> None:
+    server: Any = MagicMock()
+    server.started = True
+    with patch.object(
+        serve_module.webbrowser, "open", side_effect=RuntimeError("no DISPLAY")
+    ):
+        # MUST NOT raise — a missing $DISPLAY shouldn't take the server
+        # launcher down.
+        await asyncio.wait_for(
+            serve_module._open_browser_after_server_ready(
+                server, "http://127.0.0.1:12345/", timeout_s=0.5
+            ),
+            timeout=1.0,
         )
