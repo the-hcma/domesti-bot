@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -40,6 +41,11 @@ from app.api.ui_state import (
     bulk_off_kasa_apply,
     find_kasa_by_host,
     find_tailwind_by_identifier,
+)
+from app.device_state_watcher import (
+    build_default_watchers,
+    poll_interval_from_env,
+    run_device_state_watchers,
 )
 from app.domesti_bot_cli import (
     DeviceManagersState,
@@ -155,6 +161,13 @@ def create_app(args: Any) -> FastAPI:
         app.state.discovery_error = None
         app.state.discovery_started_at = time.monotonic()
         app.state.discovery_completed_at = None
+        # Continuous state watcher (kicked off after discovery succeeds —
+        # see ``app.device_state_watcher``). The lifespan owns the stop
+        # event so it can shut watchers down cleanly before tearing down
+        # the underlying managers.
+        watcher_stop = asyncio.Event()
+        app.state.watcher_stop = watcher_stop
+        app.state.watcher_task = None
 
         async def _run_discovery() -> None:
             started = time.monotonic()
@@ -176,6 +189,24 @@ def create_app(args: Any) -> FastAPI:
                 "[startup] device discovery complete in %.1fs",
                 app.state.discovery_completed_at - started,
             )
+            try:
+                poll_interval_s = poll_interval_from_env()
+            except ValueError as exc:
+                _LOGGER.error(
+                    "[state-watcher] disabled — bad DOMESTI_STATE_POLL_INTERVAL_S: %s",
+                    exc,
+                )
+                return
+            watchers = build_default_watchers(state, interval_s=poll_interval_s)
+            app.state.watcher_task = asyncio.create_task(
+                run_device_state_watchers(watchers, stop=watcher_stop),
+                name="device-state-watcher",
+            )
+            _LOGGER.info(
+                "[state-watcher] started; polling every %.1fs across %d backend(s)",
+                poll_interval_s,
+                len(watchers),
+            )
 
         discovery_task = asyncio.create_task(_run_discovery(), name="device-discovery")
         app.state.discovery_task = discovery_task
@@ -184,10 +215,17 @@ def create_app(args: Any) -> FastAPI:
         finally:
             if not discovery_task.done():
                 discovery_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await discovery_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+            # Stop the state watcher *before* tearing down managers so we
+            # don't poll a half-disconnected backend during shutdown.
+            watcher_stop.set()
+            watcher_task: asyncio.Task[None] | None = getattr(
+                app.state, "watcher_task", None
+            )
+            if watcher_task is not None and not watcher_task.done():
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await watcher_task
             state = app.state.device_state
             if state is not None:
                 await shutdown_device_managers(state)
