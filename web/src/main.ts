@@ -5,7 +5,12 @@
 // device, plus per-family and global bulk actions.
 
 import { api, HttpError } from "./api.js";
-import type { UIDeviceOut, UIFamilyOut, UIStateOut } from "./types.js";
+import type {
+  UIDeviceOut,
+  UIDeviceState,
+  UIFamilyOut,
+  UIStateOut,
+} from "./types.js";
 
 const APP_ROOT_ID = "app";
 
@@ -70,29 +75,60 @@ class DomestiBotController {
   }
 
   private async onOperateTailwind(device: UIDeviceOut): Promise<void> {
-    // Symmetric with onToggleKasa: derive the next state from the current
-    // one. ``unknown`` (transient ``OPENING`` / ``CLOSING``) defaults to
-    // closing — safer than opening unattended.
+    // ``unknown`` (transient OPENING/CLOSING) defaults to closing — same
+    // safer-default the backend applies. The optimistic prediction
+    // matches the action we'll actually send.
     const wantOpen = device.state === "closed";
+    const nextState = wantOpen ? "open" : "closed";
+    this.predictDeviceState(device.family_id, device.id, nextState);
+    this.render();
     try {
       if (wantOpen) {
         await api.openTailwindDoor(device.id);
       } else {
         await api.closeTailwindDoor(device.id);
       }
-      await this.refresh();
     } catch (err) {
-      this.renderError(`Failed to operate ${device.label}`, err);
+      console.warn(`[domesti-bot] operate ${device.label} failed`, err);
+      await this.refresh();
     }
   }
 
   private async onToggleKasa(device: UIDeviceOut): Promise<void> {
-    const next = device.state !== "on";
+    // Optimistic update: predict the post-action state and re-render
+    // immediately so the button label flips to the *next* action
+    // without waiting for the round-trip. The continuous state
+    // watcher (see ``app/device_state_watcher.py``) will reconcile
+    // with the canonical reading on its next poll; on action failure
+    // we fall back to a full refresh.
+    const nextOn = device.state !== "on";
+    this.predictDeviceState(device.family_id, device.id, nextOn ? "on" : "off");
+    this.render();
     try {
-      await api.toggleKasa(device.id, next);
-      await this.refresh();
+      await api.toggleKasa(device.id, nextOn);
     } catch (err) {
-      this.renderError(`Failed to toggle ${device.label}`, err);
+      console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+      await this.refresh();
+    }
+  }
+
+  private predictDeviceState(
+    familyId: string,
+    deviceId: string,
+    nextState: UIDeviceState,
+  ): void {
+    // Mutate the controller's cached ``state`` in place so the next
+    // ``render()`` reflects the predicted device state. No-op when the
+    // device isn't found (the watcher's next poll will reconcile).
+    if (!this.state) return;
+    for (const family of this.state.families) {
+      if (family.id !== familyId) continue;
+      for (const device of family.devices) {
+        if (device.id === deviceId) {
+          device.state = nextState;
+          return;
+        }
+      }
     }
   }
 
