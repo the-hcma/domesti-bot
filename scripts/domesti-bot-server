@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Start the domesti device-manager HTTP API (FastAPI + uvicorn).
+# Start the domesti-bot HTTP API (FastAPI + uvicorn).
 #
 # Logging strategy mirrors my-tracks (see docs/AGENTS.md): timestamps in the
 # system timezone, a single line per event, optional rotating file output, and
 # `--console` for dual logging during development.
 #
 # Usage:
-#   ./scripts/device-manager-server [OPTIONS] [-- SERVER_OPTIONS]
+#   ./scripts/domesti-bot-server [OPTIONS] [-- SERVER_OPTIONS]
 #
 # Logging options (handled by the wrapper, forwarded as env vars):
 #   --log-level LEVEL    trace | debug | info | warning | error | critical
@@ -22,10 +22,10 @@
 # --listen-host, --listen-port, discovery flags).
 #
 # Examples:
-#   ./scripts/device-manager-server
-#   ./scripts/device-manager-server --console --log-level debug
-#   ./scripts/device-manager-server --listen-host 127.0.0.1 --listen-port 8765
-#   ./scripts/device-manager-server --no-log-file --log-level debug
+#   ./scripts/domesti-bot-server
+#   ./scripts/domesti-bot-server --console --log-level debug
+#   ./scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8765
+#   ./scripts/domesti-bot-server --no-log-file --log-level debug
 
 set -euo pipefail
 
@@ -35,7 +35,7 @@ cd "$repo_root"
 serve_module="config.serve"
 serve_path="${repo_root}/config/serve.py"
 if [[ ! -f "$serve_path" ]]; then
-  echo "device-manager-server: missing ${serve_path#"${repo_root}/"} in ${repo_root}" >&2
+  echo "domesti-bot-server: missing ${serve_path#"${repo_root}/"} in ${repo_root}" >&2
   exit 1
 fi
 
@@ -49,7 +49,7 @@ forwarded_args=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     --log-level)
-      [[ $# -ge 2 ]] || { echo "device-manager-server: --log-level requires a value" >&2; exit 2; }
+      [[ $# -ge 2 ]] || { echo "domesti-bot-server: --log-level requires a value" >&2; exit 2; }
       log_level=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
       shift 2
       ;;
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --log-file)
-      [[ $# -ge 2 ]] || { echo "device-manager-server: --log-file requires a value" >&2; exit 2; }
+      [[ $# -ge 2 ]] || { echo "domesti-bot-server: --log-file requires a value" >&2; exit 2; }
       log_file_override="$2"
       shift 2
       ;;
@@ -106,14 +106,14 @@ done
 case "$log_level" in
   trace|debug|info|warning|error|critical) ;;
   *)
-    echo "device-manager-server: invalid --log-level '$log_level'" >&2
+    echo "domesti-bot-server: invalid --log-level '$log_level'" >&2
     echo "Valid levels: trace, debug, info, warning, error, critical" >&2
     exit 2
     ;;
 esac
 
 if [[ "$disable_log_file" == true && -n "$log_file_override" ]]; then
-  echo "device-manager-server: --no-log-file conflicts with --log-file" >&2
+  echo "domesti-bot-server: --no-log-file conflicts with --log-file" >&2
   exit 2
 fi
 
@@ -162,7 +162,7 @@ else
   log_dest="console"
 fi
 
-echo "domesti-bot device-manager-server"
+echo "domesti-bot-server"
 echo "  Log level:   ${DOMESTI_LOG_LEVEL}  (timestamps: ${log_tz})"
 echo "  Logging to:  ${log_dest}"
 [[ -n "$log_file" && "$log_to_console" != true ]] && echo "  Tip:         pass --console to also stream logs to this terminal"
@@ -177,5 +177,5 @@ if [[ -x "$venv_python" ]]; then
   exec "$venv_python" -m "$serve_module" "${forwarded_args[@]}"
 fi
 
-echo "device-manager-server: install uv (https://docs.astral.sh/uv/) or run 'uv sync' in ${repo_root}" >&2
+echo "domesti-bot-server: install uv (https://docs.astral.sh/uv/) or run 'uv sync' in ${repo_root}" >&2
 exit 1

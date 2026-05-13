@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # scripts/on-deploy - Build hook called by setup-service before starting or
-# restarting the device-manager-server systemd unit.
+# restarting the domesti-bot-server systemd unit.
 #
 # Path convention matches my-tracks/scripts/on-deploy so the shared
 # `~/work/ai/repository-helpers/scripts/setup-service` tool can call it without
@@ -97,7 +97,7 @@ mkdir -p "$(dirname "$sha_file")"
 
 # Ensure the Python environment exists. setup-service may invoke on-deploy on
 # a brand-new host or worktree without `.venv/`; the systemd ExecStart shells
-# into `scripts/device-manager-server`, which requires it.
+# into `scripts/domesti-bot-server`, which requires it.
 if [[ ! -d "$repo_dir/.venv" ]]; then
     echo "  .venv missing — running 'uv sync'..."
     uv sync
@@ -110,7 +110,7 @@ fi
 # Clear a stuck "failed" unit state so the next restart isn't reported as
 # failed even on a clean start. Suppress all errors: the unit may not be
 # installed yet (first deploy) or the caller may not have sudo rights.
-unit="device-manager-server.service"
+unit="domesti-bot-server.service"
 if command -v systemctl &>/dev/null; then
     if [[ "$(id -u)" -eq 0 ]]; then
         systemctl reset-failed "$unit" &>/dev/null || true

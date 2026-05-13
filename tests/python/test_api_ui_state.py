@@ -27,7 +27,7 @@ from app import kasa_discovery_store
 from app.api.app import create_app
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
 from app.api.ui_state import build_ui_state
-from app.device_manager_cli import DeviceManagersState
+from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 

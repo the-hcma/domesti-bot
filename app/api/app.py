@@ -40,7 +40,7 @@ from app.api.ui_state import (
     find_kasa_by_host,
     find_tailwind_by_identifier,
 )
-from app.device_manager_cli import (
+from app.domesti_bot_cli import (
     DeviceManagersState,
     _Theme,
     _all_cli_device_labels,

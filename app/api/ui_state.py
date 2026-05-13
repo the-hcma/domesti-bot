@@ -1,7 +1,7 @@
 """Build the ``GET /v1/ui/state`` payload + the per-device / bulk action helpers.
 
 This module is the single place that knows how to map a
-:class:`app.device_manager_cli.DeviceManagersState` (live, in-memory) plus
+:class:`app.domesti_bot_cli.DeviceManagersState` (live, in-memory) plus
 the persisted ``ui_preferences`` SQLite rows into the ``UIStateOut`` shape
 returned by the HTTP API, *and* the helpers that mutate device state via
 the kasa stack.
@@ -28,7 +28,7 @@ from pathlib import Path
 
 from app import kasa_discovery_store
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
-from app.device_manager_cli import DeviceManagersState
+from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 from app.rule_engine import DoorPosition, SwitchPowerState
@@ -152,7 +152,7 @@ def _tailwind_devices(
     """One :class:`UIDeviceOut` per Tailwind door.
 
     Canonical key is the door's ``identifier`` (matches
-    :func:`app.device_manager_cli._sqlite_canonical_key` for the
+    :func:`app.domesti_bot_cli._sqlite_canonical_key` for the
     ``tailwind`` backend). A door reporting neither fully open nor fully
     closed (e.g. ``OPENING`` / ``CLOSING``) becomes ``state="unknown"`` so
     the UI never has to guess.

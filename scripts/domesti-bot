@@ -3,19 +3,19 @@
 # Launch the interactive REPL CLI for LAN device control.
 #
 # Usage:
-#   ./scripts/device-manager [OPTIONS]
+#   ./scripts/domesti-bot [OPTIONS]
 #
-# See ``app/device_manager_cli.py`` for the full flag list.
+# See ``app/domesti_bot_cli.py`` for the full flag list.
 
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-cli_module="app.device_manager_cli"
-cli_path="${repo_root}/app/device_manager_cli.py"
+cli_module="app.domesti_bot_cli"
+cli_path="${repo_root}/app/domesti_bot_cli.py"
 if [[ ! -f "$cli_path" ]]; then
-  echo "device-manager: missing ${cli_path#"${repo_root}/"} in ${repo_root}" >&2
+  echo "domesti-bot: missing ${cli_path#"${repo_root}/"} in ${repo_root}" >&2
   exit 1
 fi
 
@@ -28,5 +28,5 @@ if [[ -x "$venv_python" ]]; then
   exec "$venv_python" -m "$cli_module" "$@"
 fi
 
-echo "device-manager: install uv (https://docs.astral.sh/uv/) or run 'uv sync' in ${repo_root}" >&2
+echo "domesti-bot: install uv (https://docs.astral.sh/uv/) or run 'uv sync' in ${repo_root}" >&2
 exit 1

@@ -1,8 +1,8 @@
 # `web/` — domesti-bot browser bundle
 
-TypeScript source for the browser-side tile dashboard served by the FastAPI
-device-manager. Compiled output is written to `../app/api/static/dist/` and
-served at `/static/dist/` by the Python server.
+TypeScript source for the browser-side tile dashboard served by the
+domesti-bot FastAPI server. Compiled output is written to
+`../app/api/static/dist/` and served at `/static/dist/` by the Python server.
 
 ## Conventions
 
