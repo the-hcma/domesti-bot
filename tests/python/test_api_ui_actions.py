@@ -138,8 +138,10 @@ async def test_bulk_off_global_apply_skips_excluded_devices(tmp_path: Path) -> N
     c = _FakeKasa("10.0.0.3", "Also keep", is_on=True)
     state = _state(kasa_devices=[a, b, c], cache_path=db)
     affected, skipped = await bulk_off_global_apply(state, cache_path=db)
-    assert affected == ["10.0.0.1", "10.0.0.3"]
-    assert skipped == ["10.0.0.2"]
+    # PR5 gave global bulk-off a richer return shape so it can mix kasa
+    # hosts and tailwind door ids without ambiguity.
+    assert affected == [("kasa", "10.0.0.1"), ("kasa", "10.0.0.3")]
+    assert skipped == [("kasa", "10.0.0.2")]
     assert a.is_on is False
     assert b.is_on is True
     assert c.is_on is False
@@ -154,7 +156,7 @@ async def test_bulk_off_global_apply_with_no_cache_path_treats_no_one_as_exclude
     b = _FakeKasa("10.0.0.2", "B", is_on=True)
     state = _state(kasa_devices=[a, b])
     affected, skipped = await bulk_off_global_apply(state, cache_path=None)
-    assert affected == ["10.0.0.1", "10.0.0.2"]
+    assert affected == [("kasa", "10.0.0.1"), ("kasa", "10.0.0.2")]
     assert skipped == []
 
 
@@ -214,7 +216,12 @@ def test_post_global_bulk_off_returns_affected_and_skipped(tmp_path: Path) -> No
     response = client.post("/v1/ui/global/bulk-off")
     assert response.status_code == 200
     body = response.json()
-    assert body == {"affected": ["10.0.0.1"], "skipped": ["10.0.0.2"]}
+    # PR5 evolved the response: each entry is a ``{family_id, device_id}``
+    # object so kasa/tailwind can coexist in the same payload.
+    assert body == {
+        "affected": [{"family_id": "kasa", "device_id": "10.0.0.1"}],
+        "skipped": [{"family_id": "kasa", "device_id": "10.0.0.2"}],
+    }
     assert a.is_on is False
     assert b.is_on is True
 

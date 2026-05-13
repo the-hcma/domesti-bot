@@ -1,13 +1,16 @@
 // Browser entrypoint for the domesti-bot landing page.
 //
-// PR4 of the `web-ui-tiles` stack: render the kasa tile grid + bulk action
-// bar (per-family kasa-all-off, global all-off) and wire the per-tile
-// toggle and "exclude from global" checkbox to the FastAPI endpoints.
+// PR5 of the `web-ui-tiles` stack: tailwind tiles get the Open / Close
+// controls + the family-level "Close all" button, and the global
+// "Turn everything off" now closes every tailwind door alongside turning
+// every kasa switch off (honoring per-device `exclude_from_global=True`).
 //
-// Tailwind tiles + tailwind-specific bulk actions land in PR5 (the server
-// already returns tailwind tiles in `GET /v1/ui/state`; this PR renders
-// them as read-only state tiles without a toggle so the family is visible
-// without claiming functionality it doesn't have yet).
+// Earlier PRs in this stack:
+//   PR1 — TypeScript toolchain (pnpm + esbuild + /static mount)
+//   PR2 — `ui_preferences` SQLite table
+//   PR3 — `GET /v1/ui/state` read-only endpoint
+//   PR4 — kasa tile rendering + per-tile toggle + family bulk-off + global
+//         bulk-off + per-tile exclude-from-global checkbox
 
 import { api, HttpError } from "./api.js";
 import type { UIDeviceOut, UIFamilyOut, UIStateOut } from "./types.js";
@@ -34,12 +37,17 @@ class AppController {
   }
 
   private async onBulkOffFamily(familyId: string): Promise<void> {
-    if (familyId !== "kasa") return;
     try {
-      await api.bulkOffKasa();
+      if (familyId === "kasa") {
+        await api.bulkOffKasa();
+      } else if (familyId === "tailwind") {
+        await api.closeAllTailwind();
+      } else {
+        return;
+      }
       await this.refresh();
     } catch (err) {
-      this.renderError(`Failed to turn off all ${familyId}`, err);
+      this.renderError(`Failed to bulk action on ${familyId}`, err);
     }
   }
 
@@ -64,6 +72,23 @@ class AppController {
         `Failed to update preference for ${device.label}`,
         err,
       );
+    }
+  }
+
+  private async onOperateTailwind(device: UIDeviceOut): Promise<void> {
+    // Symmetric with onToggleKasa: derive the next state from the current
+    // one. ``unknown`` (transient ``OPENING`` / ``CLOSING``) defaults to
+    // closing — safer than opening unattended.
+    const wantOpen = device.state === "closed";
+    try {
+      if (wantOpen) {
+        await api.openTailwindDoor(device.id);
+      } else {
+        await api.closeTailwindDoor(device.id);
+      }
+      await this.refresh();
+    } catch (err) {
+      this.renderError(`Failed to operate ${device.label}`, err);
     }
   }
 
@@ -154,7 +179,11 @@ class AppController {
     void this.onToggleKasa(device);
   }
 
-  bulkOffFamilyTile(familyId: string): void {
+  operateTailwindTile(device: UIDeviceOut): void {
+    void this.onOperateTailwind(device);
+  }
+
+  bulkActionFamilyTile(familyId: string): void {
     void this.onBulkOffFamily(familyId);
   }
 
@@ -208,12 +237,20 @@ function renderDevice(
     });
     tile.append(toggle);
   } else {
-    // Door tiles render read-only in PR4; the open/close controls land
-    // in PR5 once the tailwind action endpoints exist.
-    const note = document.createElement("p");
-    note.className = "tile-note";
-    note.textContent = "Open / close lands in the next update.";
-    tile.append(note);
+    // Door tile: a single button that flips between Open and Close based
+    // on the current cached position. ``unknown`` (transient ``OPENING``
+    // / ``CLOSING``) renders as Close — same default as the controller.
+    const op = document.createElement("button");
+    op.type = "button";
+    op.className = "tile-toggle";
+    const isOpen = device.state === "open";
+    op.dataset["on"] = isOpen ? "true" : "false";
+    op.setAttribute("aria-pressed", isOpen ? "true" : "false");
+    op.textContent = isOpen ? "Close" : "Open";
+    op.addEventListener("click", () => {
+      controller.operateTailwindTile(device);
+    });
+    tile.append(op);
   }
 
   const excludeRow = document.createElement("label");
@@ -247,13 +284,13 @@ function renderFamily(
   heading.textContent = family.label;
   header.append(heading);
 
-  if (family.id === "kasa") {
+  if (family.id === "kasa" || family.id === "tailwind") {
     const bulkBtn = document.createElement("button");
     bulkBtn.type = "button";
     bulkBtn.className = "btn";
-    bulkBtn.textContent = "Turn off all";
+    bulkBtn.textContent = family.id === "kasa" ? "Turn off all" : "Close all";
     bulkBtn.addEventListener("click", () => {
-      controller.bulkOffFamilyTile(family.id);
+      controller.bulkActionFamilyTile(family.id);
     });
     header.append(bulkBtn);
   }

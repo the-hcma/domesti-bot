@@ -32,6 +32,16 @@ export interface UIBulkActionOut {
   skipped: string[];
 }
 
+export interface UIGlobalBulkActionItem {
+  family_id: string;
+  device_id: string;
+}
+
+export interface UIGlobalBulkActionOut {
+  affected: UIGlobalBulkActionItem[];
+  skipped: UIGlobalBulkActionItem[];
+}
+
 export interface UIDeviceActionOut {
   device: UIDeviceOut;
 }
