@@ -56,29 +56,46 @@ class DomestiBotController {
 
   private async onBulkOffFamily(familyId: string): Promise<void> {
     // A bulk command supersedes any single-tile predictions in that
-    // family — wipe their grace windows so the post-bulk refresh
-    // shows the canonical state without holding onto stale guesses.
-    this.clearPendingPredictionsForFamily(familyId);
+    // family. Replace them with one prediction per non-excluded device
+    // pointing at the bulk-off target state ("off" for switches,
+    // "closed" for doors) so the tiles flip immediately, the action
+    // labels swap to "Turn it on" / "Open it", and the grace window
+    // suppresses any contradictory poll readings that arrive while
+    // the devices are still settling.
+    if (familyId !== "kasa" && familyId !== "tailwind") return;
+    this.predictBulkOffForFamily(familyId);
+    this.render();
     try {
       if (familyId === "kasa") {
         await api.bulkOffKasa();
-      } else if (familyId === "tailwind") {
-        await api.closeAllTailwind();
       } else {
-        return;
+        await api.closeAllTailwind();
       }
       await this.refresh();
     } catch (err) {
+      // Bulk dispatch failed — every prediction we just registered
+      // for this family is provably wrong (the request never landed
+      // server-side), so drop the grace windows and let the next
+      // poll show reality.
+      this.clearPendingPredictionsForFamily(familyId);
       this.renderError(`Failed to bulk action on ${familyId}`, err);
     }
   }
 
   private async onBulkOffGlobal(): Promise<void> {
-    this.clearAllPendingPredictions();
+    // Same optimistic pattern as the per-family bulk-off, but spans
+    // every family. Excluded devices keep their current state — the
+    // backend won't touch them, so neither should the prediction
+    // overlay. On dispatch failure we drop every prediction we just
+    // registered so a backend that never received the call doesn't
+    // leave the UI lying about device state.
+    this.predictBulkOffGlobal();
+    this.render();
     try {
       await api.bulkOffGlobal();
       await this.refresh();
     } catch (err) {
+      this.clearAllPendingPredictions();
       this.renderError("Failed to run global all-off", err);
     }
   }
@@ -191,6 +208,42 @@ class DomestiBotController {
 
   private clearAllPendingPredictions(): void {
     this.pendingPredictions.clear();
+  }
+
+  private predictBulkOffForFamily(familyId: string): void {
+    // Register an optimistic prediction for every non-excluded device
+    // in ``familyId`` that the bulk-off command will actually act on.
+    // We deliberately don't touch excluded devices: the backend will
+    // skip them, and showing them flipping off would be a lie that
+    // the next refresh has to correct.
+    if (!this.state) return;
+    for (const family of this.state.families) {
+      if (family.id !== familyId) continue;
+      for (const device of family.devices) {
+        if (device.exclude_from_global) continue;
+        this.predictDeviceState(
+          family.id,
+          device.id,
+          bulkOffStateForKind(device.kind),
+        );
+      }
+    }
+  }
+
+  private predictBulkOffGlobal(): void {
+    // Spans every family. Mirrors :meth:`predictBulkOffForFamily` for
+    // the global "Turn everything off" button.
+    if (!this.state) return;
+    for (const family of this.state.families) {
+      for (const device of family.devices) {
+        if (device.exclude_from_global) continue;
+        this.predictDeviceState(
+          family.id,
+          device.id,
+          bulkOffStateForKind(device.kind),
+        );
+      }
+    }
   }
 
   private predictDeviceState(
@@ -333,6 +386,14 @@ class DomestiBotController {
   setExcludeTile(device: UIDeviceOut, excludeFromGlobal: boolean): void {
     void this.onSetExclude(device, excludeFromGlobal);
   }
+}
+
+function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
+  // What the backend's bulk-off endpoints actually drive each device
+  // kind to. Used by the controller's optimistic-prediction helpers
+  // so the UI can show the post-action state before the round-trip
+  // (and the post-action poll) lands.
+  return kind === "switch" ? "off" : "closed";
 }
 
 function renderDevice(
