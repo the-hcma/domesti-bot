@@ -54,6 +54,7 @@ import httpx
 import io
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -82,6 +83,7 @@ COMMANDS = (
     "help",
     "is-on",
     "is-open",
+    "kasa-creds",
     "open-door",
     "pause",
     "quit",
@@ -108,6 +110,10 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("help", "Show this list."),
     ("is-on", "Print whether a Kasa switch or Cast target is on (media playing) or off."),
     ("is-open", "Print whether a Tailwind door reads fully open."),
+    (
+        "kasa-creds",
+        "Prompt for Kasa/Tapo account email + password (password hidden) and rediscover.",
+    ),
     ("open-door", "Tell Tailwind to fully open a door."),
     ("pause", "Pause playback on a Sonos zone."),
     ("quit", "Leave the REPL (same as exit)."),
@@ -323,6 +329,91 @@ def _kasa_switch_aliases(mgr: KasaDeviceManager) -> list[str]:
         return sorted(labels)
     except NotInitializedError:
         return []
+
+
+def _maybe_print_kasa_auth_notice(
+    kasa_mgr: KasaDeviceManager, *, theme: _Theme
+) -> None:
+    """One-shot suggestion when KLAP devices were skipped over auth.
+
+    Fires after the ``Ready`` banner when (a) at least one device was
+    skipped because ``Discover.discover`` came back with KLAP that
+    needed account creds we didn't have, and (b) we don't already have
+    creds configured (those failures are a different problem covered by
+    the per-device WARNING from ``kasa_device_manager``). The notice
+    points at the ``kasa-creds`` REPL command for a no-restart fix.
+    """
+
+    skipped = kasa_mgr.skipped_auth_hosts
+    if not skipped or kasa_mgr.has_credentials:
+        return
+    n = len(skipped)
+    sample = ", ".join(skipped[:3]) + (", …" if n > 3 else "")
+    print(
+        f"{theme.warn(f'Notice: {n} Kasa device(s) need account credentials for the KLAP handshake')} "
+        f"{theme.dim(f'({sample})')}"
+    )
+    print(
+        f"  {theme.dim('Type')} {theme.cmd('kasa-creds')} "
+        f"{theme.dim('to enter your Kasa/Tapo email/password (hidden) and rediscover,')}"
+    )
+    print(
+        f"  {theme.dim('or set KASA_USERNAME + KASA_PASSWORD env vars before restart.')}"
+    )
+
+
+async def _repl_cmd_kasa_creds(
+    kasa_mgr: KasaDeviceManager,
+    *,
+    prompt_fn: Callable[[str, bool], Awaitable[str]],
+    theme: _Theme,
+) -> None:
+    """Interactive Kasa credential entry + rediscover (driven by ``prompt_fn``).
+
+    ``prompt_fn(message, is_password)`` is the injection point: the
+    REPL wires it to a fresh :class:`prompt_toolkit.PromptSession`'s
+    ``prompt_async`` so the password field is starred. Tests pass a
+    canned-answer function so this helper stays exercisable without
+    prompt_toolkit's terminal layer.
+
+    Credentials are stored only in memory on the manager — to persist
+    across restarts the user still needs to set ``KASA_USERNAME`` and
+    ``KASA_PASSWORD`` in their environment (or the systemd
+    ``EnvironmentFile=``).
+    """
+
+    print(
+        f"{theme.header('Kasa credentials')} "
+        f"{theme.dim('(password hidden — to persist, set KASA_USERNAME / KASA_PASSWORD env vars before restart)')}"
+    )
+    try:
+        username = await prompt_fn("  Kasa account email: ", False)
+        password = await prompt_fn("  Kasa password: ", True)
+    except (EOFError, KeyboardInterrupt):
+        print(theme.err("kasa-creds: cancelled"), file=sys.stderr)
+        return
+    try:
+        kasa_mgr.set_credentials(username=username, password=password)
+    except ValueError as ex:
+        print(theme.err(f"kasa-creds: {ex}"), file=sys.stderr)
+        return
+    print(theme.dim("kasa-creds: rediscovering Kasa devices…"))
+    try:
+        await kasa_mgr.rediscover()
+    except Exception as ex:
+        print(theme.err(f"kasa-creds: rediscover failed: {ex}"), file=sys.stderr)
+        return
+    n_switches = len(_kasa_switch_aliases(kasa_mgr))
+    skipped = kasa_mgr.skipped_auth_hosts
+    if skipped:
+        print(
+            theme.warn(
+                f"kasa-creds: {len(skipped)} device(s) still failed auth: "
+                f"{', '.join(skipped)}"
+            )
+        )
+        print(f"  {theme.dim('Likely a wrong account email/password.')}")
+    print(theme.ok(f"Kasa: ready ({n_switches} switch(es))"))
 
 
 def _all_cli_device_labels(
@@ -1290,6 +1381,19 @@ async def dispatch_repl_action(
         print(f"{theme.ok('Refreshed')} {theme.dim(tail)}")
         return
 
+    if cmd == "kasa-creds":
+        async def _toolkit_prompt(message: str, is_password: bool) -> str:
+            # A fresh, completion-less PromptSession keeps the cred
+            # input visually distinct from the regular REPL line — no
+            # history, no completer, just a starred field.
+            session = PromptSession()
+            return await session.prompt_async(message, is_password=is_password)
+
+        await _repl_cmd_kasa_creds(
+            kasa_mgr, prompt_fn=_toolkit_prompt, theme=theme
+        )
+        return
+
     if cmd == "refresh-discovery":
         async def rd_androidtv() -> dict[str, Any]:
             slug = "androidtv"
@@ -2066,6 +2170,7 @@ async def bootstrap_device_managers(
             f"{nd} Tailwind door(s)). Tab-complete commands and names."
         )
         print(f"{theme.ok('Ready')} {theme.dim(tail)}", flush=True)
+        _maybe_print_kasa_auth_notice(kasa_mgr, theme=theme)
 
     return DeviceManagersState(
         kasa_mgr=kasa_mgr,
