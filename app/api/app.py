@@ -75,11 +75,36 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _LANDING_PAGE_PATH = _STATIC_DIR / "index.html"
 
 
+# Paths whose *successful* (HTTP < 400) access log lines are emitted
+# at DEBUG instead of INFO. These are the high-frequency polling
+# endpoints whose [http] records would otherwise dominate INFO
+# output. Failure responses (>= 400) for the same paths still log at
+# INFO so genuine errors stay visible at the default level.
+#
+# This complements :class:`app.logging_config.HealthCheckFilter`,
+# which post-hoc demotes ``/health`` lines all the way to TRACE
+# (effectively invisible). The DEBUG path here is the right level
+# for endpoints worth seeing when you turn the dial up to debug a
+# real issue, but not worth seeing on every poll otherwise.
+_QUIET_ACCESS_LOG_PATHS: frozenset[str] = frozenset({
+    # The web UI polls this on a 5s cadence (see ``main.ts``).
+    "/v1/ui/state",
+})
+
+
 class _AccessLogMiddleware(BaseHTTPMiddleware):
     """Emit a single ``[http]`` log line per request.
 
+    Level selection:
+
+    * 5xx raised exceptions → ``logger.exception(...)`` (ERROR with traceback).
+    * 4xx/5xx responses     → INFO (errors should stay visible at the default level).
+    * Successful responses to paths in :data:`_QUIET_ACCESS_LOG_PATHS` → DEBUG
+      (poll heartbeats; see the constant's docstring).
+    * Everything else       → INFO.
+
     The :class:`app.logging_config.HealthCheckFilter` demotes ``/health`` lines
-    to TRACE so they don't pollute INFO output. Each record looks like::
+    further to TRACE so they never surface even at DEBUG. Each record looks like::
 
         [http] 127.0.0.1 GET /v1/completion-aliases 200 (12.3 ms)
     """
@@ -100,7 +125,14 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             )
             raise
         elapsed_ms = (time.perf_counter() - started) * 1000.0
-        _LOGGER.info(
+        level = (
+            logging.DEBUG
+            if response.status_code < 400
+            and request.url.path in _QUIET_ACCESS_LOG_PATHS
+            else logging.INFO
+        )
+        _LOGGER.log(
+            level,
             "[http] %s %s %s %d (%.1f ms)",
             client_host,
             request.method,
