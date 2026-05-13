@@ -19,8 +19,15 @@ from config.serve import (
 )
 
 
-def _ns(host: str | None, port: int | None) -> argparse.Namespace:
-    return argparse.Namespace(listen_host=host, listen_port=port)
+def _ns(
+    host: str | None,
+    port: int | None,
+    *,
+    listen_all: bool = False,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        listen_host=host, listen_port=port, listen_all=listen_all
+    )
 
 
 def _ns_with_browser(
@@ -80,6 +87,48 @@ def test_invalid_env_port_raises_system_exit() -> None:
 def test_out_of_range_port_raises_system_exit() -> None:
     with pytest.raises(SystemExit, match="out of range"):
         resolve_listen_address(_ns(None, 70000), env={})
+
+
+def test_listen_all_binds_wildcard_when_no_explicit_host() -> None:
+    host, port = resolve_listen_address(_ns(None, None, listen_all=True), env={})
+    assert host == "0.0.0.0"
+    assert port == 0
+
+
+def test_listen_all_does_not_change_port_resolution() -> None:
+    # Port comes from --listen-port / env / 0 — --listen-all only touches host.
+    host, port = resolve_listen_address(
+        _ns(None, 9876, listen_all=True), env={}
+    )
+    assert (host, port) == ("0.0.0.0", 9876)
+
+
+def test_explicit_listen_host_beats_listen_all() -> None:
+    # Explicit --listen-host 127.0.0.1 wins over --listen-all 0.0.0.0
+    # — useful when the user wants to override the wildcard convenience
+    # flag for a single run (e.g. a temporarily-tightened test).
+    host, _ = resolve_listen_address(
+        _ns("127.0.0.1", None, listen_all=True), env={}
+    )
+    assert host == "127.0.0.1"
+
+
+def test_listen_all_beats_env_host() -> None:
+    # CLI flag must win over env — same rule as --listen-host vs env.
+    host, _ = resolve_listen_address(
+        _ns(None, None, listen_all=True),
+        env={"DOMESTI_LISTEN_HOST": "10.0.0.5"},
+    )
+    assert host == "0.0.0.0"
+
+
+def test_resolver_works_for_legacy_namespace_without_listen_all() -> None:
+    # Pre-existing callers (e.g. older tests) construct a Namespace
+    # without ``listen_all``. ``getattr(args, "listen_all", False)``
+    # must keep them on the loopback default.
+    args = argparse.Namespace(listen_host=None, listen_port=None)
+    host, _ = resolve_listen_address(args, env={})
+    assert host == "127.0.0.1"
 
 
 def test_bind_listen_socket_allocates_a_free_port() -> None:
@@ -267,6 +316,60 @@ async def test_open_browser_after_server_ready_gives_up_on_timeout() -> None:
             timeout=1.0,
         )
     wb_open.assert_not_called()
+
+
+def test_log_listening_banner_warns_on_wildcard_without_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Wildcard bind + no shared secret = every LAN client can drive the
+    # API. The launcher must surface that out loud so it can't happen
+    # by accident on an untrusted network.
+    monkeypatch.delenv("DOMESTI_API_KEY", raising=False)
+    monkeypatch.setattr(serve_module, "_lan_addresses", lambda: ["192.0.2.7"])
+    sock = _mock_sock("0.0.0.0", 8765)
+    with caplog.at_level(logging.INFO, logger="config.serve"):
+        serve_module._log_listening_banner(sock)
+    records = [r for r in caplog.records if r.name == "config.serve"]
+    warnings = [r for r in records if r.levelno >= logging.WARNING]
+    assert any(
+        "DOMESTI_API_KEY unset" in r.getMessage() for r in warnings
+    ), [r.getMessage() for r in records]
+
+
+def test_log_listening_banner_quiet_on_wildcard_with_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Same wildcard bind but with a shared secret — no warning,
+    # because the API is no longer reachable unauthenticated.
+    monkeypatch.setenv("DOMESTI_API_KEY", "secret-token")
+    monkeypatch.setattr(serve_module, "_lan_addresses", lambda: [])
+    sock = _mock_sock("0.0.0.0", 8765)
+    with caplog.at_level(logging.INFO, logger="config.serve"):
+        serve_module._log_listening_banner(sock)
+    warnings = [
+        r for r in caplog.records
+        if r.name == "config.serve" and r.levelno >= logging.WARNING
+    ]
+    assert warnings == [], [r.getMessage() for r in warnings]
+
+
+def test_log_listening_banner_quiet_on_loopback_without_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Loopback bind without an api-key is the dev default — should NOT
+    # trigger the wildcard warning even though the api-key is unset.
+    monkeypatch.delenv("DOMESTI_API_KEY", raising=False)
+    sock = _mock_sock("127.0.0.1", 12345)
+    with caplog.at_level(logging.INFO, logger="config.serve"):
+        serve_module._log_listening_banner(sock)
+    warnings = [
+        r for r in caplog.records
+        if r.name == "config.serve" and r.levelno >= logging.WARNING
+    ]
+    assert warnings == [], [r.getMessage() for r in warnings]
 
 
 @pytest.mark.asyncio
