@@ -232,7 +232,7 @@ class DomestiBotController {
 
   private predictBulkOffGlobal(): void {
     // Spans every family. Mirrors :meth:`predictBulkOffForFamily` for
-    // the global "Turn everything off" button.
+    // the global "Turn off / close everything" button.
     if (!this.state) return;
     for (const family of this.state.families) {
       for (const device of family.devices) {
@@ -321,7 +321,7 @@ class DomestiBotController {
       const globalBtn = document.createElement("button");
       globalBtn.type = "button";
       globalBtn.className = "btn btn-danger";
-      globalBtn.textContent = "Turn everything off";
+      globalBtn.textContent = "Turn off / close everything";
       globalBtn.disabled = !this.connected;
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
@@ -493,7 +493,7 @@ function renderFamily(
     bulkBtn.type = "button";
     // Per-family bulk-off is always destructive ("Turn off all" /
     // "Close all"), so use the same red ``btn-danger`` styling as the
-    // global "Turn everything off" button — colors stay consistent
+    // global "Turn off / close everything" button — colors stay consistent
     // with the green/red rule that drives the state badges and the
     // per-tile toggles.
     bulkBtn.className = "btn btn-danger";

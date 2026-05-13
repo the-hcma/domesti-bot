@@ -153,7 +153,7 @@ class GotailwindDevice(DoorDevice):
         # ``gotailwind`` raises ``TailwindDoorAlreadyInStateError`` when
         # the door is already closed (or already in any commanded state).
         # Our app contract treats close/open as idempotent — a user
-        # clicking "Close" on a closed door, or "Turn everything off"
+        # clicking "Close" on a closed door, or "Turn off / close everything"
         # while some doors are already shut, should succeed. Pin the
         # cached ``_reported_state`` to the target so the next refresh
         # reflects what's actually true.
