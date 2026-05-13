@@ -171,6 +171,7 @@ class DomestiBotController {
       globalBtn.type = "button";
       globalBtn.className = "btn btn-danger";
       globalBtn.textContent = "Turn everything off";
+      globalBtn.disabled = !this.connected;
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
       });
@@ -239,6 +240,7 @@ class DomestiBotController {
 function renderDevice(
   device: UIDeviceOut,
   controller: DomestiBotController,
+  connected: boolean,
 ): HTMLElement {
   const tile = document.createElement("article");
   tile.className = `tile tile-${device.kind}`;
@@ -290,6 +292,7 @@ function renderDevice(
   toggle.dataset["on"] = isActive ? "true" : "false";
   toggle.setAttribute("aria-pressed", isActive ? "true" : "false");
   toggle.textContent = actionLabel;
+  toggle.disabled = !connected;
   tile.append(toggle);
 
   const excludeRow = document.createElement("label");
@@ -297,6 +300,7 @@ function renderDevice(
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = device.exclude_from_global;
+  checkbox.disabled = !connected;
   checkbox.addEventListener("change", () => {
     controller.setExcludeTile(device, checkbox.checked);
   });
@@ -330,6 +334,7 @@ function renderFamily(
     bulkBtn.type = "button";
     bulkBtn.className = "btn";
     bulkBtn.textContent = family.id === "kasa" ? "Turn off all" : "Close all";
+    bulkBtn.disabled = !connected;
     bulkBtn.addEventListener("click", () => {
       controller.bulkActionFamilyTile(family.id);
     });
@@ -340,7 +345,7 @@ function renderFamily(
   const grid = document.createElement("div");
   grid.className = "tile-grid";
   for (const device of family.devices) {
-    grid.append(renderDevice(device, controller));
+    grid.append(renderDevice(device, controller, connected));
   }
   section.append(grid);
   return section;
