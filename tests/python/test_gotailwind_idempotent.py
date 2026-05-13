@@ -2,7 +2,7 @@
 
 ``gotailwind`` raises :class:`TailwindDoorAlreadyInStateError` when the
 controller is asked to send a door to a position it already reports.
-That used to crash the global ``Turn off / close everything`` flow whenever any
+That used to crash the global ``Turn off / pause / close everything`` flow whenever any
 Tailwind door happened to already be closed. The wrapper now swallows
 that exception and reports success so the bulk operation cannot be
 aborted by a no-op call.

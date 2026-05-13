@@ -40,6 +40,7 @@ from collections.abc import Iterable
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
+from app.sonos_device_manager import SonosDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +104,49 @@ class KasaPollingWatcher(DeviceStateWatcher):
                 pass
 
 
+class SonosPollingWatcher(DeviceStateWatcher):
+    """Periodically re-read every Sonos zone's playback state.
+
+    Drives refresh through :meth:`SonosDeviceManager.is_playing`, which
+    calls the zone's :meth:`SonosSpeakerDevice.update_playback_state`
+    and updates the cached :attr:`SonosSpeakerDevice.is_playing` flag
+    in place. The return value is discarded — we only want the side
+    effect (the UI reads the cached flag, never blocks on UPnP).
+
+    External mutations the watcher catches: the user pausing playback
+    from the Sonos app, AirPlay handing off, or the zone going idle
+    after the queue runs out.
+    """
+
+    def __init__(
+        self,
+        mgr: SonosDeviceManager,
+        *,
+        interval_s: float = DEFAULT_POLL_INTERVAL_S,
+    ) -> None:
+        self._mgr = mgr
+        self._interval_s = interval_s
+
+    async def _refresh_once(self) -> None:
+        for sp in self._mgr.players:
+            try:
+                await self._mgr.is_playing(sp.identifier)
+            except Exception:
+                _LOGGER.warning(
+                    "[state-watcher sonos] %s update failed; keeping last known state",
+                    sp.identifier,
+                    exc_info=True,
+                )
+
+    async def run(self, *, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            await self._refresh_once()
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=self._interval_s)
+            except asyncio.TimeoutError:
+                pass
+
+
 class TailwindPollingWatcher(DeviceStateWatcher):
     """Periodically re-read every tailwind door's open/closed state.
 
@@ -150,14 +194,17 @@ def build_default_watchers(
     """Return the default watcher list for a finished discovery state.
 
     Skips backends that aren't configured (``--no-tailwind`` etc.).
-    Sonos and AndroidTV are intentionally omitted today — they don't
-    surface state in ``/v1/ui/state`` yet, so polling them would just
-    waste LAN traffic.
+    AndroidTV is intentionally omitted — bring-up is gated off (see
+    ``ANDROIDTV_TEMPORARILY_DISABLED``), so there's nothing to poll.
     """
 
     watchers: list[DeviceStateWatcher] = [
         KasaPollingWatcher(state.kasa_mgr, interval_s=interval_s),
     ]
+    if state.sonos_mgr is not None:
+        watchers.append(
+            SonosPollingWatcher(state.sonos_mgr, interval_s=interval_s)
+        )
     if state.tailwind_mgr is not None:
         watchers.append(
             TailwindPollingWatcher(state.tailwind_mgr, interval_s=interval_s)

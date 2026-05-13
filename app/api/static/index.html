@@ -83,15 +83,15 @@
     .tile-head { display: flex; align-items: center; justify-content: space-between;
       gap: 6px; }
     .tile-label { font-size: 14px; font-weight: 600; }
-    /* State-badge colors are standardized across both device kinds:
-       "active" states (on, open) are green, "inactive" states (off,
-       closed) are red, and the transient ``unknown`` (Tailwind
-       OPENING/CLOSING) stays amber so it's visually distinct from
-       the two settled states. */
+    /* State-badge colors are standardized across every device kind:
+       "active" states (on, playing, open) are green; "inactive"
+       states (off, paused, closed) are red; the transient ``unknown``
+       (Tailwind OPENING/CLOSING, Sonos pre-poll or stopped queue)
+       stays amber so the third state is visually distinct. */
     .tile-state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
       color: var(--muted); }
-    .tile-state-on, .tile-state-open { color: var(--accent); }
-    .tile-state-off, .tile-state-closed { color: var(--danger); }
+    .tile-state-on, .tile-state-playing, .tile-state-open { color: var(--accent); }
+    .tile-state-off, .tile-state-paused, .tile-state-closed { color: var(--danger); }
     .tile-state-unknown { color: var(--pending); }
     /* The toggle button's color tracks the *action* it will perform,
        not the current state — so the user reads color as the outcome

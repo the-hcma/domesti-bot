@@ -23,6 +23,7 @@ future embed surface.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -32,13 +33,30 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 from app.rule_engine import DoorPosition, SwitchPowerState
+from app.sonos_device_manager import (
+    SonosDeviceManager,
+    SonosSpeakerDevice,
+    SonosTransitionUnavailableError,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 # Server-owned UI metadata per family. Order in this list is the rendering
-# order on the page (top → bottom rows of tiles).
+# order on the page (top → bottom rows of tiles); matches the alphabetical
+# ``family_id`` order documented on ``UIStateOut``.
 _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("kasa", "Lights & plugs", "#3B82F6"),
+    ("sonos", "Sonos zones", "#8B5CF6"),
     ("tailwind", "Garage doors", "#10B981"),
 )
+
+# Speaker-kind state strings emitted on ``UIDeviceOut.state`` for Sonos.
+# Mirrors the ``on``/``off`` / ``open``/``closed`` pattern but uses
+# distinct values so the front-end can color and label them
+# independently. ``unknown`` covers the ``is_playing is None`` window
+# before the first watcher tick and any transient UPnP failure.
+_SONOS_PLAYING_STATE = "playing"
+_SONOS_PAUSED_STATE = "paused"
 
 
 async def _bulk_close_tailwind_apply_impl(
@@ -66,6 +84,53 @@ async def _bulk_close_tailwind_apply_impl(
             skipped.append(key)
             continue
         await gd.close()
+        affected.append(key)
+    affected.sort()
+    skipped.sort()
+    return affected, skipped
+
+
+async def _bulk_pause_sonos_apply_impl(
+    mgr: SonosDeviceManager,
+    *,
+    excluded: set[str],
+) -> tuple[list[str], list[str]]:
+    """Iterate Sonos zones, pause non-excluded *playing* ones, return ``(affected, skipped)``.
+
+    Zones with ``is_playing is False`` (already paused) or ``None``
+    (state not yet known) are left alone — a no-op ``pause`` call on a
+    paused zone is harmless but pointless, and the watcher / next
+    refresh will clear ``None`` shortly. Excluded zones are reported
+    in ``skipped`` even when they are already paused, matching the
+    kasa helper's convention so the UI can honestly say "X devices
+    weren't touched because you excluded them".
+
+    A zone that raises :class:`SonosTransitionUnavailableError` (UPnP
+    701 — the zone drifted out of ``PLAYING`` between our last poll
+    and this call) is logged at warning and dropped from both lists:
+    the zone isn't truly excluded (the user didn't ask for it to be),
+    and we didn't actually pause it either. One stuck zone must not
+    take down a global "Turn off / pause / close everything" action.
+    """
+
+    affected: list[str] = []
+    skipped: list[str] = []
+    for sp in mgr.players:
+        key = sp.identifier
+        if key in excluded:
+            skipped.append(key)
+            continue
+        if sp.is_playing is not True:
+            continue
+        try:
+            await sp.pause()
+        except SonosTransitionUnavailableError as exc:
+            _LOGGER.warning(
+                "[ui bulk-pause] %s: skipping zone, Sonos refused pause (%s)",
+                key,
+                exc,
+            )
+            continue
         affected.append(key)
     affected.sort()
     skipped.sort()
@@ -144,6 +209,44 @@ def _kasa_devices(
     return out
 
 
+def _sonos_devices(
+    mgr: SonosDeviceManager,
+    excluded: set[str],
+) -> list[UIDeviceOut]:
+    """One :class:`UIDeviceOut` per Sonos zone.
+
+    Canonical key is the zone's ``identifier`` (``RINCON_…`` UID when
+    SoCo provides it). ``state`` is derived from the cached
+    :attr:`SonosSpeakerDevice.is_playing` flag — ``None`` (no poll yet)
+    becomes ``"unknown"`` so the UI never blocks on a live UPnP call
+    just to render a tile.
+    """
+
+    out: list[UIDeviceOut] = []
+    for sp in mgr.players:
+        key = sp.identifier
+        out.append(
+            UIDeviceOut(
+                id=key,
+                family_id="sonos",
+                label=sp.preferred_label,
+                kind="speaker",
+                state=_sonos_state(sp.is_playing),
+                exclude_from_global=key in excluded,
+            )
+        )
+    out.sort(key=lambda d: (d.label.lower(), d.id))
+    return out
+
+
+def _sonos_state(is_playing: bool | None) -> str:
+    if is_playing is True:
+        return _SONOS_PLAYING_STATE
+    if is_playing is False:
+        return _SONOS_PAUSED_STATE
+    return "unknown"
+
+
 def _switch_state(is_on: bool) -> str:
     return SwitchPowerState.ON.value if is_on else SwitchPowerState.OFF.value
 
@@ -212,6 +315,42 @@ def build_kasa_device_view(
     )
 
 
+def build_sonos_device_view(
+    mgr: SonosDeviceManager,
+    *,
+    device_id: str,
+    cache_path: Path | None,
+) -> UIDeviceOut:
+    """Build a fresh :class:`UIDeviceOut` for one Sonos zone after an action.
+
+    Symmetric to :func:`build_kasa_device_view`. Raises :class:`KeyError`
+    when ``device_id`` doesn't match a known zone (the route handler
+    maps that to a 404). Reads the cached
+    :attr:`SonosSpeakerDevice.is_playing` rather than triggering a live
+    UPnP call — the action handler updates the cache before this
+    builds, so the returned state already reflects the new playback.
+    """
+
+    sp = find_sonos_by_identifier(mgr, device_id)
+    if sp is None:
+        raise KeyError(device_id)
+    excluded = (
+        _excluded_keys(
+            kasa_discovery_store.load_ui_preferences(cache_path), "sonos"
+        )
+        if cache_path is not None
+        else set()
+    )
+    return UIDeviceOut(
+        id=device_id,
+        family_id="sonos",
+        label=sp.preferred_label,
+        kind="speaker",
+        state=_sonos_state(sp.is_playing),
+        exclude_from_global=device_id in excluded,
+    )
+
+
 def build_tailwind_device_view(
     mgr: GotailwindDeviceManager,
     *,
@@ -273,6 +412,8 @@ def build_ui_state(
         excluded = _excluded_keys(pref_rows, family_id)
         if family_id == "kasa":
             devices = _kasa_devices(state.kasa_mgr, excluded)
+        elif family_id == "sonos" and state.sonos_mgr is not None:
+            devices = _sonos_devices(state.sonos_mgr, excluded)
         elif family_id == "tailwind" and state.tailwind_mgr is not None:
             devices = _tailwind_devices(state.tailwind_mgr, excluded)
         else:
@@ -308,13 +449,20 @@ async def bulk_off_global_apply(
     *,
     cache_path: Path | None,
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """Global "turn off / close all": kasa **and** tailwind, honoring exclusions.
+    """Global "turn off / close / pause all": every supported family, honoring exclusions.
 
     Returns ``(affected, skipped)`` where each entry is a
     ``(family_id, device_id)`` tuple — ``family_id`` is needed because
-    the global action spans families. When ``cache_path`` is ``None``
-    (``--no-discovery-cache``) we treat every device as **not** excluded,
-    which matches the read-side behavior of :func:`build_ui_state`.
+    the global action spans families. Per-family translation:
+
+    * ``kasa`` → ``turn_off`` for every non-excluded switch.
+    * ``sonos`` → ``pause`` for every non-excluded zone that's
+      currently playing (paused / unknown zones are left alone).
+    * ``tailwind`` → ``close`` for every non-excluded door.
+
+    When ``cache_path`` is ``None`` (``--no-discovery-cache``) we treat
+    every device as **not** excluded, which matches the read-side
+    behavior of :func:`build_ui_state`.
     """
 
     rows = (
@@ -323,6 +471,7 @@ async def bulk_off_global_apply(
         else []
     )
     kasa_excluded = _excluded_keys(rows, "kasa")
+    sonos_excluded = _excluded_keys(rows, "sonos")
     tailwind_excluded = _excluded_keys(rows, "tailwind")
     affected: list[tuple[str, str]] = []
     skipped: list[tuple[str, str]] = []
@@ -331,6 +480,12 @@ async def bulk_off_global_apply(
     )
     affected.extend(("kasa", k) for k in kasa_aff)
     skipped.extend(("kasa", k) for k in kasa_skip)
+    if state.sonos_mgr is not None:
+        son_aff, son_skip = await _bulk_pause_sonos_apply_impl(
+            state.sonos_mgr, excluded=sonos_excluded
+        )
+        affected.extend(("sonos", k) for k in son_aff)
+        skipped.extend(("sonos", k) for k in son_skip)
     if state.tailwind_mgr is not None:
         tw_aff, tw_skip = await _bulk_close_tailwind_apply_impl(
             state.tailwind_mgr, excluded=tailwind_excluded
@@ -356,6 +511,22 @@ async def bulk_off_kasa_apply(
     return await _bulk_off_kasa_apply_impl(state.kasa_mgr, excluded=set())
 
 
+async def bulk_pause_sonos_apply(
+    state: DeviceManagersState,
+) -> tuple[list[str], list[str]]:
+    """Family-level "pause all Sonos zones" — ignores per-device exclusions.
+
+    Only currently-playing zones are paused; already-paused or
+    unknown-state zones drop out of the iteration without an extra LAN
+    round-trip. When the Sonos manager isn't configured
+    (``state.sonos_mgr is None``), both lists are empty.
+    """
+
+    if state.sonos_mgr is None:
+        return [], []
+    return await _bulk_pause_sonos_apply_impl(state.sonos_mgr, excluded=set())
+
+
 def find_kasa_by_host(mgr: KasaDeviceManager, host: str) -> KasaDevice | None:
     """Look up a kasa device by its **host** (the canonical key).
 
@@ -372,6 +543,26 @@ def find_kasa_by_host(mgr: KasaDeviceManager, host: str) -> KasaDevice | None:
     for kd in mgr.switches:
         if (kd._kDevice.host or "").strip() == needle:
             return kd
+    return None
+
+
+def find_sonos_by_identifier(
+    mgr: SonosDeviceManager, device_id: str
+) -> SonosSpeakerDevice | None:
+    """Look up a Sonos zone by its ``identifier`` (``RINCON_…`` UID).
+
+    Mirrors :func:`find_kasa_by_host`. ``mgr.get_device_by_alias``
+    accepts both the identifier and the display label; the UI layer
+    restricts to the identifier here so two zones sharing a label
+    cannot collide on a single tile click.
+    """
+
+    needle = device_id.strip()
+    if not needle:
+        return None
+    for sp in mgr.players:
+        if sp.identifier == needle:
+            return sp
     return None
 
 

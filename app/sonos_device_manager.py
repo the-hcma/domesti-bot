@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from soco import SoCo, discover as soco_discover
+from soco.exceptions import SoCoUPnPException
 
 from app import kasa_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SpeakerDeviceManager
@@ -36,9 +37,29 @@ _SONOS_TRANSPORT_LABELS: dict[str, str] = {
     "TRANSITIONING": "transitioning",
 }
 
+# UPnP fault code Sonos returns when the requested transport transition
+# cannot proceed from the *current* state. Common triggers: ``Play`` on
+# a zone with an empty queue / no media source, ``Pause`` on a zone
+# that has already drifted out of ``PLAYING`` between our last poll and
+# the click, or any action on a zone that is mid-``TRANSITIONING``.
+# The code itself is a string in :mod:`soco` (see ``SoCoUPnPException``
+# docstring) — keep the comparison stringly-typed and defensive.
+_SONOS_UPNP_TRANSITION_UNAVAILABLE = "701"
+
+
+class SonosTransitionUnavailableError(Exception):
+    """Raised when Sonos refuses a play/pause because it can't transition.
+
+    Wraps :class:`soco.exceptions.SoCoUPnPException` with fault code
+    701 ("Transition not available") so the HTTP layer can surface a
+    helpful 409 rather than a generic 500, and so the bulk-pause helper
+    can skip the offending zone without taking the whole batch down.
+    The original exception is available via ``__cause__`` for logging.
+    """
+
 
 class SonosSpeakerDevice(SpeakerDevice):
-    __slots__ = ("_soco",)
+    __slots__ = ("_is_playing", "_soco")
 
     def __init__(
         self,
@@ -49,15 +70,73 @@ class SonosSpeakerDevice(SpeakerDevice):
     ) -> None:
         super().__init__(identifier, display_name=display_name)
         self._soco = soco_zone
+        # Tri-state cache: ``True``/``False`` once we've successfully read
+        # the transport state at least once, ``None`` while we still don't
+        # know. The UI maps the three values to ``playing`` / ``paused`` /
+        # ``unknown`` state badges. Live UPnP traffic only happens in
+        # :meth:`update_playback_state`; everything else reads this cache.
+        self._is_playing: bool | None = None
+
+    @property
+    def is_playing(self) -> bool | None:
+        """Last observed playback state, or ``None`` before the first poll.
+
+        Driven by :meth:`update_playback_state` (background watcher) and
+        by :meth:`pause` / :meth:`resume` (immediate post-action sync).
+        """
+
+        return self._is_playing
 
     async def pause(self) -> None:
-        await asyncio.to_thread(self._soco.pause)
+        try:
+            await asyncio.to_thread(self._soco.pause)
+        except SoCoUPnPException as exc:
+            if str(getattr(exc, "error_code", "")) == _SONOS_UPNP_TRANSITION_UNAVAILABLE:
+                # Sonos refused the pause — typically because the zone
+                # has already drifted out of PLAYING (queue ended,
+                # someone hit pause on the phone app between our last
+                # poll and this click). Refresh from a live UPnP read
+                # so the cache reflects truth, then surface a domain
+                # error the endpoint maps to 409.
+                await self.update_playback_state()
+                raise SonosTransitionUnavailableError(
+                    f"Sonos zone {self.preferred_label!r} cannot pause from "
+                    f"its current transport state (likely already paused / stopped)."
+                ) from exc
+            raise
+        # Post-action sync. Sonos sometimes lingers in ``TRANSITIONING`` for
+        # a beat right after a pause, so trusting the action's commanded
+        # state is more accurate than a re-poll racing the transition.
+        self._is_playing = False
 
     async def resume(self) -> None:
-        await asyncio.to_thread(self._soco.play)
+        try:
+            await asyncio.to_thread(self._soco.play)
+        except SoCoUPnPException as exc:
+            if str(getattr(exc, "error_code", "")) == _SONOS_UPNP_TRANSITION_UNAVAILABLE:
+                # Most common trigger here is an empty queue: Sonos has
+                # nothing to play, so ``Play`` is rejected with UPnP
+                # 701. Less common: the zone is mid-TRANSITIONING.
+                # Refresh the cache from UPnP so the tile shows the
+                # zone's real state, then raise a domain error the
+                # endpoint maps to 409.
+                await self.update_playback_state()
+                raise SonosTransitionUnavailableError(
+                    f"Sonos zone {self.preferred_label!r} cannot resume — "
+                    f"the queue is empty or the zone is mid-transition. "
+                    f"Pick something to play from the Sonos app first."
+                ) from exc
+            raise
+        self._is_playing = True
 
     def transport_state_summary(self) -> str:
-        """Best-effort playback view from UPnP AV transport (``playing`` / ``paused`` / …)."""
+        """Best-effort playback view from UPnP AV transport (``playing`` / ``paused`` / …).
+
+        Live UPnP call — refreshes the cache as a side effect so callers
+        that want the cheap cached value can read :attr:`is_playing`
+        afterwards. The summary string preserves nuance the cache can't
+        (``transitioning``, ``stopped``), useful for the REPL.
+        """
 
         try:
             info = self._soco.get_current_transport_info()
@@ -67,9 +146,32 @@ class SonosSpeakerDevice(SpeakerDevice):
             return "unknown"
         if not raw:
             return "unknown"
-        return _SONOS_TRANSPORT_LABELS.get(
+        label = _SONOS_TRANSPORT_LABELS.get(
             raw, raw.replace("_", " ").lower()
         )
+        # Keep :attr:`is_playing` in sync so a manual REPL read of
+        # ``transport_state_summary`` and the next UI poll converge on
+        # the same answer.
+        if label == "playing":
+            self._is_playing = True
+        elif label in ("paused", "stopped"):
+            self._is_playing = False
+        return label
+
+    async def update_playback_state(self) -> None:
+        """Refresh :attr:`is_playing` from a live UPnP transport read.
+
+        Used by :class:`app.device_state_watcher.SonosPollingWatcher` and
+        any code that needs to know "is this zone currently making
+        noise" without committing to the verbose label. Failures are
+        swallowed (logged by the caller); the cache keeps its last
+        known value so transient LAN blips don't flicker the tile.
+        """
+
+        # ``transport_state_summary`` already runs the UPnP call in the
+        # event-loop thread (it's synchronous), so push it to a worker
+        # to avoid blocking the loop for slow zones.
+        await asyncio.to_thread(self.transport_state_summary)
 
 
 class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
@@ -222,6 +324,21 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         if self._alias_to_device is None:
             raise NotInitializedError
         return self._alias_to_device.get(identifier)
+
+    async def is_playing(self, identifier: str) -> bool | None:
+        """Refresh and return the zone's cached playback flag.
+
+        Mirrors :meth:`KasaDeviceManager.is_on` so the polling watcher
+        (:class:`app.device_state_watcher.SonosPollingWatcher`) follows
+        the same shape as the kasa one. Returns ``None`` when the
+        single UPnP read failed; the zone's cached
+        :attr:`SonosSpeakerDevice.is_playing` keeps its previous value
+        in that case.
+        """
+
+        device = self._device_for(identifier)
+        await device.update_playback_state()
+        return device.is_playing
 
     @property
     def is_cache_warm(self) -> bool:

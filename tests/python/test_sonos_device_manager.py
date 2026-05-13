@@ -7,8 +7,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from soco.exceptions import SoCoUPnPException
+
 from app import kasa_discovery_store
-from app.sonos_device_manager import SonosDeviceManager, SonosSpeakerDevice
+from app.sonos_device_manager import (
+    SonosDeviceManager,
+    SonosSpeakerDevice,
+    SonosTransitionUnavailableError,
+)
 
 
 @pytest.mark.asyncio
@@ -245,3 +251,170 @@ def test_is_cache_warm_false_when_cache_file_missing(tmp_path: Path) -> None:
         discovery_timeout=0.1, discovery_cache_path=tmp_path / "absent.sqlite"
     )
     assert mgr.is_cache_warm is False
+
+
+def test_is_playing_cache_starts_none() -> None:
+    """A freshly constructed zone hasn't been polled yet — the UI tile
+    renders ``state="unknown"`` until the watcher (or an action) fills
+    in a definite value. Asserts the contract :func:`_sonos_state`
+    relies on."""
+
+    zone = MagicMock(uid="u1", player_name="X")
+    dev = SonosSpeakerDevice("u1", zone, display_name="X")
+    assert dev.is_playing is None
+
+
+@pytest.mark.asyncio
+async def test_pause_resume_sync_is_playing_cache() -> None:
+    """``pause`` / ``resume`` must trust the commanded state, not race
+    a re-poll. Sonos lingers in ``TRANSITIONING`` for a beat after
+    every transport call, so reading the cache after the action would
+    flicker the UI tile back to ``unknown``. The post-action sync is
+    what keeps the optimistic UI update honest."""
+
+    zone = MagicMock(uid="u1", player_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    assert dev.is_playing is None
+    await dev.resume()
+    assert dev.is_playing is True
+    await dev.pause()
+    assert dev.is_playing is False
+
+
+def test_transport_state_summary_updates_is_playing_cache() -> None:
+    """``transport_state_summary`` is the live UPnP path used by the
+    watcher; the cache it leaves behind drives the cheap UI render."""
+
+    zone = MagicMock(uid="u1", player_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "PLAYING",
+    }
+    assert dev.transport_state_summary() == "playing"
+    assert dev.is_playing is True
+
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "PAUSED_PLAYBACK",
+    }
+    assert dev.transport_state_summary() == "paused"
+    assert dev.is_playing is False
+
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "STOPPED",
+    }
+    assert dev.transport_state_summary() == "stopped"
+    # ``stopped`` is mapped to "not playing" so a stopped zone shows
+    # as ``paused`` in the UI rather than getting stuck on
+    # ``unknown`` forever.
+    assert dev.is_playing is False
+
+
+def test_transport_state_summary_leaves_cache_intact_on_failure() -> None:
+    """A flaky UPnP read must not flicker the tile — keep the last
+    known value so transient LAN blips don't churn the state badge."""
+
+    zone = MagicMock(uid="u1", player_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "PLAYING",
+    }
+    dev.transport_state_summary()
+    assert dev.is_playing is True
+    zone.get_current_transport_info.side_effect = RuntimeError("upnp boom")
+    assert dev.transport_state_summary() == "unknown"
+    assert dev.is_playing is True
+
+
+def _upnp_error(code: str, message: str) -> SoCoUPnPException:
+    """Build a SoCoUPnPException matching the real one's positional args."""
+
+    return SoCoUPnPException(message=message, error_code=code, error_xml="")
+
+
+@pytest.mark.asyncio
+async def test_pause_raises_domain_error_on_upnp_701() -> None:
+    """A pause that hits UPnP 701 must surface as the domain error so
+    the HTTP layer can return 409 instead of leaking an opaque 500.
+    Other UPnP faults must keep propagating — only 701 is the
+    "transition not possible" case we know how to translate."""
+
+    zone = MagicMock(uid="u1", player_name="Office")
+    zone.pause.side_effect = _upnp_error("701", "Transition not available")
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "STOPPED",
+    }
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+
+    with pytest.raises(SonosTransitionUnavailableError) as exc_info:
+        await dev.pause()
+    assert isinstance(exc_info.value.__cause__, SoCoUPnPException)
+    # The handler refreshes from a live UPnP read so the cache mirrors
+    # truth (the zone is stopped → not playing) before returning to
+    # the caller. Without this, the optimistic UI flip would leave a
+    # stale ``is_playing=True`` value in place.
+    assert dev.is_playing is False
+
+
+@pytest.mark.asyncio
+async def test_pause_propagates_non_701_upnp_errors() -> None:
+    zone = MagicMock(uid="u1", player_name="Office")
+    zone.pause.side_effect = _upnp_error("500", "Internal server error")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+
+    with pytest.raises(SoCoUPnPException):
+        await dev.pause()
+
+
+@pytest.mark.asyncio
+async def test_resume_raises_domain_error_on_upnp_701_empty_queue() -> None:
+    """The original 500 the user reported. UPnP 701 on play() means
+    the zone has nothing to play (empty queue or mid-transition);
+    callers see a clean domain exception they can map to 409."""
+
+    zone = MagicMock(uid="u1", player_name="Living Room")
+    zone.play.side_effect = _upnp_error("701", "Transition not available")
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "STOPPED",
+    }
+    dev = SonosSpeakerDevice("u1", zone, display_name="Living Room")
+
+    with pytest.raises(SonosTransitionUnavailableError) as exc_info:
+        await dev.resume()
+    assert "Living Room" in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, SoCoUPnPException)
+    # Cache reflects reality after the failed action — the zone is
+    # stopped, not playing.
+    assert dev.is_playing is False
+
+
+@pytest.mark.asyncio
+async def test_resume_propagates_non_701_upnp_errors() -> None:
+    zone = MagicMock(uid="u1", player_name="Office")
+    zone.play.side_effect = _upnp_error("500", "Internal server error")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+
+    with pytest.raises(SoCoUPnPException):
+        await dev.resume()
+
+
+@pytest.mark.asyncio
+async def test_manager_is_playing_refreshes_cache() -> None:
+    """The polling watcher drives refresh through this method —
+    asserts it forces a fresh transport read on each call and
+    returns the cached flag."""
+
+    zone = MagicMock(uid="RINCON_TEST", player_name="Living room")
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "PLAYING",
+    }
+
+    mgr = SonosDeviceManager(discovery_timeout=0.1)
+    with patch("app.sonos_device_manager.soco_discover", return_value={zone}):
+        await mgr.fetch()
+
+    assert await mgr.is_playing("Living room") is True
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "PAUSED_PLAYBACK",
+    }
+    assert await mgr.is_playing("Living room") is False

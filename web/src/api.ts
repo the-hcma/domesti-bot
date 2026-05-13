@@ -118,6 +118,9 @@ export const api = {
       {},
     );
   },
+  pauseAllSonos(): Promise<UIBulkActionOut> {
+    return call<UIBulkActionOut>("POST", "/v1/ui/sonos/pause-all", {});
+  },
   setExclude(
     familyId: string,
     deviceId: string,
@@ -134,6 +137,13 @@ export const api = {
       "POST",
       `/v1/ui/kasa/devices/${encodeURIComponent(deviceId)}/toggle`,
       { on },
+    );
+  },
+  toggleSonos(deviceId: string, playing: boolean): Promise<UIDeviceActionOut> {
+    return call<UIDeviceActionOut>(
+      "POST",
+      `/v1/ui/sonos/zones/${encodeURIComponent(deviceId)}/toggle`,
+      { playing },
     );
   },
 };

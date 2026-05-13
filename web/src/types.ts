@@ -3,9 +3,16 @@
 // guards the Python side; the TypeScript side is guarded by `tsc --strict`
 // at `pnpm run typecheck`.
 
-export type UIDeviceKind = "switch" | "door";
+export type UIDeviceKind = "switch" | "speaker" | "door";
 
-export type UIDeviceState = "on" | "off" | "open" | "closed" | "unknown";
+export type UIDeviceState =
+  | "on"
+  | "off"
+  | "playing"
+  | "paused"
+  | "open"
+  | "closed"
+  | "unknown";
 
 export interface UIDeviceOut {
   id: string;
