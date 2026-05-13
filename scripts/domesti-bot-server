@@ -19,13 +19,17 @@
 #   -h, --help           Show this help and the upstream Python --help text
 #
 # Everything else is forwarded verbatim to `python -m config.serve` (e.g.
-# --listen-host, --listen-port, discovery flags).
+# --listen-host, --listen-port, --no-browser, discovery flags).
+#
+# Dev mode (loopback bind): a browser tab opens automatically once
+# uvicorn is serving. Pass --no-browser to suppress (also set
+# automatically when running under systemd via $INVOCATION_ID).
 #
 # Examples:
 #   ./scripts/domesti-bot-server
 #   ./scripts/domesti-bot-server --console --log-level debug
 #   ./scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8765
-#   ./scripts/domesti-bot-server --no-log-file --log-level debug
+#   ./scripts/domesti-bot-server --no-browser --no-log-file --log-level debug
 
 set -euo pipefail
 
