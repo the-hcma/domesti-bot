@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
@@ -272,7 +273,7 @@ def test_get_v1_ui_state_returns_payload_when_state_is_set(tmp_path: Path) -> No
     app.state.discovery_error = None
 
     response = client.get("/v1/ui/state")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     payload = response.json()
     assert "families" in payload
     assert len(payload["families"]) == 1
@@ -301,16 +302,16 @@ def test_get_v1_ui_state_rejects_request_without_api_key_when_env_set(
     app.state.discovery_error = None
     with patch.dict(os.environ, {"DOMESTI_API_KEY": "shh"}, clear=False):
         bad = client.get("/v1/ui/state")
-        assert bad.status_code == 401
+        assert bad.status_code == HTTPStatus.UNAUTHORIZED
         ok = client.get("/v1/ui/state", headers={"X-Domesti-Api-Key": "shh"})
-        assert ok.status_code == 200
+        assert ok.status_code == HTTPStatus.OK
         assert ok.json()["families"][0]["devices"][0]["id"] == "10.0.0.1"
 
 
 def test_get_v1_ui_state_returns_503_with_retry_after_while_discovery_in_progress() -> None:
     client, _app = _client()
     response = client.get("/v1/ui/state")
-    assert response.status_code == 503
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
     assert response.headers.get("Retry-After") == "2"
 
 

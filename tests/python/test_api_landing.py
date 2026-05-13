@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import time
+from http import HTTPStatus
 from typing import Any
 from unittest.mock import patch
 
@@ -46,7 +47,7 @@ def _client() -> tuple[TestClient, FastAPI]:
 def test_favicon_returns_204_no_content() -> None:
     client, _app = _client()
     response = client.get("/favicon.ico")
-    assert response.status_code == 204
+    assert response.status_code == HTTPStatus.NO_CONTENT
     assert response.content == b""
 
 
@@ -55,7 +56,7 @@ def test_health_reports_discovery_failed_when_error_set() -> None:
     app.state.device_state = None
     app.state.discovery_error = "RuntimeError('no LAN')"
     response = client.get("/health")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["service"] == "domesti-bot"
@@ -67,7 +68,7 @@ def test_health_reports_discovery_failed_when_error_set() -> None:
 def test_health_reports_discovery_in_progress_before_state_is_set() -> None:
     client, _app = _client()
     response = client.get("/health")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["service"] == "domesti-bot"
@@ -81,7 +82,7 @@ def test_health_reports_ready_when_state_is_set() -> None:
     app.state.device_state = object()  # marker, not a real state
     app.state.discovery_error = None
     response = client.get("/health")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     payload = response.json()
     assert payload["ready"] is True
     assert payload["discovery"] == "ready"
@@ -111,14 +112,14 @@ def test_lifespan_yields_immediately_even_when_discovery_blocks() -> None:
                 f"lifespan startup took {startup_elapsed:.1f}s; discovery is still blocking"
             )
             # Static routes must be live immediately:
-            assert client.get("/").status_code == 200
-            assert client.get("/favicon.ico").status_code == 204
+            assert client.get("/").status_code == HTTPStatus.OK
+            assert client.get("/favicon.ico").status_code == HTTPStatus.NO_CONTENT
             health = client.get("/health").json()
             assert health["ready"] is False
             assert health["discovery"] == "in_progress"
             # Protected routes must surface a 503 with Retry-After:
             r = client.get("/v1/completion-aliases")
-            assert r.status_code == 503
+            assert r.status_code == HTTPStatus.SERVICE_UNAVAILABLE
             assert r.headers.get("Retry-After") == "2"
             assert "in progress" in r.json()["detail"].lower()
 
@@ -128,7 +129,7 @@ def test_protected_route_returns_503_with_failure_detail_when_discovery_failed()
     app.state.device_state = None
     app.state.discovery_error = "OSError('no LAN')"
     response = client.get("/v1/completion-aliases")
-    assert response.status_code == 503
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
     assert response.headers.get("Retry-After") == "30"
     assert "Device discovery failed" in response.json()["detail"]
     assert "OSError" in response.json()["detail"]
@@ -137,7 +138,7 @@ def test_protected_route_returns_503_with_failure_detail_when_discovery_failed()
 def test_protected_route_returns_503_with_retry_after_while_discovery_in_progress() -> None:
     client, _app = _client()
     response = client.get("/v1/completion-aliases")
-    assert response.status_code == 503
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
     assert response.headers.get("Retry-After") == "2"
     detail = response.json()["detail"]
     assert "in progress" in detail.lower()
@@ -146,7 +147,7 @@ def test_protected_route_returns_503_with_retry_after_while_discovery_in_progres
 def test_root_landing_page_is_excluded_from_openapi_schema() -> None:
     client, _app = _client()
     response = client.get("/openapi.json")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     paths = response.json().get("paths", {})
     assert "/" not in paths
     assert "/favicon.ico" not in paths
@@ -182,7 +183,7 @@ def test_root_landing_page_includes_app_root_for_tile_ui() -> None:
 def test_root_landing_page_returns_html_with_success_marker() -> None:
     client, _app = _client()
     response = client.get("/")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     ctype = response.headers.get("content-type", "")
     assert ctype.startswith("text/html"), ctype
     body = response.text
@@ -201,7 +202,7 @@ def test_static_index_html_is_served_directly_at_static_mount() -> None:
     """
     client, _app = _client()
     response = client.get("/static/index.html")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     ctype = response.headers.get("content-type", "")
     assert ctype.startswith("text/html"), ctype
     assert 'id="bundle-status"' in response.text
@@ -213,4 +214,4 @@ def test_static_missing_bundle_returns_clean_404() -> None:
     """
     client, _app = _client()
     response = client.get("/static/dist/does-not-exist.js")
-    assert response.status_code == 404
+    assert response.status_code == HTTPStatus.NOT_FOUND

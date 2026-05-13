@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from pathlib import Path
@@ -16,16 +17,14 @@ def test_ensure_schema_upgrades_legacy_database(tmp_path: Path) -> None:
     """Older files had only ``kasa_discovered_devices``; reads must create newer tables."""
 
     db = tmp_path / "legacy.sqlite"
-    conn = sqlite3.connect(db)
-    conn.execute(
-        "CREATE TABLE kasa_discovered_devices (host TEXT PRIMARY KEY, config_json TEXT)"
-    )
-    conn.commit()
-    conn.close()
+    with contextlib.closing(sqlite3.connect(db)) as conn:
+        conn.execute(
+            "CREATE TABLE kasa_discovered_devices (host TEXT PRIMARY KEY, config_json TEXT)"
+        )
+        conn.commit()
 
     kasa_discovery_store.ensure_schema(db)
-    conn = sqlite3.connect(db)
-    try:
+    with contextlib.closing(sqlite3.connect(db)) as conn:
         cur = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         )
@@ -35,8 +34,6 @@ def test_ensure_schema_upgrades_legacy_database(tmp_path: Path) -> None:
         assert "kasa_discovered_devices" in names
         assert "sonos_known_zones" in names
         assert "ui_preferences" in names
-    finally:
-        conn.close()
 
 
 def test_load_missing_file_returns_empty(tmp_path: Path) -> None:
@@ -62,8 +59,7 @@ def test_roundtrip_save_and_load(tmp_path: Path) -> None:
     rows = kasa_discovery_store.load_cached_configs(db)
     assert rows == [("192.168.1.50", cfg)]
 
-    conn = kasa_discovery_store.open_db(db)
-    try:
+    with contextlib.closing(kasa_discovery_store.open_db(db)) as conn:
         cur = conn.execute(
             "SELECT host, alias, config_json FROM kasa_discovered_devices"
         )
@@ -71,8 +67,6 @@ def test_roundtrip_save_and_load(tmp_path: Path) -> None:
         assert h == "192.168.1.50"
         assert alias == "Desk lamp"
         assert json.loads(raw) == cfg
-    finally:
-        conn.close()
 
 
 def test_save_replaces_previous_rows(tmp_path: Path) -> None:
@@ -162,29 +156,25 @@ def test_ensure_schema_adds_androidtv_uuid_and_model_columns(tmp_path: Path) -> 
     """Legacy DBs (no uuid/model_name columns) must gain them via ALTER TABLE."""
 
     db = tmp_path / "legacy.sqlite"
-    conn = sqlite3.connect(db)
-    conn.execute(
-        "CREATE TABLE androidtv_discovered_hosts ("
-        " host TEXT NOT NULL, port INTEGER NOT NULL, updated_at REAL NOT NULL,"
-        " friendly_name TEXT, PRIMARY KEY (host, port))"
-    )
-    conn.execute(
-        "INSERT INTO androidtv_discovered_hosts (host, port, updated_at, friendly_name) "
-        "VALUES (?, ?, ?, ?)",
-        ("192.168.1.10", 8009, 0.0, "Living room"),
-    )
-    conn.commit()
-    conn.close()
+    with contextlib.closing(sqlite3.connect(db)) as conn:
+        conn.execute(
+            "CREATE TABLE androidtv_discovered_hosts ("
+            " host TEXT NOT NULL, port INTEGER NOT NULL, updated_at REAL NOT NULL,"
+            " friendly_name TEXT, PRIMARY KEY (host, port))"
+        )
+        conn.execute(
+            "INSERT INTO androidtv_discovered_hosts (host, port, updated_at, friendly_name) "
+            "VALUES (?, ?, ?, ?)",
+            ("192.168.1.10", 8009, 0.0, "Living room"),
+        )
+        conn.commit()
 
     kasa_discovery_store.ensure_schema(db)
 
-    conn = sqlite3.connect(db)
-    try:
+    with contextlib.closing(sqlite3.connect(db)) as conn:
         cur = conn.execute("PRAGMA table_info(androidtv_discovered_hosts)")
         cols = {row[1] for row in cur.fetchall()}
         assert {"host", "port", "updated_at", "friendly_name", "uuid", "model_name"} <= cols
-    finally:
-        conn.close()
     # Existing row reads back with NULLs for the new columns.
     assert kasa_discovery_store.load_androidtv_known_devices(db) == [
         ("192.168.1.10", 8009, "Living room", None, None),

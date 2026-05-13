@@ -7,6 +7,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -110,7 +111,10 @@ async def _verify_api_key(
     if not expected:
         return
     if (x_domesti_api_key or "").strip() != expected:
-        raise HTTPException(status_code=401, detail="Invalid or missing X-Domesti-Api-Key")
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail="Invalid or missing X-Domesti-Api-Key",
+        )
 
 
 def _device_state(request: Request) -> DeviceManagersState:
@@ -120,12 +124,12 @@ def _device_state(request: Request) -> DeviceManagersState:
     err: str | None = getattr(request.app.state, "discovery_error", None)
     if err is not None:
         raise HTTPException(
-            status_code=503,
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail=f"Device discovery failed: {err}",
             headers={"Retry-After": "30"},
         )
     raise HTTPException(
-        status_code=503,
+        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
         detail="Device discovery still in progress; check /health and retry shortly",
         headers={"Retry-After": "2"},
     )
@@ -221,7 +225,7 @@ def create_app(args: Any) -> FastAPI:
                 "[index] landing page missing at %s", _LANDING_PAGE_PATH
             )
             raise HTTPException(
-                status_code=500,
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                 detail=f"Landing page missing at {_LANDING_PAGE_PATH}",
             )
         return HTMLResponse(html)
@@ -230,7 +234,7 @@ def create_app(args: Any) -> FastAPI:
     async def favicon() -> Response:
         # Browsers fetch /favicon.ico automatically; return 204 to silence the
         # access log 404 without shipping an actual icon asset.
-        return Response(status_code=204)
+        return Response(status_code=HTTPStatus.NO_CONTENT)
 
     @app.get("/health")
     async def health(request: Request) -> dict[str, Any]:
@@ -320,7 +324,7 @@ def create_app(args: Any) -> FastAPI:
         kd = find_kasa_by_host(state.kasa_mgr, device_id)
         if kd is None:
             raise HTTPException(
-                status_code=404,
+                status_code=HTTPStatus.NOT_FOUND,
                 detail=f"Unknown kasa device: {device_id}",
             )
         if body.on:
@@ -345,12 +349,12 @@ def create_app(args: Any) -> FastAPI:
     ) -> UIPreferenceOut:
         if family_id not in {"kasa", "tailwind"}:
             raise HTTPException(
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 detail=f"Unknown family_id: {family_id}",
             )
         if state.cache_path is None:
             raise HTTPException(
-                status_code=409,
+                status_code=HTTPStatus.CONFLICT,
                 detail=(
                     "Per-device UI preferences cannot be persisted: server "
                     "started with --no-discovery-cache. Restart with a "
@@ -360,14 +364,14 @@ def create_app(args: Any) -> FastAPI:
             )
         if family_id == "kasa" and find_kasa_by_host(state.kasa_mgr, device_id) is None:
             raise HTTPException(
-                status_code=404,
+                status_code=HTTPStatus.NOT_FOUND,
                 detail=f"Unknown kasa device: {device_id}",
             )
         if family_id == "tailwind":
             tw = state.tailwind_mgr
             if tw is None or all(d.identifier != device_id for d in tw.doors):
                 raise HTTPException(
-                    status_code=404,
+                    status_code=HTTPStatus.NOT_FOUND,
                     detail=f"Unknown tailwind device: {device_id}",
                 )
         kasa_discovery_store.upsert_ui_preference(
@@ -404,13 +408,13 @@ def create_app(args: Any) -> FastAPI:
     ) -> UIDeviceActionOut:
         if state.tailwind_mgr is None:
             raise HTTPException(
-                status_code=404,
+                status_code=HTTPStatus.NOT_FOUND,
                 detail="Tailwind manager is not configured on this server",
             )
         gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
         if gd is None:
             raise HTTPException(
-                status_code=404,
+                status_code=HTTPStatus.NOT_FOUND,
                 detail=f"Unknown tailwind device: {device_id}",
             )
         await gd.close()
@@ -432,13 +436,13 @@ def create_app(args: Any) -> FastAPI:
     ) -> UIDeviceActionOut:
         if state.tailwind_mgr is None:
             raise HTTPException(
-                status_code=404,
+                status_code=HTTPStatus.NOT_FOUND,
                 detail="Tailwind manager is not configured on this server",
             )
         gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
         if gd is None:
             raise HTTPException(
-                status_code=404,
+                status_code=HTTPStatus.NOT_FOUND,
                 detail=f"Unknown tailwind device: {device_id}",
             )
         await gd.open()

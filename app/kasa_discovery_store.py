@@ -10,6 +10,7 @@ friendly_name)`` hints from PyChromecast (typically port **8009**), not ADB.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import time
@@ -120,15 +121,12 @@ def ensure_schema(path: Path) -> None:
     path = path.expanduser().resolve()
     if not path.is_file():
         return
-    conn = sqlite3.connect(path)
-    try:
+    with contextlib.closing(sqlite3.connect(path)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.executescript(_SCHEMA)
         _apply_androidtv_friendly_name_migration(conn)
         _apply_androidtv_uuid_model_migration(conn)
         conn.commit()
-    finally:
-        conn.close()
 
 
 def load_androidtv_endpoint_rows(path: Path) -> list[tuple[str, int, str | None]]:
@@ -138,8 +136,7 @@ def load_androidtv_endpoint_rows(path: Path) -> list[tuple[str, int, str | None]
     if not path.is_file():
         return []
     ensure_schema(path)
-    conn = sqlite3.connect(path)
-    try:
+    with contextlib.closing(sqlite3.connect(path)) as conn:
         _apply_androidtv_friendly_name_migration(conn)
         conn.commit()
         cur = conn.execute(
@@ -151,8 +148,6 @@ def load_androidtv_endpoint_rows(path: Path) -> list[tuple[str, int, str | None]
             label = (str(fn).strip() if fn is not None else "") or None
             out.append((str(h), int(p), label))
         return out
-    finally:
-        conn.close()
 
 
 def load_androidtv_hosts(path: Path) -> list[tuple[str, int]]:
@@ -177,8 +172,7 @@ def load_androidtv_known_devices(
     if not path.is_file():
         return []
     ensure_schema(path)
-    conn = sqlite3.connect(path)
-    try:
+    with contextlib.closing(sqlite3.connect(path)) as conn:
         _apply_androidtv_friendly_name_migration(conn)
         _apply_androidtv_uuid_model_migration(conn)
         conn.commit()
@@ -193,8 +187,6 @@ def load_androidtv_known_devices(
             model_s = (str(model).strip() if model is not None else "") or None
             out.append((str(h), int(p), label, uid_s, model_s))
         return out
-    finally:
-        conn.close()
 
 
 def load_cached_configs(path: Path) -> list[tuple[str, dict[str, Any]]]:
@@ -203,14 +195,11 @@ def load_cached_configs(path: Path) -> list[tuple[str, dict[str, Any]]]:
     if not path.is_file():
         return []
     ensure_schema(path)
-    conn = sqlite3.connect(path)
-    try:
+    with contextlib.closing(sqlite3.connect(path)) as conn:
         cur = conn.execute(
             "SELECT host, config_json FROM kasa_discovered_devices ORDER BY host"
         )
         return [(host, json.loads(raw)) for host, raw in cur.fetchall()]
-    finally:
-        conn.close()
 
 
 def save_androidtv_hosts(
@@ -235,8 +224,7 @@ def save_androidtv_hosts(
     the no-mDNS startup must pass the 4- or 5-tuple shape.
     """
 
-    conn = open_db(path)
-    try:
+    with contextlib.closing(open_db(path)) as conn:
         conn.execute("DELETE FROM androidtv_discovered_hosts")
         now = time.time()
         records: list[tuple[str, int, str | None, str | None, str | None]] = []
@@ -259,8 +247,6 @@ def save_androidtv_hosts(
             [(h, p, now, fn, uid, model) for h, p, fn, uid, model in records],
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def _nonblank_str(value: object) -> str | None:
@@ -275,8 +261,7 @@ def save_configs(
     rows: list[tuple[str, str | None, dict[str, Any]]],
 ) -> None:
     """Replace all rows with ``(host, alias, config_dict)`` snapshots."""
-    conn = open_db(path)
-    try:
+    with contextlib.closing(open_db(path)) as conn:
         conn.execute("DELETE FROM kasa_discovered_devices")
         now = time.time()
         conn.executemany(
@@ -285,8 +270,6 @@ def save_configs(
             [(h, a, json.dumps(d), now) for h, a, d in rows],
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def save_sonos_zones(
@@ -299,8 +282,7 @@ def save_sonos_zones(
     discovery layer rather than a usable cache row).
     """
 
-    conn = open_db(path)
-    try:
+    with contextlib.closing(open_db(path)) as conn:
         conn.execute("DELETE FROM sonos_known_zones")
         now = time.time()
         triples: list[tuple[str, str, str | None]] = []
@@ -320,22 +302,17 @@ def save_sonos_zones(
             [(u, h, n, now) for u, h, n in triples],
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def save_tailwind_host(path: Path, host: str) -> None:
     """Remember the last reachable Tailwind controller address (token still comes from env / CLI)."""
-    conn = open_db(path)
-    try:
+    with contextlib.closing(open_db(path)) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO tailwind_last_host (id, host, updated_at) "
             "VALUES (1, ?, ?)",
             (host.strip(), time.time()),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None]]:
@@ -351,8 +328,7 @@ def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None]]:
     if not path.is_file():
         return []
     ensure_schema(path)
-    conn = sqlite3.connect(path)
-    try:
+    with contextlib.closing(sqlite3.connect(path)) as conn:
         cur = conn.execute(
             "SELECT uuid, host, zone_name FROM sonos_known_zones "
             "ORDER BY COALESCE(zone_name, uuid)"
@@ -362,8 +338,6 @@ def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None]]:
             label = (str(n).strip() if n is not None else "") or None
             rows.append((str(u), str(h), label))
         return rows
-    finally:
-        conn.close()
 
 
 def load_tailwind_host(path: Path) -> str | None:
@@ -372,13 +346,10 @@ def load_tailwind_host(path: Path) -> str | None:
     if not path.is_file():
         return None
     ensure_schema(path)
-    conn = sqlite3.connect(path)
-    try:
+    with contextlib.closing(sqlite3.connect(path)) as conn:
         cur = conn.execute("SELECT host FROM tailwind_last_host WHERE id = 1")
         row = cur.fetchone()
         return str(row[0]).strip() if row else None
-    finally:
-        conn.close()
 
 
 def load_ui_preferences(path: Path) -> list[tuple[str, str, bool]]:
@@ -397,15 +368,12 @@ def load_ui_preferences(path: Path) -> list[tuple[str, str, bool]]:
     if not path.is_file():
         return []
     ensure_schema(path)
-    conn = sqlite3.connect(path)
-    try:
+    with contextlib.closing(sqlite3.connect(path)) as conn:
         cur = conn.execute(
             "SELECT backend, canonical_key, exclude_from_global "
             "FROM ui_preferences ORDER BY backend, canonical_key"
         )
         return [(str(b), str(k), bool(int(x))) for b, k, x in cur.fetchall()]
-    finally:
-        conn.close()
 
 
 def load_display_names(path: Path) -> list[tuple[str, str, str]]:
@@ -414,14 +382,11 @@ def load_display_names(path: Path) -> list[tuple[str, str, str]]:
     if not path.is_file():
         return []
     ensure_schema(path)
-    conn = sqlite3.connect(path)
-    try:
+    with contextlib.closing(sqlite3.connect(path)) as conn:
         cur = conn.execute(
             "SELECT backend, canonical_key, display_name FROM device_display_names"
         )
         return [(str(b), str(k), str(n)) for b, k, n in cur.fetchall()]
-    finally:
-        conn.close()
 
 
 def upsert_display_name(
@@ -431,8 +396,7 @@ def upsert_display_name(
     canonical_key: str,
     display_name: str,
 ) -> None:
-    conn = open_db(path)
-    try:
+    with contextlib.closing(open_db(path)) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO device_display_names "
             "(backend, canonical_key, display_name, updated_at) VALUES (?, ?, ?, ?)",
@@ -444,8 +408,6 @@ def upsert_display_name(
             ),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def upsert_ui_preference(
@@ -461,8 +423,7 @@ def upsert_ui_preference(
     :func:`load_ui_preferences` reader converts back to :class:`bool`.
     """
 
-    conn = open_db(path)
-    try:
+    with contextlib.closing(open_db(path)) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO ui_preferences "
             "(backend, canonical_key, exclude_from_global, updated_at) "
@@ -475,20 +436,15 @@ def upsert_ui_preference(
             ),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def delete_display_name(path: Path, *, backend: str, canonical_key: str) -> None:
-    conn = open_db(path)
-    try:
+    with contextlib.closing(open_db(path)) as conn:
         conn.execute(
             "DELETE FROM device_display_names WHERE backend = ? AND canonical_key = ?",
             (backend.strip(), canonical_key.strip()),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def delete_ui_preference(path: Path, *, backend: str, canonical_key: str) -> None:
@@ -499,12 +455,9 @@ def delete_ui_preference(path: Path, *, backend: str, canonical_key: str) -> Non
     landing page.
     """
 
-    conn = open_db(path)
-    try:
+    with contextlib.closing(open_db(path)) as conn:
         conn.execute(
             "DELETE FROM ui_preferences WHERE backend = ? AND canonical_key = ?",
             (backend.strip(), canonical_key.strip()),
         )
         conn.commit()
-    finally:
-        conn.close()

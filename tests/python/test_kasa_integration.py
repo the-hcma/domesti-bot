@@ -84,8 +84,7 @@ async def test_kasa_disconnect_resets_manager() -> None:
 @pytest.mark.asyncio
 async def test_kasa_fetch_exposes_switches_and_status_string() -> None:
     _require_kasa_integration()
-    mgr = _mgr_for_integration()
-    try:
+    async with _mgr_for_integration() as mgr:
         await mgr.fetch()
         _print_discovered_switches(mgr)
         switches = mgr.switches
@@ -95,8 +94,6 @@ async def test_kasa_fetch_exposes_switches_and_status_string() -> None:
         for sw in switches:
             assert sw.identifier in summary
             assert sw.power_state in (SwitchPowerState.ON, SwitchPowerState.OFF)
-    finally:
-        await mgr.disconnect()
 
 
 @pytest.mark.integration
@@ -107,8 +104,7 @@ async def test_kasa_fetch_via_default_udp_broadcast(
     """``Discover.discover()`` default broadcast when ``KASA_DISCOVERY_TARGET`` is unset."""
     monkeypatch.delenv("KASA_DISCOVERY_TARGET", raising=False)
     _require_kasa_integration()
-    mgr = KasaDeviceManager(discovery_timeout=15)
-    try:
+    async with KasaDeviceManager(discovery_timeout=15) as mgr:
         print(
             "\n--- Kasa: UDP discovery (default broadcast, no KASA_DISCOVERY_TARGET) ---\n",
             flush=True,
@@ -116,16 +112,13 @@ async def test_kasa_fetch_via_default_udp_broadcast(
         await mgr.fetch()
         _print_discovered_switches(mgr)
         assert len(mgr.switches) >= 1
-    finally:
-        await mgr.disconnect()
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_kasa_live_power_matches_cached_switch_state() -> None:
     _require_kasa_integration()
-    mgr = _mgr_for_integration()
-    try:
+    async with _mgr_for_integration() as mgr:
         await mgr.fetch()
         _print_discovered_switches(mgr)
         for sw in mgr.switches:
@@ -135,5 +128,3 @@ async def test_kasa_live_power_matches_cached_switch_state() -> None:
             assert live_off == (not live_on)
             assert live_on == (sw.power_state == SwitchPowerState.ON)
             assert live_off == (sw.power_state == SwitchPowerState.OFF)
-    finally:
-        await mgr.disconnect()

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
+from types import TracebackType
+from typing import Generic, Self, TypeVar
 
 from app.rule_engine import Device, DoorDevice, SpeakerDevice, SwitchDevice
 
@@ -27,7 +28,25 @@ SwitchT = TypeVar("SwitchT", bound=SwitchDevice)
 
 
 class DeviceManager(ABC, Generic[D]):
-    """Lifecycle shared by all backends: discover devices and optionally tear down sessions."""
+    """Lifecycle shared by all backends: discover devices and optionally tear down sessions.
+
+    Supports use as an async context manager so callers can write
+    ``async with KasaDeviceManager(...) as mgr: await mgr.fetch(); ...``
+    instead of an explicit ``try / finally: await mgr.disconnect()``. The
+    ``__aenter__`` does not call ``fetch()`` — entry is cheap; callers
+    still drive discovery explicitly so they control timing and arguments.
+    """
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self.disconnect()
 
     async def disconnect(self) -> None:
         """Release network resources; override when the backing client needs cleanup."""

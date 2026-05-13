@@ -113,6 +113,16 @@ domesti-bot/
 - **Spelling locale**: American English in all new project-authored prose (docstrings, comments, user-visible API field descriptions, README sections this repo maintains). Do not rewrite third-party literals (e.g. upstream API field names) when those spellings are required for correctness.
 - **Module-level mutable state**: avoid the `global` keyword. Group related mutable state into a holder class and expose one module-level instance.
 - **Nomenclature for mappings**: use `{key}_to_{value}` instead of generic `_map` / `_dict` suffixes (e.g. `host_to_label`, not `label_map`).
+- **Prefer `with` (context managers) over `try / finally`.** Any time a resource has a cleanup action that must run on both the success and failure path, the resource should be acquired with a `with` (or `async with`) block — not a hand-rolled `try / finally`. Examples in this codebase:
+  - `sqlite3.Connection` → `with contextlib.closing(sqlite3.connect(path)) as conn:` (the bare `with sqlite3.connect(...) as conn:` form only wraps a transaction; it does **not** close the connection, so always use `contextlib.closing`).
+  - `socket.socket` → `with bind_listen_socket(host, port) as sock:` (sockets are native context managers).
+  - `app.device_manager.DeviceManager` (and every per-family `*DeviceManager` subclass) → `async with KasaDeviceManager(...) as mgr: await mgr.fetch(); ...`. `__aexit__` calls `disconnect()` so callers no longer need an explicit `try / finally`.
+  - When wrapping a one-shot teardown of a third-party object that exposes no `__exit__` / `__aexit__`, write a small `@contextlib.contextmanager` / `@contextlib.asynccontextmanager` helper at module scope rather than inlining the same `try / finally` in every call-site.
+  - **Acceptable exceptions** (do not rewrite these as context managers):
+    - A `try / finally` that is itself the body of an `@asynccontextmanager` (e.g. the FastAPI lifespan in `app.api.app.create_app` — that `finally` is the cleanup half of the context manager being defined).
+    - A `try / finally` that restores **scalar state** rather than releasing a resource (e.g. `SonosDeviceManager.rediscover` saves and restores `self._force_discovery`). Inline `try / finally` is fine for a 2–3 line state toggle.
+    - Third-party objects that only expose imperative cleanup methods (no `__exit__` / `__aexit__`) **and** are used in exactly one call-site (e.g. `pychromecast.CastBrowser.stop_discovery()` in `app/androidtv_device_manager.py`). Add a wrapping context manager when the same pattern repeats in three or more call-sites.
+- **HTTP status codes use `http.HTTPStatus`, not integer literals.** Both server code (`HTTPException(status_code=HTTPStatus.NOT_FOUND, ...)`, `Response(status_code=HTTPStatus.NO_CONTENT)`) and tests (`assert response.status_code == HTTPStatus.OK`) reference the named constants. `HTTPStatus` is an `IntEnum`, so it compares equal to the integer codes — wire format is unchanged. Common values used in this repo: `OK` (200), `NO_CONTENT` (204), `BAD_REQUEST` (400), `UNAUTHORIZED` (401), `NOT_FOUND` (404), `CONFLICT` (409), `UNPROCESSABLE_ENTITY` (422), `INTERNAL_SERVER_ERROR` (500), `SERVICE_UNAVAILABLE` (503).
 
 ---
 
