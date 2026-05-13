@@ -169,6 +169,16 @@ def test_root_landing_page_references_bundle_and_status_element() -> None:
     assert 'data-state="pending"' in body
 
 
+def test_root_landing_page_includes_app_root_for_tile_ui() -> None:
+    """``main.ts`` mounts the tile grid into ``#app``; the container must
+    exist before the bundle runs so the controller's ``getElementById``
+    succeeds."""
+
+    client, _app = _client()
+    body = client.get("/").text
+    assert 'id="app"' in body
+
+
 def test_root_landing_page_returns_html_with_success_marker() -> None:
     client, _app = _client()
     response = client.get("/")

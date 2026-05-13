@@ -16,13 +16,25 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import HTMLResponse, Response
 
+from app import kasa_discovery_store
 from app.api.schemas import (
     CompletionAliasesOut,
     ExecuteLineIn,
     ExecuteLineOut,
+    UIBulkActionOut,
+    UIDeviceActionOut,
+    UIPowerSetIn,
+    UIPreferenceIn,
+    UIPreferenceOut,
     UIStateOut,
 )
-from app.api.ui_state import build_ui_state
+from app.api.ui_state import (
+    build_kasa_device_view,
+    build_ui_state,
+    bulk_off_global_apply,
+    bulk_off_kasa_apply,
+    find_kasa_by_host,
+)
 from app.device_manager_cli import (
     DeviceManagersState,
     _Theme,
@@ -259,12 +271,107 @@ def create_app(args: Any) -> FastAPI:
             return ExecuteLineOut(stdout=out, stderr=err, error=api_err)
         return ExecuteLineOut(stdout=out, stderr=err, error=None)
 
+    @app.post(
+        "/v1/ui/global/bulk-off",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def global_bulk_off(state: DeviceState) -> UIBulkActionOut:
+        # Global "turn off everything" — currently kasa only; tailwind
+        # close-all lands in PR 5. ``exclude_from_global=True`` rows are
+        # honored (they appear in ``skipped``).
+        affected, skipped = await bulk_off_global_apply(
+            state, cache_path=state.cache_path
+        )
+        return UIBulkActionOut(affected=affected, skipped=skipped)
+
+    @app.post(
+        "/v1/ui/kasa/bulk-off",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def kasa_bulk_off(state: DeviceState) -> UIBulkActionOut:
+        # Family-level bulk: ``exclude_from_global`` is intentionally
+        # **not** consulted (the user explicitly clicked "all kasa off").
+        affected, skipped = await bulk_off_kasa_apply(state)
+        return UIBulkActionOut(affected=affected, skipped=skipped)
+
+    @app.post(
+        "/v1/ui/kasa/devices/{device_id}/toggle",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def kasa_set_power(
+        device_id: str,
+        body: UIPowerSetIn,
+        state: DeviceState,
+    ) -> UIDeviceActionOut:
+        kd = find_kasa_by_host(state.kasa_mgr, device_id)
+        if kd is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown kasa device: {device_id}",
+            )
+        if body.on:
+            await kd.turn_on()
+        else:
+            await kd.turn_off()
+        return UIDeviceActionOut(
+            device=build_kasa_device_view(
+                state.kasa_mgr, host=device_id, cache_path=state.cache_path
+            )
+        )
+
+    @app.put(
+        "/v1/ui/preferences/{family_id}/{device_id}",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def set_ui_preference(
+        family_id: str,
+        device_id: str,
+        body: UIPreferenceIn,
+        state: DeviceState,
+    ) -> UIPreferenceOut:
+        if family_id not in {"kasa", "tailwind"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown family_id: {family_id}",
+            )
+        if state.cache_path is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Per-device UI preferences cannot be persisted: server "
+                    "started with --no-discovery-cache. Restart with a "
+                    "discovery cache path to enable the exclude-from-global "
+                    "checkbox."
+                ),
+            )
+        if family_id == "kasa" and find_kasa_by_host(state.kasa_mgr, device_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown kasa device: {device_id}",
+            )
+        if family_id == "tailwind":
+            tw = state.tailwind_mgr
+            if tw is None or all(d.identifier != device_id for d in tw.doors):
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown tailwind device: {device_id}",
+                )
+        kasa_discovery_store.upsert_ui_preference(
+            state.cache_path,
+            backend=family_id,
+            canonical_key=device_id,
+            exclude_from_global=body.exclude_from_global,
+        )
+        return UIPreferenceOut(
+            family_id=family_id,
+            device_id=device_id,
+            exclude_from_global=body.exclude_from_global,
+        )
+
     @app.get("/v1/ui/state", dependencies=[Depends(_verify_api_key)])
     async def ui_state(state: DeviceState) -> UIStateOut:
         # Read-only join of in-memory manager state with the persisted
-        # ``ui_preferences`` SQLite rows. The toggle / bulk-action endpoints
-        # that mutate device state and ``ui_preferences`` land in PR4
-        # (kasa) and PR5 (tailwind).
+        # ``ui_preferences`` SQLite rows.
         return build_ui_state(state, cache_path=state.cache_path)
 
     return app
