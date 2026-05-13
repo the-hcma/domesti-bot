@@ -223,26 +223,29 @@ function renderDevice(
   head.append(stateBadge);
   tile.append(head);
 
-  // Each tile gets a single toggle whose label reflects the *current*
-  // state — clicking it flips the device to the opposite state. For
-  // doors, ``unknown`` (transient OPENING/CLOSING) is treated as
-  // not-open so the next click closes — same default as the controller.
+  // The button label is the *action* the user will get by clicking —
+  // derived from the current state. The state badge above already
+  // shows the current state; the button shows what'll happen next so
+  // the user doesn't have to translate "On" → "click to turn off" in
+  // their head. For doors, ``unknown`` (transient OPENING/CLOSING) is
+  // treated as not-open so the next click closes — same default as the
+  // controller's action handler.
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "tile-toggle";
   let isActive: boolean;
-  let toggleLabel: string;
+  let actionLabel: string;
   let excludeText: string;
   if (device.kind === "switch") {
     isActive = device.state === "on";
-    toggleLabel = isActive ? "On" : "Off";
+    actionLabel = isActive ? "Turn it off" : "Turn it on";
     excludeText = "Exclude from global all-off";
     toggle.addEventListener("click", () => {
       controller.toggleKasaTile(device);
     });
   } else {
     isActive = device.state === "open";
-    toggleLabel = isActive ? "Open" : "Closed";
+    actionLabel = isActive ? "Close it" : "Open it";
     excludeText = "Exclude from global close-all";
     toggle.addEventListener("click", () => {
       controller.operateTailwindTile(device);
@@ -250,7 +253,7 @@ function renderDevice(
   }
   toggle.dataset["on"] = isActive ? "true" : "false";
   toggle.setAttribute("aria-pressed", isActive ? "true" : "false");
-  toggle.textContent = toggleLabel;
+  toggle.textContent = actionLabel;
   tile.append(toggle);
 
   const excludeRow = document.createElement("label");
