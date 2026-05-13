@@ -77,8 +77,7 @@ async def test_gotailwind_disconnect_resets_manager() -> None:
 async def test_gotailwind_fetch_exposes_doors_and_status_string() -> None:
     token = _tailwind_token_required()
     host = _tailwind_host_optional()
-    mgr = GotailwindDeviceManager(host=host, token=token)
-    try:
+    async with GotailwindDeviceManager(host=host, token=token) as mgr:
         await mgr.fetch()
         _print_discovered_devices(mgr)
         doors = mgr.doors
@@ -91,8 +90,6 @@ async def test_gotailwind_fetch_exposes_doors_and_status_string() -> None:
             assert f"door {door.door_index}" in summary
             assert door.identifier in summary
             assert door.door_state in (DoorPosition.OPEN, DoorPosition.CLOSED)
-    finally:
-        await mgr.disconnect()
 
 
 @pytest.mark.integration
@@ -103,8 +100,7 @@ async def test_gotailwind_fetch_via_mdns_when_host_unset(
     """``fetch()`` resolves the controller via mDNS when ``host`` and ``TAILWIND_HOST`` are unset."""
     monkeypatch.delenv("TAILWIND_HOST", raising=False)
     token = _tailwind_token_required()
-    mgr = GotailwindDeviceManager(token=token, discovery_timeout=25.0)
-    try:
+    async with GotailwindDeviceManager(token=token, discovery_timeout=25.0) as mgr:
         print(
             "\n--- GoTailwind: mDNS inside fetch() (TAILWIND_HOST unset) ---\n",
             flush=True,
@@ -114,8 +110,6 @@ async def test_gotailwind_fetch_via_mdns_when_host_unset(
         assert mgr.host is not None
         ipaddress.ip_address(mgr.host)
         assert len(mgr.doors) >= 1
-    finally:
-        await mgr.disconnect()
 
 
 @pytest.mark.integration
@@ -123,8 +117,7 @@ async def test_gotailwind_fetch_via_mdns_when_host_unset(
 async def test_gotailwind_live_state_matches_cached_door_state() -> None:
     token = _tailwind_token_required()
     host = _tailwind_host_optional()
-    mgr = GotailwindDeviceManager(host=host, token=token)
-    try:
+    async with GotailwindDeviceManager(host=host, token=token) as mgr:
         await mgr.fetch()
         _print_discovered_devices(mgr)
         for door in mgr.doors:
@@ -134,5 +127,3 @@ async def test_gotailwind_live_state_matches_cached_door_state() -> None:
             assert live_open != live_closed
             assert live_open == (door.door_state == DoorPosition.OPEN)
             assert live_closed == (door.door_state == DoorPosition.CLOSED)
-    finally:
-        await mgr.disconnect()

@@ -19,6 +19,7 @@ Mock-based, no LAN traffic. The fake door records every ``open`` /
 from __future__ import annotations
 
 import argparse
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -232,7 +233,7 @@ def test_post_tailwind_close_all_closes_every_door() -> None:
     app.state.device_state = _state(tailwind_doors=[a, b])
     app.state.discovery_error = None
     r = client.post("/v1/ui/tailwind/close-all")
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     assert r.json() == {"affected": ["door-1", "door-2"], "skipped": []}
     assert a.is_closed is True
     assert b.is_closed is True
@@ -243,7 +244,7 @@ def test_post_tailwind_close_all_returns_empty_when_manager_absent() -> None:
     app.state.device_state = _state(kasa_devices=[])
     app.state.discovery_error = None
     r = client.post("/v1/ui/tailwind/close-all")
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     assert r.json() == {"affected": [], "skipped": []}
 
 
@@ -254,7 +255,7 @@ def test_post_tailwind_close_door_returns_404_for_unknown_device() -> None:
     )
     app.state.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-99/close")
-    assert r.status_code == 404
+    assert r.status_code == HTTPStatus.NOT_FOUND
     assert "door-99" in r.json()["detail"]
 
 
@@ -263,7 +264,7 @@ def test_post_tailwind_close_door_returns_404_when_manager_absent() -> None:
     app.state.device_state = _state(kasa_devices=[])
     app.state.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-1/close")
-    assert r.status_code == 404
+    assert r.status_code == HTTPStatus.NOT_FOUND
     assert "Tailwind manager" in r.json()["detail"]
 
 
@@ -273,7 +274,7 @@ def test_post_tailwind_close_door_succeeds_and_returns_refreshed_view() -> None:
     app.state.device_state = _state(tailwind_doors=[door])
     app.state.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-1/close")
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     body = r.json()
     assert body["device"]["id"] == "door-1"
     assert body["device"]["family_id"] == "tailwind"
@@ -288,7 +289,7 @@ def test_post_tailwind_open_door_returns_404_when_manager_absent() -> None:
     app.state.device_state = _state(kasa_devices=[])
     app.state.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-1/open")
-    assert r.status_code == 404
+    assert r.status_code == HTTPStatus.NOT_FOUND
 
 
 def test_post_tailwind_open_door_succeeds_and_returns_refreshed_view() -> None:
@@ -297,7 +298,7 @@ def test_post_tailwind_open_door_succeeds_and_returns_refreshed_view() -> None:
     app.state.device_state = _state(tailwind_doors=[door])
     app.state.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-1/open")
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     body = r.json()
     assert body["device"]["state"] == "open"
     assert door.is_open is True
@@ -315,7 +316,9 @@ def test_post_tailwind_actions_return_503_while_discovery_in_progress() -> None:
     ]
     for method, path, body in paths:
         r = client.request(method, path, json=body)
-        assert r.status_code == 503, f"{method} {path} → {r.status_code}"
+        assert r.status_code == HTTPStatus.SERVICE_UNAVAILABLE, (
+            f"{method} {path} → {r.status_code}"
+        )
         assert r.headers.get("Retry-After") == "2"
 
 

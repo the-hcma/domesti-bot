@@ -59,42 +59,31 @@ def test_out_of_range_port_raises_system_exit() -> None:
 
 
 def test_bind_listen_socket_allocates_a_free_port() -> None:
-    sock = bind_listen_socket("127.0.0.1", 0)
-    try:
+    with bind_listen_socket("127.0.0.1", 0) as sock:
         bound_host, bound_port = sock.getsockname()[:2]
         assert bound_host == "127.0.0.1"
         assert 1024 <= bound_port <= 65535, "OS must pick a real ephemeral port"
         assert sock.fileno() != -1
-    finally:
-        sock.close()
 
 
 def test_bind_listen_socket_specific_port_round_trip() -> None:
     # Bind to port 0 first to discover a free port, close, then re-bind to it.
-    probe = bind_listen_socket("127.0.0.1", 0)
-    _, free_port = probe.getsockname()[:2]
-    probe.close()
+    with bind_listen_socket("127.0.0.1", 0) as probe:
+        _, free_port = probe.getsockname()[:2]
 
-    sock = bind_listen_socket("127.0.0.1", free_port)
-    try:
+    with bind_listen_socket("127.0.0.1", free_port) as sock:
         assert sock.getsockname()[1] == free_port
-    finally:
-        sock.close()
 
 
 def test_bind_listen_socket_in_use_raises_with_helpful_message() -> None:
-    held = bind_listen_socket("127.0.0.1", 0)
-    try:
+    with bind_listen_socket("127.0.0.1", 0) as held:
         _, busy_port = held.getsockname()[:2]
         with pytest.raises(SystemExit, match="already in use"):
             bind_listen_socket("127.0.0.1", busy_port)
-    finally:
-        held.close()
 
 
 def test_bind_listen_socket_returns_streaming_listener() -> None:
-    sock = bind_listen_socket("127.0.0.1", 0)
-    try:
+    with bind_listen_socket("127.0.0.1", 0) as sock:
         assert sock.type == socket.SOCK_STREAM
         # ``listen()`` must have been called; a second listen() is a no-op but
         # accepting a connection requires the socket to be in LISTEN state.
@@ -102,8 +91,6 @@ def test_bind_listen_socket_returns_streaming_listener() -> None:
             conn, _ = sock.accept()
             conn.close()
             assert client.fileno() != -1
-    finally:
-        sock.close()
 
 
 def test_main_swallows_keyboard_interrupt_and_logs_clean_exit(

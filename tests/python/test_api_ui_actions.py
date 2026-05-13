@@ -20,6 +20,7 @@ side effects (per ``AGENTS.md``: "Each test asserts an observable outcome
 from __future__ import annotations
 
 import argparse
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -214,7 +215,7 @@ def test_post_global_bulk_off_returns_affected_and_skipped(tmp_path: Path) -> No
     app.state.discovery_error = None
 
     response = client.post("/v1/ui/global/bulk-off")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     body = response.json()
     # PR5 evolved the response: each entry is a ``{family_id, device_id}``
     # object so kasa/tailwind can coexist in the same payload.
@@ -234,7 +235,7 @@ def test_post_kasa_bulk_off_turns_off_every_kasa_device() -> None:
     app.state.discovery_error = None
 
     response = client.post("/v1/ui/kasa/bulk-off")
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     body = response.json()
     assert body == {"affected": ["10.0.0.1", "10.0.0.2"], "skipped": []}
     assert a.is_on is False
@@ -251,7 +252,7 @@ def test_post_kasa_toggle_returns_404_for_unknown_device() -> None:
         "/v1/ui/kasa/devices/10.0.0.99/toggle",
         json={"on": False},
     )
-    assert r.status_code == 404
+    assert r.status_code == HTTPStatus.NOT_FOUND
     detail = r.json()["detail"]
     assert "10.0.0.99" in detail
 
@@ -272,7 +273,7 @@ def test_post_kasa_toggle_turns_device_off_and_returns_refreshed_view(
         "/v1/ui/kasa/devices/10.0.0.1/toggle",
         json={"on": False},
     )
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     body = r.json()
     assert body["device"]["id"] == "10.0.0.1"
     assert body["device"]["state"] == "off"
@@ -288,7 +289,7 @@ def test_post_kasa_toggle_turns_device_on() -> None:
     app.state.device_state = _state(kasa_devices=[fake])
     app.state.discovery_error = None
     r = client.post("/v1/ui/kasa/devices/10.0.0.1/toggle", json={"on": True})
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     assert r.json()["device"]["state"] == "on"
     assert fake.is_on is True
 
@@ -299,7 +300,7 @@ def test_post_kasa_toggle_with_invalid_body_returns_422() -> None:
     app.state.device_state = _state(kasa_devices=[fake])
     app.state.discovery_error = None
     r = client.post("/v1/ui/kasa/devices/10.0.0.1/toggle", json={"power": True})
-    assert r.status_code == 422
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
 def test_put_ui_preference_persists_kasa_exclusion(tmp_path: Path) -> None:
@@ -313,7 +314,7 @@ def test_put_ui_preference_persists_kasa_exclusion(tmp_path: Path) -> None:
         "/v1/ui/preferences/kasa/10.0.0.1",
         json={"exclude_from_global": True},
     )
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     assert r.json() == {
         "family_id": "kasa",
         "device_id": "10.0.0.1",
@@ -327,7 +328,7 @@ def test_put_ui_preference_persists_kasa_exclusion(tmp_path: Path) -> None:
         "/v1/ui/preferences/kasa/10.0.0.1",
         json={"exclude_from_global": False},
     )
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     assert kasa_discovery_store.load_ui_preferences(db) == [
         ("kasa", "10.0.0.1", False),
     ]
@@ -345,7 +346,7 @@ def test_put_ui_preference_returns_404_for_unknown_kasa_device(tmp_path: Path) -
         "/v1/ui/preferences/kasa/10.0.0.99",
         json={"exclude_from_global": True},
     )
-    assert r.status_code == 404
+    assert r.status_code == HTTPStatus.NOT_FOUND
 
 
 def test_put_ui_preference_returns_404_for_unknown_tailwind_device(
@@ -363,7 +364,7 @@ def test_put_ui_preference_returns_404_for_unknown_tailwind_device(
         "/v1/ui/preferences/tailwind/door-99",
         json={"exclude_from_global": True},
     )
-    assert r.status_code == 404
+    assert r.status_code == HTTPStatus.NOT_FOUND
 
 
 def test_put_ui_preference_returns_400_for_unknown_family(tmp_path: Path) -> None:
@@ -378,7 +379,7 @@ def test_put_ui_preference_returns_400_for_unknown_family(tmp_path: Path) -> Non
         "/v1/ui/preferences/zigbee/whatever",
         json={"exclude_from_global": True},
     )
-    assert r.status_code == 400
+    assert r.status_code == HTTPStatus.BAD_REQUEST
     assert "zigbee" in r.json()["detail"]
 
 
@@ -393,7 +394,7 @@ def test_put_ui_preference_returns_409_when_no_discovery_cache_configured() -> N
         "/v1/ui/preferences/kasa/10.0.0.1",
         json={"exclude_from_global": True},
     )
-    assert r.status_code == 409
+    assert r.status_code == HTTPStatus.CONFLICT
     assert "discovery cache" in r.json()["detail"]
 
 
@@ -410,7 +411,7 @@ def test_put_ui_preference_persists_tailwind_exclusion(tmp_path: Path) -> None:
         "/v1/ui/preferences/tailwind/door-1",
         json={"exclude_from_global": True},
     )
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     assert kasa_discovery_store.load_ui_preferences(db) == [
         ("tailwind", "door-1", True),
     ]
@@ -431,7 +432,9 @@ def test_action_endpoints_return_503_while_discovery_in_progress() -> None:
     ]
     for method, path, body in bodies:
         r = client.request(method, path, json=body)
-        assert r.status_code == 503, f"{method} {path} → {r.status_code}"
+        assert r.status_code == HTTPStatus.SERVICE_UNAVAILABLE, (
+            f"{method} {path} → {r.status_code}"
+        )
         assert r.headers.get("Retry-After") == "2"
 
 
