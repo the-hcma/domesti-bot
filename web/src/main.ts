@@ -491,7 +491,12 @@ function renderFamily(
   if (family.id === "kasa" || family.id === "tailwind") {
     const bulkBtn = document.createElement("button");
     bulkBtn.type = "button";
-    bulkBtn.className = "btn";
+    // Per-family bulk-off is always destructive ("Turn off all" /
+    // "Close all"), so use the same red ``btn-danger`` styling as the
+    // global "Turn everything off" button — colors stay consistent
+    // with the green/red rule that drives the state badges and the
+    // per-tile toggles.
+    bulkBtn.className = "btn btn-danger";
     bulkBtn.textContent = family.id === "kasa" ? "Turn off all" : "Close all";
     bulkBtn.disabled = !connected;
     bulkBtn.addEventListener("click", () => {

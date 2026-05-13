@@ -69,20 +69,29 @@
     .tile-head { display: flex; align-items: center; justify-content: space-between;
       gap: 6px; }
     .tile-label { font-size: 14px; font-weight: 600; }
+    /* State-badge colors are standardized across both device kinds:
+       "active" states (on, open) are green, "inactive" states (off,
+       closed) are red, and the transient ``unknown`` (Tailwind
+       OPENING/CLOSING) stays amber so it's visually distinct from
+       the two settled states. */
     .tile-state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
       color: var(--muted); }
-    .tile-state-on { color: var(--accent); }
-    .tile-state-off { color: var(--muted); }
-    .tile-state-open { color: var(--pending); }
-    .tile-state-closed { color: var(--accent); }
+    .tile-state-on, .tile-state-open { color: var(--accent); }
+    .tile-state-off, .tile-state-closed { color: var(--danger); }
     .tile-state-unknown { color: var(--pending); }
+    /* The toggle button's color tracks the *action* it will perform,
+       not the current state — so the user reads color as the outcome
+       of clicking. ``data-on="true"`` means the device is already in
+       its active state, so the click will turn it off/close it →
+       red. ``data-on="false"`` means the click will turn it on/open
+       it → green. The disabled rules below override both with
+       grayscale + reduced opacity when the backend is unreachable. */
     .tile-toggle { font: inherit; cursor: pointer;
-      border: 1px solid var(--border); background: var(--card);
-      color: var(--fg); border-radius: 6px; padding: 6px 10px; min-width: 64px;
-      touch-action: manipulation; }
-    .tile-toggle[data-on="true"] { background: var(--family-color, var(--accent));
-      color: white; border-color: transparent; }
-    .tile-toggle:focus-visible { outline: 2px solid var(--family-color, var(--accent));
+      border: 1px solid transparent; color: white; border-radius: 6px;
+      padding: 6px 10px; min-width: 64px; touch-action: manipulation; }
+    .tile-toggle[data-on="false"] { background: var(--accent); }
+    .tile-toggle[data-on="true"] { background: var(--danger); }
+    .tile-toggle:focus-visible { outline: 2px solid var(--fg);
       outline-offset: 2px; }
     .tile-note { font-size: 12px; color: var(--muted); margin: 0; }
     .tile-exclude { display: flex; align-items: center; gap: 6px;
