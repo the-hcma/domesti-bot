@@ -49,10 +49,13 @@ async def _bulk_close_tailwind_apply_impl(
     """Iterate tailwind doors, close non-excluded ones, return ``(affected, skipped)``.
 
     Doors that are *already* closed (``is_closed=True``) are still passed
-    to ``close()`` — the underlying tailwind controller treats it as a
-    no-op and the explicit call keeps the success/failure path uniform
-    for the UI. Doors in a transient state (``OPENING`` / ``CLOSING``)
-    are also closed; the controller will queue the new command.
+    to ``close()`` — :meth:`GotailwindDevice.close` swallows the
+    ``TailwindDoorAlreadyInStateError`` raised by the upstream
+    controller and reports success, so the call is safely idempotent
+    and the bulk operation can't be aborted by one door that happens
+    to already be shut. Doors in a transient state (``OPENING`` /
+    ``CLOSING``) are also closed; the controller will queue the new
+    command.
     """
 
     affected: list[str] = []
