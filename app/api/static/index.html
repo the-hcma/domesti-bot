@@ -96,10 +96,17 @@
       justify-content: space-between; gap: 8px 12px;
       padding-bottom: 10px; border-bottom: 1px solid var(--border);
       margin-bottom: 12px; }
-    .family-header h3::before {
-      content: ""; display: inline-block; width: 10px; height: 10px;
-      background: var(--family-color, var(--muted)); border-radius: 3px;
-      margin-right: 8px; vertical-align: middle;
+    /* Family-section header icon. The SVG itself uses stroke=
+       currentColor, so the per-family hue lives in CSS — keeping
+       the swatch and the icon paint glued to the same source. The
+       1.4em sizing ties the icon to the h3 font-size so it scales
+       cleanly with future heading-size tweaks. Falls back to the
+       muted-foreground colour for families without an icon (which
+       just won't have an .family-icon child to colour). */
+    .family-icon {
+      display: inline-block; width: 1.4em; height: 1.4em;
+      color: var(--family-color, var(--muted));
+      vertical-align: -0.35em; margin-right: 10px;
     }
     .tile-grid { display: grid; gap: 10px;
       grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
