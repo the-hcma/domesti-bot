@@ -13,6 +13,14 @@ listening (e.g. another local dev server, the Cursor my-tracks plugin) and the
 URL is shown explicitly so the developer can paste it into a browser. For
 production, the systemd unit passes ``--listen-host 127.0.0.1 --listen-port
 8765`` explicitly.
+
+**LAN mode** (``--listen-all``): bind to ``0.0.0.0`` so the API is reachable
+from other devices on the same network — handy for validating the UI on a
+phone or another laptop. The banner enumerates every non-loopback IPv4 address
+the host knows about so it's a copy/paste into the device's browser. When
+``DOMESTI_API_KEY`` is unset, the launcher also logs a warning since wildcard
+bind + no shared secret is fine for ad-hoc UI testing on a trusted home
+network but not for anything more public.
 """
 
 from __future__ import annotations
@@ -57,7 +65,20 @@ def build_serve_parser() -> argparse.ArgumentParser:
         metavar="ADDR",
         help=(
             "Bind address. If unset, falls back to $DOMESTI_LISTEN_HOST, "
-            "then to 127.0.0.1 (dev mode). Use 0.0.0.0 for LAN access."
+            "then to 127.0.0.1 (dev mode). Use 0.0.0.0 for LAN access "
+            "(or pass --listen-all as a shortcut)."
+        ),
+    )
+    parser.add_argument(
+        "--listen-all",
+        action="store_true",
+        help=(
+            "Bind to 0.0.0.0 instead of 127.0.0.1 so the API is reachable "
+            "from other devices on the LAN (e.g. validating the UI on a "
+            "phone). Convenience shortcut for ``--listen-host 0.0.0.0`` — "
+            "if both are passed, the explicit ``--listen-host`` wins. "
+            "Has no effect when run under systemd (the production unit "
+            "always passes its own ``--listen-host 127.0.0.1``)."
         ),
     )
     parser.add_argument(
@@ -90,18 +111,35 @@ def resolve_listen_address(
 ) -> tuple[str, int]:
     """Pick the effective ``(host, port)`` from CLI flags, env vars, or dev defaults.
 
-    Precedence: explicit CLI flag → env var (``DOMESTI_LISTEN_HOST`` /
-    ``DOMESTI_LISTEN_PORT``) → dev default (``127.0.0.1``, port ``0``).
+    Host precedence (first non-None wins):
+
+    1. ``--listen-host ADDR`` (explicit always wins, even over ``--listen-all``);
+    2. ``--listen-all`` (convenience flag → ``0.0.0.0``);
+    3. ``$DOMESTI_LISTEN_HOST``;
+    4. ``127.0.0.1`` (dev default).
+
+    Port precedence: ``--listen-port`` → ``$DOMESTI_LISTEN_PORT`` →
+    ``0`` (OS-allocated).
     """
 
     env = env if env is not None else dict(os.environ)
     cli_host: str | None = getattr(args, "listen_host", None)
     cli_port: int | None = getattr(args, "listen_port", None)
+    # ``getattr(..., False)`` so older callers (and pre-existing tests)
+    # that build a Namespace without ``listen_all`` continue to work.
+    listen_all: bool = getattr(args, "listen_all", False)
 
     env_host = (env.get("DOMESTI_LISTEN_HOST") or "").strip()
     env_port_raw = (env.get("DOMESTI_LISTEN_PORT") or "").strip()
 
-    host = cli_host if cli_host is not None else (env_host or "127.0.0.1")
+    if cli_host is not None:
+        host = cli_host
+    elif listen_all:
+        host = "0.0.0.0"
+    elif env_host:
+        host = env_host
+    else:
+        host = "127.0.0.1"
 
     if cli_port is not None:
         port = cli_port
@@ -243,7 +281,8 @@ async def _open_browser_after_server_ready(
 
 def _log_listening_banner(sock: socket.socket) -> None:
     bound_host, bound_port = sock.getsockname()[:2]
-    api_key_state = "set" if (os.environ.get("DOMESTI_API_KEY") or "").strip() else "unset"
+    api_key_set = bool((os.environ.get("DOMESTI_API_KEY") or "").strip())
+    api_key_state = "set" if api_key_set else "unset"
     _LOGGER.info(
         "[http] listening on http://%s:%d (api-key %s)",
         bound_host,
@@ -254,6 +293,18 @@ def _log_listening_banner(sock: socket.socket) -> None:
         _LOGGER.info("[http] local:   http://127.0.0.1:%d", bound_port)
         for ip in _lan_addresses():
             _LOGGER.info("[http] network: http://%s:%d", ip, bound_port)
+        if not api_key_set:
+            # The combination of wildcard bind + no shared secret means
+            # anyone on the LAN can drive every device endpoint. Fine
+            # for ad-hoc UI testing on a trusted home network; worth a
+            # warning so it can't happen by accident on, say, a coffee-
+            # shop wifi without the operator noticing.
+            _LOGGER.warning(
+                "[http] bound to a wildcard address with DOMESTI_API_KEY unset — "
+                "every LAN client can reach the API unauthenticated. Set "
+                "DOMESTI_API_KEY or bind back to 127.0.0.1 if this isn't a "
+                "trusted network."
+            )
 
 
 def main() -> None:
