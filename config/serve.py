@@ -7,12 +7,11 @@ the dict-config and ``scripts/domesti-bot-server`` for the env vars that
 drive it.
 
 **Dev-mode default** (no flags, no env vars): bind to ``127.0.0.1`` on an
-**OS-allocated free port** and print the actual URL at startup. This mirrors
-the fpdf launcher pattern: it is impossible to clash with anything else
-listening (e.g. another local dev server, the Cursor my-tracks plugin) and the
-URL is shown explicitly so the developer can paste it into a browser. For
-production, the systemd unit passes ``--listen-host 127.0.0.1 --listen-port
-8765`` explicitly.
+**OS-allocated free port** and print the actual URL at startup. This avoids
+clashing with anything else already listening (for example another local HTTP
+server or IDE tooling) and the URL is shown explicitly so the developer can
+paste it into a browser. For production, the systemd unit passes ``--listen-host
+127.0.0.1 --listen-port 8765`` explicitly.
 
 **LAN mode** (``--listen-all``): bind to ``0.0.0.0`` so the API is reachable
 from other devices on the same network — handy for validating the UI on a
@@ -162,7 +161,7 @@ def resolve_listen_address(
 
 
 def bind_listen_socket(host: str, port: int) -> socket.socket:
-    """Create, bind, and ``listen()`` on a TCP socket — fpdf-style early bind.
+    """Create, bind, and ``listen()`` on a TCP socket for an early listen-before-startup bind.
 
     The socket is handed to ``uvicorn.Server.serve(sockets=[sock])`` so the OS
     picks the free port *before* application startup (lifespan / discovery)

@@ -1,4 +1,4 @@
-"""Logging strategy mirroring the my-tracks project.
+"""Logging configuration for domesti-bot (dict-config, formatters, handlers).
 
 Goals (per the conventions documented in ``docs/AGENTS.md``):
 
@@ -91,7 +91,7 @@ class HealthCheckFilter(logging.Filter):
 class LocalTimeFormatter(logging.Formatter):
     """Format timestamps in :data:`SYSTEM_TIMEZONE` (or UTC when ``LOG_UTC=1`` is set).
 
-    Matches my-tracks's format exactly so tail-grep recipes work across both projects.
+    Uses a fixed-width column layout so ``grep`` and ``tail`` stay readable in terminals.
     """
 
     def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:

@@ -94,10 +94,10 @@ domesti-bot/
 **Layout rules**:
 
 - All Python source lives in `app/`. Sibling imports inside `app/` use **absolute** form: `from app.rule_engine import Device` — not relative (`from .rule_engine import Device`).
-- The HTTP API is a subpackage `app/api/` (parallel to how my-tracks organizes `app/mqtt/`). Do not flatten Pydantic schemas into `app/` proper.
+- The HTTP API is a subpackage `app/api/`. Do not flatten Pydantic schemas into `app/` proper.
 - `config/` holds only process-level wiring (uvicorn launch, future settings glue). It is **not** a place for domain code.
 - **Never move** `pyproject.toml`, `pyrightconfig.json`, `uv.lock`, or `.python-version` out of the repo root — IDE and tool discovery walk up from source files and depend on root-level placement.
-- Tests live in `tests/python/` (mirroring my-tracks). Real-hardware integration tests live alongside unit tests but carry the `@pytest.mark.integration` marker. Static fixture data lives in `tests/python/fixtures/`.
+- Tests live in `tests/python/`. Real-hardware integration tests live alongside unit tests but carry the `@pytest.mark.integration` marker. Static fixture data lives in `tests/python/fixtures/`.
 - `tests/bash/` is reserved for future shell-script tests. Keep `.gitkeep` until real tests exist.
 - **Browser code lives in `web/`** (TypeScript). Sources never go in `app/api/static/` — only the build output (`app/api/static/dist/`) does, and that is gitignored. See "Web UI" below.
 
@@ -171,7 +171,7 @@ uv run pytest -m integration                  # LAN hardware only
 - The FastAPI app is created via `app.api.app.create_app(args)`; the entrypoint is `config/serve.py` (run as `python -m config.serve`, or via `scripts/domesti-bot-server`).
 - **Authentication**: when `DOMESTI_API_KEY` is set in the environment, every protected endpoint requires the `X-Domesti-Api-Key` header. If the env var is unset, the API is open (intended for trusted LAN only — never expose unauthenticated to the public internet).
 - **Bind address**: production systemd binds to `127.0.0.1:8765`. Do not change the production unit to `0.0.0.0` without a fronting reverse proxy that handles TLS and auth.
-- **Dev-mode default** (no flags, no env vars): bind to `127.0.0.1` on an **OS-allocated free port** (mirrors `fpdf`'s launcher). The startup banner logs `[http] listening on http://127.0.0.1:<port> (api-key …)` so the developer can paste the URL into a browser. The launcher pre-binds the socket with `config.serve.bind_listen_socket()` *before* lifespan / device discovery runs, so the URL appears at the top of the run rather than after the discovery wait. Use `--listen-port 8765` or `DOMESTI_LISTEN_PORT=8765` to pin a specific port. Precedence: CLI flag → env var → dev default.
+- **Dev-mode default** (no flags, no env vars): bind to `127.0.0.1` on an **OS-allocated free port** so local collisions with other listeners are unlikely. The startup banner logs `[http] listening on http://127.0.0.1:<port> (api-key …)` so the developer can paste the URL into a browser. The launcher pre-binds the socket with `config.serve.bind_listen_socket()` *before* lifespan / device discovery runs, so the URL appears at the top of the run rather than after the discovery wait. Use `--listen-port 8765` or `DOMESTI_LISTEN_PORT=8765` to pin a specific port. Precedence: CLI flag → env var → dev default.
 - **CORS**: the dev configuration uses `allow_origins=["*"]`. Tighten this before exposing the service outside the LAN.
 - **Pydantic schemas** for all request and response bodies live in `app/api/schemas.py`. New endpoints must define typed `*In` / `*Out` models — no raw `dict[str, Any]` return types.
 - **Endpoint additions** must:
@@ -290,7 +290,7 @@ pnpm run check                   # typecheck + build (mirrors the CI job)
 
 ## Logging
 
-The strategy mirrors `my-tracks` exactly so tail / grep recipes transfer between the two projects.
+The strategy is intentionally stable so operator tail / grep recipes keep working across upgrades.
 
 **Library code**
 
@@ -304,10 +304,10 @@ The strategy mirrors `my-tracks` exactly so tail / grep recipes transfer between
 **Configuration**
 
 - The dict-config and the `LocalTimeFormatter` live in `app/logging_config.py`. The launcher exports env vars; the Python process calls `apply_logging_from_env()` before uvicorn boots.
-- Format (identical to my-tracks): `YYYYMMDD-HH:MM:SS.mmm | LEVEL    | module       | message`.
+- Format: `YYYYMMDD-HH:MM:SS.mmm | LEVEL    | module       | message`.
 - Timestamps render in the **system timezone** by default. Set `LOG_UTC=1` (or pass `--log-utc`) to switch to UTC.
 - Custom **`TRACE`** level (numeric value 5, below `DEBUG`) is auto-registered for high-volume per-request lines. The `HealthCheckFilter` demotes `/health` access lines to `TRACE` so they never pollute `INFO` output. A complementary path-based demotion lives in `app/api/app.py`: paths in `_QUIET_ACCESS_LOG_PATHS` (currently just `/v1/ui/state`, the web UI's 5-second poll) emit their **successful** `[http]` lines at `DEBUG` so they're invisible at the default `INFO` level but resurface when you turn the dial up to debug a real issue. Failure responses (`>= 400`) for the same paths still log at `INFO` so genuine errors stay visible. Add new noisy poll endpoints to `_QUIET_ACCESS_LOG_PATHS` rather than introducing new filters or per-handler log suppression.
-- **File logging**: when `LOG_FILE` is set (default `$HOME/scratch/domesti-bot/domesti-bot.log` — same per-user scratch-tree convention as `my-tracks`'s `$HOME/scratch/my-tracks/my-tracks.log`), a `RotatingFileHandler` writes 10 MB files with 5 backups. `--no-log-file` disables file output entirely.
+- **File logging**: when `LOG_FILE` is set (default `$HOME/scratch/domesti-bot/domesti-bot.log`, under a per-user `$HOME/scratch/` tree for easy discovery), a `RotatingFileHandler` writes 10 MB files with 5 backups. `--no-log-file` disables file output entirely.
 - **Dual logging**: pass `--console` to keep the file destination *and* mirror to stdout — useful during development.
 - **Levels** are controlled by `--log-level {trace,debug,info,warning,error,critical}` (default `info`). The flag sets `DOMESTI_LOG_LEVEL`, which is applied to the root logger, the `app.*` namespace, and all uvicorn loggers (`uvicorn`, `uvicorn.error`, `uvicorn.access`).
 
@@ -345,7 +345,7 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 
 ## Commits, Stacking & Pull Requests
 
-> When `docs/GRAPHITE.md` lands in this repo, treat it as the full reference. Until then, follow the conventions below (consistent with the other `the-hcma/*` repos).
+> When `docs/GRAPHITE.md` lands in this repo, treat it as the full reference. Until then, follow the conventions below (aligned with sibling repositories in the same GitHub org).
 
 - This project uses **Graphite (`gt`)** for branch stacking. All work happens in stacked branches.
 - **Never commit or push directly to `main`.** `main` is updated only via merged PRs. Enforcement layers, in order of strength:
@@ -441,7 +441,7 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 
 ### Deploy hook (`scripts/on-deploy`)
 
-`setup-service` from `repository-helpers` calls `scripts/on-deploy` before starting or restarting the systemd unit. The path and contract match `my-tracks/scripts/on-deploy` so the shared tool works against both projects without per-project configuration.
+`setup-service` from `repository-helpers` calls `scripts/on-deploy` before starting or restarting the systemd unit. Implement the exit-code contract documented below so the shared installer can drive restarts without per-repo customization.
 
 **Exit-code contract** (the hook MUST NOT restart the unit itself — that responsibility belongs to `setup-service`):
 
@@ -494,7 +494,7 @@ CI lives in `.github/workflows/`:
 
 Dependabot itself is configured in **`.github/dependabot.yml`**: weekly Monday sweeps across `pip` (root `pyproject.toml`), `npm` (`/web`), and `github-actions` (`/`), all labeled `dependencies` so the auto-merge workflow picks them up. Patch + minor bumps are grouped into a handful of named buckets (`fastapi-stack`, `pytest-stack`, `typescript`, `esbuild`) to keep the PR count down; major bumps continue to land as individual PRs for review.
 
-**`.github/CODEOWNERS`** maps `*` to `@thehcma` — same pattern as the-hcma/fpdf and the-hcma/my-tracks. Adding additional reviewers later is a one-line entry per path glob.
+**`.github/CODEOWNERS`** maps `*` to `@thehcma` (blanket ownership for now). Adding additional reviewers later is a one-line entry per path glob.
 
 No PR may be merged with a failing CI check.
 

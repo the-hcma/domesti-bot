@@ -1,7 +1,6 @@
 version: 2
 
-# Mirrors the cadence used by the-hcma/my-tracks: weekly Monday sweeps
-# across every ecosystem we actually ship, grouped where the noise is
+# Weekly Monday sweeps across every ecosystem we actually ship, grouped where the noise is
 # worst, all labeled ``dependencies`` so the existing
 # ``dependabot-auto-merge.yml`` workflow can pick them up. The
 # ``pip`` ecosystem here covers everything declared in the root
