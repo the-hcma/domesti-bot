@@ -47,8 +47,9 @@ interface PendingPrediction {
 class DomestiBotController {
   // Background poll cadence: refreshes ``/v1/ui/state`` so the family
   // frames flip between green (backend reachable) and red (backend
-  // unreachable) without the user having to click anything.
-  private static readonly POLL_MS = 5000;
+  // unreachable) without the user having to click anything. Three seconds
+  // is a compromise between snappy tiles and LAN / server load.
+  private static readonly POLL_MS = 3000;
 
   // Grace window during which a click's optimistic prediction
   // overrides contradicting poll results. Picked to comfortably
@@ -114,6 +115,7 @@ class DomestiBotController {
     this.renderLoading("Discovering devices…");
     await this.bootstrap();
     this.schedulePoll();
+    this.registerVisibilityPollBoost();
   }
 
   private async bootstrap(): Promise<void> {
@@ -456,6 +458,17 @@ class DomestiBotController {
       this.connected = false;
       if (this.state) this.render();
     }
+  }
+
+  private registerVisibilityPollBoost(): void {
+    // When the user returns from another app, catch up immediately instead
+    // of waiting for the next interval tick.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      void this.refresh();
+    });
   }
 
   private schedulePoll(): void {
@@ -1016,17 +1029,7 @@ function initPwaInstallBanner(): void {
     return;
   }
 
-  const ios =
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.userAgent.includes("Mac") && "ontouchend" in document);
-
-  // Full desktop browsers (fine pointer, no iOS) already promote install in
-  // the chrome UI; keep this hint for phones, tablets, and Safari on iOS/iPadOS.
-  const touchOrNarrow =
-    ios ||
-    window.matchMedia("(pointer: coarse)").matches ||
-    window.matchMedia("(max-width: 640px)").matches;
-  if (!touchOrNarrow) {
+  if (!isMobileFormFactor()) {
     return;
   }
 
@@ -1045,9 +1048,8 @@ function initPwaInstallBanner(): void {
 
   const copy = document.createElement("p");
   copy.className = "pwa-install-banner-copy";
-  copy.textContent = ios
-    ? "In Safari, tap the Share button, then Add to Home Screen to open this dashboard like an app."
-    : "Add this page to your home screen for quick access. When your browser offers it, tap Install below.";
+  copy.textContent =
+    "Add this dashboard to your home screen for one-tap access. Use Install below when your browser enables it; otherwise open the browser menu and choose Add to Home screen or Install app.";
 
   const persistRow = document.createElement("div");
   persistRow.className = "pwa-install-persist-row";
@@ -1089,14 +1091,10 @@ function initPwaInstallBanner(): void {
       sessionStorage.setItem(PWA_INSTALL_DISMISS_SESSION_KEY, "1");
     }
     banner.remove();
-    if (!ios) {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
-    }
+    window.removeEventListener("beforeinstallprompt", onBeforeInstall);
   };
 
-  if (!ios) {
-    window.addEventListener("beforeinstallprompt", onBeforeInstall);
-  }
+  window.addEventListener("beforeinstallprompt", onBeforeInstall);
 
   installBtn.addEventListener("click", () => {
     void (async () => {
@@ -1115,6 +1113,25 @@ function initPwaInstallBanner(): void {
   actions.append(installBtn, dismissBtn);
   banner.append(title, copy, persistRow, actions);
   mainEl.insertBefore(banner, mainEl.firstChild);
+}
+
+function isMobileFormFactor(): boolean {
+  const uaData = (
+    navigator as Navigator & { userAgentData?: { mobile?: boolean } }
+  ).userAgentData;
+  if (uaData?.mobile === true) {
+    return true;
+  }
+  if (uaData?.mobile === false) {
+    return false;
+  }
+  // No Client Hints (common on WebKit) — infer compact, touch-first UI without
+  // matching particular browser names.
+  return (
+    window.matchMedia("(any-pointer: coarse)").matches ||
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(max-width: 768px)").matches
+  );
 }
 
 function renderDevice(
