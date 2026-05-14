@@ -3,6 +3,11 @@
 // guards the Python side; the TypeScript side is guarded by `tsc --strict`
 // at `pnpm run typecheck`.
 
+export interface MetaOut {
+  version: string;
+  commit: string;
+}
+
 export type UIDeviceKind = "switch" | "speaker" | "door";
 
 export type UIDeviceState =
