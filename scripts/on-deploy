@@ -109,12 +109,13 @@ fi
 # Clear a stuck "failed" unit state so the next restart isn't reported as
 # failed even on a clean start. Suppress all errors: the unit may not be
 # installed yet (first deploy) or the caller may not have sudo rights.
-unit="domesti-bot-server.service"
+# User unit installed by ``setup-service`` (``~/.config/systemd/user/``).
+unit="domesti-bot.service"
 if command -v systemctl &>/dev/null; then
     if [[ "$(id -u)" -eq 0 ]]; then
         systemctl reset-failed "$unit" &>/dev/null || true
     else
-        sudo -n systemctl reset-failed "$unit" &>/dev/null || true
+        systemctl --user reset-failed "$unit" &>/dev/null || true
     fi
 fi
 

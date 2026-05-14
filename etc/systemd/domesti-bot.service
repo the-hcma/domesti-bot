@@ -1,0 +1,31 @@
+# User systemd unit for domesti-bot (HTTP API + web UI).
+#
+# repository-helpers ``setup-service`` substitutes ``@@REPO_DIR@@`` with the
+# git worktree path, installs to ``~/.config/systemd/user/``, enables linger,
+# and runs ``scripts/on-deploy`` before (re)start. Same pattern as fpdf's
+# ``etc/systemd/fpdf.service``.
+#
+# Production listen: ``127.0.0.1:8003``. Keep ``ExecStart`` and ``ExecStartPost``
+# ports aligned if you change either.
+#
+# Logs: ``~/scratch/domesti-bot/domesti-bot.log`` (``setup-service`` also
+# ensures ``~/scratch/domesti-bot/`` exists).
+
+[Unit]
+Description=domesti-bot HTTP API
+After=network.target
+StartLimitIntervalSec=100
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=@@REPO_DIR@@
+ExecStart=@@REPO_DIR@@/scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8003 --no-browser
+Restart=always
+RestartSec=5
+StandardOutput=append:%h/scratch/domesti-bot/domesti-bot.log
+StandardError=append:%h/scratch/domesti-bot/domesti-bot.log
+ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
+
+[Install]
+WantedBy=default.target

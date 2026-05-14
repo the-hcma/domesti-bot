@@ -11,7 +11,7 @@ This file defines the non-negotiable standards for all contributors (human or AI
   ~/work/ai/repository-helpers/scripts/dev/start-development --refresh
   ~/work/ai/repository-helpers/scripts/dev/start-development
   ```
-  - **`--refresh`** (first): syncs `main` with Graphite (`gt sync`), prunes merged worktrees and branches, pulls latest `main`, and ensures the systemd service (`domesti-bot-server.service`) is installed and running. Exits immediately — it does **not** prompt for a worktree.
+  - **`--refresh`** (first): syncs `main` with Graphite (`gt sync`), prunes merged worktrees and branches, pulls latest `main`, and ensures the systemd user unit (`domesti-bot.service` from `etc/systemd/`) is installed and running via `setup-service`. Exits immediately — it does **not** prompt for a worktree.
   - **plain** (second): repeats the sync/cleanup, then prompts you to name a new worktree for the upcoming work. Pass `--worktree <name> --no-interactive` to skip the prompt.
 - Both commands are required. This replaces any manual `gt sync --force` step.
 
@@ -70,7 +70,9 @@ domesti-bot/
 │   ├── domesti-bot-server                 `uv run python -m config.serve "$@"`
 │   ├── on-deploy                          setup-service build hook (exit 0/1/2+ contract)
 │   └── verify_google_cast_discovery.py    standalone discovery probe
-├── production/                           Server-side deploy bits
+├── etc/systemd/                          User unit template for ``setup-service`` (@@REPO_DIR@@)
+│   └── domesti-bot.service
+├── production/                           Server-side deploy bits (optional **system** unit)
 │   └── systemd/domesti-bot-server.service.template
 ├── web/                                  Browser TypeScript bundle (see "Web UI" below)
 │   ├── package.json                       pnpm scripts; pinned via `packageManager`
@@ -399,7 +401,8 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 
 ## Server Management (development)
 
-- The server runs as a **systemd service** in production (`domesti-bot-server.service`), installed via `~/work/ai/repository-helpers/scripts/setup-service` against the template at `production/systemd/domesti-bot-server.service.template`.
+- **User installs** (typical dev / home server): `~/work/ai/repository-helpers/scripts/setup-service` reads `etc/systemd/domesti-bot.service`, substitutes `@@REPO_DIR@@`, installs `~/.config/systemd/user/domesti-bot.service`, and runs `scripts/on-deploy` before (re)start — same pattern as fpdf's `etc/systemd/fpdf.service`.
+- **System installs** (multi-user.target, dedicated service account): use `production/systemd/domesti-bot-server.service.template` with `@@REPO_ROOT@@` / `@@SERVICE_USER@@` and install under `/etc/systemd/system/` yourself; that path is **not** consumed by `setup-service`.
 - **Production listen port** is **`127.0.0.1:8003`** (fixed loopback port in the unit's `ExecStart`). After start, **`ExecStartPost`** runs `curl` against `http://127.0.0.1:8003/health` with retries so systemd only reports *active* once the process is actually answering HTTP. If you change the port in the template, update both `ExecStart` and `ExecStartPost` so they stay in sync.
 - **During development / testing**: do not start the production server manually. The session-init script (`start-development --refresh`) ensures the background service is running.
 - Manual runs for debugging: `./scripts/domesti-bot-server` (forwards all flags to `python -m config.serve`).
@@ -459,7 +462,7 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 2. Add `$HOME/.local/bin` to `PATH` so `uv` is discoverable from `setup-service`'s non-login shell.
 3. Verify `uv` is on `PATH`; exit `2` if missing.
 4. Ensure `.venv/` exists with a usable interpreter — recreate it via `uv sync` if missing or stale (handles brand-new worktrees).
-5. Reset a stuck `domesti-bot-server.service` failed state (best-effort; ignored if the unit isn't installed yet or sudo isn't available).
+5. Reset a stuck `domesti-bot.service` failed state for the **user** manager (`systemctl --user`) when not root; when root, reset the system manager (best-effort; ignored if the unit isn't installed yet).
 6. Compare `git rev-parse HEAD` against the per-host SHA cache (`$HOME/scratch/domesti-bot/on-deploy-sha`, overridable via `ON_DEPLOY_SHA_FILE`). If equal and `--force` was not passed → exit `1`.
 7. `uv sync --frozen` — refuse to mutate `uv.lock` on a deploy box; build either matches the committed pin or fails loudly.
 8. Smoke-import `config.serve` so a broken dep or syntax error fails the hook BEFORE `setup-service` restarts the unit.

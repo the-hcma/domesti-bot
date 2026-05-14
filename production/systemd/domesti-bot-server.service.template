@@ -1,4 +1,8 @@
-# systemd unit for the domesti-bot HTTP API.
+# systemd **system** unit for domesti-bot (multi-user.target, sudo install).
+#
+# For the usual **user** install on a dev box, use ``etc/systemd/domesti-bot.service``
+# instead — ``~/work/ai/repository-helpers/scripts/setup-service`` reads that file
+# and substitutes ``@@REPO_DIR@@`` only (same contract as fpdf).
 #
 # After substitution, install the rendered unit, for example:
 #   sudo install -m 644 domesti-bot-server.service /etc/systemd/system/domesti-bot-server.service
@@ -8,9 +12,6 @@
 # Placeholders (replace entire @@...@@ token including at-signs):
 #   @@REPO_ROOT@@     Absolute path to the repository on the server (e.g. /opt/domesti-bot).
 #   @@SERVICE_USER@@  Unprivileged account to run the process (e.g. domesti).
-#
-# repository-helpers setup-service: substitute @@REPO_ROOT@@ and @@SERVICE_USER@@ (or
-# configure equivalent token mapping) before copying to /etc/systemd/system/.
 #
 # Production listen port is 8003 (same pattern as fpdf's systemd unit: a fixed
 # loopback port in ExecStart plus ExecStartPost curling /health on that port).
