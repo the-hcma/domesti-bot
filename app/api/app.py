@@ -23,6 +23,7 @@ from app.api.schemas import (
     CompletionAliasesOut,
     ExecuteLineIn,
     ExecuteLineOut,
+    MetaOut,
     UIBulkActionOut,
     UIDeviceActionOut,
     UIGlobalBulkActionItem,
@@ -46,6 +47,7 @@ from app.api.ui_state import (
     find_sonos_by_identifier,
     find_tailwind_by_identifier,
 )
+from app.build_info import get_build_info
 from app.device_state_watcher import (
     build_default_watchers,
     poll_interval_from_env,
@@ -269,7 +271,7 @@ def create_app(args: Any) -> FastAPI:
 
     app = FastAPI(
         title="domesti-bot",
-        version="0.1.0",
+        version=get_build_info()[0],
         lifespan=lifespan,
     )
     app.add_middleware(_AccessLogMiddleware)
@@ -328,6 +330,11 @@ def create_app(args: Any) -> FastAPI:
             "discovery": discovery,
             "error": err,
         }
+
+    @app.get("/v1/meta", response_model=MetaOut)
+    async def meta() -> MetaOut:
+        ver, commit = get_build_info()
+        return MetaOut(version=ver, commit=commit)
 
     @app.get("/v1/completion-aliases", dependencies=[Depends(_verify_api_key)])
     async def completion_aliases(state: DeviceState) -> CompletionAliasesOut:

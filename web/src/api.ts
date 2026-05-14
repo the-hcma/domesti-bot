@@ -3,13 +3,15 @@
 // against the matching interface in `./types.ts`.
 //
 // Auth: when the server is started with `DOMESTI_API_KEY=…`, every
-// `/v1/...` route requires the `X-Domesti-Api-Key` header. The browser
+// protected `/v1/...` route (everything except ``GET /v1/meta``) requires
+// the `X-Domesti-Api-Key` header. The browser
 // reads the key from a `<meta name="domesti-api-key" content="…">` tag if
 // present (so a deployment can inject it server-side without us exposing
 // it to JS at build time). Default LAN deployments leave the env var
 // unset and the page works without the meta tag.
 
 import type {
+  MetaOut,
   UIBulkActionOut,
   UIDeviceActionOut,
   UIGlobalBulkActionOut,
@@ -113,6 +115,9 @@ export const api = {
       `/v1/ui/tailwind/doors/${encodeURIComponent(deviceId)}/close`,
       {},
     );
+  },
+  fetchMeta(): Promise<MetaOut> {
+    return call<MetaOut>("GET", "/v1/meta");
   },
   fetchState(): Promise<UIStateOut> {
     return call<UIStateOut>("GET", "/v1/ui/state");

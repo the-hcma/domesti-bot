@@ -5,6 +5,15 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class CompletionAliasesOut(BaseModel):
+    """Device name fragments for Tab completion in remote CLI mode."""
+
+    switch: list[str] = Field(default_factory=list)
+    sonos: list[str] = Field(default_factory=list)
+    tailwind: list[str] = Field(default_factory=list)
+    all_device_labels: list[str] = Field(default_factory=list)
+
+
 class ExecuteLineIn(BaseModel):
     """One REPL line (same syntax as ``domesti_bot_cli``)."""
 
@@ -22,13 +31,18 @@ class ExecuteLineOut(BaseModel):
     )
 
 
-class CompletionAliasesOut(BaseModel):
-    """Device name fragments for Tab completion in remote CLI mode."""
+class MetaOut(BaseModel):
+    """Build identity for the running server process (landing-page tooltip)."""
 
-    switch: list[str] = Field(default_factory=list)
-    sonos: list[str] = Field(default_factory=list)
-    tailwind: list[str] = Field(default_factory=list)
-    all_device_labels: list[str] = Field(default_factory=list)
+    version: str = Field(..., description="``project.version`` from ``pyproject.toml``.")
+    commit: str = Field(
+        ...,
+        description=(
+            "Short git SHA (``git rev-parse --short=12``) when available, else "
+            "``GITHUB_SHA`` / ``DOMESTI_GIT_COMMIT`` truncated to 12 hex chars, else "
+            "``unknown``."
+        ),
+    )
 
 
 class UIDeviceOut(BaseModel):

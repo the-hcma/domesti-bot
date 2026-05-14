@@ -6,6 +6,7 @@
 
 import { api, HttpError } from "./api.js";
 import type {
+  MetaOut,
   UIDeviceOut,
   UIDeviceState,
   UIFamilyOut,
@@ -13,6 +14,9 @@ import type {
 } from "./types.js";
 
 const APP_ROOT_ID = "app";
+
+/** Public source repository (tooltip copy + icon link target). */
+const DOMESTI_BOT_REPO_HREF = "https://github.com/the-hcma/domesti-bot";
 
 interface PendingPrediction {
   state: UIDeviceState;
@@ -71,12 +75,14 @@ class DomestiBotController {
   // etc.). Confirmed predictions (poll state == predicted state)
   // delete themselves; expired predictions release their hold.
   private pendingPredictions: Map<string, PendingPrediction> = new Map();
+  private meta: MetaOut | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
   }
 
   async init(): Promise<void> {
+    void this.loadMeta();
     // Show a spinner while ``/v1/ui/state`` is still answering 503
     // "still in progress" — the FastAPI lifespan defers device
     // discovery so the HTTP server is up well before the first
@@ -122,6 +128,19 @@ class DomestiBotController {
         this.renderError("Failed to load device state", err);
         return;
       }
+    }
+  }
+
+  private async loadMeta(): Promise<void> {
+    try {
+      this.meta = await api.fetchMeta();
+      if (this.state) {
+        this.render();
+      } else if (this.root.querySelector(".tile-loading-row") !== null) {
+        this.renderLoading("Discovering devices…");
+      }
+    } catch {
+      this.meta = null;
     }
   }
 
@@ -433,6 +452,7 @@ class DomestiBotController {
     if (state.families.length > 0) {
       const header = document.createElement("header");
       header.className = "tile-header";
+      header.append(createBrandMark(this.meta));
       const globalBtn = document.createElement("button");
       globalBtn.type = "button";
       globalBtn.className = "btn btn-danger";
@@ -444,6 +464,10 @@ class DomestiBotController {
       header.append(globalBtn);
       this.root.append(header);
     } else {
+      const emptyHead = document.createElement("header");
+      emptyHead.className = "tile-header tile-header-sparse";
+      emptyHead.append(createBrandMark(this.meta));
+      this.root.append(emptyHead);
       const empty = document.createElement("p");
       empty.className = "tile-empty";
       empty.textContent =
@@ -515,6 +539,10 @@ class DomestiBotController {
         ? err.message
         : String(err);
     this.root.replaceChildren();
+    const errHead = document.createElement("header");
+    errHead.className = "tile-header tile-header-sparse";
+    errHead.append(createBrandMark(this.meta));
+    this.root.append(errHead);
     const banner = document.createElement("div");
     banner.className = "tile-error";
     banner.textContent = `${prefix} — ${detail}`;
@@ -535,6 +563,10 @@ class DomestiBotController {
     // (see ``.tile-spinner`` in ``index.html``) with a short text
     // so screen-reader users get a verbal cue too.
     this.root.replaceChildren();
+    const loadHead = document.createElement("header");
+    loadHead.className = "tile-header tile-header-sparse";
+    loadHead.append(createBrandMark(this.meta));
+    this.root.append(loadHead);
     const row = document.createElement("div");
     row.className = "tile-loading-row";
     row.setAttribute("role", "status");
@@ -617,6 +649,121 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
     case "door":
       return "closed";
   }
+}
+
+/** Robot-with-apron mascot: click opens GitHub; hover shows product, copyright, build, and repo link. */
+function createBrandMark(meta: MetaOut | null): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "brand-mark";
+  wrap.setAttribute("role", "group");
+  wrap.setAttribute(
+    "aria-label",
+    meta
+      ? `domesti-bot, version ${meta.version}, commit ${meta.commit}, GitHub repository`
+      : "domesti-bot, GitHub repository, build information loading",
+  );
+
+  const iconLink = document.createElement("a");
+  iconLink.className = "brand-mark-icon-link";
+  iconLink.href = DOMESTI_BOT_REPO_HREF;
+  iconLink.target = "_blank";
+  iconLink.rel = "noopener noreferrer";
+  iconLink.setAttribute(
+    "aria-label",
+    "domesti-bot — open github.com/the-hcma/domesti-bot in a new tab",
+  );
+
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "brand-mark-svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.35");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+
+  const head = document.createElementNS(SVG_NS, "rect");
+  head.setAttribute("x", "7");
+  head.setAttribute("y", "3");
+  head.setAttribute("width", "10");
+  head.setAttribute("height", "8");
+  head.setAttribute("rx", "2.5");
+
+  const eyeL = document.createElementNS(SVG_NS, "circle");
+  eyeL.setAttribute("cx", "10");
+  eyeL.setAttribute("cy", "6.5");
+  eyeL.setAttribute("r", "1");
+  eyeL.setAttribute("fill", "currentColor");
+  eyeL.setAttribute("stroke", "none");
+
+  const eyeR = document.createElementNS(SVG_NS, "circle");
+  eyeR.setAttribute("cx", "14");
+  eyeR.setAttribute("cy", "6.5");
+  eyeR.setAttribute("r", "1");
+  eyeR.setAttribute("fill", "currentColor");
+  eyeR.setAttribute("stroke", "none");
+
+  const body = document.createElementNS(SVG_NS, "rect");
+  body.setAttribute("x", "7");
+  body.setAttribute("y", "11.5");
+  body.setAttribute("width", "10");
+  body.setAttribute("height", "10");
+  body.setAttribute("rx", "2");
+
+  const apron = document.createElementNS(SVG_NS, "path");
+  apron.setAttribute(
+    "d",
+    "M9 12.5 L10.5 18.5 Q12 19.8 13.5 18.5 L15 12.5 Q12 14 9 12.5z",
+  );
+  apron.setAttribute("fill", "none");
+
+  const waist = document.createElementNS(SVG_NS, "path");
+  waist.setAttribute("d", "M8 17.5h8");
+  waist.setAttribute("fill", "none");
+
+  svg.append(head, eyeL, eyeR, body, apron, waist);
+  iconLink.append(svg);
+
+  const tip = document.createElement("span");
+  tip.className = "brand-mark-tooltip";
+  tip.setAttribute("role", "tooltip");
+
+  const product = document.createElement("div");
+  product.className = "brand-mark-tooltip-product";
+  product.textContent = "domesti-bot";
+
+  const rights = document.createElement("div");
+  rights.className = "brand-mark-tooltip-copy";
+  rights.textContent = "\u00a9 2026 Henrique Andrade";
+
+  tip.append(product, rights);
+
+  if (meta) {
+    const v = document.createElement("div");
+    v.className = "brand-mark-tooltip-build";
+    v.textContent = `Version ${meta.version}`;
+    const c = document.createElement("div");
+    c.className = "brand-mark-tooltip-build";
+    c.textContent = `Commit ${meta.commit}`;
+    tip.append(v, c);
+  } else {
+    const pending = document.createElement("div");
+    pending.className = "brand-mark-tooltip-build";
+    pending.textContent = "Loading build info\u2026";
+    tip.append(pending);
+  }
+
+  const repoLink = document.createElement("a");
+  repoLink.className = "brand-mark-tooltip-repo";
+  repoLink.href = DOMESTI_BOT_REPO_HREF;
+  repoLink.target = "_blank";
+  repoLink.rel = "noopener noreferrer";
+  repoLink.textContent = "github.com/the-hcma/domesti-bot";
+  tip.append(repoLink);
+
+  wrap.append(iconLink, tip);
+  return wrap;
 }
 
 function createFamilyIcon(familyId: string): SVGElement | null {
