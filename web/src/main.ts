@@ -468,11 +468,39 @@ class DomestiBotController {
       emptyHead.className = "tile-header tile-header-sparse";
       emptyHead.append(createBrandMark(this.meta));
       this.root.append(emptyHead);
-      const empty = document.createElement("p");
-      empty.className = "tile-empty";
-      empty.textContent =
-        "No devices discovered yet. The server is still bringing them up — refresh in a few seconds.";
-      this.root.append(empty);
+      const panel = document.createElement("section");
+      panel.className = "tile-empty-discovery";
+      const h2 = document.createElement("h2");
+      h2.textContent = "No devices found on the network";
+      const lead = document.createElement("p");
+      lead.className = "tile-empty";
+      lead.textContent =
+        "Discovery finished, but nothing on the LAN responded as a controllable device. That usually means hardware is asleep, on another VLAN, or not configured for this server.";
+      const list = document.createElement("ul");
+      const tips: readonly string[] = [
+        "Confirm plugs, speakers, and garage controllers are powered and on the same routed network as this host.",
+        "For Kasa / Tapo, set KASA_USERNAME and KASA_PASSWORD when the LAN handshake requires your cloud account, then run discovery again (CLI: --force-discovery).",
+        "For GoTailwind doors, set TAILWIND_TOKEN so the server can reach your controller.",
+      ];
+      for (const line of tips) {
+        const li = document.createElement("li");
+        li.textContent = line;
+        list.append(li);
+      }
+      const health = document.createElement("p");
+      health.className = "tile-empty";
+      const hl = document.createElement("a");
+      hl.href = "/health";
+      hl.textContent = "/health";
+      health.append(
+        document.createTextNode("Open "),
+        hl,
+        document.createTextNode(
+          " in this browser to see whether discovery is still running or failed with an error.",
+        ),
+      );
+      panel.append(h2, lead, list, health);
+      this.root.append(panel);
       return;
     }
 
@@ -651,7 +679,7 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   }
 }
 
-/** Robot-with-apron mascot: click opens GitHub; hover shows product, copyright, build, and repo link. */
+/** Robot-with-apron mascot: click opens GitHub; hover shows product, tagline, copyright, license, build, and repo link. */
 function createBrandMark(meta: MetaOut | null): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "brand-mark";
@@ -677,50 +705,57 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   svg.setAttribute("class", "brand-mark-svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.35");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute("aria-hidden", "true");
 
   const head = document.createElementNS(SVG_NS, "rect");
+  head.setAttribute("class", "brand-mark-bm-head");
   head.setAttribute("x", "7");
   head.setAttribute("y", "3");
   head.setAttribute("width", "10");
   head.setAttribute("height", "8");
   head.setAttribute("rx", "2.5");
+  head.setAttribute("stroke-width", "1.35");
+  head.setAttribute("stroke-linecap", "round");
+  head.setAttribute("stroke-linejoin", "round");
 
   const eyeL = document.createElementNS(SVG_NS, "circle");
+  eyeL.setAttribute("class", "brand-mark-bm-eye");
   eyeL.setAttribute("cx", "10");
   eyeL.setAttribute("cy", "6.5");
   eyeL.setAttribute("r", "1");
-  eyeL.setAttribute("fill", "currentColor");
-  eyeL.setAttribute("stroke", "none");
 
   const eyeR = document.createElementNS(SVG_NS, "circle");
+  eyeR.setAttribute("class", "brand-mark-bm-eye");
   eyeR.setAttribute("cx", "14");
   eyeR.setAttribute("cy", "6.5");
   eyeR.setAttribute("r", "1");
-  eyeR.setAttribute("fill", "currentColor");
-  eyeR.setAttribute("stroke", "none");
 
   const body = document.createElementNS(SVG_NS, "rect");
+  body.setAttribute("class", "brand-mark-bm-body");
   body.setAttribute("x", "7");
   body.setAttribute("y", "11.5");
   body.setAttribute("width", "10");
   body.setAttribute("height", "10");
   body.setAttribute("rx", "2");
+  body.setAttribute("stroke-width", "1.35");
+  body.setAttribute("stroke-linecap", "round");
+  body.setAttribute("stroke-linejoin", "round");
 
   const apron = document.createElementNS(SVG_NS, "path");
+  apron.setAttribute("class", "brand-mark-bm-apron");
   apron.setAttribute(
     "d",
     "M9 12.5 L10.5 18.5 Q12 19.8 13.5 18.5 L15 12.5 Q12 14 9 12.5z",
   );
-  apron.setAttribute("fill", "none");
+  apron.setAttribute("stroke-width", "1.35");
+  apron.setAttribute("stroke-linecap", "round");
+  apron.setAttribute("stroke-linejoin", "round");
 
   const waist = document.createElementNS(SVG_NS, "path");
+  waist.setAttribute("class", "brand-mark-bm-waist");
   waist.setAttribute("d", "M8 17.5h8");
-  waist.setAttribute("fill", "none");
+  waist.setAttribute("stroke-width", "1.35");
+  waist.setAttribute("stroke-linecap", "round");
 
   svg.append(head, eyeL, eyeR, body, apron, waist);
   iconLink.append(svg);
@@ -733,11 +768,20 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   product.className = "brand-mark-tooltip-product";
   product.textContent = "domesti-bot";
 
+  const tagline = document.createElement("div");
+  tagline.className = "brand-mark-tooltip-tagline";
+  tagline.textContent =
+    "Home LAN dashboard for Kasa, Sonos, GoTailwind, and more.";
+
   const rights = document.createElement("div");
   rights.className = "brand-mark-tooltip-copy";
   rights.textContent = "\u00a9 2026 Henrique Andrade";
 
-  tip.append(product, rights);
+  const license = document.createElement("div");
+  license.className = "brand-mark-tooltip-license";
+  license.textContent = "Open-source software under the MIT License.";
+
+  tip.append(product, tagline, rights, license);
 
   if (meta) {
     const v = document.createElement("div");
@@ -763,6 +807,47 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   tip.append(repoLink);
 
   wrap.append(iconLink, tip);
+
+  let tipPinned = false;
+  const syncPos = (): void => {
+    syncBrandMarkTooltipPosition(iconLink, tip);
+  };
+  const openTooltip = (): void => {
+    if (tipPinned) return;
+    tipPinned = true;
+    tip.classList.add("is-open");
+    syncBrandMarkTooltipPosition(iconLink, tip);
+    window.addEventListener("resize", syncPos);
+    window.addEventListener("scroll", syncPos, true);
+  };
+  const closeTooltip = (): void => {
+    if (!tipPinned) return;
+    tipPinned = false;
+    tip.classList.remove("is-open");
+    tip.style.removeProperty("left");
+    tip.style.removeProperty("top");
+    tip.style.removeProperty("position");
+    tip.style.removeProperty("display");
+    window.removeEventListener("resize", syncPos);
+    window.removeEventListener("scroll", syncPos, true);
+  };
+  wrap.addEventListener("pointerenter", openTooltip);
+  wrap.addEventListener("pointerleave", (ev) => {
+    const rel = ev.relatedTarget as Node | null;
+    if (rel && wrap.contains(rel)) {
+      return;
+    }
+    closeTooltip();
+  });
+  wrap.addEventListener("focusin", () => {
+    openTooltip();
+  });
+  wrap.addEventListener("focusout", (ev) => {
+    if (!wrap.contains(ev.relatedTarget as Node | null)) {
+      closeTooltip();
+    }
+  });
+
   return wrap;
 }
 
@@ -972,6 +1057,34 @@ function start(): void {
   }
   const controller = new DomestiBotController(root);
   void controller.init();
+}
+
+function syncBrandMarkTooltipPosition(anchor: HTMLElement, tip: HTMLElement): void {
+  if (!tip.classList.contains("is-open")) {
+    return;
+  }
+  const margin = 10;
+  const ar = anchor.getBoundingClientRect();
+  tip.style.position = "fixed";
+  tip.style.display = "block";
+  const tw = tip.offsetWidth;
+  const th = tip.offsetHeight;
+  let top = ar.bottom + margin;
+  if (top + th > window.innerHeight - margin) {
+    top = ar.top - th - margin;
+  }
+  let left = ar.left;
+  if (left + tw > window.innerWidth - margin) {
+    left = window.innerWidth - tw - margin;
+  }
+  if (left < margin) {
+    left = margin;
+  }
+  if (top < margin) {
+    top = margin;
+  }
+  tip.style.left = `${Math.round(left)}px`;
+  tip.style.top = `${Math.round(top)}px`;
 }
 
 if (document.readyState === "loading") {
