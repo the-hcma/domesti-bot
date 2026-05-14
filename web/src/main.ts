@@ -1015,14 +1015,25 @@ function initPwaInstallBanner(): void {
   ) {
     return;
   }
-  const mainEl = document.querySelector("main");
-  if (mainEl === null) {
-    return;
-  }
 
   const ios =
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+
+  // Full desktop browsers (fine pointer, no iOS) already promote install in
+  // the chrome UI; keep this hint for phones, tablets, and Safari on iOS/iPadOS.
+  const touchOrNarrow =
+    ios ||
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(max-width: 640px)").matches;
+  if (!touchOrNarrow) {
+    return;
+  }
+
+  const mainEl = document.querySelector("main");
+  if (mainEl === null) {
+    return;
+  }
 
   const banner = document.createElement("aside");
   banner.className = "pwa-install-banner";
