@@ -15,6 +15,21 @@ import type {
 
 const APP_ROOT_ID = "app";
 
+const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
+const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
+
+const THEME_STORAGE_KEY = "domesti-color-theme";
+
+/** Moon icon — shown when UI is light (control switches to dark). */
+const THEME_GLYPH_MOON_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+
+/** Sun icon — shown when UI is dark (control switches to light). */
+const THEME_GLYPH_SUN_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+
+let themeToggleSingleton: HTMLButtonElement | null = null;
+
 /** Chromium-only: deferred until the user taps our Install control. */
 interface PwaBeforeInstallPromptEvent extends Event {
   readonly userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -457,22 +472,25 @@ class DomestiBotController {
     this.root.dataset["connected"] = this.connected ? "true" : "false";
     if (state.families.length > 0) {
       const header = document.createElement("header");
-      header.className = "tile-header";
+      header.className = "tile-header tile-header-global";
       header.append(createBrandMark(this.meta));
+      const actions = document.createElement("div");
+      actions.className = "tile-header-actions";
       const globalBtn = document.createElement("button");
       globalBtn.type = "button";
-      globalBtn.className = "btn btn-danger";
+      globalBtn.className = "btn btn-danger tile-header-global-off";
       globalBtn.textContent = "Turn off / pause / close everything";
       globalBtn.disabled = !this.connected;
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
       });
-      header.append(globalBtn);
+      actions.append(globalBtn, createThemeToggleButton());
+      header.append(actions);
       this.root.append(header);
     } else {
       const emptyHead = document.createElement("header");
       emptyHead.className = "tile-header tile-header-sparse";
-      emptyHead.append(createBrandMark(this.meta));
+      emptyHead.append(createBrandMark(this.meta), createThemeToggleButton());
       this.root.append(emptyHead);
       const panel = document.createElement("section");
       panel.className = "tile-empty-discovery";
@@ -575,7 +593,7 @@ class DomestiBotController {
     this.root.replaceChildren();
     const errHead = document.createElement("header");
     errHead.className = "tile-header tile-header-sparse";
-    errHead.append(createBrandMark(this.meta));
+    errHead.append(createBrandMark(this.meta), createThemeToggleButton());
     this.root.append(errHead);
     const banner = document.createElement("div");
     banner.className = "tile-error";
@@ -599,7 +617,7 @@ class DomestiBotController {
     this.root.replaceChildren();
     const loadHead = document.createElement("header");
     loadHead.className = "tile-header tile-header-sparse";
-    loadHead.append(createBrandMark(this.meta));
+    loadHead.append(createBrandMark(this.meta), createThemeToggleButton());
     this.root.append(loadHead);
     const row = document.createElement("div");
     row.className = "tile-loading-row";
@@ -669,6 +687,32 @@ const FAMILY_ICON_PATHS: Record<string, readonly string[]> = {
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+function applyStoredColorTheme(): void {
+  const raw = localStorage.getItem(THEME_STORAGE_KEY);
+  const t = raw === "light" || raw === "dark" ? raw : null;
+  if (t === null) {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", t);
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta !== null) {
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = t === "dark" || (t === null && systemDark);
+    meta.setAttribute("content", dark ? "#15171a" : "#0a0a0a");
+  }
+  if (themeToggleSingleton !== null) {
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const darkNow = t === "dark" || (t === null && systemDark);
+    themeToggleSingleton.innerHTML = darkNow ? THEME_GLYPH_SUN_SVG : THEME_GLYPH_MOON_SVG;
+    const title = darkNow
+      ? "Switch to light appearance"
+      : "Switch to dark appearance";
+    themeToggleSingleton.title = title;
+    themeToggleSingleton.setAttribute("aria-label", title);
+  }
+}
 
 function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   // What the backend's bulk-off endpoints actually drive each device
@@ -751,6 +795,7 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
 
   const head = document.createElementNS(SVG_NS, "rect");
   head.setAttribute("class", "brand-mark-bm-head");
+  head.setAttribute("fill", "none");
   head.setAttribute("x", "4.8");
   head.setAttribute("y", "3.35");
   head.setAttribute("width", "14.4");
@@ -761,7 +806,7 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   head.setAttribute("stroke-linejoin", "round");
 
   const antennaRod = document.createElementNS(SVG_NS, "line");
-  antennaRod.setAttribute("class", "brand-mark-bm-antenna");
+  antennaRod.setAttribute("class", "brand-mark-bm-antenna-rod");
   antennaRod.setAttribute("x1", "12");
   antennaRod.setAttribute("y1", "3.35");
   antennaRod.setAttribute("x2", "12");
@@ -770,7 +815,7 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   antennaRod.setAttribute("stroke-linecap", "round");
 
   const antennaBall = document.createElementNS(SVG_NS, "circle");
-  antennaBall.setAttribute("class", "brand-mark-bm-antenna");
+  antennaBall.setAttribute("class", "brand-mark-bm-antenna-ball");
   antennaBall.setAttribute("cx", "12");
   antennaBall.setAttribute("cy", "0.55");
   antennaBall.setAttribute("r", "0.85");
@@ -926,8 +971,34 @@ function createFamilyIcon(familyId: string): SVGElement | null {
   return svg;
 }
 
+function createThemeToggleButton(): HTMLButtonElement {
+  if (themeToggleSingleton !== null) {
+    return themeToggleSingleton;
+  }
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-theme-toggle";
+  btn.addEventListener("click", () => {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    const explicit = raw === "light" || raw === "dark" ? raw : null;
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const darkNow = explicit === "dark" || (explicit === null && systemDark);
+    localStorage.setItem(THEME_STORAGE_KEY, darkNow ? "light" : "dark");
+    applyStoredColorTheme();
+  });
+  const mql = window.matchMedia("(prefers-color-scheme: dark)");
+  mql.addEventListener("change", () => {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (raw !== "light" && raw !== "dark") {
+      applyStoredColorTheme();
+    }
+  });
+  themeToggleSingleton = btn;
+  applyStoredColorTheme();
+  return btn;
+}
+
 function initPwaInstallBanner(): void {
-  const PWA_DISMISS = "domesti-pwa-install-dismissed";
   if (window.matchMedia("(display-mode: standalone)").matches) {
     return;
   }
@@ -935,17 +1006,34 @@ function initPwaInstallBanner(): void {
   if (nav.standalone === true) {
     return;
   }
-  if (sessionStorage.getItem(PWA_DISMISS) === "1") {
+  if (localStorage.getItem(PWA_INSTALL_DISMISS_PERMANENT_KEY) === "1") {
     return;
   }
-  const mainEl = document.querySelector("main");
-  if (mainEl === null) {
+  if (
+    sessionStorage.getItem(PWA_INSTALL_DISMISS_SESSION_KEY) === "1" ||
+    sessionStorage.getItem("domesti-pwa-install-dismissed") === "1"
+  ) {
     return;
   }
 
   const ios =
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+
+  // Full desktop browsers (fine pointer, no iOS) already promote install in
+  // the chrome UI; keep this hint for phones, tablets, and Safari on iOS/iPadOS.
+  const touchOrNarrow =
+    ios ||
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(max-width: 640px)").matches;
+  if (!touchOrNarrow) {
+    return;
+  }
+
+  const mainEl = document.querySelector("main");
+  if (mainEl === null) {
+    return;
+  }
 
   const banner = document.createElement("aside");
   banner.className = "pwa-install-banner";
@@ -961,6 +1049,17 @@ function initPwaInstallBanner(): void {
     ? "In Safari, tap the Share button, then Add to Home Screen to open this dashboard like an app."
     : "Add this page to your home screen for quick access. When your browser offers it, tap Install below.";
 
+  const persistRow = document.createElement("div");
+  persistRow.className = "pwa-install-persist-row";
+  const persistCb = document.createElement("input");
+  persistCb.type = "checkbox";
+  persistCb.id = "pwa-install-do-not-ask";
+  persistCb.className = "pwa-install-persist-cb";
+  const persistLabel = document.createElement("label");
+  persistLabel.className = "pwa-install-persist-label";
+  persistLabel.htmlFor = "pwa-install-do-not-ask";
+  persistLabel.textContent = "Do not ask again";
+
   const actions = document.createElement("div");
   actions.className = "pwa-install-actions";
 
@@ -973,7 +1072,7 @@ function initPwaInstallBanner(): void {
   const dismissBtn = document.createElement("button");
   dismissBtn.type = "button";
   dismissBtn.className = "btn pwa-dismiss-btn";
-  dismissBtn.textContent = "Not now";
+  dismissBtn.textContent = "Dismiss";
 
   let deferred: PwaBeforeInstallPromptEvent | null = null;
 
@@ -984,7 +1083,11 @@ function initPwaInstallBanner(): void {
   };
 
   const dismiss = (): void => {
-    sessionStorage.setItem(PWA_DISMISS, "1");
+    if (persistCb.checked) {
+      localStorage.setItem(PWA_INSTALL_DISMISS_PERMANENT_KEY, "1");
+    } else {
+      sessionStorage.setItem(PWA_INSTALL_DISMISS_SESSION_KEY, "1");
+    }
     banner.remove();
     if (!ios) {
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
@@ -1008,8 +1111,9 @@ function initPwaInstallBanner(): void {
 
   dismissBtn.addEventListener("click", dismiss);
 
+  persistRow.append(persistCb, persistLabel);
   actions.append(installBtn, dismissBtn);
-  banner.append(title, copy, actions);
+  banner.append(title, copy, persistRow, actions);
   mainEl.insertBefore(banner, mainEl.firstChild);
 }
 
@@ -1054,21 +1158,21 @@ function renderDevice(
   if (device.kind === "switch") {
     isActive = device.state === "on";
     actionLabel = isActive ? "Turn it off" : "Turn it on";
-    excludeText = "Exclude from global all-off";
+    excludeText = "Exclude from all-off";
     toggle.addEventListener("click", () => {
       controller.toggleKasaTile(device);
     });
   } else if (device.kind === "speaker") {
     isActive = device.state === "playing";
     actionLabel = isActive ? "Pause it" : "Resume it";
-    excludeText = "Exclude from global pause-all";
+    excludeText = "Exclude from pause-all";
     toggle.addEventListener("click", () => {
       controller.toggleSonosTile(device);
     });
   } else {
     isActive = device.state === "open";
     actionLabel = isActive ? "Close it" : "Open it";
-    excludeText = "Exclude from global close-all";
+    excludeText = "Exclude from close-all";
     toggle.addEventListener("click", () => {
       controller.operateTailwindTile(device);
     });
@@ -1182,6 +1286,7 @@ function removeJsBootHint(): void {
 
 function start(): void {
   removeJsBootHint();
+  applyStoredColorTheme();
   initPwaInstallBanner();
   registerServiceWorker();
   const root = document.getElementById(APP_ROOT_ID);

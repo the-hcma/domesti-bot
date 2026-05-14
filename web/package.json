@@ -5,13 +5,14 @@
   "description": "Browser bundle for the domesti-bot HTTP API.",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node scripts/rasterize-pwa-icons.mjs && node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "check": "pnpm run typecheck && pnpm run build"
   },
   "devDependencies": {
     "esbuild": "0.28.0",
+    "sharp": "^0.34.5",
     "typescript": "6.0.3"
   },
   "packageManager": "pnpm@10.33.4",
@@ -20,7 +21,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "sharp"
     ]
   }
 }

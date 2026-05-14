@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>
+    .bm-body { fill: #7e57c2; stroke: #311b92; stroke-width: 1.15; stroke-linejoin: round; }
+    .bm-neck { fill: #6a1b9a; stroke: #311b92; stroke-width: 0.9; stroke-linejoin: round; }
+    .bm-apron { fill: #ffca28; stroke: #e65100; stroke-width: 1.05; stroke-linejoin: round; }
+    .bm-waist { fill: none; stroke: #4a148c; stroke-width: 1.05; stroke-linecap: round; }
+    .bm-head { fill: none; stroke: #1a237e; stroke-width: 1.2; stroke-linejoin: round; }
+    .bm-ant { fill: #3949ab; stroke: #1a237e; stroke-width: 0.55; }
+    .bm-ant-line { fill: none; stroke: #1a237e; stroke-width: 1.15; stroke-linecap: round; }
+    .bm-eye { fill: #ffffff; stroke: #263238; stroke-width: 0.42; }
+    .bm-mouth { fill: none; stroke: #263238; stroke-width: 0.55; stroke-linecap: round; }
+  </style>
+  <rect class="bm-body" x="5.5" y="12.8" width="13" height="10" rx="2.5"/>
+  <path class="bm-apron" d="M6 13.2 L18 13.2 L17.2 20.8 Q12 22.4 6.8 20.8 Z"/>
+  <path class="bm-waist" d="M7.5 18.5h9"/>
+  <rect class="bm-neck" x="9.4" y="11.4" width="5.2" height="2.4" rx="0.9"/>
+  <rect class="bm-head" x="4.8" y="3.35" width="14.4" height="9.05" rx="3.2"/>
+  <line class="bm-ant-line" x1="12" y1="3.35" x2="12" y2="0.65"/>
+  <circle class="bm-ant" cx="12" cy="0.55" r="0.85"/>
+  <circle class="bm-eye" cx="9.15" cy="7.05" r="1.22"/>
+  <circle class="bm-eye" cx="14.85" cy="7.05" r="1.22"/>
+  <path class="bm-mouth" d="M8.15 9.35 Q12 11.05 15.85 9.35"/>
+</svg>
