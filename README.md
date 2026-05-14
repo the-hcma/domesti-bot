@@ -125,7 +125,7 @@ uv sync
 
 # The full set of CI gates, in the order they run on every PR:
 uv run pyright                       # type errors over app/, config/, scripts/, tests/
-uv run pytest -m "not integration"   # hermetic test suite
+uv run pytest -m "not integration" -n auto   # hermetic (parallel; matches CI)
 shellcheck $(git ls-files scripts production/scripts | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$')
 
 # Frontend, when web/src/ is touched:

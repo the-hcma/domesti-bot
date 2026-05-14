@@ -20,6 +20,7 @@ dependencies = [
     "pyright",
     "pytest",
     "pytest-asyncio",
+    "pytest-xdist>=3.8.0",
     "python-kasa",
     "soco>=0.30",
     "uvicorn[standard]>=0.46.0",
