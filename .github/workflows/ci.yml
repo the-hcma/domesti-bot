@@ -115,7 +115,10 @@ jobs:
         run: uv sync
 
       - name: Run pytest (skip integration / LAN hardware tests)
-        run: uv run pytest -m "not integration"
+        # ``pytest-xdist`` parallelizes across CPU cores (``-n auto``) so CI
+        # stays fast as the hermetic suite grows. Hermetic tests must remain
+        # process-safe (no fixed ports, no shared mutable globals).
+        run: uv run pytest -m "not integration" -n auto
 
   shellcheck:
     name: Shellcheck

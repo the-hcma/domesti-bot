@@ -142,6 +142,7 @@ domesti-bot/
 - **`pytest`** is the framework. Configuration lives in the `[tool.pytest.ini_options]` block of `pyproject.toml`:
   - `testpaths = ["tests/python"]` — pytest discovery is scoped to the canonical test root.
   - `asyncio_mode = "auto"` — `async def test_*` works without `@pytest.mark.asyncio`. Continue using the explicit decorator for clarity in existing files where it is already present.
+  - **Parallel hermetic runs** — CI and the pre-PR gate use **`pytest-xdist`** with **`-n auto`** so the hermetic suite spreads across CPU cores (`uv run pytest -m "not integration" -n auto`). Omit **`-n auto`** when you need a single process (e.g. `pdb`). New tests must stay **process-safe**: no fixed listen ports, no reliance on a shared mutable module global without a lock, no accidental dependence on collection order across workers.
   - Tests import application code via the full package path: `from app.kasa_device_manager import KasaDeviceManager` (never `from kasa_device_manager import ...`).
   - Mock patch targets follow the same rule: `patch("app.androidtv_device_manager._discover_cast_infos_sync", ...)` — patching by the symbol's defining module, with the full dotted path.
 - **Integration tests** that exercise real LAN hardware are marked `@pytest.mark.integration` and skipped by default in CI/local quick runs. Document required env vars (e.g. `KASA_USERNAME`, `TAILWIND_TOKEN`) at the top of the test file.
@@ -157,9 +158,10 @@ domesti-bot/
 
 Run the suite:
 ```
-uv run pytest -m "not integration"     # fast / hermetic
-uv run pytest                          # full suite
-uv run pytest -m integration           # LAN hardware only
+uv run pytest -m "not integration" -n auto   # hermetic, mirrors CI (parallel)
+uv run pytest -m "not integration"          # hermetic, single-process (pdb / isolation)
+uv run pytest                                 # full suite
+uv run pytest -m integration                  # LAN hardware only
 ```
 
 ---
@@ -371,7 +373,7 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 1. **Pre-PR quality gates** — all must pass locally before submit (these mirror the CI jobs in `.github/workflows/ci.yml`):
    ```
    uv run pyright                          # type errors over app/, config/, scripts/, tests/
-   uv run pytest -m "not integration"      # hermetic tests under tests/python/
+   uv run pytest -m "not integration" -n auto   # hermetic tests (matches CI parallelism)
    shellcheck $(git ls-files scripts | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$')
    uv run --with pip-audit pip-audit       # CVE check (daily in CI; nice locally too)
    ```
@@ -479,7 +481,7 @@ CI lives in `.github/workflows/`:
 
 - **`ci.yml`** — runs on every PR (skipping merge-queue staging branches and already-merged PRs):
   - `Pyright` — `uv run pyright`
-  - `Pytest (hermetic)` — `uv run pytest -m "not integration"`
+  - `Pytest (hermetic)` — `uv run pytest -m "not integration" -n auto` (**pytest-xdist**)
   - `Shellcheck` — every no-extension script under `scripts/`
   - `Web (typecheck + build)` — `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm run build`, asserts `app/api/static/dist/main.js` exists
   - `Workflow Lint (actionlint)` — validates the YAML in `.github/workflows/`
@@ -503,7 +505,7 @@ No PR may be merged with a failing CI check.
 Before every commit (mirrors the CI gates above):
 
 - [ ] `uv run pyright` — passes with no new errors
-- [ ] `uv run pytest -m "not integration"` — green, no warnings
+- [ ] `uv run pytest -m "not integration" -n auto` — green, no warnings (or single-process without `-n auto` when debugging)
 - [ ] `shellcheck` clean on any modified shell scripts
 - [ ] `actionlint` clean on any modified workflow files (`uvx actionlint` or the binary)
 - [ ] If any `web/` source changed: `cd web && pnpm run check` (typecheck + build) is green
