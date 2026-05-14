@@ -49,24 +49,32 @@
       justify-content: space-between; gap: 8px 12px; padding: 0 4px; }
     .tile-header-sparse { justify-content: flex-start; }
     .brand-mark { position: relative; display: inline-flex;
-      flex: 0 0 auto; align-items: center; color: var(--muted); }
-    .brand-mark-icon-link { display: inline-flex; align-items: center;
-      color: inherit; text-decoration: none; border-radius: 6px;
-      cursor: pointer; }
+      flex: 0 0 auto; flex-shrink: 0; align-items: center; color: var(--muted); }
+    .brand-mark-icon-link { display: inline-flex; flex-shrink: 0;
+      align-items: center; color: inherit; text-decoration: none;
+      border-radius: 6px; cursor: pointer; }
     .brand-mark-icon-link:hover { color: var(--fg); }
     .brand-mark-icon-link:focus-visible { outline: 2px solid var(--accent);
       outline-offset: 2px; }
-    .brand-mark-svg { width: 30px; height: 30px; display: block; }
-    .brand-mark-bm-head { fill: #5c6bc0; stroke: #1a237e; }
-    .brand-mark-bm-eye { fill: #eceff1; stroke: none; }
+    .brand-mark-svg { width: 30px; height: 30px; display: block;
+      flex-shrink: 0; }
     .brand-mark-bm-body { fill: #7e57c2; stroke: #311b92; }
+    .brand-mark-bm-neck { fill: #6a1b9a; stroke: #311b92; }
     .brand-mark-bm-apron { fill: #ffca28; stroke: #e65100; }
+    .brand-mark-bm-head { fill: #5c6bc0; stroke: #1a237e; }
+    .brand-mark-bm-antenna { fill: #3949ab; stroke: #1a237e; }
+    .brand-mark-bm-eye { fill: #ffffff; stroke: #263238; stroke-width: 0.42; }
+    .brand-mark-bm-mouth { fill: none; stroke: #263238; stroke-width: 0.55;
+      stroke-linecap: round; }
     .brand-mark-bm-waist { fill: none; stroke: #4a148c; }
     @media (prefers-color-scheme: dark) {
-      .brand-mark-bm-head { fill: #9fa8da; stroke: #283593; }
-      .brand-mark-bm-eye { fill: #1a237e; }
       .brand-mark-bm-body { fill: #b39ddb; stroke: #4a148c; }
+      .brand-mark-bm-neck { fill: #7e57c2; stroke: #4a148c; }
       .brand-mark-bm-apron { fill: #ffe082; stroke: #ff6f00; }
+      .brand-mark-bm-head { fill: #9fa8da; stroke: #283593; }
+      .brand-mark-bm-antenna { fill: #5c6bc0; stroke: #283593; }
+      .brand-mark-bm-eye { fill: #eceff1; stroke: #1a237e; stroke-width: 0.42; }
+      .brand-mark-bm-mouth { stroke: #c5cae9; stroke-width: 0.55; }
       .brand-mark-bm-waist { stroke: #e1bee7; }
     }
     /* Tooltip is ``position: fixed`` from JS so it stays inside the viewport
@@ -104,6 +112,20 @@
       color: var(--muted); line-height: 1.5; }
     .tile-empty-discovery li { margin: 4px 0; }
     .tile-empty-discovery a { color: var(--accent); }
+    /* PWA install hint — ``main.ts`` mounts this when not running standalone. */
+    .pwa-install-banner { margin: 0 0 12px; padding: 10px 12px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06); }
+    .pwa-install-banner-title { margin: 0 0 6px; font-size: 14px;
+      font-weight: 600; color: var(--fg); }
+    .pwa-install-banner-copy { margin: 0 0 8px; font-size: 13px;
+      color: var(--muted); line-height: 1.45; }
+    .pwa-install-actions { display: flex; flex-wrap: wrap; gap: 8px;
+      align-items: center; }
+    .pwa-install-btn { background: var(--accent); color: #fff;
+      border-color: transparent; }
+    .pwa-install-btn:focus-visible { outline: 2px solid var(--accent);
+      outline-offset: 2px; }
     /* Spinner rendered while the backend is still discovering devices
        (the FastAPI lifespan defers discovery and ``/v1/ui/state``
        returns 503 + ``detail: "still in progress"`` until it lands).

@@ -339,6 +339,11 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 - **Validate user-controlled paths** (REPL filenames, future upload endpoints) with `pathlib.Path.resolve()` before any filesystem operation; reject paths that escape the working directory.
 - **No `eval`, `exec`, or `subprocess.run(..., shell=True)`** with user-controlled strings.
 - **Passwords / tokens never appear in shell command arguments** — they end up in `~/.bash_history` and in `ps aux`. Pass them via stdin, environment variables loaded from root-readable files, or systemd `EnvironmentFile=`.
+- **Persisting `TAILWIND_TOKEN` (and similar) for a systemd service** — pick one:
+  - **`EnvironmentFile=`** on the unit (or a **drop-in** via `systemctl edit`): path to a mode-`600` file owned by root or the service user, one `KEY=value` per line. Keeps secrets out of `ExecStart=` and the main unit file; rotate by replacing the file and restarting.
+  - **User units**: `~/.config/environment.d/*.conf` exports variables for `systemctl --user` sessions after `daemon-reload` / re-login (see systemd.environment-generator(7)); still keep the file private to that user.
+  - **`LoadCredential=` / credential pick-up** (systemd 247+): store the token in a root-only file and pass it via the credentials protocol if the process is taught to read `$CREDENTIALS_DIRECTORY` — the stock launcher today reads **environment only**, so this path needs small launcher glue before it is turnkey.
+  - **Avoid** plain `Environment=TAILWIND_TOKEN=…` in a shared or world-readable unit: it is easy to leak via `systemctl cat` copies and process listings.
 
 ---
 
