@@ -2291,7 +2291,7 @@ def build_arg_parser(*, add_help: bool = True) -> argparse.ArgumentParser:
         metavar="URL",
         help=(
             "Use a remote domesti HTTP API instead of local hardware "
-            "(e.g. http://192.168.1.10:8765). Also DEVICE_MANAGER_API_URL."
+            "(e.g. http://192.168.1.10:8003). Also DEVICE_MANAGER_API_URL."
         ),
     )
     p.add_argument(

@@ -2,7 +2,7 @@
 #
 # Start the domesti-bot HTTP API (FastAPI + uvicorn).
 #
-# Logging strategy mirrors my-tracks (see docs/AGENTS.md): timestamps in the
+# Logging behavior is documented in docs/AGENTS.md: timestamps in the
 # system timezone, a single line per event, optional rotating file output, and
 # `--console` for dual logging during development.
 #
@@ -28,7 +28,7 @@
 # Examples:
 #   ./scripts/domesti-bot-server
 #   ./scripts/domesti-bot-server --console --log-level debug
-#   ./scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8765
+#   ./scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8003
 #   ./scripts/domesti-bot-server --no-browser --no-log-file --log-level debug
 
 set -euo pipefail
@@ -127,9 +127,8 @@ else
   if [[ -n "$log_file_override" ]]; then
     log_file="$log_file_override"
   else
-    # Mirror the my-tracks convention: per-user scratch tree outside the repo
-    # so log rotation never lands on a tracked file. Matches my-tracks's
-    # default ${HOME}/scratch/my-tracks/my-tracks.log.
+    # Default log path: per-user scratch tree outside the repo so rotation
+    # never writes under a tracked directory.
     log_file="${HOME}/scratch/domesti-bot/domesti-bot.log"
   fi
   mkdir -p "$(dirname "$log_file")"

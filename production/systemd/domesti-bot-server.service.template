@@ -12,6 +12,10 @@
 # repository-helpers setup-service: substitute @@REPO_ROOT@@ and @@SERVICE_USER@@ (or
 # configure equivalent token mapping) before copying to /etc/systemd/system/.
 #
+# Production listen port is 8003 (same pattern as fpdf's systemd unit: a fixed
+# loopback port in ExecStart plus ExecStartPost curling /health on that port).
+# If you change the port in ExecStart, update ExecStartPost to match.
+#
 # Optional: set DOMESTI_API_KEY in the environment for authenticated clients, or add an
 # EnvironmentFile= line pointing at a root-only file.
 
@@ -24,9 +28,12 @@ Wants=network-online.target
 Type=simple
 User=@@SERVICE_USER@@
 WorkingDirectory=@@REPO_ROOT@@
-ExecStart=@@REPO_ROOT@@/scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8765 --no-browser
+ExecStart=@@REPO_ROOT@@/scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8003 --no-browser
 Restart=on-failure
 RestartSec=5
+
+# Smoke the bound port after the process starts (mirrors fpdf's ExecStartPost pattern).
+ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
 
 # Hardening (safe for this workload; adjust if you add writable paths outside the repo).
 NoNewPrivileges=yes
