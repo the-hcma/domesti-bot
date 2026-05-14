@@ -15,7 +15,18 @@ import type {
 
 const APP_ROOT_ID = "app";
 
+const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
+const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
+
 const THEME_STORAGE_KEY = "domesti-color-theme";
+
+/** Moon icon — shown when UI is light (control switches to dark). */
+const THEME_GLYPH_MOON_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+
+/** Sun icon — shown when UI is dark (control switches to light). */
+const THEME_GLYPH_SUN_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
 
 let themeToggleSingleton: HTMLButtonElement | null = null;
 
@@ -694,7 +705,7 @@ function applyStoredColorTheme(): void {
   if (themeToggleSingleton !== null) {
     const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const darkNow = t === "dark" || (t === null && systemDark);
-    themeToggleSingleton.textContent = darkNow ? "Light" : "Dark";
+    themeToggleSingleton.innerHTML = darkNow ? THEME_GLYPH_SUN_SVG : THEME_GLYPH_MOON_SVG;
     const title = darkNow
       ? "Switch to light appearance"
       : "Switch to dark appearance";
@@ -988,7 +999,6 @@ function createThemeToggleButton(): HTMLButtonElement {
 }
 
 function initPwaInstallBanner(): void {
-  const PWA_DISMISS = "domesti-pwa-install-dismissed";
   if (window.matchMedia("(display-mode: standalone)").matches) {
     return;
   }
@@ -996,7 +1006,13 @@ function initPwaInstallBanner(): void {
   if (nav.standalone === true) {
     return;
   }
-  if (sessionStorage.getItem(PWA_DISMISS) === "1") {
+  if (localStorage.getItem(PWA_INSTALL_DISMISS_PERMANENT_KEY) === "1") {
+    return;
+  }
+  if (
+    sessionStorage.getItem(PWA_INSTALL_DISMISS_SESSION_KEY) === "1" ||
+    sessionStorage.getItem("domesti-pwa-install-dismissed") === "1"
+  ) {
     return;
   }
   const mainEl = document.querySelector("main");
@@ -1022,6 +1038,17 @@ function initPwaInstallBanner(): void {
     ? "In Safari, tap the Share button, then Add to Home Screen to open this dashboard like an app."
     : "Add this page to your home screen for quick access. When your browser offers it, tap Install below.";
 
+  const persistRow = document.createElement("div");
+  persistRow.className = "pwa-install-persist-row";
+  const persistCb = document.createElement("input");
+  persistCb.type = "checkbox";
+  persistCb.id = "pwa-install-do-not-ask";
+  persistCb.className = "pwa-install-persist-cb";
+  const persistLabel = document.createElement("label");
+  persistLabel.className = "pwa-install-persist-label";
+  persistLabel.htmlFor = "pwa-install-do-not-ask";
+  persistLabel.textContent = "Do not ask again";
+
   const actions = document.createElement("div");
   actions.className = "pwa-install-actions";
 
@@ -1034,7 +1061,7 @@ function initPwaInstallBanner(): void {
   const dismissBtn = document.createElement("button");
   dismissBtn.type = "button";
   dismissBtn.className = "btn pwa-dismiss-btn";
-  dismissBtn.textContent = "Not now";
+  dismissBtn.textContent = "Dismiss";
 
   let deferred: PwaBeforeInstallPromptEvent | null = null;
 
@@ -1045,7 +1072,11 @@ function initPwaInstallBanner(): void {
   };
 
   const dismiss = (): void => {
-    sessionStorage.setItem(PWA_DISMISS, "1");
+    if (persistCb.checked) {
+      localStorage.setItem(PWA_INSTALL_DISMISS_PERMANENT_KEY, "1");
+    } else {
+      sessionStorage.setItem(PWA_INSTALL_DISMISS_SESSION_KEY, "1");
+    }
     banner.remove();
     if (!ios) {
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
@@ -1069,8 +1100,9 @@ function initPwaInstallBanner(): void {
 
   dismissBtn.addEventListener("click", dismiss);
 
+  persistRow.append(persistCb, persistLabel);
   actions.append(installBtn, dismissBtn);
-  banner.append(title, copy, actions);
+  banner.append(title, copy, persistRow, actions);
   mainEl.insertBefore(banner, mainEl.firstChild);
 }
 

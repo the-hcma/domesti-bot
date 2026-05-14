@@ -77,6 +77,10 @@
     .tile-header-actions { display: flex; flex: 1 1 auto; align-items: stretch;
       justify-content: flex-end; gap: 8px; min-width: 0; }
     .tile-header-global-off { flex: 1 1 auto; min-width: 0; white-space: normal; }
+    .btn-theme-toggle { display: inline-flex; align-items: center;
+      justify-content: center; min-width: 44px; min-height: 44px;
+      padding: 6px; color: var(--fg); }
+    .btn-theme-toggle svg { display: block; }
     .btn-theme-toggle { flex: 0 0 auto; flex-shrink: 0; white-space: nowrap; }
     .brand-mark { position: relative; display: inline-flex;
       flex: 0 0 auto; flex-shrink: 0; align-items: center; color: var(--muted); }
@@ -163,6 +167,12 @@
       color: var(--muted); line-height: 1.45; }
     .pwa-install-actions { display: flex; flex-wrap: wrap; gap: 8px;
       align-items: center; }
+    .pwa-install-persist-row { display: flex; align-items: center; gap: 8px;
+      margin: 0 0 10px; }
+    .pwa-install-persist-cb { width: 18px; height: 18px; flex-shrink: 0;
+      cursor: pointer; }
+    .pwa-install-persist-label { font-size: 13px; color: var(--muted);
+      cursor: pointer; user-select: none; }
     .pwa-install-btn { background: var(--accent); color: #fff;
       border-color: transparent; }
     .pwa-install-btn:focus-visible { outline: 2px solid var(--accent);
@@ -215,6 +225,16 @@
       transition: border-color 200ms ease-in-out; }
     .family[data-connected="true"] { border-color: var(--accent); }
     .family[data-connected="false"] { border-color: var(--danger); }
+    @media (prefers-color-scheme: light) {
+      html:not([data-theme]) .family {
+        background: color-mix(in srgb, var(--family-color, var(--muted)) 16%,
+          var(--card));
+      }
+    }
+    html[data-theme="light"] .family {
+      background: color-mix(in srgb, var(--family-color, var(--muted)) 16%,
+        var(--card));
+    }
     .family-header { display: flex; flex-wrap: wrap; align-items: center;
       justify-content: space-between; gap: 8px 12px;
       padding-bottom: 10px; border-bottom: 1px solid var(--border);
