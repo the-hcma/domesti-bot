@@ -412,6 +412,15 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 - Manual runs for debugging: `./scripts/domesti-bot-server` (forwards all flags to `python -m config.serve`).
 - **Do not curl/HTTP against the running production port (8003) during automated testing.** Tests must exercise the ASGI app directly via `httpx.AsyncClient(app=app)` so they cannot collide with the live server.
 
+### Blank browser / empty `#app` on a real host
+
+Typical causes (check in order):
+
+1. **Wrong URL or bind address** — If the unit still used loopback-only (`127.0.0.1`) and you open `http://<this-host's-LAN-IP>:8003/` from another machine, the connection never reaches the process. The `etc/systemd` unit uses `--listen-all` so `0.0.0.0:8003` accepts LAN clients; confirm with `ss -ltnp | grep 8003` (or `lsof -iTCP:8003 -sTCP:LISTEN`). Firewall rules must allow TCP **8003** on the interfaces you use.
+2. **Missing web bundle** — `GET /` returns HTML immediately, but the tile UI lives in `app/api/static/dist/main.js` (gitignored). If that file was never built, the browser shows an empty shell until the static boot hint (or nothing, on older HTML). Run `setup-service` so `scripts/on-deploy` runs `pnpm run build` in `web/`, or build manually once: `cd web && pnpm install --frozen-lockfile && pnpm run build`. Confirm `GET /static/dist/main.js` returns **200** (not **404**).
+3. **`on-deploy` exit 1 (no restart)** — When the deployed Git SHA matches the last successful `on-deploy` cache, the hook exits **1** and `setup-service` skips restarting the unit. That does **not** skip the first-ever install, but if you copied a tree without rebuilding and the SHA file already matched, you could still lack `dist/`. Run `./scripts/on-deploy --force` once, or delete `$HOME/scratch/domesti-bot/on-deploy-sha` and rerun `setup-service`.
+4. **API key** — With `DOMESTI_API_KEY` set, unauthenticated browser calls to protected JSON routes return **401**; the shell still loads if the bundle exists. Open `GET /health` (no key) to verify HTTP, then configure the key in the client or relax auth for debugging only.
+
 ### Discovery Cache (cache-first startup)
 
 Device discovery is **cache-first**: the LAN probe runs only when the SQLite discovery cache (`$HOME/.cache/rule-engine/device_discovery.sqlite` by default; override with `--discovery-cache`) is empty for that backend or the cached state fails to reconnect. Pass `--force-discovery` to bypass the cache for all backends.

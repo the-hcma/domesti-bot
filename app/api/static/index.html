@@ -201,6 +201,12 @@
     }
     .tile-exclude:has(input:disabled) { cursor: not-allowed; opacity: 0.7; }
 
+    /* Shown until ``main.ts`` removes this node; if the module bundle 404s,
+       the user still sees why the screen stayed blank. */
+    .boot-js-hint { color: var(--muted); font-size: 14px; line-height: 1.5;
+      max-width: 42rem; padding: 8px 4px 0; }
+    .boot-js-hint code { font-size: 13px; }
+
     /* Phone viewport: < 600px (covers iPhone SE through Pro Max in
        portrait). Goals:
        * collapse the outer chrome so tiles take the full screen width;
@@ -225,7 +231,19 @@
 </head>
 <body>
   <main>
-    <div id="app"></div>
+    <div id="app">
+      <noscript>
+        <p class="tile-loading">JavaScript is required for the domesti-bot control panel.</p>
+      </noscript>
+      <div id="app-js-boot-hint" class="boot-js-hint">
+        <p>Loading the control panel…</p>
+        <p>If this message stays visible, the UI script did not load. The server is
+          probably missing <code>app/api/static/dist/main.js</code>. From the repo run
+          <code>cd web &amp;&amp; pnpm install --frozen-lockfile &amp;&amp; pnpm run build</code>,
+          or rerun <code>setup-service</code> so <code>scripts/on-deploy</code> builds the bundle.</p>
+        <p>Open <a href="/health"><code>/health</code></a> to verify the API responds.</p>
+      </div>
+    </div>
   </main>
   <script type="module" src="/static/dist/main.js"></script>
 </body>

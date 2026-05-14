@@ -937,6 +937,10 @@ function renderFamily(
   return section;
 }
 
+function removeJsBootHint(): void {
+  document.getElementById("app-js-boot-hint")?.remove();
+}
+
 function registerServiceWorker(): void {
   if (!("serviceWorker" in navigator)) {
     return;
@@ -959,6 +963,7 @@ function registerServiceWorker(): void {
 }
 
 function start(): void {
+  removeJsBootHint();
   registerServiceWorker();
   const root = document.getElementById(APP_ROOT_ID);
   if (!root) {
