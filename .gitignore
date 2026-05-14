@@ -1,6 +1,10 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Local git worktrees; never commit as nested repo entries.
+.worktrees/
+
 *.sqlite
 *.sqlite-journal
 __pycache__/
