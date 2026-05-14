@@ -3,9 +3,8 @@
 # scripts/on-deploy - Build hook called by setup-service before starting or
 # restarting the domesti-bot-server systemd unit.
 #
-# Path convention matches my-tracks/scripts/on-deploy so the shared
-# `~/work/ai/repository-helpers/scripts/setup-service` tool can call it without
-# per-project configuration.
+# Installed at this path so `~/work/ai/repository-helpers/scripts/setup-service`
+# can invoke it without per-repo configuration.
 #
 # Exit-code contract (required by setup-service):
 #   0  — steps were executed; the unit must be restarted to pick up changes.

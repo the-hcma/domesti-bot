@@ -1,4 +1,4 @@
-"""Tests for :mod:`app.logging_config` — ensure my-tracks parity."""
+"""Tests for :mod:`app.logging_config` (formatters, filters, env wiring)."""
 
 from __future__ import annotations
 
