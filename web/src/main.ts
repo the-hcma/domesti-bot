@@ -700,7 +700,7 @@ function applyStoredColorTheme(): void {
   if (meta !== null) {
     const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const dark = t === "dark" || (t === null && systemDark);
-    meta.setAttribute("content", dark ? "#15171a" : "#2e7d32");
+    meta.setAttribute("content", dark ? "#15171a" : "#0a0a0a");
   }
   if (themeToggleSingleton !== null) {
     const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -1147,21 +1147,21 @@ function renderDevice(
   if (device.kind === "switch") {
     isActive = device.state === "on";
     actionLabel = isActive ? "Turn it off" : "Turn it on";
-    excludeText = "Exclude from global all-off";
+    excludeText = "Exclude from all-off";
     toggle.addEventListener("click", () => {
       controller.toggleKasaTile(device);
     });
   } else if (device.kind === "speaker") {
     isActive = device.state === "playing";
     actionLabel = isActive ? "Pause it" : "Resume it";
-    excludeText = "Exclude from global pause-all";
+    excludeText = "Exclude from pause-all";
     toggle.addEventListener("click", () => {
       controller.toggleSonosTile(device);
     });
   } else {
     isActive = device.state === "open";
     actionLabel = isActive ? "Close it" : "Open it";
-    excludeText = "Exclude from global close-all";
+    excludeText = "Exclude from close-all";
     toggle.addEventListener("click", () => {
       controller.operateTailwindTile(device);
     });

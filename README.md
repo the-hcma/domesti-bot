@@ -92,8 +92,8 @@ After starting the server, the landing page hydrates a tile UI:
   (every 5 seconds).
 - Per-family bulk button (`Turn off all`, `Pause all`, `Close all`) and a
   global `Turn off / pause / close everything` button at the top.
-- Per-tile "Exclude from global all-off" checkbox so the global bulk action
-  skips devices you don't want it touching.
+- Per-tile "Exclude from all-off" (and analogous) checkbox so the top-of-page
+  bulk action skips devices you don't want it touching.
 - Connectivity indicator: family frames turn red when the backend is
   unreachable; all controls grey out until the next poll succeeds.
 
