@@ -15,6 +15,10 @@ import type {
 
 const APP_ROOT_ID = "app";
 
+const THEME_STORAGE_KEY = "domesti-color-theme";
+
+let themeToggleSingleton: HTMLButtonElement | null = null;
+
 /** Chromium-only: deferred until the user taps our Install control. */
 interface PwaBeforeInstallPromptEvent extends Event {
   readonly userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -457,22 +461,25 @@ class DomestiBotController {
     this.root.dataset["connected"] = this.connected ? "true" : "false";
     if (state.families.length > 0) {
       const header = document.createElement("header");
-      header.className = "tile-header";
+      header.className = "tile-header tile-header-global";
       header.append(createBrandMark(this.meta));
+      const actions = document.createElement("div");
+      actions.className = "tile-header-actions";
       const globalBtn = document.createElement("button");
       globalBtn.type = "button";
-      globalBtn.className = "btn btn-danger";
+      globalBtn.className = "btn btn-danger tile-header-global-off";
       globalBtn.textContent = "Turn off / pause / close everything";
       globalBtn.disabled = !this.connected;
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
       });
-      header.append(globalBtn);
+      actions.append(globalBtn, createThemeToggleButton());
+      header.append(actions);
       this.root.append(header);
     } else {
       const emptyHead = document.createElement("header");
       emptyHead.className = "tile-header tile-header-sparse";
-      emptyHead.append(createBrandMark(this.meta));
+      emptyHead.append(createBrandMark(this.meta), createThemeToggleButton());
       this.root.append(emptyHead);
       const panel = document.createElement("section");
       panel.className = "tile-empty-discovery";
@@ -575,7 +582,7 @@ class DomestiBotController {
     this.root.replaceChildren();
     const errHead = document.createElement("header");
     errHead.className = "tile-header tile-header-sparse";
-    errHead.append(createBrandMark(this.meta));
+    errHead.append(createBrandMark(this.meta), createThemeToggleButton());
     this.root.append(errHead);
     const banner = document.createElement("div");
     banner.className = "tile-error";
@@ -599,7 +606,7 @@ class DomestiBotController {
     this.root.replaceChildren();
     const loadHead = document.createElement("header");
     loadHead.className = "tile-header tile-header-sparse";
-    loadHead.append(createBrandMark(this.meta));
+    loadHead.append(createBrandMark(this.meta), createThemeToggleButton());
     this.root.append(loadHead);
     const row = document.createElement("div");
     row.className = "tile-loading-row";
@@ -669,6 +676,32 @@ const FAMILY_ICON_PATHS: Record<string, readonly string[]> = {
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+function applyStoredColorTheme(): void {
+  const raw = localStorage.getItem(THEME_STORAGE_KEY);
+  const t = raw === "light" || raw === "dark" ? raw : null;
+  if (t === null) {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", t);
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta !== null) {
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = t === "dark" || (t === null && systemDark);
+    meta.setAttribute("content", dark ? "#15171a" : "#2e7d32");
+  }
+  if (themeToggleSingleton !== null) {
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const darkNow = t === "dark" || (t === null && systemDark);
+    themeToggleSingleton.textContent = darkNow ? "Light" : "Dark";
+    const title = darkNow
+      ? "Switch to light appearance"
+      : "Switch to dark appearance";
+    themeToggleSingleton.title = title;
+    themeToggleSingleton.setAttribute("aria-label", title);
+  }
+}
 
 function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   // What the backend's bulk-off endpoints actually drive each device
@@ -751,6 +784,7 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
 
   const head = document.createElementNS(SVG_NS, "rect");
   head.setAttribute("class", "brand-mark-bm-head");
+  head.setAttribute("fill", "none");
   head.setAttribute("x", "4.8");
   head.setAttribute("y", "3.35");
   head.setAttribute("width", "14.4");
@@ -761,7 +795,7 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   head.setAttribute("stroke-linejoin", "round");
 
   const antennaRod = document.createElementNS(SVG_NS, "line");
-  antennaRod.setAttribute("class", "brand-mark-bm-antenna");
+  antennaRod.setAttribute("class", "brand-mark-bm-antenna-rod");
   antennaRod.setAttribute("x1", "12");
   antennaRod.setAttribute("y1", "3.35");
   antennaRod.setAttribute("x2", "12");
@@ -770,7 +804,7 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   antennaRod.setAttribute("stroke-linecap", "round");
 
   const antennaBall = document.createElementNS(SVG_NS, "circle");
-  antennaBall.setAttribute("class", "brand-mark-bm-antenna");
+  antennaBall.setAttribute("class", "brand-mark-bm-antenna-ball");
   antennaBall.setAttribute("cx", "12");
   antennaBall.setAttribute("cy", "0.55");
   antennaBall.setAttribute("r", "0.85");
@@ -924,6 +958,33 @@ function createFamilyIcon(familyId: string): SVGElement | null {
     svg.append(path);
   }
   return svg;
+}
+
+function createThemeToggleButton(): HTMLButtonElement {
+  if (themeToggleSingleton !== null) {
+    return themeToggleSingleton;
+  }
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-theme-toggle";
+  btn.addEventListener("click", () => {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    const explicit = raw === "light" || raw === "dark" ? raw : null;
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const darkNow = explicit === "dark" || (explicit === null && systemDark);
+    localStorage.setItem(THEME_STORAGE_KEY, darkNow ? "light" : "dark");
+    applyStoredColorTheme();
+  });
+  const mql = window.matchMedia("(prefers-color-scheme: dark)");
+  mql.addEventListener("change", () => {
+    const raw = localStorage.getItem(THEME_STORAGE_KEY);
+    if (raw !== "light" && raw !== "dark") {
+      applyStoredColorTheme();
+    }
+  });
+  themeToggleSingleton = btn;
+  applyStoredColorTheme();
+  return btn;
 }
 
 function initPwaInstallBanner(): void {
@@ -1182,6 +1243,7 @@ function removeJsBootHint(): void {
 
 function start(): void {
   removeJsBootHint();
+  applyStoredColorTheme();
   initPwaInstallBanner();
   registerServiceWorker();
   const root = document.getElementById(APP_ROOT_ID);

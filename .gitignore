@@ -22,4 +22,5 @@ logs/
 # The dist/ directory is rebuilt by `pnpm run build` (locally, in CI, and via
 # scripts/on-deploy in production); it must not be committed.
 web/node_modules/
+.pnpm-store/
 app/api/static/dist/

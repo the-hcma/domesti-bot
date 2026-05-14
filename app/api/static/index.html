@@ -8,7 +8,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="manifest" href="/static/manifest.webmanifest">
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="/static/icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
   <style>
     :root {
       color-scheme: light dark;
@@ -23,7 +24,8 @@
       --border: #e1e4e8;
     }
     @media (prefers-color-scheme: dark) {
-      :root {
+      html:not([data-theme]) {
+        color-scheme: dark;
         --fg: #e6e6e6;
         --muted: #a0a6b1;
         --accent: #7bd389;
@@ -34,6 +36,30 @@
         --bg: #15171a;
         --border: #2a2e34;
       }
+    }
+    html[data-theme="light"] {
+      color-scheme: light;
+      --fg: #1d1f21;
+      --muted: #5a6171;
+      --accent: #2e7d32;
+      --pending: #b58900;
+      --danger: #b3261e;
+      --card: #ffffff;
+      --card-elev: #fafbfc;
+      --bg: #f6f7f9;
+      --border: #e1e4e8;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --fg: #e6e6e6;
+      --muted: #a0a6b1;
+      --accent: #7bd389;
+      --pending: #f4c54e;
+      --danger: #ff7b72;
+      --card: #1f2226;
+      --card-elev: #262a30;
+      --bg: #15171a;
+      --border: #2a2e34;
     }
     html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
       font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -47,7 +73,11 @@
     #app { display: flex; flex-direction: column; gap: 18px; }
     .tile-header { display: flex; flex-wrap: wrap; align-items: center;
       justify-content: space-between; gap: 8px 12px; padding: 0 4px; }
-    .tile-header-sparse { justify-content: flex-start; }
+    .tile-header-sparse { justify-content: space-between; width: 100%; }
+    .tile-header-actions { display: flex; flex: 1 1 auto; align-items: stretch;
+      justify-content: flex-end; gap: 8px; min-width: 0; }
+    .tile-header-global-off { flex: 1 1 auto; min-width: 0; white-space: normal; }
+    .btn-theme-toggle { flex: 0 0 auto; flex-shrink: 0; white-space: nowrap; }
     .brand-mark { position: relative; display: inline-flex;
       flex: 0 0 auto; flex-shrink: 0; align-items: center; color: var(--muted); }
     .brand-mark-icon-link { display: inline-flex; flex-shrink: 0;
@@ -61,22 +91,33 @@
     .brand-mark-bm-body { fill: #7e57c2; stroke: #311b92; }
     .brand-mark-bm-neck { fill: #6a1b9a; stroke: #311b92; }
     .brand-mark-bm-apron { fill: #ffca28; stroke: #e65100; }
-    .brand-mark-bm-head { fill: #5c6bc0; stroke: #1a237e; }
-    .brand-mark-bm-antenna { fill: #3949ab; stroke: #1a237e; }
+    .brand-mark-bm-head { fill: none; stroke: var(--muted); }
+    .brand-mark-bm-antenna-rod { fill: none; stroke: var(--muted); }
+    .brand-mark-bm-antenna-ball { fill: var(--muted); stroke: var(--fg); }
     .brand-mark-bm-eye { fill: #ffffff; stroke: #263238; stroke-width: 0.42; }
     .brand-mark-bm-mouth { fill: none; stroke: #263238; stroke-width: 0.55;
       stroke-linecap: round; }
     .brand-mark-bm-waist { fill: none; stroke: #4a148c; }
     @media (prefers-color-scheme: dark) {
-      .brand-mark-bm-body { fill: #b39ddb; stroke: #4a148c; }
-      .brand-mark-bm-neck { fill: #7e57c2; stroke: #4a148c; }
-      .brand-mark-bm-apron { fill: #ffe082; stroke: #ff6f00; }
-      .brand-mark-bm-head { fill: #9fa8da; stroke: #283593; }
-      .brand-mark-bm-antenna { fill: #5c6bc0; stroke: #283593; }
-      .brand-mark-bm-eye { fill: #eceff1; stroke: #1a237e; stroke-width: 0.42; }
-      .brand-mark-bm-mouth { stroke: #c5cae9; stroke-width: 0.55; }
-      .brand-mark-bm-waist { stroke: #e1bee7; }
+      html:not([data-theme]) .brand-mark-bm-body { fill: #b39ddb; stroke: #4a148c; }
+      html:not([data-theme]) .brand-mark-bm-neck { fill: #7e57c2; stroke: #4a148c; }
+      html:not([data-theme]) .brand-mark-bm-apron { fill: #ffe082; stroke: #ff6f00; }
+      html:not([data-theme]) .brand-mark-bm-head { stroke: #c5cae9; }
+      html:not([data-theme]) .brand-mark-bm-antenna-rod { stroke: #c5cae9; }
+      html:not([data-theme]) .brand-mark-bm-antenna-ball { fill: #c5cae9; stroke: #283593; }
+      html:not([data-theme]) .brand-mark-bm-eye { fill: #eceff1; stroke: #1a237e; stroke-width: 0.42; }
+      html:not([data-theme]) .brand-mark-bm-mouth { stroke: #c5cae9; stroke-width: 0.55; }
+      html:not([data-theme]) .brand-mark-bm-waist { stroke: #e1bee7; }
     }
+    html[data-theme="dark"] .brand-mark-bm-body { fill: #b39ddb; stroke: #4a148c; }
+    html[data-theme="dark"] .brand-mark-bm-neck { fill: #7e57c2; stroke: #4a148c; }
+    html[data-theme="dark"] .brand-mark-bm-apron { fill: #ffe082; stroke: #ff6f00; }
+    html[data-theme="dark"] .brand-mark-bm-head { stroke: #c5cae9; }
+    html[data-theme="dark"] .brand-mark-bm-antenna-rod { stroke: #c5cae9; }
+    html[data-theme="dark"] .brand-mark-bm-antenna-ball { fill: #c5cae9; stroke: #283593; }
+    html[data-theme="dark"] .brand-mark-bm-eye { fill: #eceff1; stroke: #1a237e; stroke-width: 0.42; }
+    html[data-theme="dark"] .brand-mark-bm-mouth { stroke: #c5cae9; stroke-width: 0.55; }
+    html[data-theme="dark"] .brand-mark-bm-waist { stroke: #e1bee7; }
     /* Tooltip is ``position: fixed`` from JS so it stays inside the viewport
        (absolute + ``bottom: 100%`` clipped the card against the top edge). */
     .brand-mark-tooltip { display: none; z-index: 1000; min-width: 12rem;
@@ -277,11 +318,8 @@
         flex-wrap: nowrap;
         justify-content: flex-start;
       }
-      .tile-header:not(.tile-header-sparse) .btn {
-        flex: 1 1 auto;
-        min-width: 0;
-        white-space: normal;
-      }
+      .tile-header-actions { flex: 1 1 auto; min-width: 0; }
+      .tile-header-global-off { min-width: 0; }
     }
   </style>
 </head>
