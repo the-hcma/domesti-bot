@@ -937,7 +937,29 @@ function renderFamily(
   return section;
 }
 
+function registerServiceWorker(): void {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+  const { protocol, hostname } = window.location;
+  const allowed =
+    protocol === "https:" ||
+    hostname === "localhost" ||
+    hostname === "127.0.0.1";
+  if (!allowed) {
+    return;
+  }
+  window.addEventListener(
+    "load",
+    () => {
+      void navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    },
+    { once: true },
+  );
+}
+
 function start(): void {
+  registerServiceWorker();
   const root = document.getElementById(APP_ROOT_ID);
   if (!root) {
     console.warn(`[domesti-bot] expected #${APP_ROOT_ID} in landing page`);

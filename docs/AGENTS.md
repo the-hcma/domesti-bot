@@ -82,6 +82,9 @@ domesti-bot/
 │   └── src/main.ts                        browser entrypoint
 ├── app/api/static/                       Files served at `/static/` by FastAPI
 │   ├── index.html                         landing page (loads /static/dist/main.js)
+│   ├── manifest.webmanifest               PWA manifest (icons + ``display: standalone``)
+│   ├── sw.js                              service worker (also routed at ``GET /sw.js`` for ``scope: /``)
+│   ├── icons/                             committed PNG launcher icons
 │   └── dist/                              `pnpm run build` output (gitignored)
 ├── AGENTS.md → docs/AGENTS.md            Symlink so Cursor / agent tools auto-discover at root
 ├── docs/
@@ -101,7 +104,7 @@ domesti-bot/
 - **Never move** `pyproject.toml`, `pyrightconfig.json`, `uv.lock`, or `.python-version` out of the repo root — IDE and tool discovery walk up from source files and depend on root-level placement.
 - Tests live in `tests/python/`. Real-hardware integration tests live alongside unit tests but carry the `@pytest.mark.integration` marker. Static fixture data lives in `tests/python/fixtures/`.
 - `tests/bash/` is reserved for future shell-script tests. Keep `.gitkeep` until real tests exist.
-- **Browser code lives in `web/`** (TypeScript). Sources never go in `app/api/static/` — only the build output (`app/api/static/dist/`) does, and that is gitignored. See "Web UI" below.
+- **Browser code lives in `web/`** (TypeScript). Sources never go in `app/api/static/` — only the build output (`app/api/static/dist/`) does, and that is gitignored. Other committed files under `app/api/static/` (HTML, PWA assets) are not TypeScript sources. See "Web UI" below.
 
 ---
 
@@ -208,7 +211,8 @@ uv run pytest -m integration                  # LAN hardware only
 - **Kasa KLAP credentials (newer Tapo / cloud-linked plugs).** TP-Link's newer KLAP protocol has **no anonymous LAN mode**: a device that was paired through the Kasa or Tapo phone app requires the *account email + password* for the LAN handshake. Without them, `Discover.discover` finds the device but `dev.update()` (and every recovery path) raises `AuthenticationError`. Two surfaces deal with this:
   - **Persistent** — set `KASA_USERNAME` + `KASA_PASSWORD` (both, or neither — partial is rejected) and rerun with `--force-discovery` to rebuild the cache. The user-facing WARNING gets an actionable suffix from `_klap_auth_recovery_hint`: when credentials are unset, it names the env vars and `--force-discovery`; when they're set, it flags a likely credential mismatch. The systemd unit reads them via `EnvironmentFile=` so they never appear in `ps aux` or shell history.
   - **No-restart REPL** — `KasaDeviceManager` records every auth-skipped host in `skipped_auth_hosts` (cleared at the start of each fetch). After the bootstrap `Ready` banner, `_maybe_print_kasa_auth_notice` surfaces a one-shot suggestion when at least one host was skipped *and* `has_credentials is False`, pointing at the `kasa-creds` REPL command. `kasa-creds` opens a fresh `prompt_toolkit.PromptSession` and asks for email (visible) and password (`is_password=True` — starred); on confirmation it calls `KasaDeviceManager.set_credentials(...)` and triggers `rediscover()`. Credentials are stored **only in memory** — they're not written to the SQLite cache, so to survive a restart the user still needs the env-var path. `_repl_cmd_kasa_creds` takes `prompt_fn` as a dependency so tests can exercise it without prompt_toolkit's terminal layer.
-- **Static assets.** `app/api/static/` is mounted at `/static/` via `StaticFiles`. Source files (HTML, future CSS) live there directly and are committed; the `dist/` subdirectory is gitignored and rebuilt by `pnpm run build` (see "Web UI" below). The mount is unconditional — a missing `dist/main.js` 404s cleanly without breaking `/`.
+- **Static assets.** `app/api/static/` is mounted at `/static/` via `StaticFiles`. Source files (HTML, PWA manifest, service worker, icons) live there directly and are committed; the `dist/` subdirectory is gitignored and rebuilt by `pnpm run build` (see "Web UI" below). The mount is unconditional — a missing `dist/main.js` 404s cleanly without breaking `/`.
+- **PWA.** `index.html` links `manifest.webmanifest`; `web/src/main.ts` registers `/sw.js` (served at the URL root, not only under `/static/`, so the worker scope covers the whole app). Install prompts require HTTPS or loopback; LAN-only HTTP still gets manifest metadata in supporting browsers.
 - **Favicon.** `GET /favicon.ico` returns `204 No Content` so browser auto-fetches don't generate 404 noise. Do not ship a real icon binary; if branding is needed in the future, prefer an inline SVG behind a separate route.
 
 ---
