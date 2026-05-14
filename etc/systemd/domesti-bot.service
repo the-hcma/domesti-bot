@@ -14,6 +14,11 @@
 #
 # Logs: ``~/scratch/domesti-bot/domesti-bot.log`` (``setup-service`` also
 # ensures ``~/scratch/domesti-bot/`` exists).
+#
+# Secrets (``TAILWIND_TOKEN``, ``KASA_*``, ``DOMESTI_API_KEY``): use
+# ``systemctl --user edit domesti-bot`` and set ``EnvironmentFile=`` to a
+# mode-600 file under your home directory, or export them via
+# ``~/.config/environment.d/*.conf`` (see docs/AGENTS.md Security).
 
 [Unit]
 Description=domesti-bot - home automation service

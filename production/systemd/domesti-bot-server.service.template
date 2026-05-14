@@ -17,9 +17,11 @@
 # loopback port in ExecStart plus ExecStartPost curling /health on that port).
 # If you change the port in ExecStart, update ExecStartPost to match.
 #
-# Optional: set DOMESTI_API_KEY in the environment for authenticated clients, or add an
-# EnvironmentFile= line pointing at a root-only file.
-
+# Optional: set DOMESTI_API_KEY in the environment for authenticated clients.
+# For TAILWIND_TOKEN, KASA_*, etc., prefer a root-only file (mode 600) and a unit drop-in:
+#   [Service]
+#   EnvironmentFile=-/etc/domesti-bot/environment
+# (one KEY=value per line). Avoid embedding secrets directly in Environment=.
 [Unit]
 Description=domesti-bot HTTP API (domesti-bot-server)
 After=network-online.target

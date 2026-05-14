@@ -15,6 +15,12 @@ import type {
 
 const APP_ROOT_ID = "app";
 
+/** Chromium-only: deferred until the user taps our Install control. */
+interface PwaBeforeInstallPromptEvent extends Event {
+  readonly userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+  prompt: () => Promise<void>;
+}
+
 /** Public source repository (tooltip copy + icon link target). */
 const DOMESTI_BOT_REPO_HREF = "https://github.com/the-hcma/domesti-bot";
 
@@ -703,61 +709,101 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
 
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("class", "brand-mark-svg");
+  svg.setAttribute("width", "30");
+  svg.setAttribute("height", "30");
   svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
   svg.setAttribute("aria-hidden", "true");
-
-  const head = document.createElementNS(SVG_NS, "rect");
-  head.setAttribute("class", "brand-mark-bm-head");
-  head.setAttribute("x", "7");
-  head.setAttribute("y", "3");
-  head.setAttribute("width", "10");
-  head.setAttribute("height", "8");
-  head.setAttribute("rx", "2.5");
-  head.setAttribute("stroke-width", "1.35");
-  head.setAttribute("stroke-linecap", "round");
-  head.setAttribute("stroke-linejoin", "round");
-
-  const eyeL = document.createElementNS(SVG_NS, "circle");
-  eyeL.setAttribute("class", "brand-mark-bm-eye");
-  eyeL.setAttribute("cx", "10");
-  eyeL.setAttribute("cy", "6.5");
-  eyeL.setAttribute("r", "1");
-
-  const eyeR = document.createElementNS(SVG_NS, "circle");
-  eyeR.setAttribute("class", "brand-mark-bm-eye");
-  eyeR.setAttribute("cx", "14");
-  eyeR.setAttribute("cy", "6.5");
-  eyeR.setAttribute("r", "1");
 
   const body = document.createElementNS(SVG_NS, "rect");
   body.setAttribute("class", "brand-mark-bm-body");
-  body.setAttribute("x", "7");
-  body.setAttribute("y", "11.5");
-  body.setAttribute("width", "10");
+  body.setAttribute("x", "5.5");
+  body.setAttribute("y", "12.8");
+  body.setAttribute("width", "13");
   body.setAttribute("height", "10");
-  body.setAttribute("rx", "2");
-  body.setAttribute("stroke-width", "1.35");
+  body.setAttribute("rx", "2.5");
+  body.setAttribute("stroke-width", "1.2");
   body.setAttribute("stroke-linecap", "round");
   body.setAttribute("stroke-linejoin", "round");
 
   const apron = document.createElementNS(SVG_NS, "path");
   apron.setAttribute("class", "brand-mark-bm-apron");
-  apron.setAttribute(
-    "d",
-    "M9 12.5 L10.5 18.5 Q12 19.8 13.5 18.5 L15 12.5 Q12 14 9 12.5z",
-  );
-  apron.setAttribute("stroke-width", "1.35");
+  apron.setAttribute("d", "M6 13.2 L18 13.2 L17.2 20.8 Q12 22.4 6.8 20.8 Z");
+  apron.setAttribute("stroke-width", "1.05");
   apron.setAttribute("stroke-linecap", "round");
   apron.setAttribute("stroke-linejoin", "round");
 
   const waist = document.createElementNS(SVG_NS, "path");
   waist.setAttribute("class", "brand-mark-bm-waist");
-  waist.setAttribute("d", "M8 17.5h8");
-  waist.setAttribute("stroke-width", "1.35");
+  waist.setAttribute("d", "M7.5 18.5h9");
+  waist.setAttribute("stroke-width", "1.05");
   waist.setAttribute("stroke-linecap", "round");
 
-  svg.append(head, eyeL, eyeR, body, apron, waist);
+  const neck = document.createElementNS(SVG_NS, "rect");
+  neck.setAttribute("class", "brand-mark-bm-neck");
+  neck.setAttribute("x", "9.4");
+  neck.setAttribute("y", "11.4");
+  neck.setAttribute("width", "5.2");
+  neck.setAttribute("height", "2.4");
+  neck.setAttribute("rx", "0.9");
+  neck.setAttribute("stroke-width", "0.9");
+  neck.setAttribute("stroke-linecap", "round");
+  neck.setAttribute("stroke-linejoin", "round");
+
+  const head = document.createElementNS(SVG_NS, "rect");
+  head.setAttribute("class", "brand-mark-bm-head");
+  head.setAttribute("x", "4.8");
+  head.setAttribute("y", "3.35");
+  head.setAttribute("width", "14.4");
+  head.setAttribute("height", "9.05");
+  head.setAttribute("rx", "3.2");
+  head.setAttribute("stroke-width", "1.2");
+  head.setAttribute("stroke-linecap", "round");
+  head.setAttribute("stroke-linejoin", "round");
+
+  const antennaRod = document.createElementNS(SVG_NS, "line");
+  antennaRod.setAttribute("class", "brand-mark-bm-antenna");
+  antennaRod.setAttribute("x1", "12");
+  antennaRod.setAttribute("y1", "3.35");
+  antennaRod.setAttribute("x2", "12");
+  antennaRod.setAttribute("y2", "0.65");
+  antennaRod.setAttribute("stroke-width", "1.15");
+  antennaRod.setAttribute("stroke-linecap", "round");
+
+  const antennaBall = document.createElementNS(SVG_NS, "circle");
+  antennaBall.setAttribute("class", "brand-mark-bm-antenna");
+  antennaBall.setAttribute("cx", "12");
+  antennaBall.setAttribute("cy", "0.55");
+  antennaBall.setAttribute("r", "0.85");
+  antennaBall.setAttribute("stroke-width", "0.55");
+
+  const eyeL = document.createElementNS(SVG_NS, "circle");
+  eyeL.setAttribute("class", "brand-mark-bm-eye");
+  eyeL.setAttribute("cx", "9.15");
+  eyeL.setAttribute("cy", "7.05");
+  eyeL.setAttribute("r", "1.22");
+
+  const eyeR = document.createElementNS(SVG_NS, "circle");
+  eyeR.setAttribute("class", "brand-mark-bm-eye");
+  eyeR.setAttribute("cx", "14.85");
+  eyeR.setAttribute("cy", "7.05");
+  eyeR.setAttribute("r", "1.22");
+
+  const mouth = document.createElementNS(SVG_NS, "path");
+  mouth.setAttribute("class", "brand-mark-bm-mouth");
+  mouth.setAttribute("d", "M8.15 9.35 Q12 11.05 15.85 9.35");
+
+  svg.append(
+    body,
+    apron,
+    waist,
+    neck,
+    head,
+    antennaRod,
+    antennaBall,
+    eyeL,
+    eyeR,
+    mouth,
+  );
   iconLink.append(svg);
 
   const tip = document.createElement("span");
@@ -878,6 +924,93 @@ function createFamilyIcon(familyId: string): SVGElement | null {
     svg.append(path);
   }
   return svg;
+}
+
+function initPwaInstallBanner(): void {
+  const PWA_DISMISS = "domesti-pwa-install-dismissed";
+  if (window.matchMedia("(display-mode: standalone)").matches) {
+    return;
+  }
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  if (nav.standalone === true) {
+    return;
+  }
+  if (sessionStorage.getItem(PWA_DISMISS) === "1") {
+    return;
+  }
+  const mainEl = document.querySelector("main");
+  if (mainEl === null) {
+    return;
+  }
+
+  const ios =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+
+  const banner = document.createElement("aside");
+  banner.className = "pwa-install-banner";
+  banner.setAttribute("aria-label", "Install web app");
+
+  const title = document.createElement("p");
+  title.className = "pwa-install-banner-title";
+  title.textContent = "Install domesti-bot";
+
+  const copy = document.createElement("p");
+  copy.className = "pwa-install-banner-copy";
+  copy.textContent = ios
+    ? "In Safari, tap the Share button, then Add to Home Screen to open this dashboard like an app."
+    : "Add this page to your home screen for quick access. When your browser offers it, tap Install below.";
+
+  const actions = document.createElement("div");
+  actions.className = "pwa-install-actions";
+
+  const installBtn = document.createElement("button");
+  installBtn.type = "button";
+  installBtn.className = "btn pwa-install-btn";
+  installBtn.textContent = "Install";
+  installBtn.hidden = true;
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.type = "button";
+  dismissBtn.className = "btn pwa-dismiss-btn";
+  dismissBtn.textContent = "Not now";
+
+  let deferred: PwaBeforeInstallPromptEvent | null = null;
+
+  const onBeforeInstall = (ev: Event): void => {
+    ev.preventDefault();
+    deferred = ev as PwaBeforeInstallPromptEvent;
+    installBtn.hidden = false;
+  };
+
+  const dismiss = (): void => {
+    sessionStorage.setItem(PWA_DISMISS, "1");
+    banner.remove();
+    if (!ios) {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+    }
+  };
+
+  if (!ios) {
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+  }
+
+  installBtn.addEventListener("click", () => {
+    void (async () => {
+      if (deferred === null) {
+        return;
+      }
+      await deferred.prompt();
+      void deferred.userChoice;
+      dismiss();
+    })();
+  });
+
+  dismissBtn.addEventListener("click", dismiss);
+
+  actions.append(installBtn, dismissBtn);
+  banner.append(title, copy, actions);
+  mainEl.insertBefore(banner, mainEl.firstChild);
 }
 
 function renderDevice(
@@ -1022,10 +1155,6 @@ function renderFamily(
   return section;
 }
 
-function removeJsBootHint(): void {
-  document.getElementById("app-js-boot-hint")?.remove();
-}
-
 function registerServiceWorker(): void {
   if (!("serviceWorker" in navigator)) {
     return;
@@ -1047,8 +1176,13 @@ function registerServiceWorker(): void {
   );
 }
 
+function removeJsBootHint(): void {
+  document.getElementById("app-js-boot-hint")?.remove();
+}
+
 function start(): void {
   removeJsBootHint();
+  initPwaInstallBanner();
   registerServiceWorker();
   const root = document.getElementById(APP_ROOT_ID);
   if (!root) {
