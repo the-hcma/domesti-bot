@@ -152,8 +152,10 @@ documented in [`docs/AGENTS.md`](docs/AGENTS.md). Notable rules:
 The production target is a **systemd user unit**. The template at
 [`etc/systemd/domesti-bot.service`](etc/systemd/domesti-bot.service) is what
 [`repository-helpers`](https://github.com/the-hcma/repository-helpers)
-`setup-service` installs (same `@@REPO_DIR@@` contract as fpdf). It binds
-`127.0.0.1:8003`. The deploy hook [`scripts/on-deploy`](scripts/on-deploy)
+`setup-service` installs (same `@@REPO_DIR@@` contract as fpdf). It passes
+`--listen-all --listen-port 8003` so the API listens on all interfaces (use
+`DOMESTI_API_KEY` on untrusted LANs). `ExecStartPost` curls `GET /health` on
+loopback until the process answers. The deploy hook [`scripts/on-deploy`](scripts/on-deploy)
 runs `uv sync`, rebuilds the web bundle when needed, and lets `setup-service`
 restart the unit. For a **system**-level unit with a dedicated user, see
 [`production/systemd/domesti-bot-server.service.template`](production/systemd/domesti-bot-server.service.template).

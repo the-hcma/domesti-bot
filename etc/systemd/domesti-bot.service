@@ -3,16 +3,20 @@
 # repository-helpers ``setup-service`` substitutes ``@@REPO_DIR@@`` with the
 # git worktree path, installs to ``~/.config/systemd/user/``, enables linger,
 # and runs ``scripts/on-deploy`` before (re)start. Same pattern as fpdf's
-# ``etc/systemd/fpdf.service``.
+# ``etc/systemd/fpdf.service`` (``--listen-all`` so other hosts reach port 8003
+# when nginx is not on this machine).
 #
-# Production listen: ``127.0.0.1:8003``. Keep ``ExecStart`` and ``ExecStartPost``
-# ports aligned if you change either.
+# Port 8003 on all interfaces. Keep ``ExecStart`` and ``ExecStartPost`` ports
+# aligned if you change either.
+#
+# ``ExecStartPost`` hits ``GET /health`` on loopback; that still works when the
+# server binds ``0.0.0.0:8003`` because the stack accepts ``127.0.0.1:8003``.
 #
 # Logs: ``~/scratch/domesti-bot/domesti-bot.log`` (``setup-service`` also
 # ensures ``~/scratch/domesti-bot/`` exists).
 
 [Unit]
-Description=domesti-bot HTTP API
+Description=domesti-bot - home automation service
 After=network.target
 StartLimitIntervalSec=100
 StartLimitBurst=5
@@ -20,7 +24,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 WorkingDirectory=@@REPO_DIR@@
-ExecStart=@@REPO_DIR@@/scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8003 --no-browser
+ExecStart=@@REPO_DIR@@/scripts/domesti-bot-server --listen-all --listen-port 8003 --no-browser
 Restart=always
 RestartSec=5
 StandardOutput=append:%h/scratch/domesti-bot/domesti-bot.log

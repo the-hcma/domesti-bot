@@ -10,8 +10,10 @@ drive it.
 **OS-allocated free port** and print the actual URL at startup. This avoids
 clashing with anything else already listening (for example another local HTTP
 server or IDE tooling) and the URL is shown explicitly so the developer can
-paste it into a browser. For production, the systemd unit passes ``--listen-host
-127.0.0.1 --listen-port 8003`` explicitly.
+paste it into a browser. The user systemd unit (``etc/systemd/domesti-bot.service``)
+passes ``--listen-all --listen-port 8003`` so LAN clients can reach the service
+without a colocated reverse proxy; the **system** template under
+``production/systemd/`` still pins loopback when nginx terminates TLS on the same host.
 
 **LAN mode** (``--listen-all``): bind to ``0.0.0.0`` so the API is reachable
 from other devices on the same network — handy for validating the UI on a
