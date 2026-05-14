@@ -149,14 +149,14 @@ documented in [`docs/AGENTS.md`](docs/AGENTS.md). Notable rules:
 
 ## Production deployment
 
-The production target is a systemd user unit. The template at
-[`production/systemd/device-manager-server.service.template`](production/systemd/device-manager-server.service.template)
-is installed via the
-[`repository-helpers`](https://github.com/the-hcma/repository-helpers) setup
-script and binds `127.0.0.1:8003` behind whatever reverse proxy you choose to
-front it with. The on-deploy hook (`production/scripts/on-deploy`) runs
-`uv sync` and restarts the unit on every checkout, so a `git pull` is enough
-to update.
+The production target is a **systemd user unit**. The template at
+[`etc/systemd/domesti-bot.service`](etc/systemd/domesti-bot.service) is what
+[`repository-helpers`](https://github.com/the-hcma/repository-helpers)
+`setup-service` installs (same `@@REPO_DIR@@` contract as fpdf). It binds
+`127.0.0.1:8003`. The deploy hook [`scripts/on-deploy`](scripts/on-deploy)
+runs `uv sync`, rebuilds the web bundle when needed, and lets `setup-service`
+restart the unit. For a **system**-level unit with a dedicated user, see
+[`production/systemd/domesti-bot-server.service.template`](production/systemd/domesti-bot-server.service.template).
 
 `docs/AGENTS.md` has the deployment-specific details — auth keys, log paths,
 service management commands.
