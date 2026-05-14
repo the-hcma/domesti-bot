@@ -153,7 +153,7 @@ The production target is a systemd user unit. The template at
 [`production/systemd/device-manager-server.service.template`](production/systemd/device-manager-server.service.template)
 is installed via the
 [`repository-helpers`](https://github.com/the-hcma/repository-helpers) setup
-script and binds `127.0.0.1:8765` behind whatever reverse proxy you choose to
+script and binds `127.0.0.1:8003` behind whatever reverse proxy you choose to
 front it with. The on-deploy hook (`production/scripts/on-deploy`) runs
 `uv sync` and restarts the unit on every checkout, so a `git pull` is enough
 to update.

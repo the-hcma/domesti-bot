@@ -28,7 +28,7 @@
 # Examples:
 #   ./scripts/domesti-bot-server
 #   ./scripts/domesti-bot-server --console --log-level debug
-#   ./scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8765
+#   ./scripts/domesti-bot-server --listen-host 127.0.0.1 --listen-port 8003
 #   ./scripts/domesti-bot-server --no-browser --no-log-file --log-level debug
 
 set -euo pipefail

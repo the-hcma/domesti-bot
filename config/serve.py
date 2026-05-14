@@ -12,7 +12,7 @@ the fpdf launcher pattern: it is impossible to clash with anything else
 listening (e.g. another local dev server, the Cursor my-tracks plugin) and the
 URL is shown explicitly so the developer can paste it into a browser. For
 production, the systemd unit passes ``--listen-host 127.0.0.1 --listen-port
-8765`` explicitly.
+8003`` explicitly.
 
 **LAN mode** (``--listen-all``): bind to ``0.0.0.0`` so the API is reachable
 from other devices on the same network — handy for validating the UI on a

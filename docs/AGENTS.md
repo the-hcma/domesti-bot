@@ -170,8 +170,8 @@ uv run pytest -m integration                  # LAN hardware only
 
 - The FastAPI app is created via `app.api.app.create_app(args)`; the entrypoint is `config/serve.py` (run as `python -m config.serve`, or via `scripts/domesti-bot-server`).
 - **Authentication**: when `DOMESTI_API_KEY` is set in the environment, every protected endpoint requires the `X-Domesti-Api-Key` header. If the env var is unset, the API is open (intended for trusted LAN only — never expose unauthenticated to the public internet).
-- **Bind address**: production systemd binds to `127.0.0.1:8765`. Do not change the production unit to `0.0.0.0` without a fronting reverse proxy that handles TLS and auth.
-- **Dev-mode default** (no flags, no env vars): bind to `127.0.0.1` on an **OS-allocated free port** (mirrors `fpdf`'s launcher). The startup banner logs `[http] listening on http://127.0.0.1:<port> (api-key …)` so the developer can paste the URL into a browser. The launcher pre-binds the socket with `config.serve.bind_listen_socket()` *before* lifespan / device discovery runs, so the URL appears at the top of the run rather than after the discovery wait. Use `--listen-port 8765` or `DOMESTI_LISTEN_PORT=8765` to pin a specific port. Precedence: CLI flag → env var → dev default.
+- **Bind address**: production systemd binds to `127.0.0.1:8003`. Do not change the production unit to `0.0.0.0` without a fronting reverse proxy that handles TLS and auth.
+- **Dev-mode default** (no flags, no env vars): bind to `127.0.0.1` on an **OS-allocated free port** (mirrors `fpdf`'s launcher). The startup banner logs `[http] listening on http://127.0.0.1:<port> (api-key …)` so the developer can paste the URL into a browser. The launcher pre-binds the socket with `config.serve.bind_listen_socket()` *before* lifespan / device discovery runs, so the URL appears at the top of the run rather than after the discovery wait. Use `--listen-port <port>` or `DOMESTI_LISTEN_PORT=<port>` to pin a specific port. Precedence: CLI flag → env var → dev default.
 - **CORS**: the dev configuration uses `allow_origins=["*"]`. Tighten this before exposing the service outside the LAN.
 - **Pydantic schemas** for all request and response bodies live in `app/api/schemas.py`. New endpoints must define typed `*In` / `*Out` models — no raw `dict[str, Any]` return types.
 - **Endpoint additions** must:
@@ -328,7 +328,7 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 ## Security
 
 - **Never log, store, or transmit credentials** (`KASA_PASSWORD`, `TAILWIND_TOKEN`, `DOMESTI_API_KEY`) in plain text. Read them from the environment; do not echo them to stdout or commit `.env` files.
-- **Never bind the production server to `0.0.0.0`** without explicit user approval and an auth/TLS plan. The default is `127.0.0.1:8765`.
+- **Never bind the production server to `0.0.0.0`** without explicit user approval and an auth/TLS plan. The default is `127.0.0.1:8003`.
 - **Validate user-controlled paths** (REPL filenames, future upload endpoints) with `pathlib.Path.resolve()` before any filesystem operation; reject paths that escape the working directory.
 - **No `eval`, `exec`, or `subprocess.run(..., shell=True)`** with user-controlled strings.
 - **Passwords / tokens never appear in shell command arguments** — they end up in `~/.bash_history` and in `ps aux`. Pass them via stdin, environment variables loaded from root-readable files, or systemd `EnvironmentFile=`.
@@ -399,9 +399,10 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 ## Server Management (development)
 
 - The server runs as a **systemd service** in production (`domesti-bot-server.service`), installed via `~/work/ai/repository-helpers/scripts/setup-service` against the template at `production/systemd/domesti-bot-server.service.template`.
+- **Production listen port** is **`127.0.0.1:8003`** (fixed in the unit's `ExecStart`, same idea as fpdf's fixed loopback port). After start, **`ExecStartPost`** runs `curl` against `http://127.0.0.1:8003/health` with retries so systemd only reports *active* once the process is actually answering HTTP — mirroring fpdf's `ExecStartPost` pattern. If you change the port in the template, update both `ExecStart` and `ExecStartPost` so they stay in sync.
 - **During development / testing**: do not start the production server manually. The session-init script (`start-development --refresh`) ensures the background service is running.
 - Manual runs for debugging: `./scripts/domesti-bot-server` (forwards all flags to `python -m config.serve`).
-- **Do not curl/HTTP against the running production port (8765) during automated testing.** Tests must exercise the ASGI app directly via `httpx.AsyncClient(app=app)` so they cannot collide with the live server.
+- **Do not curl/HTTP against the running production port (8003) during automated testing.** Tests must exercise the ASGI app directly via `httpx.AsyncClient(app=app)` so they cannot collide with the live server.
 
 ### Discovery Cache (cache-first startup)
 
