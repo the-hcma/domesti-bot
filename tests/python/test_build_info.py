@@ -11,6 +11,8 @@ import app.build_info as build_info
 def test_get_build_info_prefers_embedded_version_and_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.delenv("DOMESTI_GIT_COMMIT", raising=False)
     monkeypatch.setattr(build_meta, "EMBEDDED_VERSION", "2.0.0")
     monkeypatch.setattr(build_meta, "EMBEDDED_COMMIT", "abcdef000000")
     build_info.get_build_info.cache_clear()
@@ -20,6 +22,7 @@ def test_get_build_info_prefers_embedded_version_and_commit(
 def test_get_build_info_env_commit_overrides_embedded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
     monkeypatch.setattr(build_meta, "EMBEDDED_COMMIT", "111111111111")
     monkeypatch.setenv("DOMESTI_GIT_COMMIT", "fedcba" * 8)
     build_info.get_build_info.cache_clear()
