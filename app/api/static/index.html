@@ -239,6 +239,17 @@
       .btn { padding: 10px 16px; min-height: 44px; font-size: 15px; }
       .tile-exclude { font-size: 13px; padding: 4px 0; }
       .tile-exclude input[type="checkbox"] { width: 20px; height: 20px; }
+      /* Global header: keep mascot + bulk button on one row (wrap was
+         stacking the icon alone above the full-width button). */
+      .tile-header:not(.tile-header-sparse) {
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+      }
+      .tile-header:not(.tile-header-sparse) .btn {
+        flex: 1 1 auto;
+        min-width: 0;
+        white-space: normal;
+      }
     }
   </style>
 </head>
