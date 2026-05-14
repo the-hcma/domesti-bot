@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import HTMLResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, Response
 
 from app import kasa_discovery_store
 from app.api.schemas import (
@@ -330,6 +330,23 @@ def create_app(args: Any) -> FastAPI:
             "discovery": discovery,
             "error": err,
         }
+
+    @app.get("/sw.js", include_in_schema=False)
+    async def service_worker() -> FileResponse:
+        # Served at the site root so ``navigator.serviceWorker.register`` can use
+        # ``{ scope: '/' }``. A file under ``/static/`` would default to ``/static/``
+        # scope only unless every response carried ``Service-Worker-Allowed``.
+        path = _STATIC_DIR / "sw.js"
+        if not path.is_file():
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Service worker missing at {path}",
+            )
+        return FileResponse(
+            path,
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/v1/meta", response_model=MetaOut)
     async def meta() -> MetaOut:

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import time
 from http import HTTPStatus
 from typing import Any
@@ -144,29 +145,6 @@ def test_protected_route_returns_503_with_retry_after_while_discovery_in_progres
     assert "in progress" in detail.lower()
 
 
-def test_root_landing_page_is_excluded_from_openapi_schema() -> None:
-    client, _app = _client()
-    response = client.get("/openapi.json")
-    assert response.status_code == HTTPStatus.OK
-    paths = response.json().get("paths", {})
-    assert "/" not in paths
-    assert "/favicon.ico" not in paths
-    assert "/health" in paths
-    assert "/v1/completion-aliases" in paths
-
-
-def test_root_landing_page_references_bundle() -> None:
-    """The landing page must load /static/dist/main.js.
-
-    The TypeScript bundle (built by ``pnpm run build`` under ``web/``)
-    mounts the tile UI; tests in this module deliberately don't run the
-    bundle (no headless browser), only assert the HTML contract.
-    """
-    client, _app = _client()
-    body = client.get("/").text
-    assert 'src="/static/dist/main.js"' in body
-
-
 def test_root_landing_page_includes_app_root_for_tile_ui() -> None:
     """``main.ts`` mounts the tile grid into ``#app``; the container must
     exist before the bundle runs so the controller's ``getElementById``
@@ -196,6 +174,46 @@ def test_root_landing_page_is_clean_html_without_admin_chrome() -> None:
     assert "/v1/execute-line" not in body
 
 
+def test_root_landing_page_is_excluded_from_openapi_schema() -> None:
+    client, _app = _client()
+    response = client.get("/openapi.json")
+    assert response.status_code == HTTPStatus.OK
+    paths = response.json().get("paths", {})
+    assert "/" not in paths
+    assert "/favicon.ico" not in paths
+    assert "/sw.js" not in paths
+    assert "/health" in paths
+    assert "/v1/completion-aliases" in paths
+
+
+def test_root_landing_page_links_web_app_manifest() -> None:
+    client, _app = _client()
+    body = client.get("/").text
+    assert 'rel="manifest"' in body
+    assert 'href="/static/manifest.webmanifest"' in body
+
+
+def test_root_landing_page_references_bundle() -> None:
+    """The landing page must load /static/dist/main.js.
+
+    The TypeScript bundle (built by ``pnpm run build`` under ``web/``)
+    mounts the tile UI; tests in this module deliberately don't run the
+    bundle (no headless browser), only assert the HTML contract.
+    """
+    client, _app = _client()
+    body = client.get("/").text
+    assert 'src="/static/dist/main.js"' in body
+
+
+def test_service_worker_js_is_served_at_root() -> None:
+    client, _app = _client()
+    response = client.get("/sw.js")
+    assert response.status_code == HTTPStatus.OK
+    ctype = response.headers.get("content-type", "")
+    assert "javascript" in ctype
+    assert b"addEventListener" in response.content
+
+
 def test_static_index_html_is_served_directly_at_static_mount() -> None:
     """``/static/index.html`` must be reachable through the StaticFiles mount.
 
@@ -208,6 +226,20 @@ def test_static_index_html_is_served_directly_at_static_mount() -> None:
     ctype = response.headers.get("content-type", "")
     assert ctype.startswith("text/html"), ctype
     assert 'id="app"' in response.text
+
+
+def test_static_manifest_webmanifest_defines_icons() -> None:
+    client, _app = _client()
+    response = client.get("/static/manifest.webmanifest")
+    assert response.status_code == HTTPStatus.OK
+    payload = json.loads(response.text)
+    assert payload.get("display") == "standalone"
+    assert payload.get("start_url") == "/"
+    icons = payload.get("icons")
+    assert isinstance(icons, list) and len(icons) >= 2
+    srcs = {item.get("src") for item in icons if isinstance(item, dict)}
+    assert "/static/icons/icon-192.png" in srcs
+    assert "/static/icons/icon-512.png" in srcs
 
 
 def test_static_missing_bundle_returns_clean_404() -> None:
