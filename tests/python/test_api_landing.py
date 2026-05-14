@@ -155,6 +155,17 @@ def test_root_landing_page_includes_app_root_for_tile_ui() -> None:
     assert 'id="app"' in body
 
 
+def test_root_landing_page_includes_js_boot_hint_before_hydration() -> None:
+    """When ``/static/dist/main.js`` is missing (404), the HTML still explains why
+    the page stayed empty and points at ``/health`` plus the bundle build path."""
+
+    client, _app = _client()
+    body = client.get("/").text
+    assert 'id="app-js-boot-hint"' in body
+    assert "app/api/static/dist/main.js" in body
+    assert "/health" in body
+
+
 def test_root_landing_page_is_clean_html_without_admin_chrome() -> None:
     """Landing page is the tile UI only — no banner, no endpoints list.
 
