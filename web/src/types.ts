@@ -63,3 +63,21 @@ export interface UIPreferenceOut {
   device_id: string;
   exclude_from_global: boolean;
 }
+
+export type SecretsKeySource = "env" | "file" | "none";
+
+export type TailwindTokenSource = "cli" | "env" | "database" | "none";
+
+export interface TailwindTokenSettingsOut {
+  configured: boolean;
+  source: TailwindTokenSource;
+  secrets_key_configured: boolean;
+  secrets_key_source: SecretsKeySource;
+  stored_in_database: boolean;
+}
+
+export interface TailwindTokenSetOut {
+  configured: boolean;
+  source: TailwindTokenSource;
+  restart_required: boolean;
+}

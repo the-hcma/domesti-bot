@@ -93,10 +93,25 @@ See **`docs/figures/mobile-compact-tile-reference.png`** — external product mo
 
 ---
 
+## 4. SQLAlchemy for persistence (in progress)
+
+### Goal
+
+Replace raw ``sqlite3`` calls in :mod:`app.kasa_discovery_store` with **SQLAlchemy 2.x** ORM access so schema, migrations, and new tables (e.g. ``app_secrets``) share one code path.
+
+### Direction
+
+1. ``app/db/`` — ``Base``, ORM models, ``bootstrap_schema``, legacy ``ALTER TABLE`` steps, ``discovery_session``.
+2. Keep :mod:`app.kasa_discovery_store` as the **public facade** (call sites unchanged).
+3. Add ``app_secrets`` for Fernet-encrypted values (Tailwind token first).
+4. Hermetic tests for secrets + settings routes; existing discovery-store tests must stay green.
+
+---
+
 ## Suggested implementation order
 
 1. **Compact mobile tiles** — isolated UI/CSS/TS change; lowest coupling; immediate user-visible win.
-2. **Encrypted Tailwind token storage + settings UI** — security review; touches lifespan, DB, API schemas.
+2. **Encrypted Tailwind token storage + settings UI** + **SQLAlchemy migration** (this branch) — security review; touches lifespan, DB, API schemas.
 3. **Broadcast + cross-tab optimistic alignment** — largest architectural change; benefits most once (1) and (2) stabilize.
 
 ---

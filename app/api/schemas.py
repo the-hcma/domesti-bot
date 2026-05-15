@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+SecretsKeySourceOut = Literal["env", "file", "none"]
+TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
 
 
 class CompletionAliasesOut(BaseModel):
@@ -189,3 +194,59 @@ class UIPreferenceOut(BaseModel):
     family_id: str
     device_id: str
     exclude_from_global: bool
+
+
+class TailwindTokenSetIn(BaseModel):
+    """Body for ``PUT /v1/settings/tailwind-token`` (token is never returned)."""
+
+    token: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="GoTailwind Local Control Key (six-digit code from the Tailwind dashboard).",
+    )
+
+
+class TailwindTokenSetOut(BaseModel):
+    """Confirmation after persisting an encrypted Tailwind token."""
+
+    configured: bool = Field(
+        ...,
+        description="True when a token is now available (env, CLI, or database).",
+    )
+    source: TailwindTokenSourceOut = Field(
+        ...,
+        description="Where the active token is read from after this request.",
+    )
+    restart_required: bool = Field(
+        ...,
+        description=(
+            "True when the running server must restart (or rediscover) before "
+            "GoTailwind doors appear if they were previously skipped."
+        ),
+    )
+
+
+class TailwindTokenSettingsOut(BaseModel):
+    """Tailwind credential status (no secret material)."""
+
+    configured: bool = Field(
+        ...,
+        description="True when CLI, environment, or encrypted database provides a token.",
+    )
+    source: TailwindTokenSourceOut = Field(
+        ...,
+        description="Active source: ``cli`` → ``--tailwind-token``, ``env`` → ``TAILWIND_TOKEN``, ``database`` → encrypted SQLite row.",
+    )
+    secrets_key_configured: bool = Field(
+        ...,
+        description="True when a valid Fernet key is available (environment or ``domesti-secrets.json``).",
+    )
+    secrets_key_source: SecretsKeySourceOut = Field(
+        ...,
+        description="``env`` → ``DOMESTI_SECRETS_KEY``; ``file`` → ``domesti-secrets.json`` at repo root.",
+    )
+    stored_in_database: bool = Field(
+        ...,
+        description="True when an encrypted ``tailwind_token`` row exists (may be overridden by env/CLI).",
+    )

@@ -12,6 +12,8 @@
 
 import type {
   MetaOut,
+  TailwindTokenSetOut,
+  TailwindTokenSettingsOut,
   UIBulkActionOut,
   UIDeviceActionOut,
   UIGlobalBulkActionOut,
@@ -75,7 +77,7 @@ function apiKeyFromMeta(): string | null {
 }
 
 async function call<T>(
-  method: "GET" | "POST" | "PUT",
+  method: "DELETE" | "GET" | "POST" | "PUT",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -119,8 +121,17 @@ export const api = {
   fetchMeta(): Promise<MetaOut> {
     return call<MetaOut>("GET", "/v1/meta");
   },
+  clearTailwindToken(): Promise<TailwindTokenSettingsOut> {
+    return call<TailwindTokenSettingsOut>("DELETE", "/v1/settings/tailwind-token");
+  },
   fetchState(): Promise<UIStateOut> {
     return call<UIStateOut>("GET", "/v1/ui/state");
+  },
+  fetchTailwindTokenSettings(): Promise<TailwindTokenSettingsOut> {
+    return call<TailwindTokenSettingsOut>("GET", "/v1/settings/tailwind-token");
+  },
+  putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
+    return call<TailwindTokenSetOut>("PUT", "/v1/settings/tailwind-token", { token });
   },
   openTailwindDoor(deviceId: string): Promise<UIDeviceActionOut> {
     return call<UIDeviceActionOut>(

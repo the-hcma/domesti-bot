@@ -497,13 +497,24 @@ class DomestiBotController {
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
       });
+      const menu = createDesktopMenuButton(this.meta);
+      if (menu !== null) {
+        actions.append(menu);
+      }
       actions.append(globalBtn, createThemeToggleButton());
       header.append(actions);
       this.root.append(header);
     } else {
       const emptyHead = document.createElement("header");
       emptyHead.className = "tile-header tile-header-sparse";
-      emptyHead.append(createBrandMark(this.meta), createThemeToggleButton());
+      const sparseActions = document.createElement("div");
+      sparseActions.className = "tile-header-actions tile-header-actions-sparse";
+      const menu = createDesktopMenuButton(this.meta);
+      if (menu !== null) {
+        sparseActions.append(menu);
+      }
+      sparseActions.append(createThemeToggleButton());
+      emptyHead.append(createBrandMark(this.meta), sparseActions);
       this.root.append(emptyHead);
       const panel = document.createElement("section");
       panel.className = "tile-empty-discovery";
@@ -982,6 +993,241 @@ function createFamilyIcon(familyId: string): SVGElement | null {
     svg.append(path);
   }
   return svg;
+}
+
+let openAppMenuCloser: (() => void) | null = null;
+
+function closeAppMenu(): void {
+  if (openAppMenuCloser !== null) {
+    openAppMenuCloser();
+    openAppMenuCloser = null;
+  }
+}
+
+function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
+  if (isMobileFormFactor()) {
+    return null;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "app-menu";
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "btn btn-menu";
+  trigger.setAttribute("aria-label", "Open menu");
+  trigger.setAttribute("aria-haspopup", "menu");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.innerHTML =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>';
+  const panel = document.createElement("div");
+  panel.className = "app-menu-panel";
+  panel.setAttribute("role", "menu");
+  panel.hidden = true;
+  const settingsItem = document.createElement("button");
+  settingsItem.type = "button";
+  settingsItem.className = "app-menu-item";
+  settingsItem.setAttribute("role", "menuitem");
+  settingsItem.textContent = "Settings";
+  settingsItem.addEventListener("click", () => {
+    closeAppMenu();
+    void openTailwindSettingsDialog();
+  });
+  const aboutItem = document.createElement("button");
+  aboutItem.type = "button";
+  aboutItem.className = "app-menu-item";
+  aboutItem.setAttribute("role", "menuitem");
+  aboutItem.textContent = "About";
+  aboutItem.addEventListener("click", () => {
+    closeAppMenu();
+    openAboutDialog(meta);
+  });
+  panel.append(settingsItem, aboutItem);
+  wrap.append(trigger, panel);
+
+  const onDocumentClick = (ev: MouseEvent): void => {
+    if (!wrap.contains(ev.target as Node)) {
+      closeAppMenu();
+    }
+  };
+
+  trigger.addEventListener("click", () => {
+    if (panel.hidden) {
+      panel.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+      openAppMenuCloser = () => {
+        panel.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+        document.removeEventListener("click", onDocumentClick, true);
+      };
+      window.setTimeout(() => {
+        document.addEventListener("click", onDocumentClick, true);
+      }, 0);
+    } else {
+      closeAppMenu();
+    }
+  });
+
+  return wrap;
+}
+
+function openAboutDialog(meta: MetaOut | null): void {
+  const dialog = document.createElement("dialog");
+  dialog.className = "settings-dialog about-dialog";
+  const title = document.createElement("h2");
+  title.textContent = "About domesti-bot";
+  const body = document.createElement("p");
+  body.className = "settings-dialog-lead";
+  body.textContent =
+    "Self-hosted LAN dashboard for TP-Link Kasa, Sonos, and GoTailwind garage doors.";
+  const version = document.createElement("p");
+  version.className = "settings-dialog-status";
+  version.textContent = meta
+    ? `Version ${meta.version} · commit ${meta.commit}`
+    : "Loading build info…";
+  const repo = document.createElement("a");
+  repo.className = "about-dialog-repo";
+  repo.href = DOMESTI_BOT_REPO_HREF;
+  repo.target = "_blank";
+  repo.rel = "noopener noreferrer";
+  repo.textContent = "github.com/the-hcma/domesti-bot";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "btn";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", () => {
+    dialog.close();
+  });
+  const actions = document.createElement("div");
+  actions.className = "settings-dialog-actions";
+  actions.append(closeBtn);
+  dialog.append(title, body, version, repo, actions);
+  document.body.append(dialog);
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+  });
+  dialog.addEventListener("click", (ev) => {
+    if (ev.target === dialog) {
+      dialog.close();
+    }
+  });
+  dialog.showModal();
+}
+
+async function openTailwindSettingsDialog(): Promise<void> {
+  const dialog = document.createElement("dialog");
+  dialog.className = "settings-dialog";
+  const form = document.createElement("form");
+  form.method = "dialog";
+  const title = document.createElement("h2");
+  title.textContent = "GoTailwind token";
+  const intro = document.createElement("p");
+  intro.className = "settings-dialog-lead";
+  intro.textContent =
+    "Paste the six-digit Local Control Key from the Tailwind web dashboard. It is stored encrypted in the discovery database and is never shown again after you save.";
+  const status = document.createElement("p");
+  status.className = "settings-dialog-status";
+  status.textContent = "Loading…";
+  const label = document.createElement("label");
+  label.className = "settings-dialog-field";
+  const labelText = document.createElement("span");
+  labelText.textContent = "Local Control Key";
+  const input = document.createElement("input");
+  input.type = "password";
+  input.name = "token";
+  input.autocomplete = "off";
+  input.inputMode = "numeric";
+  input.maxLength = 64;
+  input.required = true;
+  label.append(labelText, input);
+  const actions = document.createElement("div");
+  actions.className = "settings-dialog-actions";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "submit";
+  saveBtn.className = "btn";
+  saveBtn.textContent = "Save";
+  const clearBtn = document.createElement("button");
+  clearBtn.type = "button";
+  clearBtn.className = "btn";
+  clearBtn.textContent = "Clear stored token";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "btn";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", () => {
+    dialog.close();
+  });
+  actions.append(saveBtn, clearBtn, closeBtn);
+  form.append(title, intro, status, label, actions);
+  dialog.append(form);
+  document.body.append(dialog);
+
+  const refreshStatus = async (): Promise<void> => {
+    try {
+      const s = await api.fetchTailwindTokenSettings();
+      const parts = [
+        s.configured
+          ? `Active source: ${s.source}.`
+          : "No token is active on this server.",
+        s.stored_in_database
+          ? "An encrypted copy exists in the database."
+          : "Nothing stored in the database yet.",
+        s.secrets_key_configured
+          ? `Encryption key is configured (source: ${s.secrets_key_source}).`
+          : "Add domesti_secrets_key to domesti-secrets.json at the repo root (see domesti-secrets.json.example) or set DOMESTI_SECRETS_KEY before saving to the database.",
+      ];
+      if (s.source === "env" || s.source === "cli") {
+        parts.push(
+          "TAILWIND_TOKEN (or --tailwind-token) overrides the database until you remove it.",
+        );
+      }
+      status.textContent = parts.join(" ");
+    } catch (err) {
+      status.textContent =
+        err instanceof HttpError ? err.detail : "Could not load token status.";
+    }
+  };
+
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void (async () => {
+      try {
+        const out = await api.putTailwindToken(input.value);
+        input.value = "";
+        const hint = out.restart_required
+          ? " Saved. Restart domesti-bot (or redeploy) so garage doors use the new token."
+          : " Saved.";
+        status.textContent = hint;
+        await refreshStatus();
+      } catch (err) {
+        status.textContent =
+          err instanceof HttpError ? err.detail : "Save failed.";
+      }
+    })();
+  });
+
+  clearBtn.addEventListener("click", () => {
+    void (async () => {
+      try {
+        await api.clearTailwindToken();
+        status.textContent = "Stored database token removed.";
+        await refreshStatus();
+      } catch (err) {
+        status.textContent =
+          err instanceof HttpError ? err.detail : "Clear failed.";
+      }
+    })();
+  });
+
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+  });
+  dialog.addEventListener("click", (ev) => {
+    if (ev.target === dialog) {
+      dialog.close();
+    }
+  });
+
+  await refreshStatus();
+  dialog.showModal();
 }
 
 function createThemeToggleButton(): HTMLButtonElement {
