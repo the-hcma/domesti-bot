@@ -7,6 +7,7 @@
 import { api, HttpError } from "./api.js";
 import type {
   MetaOut,
+  TailwindTokenSettingsOut,
   UIDeviceOut,
   UIDeviceState,
   UIFamilyOut,
@@ -1161,7 +1162,7 @@ async function openTailwindSettingsDialog(): Promise<void> {
   title.textContent = "GoTailwind token";
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
-  status.textContent = "Loading…";
+  status.hidden = true;
   const label = document.createElement("label");
   label.className = "settings-dialog-field";
   const labelText = document.createElement("span");
@@ -1222,40 +1223,55 @@ async function openTailwindSettingsDialog(): Promise<void> {
   dialog.append(form);
   document.body.append(dialog);
 
+  const applyTokenFieldsFromSettings = (s: TailwindTokenSettingsOut): void => {
+    storedToken = s.stored_token;
+    if (storedToken) {
+      input.value = storedToken;
+      input.required = false;
+      if (!tokenRevealed) {
+        input.type = "password";
+      }
+    } else {
+      input.required = true;
+    }
+    input.placeholder = storedToken ? "" : "Six-digit token";
+  };
+
+  const showStatusMessage = (message: string): void => {
+    status.textContent = message;
+    status.hidden = false;
+  };
+
+  const hideStatus = (): void => {
+    status.textContent = "";
+    status.hidden = true;
+  };
+
+  const updateStatusHint = (s: TailwindTokenSettingsOut): void => {
+    if (!s.secrets_key_configured) {
+      showStatusMessage(
+        "Add domesti_secrets_key to domesti-secrets.json at the repo root (see domesti-secrets.json.example) or set DOMESTI_SECRETS_KEY before saving to the database.",
+      );
+      return;
+    }
+    if (s.source === "env" || s.source === "cli") {
+      showStatusMessage(
+        "TAILWIND_TOKEN (or --tailwind-token) overrides the database until you remove it.",
+      );
+      return;
+    }
+    hideStatus();
+  };
+
   const refreshStatus = async (): Promise<void> => {
     try {
       const s = await api.fetchTailwindTokenSettings();
-      storedToken = s.stored_token;
-      if (storedToken) {
-        input.value = storedToken;
-        input.required = false;
-        if (!tokenRevealed) {
-          input.type = "password";
-        }
-      } else {
-        input.required = true;
-      }
-      input.placeholder = storedToken ? "" : "Six-digit token";
-      const parts = [
-        s.configured
-          ? `Active source: ${s.source}.`
-          : "No token is active on this server.",
-        s.stored_in_database
-          ? "An encrypted copy exists in the database."
-          : "Nothing stored in the database yet.",
-        s.secrets_key_configured
-          ? `Encryption key is configured (source: ${s.secrets_key_source}).`
-          : "Add domesti_secrets_key to domesti-secrets.json at the repo root (see domesti-secrets.json.example) or set DOMESTI_SECRETS_KEY before saving to the database.",
-      ];
-      if (s.source === "env" || s.source === "cli") {
-        parts.push(
-          "TAILWIND_TOKEN (or --tailwind-token) overrides the database until you remove it.",
-        );
-      }
-      status.textContent = parts.join(" ");
+      applyTokenFieldsFromSettings(s);
+      updateStatusHint(s);
     } catch (err) {
-      status.textContent =
-        err instanceof HttpError ? err.detail : "Could not load token status.";
+      showStatusMessage(
+        err instanceof HttpError ? err.detail : "Could not load token status.",
+      );
     }
   };
 
@@ -1263,7 +1279,7 @@ async function openTailwindSettingsDialog(): Promise<void> {
     void (async () => {
       const token = input.value.trim();
       if (!token) {
-        status.textContent = "Enter a token before saving.";
+        showStatusMessage("Enter a token before saving.");
         return;
       }
       saveBtn.disabled = true;
@@ -1271,18 +1287,20 @@ async function openTailwindSettingsDialog(): Promise<void> {
         const out = await api.putTailwindToken(token);
         showSettingsToast("Token saved.");
         reloadDevicesAfterClose = !out.restart_required;
-        if (out.restart_required) {
-          status.textContent =
-            "Token saved in the database. Restart domesti-bot (or remove TAILWIND_TOKEN) so garage doors use it.";
-        } else {
-          status.textContent =
-            "Token saved in the database. Close this dialog to refresh the device list.";
-        }
         setTokenRevealed(false);
-        await refreshStatus();
+        const s = await api.fetchTailwindTokenSettings();
+        applyTokenFieldsFromSettings(s);
+        if (out.restart_required) {
+          showStatusMessage(
+            "Token saved. Restart domesti-bot (or remove TAILWIND_TOKEN) so garage doors use it.",
+          );
+        } else {
+          updateStatusHint(s);
+        }
       } catch (err) {
-        status.textContent =
-          err instanceof HttpError ? err.detail : "Save failed.";
+        showStatusMessage(
+          err instanceof HttpError ? err.detail : "Save failed.",
+        );
       } finally {
         saveBtn.disabled = false;
       }
@@ -1303,12 +1321,12 @@ async function openTailwindSettingsDialog(): Promise<void> {
         input.required = true;
         setTokenRevealed(false);
         showSettingsToast("Stored token cleared.");
-        status.textContent = "Stored database token removed.";
         reloadDevicesAfterClose = true;
         await refreshStatus();
       } catch (err) {
-        status.textContent =
-          err instanceof HttpError ? err.detail : "Clear failed.";
+        showStatusMessage(
+          err instanceof HttpError ? err.detail : "Clear failed.",
+        );
       }
     })();
   });
