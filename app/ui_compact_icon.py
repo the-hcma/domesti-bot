@@ -7,7 +7,7 @@ today — users often encode the room or object in the alias (``Kitchen lamp``).
 
 Resolution order for Kasa switches:
 
-1. **Object** tokens in the label (``lamp``, ``led``, ``plug``, ``fan``, …).
+1. **Object** tokens in the label (``lamp``, ``light``, ``plug``, ``fan``, …).
 2. **Room** tokens when the label names a space (``kitchen``, ``bedroom``, …).
 3. **Hardware model** prefix when the label is otherwise generic.
 4. Default ``bulb``.
@@ -17,19 +17,32 @@ from __future__ import annotations
 
 import re
 
-# Substrings in the normalized label → icon key (first match wins).
-_OBJECT_SUBSTRINGS: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("chandelier", "sconce", "lamp", "light", "bulb", "led"), "bulb"),
+# Multi-word object phrases (substring match, longest first).
+_OBJECT_PHRASE_RULES: tuple[tuple[str, str], ...] = (
+    ("night stand", "table"),
+    ("nightstand", "table"),
+)
+
+# Whole-word object tokens (``light`` uses word boundaries — not ``highlight``).
+_OBJECT_WORD_RULES: tuple[tuple[str, str], ...] = (
+    ("lamp", "lamp"),
+    ("light", "light"),
+    ("bulb", "bulb"),
+    ("led", "bulb"),
+)
+
+# Other object substrings (no bare ``light`` / ``lamp`` here).
+_OBJECT_SUBSTRING_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("chandelier", "sconce"), "bulb"),
     (("strip",), "strip"),
     (("fan",), "fan"),
     (("outlet", "plug", "socket", "receptacle"), "outlet"),
     (("pendant",), "pendant"),
     (("lantern",), "lantern"),
     (("desk",), "desk"),
-    (("nightstand", "night stand"), "table"),
 )
 
-# Whole-word room tokens (checked after object substrings).
+# Whole-word room tokens (checked after object tokens).
 _ROOM_WORDS_TO_ICON: dict[str, str] = {
     "attic": "room_attic",
     "basement": "room_basement",
@@ -89,8 +102,18 @@ _MODEL_PREFIX_TO_ICON: tuple[tuple[str, str], ...] = (
 )
 
 
+def _contains_word(normalized: str, word: str) -> bool:
+    return re.search(rf"\b{re.escape(word)}\b", normalized) is not None
+
+
 def _icon_from_object_tokens(normalized: str) -> str | None:
-    for tokens, icon in _OBJECT_SUBSTRINGS:
+    for phrase, icon in _OBJECT_PHRASE_RULES:
+        if phrase in normalized:
+            return icon
+    for word, icon in _OBJECT_WORD_RULES:
+        if _contains_word(normalized, word):
+            return icon
+    for tokens, icon in _OBJECT_SUBSTRING_RULES:
         if any(token in normalized for token in tokens):
             return icon
     return None

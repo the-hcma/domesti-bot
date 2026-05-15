@@ -16,14 +16,36 @@ def test_resolve_compact_icon_kasa_label_desk_object() -> None:
     )
 
 
-def test_resolve_compact_icon_kasa_basement_lamp_is_bulb() -> None:
+def test_resolve_compact_icon_kasa_basement_lamp_is_lamp() -> None:
     assert (
         resolve_compact_icon(
             family_id="kasa",
             label="Basement lamp",
             kind="switch",
         )
-        == "bulb"
+        == "lamp"
+    )
+
+
+def test_resolve_compact_icon_kasa_hall_light_is_light() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Hall light",
+            kind="switch",
+        )
+        == "light"
+    )
+
+
+def test_resolve_compact_icon_kasa_highlight_is_not_light_icon() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Highlight strip",
+            kind="switch",
+        )
+        == "strip"
     )
 
 
