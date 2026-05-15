@@ -10,7 +10,17 @@ This document tracks **remaining** planned work. Shipped items are summarized be
 | --- | --- | --- |
 | **SQLAlchemy persistence** | [#56](https://github.com/the-hcma/domesti-bot/pull/56) | `app/db/`, `kasa_discovery_store` facade, `app_secrets`, legacy `ALTER TABLE` |
 | **Encrypted Tailwind token + desktop settings** | [#56](https://github.com/the-hcma/domesti-bot/pull/56)–[#60](https://github.com/the-hcma/domesti-bot/pull/60) | Fernet, ☰ Settings, `setup-secrets` REPL, hot-reload, dialog UX |
-| **Compact mobile tiles (3-column)** | (this branch) | `#app[data-layout="compact"]`, square tappable tiles, no exclude row |
+| **Compact mobile layout (viewport + saturated tiles)** | [#61](https://github.com/the-hcma/domesti-bot/pull/61)–[#64](https://github.com/the-hcma/domesti-bot/pull/64), [#65](https://github.com/the-hcma/domesti-bot/pull/65) | `COMPACT_LAYOUT_MQ`, 3-column grid, green/red/amber tiles; desktop saturated tiles with per-tile actions |
+| **Compact tile UX polish** | [#66](https://github.com/the-hcma/domesti-bot/pull/66)–[#68](https://github.com/the-hcma/domesti-bot/pull/68) | Tile-only tap actions (no Turn/Pause/Close buttons); inset exclude checkbox + `title` hint; 50/50 icon/label grid on phone; `lamp` / `light` / `led` / `bulb` + `room_*` icons via `app/ui_compact_icon.py`; desktop On/Off for Kasa |
+| **PWA shell refresh after deploy** | [#69](https://github.com/the-hcma/domesti-bot/pull/69) | `sw.js` v11: stale-while-revalidate for `GET /` and `main.js` (compact CSS is inline in `index.html`) |
+
+### Web UI / compact tiles (reference)
+
+- **Layout**: `data-layout="compact"` when viewport ≤ 768px (`web/src/main.ts`); styles in `app/api/static/index.html` (inline CSS, not the bundle).
+- **Phone**: square tiles; top half icon, bottom half label (`line-clamp`); state shown by **color only** (no Playing/On text on compact).
+- **Desktop**: same saturated tile chrome; tap toggles; **On/Off**, **Playing/Paused**, **Open/Closed** captions under labels.
+- **Icons**: server resolves `UIDeviceOut.compact_icon` (object name beats room name beats Kasa model); client draws `garage_open` / `garage_closed` from live door state.
+- **Deploy**: `git pull` then `setup-service` / `./scripts/on-deploy` rebuilds when `HEAD`, deploy-input fingerprint, or `dist/main.js` drift (missing bundle, stale mtime, legacy commit-only cache). `--force` bypasses the skip check. Installed PWAs still need a new service worker (v11+) or clear site data for shell HTML.
 
 ---
 
@@ -48,10 +58,12 @@ Today optimistic updates and pending predictions are centered on **the actor’s
 
 ## Suggested implementation order (remaining)
 
-1. **Broadcast + cross-tab optimistic alignment** — largest architectural change; benefits most now that mobile compact layout and encrypted settings are done.
+1. **Broadcast + cross-tab optimistic alignment** — largest architectural change; benefits most now that compact layout, icons, settings, and deploy detection are done.
 
 ---
 
 ## Tracking
 
 Delete or shrink sections in this file as work ships, or replace with links to ADRs / merged PRs. Prefer **one concern per PR** per repository rules.
+
+When changing **compact** styles or **service worker** behavior, bump `VERSION` in `app/api/static/sw.js` whenever `index.html` or deploy-critical shell assets change, and document deploy steps in the PR test plan.
