@@ -829,6 +829,84 @@ const COMPACT_ICON_PATHS: Record<string, readonly string[]> = {
     "M9 14h6",
     "M10 6h4l1 8H9l1-8z",
   ],
+  room_attic: [
+    "M4 20h16",
+    "M6 20V10l6-5 6 5v10",
+    "M9 14h6",
+    "M12 7v3",
+  ],
+  room_basement: [
+    "M4 18h16",
+    "M6 18V11l6-4 6 4v7",
+    "M9 14h6",
+    "M12 8v2",
+  ],
+  room_bathroom: [
+    "M6 20h12",
+    "M8 20v-6h8v6",
+    "M10 10h4v4h-4z",
+    "M12 4v3",
+  ],
+  room_bedroom: [
+    "M4 20h16",
+    "M6 14h12v6",
+    "M8 14V9h8v5",
+    "M10 11h4",
+  ],
+  room_dining: [
+    "M4 20h16",
+    "M8 20v-4h8v4",
+    "M10 8h4v8h-4z",
+    "M6 8h12",
+  ],
+  room_garage: [
+    "M3 14h18v7H3z",
+    "M3 14V9l9-6 9 6v5",
+    "M8 14h8",
+  ],
+  room_guest: [
+    "M4 20h16",
+    "M7 14h10v6",
+    "M9 14V10h6v4",
+    "M12 6v2",
+  ],
+  room_hall: [
+    "M4 20h16",
+    "M6 20V12h12v8",
+    "M9 12h6",
+    "M12 4v5",
+  ],
+  room_kitchen: [
+    "M5 20h14",
+    "M8 20v-5h8v5",
+    "M10 7h4l1 8h-6l1-8z",
+    "M12 3v2",
+  ],
+  room_laundry: [
+    "M5 20h14",
+    "M8 20v-6h8v6",
+    "M10 8h4l-1 10h-2L10 8z",
+    "M12 5v2",
+  ],
+  room_living: [
+    "M4 20h16",
+    "M6 16h12v4",
+    "M8 16V11h8v5",
+    "M10 11h4v2",
+    "M7 11h10",
+  ],
+  room_office: [
+    "M4 22h16",
+    "M12 14v8",
+    "M8 14h8",
+    "M12 2l6 8H6l6-8z",
+  ],
+  room_porch: [
+    "M4 20h16",
+    "M6 20V11l6-6 6 6v9",
+    "M9 14h6",
+    "M12 5v3",
+  ],
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -1699,7 +1777,11 @@ function initPwaInstallBanner(): void {
   mainEl.insertBefore(banner, mainEl.firstChild);
 }
 
-function appendSaturatedTileVisuals(container: HTMLElement, device: UIDeviceOut): void {
+function appendSaturatedTileVisuals(
+  container: HTMLElement,
+  device: UIDeviceOut,
+  compactHalfLayout: boolean,
+): void {
   const iconWrap = document.createElement("span");
   iconWrap.className = "tile-saturated-icon-wrap";
   const icon = createTileIcon(device);
@@ -1712,13 +1794,28 @@ function appendSaturatedTileVisuals(container: HTMLElement, device: UIDeviceOut)
   const label = document.createElement("span");
   label.className = "tile-saturated-label";
   label.textContent = device.label;
-  container.append(label);
 
-  const stateCaption = tileStateCaption(device);
-  if (stateCaption !== null) {
-    const stateEl = document.createElement("span");
+  const stateCaption = tileStateCaption(device, !compactHalfLayout);
+  const stateEl =
+    stateCaption !== null ? document.createElement("span") : null;
+  if (stateEl !== null) {
     stateEl.className = "tile-saturated-state";
     stateEl.textContent = stateCaption;
+  }
+
+  if (compactHalfLayout) {
+    const textZone = document.createElement("div");
+    textZone.className = "tile-saturated-text";
+    textZone.append(label);
+    if (stateEl !== null) {
+      textZone.append(stateEl);
+    }
+    container.append(textZone);
+    return;
+  }
+
+  container.append(label);
+  if (stateEl !== null) {
     container.append(stateEl);
   }
 }
@@ -1905,7 +2002,7 @@ function createTileSaturatedHit(
   hit.setAttribute("aria-pressed", isActive ? "true" : "false");
   hit.setAttribute("aria-label", compactTileAriaLabel(device));
   hit.disabled = !connected;
-  appendSaturatedTileVisuals(hit, device);
+  appendSaturatedTileVisuals(hit, device, hitClassName === "tile-compact-hit");
   attachTileHitListeners(hit, device, controller);
   return hit;
 }
@@ -2048,12 +2145,18 @@ function tileIconPaths(device: UIDeviceOut): readonly string[] {
   return COMPACT_ICON_PATHS[device.compact_icon] ?? COMPACT_ICON_PATHS["bulb"] ?? [];
 }
 
-function tileStateCaption(device: UIDeviceOut): string | null {
-  if (device.kind === "switch") {
+function tileStateCaption(
+  device: UIDeviceOut,
+  includeSwitchState: boolean,
+): string | null {
+  if (device.kind === "switch" && !includeSwitchState) {
     return null;
   }
   if (device.state === "unknown") {
     return "Unknown";
+  }
+  if (device.kind === "switch") {
+    return device.state === "on" ? "On" : "Off";
   }
   return device.state.charAt(0).toUpperCase() + device.state.slice(1);
 }

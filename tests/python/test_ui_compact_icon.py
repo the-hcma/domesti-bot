@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.ui_compact_icon import resolve_compact_icon
 
 
-def test_resolve_compact_icon_kasa_label_desk() -> None:
+def test_resolve_compact_icon_kasa_label_desk_object() -> None:
     assert (
         resolve_compact_icon(
             family_id="kasa",
@@ -27,11 +27,44 @@ def test_resolve_compact_icon_kasa_basement_lamp_is_bulb() -> None:
     )
 
 
+def test_resolve_compact_icon_kasa_basement_only_is_room() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Basement",
+            kind="switch",
+        )
+        == "room_basement"
+    )
+
+
+def test_resolve_compact_icon_kasa_kitchen_only_is_room() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Kitchen",
+            kind="switch",
+        )
+        == "room_kitchen"
+    )
+
+
+def test_resolve_compact_icon_kasa_kitchen_led_is_bulb() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Kitchen LED",
+            kind="switch",
+        )
+        == "bulb"
+    )
+
+
 def test_resolve_compact_icon_kasa_model_kl_prefix() -> None:
     assert (
         resolve_compact_icon(
             family_id="kasa",
-            label="Plug",
+            label="Thing",
             kind="switch",
             kasa_model="KL125",
         )

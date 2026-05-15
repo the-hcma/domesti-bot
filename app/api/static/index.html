@@ -361,9 +361,9 @@
       gap: 8px;
     }
     #app[data-layout="compact"] .tile-compact-hit {
-      display: flex; flex-direction: column; align-items: center;
-      justify-content: flex-start; gap: 4px; width: 100%; height: 100%;
-      margin: 0; padding: 8px 6px 6px; border: none; border-radius: 12px;
+      display: flex; flex-direction: column; align-items: stretch;
+      justify-content: flex-start; gap: 0; width: 100%; height: 100%;
+      margin: 0; padding: 6px 6px 4px; border: none; border-radius: 12px;
       font: inherit; color: #fff; cursor: pointer;
       touch-action: manipulation; text-align: center;
       background: var(--danger);
@@ -378,13 +378,18 @@
       background: var(--pending); color: #1a1a1a;
     }
     #app[data-layout="compact"] .tile-saturated-icon-wrap {
-      position: relative; display: flex; flex: 0 0 auto; align-items: center;
-      justify-content: center; align-self: center; width: 100%;
-      min-height: 0; margin-top: 2px; padding-bottom: 2px;
+      position: relative; display: flex; flex: 0 0 50%; max-height: 50%;
+      align-items: center; justify-content: center; width: 100%;
+      min-height: 0; margin: 0; padding: 0 4px;
     }
     #app[data-layout="compact"] .tile-saturated-icon {
-      width: 2.25rem; height: 2.25rem; flex-shrink: 0;
+      width: 2.35rem; height: 2.35rem; flex-shrink: 0;
       stroke-width: 1.75;
+    }
+    #app[data-layout="compact"] .tile-saturated-text {
+      display: flex; flex: 0 0 50%; max-height: 50%; min-height: 0;
+      flex-direction: column; align-items: center; justify-content: flex-start;
+      gap: 2px; width: 100%; overflow: hidden; padding: 0 2px;
     }
     #app[data-layout="compact"] .tile-saturated-overlay {
       position: absolute; right: 0; bottom: 0; width: 1.05rem; height: 1.05rem;
@@ -415,18 +420,19 @@
     #app[data-layout="compact"] .brand-mark-svg {
       width: 32px; height: 32px;
     }
-    #app[data-layout="compact"] .tile-saturated-label {
+    #app[data-layout="compact"] .tile-saturated-text .tile-saturated-label {
       flex: 1 1 auto; min-height: 0; font-size: 12px; font-weight: 700;
-      line-height: 1.2; max-width: 100%; overflow: hidden; overflow-wrap: break-word;
-      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
-      line-clamp: 3;
+      line-height: 1.15; max-width: 100%; overflow: hidden; overflow-wrap: break-word;
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4;
+      line-clamp: 4;
     }
-    #app[data-layout="compact"] .tile-saturated-state {
-      flex: 0 0 auto; font-size: 10px; font-weight: 500; line-height: 1.2;
-      opacity: 0.92; max-width: 100%;
+    #app[data-layout="compact"] .tile-saturated-text .tile-saturated-state {
+      flex: 0 0 auto; font-size: 10px; font-weight: 500; line-height: 1.15;
+      opacity: 0.92; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-state,
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-label {
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-text .tile-saturated-state,
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-text .tile-saturated-label {
       color: #1a1a1a;
     }
     #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-icon {
@@ -606,8 +612,8 @@
       }
       .tile-header-actions { flex: 1 1 auto; min-width: 0; }
       .tile-header-global-off { min-width: 0; font-size: 12px; }
-      #app[data-layout="compact"] .tile-saturated-label {
-        font-size: 11px; -webkit-line-clamp: 2; line-clamp: 2;
+      #app[data-layout="compact"] .tile-saturated-text .tile-saturated-label {
+        font-size: 11px; -webkit-line-clamp: 3; line-clamp: 3;
       }
     }
   </style>
