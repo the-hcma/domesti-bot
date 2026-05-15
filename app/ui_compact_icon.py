@@ -3,22 +3,71 @@
 Icons are chosen from the device **label** (Kasa alias / user display name),
 optional **Kasa hardware model** (e.g. ``KL125`` bulb vs ``HS103`` plug), and
 family. TP-Link app "rooms" are not available on the LAN path domesti-bot uses
-today — users often encode the room in the alias (``Kitchen lamp``).
+today — users often encode the room or object in the alias (``Kitchen lamp``).
+
+Resolution order for Kasa switches:
+
+1. **Object** tokens in the label (``lamp``, ``led``, ``plug``, ``fan``, …).
+2. **Room** tokens when the label names a space (``kitchen``, ``bedroom``, …).
+3. **Hardware model** prefix when the label is otherwise generic.
+4. Default ``bulb``.
 """
 
 from __future__ import annotations
 
 import re
 
-# Exact normalized labels from the mobile mock and common household names.
-_LABEL_TO_ICON: dict[str, str] = {
-    "basement": "outlet",
-    "guest": "table",
-    "hall": "pendant",
-    "kitchen": "bulb",
-    "office": "desk",
-    "porch": "lantern",
+# Substrings in the normalized label → icon key (first match wins).
+_OBJECT_SUBSTRINGS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("chandelier", "sconce", "lamp", "light", "bulb", "led"), "bulb"),
+    (("strip",), "strip"),
+    (("fan",), "fan"),
+    (("outlet", "plug", "socket", "receptacle"), "outlet"),
+    (("pendant",), "pendant"),
+    (("lantern",), "lantern"),
+    (("desk",), "desk"),
+    (("nightstand", "night stand"), "table"),
+)
+
+# Whole-word room tokens (checked after object substrings).
+_ROOM_WORDS_TO_ICON: dict[str, str] = {
+    "attic": "room_attic",
+    "basement": "room_basement",
+    "bath": "room_bathroom",
+    "bathroom": "room_bathroom",
+    "bedroom": "room_bedroom",
+    "deck": "room_porch",
+    "dining": "room_dining",
+    "entry": "room_hall",
+    "family": "room_living",
+    "foyer": "room_hall",
+    "garage": "room_garage",
+    "guest": "room_guest",
+    "hall": "room_hall",
+    "hallway": "room_hall",
+    "kids": "room_bedroom",
+    "kitchen": "room_kitchen",
+    "laundry": "room_laundry",
+    "living": "room_living",
+    "master": "room_bedroom",
+    "mudroom": "room_hall",
+    "nursery": "room_bedroom",
+    "office": "room_office",
+    "pantry": "room_kitchen",
+    "patio": "room_porch",
+    "porch": "room_porch",
+    "sunroom": "room_living",
 }
+
+# Multi-word room phrases (substring match).
+_ROOM_PHRASES_TO_ICON: tuple[tuple[str, str], ...] = (
+    ("living room", "room_living"),
+    ("dining room", "room_dining"),
+    ("family room", "room_living"),
+    ("guest room", "room_guest"),
+    ("laundry room", "room_laundry"),
+    ("mud room", "room_hall"),
+)
 
 # Kasa / Tapo model families (longest prefix wins via sorted iteration).
 _MODEL_PREFIX_TO_ICON: tuple[tuple[str, str], ...] = (
@@ -40,42 +89,22 @@ _MODEL_PREFIX_TO_ICON: tuple[tuple[str, str], ...] = (
 )
 
 
-def _is_lamp_like_label(normalized_label: str) -> bool:
-    return any(
-        token in normalized_label
-        for token in ("lamp", "light", "bulb", "chandelier", "sconce")
-    )
-
-
-def _kasa_icon_from_label(label: str) -> str:
-    normalized = re.sub(r"\s+", " ", label.strip().lower())
-    if not normalized:
-        return "bulb"
-    for key, icon in _LABEL_TO_ICON.items():
-        if key in normalized.split():
-            if key == "basement" and _is_lamp_like_label(normalized):
-                continue
+def _icon_from_object_tokens(normalized: str) -> str | None:
+    for tokens, icon in _OBJECT_SUBSTRINGS:
+        if any(token in normalized for token in tokens):
             return icon
-    if _is_lamp_like_label(normalized):
-        return "bulb"
-    if any(
-        token in normalized
-        for token in ("outlet", "plug", "socket", "receptacle")
-    ):
-        return "outlet"
-    if "porch" in normalized or "lantern" in normalized:
-        return "lantern"
-    if "office" in normalized or "desk" in normalized:
-        return "desk"
-    if "hall" in normalized or "pendant" in normalized:
-        return "pendant"
-    if "guest" in normalized or "bedroom" in normalized:
-        return "table"
-    if "strip" in normalized:
-        return "strip"
-    if "fan" in normalized:
-        return "fan"
-    return "bulb"
+    return None
+
+
+def _icon_from_room_tokens(normalized: str) -> str | None:
+    for phrase, icon in _ROOM_PHRASES_TO_ICON:
+        if phrase in normalized:
+            return icon
+    for word in normalized.split():
+        mapped = _ROOM_WORDS_TO_ICON.get(word)
+        if mapped is not None:
+            return mapped
+    return None
 
 
 def _kasa_icon_from_model(model: str | None) -> str | None:
@@ -88,6 +117,10 @@ def _kasa_icon_from_model(model: str | None) -> str | None:
         if upper.startswith(prefix):
             return icon
     return None
+
+
+def _normalize_label(label: str) -> str:
+    return re.sub(r"\s+", " ", label.strip().lower())
 
 
 def resolve_compact_icon(
@@ -103,8 +136,15 @@ def resolve_compact_icon(
     if family_id == "tailwind" or kind == "door":
         return "garage"
     if family_id == "kasa" or kind == "switch":
+        normalized = _normalize_label(label)
+        from_object = _icon_from_object_tokens(normalized)
+        if from_object is not None:
+            return from_object
+        from_room = _icon_from_room_tokens(normalized)
+        if from_room is not None:
+            return from_room
         from_model = _kasa_icon_from_model(kasa_model)
         if from_model is not None:
             return from_model
-        return _kasa_icon_from_label(label)
+        return "bulb"
     return "bulb"
