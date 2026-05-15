@@ -1319,6 +1319,20 @@ function createFamilyIcon(familyId: string): SVGElement | null {
   return svg;
 }
 
+function createSettingsDialogCloseButton(
+  dialog: HTMLDialogElement,
+): HTMLButtonElement {
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "settings-dialog-close";
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.textContent = "\u00d7";
+  closeBtn.addEventListener("click", () => {
+    dialog.close();
+  });
+  return closeBtn;
+}
+
 let openAppMenuCloser: (() => void) | null = null;
 
 function appendTailwindTokenIntro(parent: HTMLElement): void {
@@ -1414,11 +1428,18 @@ function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
 function openAboutDialog(meta: MetaOut | null): void {
   const dialog = document.createElement("dialog");
   dialog.className = "settings-dialog about-dialog";
+  const panel = document.createElement("div");
+  panel.className = "settings-dialog-panel";
+  const header = document.createElement("header");
+  header.className = "settings-dialog-header";
   const title = document.createElement("h2");
   title.textContent = "About domesti-bot";
-  const body = document.createElement("p");
-  body.className = "settings-dialog-lead";
-  body.textContent =
+  header.append(title, createSettingsDialogCloseButton(dialog));
+  const body = document.createElement("div");
+  body.className = "settings-dialog-body";
+  const lead = document.createElement("p");
+  lead.className = "settings-dialog-lead";
+  lead.textContent =
     "Self-hosted LAN dashboard for TP-Link Kasa, Sonos, and GoTailwind garage doors.";
   const version = document.createElement("p");
   version.className = "settings-dialog-status";
@@ -1431,17 +1452,9 @@ function openAboutDialog(meta: MetaOut | null): void {
   repo.target = "_blank";
   repo.rel = "noopener noreferrer";
   repo.textContent = "github.com/the-hcma/domesti-bot";
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.className = "btn";
-  closeBtn.textContent = "Close";
-  closeBtn.addEventListener("click", () => {
-    dialog.close();
-  });
-  const actions = document.createElement("div");
-  actions.className = "settings-dialog-actions";
-  actions.append(closeBtn);
-  dialog.append(title, body, version, repo, actions);
+  body.append(lead, version, repo);
+  panel.append(header, body);
+  dialog.append(panel);
   document.body.append(dialog);
   dialog.addEventListener("close", () => {
     dialog.remove();
