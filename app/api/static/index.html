@@ -355,31 +355,33 @@
     #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] {
       background: var(--pending); color: #1a1a1a;
     }
-    #app[data-layout="compact"] .tile-compact-icon-wrap {
+    #app[data-layout="compact"] .tile-saturated-icon-wrap {
       position: relative; display: flex; flex: 1 1 auto; align-items: center;
       justify-content: center; width: 100%; min-height: 2.75rem;
     }
-    #app[data-layout="compact"] .tile-compact-icon {
+    #app[data-layout="compact"] .tile-saturated-icon {
       width: 2.25rem; height: 2.25rem; flex-shrink: 0;
       stroke-width: 1.75;
     }
-    #app[data-layout="compact"] .tile-compact-overlay {
+    #app[data-layout="compact"] .tile-saturated-overlay {
       position: absolute; right: 0; bottom: 0; width: 1.05rem; height: 1.05rem;
       pointer-events: none;
     }
-    #app[data-layout="compact"] .tile-compact-overlay-pause,
-    #app[data-layout="compact"] .tile-compact-overlay-unknown {
+    #app[data-layout="compact"] .tile-saturated-overlay-pause,
+    #app[data-layout="compact"] .tile-saturated-overlay-playing,
+    #app[data-layout="compact"] .tile-saturated-overlay-unknown {
       stroke: #fff;
     }
-    #app[data-layout="compact"] .tile-compact-overlay-lock {
+    #app[data-layout="compact"] .tile-saturated-overlay-lock {
       stroke: var(--danger);
     }
-    #app[data-layout="compact"] .tile-compact-overlay-open {
+    #app[data-layout="compact"] .tile-saturated-overlay-open {
       stroke: #fff;
     }
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-compact-overlay-pause,
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-compact-overlay-unknown,
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-compact-overlay-open {
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-overlay-pause,
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-overlay-playing,
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-overlay-unknown,
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-overlay-open {
       stroke: #1a1a1a;
     }
     #app[data-layout="compact"] .tile-header-global-off {
@@ -390,21 +392,21 @@
     #app[data-layout="compact"] .brand-mark-svg {
       width: 32px; height: 32px;
     }
-    #app[data-layout="compact"] .tile-compact-label {
+    #app[data-layout="compact"] .tile-saturated-label {
       font-size: 12px; font-weight: 700; line-height: 1.15;
       max-width: 100%; overflow: hidden; text-overflow: ellipsis;
       white-space: nowrap;
     }
-    #app[data-layout="compact"] .tile-compact-state {
+    #app[data-layout="compact"] .tile-saturated-state {
       font-size: 10px; font-weight: 500; line-height: 1.2;
       opacity: 0.92; max-width: 100%; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap;
     }
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-compact-state,
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-compact-label {
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-state,
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-label {
       color: #1a1a1a;
     }
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-compact-icon {
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-icon {
       stroke: #1a1a1a;
     }
     #app[data-layout="compact"] .tile-compact-hit:disabled {
@@ -412,6 +414,85 @@
     }
     #app[data-layout="compact"] .tile-compact-hit:focus-visible {
       outline: 2px solid #fff; outline-offset: 2px;
+    }
+
+    /* Desktop / wide viewport: saturated tiles with per-tile actions below. */
+    #app[data-layout="comfortable"] .tile-grid {
+      grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+      gap: 12px;
+    }
+    #app[data-layout="comfortable"] .tile-rich {
+      display: flex; flex-direction: column; margin: 0; padding: 0;
+      border: none; border-radius: 12px; overflow: hidden; min-width: 0;
+      background: transparent;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    #app[data-layout="comfortable"] .tile-saturated-main {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: flex-start; gap: 4px; padding: 14px 10px 12px;
+      color: #fff; text-align: center;
+      background: var(--danger);
+    }
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="active"] {
+      background: var(--accent);
+    }
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="inactive"] {
+      background: var(--danger);
+    }
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] {
+      background: var(--pending); color: #1a1a1a;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-icon-wrap {
+      position: relative; display: flex; align-items: center;
+      justify-content: center; width: 100%; min-height: 3rem;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-icon {
+      width: 2.5rem; height: 2.5rem; flex-shrink: 0;
+      stroke-width: 1.75;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-overlay {
+      position: absolute; right: 0; bottom: 0; width: 1.15rem; height: 1.15rem;
+      pointer-events: none;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-overlay-pause,
+    #app[data-layout="comfortable"] .tile-saturated-overlay-playing,
+    #app[data-layout="comfortable"] .tile-saturated-overlay-unknown {
+      stroke: #fff;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-overlay-lock {
+      stroke: var(--danger);
+    }
+    #app[data-layout="comfortable"] .tile-saturated-overlay-open {
+      stroke: #fff;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-overlay-pause,
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-overlay-playing,
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-overlay-unknown,
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-overlay-open {
+      stroke: #1a1a1a;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-label {
+      font-size: 14px; font-weight: 700; line-height: 1.2;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-state {
+      font-size: 11px; font-weight: 500; line-height: 1.2; opacity: 0.92;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-state,
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-label {
+      color: #1a1a1a;
+    }
+    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-icon {
+      stroke: #1a1a1a;
+    }
+    #app[data-layout="comfortable"] .tile-rich-footer {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 10px 12px; background: var(--card-elev);
+      border-top: 1px solid var(--border);
+    }
+    #app[data-layout="comfortable"] .tile-rich-footer .tile-toggle {
+      width: 100%;
     }
 
     .btn { font: inherit; cursor: pointer; border: 1px solid var(--border);
@@ -500,10 +581,9 @@
       #app[data-layout="comfortable"] .tile-grid {
         grid-template-columns: 1fr; gap: 8px;
       }
-      #app[data-layout="comfortable"] .tile { padding: 12px; }
-      #app[data-layout="comfortable"] .tile-label { font-size: 15px; }
-      #app[data-layout="comfortable"] .tile-toggle {
-        padding: 10px 16px; min-height: 44px; min-width: 96px; font-size: 15px;
+      #app[data-layout="comfortable"] .tile-saturated-label { font-size: 15px; }
+      #app[data-layout="comfortable"] .tile-rich-footer .tile-toggle {
+        padding: 10px 16px; min-height: 44px; font-size: 15px;
       }
       .btn { padding: 10px 16px; min-height: 44px; font-size: 15px; }
       .tile-exclude { font-size: 13px; padding: 4px 0; }
@@ -516,7 +596,7 @@
       }
       .tile-header-actions { flex: 1 1 auto; min-width: 0; }
       .tile-header-global-off { min-width: 0; font-size: 12px; }
-      #app[data-layout="compact"] .tile-compact-label { font-size: 11px; }
+      #app[data-layout="compact"] .tile-saturated-label { font-size: 11px; }
     }
   </style>
 </head>

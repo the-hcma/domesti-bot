@@ -19,6 +19,9 @@ const APP_ROOT_ID = "app";
 /** Viewport breakpoint for the saturated three-column compact tile UI. */
 const COMPACT_LAYOUT_MQ = "(max-width: 768px)";
 
+/** Delay before hiding the about panel after pointer leaves robot + tooltip. */
+const BRAND_MARK_HOVER_LINGER_MS = 900;
+
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
 
@@ -779,10 +782,15 @@ const COMPACT_ICON_PATHS: Record<string, readonly string[]> = {
     "M4.93 19.07l2.83-2.83",
     "M16.24 7.76l2.83-2.83",
   ],
-  garage: [
+  garage_closed: [
     "M3 12h18v9H3z",
     "M3 12V9l9-6 9 6v3",
     "M12 16v5",
+  ],
+  garage_open: [
+    "M3 13h18v8H3z",
+    "M3 13V8l9-5 9 5v5",
+    "M5 13l7-6 7 6",
   ],
   lantern: [
     "M12 2v3",
@@ -822,12 +830,6 @@ const COMPACT_ICON_PATHS: Record<string, readonly string[]> = {
     "M10 6h4l1 8H9l1-8z",
   ],
 };
-
-/** Sound-wave arcs shown left of the Sonos cabinet when ``playing``. */
-const SONOS_COMPACT_PLAYING_WAVE_PATHS: readonly string[] = [
-  "M3 10c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0",
-  "M2 14c2-2 4-2 6 0s4 2 6 0",
-];
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -1110,32 +1112,50 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   repoLink.addEventListener("click", () => {
     dismissTooltip();
   });
-  wrap.addEventListener("pointerenter", () => {
+  let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelHoverHide = (): void => {
+    if (hoverHideTimer !== null) {
+      clearTimeout(hoverHideTimer);
+      hoverHideTimer = null;
+    }
+  };
+  const isPointerOverBrandMark = (node: Node | null): boolean =>
+    node !== null && (wrap.contains(node) || tip.contains(node));
+  const scheduleHoverHide = (): void => {
+    cancelHoverHide();
+    hoverHideTimer = setTimeout(() => {
+      hoverHideTimer = null;
+      hoverShown = false;
+      if (!clickPinned) {
+        hideTooltip();
+      }
+    }, BRAND_MARK_HOVER_LINGER_MS);
+  };
+  const onBrandMarkPointerEnter = (): void => {
+    cancelHoverHide();
     hoverShown = true;
     refreshTooltip();
-  });
-  wrap.addEventListener("pointerleave", (ev) => {
-    const rel = ev.relatedTarget as Node | null;
-    if (rel && wrap.contains(rel)) {
+  };
+  const onBrandMarkPointerLeave = (ev: PointerEvent): void => {
+    if (isPointerOverBrandMark(ev.relatedTarget as Node | null)) {
       return;
     }
-    hoverShown = false;
-    if (!clickPinned) {
-      hideTooltip();
-    }
-  });
+    scheduleHoverHide();
+  };
+  wrap.addEventListener("pointerenter", onBrandMarkPointerEnter);
+  wrap.addEventListener("pointerleave", onBrandMarkPointerLeave);
+  tip.addEventListener("pointerenter", onBrandMarkPointerEnter);
+  tip.addEventListener("pointerleave", onBrandMarkPointerLeave);
   wrap.addEventListener("focusin", () => {
+    cancelHoverHide();
     hoverShown = true;
     refreshTooltip();
   });
   wrap.addEventListener("focusout", (ev) => {
-    if (wrap.contains(ev.relatedTarget as Node | null)) {
+    if (isPointerOverBrandMark(ev.relatedTarget as Node | null)) {
       return;
     }
-    hoverShown = false;
-    if (!clickPinned) {
-      hideTooltip();
-    }
+    scheduleHoverHide();
   });
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape" || !clickPinned) {
@@ -1150,7 +1170,7 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
         return;
       }
       const target = ev.target as Node | null;
-      if (target !== null && wrap.contains(target)) {
+      if (target !== null && (wrap.contains(target) || tip.contains(target))) {
         return;
       }
       dismissTooltip();
@@ -1679,19 +1699,51 @@ function initPwaInstallBanner(): void {
   mainEl.insertBefore(banner, mainEl.firstChild);
 }
 
-function appendCompactTileOverlay(iconWrap: HTMLElement, device: UIDeviceOut): void {
+function appendSaturatedTileVisuals(container: HTMLElement, device: UIDeviceOut): void {
+  const iconWrap = document.createElement("span");
+  iconWrap.className = "tile-saturated-icon-wrap";
+  const icon = createTileIcon(device);
+  if (icon !== null) {
+    iconWrap.append(icon);
+  }
+  appendTileOverlay(iconWrap, device);
+  container.append(iconWrap);
+
+  const label = document.createElement("span");
+  label.className = "tile-saturated-label";
+  label.textContent = device.label;
+  container.append(label);
+
+  const stateCaption = tileStateCaption(device);
+  if (stateCaption !== null) {
+    const stateEl = document.createElement("span");
+    stateEl.className = "tile-saturated-state";
+    stateEl.textContent = stateCaption;
+    container.append(stateEl);
+  }
+}
+
+function appendTileOverlay(iconWrap: HTMLElement, device: UIDeviceOut): void {
   if (device.family_id === "sonos") {
     if (device.state === "paused") {
       iconWrap.append(
-        createCompactOverlaySvg("tile-compact-overlay tile-compact-overlay-pause", [
+        createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-pause", [
           "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
           "M10 15V9",
           "M14 15V9",
         ]),
       );
+    } else if (device.state === "playing") {
+      iconWrap.append(
+        createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-playing", [
+          "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
+          "M8 13c1-1.5 2.5-1.5 3.5 0s2.5 1.5 3.5 0",
+          "M14 13c1-1.5 2.5-1.5 3.5 0s2.5 1.5 3.5 0",
+        ]),
+      );
     } else if (device.state === "unknown") {
       iconWrap.append(
-        createCompactOverlaySvg("tile-compact-overlay tile-compact-overlay-unknown", [
+        createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-unknown", [
           "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
           "M12 16v-4",
           "M12 8h.01",
@@ -1705,29 +1757,19 @@ function appendCompactTileOverlay(iconWrap: HTMLElement, device: UIDeviceOut): v
   }
   if (device.state === "closed") {
     iconWrap.append(
-      createCompactOverlaySvg("tile-compact-overlay tile-compact-overlay-lock", [
+      createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-lock", [
         "M7 11V7a5 5 0 0 1 10 0v4",
         "M5 11h14v9H5z",
       ]),
     );
   } else if (device.state === "open") {
     iconWrap.append(
-      createCompactOverlaySvg("tile-compact-overlay tile-compact-overlay-open", [
+      createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-open", [
         "M12 19V5",
         "M5 12l7-7 7 7",
       ]),
     );
   }
-}
-
-function compactStateCaption(device: UIDeviceOut): string | null {
-  if (device.kind === "switch") {
-    return null;
-  }
-  if (device.state === "unknown") {
-    return "Unknown";
-  }
-  return device.state.charAt(0).toUpperCase() + device.state.slice(1);
 }
 
 function compactTileAriaLabel(device: UIDeviceOut): string {
@@ -1746,16 +1788,29 @@ function compactTileAriaLabel(device: UIDeviceOut): string {
   return `${device.label}, ${statePhrase}, tap to ${next}`;
 }
 
-function compactTileIconPaths(device: UIDeviceOut): readonly string[] {
-  const base =
-    COMPACT_ICON_PATHS[device.compact_icon] ?? COMPACT_ICON_PATHS["bulb"] ?? [];
-  if (device.compact_icon === "speaker" && device.state === "playing") {
-    return [...SONOS_COMPACT_PLAYING_WAVE_PATHS, ...base];
+function createTileIcon(device: UIDeviceOut): SVGSVGElement | null {
+  const paths = tileIconPaths(device);
+  if (paths.length === 0) {
+    return null;
   }
-  return base;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "tile-saturated-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
 }
 
-function createCompactOverlaySvg(
+function createTileOverlaySvg(
   className: string,
   paths: readonly string[],
 ): SVGSVGElement {
@@ -1776,26 +1831,12 @@ function createCompactOverlaySvg(
   return svg;
 }
 
-function createCompactTileIcon(device: UIDeviceOut): SVGSVGElement | null {
-  const paths = compactTileIconPaths(device);
-  if (paths.length === 0) {
-    return null;
-  }
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("class", "tile-compact-icon");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "2");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("aria-hidden", "true");
-  for (const d of paths) {
-    const path = document.createElementNS(SVG_NS, "path");
-    path.setAttribute("d", d);
-    svg.append(path);
-  }
-  return svg;
+function createTileSaturatedMain(device: UIDeviceOut): HTMLElement {
+  const main = document.createElement("div");
+  main.className = "tile-saturated-main";
+  main.dataset["tone"] = deviceStateTone(device.state);
+  appendSaturatedTileVisuals(main, device);
+  return main;
 }
 
 function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown" {
@@ -1833,32 +1874,16 @@ function renderDeviceComfortable(
   connected: boolean,
 ): HTMLElement {
   const tile = document.createElement("article");
-  tile.className = `tile tile-${device.kind}`;
+  tile.className = `tile-rich tile-${device.kind}`;
   tile.dataset["familyId"] = device.family_id;
   tile.dataset["deviceId"] = device.id;
   tile.dataset["state"] = device.state;
 
-  const head = document.createElement("div");
-  head.className = "tile-head";
-  const label = document.createElement("h4");
-  label.className = "tile-label";
-  label.textContent = device.label;
-  head.append(label);
+  tile.append(createTileSaturatedMain(device));
 
-  const stateBadge = document.createElement("span");
-  stateBadge.className = `tile-state tile-state-${device.state}`;
-  stateBadge.textContent = device.state;
-  head.append(stateBadge);
-  tile.append(head);
+  const footer = document.createElement("div");
+  footer.className = "tile-rich-footer";
 
-  // The button label is the *action* the user will get by clicking —
-  // derived from the current state. The state badge above already
-  // shows the current state; the button shows what'll happen next so
-  // the user doesn't have to translate "On" → "click to turn off" in
-  // their head. ``unknown`` defaults to the safer destructive action
-  // for each kind: doors close (transient OPENING/CLOSING → next
-  // click closes), speakers pause (stopped queue → next click
-  // pauses, a SoCo no-op).
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "tile-toggle";
@@ -1891,7 +1916,7 @@ function renderDeviceComfortable(
   toggle.setAttribute("aria-pressed", isActive ? "true" : "false");
   toggle.textContent = actionLabel;
   toggle.disabled = !connected;
-  tile.append(toggle);
+  footer.append(toggle);
 
   const excludeRow = document.createElement("label");
   excludeRow.className = "tile-exclude";
@@ -1906,7 +1931,8 @@ function renderDeviceComfortable(
   const span = document.createElement("span");
   span.textContent = excludeText;
   excludeRow.append(span);
-  tile.append(excludeRow);
+  footer.append(excludeRow);
+  tile.append(footer);
   return tile;
 }
 
@@ -1936,25 +1962,7 @@ function renderDeviceCompact(
   hit.setAttribute("aria-label", compactTileAriaLabel(device));
   hit.disabled = !connected;
 
-  const iconWrap = document.createElement("span");
-  iconWrap.className = "tile-compact-icon-wrap";
-  const icon = createCompactTileIcon(device);
-  if (icon !== null) {
-    iconWrap.append(icon);
-  }
-  appendCompactTileOverlay(iconWrap, device);
-  hit.append(iconWrap);
-  const label = document.createElement("span");
-  label.className = "tile-compact-label";
-  label.textContent = device.label;
-  hit.append(label);
-  const stateCaption = compactStateCaption(device);
-  if (stateCaption !== null) {
-    const stateEl = document.createElement("span");
-    stateEl.className = "tile-compact-state";
-    stateEl.textContent = stateCaption;
-    hit.append(stateEl);
-  }
+  appendSaturatedTileVisuals(hit, device);
 
   if (device.kind === "switch") {
     hit.addEventListener("click", () => {
@@ -2033,6 +2041,25 @@ function renderFamily(
   }
   section.append(grid);
   return section;
+}
+
+function tileIconPaths(device: UIDeviceOut): readonly string[] {
+  if (device.compact_icon === "garage" || device.kind === "door") {
+    return device.state === "open"
+      ? (COMPACT_ICON_PATHS["garage_open"] ?? [])
+      : (COMPACT_ICON_PATHS["garage_closed"] ?? COMPACT_ICON_PATHS["bulb"] ?? []);
+  }
+  return COMPACT_ICON_PATHS[device.compact_icon] ?? COMPACT_ICON_PATHS["bulb"] ?? [];
+}
+
+function tileStateCaption(device: UIDeviceOut): string | null {
+  if (device.kind === "switch") {
+    return null;
+  }
+  if (device.state === "unknown") {
+    return "Unknown";
+  }
+  return device.state.charAt(0).toUpperCase() + device.state.slice(1);
 }
 
 function registerServiceWorker(): void {
