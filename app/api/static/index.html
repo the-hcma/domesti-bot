@@ -306,11 +306,33 @@
 
     /* Compact tiles are a separate DOM shape — never inherit comfortable ``.tile``
        card chrome (gray fill, family-colored left border). */
-    .tile-compact {
-      display: block; margin: 0; padding: 0; border: none;
-      border-radius: 12px; aspect-ratio: 1; min-width: 0;
-      overflow: hidden; background: transparent;
+    .tile-compact, .tile-rich {
+      position: relative; display: block; margin: 0; padding: 0;
+      border: none; min-width: 0; overflow: hidden; background: transparent;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    .tile-compact { border-radius: 12px; aspect-ratio: 1; }
+    .tile-rich { border-radius: 12px; }
+    /* Global-bulk exclude control — checkbox only; ``title`` shows the hint. */
+    .tile-exclude-inset {
+      position: absolute; top: 5px; right: 5px; z-index: 2;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0; padding: 5px; border-radius: 6px; cursor: pointer;
+      opacity: 0.45; background: rgba(0, 0, 0, 0.2);
+      transition: opacity 150ms ease, background 150ms ease;
+    }
+    .tile-compact:hover .tile-exclude-inset,
+    .tile-rich:hover .tile-exclude-inset,
+    .tile-exclude-inset:focus-within,
+    .tile-exclude-inset:has(input:checked) {
+      opacity: 1; background: rgba(0, 0, 0, 0.32);
+    }
+    .tile-exclude-inset input[type="checkbox"] {
+      width: 16px; height: 16px; margin: 0; cursor: pointer;
+    }
+    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] ~ .tile-exclude-inset,
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] ~ .tile-exclude-inset {
+      background: rgba(255, 255, 255, 0.35);
     }
 
     /* Compact mobile layout (``#app[data-layout="compact"]`` from ``main.ts``).
@@ -340,8 +362,8 @@
     }
     #app[data-layout="compact"] .tile-compact-hit {
       display: flex; flex-direction: column; align-items: center;
-      justify-content: flex-start; gap: 2px; width: 100%; height: 100%;
-      margin: 0; padding: 10px 6px 8px; border: none; border-radius: 12px;
+      justify-content: flex-start; gap: 4px; width: 100%; height: 100%;
+      margin: 0; padding: 8px 6px 6px; border: none; border-radius: 12px;
       font: inherit; color: #fff; cursor: pointer;
       touch-action: manipulation; text-align: center;
       background: var(--danger);
@@ -356,8 +378,9 @@
       background: var(--pending); color: #1a1a1a;
     }
     #app[data-layout="compact"] .tile-saturated-icon-wrap {
-      position: relative; display: flex; flex: 1 1 auto; align-items: center;
-      justify-content: center; width: 100%; min-height: 2.75rem;
+      position: relative; display: flex; flex: 0 0 auto; align-items: center;
+      justify-content: center; align-self: center; width: 100%;
+      min-height: 0; margin-top: 2px; padding-bottom: 2px;
     }
     #app[data-layout="compact"] .tile-saturated-icon {
       width: 2.25rem; height: 2.25rem; flex-shrink: 0;
@@ -393,14 +416,14 @@
       width: 32px; height: 32px;
     }
     #app[data-layout="compact"] .tile-saturated-label {
-      font-size: 12px; font-weight: 700; line-height: 1.15;
-      max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-      white-space: nowrap;
+      flex: 1 1 auto; min-height: 0; font-size: 12px; font-weight: 700;
+      line-height: 1.2; max-width: 100%; overflow: hidden; overflow-wrap: break-word;
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+      line-clamp: 3;
     }
     #app[data-layout="compact"] .tile-saturated-state {
-      font-size: 10px; font-weight: 500; line-height: 1.2;
-      opacity: 0.92; max-width: 100%; overflow: hidden;
-      text-overflow: ellipsis; white-space: nowrap;
+      flex: 0 0 auto; font-size: 10px; font-weight: 500; line-height: 1.2;
+      opacity: 0.92; max-width: 100%;
     }
     #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-state,
     #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-label {
@@ -409,37 +432,30 @@
     #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] .tile-saturated-icon {
       stroke: #1a1a1a;
     }
-    #app[data-layout="compact"] .tile-compact-hit:disabled {
-      cursor: not-allowed; opacity: 0.45; filter: grayscale(1);
-    }
     #app[data-layout="compact"] .tile-compact-hit:focus-visible {
       outline: 2px solid #fff; outline-offset: 2px;
     }
 
-    /* Desktop / wide viewport: saturated tiles with per-tile actions below. */
+    /* Desktop / wide viewport: saturated clickable tiles (no per-tile footer). */
     #app[data-layout="comfortable"] .tile-grid {
       grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
       gap: 12px;
     }
-    #app[data-layout="comfortable"] .tile-rich {
-      display: flex; flex-direction: column; margin: 0; padding: 0;
-      border: none; border-radius: 12px; overflow: hidden; min-width: 0;
-      background: transparent;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-    }
-    #app[data-layout="comfortable"] .tile-saturated-main {
+    #app[data-layout="comfortable"] .tile-rich-hit {
       display: flex; flex-direction: column; align-items: center;
-      justify-content: flex-start; gap: 4px; padding: 14px 10px 12px;
-      color: #fff; text-align: center;
+      justify-content: flex-start; gap: 4px; width: 100%; min-height: 8.5rem;
+      margin: 0; padding: 14px 10px 12px; border: none; border-radius: 12px;
+      font: inherit; color: #fff; cursor: pointer;
+      touch-action: manipulation; text-align: center;
       background: var(--danger);
     }
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="active"] {
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="active"] {
       background: var(--accent);
     }
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="inactive"] {
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="inactive"] {
       background: var(--danger);
     }
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] {
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] {
       background: var(--pending); color: #1a1a1a;
     }
     #app[data-layout="comfortable"] .tile-saturated-icon-wrap {
@@ -465,34 +481,30 @@
     #app[data-layout="comfortable"] .tile-saturated-overlay-open {
       stroke: #fff;
     }
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-overlay-pause,
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-overlay-playing,
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-overlay-unknown,
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-overlay-open {
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] .tile-saturated-overlay-pause,
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] .tile-saturated-overlay-playing,
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] .tile-saturated-overlay-unknown,
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] .tile-saturated-overlay-open {
       stroke: #1a1a1a;
     }
     #app[data-layout="comfortable"] .tile-saturated-label {
       font-size: 14px; font-weight: 700; line-height: 1.2;
-      max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-      white-space: nowrap;
+      max-width: 100%; overflow: hidden; overflow-wrap: break-word;
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+      line-clamp: 2;
     }
     #app[data-layout="comfortable"] .tile-saturated-state {
       font-size: 11px; font-weight: 500; line-height: 1.2; opacity: 0.92;
     }
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-state,
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-label {
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] .tile-saturated-state,
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] .tile-saturated-label {
       color: #1a1a1a;
     }
-    #app[data-layout="comfortable"] .tile-saturated-main[data-tone="unknown"] .tile-saturated-icon {
+    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] .tile-saturated-icon {
       stroke: #1a1a1a;
     }
-    #app[data-layout="comfortable"] .tile-rich-footer {
-      display: flex; flex-direction: column; gap: 8px;
-      padding: 10px 12px; background: var(--card-elev);
-      border-top: 1px solid var(--border);
-    }
-    #app[data-layout="comfortable"] .tile-rich-footer .tile-toggle {
-      width: 100%;
+    #app[data-layout="comfortable"] .tile-rich-hit:focus-visible {
+      outline: 2px solid #fff; outline-offset: 2px;
     }
 
     .btn { font: inherit; cursor: pointer; border: 1px solid var(--border);
@@ -543,13 +555,15 @@
        ``disabled`` attribute on every action). Grayscale + reduced
        opacity is the universal "you can't act on this right now"
        affordance; ``cursor: not-allowed`` adds the desktop signal. */
-    .tile-toggle:disabled, .btn:disabled {
+    .tile-compact-hit:disabled, .tile-rich-hit:disabled, .btn:disabled {
       cursor: not-allowed; opacity: 0.45; filter: grayscale(1);
     }
-    .tile-exclude input[type="checkbox"]:disabled {
+    .tile-exclude-inset input[type="checkbox"]:disabled {
       cursor: not-allowed; opacity: 0.45;
     }
-    .tile-exclude:has(input:disabled) { cursor: not-allowed; opacity: 0.7; }
+    .tile-exclude-inset:has(input:disabled) {
+      cursor: not-allowed; opacity: 0.55;
+    }
 
     /* Shown until ``main.ts`` removes this node; if the module bundle 404s,
        the user still sees why the screen stayed blank. */
@@ -582,12 +596,8 @@
         grid-template-columns: 1fr; gap: 8px;
       }
       #app[data-layout="comfortable"] .tile-saturated-label { font-size: 15px; }
-      #app[data-layout="comfortable"] .tile-rich-footer .tile-toggle {
-        padding: 10px 16px; min-height: 44px; font-size: 15px;
-      }
       .btn { padding: 10px 16px; min-height: 44px; font-size: 15px; }
-      .tile-exclude { font-size: 13px; padding: 4px 0; }
-      .tile-exclude input[type="checkbox"] { width: 20px; height: 20px; }
+      .tile-exclude-inset input[type="checkbox"] { width: 20px; height: 20px; }
       /* Global header: keep mascot + bulk button on one row (wrap was
          stacking the icon alone above the full-width button). */
       .tile-header:not(.tile-header-sparse) {
@@ -596,7 +606,9 @@
       }
       .tile-header-actions { flex: 1 1 auto; min-width: 0; }
       .tile-header-global-off { min-width: 0; font-size: 12px; }
-      #app[data-layout="compact"] .tile-saturated-label { font-size: 11px; }
+      #app[data-layout="compact"] .tile-saturated-label {
+        font-size: 11px; -webkit-line-clamp: 2; line-clamp: 2;
+      }
     }
   </style>
 </head>

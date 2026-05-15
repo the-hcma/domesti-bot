@@ -1772,6 +1772,26 @@ function appendTileOverlay(iconWrap: HTMLElement, device: UIDeviceOut): void {
   }
 }
 
+function attachTileHitListeners(
+  hit: HTMLButtonElement,
+  device: UIDeviceOut,
+  controller: DomestiBotController,
+): void {
+  if (device.kind === "switch") {
+    hit.addEventListener("click", () => {
+      controller.toggleKasaTile(device);
+    });
+  } else if (device.kind === "speaker") {
+    hit.addEventListener("click", () => {
+      controller.toggleSonosTile(device);
+    });
+  } else {
+    hit.addEventListener("click", () => {
+      controller.operateTailwindTile(device);
+    });
+  }
+}
+
 function compactTileAriaLabel(device: UIDeviceOut): string {
   const statePhrase =
     device.state === "unknown" ? "state unknown" : `currently ${device.state}`;
@@ -1831,12 +1851,63 @@ function createTileOverlaySvg(
   return svg;
 }
 
-function createTileSaturatedMain(device: UIDeviceOut): HTMLElement {
-  const main = document.createElement("div");
-  main.className = "tile-saturated-main";
-  main.dataset["tone"] = deviceStateTone(device.state);
-  appendSaturatedTileVisuals(main, device);
-  return main;
+function excludeHintForDevice(device: UIDeviceOut): string {
+  if (device.kind === "switch") {
+    return "Exclude from all-off";
+  }
+  if (device.kind === "speaker") {
+    return "Exclude from pause-all";
+  }
+  return "Exclude from close-all";
+}
+
+function createTileExcludeInset(
+  device: UIDeviceOut,
+  controller: DomestiBotController,
+  connected: boolean,
+): HTMLLabelElement {
+  const hint = excludeHintForDevice(device);
+  const label = document.createElement("label");
+  label.className = "tile-exclude-inset";
+  label.title = hint;
+  label.setAttribute("aria-label", hint);
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = device.exclude_from_global;
+  checkbox.disabled = !connected;
+  checkbox.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+  });
+  checkbox.addEventListener("change", () => {
+    controller.setExcludeTile(device, checkbox.checked);
+  });
+  label.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+  });
+  label.append(checkbox);
+  return label;
+}
+
+function createTileSaturatedHit(
+  device: UIDeviceOut,
+  controller: DomestiBotController,
+  connected: boolean,
+  hitClassName: string,
+): HTMLButtonElement {
+  const hit = document.createElement("button");
+  hit.type = "button";
+  hit.className = hitClassName;
+  hit.dataset["tone"] = deviceStateTone(device.state);
+  const isActive =
+    device.state === "on" ||
+    device.state === "playing" ||
+    device.state === "open";
+  hit.setAttribute("aria-pressed", isActive ? "true" : "false");
+  hit.setAttribute("aria-label", compactTileAriaLabel(device));
+  hit.disabled = !connected;
+  appendSaturatedTileVisuals(hit, device);
+  attachTileHitListeners(hit, device, controller);
+  return hit;
 }
 
 function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown" {
@@ -1879,60 +1950,10 @@ function renderDeviceComfortable(
   tile.dataset["deviceId"] = device.id;
   tile.dataset["state"] = device.state;
 
-  tile.append(createTileSaturatedMain(device));
-
-  const footer = document.createElement("div");
-  footer.className = "tile-rich-footer";
-
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "tile-toggle";
-  let isActive: boolean;
-  let actionLabel: string;
-  let excludeText: string;
-  if (device.kind === "switch") {
-    isActive = device.state === "on";
-    actionLabel = isActive ? "Turn it off" : "Turn it on";
-    excludeText = "Exclude from all-off";
-    toggle.addEventListener("click", () => {
-      controller.toggleKasaTile(device);
-    });
-  } else if (device.kind === "speaker") {
-    isActive = device.state === "playing";
-    actionLabel = isActive ? "Pause it" : "Resume it";
-    excludeText = "Exclude from pause-all";
-    toggle.addEventListener("click", () => {
-      controller.toggleSonosTile(device);
-    });
-  } else {
-    isActive = device.state === "open";
-    actionLabel = isActive ? "Close it" : "Open it";
-    excludeText = "Exclude from close-all";
-    toggle.addEventListener("click", () => {
-      controller.operateTailwindTile(device);
-    });
-  }
-  toggle.dataset["on"] = isActive ? "true" : "false";
-  toggle.setAttribute("aria-pressed", isActive ? "true" : "false");
-  toggle.textContent = actionLabel;
-  toggle.disabled = !connected;
-  footer.append(toggle);
-
-  const excludeRow = document.createElement("label");
-  excludeRow.className = "tile-exclude";
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = device.exclude_from_global;
-  checkbox.disabled = !connected;
-  checkbox.addEventListener("change", () => {
-    controller.setExcludeTile(device, checkbox.checked);
-  });
-  excludeRow.append(checkbox);
-  const span = document.createElement("span");
-  span.textContent = excludeText;
-  excludeRow.append(span);
-  footer.append(excludeRow);
-  tile.append(footer);
+  tile.append(
+    createTileSaturatedHit(device, controller, connected, "tile-rich-hit"),
+    createTileExcludeInset(device, controller, connected),
+  );
   return tile;
 }
 
@@ -1950,35 +1971,10 @@ function renderDeviceCompact(
   tile.dataset["deviceId"] = device.id;
   tile.dataset["state"] = device.state;
 
-  const hit = document.createElement("button");
-  hit.type = "button";
-  hit.className = "tile-compact-hit";
-  hit.dataset["tone"] = deviceStateTone(device.state);
-  const isActive =
-    device.state === "on" ||
-    device.state === "playing" ||
-    device.state === "open";
-  hit.setAttribute("aria-pressed", isActive ? "true" : "false");
-  hit.setAttribute("aria-label", compactTileAriaLabel(device));
-  hit.disabled = !connected;
-
-  appendSaturatedTileVisuals(hit, device);
-
-  if (device.kind === "switch") {
-    hit.addEventListener("click", () => {
-      controller.toggleKasaTile(device);
-    });
-  } else if (device.kind === "speaker") {
-    hit.addEventListener("click", () => {
-      controller.toggleSonosTile(device);
-    });
-  } else {
-    hit.addEventListener("click", () => {
-      controller.operateTailwindTile(device);
-    });
-  }
-
-  tile.append(hit);
+  tile.append(
+    createTileSaturatedHit(device, controller, connected, "tile-compact-hit"),
+    createTileExcludeInset(device, controller, connected),
+  );
   return tile;
 }
 
