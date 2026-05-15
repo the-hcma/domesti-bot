@@ -27,14 +27,19 @@ hosts other always-on services.
   empty queue) with a surfaced action-error toast in the UI.
 - **GoTailwind garage doors** — open/close per door, "Close all", and
   idempotent operations so a "Close everything" bulk action survives doors
-  that are already closed.
+  that are already closed. The Tailwind Local Control Key can be stored
+  encrypted in the discovery SQLite database (see [Encrypted secrets](#encrypted-secrets)).
+- **Encrypted secrets** — Fernet-encrypted values in SQLite (Tailwind token
+  today); master key in gitignored `domesti-secrets.json` at the repo root.
+  Create it with the `setup-secrets` REPL command or copy
+  `domesti-secrets.json.example`.
 - **Web UI** (`/`) — tile-based control, family-color frames, optimistic UI
   updates with an 8-second grace window, backend-connectivity status, mobile
   viewport support, and standardized green-for-active / red-for-destructive
   colour rules. Talks to a stable, OpenAPI-typed HTTP surface under `/v1/…`.
 - **REPL CLI** (`scripts/domesti-bot`) — same discovery / control surface
   exposed as an interactive `prompt_toolkit` shell for scripting and
-  troubleshooting.
+  troubleshooting, including `setup-secrets` to create `domesti-secrets.json`.
 - **Continuous state monitoring** — background pollers keep the UI's view of
   Kasa, Sonos, and Tailwind state in sync without manual refresh.
 
@@ -77,9 +82,45 @@ Optional environment variables:
 | `DOMESTI_LISTEN_HOST` | Default bind address for the HTTP server. Overridden by `--listen-host` / `--listen-all`. |
 | `DOMESTI_LISTEN_PORT` | Default TCP port. `0` = OS-allocated (the dev default). |
 | `KASA_USERNAME` / `KASA_PASSWORD` | TP-Link cloud credentials for KLAP-encrypted devices (Tapo / newer Kasa). Required only if you have at least one such device. |
-| `TAILWIND_TOKEN` | GoTailwind API token, only needed if you control garage doors. |
+| `TAILWIND_TOKEN` | GoTailwind Local Control Key (six-digit code from the Tailwind dashboard). Overrides the encrypted DB copy when set. |
+| `DOMESTI_SECRETS_KEY` | Fernet master key for encrypted SQLite secrets. Overrides `domesti-secrets.json` when set. |
+| `DOMESTI_SECRETS_FILE` | Override path to the secrets JSON file (default: `./domesti-secrets.json` at repo root). |
 
 Pass `--help` to either script for the complete flag list.
+
+## Encrypted secrets
+
+Discovery state (device configs, display names, UI preferences, cached Tailwind
+host, and similar) lives in a single SQLite file. **Upgrading domesti-bot does
+not wipe that file** — existing rows keep working; new tables (such as
+`app_secrets` for encrypted values) are added automatically on first access.
+
+To encrypt secrets at rest (for example the Tailwind token saved from the web
+UI), configure a Fernet master key:
+
+1. Copy the template and generate a key (or use the REPL helper):
+
+   ```bash
+   cp domesti-secrets.json.example domesti-secrets.json
+   # in the REPL: setup-secrets
+   ```
+
+   `setup-secrets` can generate a new key or accept an existing one, writes
+   `domesti-secrets.json` with mode `0600`, and reminds you to restart the
+   server. The file is listed in `.gitignore` — never commit it.
+
+2. Restart `domesti-bot-server` so the process reads the file.
+
+3. On **desktop** browsers, open the **☰** menu → **Settings** and paste the
+   six-digit Tailwind Local Control Key. It is stored encrypted in SQLite and
+   is never shown again. Restart once more so discovery picks up the token.
+
+**Precedence for the Tailwind token:** `--tailwind-token` → `TAILWIND_TOKEN`
+env → encrypted row in SQLite. **Precedence for the Fernet key:**
+`DOMESTI_SECRETS_KEY` env → `domesti_secrets_key` in `domesti-secrets.json`.
+
+For systemd, you can still use `EnvironmentFile=` for `TAILWIND_TOKEN` instead
+of the database path; see [`docs/AGENTS.md`](docs/AGENTS.md) for security notes.
 
 ## Web UI overview
 
@@ -92,6 +133,8 @@ After starting the server, the landing page hydrates a tile UI:
   (every 5 seconds).
 - Per-family bulk button (`Turn off all`, `Pause all`, `Close all`) and a
   global `Turn off / pause / close everything` button at the top.
+- On **desktop** viewports, a **☰** menu with **Settings** (Tailwind token)
+  and **About** (build info). The menu is hidden on mobile form factors.
 - Per-tile "Exclude from all-off" (and analogous) checkbox so the top-of-page
   bulk action skips devices you don't want it touching.
 - Connectivity indicator: family frames turn red when the backend is
@@ -103,7 +146,8 @@ After starting the server, the landing page hydrates a tile UI:
 domesti-bot/
 ├── app/                          Domain code (device managers, rule engine)
 │   ├── *_device_manager.py       One per family (kasa, sonos, gotailwind, …)
-│   ├── kasa_discovery_store.py   SQLite cache shared by all managers
+│   ├── db/                       SQLAlchemy models + encrypted secrets
+│   ├── kasa_discovery_store.py   SQLite cache facade (shared by all managers)
 │   └── api/                      FastAPI HTTP surface (subpackage)
 ├── config/serve.py               uvicorn entrypoint
 ├── tests/python/                 pytest suite (hermetic + LAN-integration)

@@ -13,6 +13,9 @@ Credentials:
 * Optional ``KASA_USERNAME`` / ``KASA_PASSWORD`` (both) for Kasa/Tapo KLAP.
 * Tailwind **Local Control Key**: ``TAILWIND_TOKEN`` or ``--tailwind-token`` (see
   :mod:`app.gotailwind_device_manager`).
+* **Encrypted SQLite secrets** (e.g. Tailwind token saved from the web UI): Fernet key in
+  ``domesti-secrets.json`` at the repo root (gitignored) or ``DOMESTI_SECRETS_KEY`` in the
+  environment. Use the ``setup-secrets`` REPL command to create the JSON file.
 
 * **Sonos**: zones on your LAN (S1-class UPnP stacks included) via optional ``soco``;
   use ``pause`` / ``resume`` in the REPL. Pass ``--no-sonos`` to skip discovery.
@@ -75,6 +78,7 @@ from app.device_manager import NotInitializedError
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
+from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
 from app.tailwind_credentials import resolve_tailwind_token
 
 COMMANDS = (
@@ -94,6 +98,7 @@ COMMANDS = (
     "refresh-discovery",
     "resume",
     "set-display-name",
+    "setup-secrets",
     "show-devices",
     "turn-off",
     "turn-on",
@@ -124,6 +129,10 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("refresh-discovery", "Full LAN discovery: Google Cast, Kasa, Sonos, Tailwind."),
     ("resume", "Resume playback on a Sonos zone."),
     ("set-display-name", "Save a friendly label for a device (SQLite cache required)."),
+    (
+        "setup-secrets",
+        "Create or update domesti-secrets.json (Fernet key for encrypted DB secrets).",
+    ),
     ("show-devices", "List Google Cast targets, Kasa switches, Sonos zones, then Tailwind doors."),
     ("turn-off", "Turn a Kasa switch off, or stop media on a Cast target."),
     ("turn-on", "Turn a Kasa switch on, or resume paused Cast media if applicable."),
@@ -417,6 +426,64 @@ async def _repl_cmd_kasa_creds(
         )
         print(f"  {theme.dim('Likely a wrong account email/password.')}")
     print(theme.ok(f"Kasa: ready ({n_switches} switch(es))"))
+
+
+async def _repl_cmd_setup_secrets(
+    *,
+    prompt_fn: Callable[[str, bool], Awaitable[str]],
+    theme: _Theme,
+) -> None:
+    """Create or update ``domesti-secrets.json`` (driven by ``prompt_fn`` for tests)."""
+
+    path = secrets_json_path()
+    print(
+        f"{theme.header('Secrets file')} "
+        f"{theme.dim(f'({path})')}"
+    )
+    if (os.environ.get("DOMESTI_SECRETS_KEY") or "").strip():
+        print(
+            theme.warn(
+                "DOMESTI_SECRETS_KEY is set in the environment and overrides the JSON file."
+            )
+        )
+    if path.is_file():
+        try:
+            overwrite = await prompt_fn(
+                "  domesti-secrets.json already exists. Overwrite? [y/N]: ",
+                False,
+            )
+        except (EOFError, KeyboardInterrupt):
+            print(theme.err("setup-secrets: cancelled"), file=sys.stderr)
+            return
+        if overwrite.strip().lower() not in {"y", "yes"}:
+            print(theme.dim("setup-secrets: left existing file unchanged"))
+            return
+    try:
+        generate_answer = await prompt_fn("  Generate new Fernet key? [Y/n]: ", False)
+    except (EOFError, KeyboardInterrupt):
+        print(theme.err("setup-secrets: cancelled"), file=sys.stderr)
+        return
+    if generate_answer.strip().lower() in {"", "y", "yes"}:
+        key = generate_fernet_key()
+        print(theme.dim("setup-secrets: generated a new Fernet key"))
+    else:
+        try:
+            key = await prompt_fn("  Paste Fernet key (hidden): ", True)
+        except (EOFError, KeyboardInterrupt):
+            print(theme.err("setup-secrets: cancelled"), file=sys.stderr)
+            return
+    try:
+        written = write_secrets_json(key, path=path)
+    except ValueError as ex:
+        print(theme.err(f"setup-secrets: {ex}"), file=sys.stderr)
+        return
+    print(theme.ok(f"Wrote {written} (mode 0600, gitignored)"))
+    print(
+        theme.dim(
+            "Restart domesti-bot-server (or redeploy) so new processes pick up the file. "
+            "Use the web UI Settings menu or setup-secrets to store Tailwind tokens in SQLite."
+        )
+    )
 
 
 def _all_cli_device_labels(
@@ -1395,6 +1462,14 @@ async def dispatch_repl_action(
         await _repl_cmd_kasa_creds(
             kasa_mgr, prompt_fn=_toolkit_prompt, theme=theme
         )
+        return
+
+    if cmd == "setup-secrets":
+        async def _secrets_prompt(message: str, is_password: bool) -> str:
+            session = PromptSession()
+            return await session.prompt_async(message, is_password=is_password)
+
+        await _repl_cmd_setup_secrets(prompt_fn=_secrets_prompt, theme=theme)
         return
 
     if cmd == "refresh-discovery":
