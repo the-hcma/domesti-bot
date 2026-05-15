@@ -506,6 +506,7 @@ class DomestiBotController {
     if (!state) return;
     this.root.replaceChildren();
     this.root.dataset["connected"] = this.connected ? "true" : "false";
+    this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
     if (state.families.length > 0) {
       const header = document.createElement("header");
       header.className = "tile-header tile-header-global";
@@ -638,6 +639,7 @@ class DomestiBotController {
         ? err.message
         : String(err);
     this.root.replaceChildren();
+    this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
     const errHead = document.createElement("header");
     errHead.className = "tile-header tile-header-sparse";
     errHead.append(createBrandMark(this.meta), createThemeToggleButton());
@@ -662,6 +664,7 @@ class DomestiBotController {
     // (see ``.tile-spinner`` in ``index.html``) with a short text
     // so screen-reader users get a verbal cue too.
     this.root.replaceChildren();
+    this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
     const loadHead = document.createElement("header");
     loadHead.className = "tile-header tile-header-sparse";
     loadHead.append(createBrandMark(this.meta), createThemeToggleButton());
@@ -1507,6 +1510,54 @@ function initPwaInstallBanner(): void {
   mainEl.insertBefore(banner, mainEl.firstChild);
 }
 
+function compactTileAriaLabel(device: UIDeviceOut): string {
+  const statePhrase =
+    device.state === "unknown" ? "state unknown" : `currently ${device.state}`;
+  if (device.kind === "switch") {
+    const next = device.state === "on" ? "turn off" : "turn on";
+    return `${device.label}, ${statePhrase}, tap to ${next}`;
+  }
+  if (device.kind === "speaker") {
+    const next = device.state === "playing" ? "pause" : "resume";
+    return `${device.label}, ${statePhrase}, tap to ${next}`;
+  }
+  const next =
+    device.state === "open" ? "close" : device.state === "closed" ? "open" : "close";
+  return `${device.label}, ${statePhrase}, tap to ${next}`;
+}
+
+function createCompactTileIcon(familyId: string): SVGSVGElement | null {
+  const paths = FAMILY_ICON_PATHS[familyId];
+  if (!paths) {
+    return null;
+  }
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "tile-compact-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown" {
+  if (state === "unknown") {
+    return "unknown";
+  }
+  if (state === "on" || state === "playing" || state === "open") {
+    return "active";
+  }
+  return "inactive";
+}
+
 function isMobileFormFactor(): boolean {
   const uaData = (
     navigator as Navigator & { userAgentData?: { mobile?: boolean } }
@@ -1527,6 +1578,17 @@ function isMobileFormFactor(): boolean {
 }
 
 function renderDevice(
+  device: UIDeviceOut,
+  controller: DomestiBotController,
+  connected: boolean,
+): HTMLElement {
+  if (isMobileFormFactor()) {
+    return renderDeviceCompact(device, controller, connected);
+  }
+  return renderDeviceComfortable(device, controller, connected);
+}
+
+function renderDeviceComfortable(
   device: UIDeviceOut,
   controller: DomestiBotController,
   connected: boolean,
@@ -1609,6 +1671,56 @@ function renderDevice(
   return tile;
 }
 
+function renderDeviceCompact(
+  device: UIDeviceOut,
+  controller: DomestiBotController,
+  connected: boolean,
+): HTMLElement {
+  const tile = document.createElement("article");
+  tile.className = `tile tile-compact tile-${device.kind}`;
+  tile.dataset["familyId"] = device.family_id;
+  tile.dataset["deviceId"] = device.id;
+  tile.dataset["state"] = device.state;
+
+  const hit = document.createElement("button");
+  hit.type = "button";
+  hit.className = "tile-compact-hit";
+  hit.dataset["tone"] = deviceStateTone(device.state);
+  const isActive =
+    device.state === "on" ||
+    device.state === "playing" ||
+    device.state === "open";
+  hit.setAttribute("aria-pressed", isActive ? "true" : "false");
+  hit.setAttribute("aria-label", compactTileAriaLabel(device));
+  hit.disabled = !connected;
+
+  const icon = createCompactTileIcon(device.family_id);
+  if (icon !== null) {
+    hit.append(icon);
+  }
+  const label = document.createElement("span");
+  label.className = "tile-compact-label";
+  label.textContent = device.label;
+  hit.append(label);
+
+  if (device.kind === "switch") {
+    hit.addEventListener("click", () => {
+      controller.toggleKasaTile(device);
+    });
+  } else if (device.kind === "speaker") {
+    hit.addEventListener("click", () => {
+      controller.toggleSonosTile(device);
+    });
+  } else {
+    hit.addEventListener("click", () => {
+      controller.operateTailwindTile(device);
+    });
+  }
+
+  tile.append(hit);
+  return tile;
+}
+
 function renderFamily(
   family: UIFamilyOut,
   controller: DomestiBotController,
@@ -1660,7 +1772,9 @@ function renderFamily(
   section.append(header);
 
   const grid = document.createElement("div");
-  grid.className = "tile-grid";
+  grid.className = isMobileFormFactor()
+    ? "tile-grid tile-grid-compact"
+    : "tile-grid";
   for (const device of family.devices) {
     grid.append(renderDevice(device, controller, connected));
   }
