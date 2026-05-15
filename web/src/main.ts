@@ -736,6 +736,48 @@ const FAMILY_ICON_PATHS: Record<string, readonly string[]> = {
   ],
 };
 
+/** Kasa compact-tile silhouettes keyed by room name (see mobile mock). */
+const KASA_COMPACT_ICON_VARIANTS = {
+  bulb: [
+    "M9 18h6",
+    "M10 22h4",
+    "M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z",
+  ],
+  desk: [
+    "M4 22h16",
+    "M12 14v8",
+    "M8 14h8",
+    "M12 2l6 8H6l6-8z",
+  ],
+  lantern: [
+    "M12 2v3",
+    "M9 5h6",
+    "M10 8h4l-1 12h-2L10 8z",
+    "M8 22h8",
+  ],
+  outlet: [
+    "M7 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z",
+    "M9 12h2",
+    "M13 12h2",
+  ],
+  pendant: [
+    "M12 2v6",
+    "M8 8h8l-2 12h-4L8 8z",
+  ],
+  table: [
+    "M8 22h8",
+    "M12 14v8",
+    "M9 14h6",
+    "M10 6h4l1 8H9l1-8z",
+  ],
+} as const satisfies Record<string, readonly string[]>;
+
+/** Sound-wave arcs shown left of the Sonos cabinet when ``playing``. */
+const SONOS_COMPACT_PLAYING_WAVE_PATHS: readonly string[] = [
+  "M3 10c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0",
+  "M2 14c2-2 4-2 6 0s4 2 6 0",
+];
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 function applyStoredColorTheme(): void {
@@ -1510,6 +1552,77 @@ function initPwaInstallBanner(): void {
   mainEl.insertBefore(banner, mainEl.firstChild);
 }
 
+function appendCompactTileOverlay(iconWrap: HTMLElement, device: UIDeviceOut): void {
+  if (device.family_id === "sonos") {
+    if (device.state === "paused") {
+      iconWrap.append(
+        createCompactOverlaySvg("tile-compact-overlay tile-compact-overlay-pause", [
+          "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
+          "M10 15V9",
+          "M14 15V9",
+        ]),
+      );
+    } else if (device.state === "unknown") {
+      iconWrap.append(
+        createCompactOverlaySvg("tile-compact-overlay tile-compact-overlay-unknown", [
+          "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
+          "M12 16v-4",
+          "M12 8h.01",
+        ]),
+      );
+    }
+    return;
+  }
+  if (device.family_id !== "tailwind" || device.kind !== "door") {
+    return;
+  }
+  if (device.state === "closed") {
+    iconWrap.append(
+      createCompactOverlaySvg("tile-compact-overlay tile-compact-overlay-lock", [
+        "M7 11V7a5 5 0 0 1 10 0v4",
+        "M5 11h14v9H5z",
+      ]),
+    );
+  } else if (device.state === "open") {
+    iconWrap.append(
+      createCompactOverlaySvg("tile-compact-overlay tile-compact-overlay-open", [
+        "M12 19V5",
+        "M5 12l7-7 7 7",
+      ]),
+    );
+  }
+}
+
+function compactKasaIconPaths(label: string): readonly string[] {
+  const name = label.toLowerCase();
+  if (name.includes("porch")) {
+    return KASA_COMPACT_ICON_VARIANTS.lantern;
+  }
+  if (name.includes("office")) {
+    return KASA_COMPACT_ICON_VARIANTS.desk;
+  }
+  if (name.includes("hall")) {
+    return KASA_COMPACT_ICON_VARIANTS.pendant;
+  }
+  if (name.includes("guest")) {
+    return KASA_COMPACT_ICON_VARIANTS.table;
+  }
+  if (name.includes("basement") || name.includes("outlet") || name.includes("plug")) {
+    return KASA_COMPACT_ICON_VARIANTS.outlet;
+  }
+  return KASA_COMPACT_ICON_VARIANTS.bulb;
+}
+
+function compactStateCaption(device: UIDeviceOut): string | null {
+  if (device.kind === "switch") {
+    return null;
+  }
+  if (device.state === "unknown") {
+    return "Unknown";
+  }
+  return device.state.charAt(0).toUpperCase() + device.state.slice(1);
+}
+
 function compactTileAriaLabel(device: UIDeviceOut): string {
   const statePhrase =
     device.state === "unknown" ? "state unknown" : `currently ${device.state}`;
@@ -1526,9 +1639,44 @@ function compactTileAriaLabel(device: UIDeviceOut): string {
   return `${device.label}, ${statePhrase}, tap to ${next}`;
 }
 
-function createCompactTileIcon(familyId: string): SVGSVGElement | null {
-  const paths = FAMILY_ICON_PATHS[familyId];
-  if (!paths) {
+function compactTileIconPaths(device: UIDeviceOut): readonly string[] {
+  if (device.family_id === "kasa") {
+    return compactKasaIconPaths(device.label);
+  }
+  const familyPaths = FAMILY_ICON_PATHS[device.family_id];
+  if (!familyPaths) {
+    return [];
+  }
+  if (device.family_id === "sonos" && device.state === "playing") {
+    return [...SONOS_COMPACT_PLAYING_WAVE_PATHS, ...familyPaths];
+  }
+  return familyPaths;
+}
+
+function createCompactOverlaySvg(
+  className: string,
+  paths: readonly string[],
+): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", className);
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+function createCompactTileIcon(device: UIDeviceOut): SVGSVGElement | null {
+  const paths = compactTileIconPaths(device);
+  if (paths.length === 0) {
     return null;
   }
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -1694,14 +1842,25 @@ function renderDeviceCompact(
   hit.setAttribute("aria-label", compactTileAriaLabel(device));
   hit.disabled = !connected;
 
-  const icon = createCompactTileIcon(device.family_id);
+  const iconWrap = document.createElement("span");
+  iconWrap.className = "tile-compact-icon-wrap";
+  const icon = createCompactTileIcon(device);
   if (icon !== null) {
-    hit.append(icon);
+    iconWrap.append(icon);
   }
+  appendCompactTileOverlay(iconWrap, device);
+  hit.append(iconWrap);
   const label = document.createElement("span");
   label.className = "tile-compact-label";
   label.textContent = device.label;
   hit.append(label);
+  const stateCaption = compactStateCaption(device);
+  if (stateCaption !== null) {
+    const stateEl = document.createElement("span");
+    stateEl.className = "tile-compact-state";
+    stateEl.textContent = stateCaption;
+    hit.append(stateEl);
+  }
 
   if (device.kind === "switch") {
     hit.addEventListener("click", () => {
