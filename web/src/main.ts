@@ -28,6 +28,14 @@ const THEME_GLYPH_MOON_SVG =
 const THEME_GLYPH_SUN_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
 
+/** Eye — token hidden (click to reveal). */
+const TOKEN_REVEAL_EYE_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+
+/** Eye off — token visible (click to hide). */
+const TOKEN_REVEAL_EYE_OFF_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>';
+
 let themeToggleSingleton: HTMLButtonElement | null = null;
 
 /** Chromium-only: deferred until the user taps our Install control. */
@@ -1148,7 +1156,7 @@ async function openTailwindSettingsDialog(): Promise<void> {
   const dialog = document.createElement("dialog");
   dialog.className = "settings-dialog";
   const form = document.createElement("form");
-  form.method = "dialog";
+  let reloadDevicesAfterClose = false;
   const title = document.createElement("h2");
   title.textContent = "GoTailwind token";
   const status = document.createElement("p");
@@ -1170,24 +1178,30 @@ async function openTailwindSettingsDialog(): Promise<void> {
   const revealBtn = document.createElement("button");
   revealBtn.type = "button";
   revealBtn.className = "btn settings-dialog-reveal";
-  revealBtn.textContent = "Show";
   revealBtn.setAttribute("aria-label", "Show token");
+  revealBtn.setAttribute("aria-pressed", "false");
   let storedToken: string | null = null;
-  revealBtn.addEventListener("click", () => {
-    const show = input.type === "password";
-    if (show && !input.value && storedToken) {
+  let tokenRevealed = false;
+  const setTokenRevealed = (revealed: boolean): void => {
+    tokenRevealed = revealed;
+    if (revealed && !input.value && storedToken) {
       input.value = storedToken;
     }
-    input.type = show ? "text" : "password";
-    revealBtn.textContent = show ? "Hide" : "Show";
-    revealBtn.setAttribute("aria-label", show ? "Hide token" : "Show token");
+    input.type = revealed ? "text" : "password";
+    revealBtn.innerHTML = revealed ? TOKEN_REVEAL_EYE_OFF_SVG : TOKEN_REVEAL_EYE_SVG;
+    revealBtn.setAttribute("aria-label", revealed ? "Hide token" : "Show token");
+    revealBtn.setAttribute("aria-pressed", revealed ? "true" : "false");
+  };
+  setTokenRevealed(false);
+  revealBtn.addEventListener("click", () => {
+    setTokenRevealed(!tokenRevealed);
   });
   tokenRow.append(input, revealBtn);
   label.append(labelText, tokenRow);
   const actions = document.createElement("div");
   actions.className = "settings-dialog-actions";
   const saveBtn = document.createElement("button");
-  saveBtn.type = "submit";
+  saveBtn.type = "button";
   saveBtn.className = "btn";
   saveBtn.textContent = "Save";
   const clearBtn = document.createElement("button");
@@ -1212,9 +1226,16 @@ async function openTailwindSettingsDialog(): Promise<void> {
     try {
       const s = await api.fetchTailwindTokenSettings();
       storedToken = s.stored_token;
-      input.placeholder = storedToken
-        ? "Saved token — use Show to view"
-        : "Six-digit token";
+      if (storedToken) {
+        input.value = storedToken;
+        input.required = false;
+        if (!tokenRevealed) {
+          input.type = "password";
+        }
+      } else {
+        input.required = true;
+      }
+      input.placeholder = storedToken ? "" : "Six-digit token";
       const parts = [
         s.configured
           ? `Active source: ${s.source}.`
@@ -1238,30 +1259,39 @@ async function openTailwindSettingsDialog(): Promise<void> {
     }
   };
 
-  form.addEventListener("submit", (ev) => {
-    ev.preventDefault();
+  const saveToken = (): void => {
     void (async () => {
+      const token = input.value.trim();
+      if (!token) {
+        status.textContent = "Enter a token before saving.";
+        return;
+      }
+      saveBtn.disabled = true;
       try {
-        const out = await api.putTailwindToken(input.value);
-        input.value = "";
-        input.type = "password";
-        revealBtn.textContent = "Show";
-        revealBtn.setAttribute("aria-label", "Show token");
+        const out = await api.putTailwindToken(token);
         showSettingsToast("Token saved.");
+        reloadDevicesAfterClose = !out.restart_required;
         if (out.restart_required) {
           status.textContent =
             "Token saved in the database. Restart domesti-bot (or remove TAILWIND_TOKEN) so garage doors use it.";
         } else {
           status.textContent =
-            "Token saved. Refreshing devices to pick up GoTailwind doors…";
-          await domestiUiController?.reloadFromServer();
+            "Token saved in the database. Close this dialog to refresh the device list.";
         }
+        setTokenRevealed(false);
         await refreshStatus();
       } catch (err) {
         status.textContent =
           err instanceof HttpError ? err.detail : "Save failed.";
+      } finally {
+        saveBtn.disabled = false;
       }
     })();
+  };
+  saveBtn.addEventListener("click", saveToken);
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    saveToken();
   });
 
   clearBtn.addEventListener("click", () => {
@@ -1270,13 +1300,12 @@ async function openTailwindSettingsDialog(): Promise<void> {
         await api.clearTailwindToken();
         storedToken = null;
         input.value = "";
-        input.type = "password";
-        revealBtn.textContent = "Show";
-        revealBtn.setAttribute("aria-label", "Show token");
+        input.required = true;
+        setTokenRevealed(false);
         showSettingsToast("Stored token cleared.");
         status.textContent = "Stored database token removed.";
+        reloadDevicesAfterClose = true;
         await refreshStatus();
-        await domestiUiController?.reloadFromServer();
       } catch (err) {
         status.textContent =
           err instanceof HttpError ? err.detail : "Clear failed.";
@@ -1286,6 +1315,10 @@ async function openTailwindSettingsDialog(): Promise<void> {
 
   dialog.addEventListener("close", () => {
     dialog.remove();
+    if (reloadDevicesAfterClose) {
+      reloadDevicesAfterClose = false;
+      void domestiUiController?.reloadFromServer();
+    }
   });
   dialog.addEventListener("click", (ev) => {
     if (ev.target === dialog) {
