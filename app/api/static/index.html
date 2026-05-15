@@ -319,7 +319,7 @@
       grid-area: 1 / 1; min-width: 0; min-height: 0;
     }
     #app[data-layout="compact"] .tile-compact > .tile-exclude-inset {
-      grid-area: 1 / 1; align-self: start; justify-self: end;
+      display: none;
     }
     .tile-rich { border-radius: 12px; }
     /* Global-bulk exclude control — checkbox only; ``title`` shows the hint. */
@@ -592,6 +592,7 @@
       main { margin: 0; padding: 10px; max-width: none; }
       #app { gap: 10px; }
       #app .family-header .btn { display: none; }
+      #app .tile-compact > .tile-exclude-inset { display: none; }
       #app .tile-grid-compact,
       #app .tile-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
