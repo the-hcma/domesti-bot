@@ -294,6 +294,15 @@
       font-size: 12px; color: var(--muted); cursor: pointer; }
     .tile-exclude input[type="checkbox"] { width: 18px; height: 18px; }
 
+    /* Compact tiles are a separate DOM shape — never inherit comfortable ``.tile``
+       card chrome (gray fill, family-colored left border). */
+    .tile-compact {
+      display: block; margin: 0; padding: 0; border: none;
+      border-radius: 12px; aspect-ratio: 1; min-width: 0;
+      overflow: hidden; background: transparent;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
     /* Compact mobile layout (``#app[data-layout="compact"]`` from ``main.ts``).
        Saturated square tiles — solid green / red / amber blocks, white icon
        and labels (see ``docs/figures/mobile-compact-tile-reference.png``). */
@@ -318,11 +327,6 @@
     #app[data-layout="compact"] .tile-grid-compact {
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
-    }
-    #app[data-layout="compact"] .tile-compact {
-      padding: 0; border: none; border-radius: 12px;
-      aspect-ratio: 1; min-width: 0; overflow: hidden;
-      background: transparent; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     }
     #app[data-layout="compact"] .tile-compact-hit {
       display: flex; flex-direction: column; align-items: center;
@@ -459,18 +463,27 @@
       max-width: 42rem; padding: 8px 4px 0; }
     .boot-js-hint code { font-size: 13px; }
 
-    /* Phone viewport: < 600px (covers iPhone SE through Pro Max in
-       portrait). Goals:
-       * collapse the outer chrome so tiles take the full screen width;
-       * grow tap targets to >=44px on the buttons + checkbox; and
-       * keep the family header readable when the bulk button has to
-         wrap under the family label. */
+    /* Phone / narrow viewport (matches ``COMPACT_LAYOUT_MQ`` in ``main.ts``).
+       Collapse outer margin, force the three-column compact grid, and hide
+       per-family bulk actions even if an old bundle left ``data-layout`` stale. */
+    @media (max-width: 768px) {
+      main { margin: 0; padding: 10px; max-width: none; }
+      #app { gap: 10px; }
+      #app .family-header .btn { display: none; }
+      #app .tile-grid-compact,
+      #app .tile-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .tile-header-global-off { font-size: 12px; padding: 10px 12px; }
+    }
+
+    /* Comfortable-only tweaks below 600px (larger tap targets). */
     @media (max-width: 600px) {
-      main { margin: 0; padding: 12px; max-width: none; }
-      #app[data-layout="compact"] { gap: 10px; }
       #app[data-layout="comfortable"] { gap: 12px; }
       .family { padding: 12px; border-radius: 8px; }
       .family-header { gap: 6px 10px; }
+      main { padding: 12px; }
       #app[data-layout="comfortable"] .tile-grid {
         grid-template-columns: 1fr; gap: 8px;
       }
