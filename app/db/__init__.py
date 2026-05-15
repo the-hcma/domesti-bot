@@ -12,7 +12,12 @@ from app.db.secrets import (
     secrets_key_configured,
     secrets_key_source,
 )
-from app.db.secrets_key import load_secrets_key_material, secrets_json_path
+from app.db.secrets_key import (
+    generate_fernet_key,
+    load_secrets_key_material,
+    secrets_json_path,
+    write_secrets_json,
+)
 
 __all__ = [
     "apply_legacy_column_migrations",
@@ -23,8 +28,10 @@ __all__ = [
     "get_engine",
     "load_tailwind_token_from_db",
     "save_tailwind_token_to_db",
+    "generate_fernet_key",
     "load_secrets_key_material",
     "secrets_json_path",
+    "write_secrets_json",
     "secrets_key_configured",
     "secrets_key_source",
 ]

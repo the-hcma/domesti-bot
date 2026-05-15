@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -16,6 +18,7 @@ from app.domesti_bot_cli import (
     _normalize_edit_mode_choice,
     _parse_completion_buffer,
     _print_family_parallel_line,
+    _repl_cmd_setup_secrets,
     _resolve_cli_target,
     _resolve_device_name,
     COMMANDS,
@@ -231,3 +234,20 @@ def test_print_family_parallel_line_falls_back_to_bare_ready_without_source_or_c
     _print_family_parallel_line(theme, "sonos", result, ok_verb="ready")
     out = capsys.readouterr().out
     assert out.strip() == "Sonos: ready"
+
+
+@pytest.mark.asyncio
+async def test_repl_setup_secrets_writes_json_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secrets_file = tmp_path / "domesti-secrets.json"
+    monkeypatch.setenv("DOMESTI_SECRETS_FILE", str(secrets_file))
+    monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
+
+    async def prompt(_message: str, _is_password: bool) -> str:
+        return ""
+
+    await _repl_cmd_setup_secrets(prompt_fn=prompt, theme=_Theme(enabled=False))
+    assert secrets_file.is_file()
+    payload = json.loads(secrets_file.read_text(encoding="utf-8"))
+    assert payload["domesti_secrets_key"]

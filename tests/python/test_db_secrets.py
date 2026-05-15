@@ -19,7 +19,12 @@ from app.db.secrets import (
     secrets_key_source,
     tailwind_token_stored_in_db,
 )
-from app.db.secrets_key import load_secrets_key_material, secrets_json_path
+from app.db.secrets_key import (
+    generate_fernet_key,
+    load_secrets_key_material,
+    secrets_json_path,
+    write_secrets_json,
+)
 from app.tailwind_credentials import resolve_tailwind_token
 
 
@@ -50,6 +55,16 @@ def test_secrets_key_from_json_file(
     assert source == "file"
     assert secrets_key_configured() is True
     assert secrets_key_source() == "file"
+
+
+def test_write_secrets_json_sets_mode_600(tmp_path: Path) -> None:
+    key = generate_fernet_key()
+    target = tmp_path / "domesti-secrets.json"
+    written = write_secrets_json(key, path=target)
+    assert written == target
+    assert oct(target.stat().st_mode & 0o777) == "0o600"
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["domesti_secrets_key"] == key
 
 
 def test_save_and_load_tailwind_token_roundtrip(
