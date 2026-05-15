@@ -39,6 +39,15 @@ interface PwaBeforeInstallPromptEvent extends Event {
 /** Public source repository (tooltip copy + icon link target). */
 const DOMESTI_BOT_REPO_HREF = "https://github.com/the-hcma/domesti-bot";
 
+/** Tailwind web dashboard (Local Control Key / token). */
+const TAILWIND_WEB_DASHBOARD_HREF = "https://web.gotailwind.com";
+
+const SETTINGS_TOAST_MS = 5000;
+
+let domestiUiController: DomestiBotController | null = null;
+let settingsToast: HTMLDivElement | null = null;
+let settingsToastTimer: number | null = null;
+
 interface PendingPrediction {
   state: UIDeviceState;
   expiresAt: number;
@@ -471,6 +480,11 @@ class DomestiBotController {
     });
   }
 
+  /** Reload tiles from ``/v1/ui/state`` (e.g. after saving settings). */
+  async reloadFromServer(): Promise<void> {
+    await this.refresh();
+  }
+
   private schedulePoll(): void {
     if (this.pollTimer !== null) return;
     this.pollTimer = window.setInterval(() => {
@@ -486,6 +500,10 @@ class DomestiBotController {
     if (state.families.length > 0) {
       const header = document.createElement("header");
       header.className = "tile-header tile-header-global";
+      const menu = createDesktopMenuButton(this.meta);
+      if (menu !== null) {
+        header.append(menu);
+      }
       header.append(createBrandMark(this.meta));
       const actions = document.createElement("div");
       actions.className = "tile-header-actions";
@@ -497,22 +515,18 @@ class DomestiBotController {
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
       });
-      const menu = createDesktopMenuButton(this.meta);
-      if (menu !== null) {
-        actions.append(menu);
-      }
       actions.append(globalBtn, createThemeToggleButton());
       header.append(actions);
       this.root.append(header);
     } else {
       const emptyHead = document.createElement("header");
       emptyHead.className = "tile-header tile-header-sparse";
-      const sparseActions = document.createElement("div");
-      sparseActions.className = "tile-header-actions tile-header-actions-sparse";
       const menu = createDesktopMenuButton(this.meta);
       if (menu !== null) {
-        sparseActions.append(menu);
+        emptyHead.append(menu);
       }
+      const sparseActions = document.createElement("div");
+      sparseActions.className = "tile-header-actions tile-header-actions-sparse";
       sparseActions.append(createThemeToggleButton());
       emptyHead.append(createBrandMark(this.meta), sparseActions);
       this.root.append(emptyHead);
@@ -997,6 +1011,24 @@ function createFamilyIcon(familyId: string): SVGElement | null {
 
 let openAppMenuCloser: (() => void) | null = null;
 
+function appendTailwindTokenIntro(parent: HTMLElement): void {
+  const intro = document.createElement("p");
+  intro.className = "settings-dialog-lead";
+  const link = document.createElement("a");
+  link.href = TAILWIND_WEB_DASHBOARD_HREF;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = "Tailwind web dashboard";
+  intro.append(
+    document.createTextNode("Copy the six-digit token from the "),
+    link,
+    document.createTextNode(
+      ". It is stored encrypted in the discovery database on this server.",
+    ),
+  );
+  parent.append(intro);
+}
+
 function closeAppMenu(): void {
   if (openAppMenuCloser !== null) {
     openAppMenuCloser();
@@ -1119,17 +1151,15 @@ async function openTailwindSettingsDialog(): Promise<void> {
   form.method = "dialog";
   const title = document.createElement("h2");
   title.textContent = "GoTailwind token";
-  const intro = document.createElement("p");
-  intro.className = "settings-dialog-lead";
-  intro.textContent =
-    "Paste the six-digit Local Control Key from the Tailwind web dashboard. It is stored encrypted in the discovery database and is never shown again after you save.";
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
   status.textContent = "Loading…";
   const label = document.createElement("label");
   label.className = "settings-dialog-field";
   const labelText = document.createElement("span");
-  labelText.textContent = "Local Control Key";
+  labelText.textContent = "Token";
+  const tokenRow = document.createElement("div");
+  tokenRow.className = "settings-dialog-token-row";
   const input = document.createElement("input");
   input.type = "password";
   input.name = "token";
@@ -1137,7 +1167,23 @@ async function openTailwindSettingsDialog(): Promise<void> {
   input.inputMode = "numeric";
   input.maxLength = 64;
   input.required = true;
-  label.append(labelText, input);
+  const revealBtn = document.createElement("button");
+  revealBtn.type = "button";
+  revealBtn.className = "btn settings-dialog-reveal";
+  revealBtn.textContent = "Show";
+  revealBtn.setAttribute("aria-label", "Show token");
+  let storedToken: string | null = null;
+  revealBtn.addEventListener("click", () => {
+    const show = input.type === "password";
+    if (show && !input.value && storedToken) {
+      input.value = storedToken;
+    }
+    input.type = show ? "text" : "password";
+    revealBtn.textContent = show ? "Hide" : "Show";
+    revealBtn.setAttribute("aria-label", show ? "Hide token" : "Show token");
+  });
+  tokenRow.append(input, revealBtn);
+  label.append(labelText, tokenRow);
   const actions = document.createElement("div");
   actions.className = "settings-dialog-actions";
   const saveBtn = document.createElement("button");
@@ -1156,13 +1202,19 @@ async function openTailwindSettingsDialog(): Promise<void> {
     dialog.close();
   });
   actions.append(saveBtn, clearBtn, closeBtn);
-  form.append(title, intro, status, label, actions);
+  form.append(title);
+  appendTailwindTokenIntro(form);
+  form.append(status, label, actions);
   dialog.append(form);
   document.body.append(dialog);
 
   const refreshStatus = async (): Promise<void> => {
     try {
       const s = await api.fetchTailwindTokenSettings();
+      storedToken = s.stored_token;
+      input.placeholder = storedToken
+        ? "Saved token — use Show to view"
+        : "Six-digit token";
       const parts = [
         s.configured
           ? `Active source: ${s.source}.`
@@ -1192,10 +1244,18 @@ async function openTailwindSettingsDialog(): Promise<void> {
       try {
         const out = await api.putTailwindToken(input.value);
         input.value = "";
-        const hint = out.restart_required
-          ? " Saved. Restart domesti-bot (or redeploy) so garage doors use the new token."
-          : " Saved.";
-        status.textContent = hint;
+        input.type = "password";
+        revealBtn.textContent = "Show";
+        revealBtn.setAttribute("aria-label", "Show token");
+        showSettingsToast("Token saved.");
+        if (out.restart_required) {
+          status.textContent =
+            "Token saved in the database. Restart domesti-bot (or remove TAILWIND_TOKEN) so garage doors use it.";
+        } else {
+          status.textContent =
+            "Token saved. Refreshing devices to pick up GoTailwind doors…";
+          await domestiUiController?.reloadFromServer();
+        }
         await refreshStatus();
       } catch (err) {
         status.textContent =
@@ -1208,8 +1268,15 @@ async function openTailwindSettingsDialog(): Promise<void> {
     void (async () => {
       try {
         await api.clearTailwindToken();
+        storedToken = null;
+        input.value = "";
+        input.type = "password";
+        revealBtn.textContent = "Show";
+        revealBtn.setAttribute("aria-label", "Show token");
+        showSettingsToast("Stored token cleared.");
         status.textContent = "Stored database token removed.";
         await refreshStatus();
+        await domestiUiController?.reloadFromServer();
       } catch (err) {
         status.textContent =
           err instanceof HttpError ? err.detail : "Clear failed.";
@@ -1228,6 +1295,34 @@ async function openTailwindSettingsDialog(): Promise<void> {
 
   await refreshStatus();
   dialog.showModal();
+}
+
+function showSettingsToast(message: string): void {
+  if (settingsToastTimer !== null) {
+    window.clearTimeout(settingsToastTimer);
+    settingsToastTimer = null;
+  }
+  if (settingsToast !== null) {
+    settingsToast.remove();
+    settingsToast = null;
+  }
+  const toast = document.createElement("div");
+  toast.className = "action-toast action-toast-success";
+  toast.setAttribute("role", "status");
+  toast.setAttribute("aria-live", "polite");
+  const text = document.createElement("p");
+  text.className = "action-toast-message";
+  text.textContent = message;
+  toast.append(text);
+  document.body.append(toast);
+  settingsToast = toast;
+  settingsToastTimer = window.setTimeout(() => {
+    toast.remove();
+    if (settingsToast === toast) {
+      settingsToast = null;
+    }
+    settingsToastTimer = null;
+  }, SETTINGS_TOAST_MS);
 }
 
 function createThemeToggleButton(): HTMLButtonElement {
@@ -1558,6 +1653,7 @@ function start(): void {
     return;
   }
   const controller = new DomestiBotController(root);
+  domestiUiController = controller;
   void controller.init();
 }
 

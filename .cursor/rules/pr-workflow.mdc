@@ -13,16 +13,19 @@ When the user asks you to "commit and push" / "ship this" / "land this":
 
 1. **Never** check out `main` and commit there directly.
 2. **Never** run `git push origin main` from a local working copy.
-3. Always:
-   - Create a feature branch with `gt create <branch-name>` (preferred — Graphite stacked-branch workflow) or `git checkout -b <branch-name>`.
-   - Commit on that branch.
-   - Open a PR with `gh pr create` (or `gt submit` for Graphite stacks).
+3. Always work in a **dedicated Git worktree** (never leave in-progress PR work on the primary clone):
+   - The **primary** checkout at the repo root must stay on `main` with a **clean** working tree (no feature branch, no unstaged/staged changes).
+   - Create or use a worktree under `.worktrees/<slug>/` via `~/work/ai/repository-helpers/scripts/dev/start-development --worktree <slug> --no-interactive` (after `--refresh`), or `git worktree add .worktrees/<slug> -b feat/<slug> main`.
+   - Inside that worktree: `gt create` / commit on a **Graphite stack** branch, then `gt submit --no-interactive --publish`.
+   - Open a PR with `gh pr create` only when not using Graphite submit.
    - Return the PR URL to the user and stop.
-4. If you discover the working tree is currently on `main` with staged or unstaged changes, **first** move them to a feature branch:
+4. If you discover the **primary** worktree is dirty or on a feature branch, **do not commit there**. Stash or move the changes into a new worktree + branch, then restore `main` and a clean tree on the primary checkout:
    ```bash
-   git checkout -b <descriptive-branch-name>   # carries the working changes with you
+   git stash push -u -m "wip"
+   git checkout main
+   git worktree add .worktrees/<slug> -b feat/<slug> main
+   cd .worktrees/<slug> && git stash pop
    ```
-   then commit.
 
 ## Branch-naming convention
 

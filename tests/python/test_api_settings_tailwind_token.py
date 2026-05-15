@@ -72,6 +72,7 @@ def test_put_tailwind_token_persists_when_secrets_key_in_json_file(
     get_r = client.get("/v1/settings/tailwind-token")
     body = get_r.json()
     assert body["stored_in_database"] is True
+    assert body["stored_token"] == "123456"
     assert body["secrets_key_source"] == "file"
 
 
