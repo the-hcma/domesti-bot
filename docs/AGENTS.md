@@ -424,7 +424,7 @@ Typical causes (check in order):
 
 1. **Wrong URL or bind address** — If the unit still used loopback-only (`127.0.0.1`) and you open `http://<this-host's-LAN-IP>:8003/` from another machine, the connection never reaches the process. The `etc/systemd` unit uses `--listen-all` so `0.0.0.0:8003` accepts LAN clients; confirm with `ss -ltnp | grep 8003` (or `lsof -iTCP:8003 -sTCP:LISTEN`). Firewall rules must allow TCP **8003** on the interfaces you use.
 2. **Missing web bundle** — `GET /` returns HTML immediately, but the tile UI lives in `app/api/static/dist/main.js` (gitignored). If that file was never built, the browser shows an empty shell until the static boot hint (or nothing, on older HTML). Run `setup-service` so `scripts/on-deploy` runs `pnpm run build` in `web/`, or build manually once: `cd web && pnpm install --frozen-lockfile && pnpm run build`. Confirm `GET /static/dist/main.js` returns **200** (not **404**).
-3. **`on-deploy` exit 1 (no restart)** — When the deployed Git SHA matches the last successful `on-deploy` cache, the hook exits **1** and `setup-service` skips restarting the unit. That does **not** skip the first-ever install, but if you copied a tree without rebuilding and the SHA file already matched, you could still lack `dist/`. Run `./scripts/on-deploy --force` once, or delete `$HOME/scratch/domesti-bot/on-deploy-sha` and rerun `setup-service`.
+3. **`on-deploy` exit 1 (no restart)** — The hook exits **1** only when `HEAD`, the deploy-input fingerprint, and `app/api/static/dist/main.js` all match the last successful deploy. It rebuilds when the bundle is missing, inputs are newer than `dist/`, or the cache file is legacy commit-only. If you still need to force a full rebuild, use `./scripts/on-deploy --force`.
 4. **API key** — With `DOMESTI_API_KEY` set, unauthenticated browser calls to protected JSON routes return **401**; the shell still loads if the bundle exists. Open `GET /health` (no key) to verify HTTP, then configure the key in the client or relax auth for debugging only.
 
 ### Discovery Cache (cache-first startup)
@@ -482,12 +482,13 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 3. Verify `uv` is on `PATH`; exit `2` if missing.
 4. Ensure `.venv/` exists with a usable interpreter — recreate it via `uv sync` if missing or stale (handles brand-new worktrees).
 5. Reset a stuck `domesti-bot.service` failed state for the **user** manager (`systemctl --user`) when not root; when root, reset the system manager (best-effort; ignored if the unit isn't installed yet).
-6. Compare `git rev-parse HEAD` against the per-host SHA cache (`$HOME/scratch/domesti-bot/on-deploy-sha`, overridable via `ON_DEPLOY_SHA_FILE`). If equal and `--force` was not passed → exit `1`.
+6. Skip when `HEAD`, a hash of deploy inputs (`pyproject.toml`, `uv.lock`, `web/`, `index.html`, `sw.js`, …), and `app/api/static/dist/main.js` all match the state file (`$HOME/scratch/domesti-bot/on-deploy-sha`, overridable via `ON_DEPLOY_SHA_FILE`; format `commit=` + `inputs=` lines). Also rebuild when the bundle is missing, any input is newer than `dist/main.js`, or the cache is legacy commit-only. `--force` bypasses the skip. Skip → exit `1`.
 7. `uv sync --frozen` — refuse to mutate `uv.lock` on a deploy box; build either matches the committed pin or fails loudly.
-8. Smoke-import `config.serve` so a broken dep or syntax error fails the hook BEFORE `setup-service` restarts the unit.
-9. Record the deployed SHA, exit `0`.
+8. `pnpm install` + `pnpm run build` in `web/` when present.
+9. Smoke-import `config.serve` so a broken dep or syntax error fails the hook BEFORE `setup-service` restarts the unit.
+10. Record deploy state (`commit` + `inputs` hash), exit `0`.
 
-**Manual runs**: `./scripts/on-deploy` (idempotent) or `./scripts/on-deploy --force` to bypass the SHA cache. `--help` prints the header docblock.
+**Manual runs**: `./scripts/on-deploy` (idempotent) or `./scripts/on-deploy --force` to bypass the skip check. `--help` prints the header docblock.
 
 ---
 

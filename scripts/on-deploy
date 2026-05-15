@@ -20,8 +20,10 @@
 #   ./scripts/on-deploy --force   # ignore the SHA cache and always rebuild
 #
 # Environment:
-#   ON_DEPLOY_SHA_FILE  Optional. Override the per-host SHA cache location
+#   ON_DEPLOY_SHA_FILE  Optional. Override the per-host deploy-state cache
 #                       (default: $HOME/scratch/domesti-bot/on-deploy-sha).
+#                       Format: ``commit=<git-sha>`` and ``inputs=<hash>`` lines.
+#                       Legacy single-line SHA files are still read.
 #
 # No-Python rule: per docs/AGENTS.md, this script must not invoke `python3`
 # for utility work. The .venv may be missing or broken at hook time; that is
@@ -40,6 +42,125 @@ _on_deploy_fail() {
     exit "$rc"
 }
 trap _on_deploy_fail ERR
+
+# Paths and globs that affect uv sync, the web bundle, or the committed HTML shell.
+readonly _DEPLOY_INPUT_ROOTS=(
+    pyproject.toml
+    uv.lock
+    web/package.json
+    web/pnpm-lock.yaml
+    web/build.mjs
+    web/tsconfig.json
+    app/api/static/index.html
+    app/api/static/sw.js
+)
+readonly _DEPLOY_DIST_MAIN=app/api/static/dist/main.js
+
+_deploy_collect_input_paths() {
+    local repo="$1"
+    local path
+    for path in "${_DEPLOY_INPUT_ROOTS[@]}"; do
+        if [[ -f "$repo/$path" ]]; then
+            printf '%s\n' "$repo/$path"
+        fi
+    done
+    if [[ -d "$repo/web/src" ]]; then
+        find "$repo/web/src" -type f -print | LC_ALL=C sort
+    fi
+}
+
+_deploy_dist_is_stale() {
+    local repo="$1"
+    local dist="$repo/$_DEPLOY_DIST_MAIN"
+    if [[ ! -f "$dist" ]]; then
+        return 0
+    fi
+    local dist_mtime path_mtime
+    dist_mtime="$(stat -c '%Y' "$dist")"
+    while IFS= read -r path; do
+        [[ -z "$path" ]] && continue
+        path_mtime="$(stat -c '%Y' "$path")"
+        if (( path_mtime > dist_mtime )); then
+            return 0
+        fi
+    done < <(_deploy_collect_input_paths "$repo")
+    return 1
+}
+
+_deploy_inputs_hash() {
+    local repo="$1"
+    local list_file
+    list_file="$(mktemp)"
+    _deploy_collect_input_paths "$repo" >"$list_file"
+    if [[ ! -s "$list_file" ]]; then
+        rm -f "$list_file"
+        echo "0000000000000000000000000000000000000000000000000000000000000000"
+        return 0
+    fi
+    local digest
+    digest="$(
+        while IFS= read -r path; do
+            sha256sum "$path"
+        done <"$list_file" | sha256sum | awk '{print $1}'
+    )"
+    rm -f "$list_file"
+    echo "$digest"
+}
+
+_deploy_read_state() {
+    local state_file="$1"
+    DEPLOY_RECORDED_COMMIT=""
+    DEPLOY_RECORDED_INPUTS=""
+    if [[ ! -f "$state_file" ]]; then
+        return 1
+    fi
+    if grep -q '^commit=' "$state_file"; then
+        DEPLOY_RECORDED_COMMIT="$(grep '^commit=' "$state_file" | head -n1 | cut -d= -f2-)"
+        if grep -q '^inputs=' "$state_file"; then
+            DEPLOY_RECORDED_INPUTS="$(grep '^inputs=' "$state_file" | head -n1 | cut -d= -f2-)"
+        fi
+        return 0
+    fi
+    # Legacy cache: entire file is a single git SHA.
+    DEPLOY_RECORDED_COMMIT="$(tr -d '[:space:]' <"$state_file")"
+    return 0
+}
+
+_deploy_write_state() {
+    local state_file="$1" commit="$2" inputs="$3"
+    mkdir -p "$(dirname "$state_file")"
+    {
+        printf 'commit=%s\n' "$commit"
+        printf 'inputs=%s\n' "$inputs"
+    } >"$state_file"
+}
+
+_deploy_should_skip() {
+    local repo="$1" state_file="$2" current_sha="$3" current_inputs="$4"
+    if [[ ! -f "$repo/$_DEPLOY_DIST_MAIN" ]]; then
+        echo "  Web bundle missing ($_DEPLOY_DIST_MAIN) — rebuild required."
+        return 1
+    fi
+    if _deploy_dist_is_stale "$repo"; then
+        echo "  Deploy inputs newer than web bundle — rebuild required."
+        return 1
+    fi
+    if ! _deploy_read_state "$state_file"; then
+        return 1
+    fi
+    if [[ -z "$DEPLOY_RECORDED_INPUTS" ]]; then
+        echo "  Legacy deploy cache (commit-only) — rebuild to refresh fingerprint."
+        return 1
+    fi
+    if [[ "$DEPLOY_RECORDED_COMMIT" != "$current_sha" ]]; then
+        return 1
+    fi
+    if [[ "$DEPLOY_RECORDED_INPUTS" != "$current_inputs" ]]; then
+        echo "  Deploy inputs changed since last successful deploy — rebuild required."
+        return 1
+    fi
+    return 0
+}
 
 force_rebuild=false
 for arg in "$@"; do
@@ -119,12 +240,15 @@ if command -v systemctl &>/dev/null; then
     fi
 fi
 
-# Skip the rebuild when the commit being deployed matches the last successful
-# deploy on this host. Exit 1 signals setup-service that no restart is needed.
-if [[ "$force_rebuild" != true && -n "$current_sha" && -f "$sha_file" ]]; then
-    recorded_sha="$(cat "$sha_file")"
-    if [[ "$recorded_sha" == "$current_sha" ]]; then
-        echo "  Already deployed at commit ${current_sha:0:7} — skipping build."
+# Skip rebuild/restart only when HEAD, deploy-input fingerprint, and dist/main.js
+# all match the last successful deploy. Exit 1 => setup-service may skip restart.
+current_inputs=""
+if [[ -d "$repo_dir/web" ]] || [[ -f "$repo_dir/pyproject.toml" ]]; then
+    current_inputs="$(_deploy_inputs_hash "$repo_dir")"
+fi
+if [[ "$force_rebuild" != true && -n "$current_sha" ]]; then
+    if _deploy_should_skip "$repo_dir" "$sha_file" "$current_sha" "$current_inputs"; then
+        echo "  Already deployed at commit ${current_sha:0:7} (inputs ${current_inputs:0:7}…) — skipping build."
         echo "on-deploy: no change."
         exit 1
     fi
@@ -156,7 +280,7 @@ echo "  Verifying config.serve imports cleanly..."
 uv run python -c "import config.serve"
 
 if [[ -n "$current_sha" ]]; then
-    echo "$current_sha" > "$sha_file"
+    _deploy_write_state "$sha_file" "$current_sha" "$current_inputs"
 fi
 
 echo "on-deploy complete."
