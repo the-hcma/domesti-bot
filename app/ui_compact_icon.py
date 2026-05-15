@@ -28,7 +28,7 @@ _OBJECT_WORD_RULES: tuple[tuple[str, str], ...] = (
     ("lamp", "lamp"),
     ("light", "light"),
     ("bulb", "bulb"),
-    ("led", "bulb"),
+    ("led", "led"),
 )
 
 # Other object substrings (no bare ``light`` / ``lamp`` here).

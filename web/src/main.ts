@@ -799,6 +799,13 @@ const COMPACT_ICON_PATHS: Record<string, readonly string[]> = {
     "M9 16h6",
     "M10 5h4l1 3H9l1-3z",
   ],
+  led: [
+    "M10 17h4v3h-4z",
+    "M11 12h2v5",
+    "M12 7v5",
+    "M8 9l4-2 4 2",
+    "M8 11l4-1 4 1",
+  ],
   lantern: [
     "M12 2v3",
     "M9 5h6",

@@ -71,14 +71,14 @@ def test_resolve_compact_icon_kasa_kitchen_only_is_room() -> None:
     )
 
 
-def test_resolve_compact_icon_kasa_kitchen_led_is_bulb() -> None:
+def test_resolve_compact_icon_kasa_kitchen_led_is_led() -> None:
     assert (
         resolve_compact_icon(
             family_id="kasa",
             label="Kitchen LED",
             kind="switch",
         )
-        == "bulb"
+        == "led"
     )
 
 
