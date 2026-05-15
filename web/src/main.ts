@@ -1795,7 +1795,7 @@ function appendSaturatedTileVisuals(
   label.className = "tile-saturated-label";
   label.textContent = device.label;
 
-  const stateCaption = tileStateCaption(device, !compactHalfLayout);
+  const stateCaption = compactHalfLayout ? null : tileStateCaption(device);
   const stateEl =
     stateCaption !== null ? document.createElement("span") : null;
   if (stateEl !== null) {
@@ -2145,13 +2145,7 @@ function tileIconPaths(device: UIDeviceOut): readonly string[] {
   return COMPACT_ICON_PATHS[device.compact_icon] ?? COMPACT_ICON_PATHS["bulb"] ?? [];
 }
 
-function tileStateCaption(
-  device: UIDeviceOut,
-  includeSwitchState: boolean,
-): string | null {
-  if (device.kind === "switch" && !includeSwitchState) {
-    return null;
-  }
+function tileStateCaption(device: UIDeviceOut): string | null {
   if (device.state === "unknown") {
     return "Unknown";
   }
