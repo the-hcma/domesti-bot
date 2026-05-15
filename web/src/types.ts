@@ -25,6 +25,8 @@ export interface UIDeviceOut {
   label: string;
   kind: UIDeviceKind;
   state: UIDeviceState;
+  /** Server-resolved compact-tile SVG key (bulb, outlet, garage, speaker, …). */
+  compact_icon: string;
   exclude_from_global: boolean;
 }
 

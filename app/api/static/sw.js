@@ -1,12 +1,12 @@
 // Minimal service worker: precache shell assets and stale-while-revalidate for
 // the JS bundle so installs get a usable offline banner (not live API data).
 
-const VERSION = "domesti-bot-pwa-v8";
+const VERSION = "domesti-bot-pwa-v10";
 const PRECACHE = [
   "/",
   "/static/manifest.webmanifest",
-  "/static/icons/icon-192.png",
-  "/static/icons/icon-512.png",
+  "/static/icons/app-icon-192x192.png",
+  "/static/icons/app-icon-512x512.png",
   "/static/icons/app-icon.svg",
 ];
 

@@ -8,8 +8,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="manifest" href="/static/manifest.webmanifest">
-  <link rel="icon" href="/static/icons/icon-192.png" type="image/png">
-  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" href="/static/icons/app-icon-192x192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icons/app-icon-192x192.png">
   <style>
     :root {
       color-scheme: light dark;
@@ -88,11 +88,12 @@
     .btn-theme-toggle svg { display: block; }
     .brand-mark { position: relative; display: inline-flex;
       flex: 0 0 auto; flex-shrink: 0; align-items: center; color: var(--muted); }
-    .brand-mark-icon-link { display: inline-flex; flex-shrink: 0;
-      align-items: center; color: inherit; text-decoration: none;
-      border-radius: 6px; cursor: pointer; }
-    .brand-mark-icon-link:hover { color: var(--fg); }
-    .brand-mark-icon-link:focus-visible { outline: 2px solid var(--accent);
+    .brand-mark-icon-btn { display: inline-flex; flex-shrink: 0;
+      align-items: center; padding: 0; border: none; background: transparent;
+      color: inherit; font: inherit; border-radius: 6px; cursor: pointer;
+      touch-action: manipulation; }
+    .brand-mark-icon-btn:hover { color: var(--fg); }
+    .brand-mark-icon-btn:focus-visible { outline: 2px solid var(--accent);
       outline-offset: 2px; }
     .brand-mark-svg { width: 30px; height: 30px; display: block;
       flex-shrink: 0; }
@@ -135,8 +136,17 @@
       border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
       pointer-events: auto; white-space: normal; }
     .brand-mark-tooltip.is-open { display: block; }
+    .brand-mark-tooltip-head { display: flex; align-items: flex-start;
+      justify-content: space-between; gap: 8px; margin-bottom: 2px; }
     .brand-mark-tooltip-product { font-weight: 600; font-size: 13px;
-      margin-bottom: 2px; }
+      margin: 0; flex: 1 1 auto; min-width: 0; }
+    .brand-mark-tooltip-dismiss { flex: 0 0 auto; font: inherit; font-size: 18px;
+      line-height: 1; padding: 0 4px; border: none; background: transparent;
+      color: var(--muted); cursor: pointer; border-radius: 4px;
+      touch-action: manipulation; }
+    .brand-mark-tooltip-dismiss:hover { color: var(--fg); }
+    .brand-mark-tooltip-dismiss:focus-visible { outline: 2px solid var(--accent);
+      outline-offset: 2px; }
     .brand-mark-tooltip-tagline { font-size: 11px; color: var(--muted);
       margin-bottom: 6px; line-height: 1.35; }
     .brand-mark-tooltip-copy { font-size: 11px; color: var(--muted);
@@ -376,6 +386,9 @@
       flex: 1 1 auto; min-width: 0; border-radius: 999px;
       padding: 10px 14px; font-size: 13px; font-weight: 600;
       text-align: center; line-height: 1.25;
+    }
+    #app[data-layout="compact"] .brand-mark-svg {
+      width: 32px; height: 32px;
     }
     #app[data-layout="compact"] .tile-compact-label {
       font-size: 12px; font-weight: 700; line-height: 1.15;

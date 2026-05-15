@@ -38,6 +38,7 @@ from app.sonos_device_manager import (
     SonosSpeakerDevice,
     SonosTransitionUnavailableError,
 )
+from app.ui_compact_icon import resolve_compact_icon
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -166,6 +167,21 @@ async def _bulk_off_kasa_apply_impl(
     return affected, skipped
 
 
+def _compact_icon_for_device(
+    *,
+    family_id: str,
+    label: str,
+    kind: str,
+    kasa_model: str | None = None,
+) -> str:
+    return resolve_compact_icon(
+        family_id=family_id,
+        label=label,
+        kind=kind,
+        kasa_model=kasa_model,
+    )
+
+
 def _door_state(is_open: bool, is_closed: bool) -> str:
     if is_open:
         return DoorPosition.OPEN.value
@@ -178,6 +194,14 @@ def _excluded_keys(
     rows: Iterable[tuple[str, str, bool]], backend: str
 ) -> set[str]:
     return {key for be, key, exclude in rows if be == backend and exclude}
+
+
+def _kasa_hardware_model(kd: KasaDevice) -> str | None:
+    raw = getattr(kd._kDevice, "model", None)
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
 
 
 def _kasa_devices(
@@ -202,6 +226,12 @@ def _kasa_devices(
                 label=kd.preferred_label,
                 kind="switch",
                 state=_switch_state(kd.is_on),
+                compact_icon=_compact_icon_for_device(
+                    family_id="kasa",
+                    label=kd.preferred_label,
+                    kind="switch",
+                    kasa_model=_kasa_hardware_model(kd),
+                ),
                 exclude_from_global=host in excluded,
             )
         )
@@ -232,6 +262,11 @@ def _sonos_devices(
                 label=sp.preferred_label,
                 kind="speaker",
                 state=_sonos_state(sp.is_playing),
+                compact_icon=_compact_icon_for_device(
+                    family_id="sonos",
+                    label=sp.preferred_label,
+                    kind="speaker",
+                ),
                 exclude_from_global=key in excluded,
             )
         )
@@ -274,6 +309,11 @@ def _tailwind_devices(
                 label=gd.preferred_label,
                 kind="door",
                 state=_door_state(gd.is_open, gd.is_closed),
+                compact_icon=_compact_icon_for_device(
+                    family_id="tailwind",
+                    label=gd.preferred_label,
+                    kind="door",
+                ),
                 exclude_from_global=key in excluded,
             )
         )
@@ -311,6 +351,12 @@ def build_kasa_device_view(
         label=kd.preferred_label,
         kind="switch",
         state=_switch_state(kd.is_on),
+        compact_icon=_compact_icon_for_device(
+            family_id="kasa",
+            label=kd.preferred_label,
+            kind="switch",
+            kasa_model=_kasa_hardware_model(kd),
+        ),
         exclude_from_global=host in excluded,
     )
 
@@ -347,6 +393,11 @@ def build_sonos_device_view(
         label=sp.preferred_label,
         kind="speaker",
         state=_sonos_state(sp.is_playing),
+        compact_icon=_compact_icon_for_device(
+            family_id="sonos",
+            label=sp.preferred_label,
+            kind="speaker",
+        ),
         exclude_from_global=device_id in excluded,
     )
 
@@ -380,6 +431,11 @@ def build_tailwind_device_view(
         label=gd.preferred_label,
         kind="door",
         state=_door_state(gd.is_open, gd.is_closed),
+        compact_icon=_compact_icon_for_device(
+            family_id="tailwind",
+            label=gd.preferred_label,
+            kind="door",
+        ),
         exclude_from_global=device_id in excluded,
     )
 

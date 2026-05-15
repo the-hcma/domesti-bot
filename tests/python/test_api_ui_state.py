@@ -142,6 +142,7 @@ def test_build_ui_state_emits_only_kasa_family_when_tailwind_manager_absent() ->
             label="Desk",
             kind="switch",
             state="on",
+            compact_icon="desk",
             exclude_from_global=False,
         )
     ]
@@ -181,6 +182,7 @@ def test_build_ui_state_emits_sonos_between_kasa_and_tailwind() -> None:
             label="Kitchen",
             kind="speaker",
             state="playing",
+            compact_icon="speaker",
             exclude_from_global=False,
         )
     ]
@@ -436,5 +438,6 @@ def test_ui_state_out_is_a_pydantic_model_with_expected_fields() -> None:
         "label",
         "kind",
         "state",
+        "compact_icon",
         "exclude_from_global",
     }

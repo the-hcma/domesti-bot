@@ -77,6 +77,9 @@ class UIDeviceOut(BaseModel):
       ``False`` (the default) means a global "turn off all" / "close all"
       action will operate on this device; ``True`` means it is skipped.
       Family-level bulk actions ignore this flag.
+    * ``compact_icon``: stable key for compact mobile tile SVGs (``bulb``,
+      ``outlet``, ``garage``, ``speaker``, …). Resolved server-side from
+      label and, for Kasa, hardware model — not from TP-Link app rooms.
     """
 
     id: str = Field(..., description="Stable canonical key within the family.")
@@ -84,6 +87,10 @@ class UIDeviceOut(BaseModel):
     label: str = Field(..., description="Display name; falls back to ``id``.")
     kind: str = Field(..., description="``switch``, ``speaker``, or ``door``.")
     state: str = Field(..., description="``on``/``off`` (switch), ``playing``/``paused`` (speaker), or ``open``/``closed`` (door); ``unknown`` for transient.")
+    compact_icon: str = Field(
+        ...,
+        description="Icon key for saturated compact tiles (e.g. ``bulb``, ``garage``).",
+    )
     exclude_from_global: bool = Field(
         default=False,
         description="True → skip this device on global turn-off/close-all.",
