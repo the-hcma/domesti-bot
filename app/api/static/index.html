@@ -328,7 +328,10 @@
       color: var(--fg); }
     .settings-dialog-token-row { display: flex; gap: 8px; align-items: stretch; }
     .settings-dialog-token-row input { flex: 1 1 auto; min-width: 0; }
-    .settings-dialog-reveal { flex: 0 0 auto; white-space: nowrap; }
+    .settings-dialog-reveal { display: inline-flex; flex: 0 0 auto;
+      align-items: center; justify-content: center; min-width: 44px;
+      min-height: 44px; padding: 6px; }
+    .settings-dialog-reveal svg { display: block; }
     .settings-dialog-lead a { color: var(--accent); }
     .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
       justify-content: flex-end; }
