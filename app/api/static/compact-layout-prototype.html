@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <title>domesti-bot — compact layout prototype</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15171a">
+  <!--
+    Local iteration target for the saturated 3-column mobile UI.
+
+    Open:
+      • file:///…/app/api/static/compact-layout-prototype.html
+      • http://127.0.0.1:8003/static/compact-layout-prototype.html (when server runs)
+
+    DOM mirrors ``web/src/main.ts`` compact render + ``#app[data-layout="compact"]``
+    rules from ``index.html``. When this looks right, copy the <style> block
+    (and any markup tweaks) into ``app/api/static/index.html``.
+  -->
+  <style>
+    /* === Theme tokens (dark default — matches mock) === */
+    :root {
+      color-scheme: dark;
+      --fg: #e6e6e6;
+      --muted: #a0a6b1;
+      --accent: #7bd389;
+      --pending: #f4c54e;
+      --danger: #ff7b72;
+      --card: #1f2226;
+      --border: #2a2e34;
+      --canvas-bg: #15171a;
+      --kasa: #3b82f6;
+      --sonos: #8b5cf6;
+      --tailwind: #10b981;
+    }
+    html[data-theme="light"] {
+      color-scheme: light;
+      --fg: #1d1f21;
+      --muted: #8d99ab;
+      --accent: #2e7d32;
+      --pending: #b58900;
+      --danger: #b3261e;
+      --card: #ffffff;
+      --border: #e1e4e8;
+      --canvas-bg: #f6f7f9;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--canvas-bg);
+      color: var(--fg);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      -webkit-text-size-adjust: 100%;
+    }
+    main {
+      margin: 0;
+      padding: 10px;
+      max-width: none;
+    }
+
+    .proto-banner {
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .proto-banner strong { color: var(--fg); }
+    .proto-toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      margin-bottom: 12px;
+    }
+    .proto-toolbar button {
+      font: inherit; cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--fg);
+      border-radius: 6px;
+      padding: 8px 12px;
+    }
+
+    h3 { margin: 0; font-size: 15px; font-weight: 600; }
+
+    /* === Shared header (compact) === */
+    .tile-header {
+      display: flex; flex-wrap: nowrap; align-items: center;
+      justify-content: flex-start; gap: 8px;
+      padding: 0 2px 10px;
+    }
+    .tile-header-actions {
+      display: flex; flex: 1 1 auto; align-items: stretch;
+      justify-content: flex-end; gap: 8px; min-width: 0;
+    }
+    .btn {
+      font: inherit; cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--fg);
+      border-radius: 6px;
+      padding: 6px 12px;
+      touch-action: manipulation;
+    }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+      border-color: transparent;
+    }
+    .btn-theme-toggle {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 44px; min-height: 44px; padding: 6px;
+      flex-shrink: 0;
+    }
+    .tile-header-global-off {
+      flex: 1 1 auto; min-width: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 13px; font-weight: 600;
+      text-align: center; line-height: 1.25;
+    }
+    .brand-mark-icon-btn { display: inline-flex; padding: 0; border: none;
+      background: transparent; color: inherit; font: inherit; cursor: pointer; }
+    .brand-mark-svg { width: 32px; height: 32px; display: block; }
+
+    /* === App shell === */
+    #app[data-layout="compact"] {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* === Family section === */
+    #app[data-layout="compact"] .family {
+      padding: 12px 10px 14px;
+      border-radius: 10px;
+      border: 2px solid var(--accent);
+      background: color-mix(in srgb, var(--family-color, var(--muted)) 8%, var(--card));
+    }
+    #app[data-layout="compact"] .family[data-connected="false"] {
+      border-color: var(--danger);
+    }
+    #app[data-layout="compact"] .family-header {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    #app[data-layout="compact"] .family-header .btn { display: none; }
+    .family-icon {
+      display: inline-block;
+      width: 1.4em; height: 1.4em;
+      color: var(--family-color, var(--muted));
+      vertical-align: -0.35em;
+      margin-right: 8px;
+    }
+
+    /* === 3-column tile grid (critical) === */
+    #app[data-layout="compact"] .tile-grid-compact {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
+    }
+
+    .tile-compact {
+      display: block;
+      margin: 0; padding: 0;
+      border: none;
+      border-radius: 12px;
+      aspect-ratio: 1;
+      min-width: 0;
+      overflow: hidden;
+      background: transparent;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    }
+
+    .tile-compact-hit {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 2px;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      margin: 0;
+      padding: 10px 6px 8px;
+      border: none;
+      border-radius: 12px;
+      font: inherit;
+      color: #fff;
+      cursor: pointer;
+      touch-action: manipulation;
+      text-align: center;
+      background: var(--danger);
+    }
+    .tile-compact-hit[data-tone="active"] { background: var(--accent); }
+    .tile-compact-hit[data-tone="inactive"] { background: var(--danger); }
+    .tile-compact-hit[data-tone="unknown"] {
+      background: var(--pending);
+      color: #1a1a1a;
+    }
+
+    .tile-compact-icon-wrap {
+      position: relative;
+      display: flex;
+      flex: 1 1 auto;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 2.75rem;
+    }
+    .tile-compact-icon {
+      width: 2.25rem;
+      height: 2.25rem;
+      flex-shrink: 0;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.75;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .tile-compact-overlay {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      width: 1.05rem;
+      height: 1.05rem;
+      pointer-events: none;
+      stroke: #fff;
+      fill: none;
+      stroke-width: 2;
+    }
+    .tile-compact-overlay-lock { stroke: var(--danger); }
+    .tile-compact-hit[data-tone="unknown"] .tile-compact-icon,
+    .tile-compact-hit[data-tone="unknown"] .tile-compact-overlay,
+    .tile-compact-hit[data-tone="unknown"] .tile-compact-label,
+    .tile-compact-hit[data-tone="unknown"] .tile-compact-state {
+      stroke: #1a1a1a;
+      color: #1a1a1a;
+    }
+
+    .tile-compact-label {
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.15;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tile-compact-state {
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1.2;
+      opacity: 0.92;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Wrong layout (comfortable) — for side-by-side debug */
+    .compare-wrong {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 2px dashed var(--danger);
+    }
+    .compare-wrong .tile-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+    .compare-wrong .tile {
+      background: var(--card-elev, #262a30);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--kasa);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .compare-wrong h4 { margin: 0 0 8px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="proto-banner">
+      <strong>Compact layout prototype</strong> — saturated 3×N grid, no comfortable
+      <code>.tile</code> chrome. Toggle theme below; resize the window to phone width.
+      Viewport: <span id="proto-vpw">?</span>×<span id="proto-vph">?</span>px
+    </p>
+    <div class="proto-toolbar">
+      <button type="button" id="proto-theme">Toggle light / dark</button>
+      <button type="button" id="proto-narrow">Simulate 390px phone width</button>
+    </div>
+
+    <!-- Production-shaped DOM: must match main.ts + index.html selectors -->
+    <div id="app" data-layout="compact" data-connected="true">
+
+      <header class="tile-header tile-header-global">
+        <button type="button" class="brand-mark-icon-btn" aria-label="About domesti-bot">
+          <svg class="brand-mark-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5.5" y="12.8" width="13" height="10" rx="2.5" fill="#b39ddb" stroke="#4a148c" stroke-width="1.2"/>
+            <path d="M6 13.2 L18 13.2 L17.2 20.8 Q12 22.4 6.8 20.8 Z" fill="#ffe082" stroke="#ff6f00" stroke-width="1"/>
+            <rect x="4.8" y="3.35" width="14.4" height="9" rx="3.2" fill="none" stroke="#c5cae9" stroke-width="1.2"/>
+            <circle cx="9" cy="8" r="1.2" fill="#eceff1" stroke="#1a237e"/>
+            <circle cx="15" cy="8" r="1.2" fill="#eceff1" stroke="#1a237e"/>
+          </svg>
+        </button>
+        <div class="tile-header-actions">
+          <button type="button" class="btn btn-danger tile-header-global-off">
+            Turn off / pause / close everything
+          </button>
+          <button type="button" class="btn btn-theme-toggle" id="proto-theme-2" title="Theme">☀</button>
+        </div>
+      </header>
+
+      <section class="family" data-family-id="kasa" data-connected="true" style="--family-color: #3B82F6">
+        <header class="family-header">
+          <h3>
+            <svg class="family-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M9 18h6 M10 22h4 M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/>
+            </svg>
+            Lights &amp; plugs
+          </h3>
+          <button type="button" class="btn btn-danger">Turn off all</button>
+        </header>
+        <div class="tile-grid tile-grid-compact">
+          <article class="tile-compact tile-switch">
+            <button type="button" class="tile-compact-hit" data-tone="active">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 18h6 M10 22h4 M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Kitchen</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-switch">
+            <button type="button" class="tile-compact-hit" data-tone="inactive">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 2v3 M9 5h6 M10 8h4l-1 12h-2L10 8z M8 22h8"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Porch</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-switch">
+            <button type="button" class="tile-compact-hit" data-tone="inactive">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 22h16 M12 14v8 M8 14h8 M12 2l6 8H6l6-8z"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Office</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-switch">
+            <button type="button" class="tile-compact-hit" data-tone="active">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 2v6 M8 8h8l-2 12h-4L8 8z"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Hall</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-switch">
+            <button type="button" class="tile-compact-hit" data-tone="inactive">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 22h8 M12 14v8 M9 14h6 M10 6h4l1 8H9l1-8z"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Guest</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-switch">
+            <button type="button" class="tile-compact-hit" data-tone="inactive">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z M9 12h2 M13 12h2"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Basement</span>
+            </button>
+          </article>
+        </div>
+      </section>
+
+      <section class="family" data-family-id="sonos" data-connected="true" style="--family-color: #8B5CF6">
+        <header class="family-header">
+          <h3>
+            <svg class="family-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+              <circle cx="12" cy="14" r="4"/>
+            </svg>
+            Sonos zones
+          </h3>
+        </header>
+        <div class="tile-grid tile-grid-compact">
+          <article class="tile-compact tile-speaker">
+            <button type="button" class="tile-compact-hit" data-tone="active">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 10c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 M2 14c2-2 4-2 6 0s4 2 6 0"/>
+                  <path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+                  <circle cx="12" cy="14" r="4"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Living</span>
+              <span class="tile-compact-state">Playing</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-speaker">
+            <button type="button" class="tile-compact-hit" data-tone="inactive">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+                  <circle cx="12" cy="14" r="4"/>
+                </svg>
+                <svg class="tile-compact-overlay" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
+                  <path d="M10 15V9 M14 15V9"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Bedroom</span>
+              <span class="tile-compact-state">Paused</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-speaker">
+            <button type="button" class="tile-compact-hit" data-tone="unknown">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+                  <circle cx="12" cy="14" r="4"/>
+                </svg>
+                <svg class="tile-compact-overlay" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
+                  <path d="M12 16v-4 M12 8h.01"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Patio</span>
+              <span class="tile-compact-state">Unknown</span>
+            </button>
+          </article>
+        </div>
+      </section>
+
+      <section class="family" data-family-id="tailwind" data-connected="true" style="--family-color: #10B981">
+        <header class="family-header">
+          <h3>
+            <svg class="family-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M3 11l9-7 9 7 M5 10v11h14V10 M5 14h14"/>
+            </svg>
+            Garage doors
+          </h3>
+        </header>
+        <div class="tile-grid tile-grid-compact">
+          <article class="tile-compact tile-door">
+            <button type="button" class="tile-compact-hit" data-tone="inactive">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 12h18v9H3z M3 12V9l9-6 9 6v3 M12 16v5"/>
+                </svg>
+                <svg class="tile-compact-overlay tile-compact-overlay-lock" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4 M5 11h14v9H5z"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Left</span>
+              <span class="tile-compact-state">Closed</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-door">
+            <button type="button" class="tile-compact-hit" data-tone="active">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 12h18v9H3z M3 12V9l9-6 9 6v3 M12 16v5"/>
+                </svg>
+                <svg class="tile-compact-overlay tile-compact-overlay-open" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 19V5 M5 12l7-7 7 7"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Right</span>
+              <span class="tile-compact-state">Open</span>
+            </button>
+          </article>
+          <article class="tile-compact tile-door">
+            <button type="button" class="tile-compact-hit" data-tone="inactive">
+              <span class="tile-compact-icon-wrap">
+                <svg class="tile-compact-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 12h18v9H3z M3 12V9l9-6 9 6v3 M12 16v5"/>
+                </svg>
+                <svg class="tile-compact-overlay tile-compact-overlay-lock" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4 M5 11h14v9H5z"/>
+                </svg>
+              </span>
+              <span class="tile-compact-label">Shop</span>
+              <span class="tile-compact-state">Closed</span>
+            </button>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <section class="compare-wrong" aria-label="Wrong layout reference">
+      <p class="proto-banner">
+        <strong>Wrong (comfortable)</strong> — what you see when <code>data-layout</code>
+        is not <code>compact</code> or <code>.tile</code> chrome leaks in: single column,
+        gray cards, colored left stripe.
+      </p>
+      <div class="tile-grid">
+        <article class="tile">
+          <h4>Basement lamp</h4>
+          <span>off</span>
+        </article>
+      </div>
+    </section>
+  </main>
+  <script>
+    const root = document.documentElement;
+    function syncViewport() {
+      document.getElementById("proto-vpw").textContent = String(window.innerWidth);
+      document.getElementById("proto-vph").textContent = String(window.innerHeight);
+    }
+    function toggleTheme() {
+      root.dataset.theme = root.dataset.theme === "light" ? "dark" : "light";
+    }
+    document.getElementById("proto-theme").addEventListener("click", toggleTheme);
+    document.getElementById("proto-theme-2").addEventListener("click", toggleTheme);
+    document.getElementById("proto-narrow").addEventListener("click", () => {
+      document.body.style.maxWidth = "390px";
+      document.body.style.margin = "0 auto";
+      document.body.style.outline = "2px solid var(--accent)";
+    });
+    window.addEventListener("resize", syncViewport);
+    syncViewport();
+  </script>
+</body>
+</html>

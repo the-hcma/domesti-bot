@@ -755,8 +755,8 @@ const FAMILY_ICON_PATHS: Record<string, readonly string[]> = {
   ],
 };
 
-/** Kasa compact-tile silhouettes keyed by room name (see mobile mock). */
-const KASA_COMPACT_ICON_VARIANTS = {
+/** Compact-tile SVG paths keyed by ``UIDeviceOut.compact_icon`` from the API. */
+const COMPACT_ICON_PATHS: Record<string, readonly string[]> = {
   bulb: [
     "M9 18h6",
     "M10 22h4",
@@ -767,6 +767,22 @@ const KASA_COMPACT_ICON_VARIANTS = {
     "M12 14v8",
     "M8 14h8",
     "M12 2l6 8H6l6-8z",
+  ],
+  fan: [
+    "M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0",
+    "M12 2v4",
+    "M12 18v4",
+    "M4.93 4.93l2.83 2.83",
+    "M16.24 16.24l2.83 2.83",
+    "M2 12h4",
+    "M18 12h4",
+    "M4.93 19.07l2.83-2.83",
+    "M16.24 7.76l2.83-2.83",
+  ],
+  garage: [
+    "M3 12h18v9H3z",
+    "M3 12V9l9-6 9 6v3",
+    "M12 16v5",
   ],
   lantern: [
     "M12 2v3",
@@ -783,13 +799,29 @@ const KASA_COMPACT_ICON_VARIANTS = {
     "M12 2v6",
     "M8 8h8l-2 12h-4L8 8z",
   ],
+  plug: [
+    "M7 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z",
+    "M9 12h2",
+    "M13 12h2",
+  ],
+  speaker: [
+    "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z",
+    "M12 18a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+    "M12 6.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2z",
+  ],
+  strip: [
+    "M4 14h16",
+    "M6 10h12",
+    "M8 6h8",
+    "M10 18h4",
+  ],
   table: [
     "M8 22h8",
     "M12 14v8",
     "M9 14h6",
     "M10 6h4l1 8H9l1-8z",
   ],
-} as const satisfies Record<string, readonly string[]>;
+};
 
 /** Sound-wave arcs shown left of the Sonos cabinet when ``playing``. */
 const SONOS_COMPACT_PLAYING_WAVE_PATHS: readonly string[] = [
@@ -798,6 +830,16 @@ const SONOS_COMPACT_PLAYING_WAVE_PATHS: readonly string[] = [
 ];
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+
+function applyCompactDefaultTheme(): void {
+  if (localStorage.getItem(THEME_STORAGE_KEY) !== null) {
+    return;
+  }
+  if (!window.matchMedia(COMPACT_LAYOUT_MQ).matches) {
+    return;
+  }
+  document.documentElement.setAttribute("data-theme", "dark");
+}
 
 function applyStoredColorTheme(): void {
   const raw = localStorage.getItem(THEME_STORAGE_KEY);
@@ -840,26 +882,20 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   }
 }
 
-/** Robot-with-apron mascot: click opens GitHub; hover shows product, tagline, copyright, license, build, and repo link. */
+/** Robot-with-apron mascot: click pins about info; only the repo link opens GitHub. */
 function createBrandMark(meta: MetaOut | null): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "brand-mark";
-  wrap.setAttribute("role", "group");
-  wrap.setAttribute(
-    "aria-label",
-    meta
-      ? `domesti-bot, version ${meta.version}, commit ${meta.commit}, GitHub repository`
-      : "domesti-bot, GitHub repository, build information loading",
-  );
 
-  const iconLink = document.createElement("a");
-  iconLink.className = "brand-mark-icon-link";
-  iconLink.href = DOMESTI_BOT_REPO_HREF;
-  iconLink.target = "_blank";
-  iconLink.rel = "noopener noreferrer";
-  iconLink.setAttribute(
+  const tipId = "brand-mark-about-panel";
+  const iconBtn = document.createElement("button");
+  iconBtn.type = "button";
+  iconBtn.className = "brand-mark-icon-btn";
+  iconBtn.setAttribute("aria-controls", tipId);
+  iconBtn.setAttribute("aria-expanded", "false");
+  iconBtn.setAttribute(
     "aria-label",
-    "domesti-bot — open github.com/the-hcma/domesti-bot in a new tab",
+    "About domesti-bot — show product information",
   );
 
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -960,15 +996,28 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
     eyeR,
     mouth,
   );
-  iconLink.append(svg);
+  iconBtn.append(svg);
 
-  const tip = document.createElement("span");
+  const tip = document.createElement("div");
+  tip.id = tipId;
   tip.className = "brand-mark-tooltip";
-  tip.setAttribute("role", "tooltip");
+  tip.setAttribute("role", "dialog");
+  tip.setAttribute("aria-label", "About domesti-bot");
+
+  const tipHead = document.createElement("div");
+  tipHead.className = "brand-mark-tooltip-head";
 
   const product = document.createElement("div");
   product.className = "brand-mark-tooltip-product";
   product.textContent = "domesti-bot";
+
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "brand-mark-tooltip-dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss about domesti-bot");
+  dismiss.textContent = "\u00d7";
+
+  tipHead.append(product, dismiss);
 
   const tagline = document.createElement("div");
   tagline.className = "brand-mark-tooltip-tagline";
@@ -983,7 +1032,7 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   license.className = "brand-mark-tooltip-license";
   license.textContent = "Open-source software under the MIT License.";
 
-  tip.append(product, tagline, rights, license);
+  tip.append(tipHead, tagline, rights, license);
 
   if (meta) {
     const v = document.createElement("div");
@@ -1008,47 +1057,106 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   repoLink.textContent = "github.com/the-hcma/domesti-bot";
   tip.append(repoLink);
 
-  wrap.append(iconLink, tip);
+  wrap.append(iconBtn, tip);
 
-  let tipPinned = false;
+  let clickPinned = false;
+  let hoverShown = false;
   const syncPos = (): void => {
-    syncBrandMarkTooltipPosition(iconLink, tip);
+    syncBrandMarkTooltipPosition(iconBtn, tip);
   };
-  const openTooltip = (): void => {
-    if (tipPinned) return;
-    tipPinned = true;
+  const syncAriaExpanded = (): void => {
+    const open = clickPinned || hoverShown;
+    iconBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  const showTooltip = (): void => {
     tip.classList.add("is-open");
-    syncBrandMarkTooltipPosition(iconLink, tip);
+    syncBrandMarkTooltipPosition(iconBtn, tip);
+    syncAriaExpanded();
     window.addEventListener("resize", syncPos);
     window.addEventListener("scroll", syncPos, true);
   };
-  const closeTooltip = (): void => {
-    if (!tipPinned) return;
-    tipPinned = false;
+  const hideTooltip = (): void => {
     tip.classList.remove("is-open");
     tip.style.removeProperty("left");
     tip.style.removeProperty("top");
     tip.style.removeProperty("position");
     tip.style.removeProperty("display");
+    syncAriaExpanded();
     window.removeEventListener("resize", syncPos);
     window.removeEventListener("scroll", syncPos, true);
   };
-  wrap.addEventListener("pointerenter", openTooltip);
+  const refreshTooltip = (): void => {
+    if (clickPinned || hoverShown) {
+      showTooltip();
+    } else {
+      hideTooltip();
+    }
+  };
+  const dismissTooltip = (): void => {
+    clickPinned = false;
+    hoverShown = false;
+    hideTooltip();
+  };
+  iconBtn.addEventListener("click", () => {
+    clickPinned = !clickPinned;
+    if (clickPinned) {
+      hoverShown = true;
+    }
+    refreshTooltip();
+  });
+  dismiss.addEventListener("click", () => {
+    dismissTooltip();
+  });
+  repoLink.addEventListener("click", () => {
+    dismissTooltip();
+  });
+  wrap.addEventListener("pointerenter", () => {
+    hoverShown = true;
+    refreshTooltip();
+  });
   wrap.addEventListener("pointerleave", (ev) => {
     const rel = ev.relatedTarget as Node | null;
     if (rel && wrap.contains(rel)) {
       return;
     }
-    closeTooltip();
-  });
-  wrap.addEventListener("focusin", () => {
-    openTooltip();
-  });
-  wrap.addEventListener("focusout", (ev) => {
-    if (!wrap.contains(ev.relatedTarget as Node | null)) {
-      closeTooltip();
+    hoverShown = false;
+    if (!clickPinned) {
+      hideTooltip();
     }
   });
+  wrap.addEventListener("focusin", () => {
+    hoverShown = true;
+    refreshTooltip();
+  });
+  wrap.addEventListener("focusout", (ev) => {
+    if (wrap.contains(ev.relatedTarget as Node | null)) {
+      return;
+    }
+    hoverShown = false;
+    if (!clickPinned) {
+      hideTooltip();
+    }
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || !clickPinned) {
+      return;
+    }
+    dismissTooltip();
+  });
+  document.addEventListener(
+    "pointerdown",
+    (ev) => {
+      if (!clickPinned) {
+        return;
+      }
+      const target = ev.target as Node | null;
+      if (target !== null && wrap.contains(target)) {
+        return;
+      }
+      dismissTooltip();
+    },
+    true,
+  );
 
   return wrap;
 }
@@ -1612,34 +1720,6 @@ function appendCompactTileOverlay(iconWrap: HTMLElement, device: UIDeviceOut): v
   }
 }
 
-function compactKasaIconPaths(label: string): readonly string[] {
-  const name = label.toLowerCase();
-  if (name.includes("porch")) {
-    return KASA_COMPACT_ICON_VARIANTS.lantern;
-  }
-  if (name.includes("office")) {
-    return KASA_COMPACT_ICON_VARIANTS.desk;
-  }
-  if (name.includes("hall")) {
-    return KASA_COMPACT_ICON_VARIANTS.pendant;
-  }
-  if (name.includes("guest")) {
-    return KASA_COMPACT_ICON_VARIANTS.table;
-  }
-  const isLampLike =
-    name.includes("lamp") || name.includes("light") || name.includes("bulb");
-  if (
-    !isLampLike &&
-    (name.includes("outlet") || name.includes("plug") || name.includes("socket"))
-  ) {
-    return KASA_COMPACT_ICON_VARIANTS.outlet;
-  }
-  if (name.includes("basement") && !isLampLike) {
-    return KASA_COMPACT_ICON_VARIANTS.outlet;
-  }
-  return KASA_COMPACT_ICON_VARIANTS.bulb;
-}
-
 function compactStateCaption(device: UIDeviceOut): string | null {
   if (device.kind === "switch") {
     return null;
@@ -1667,17 +1747,12 @@ function compactTileAriaLabel(device: UIDeviceOut): string {
 }
 
 function compactTileIconPaths(device: UIDeviceOut): readonly string[] {
-  if (device.family_id === "kasa") {
-    return compactKasaIconPaths(device.label);
+  const base =
+    COMPACT_ICON_PATHS[device.compact_icon] ?? COMPACT_ICON_PATHS["bulb"] ?? [];
+  if (device.compact_icon === "speaker" && device.state === "playing") {
+    return [...SONOS_COMPACT_PLAYING_WAVE_PATHS, ...base];
   }
-  const familyPaths = FAMILY_ICON_PATHS[device.family_id];
-  if (!familyPaths) {
-    return [];
-  }
-  if (device.family_id === "sonos" && device.state === "playing") {
-    return [...SONOS_COMPACT_PLAYING_WAVE_PATHS, ...familyPaths];
-  }
-  return familyPaths;
+  return base;
 }
 
 function createCompactOverlaySvg(
@@ -1987,6 +2062,7 @@ function removeJsBootHint(): void {
 
 function start(): void {
   removeJsBootHint();
+  applyCompactDefaultTheme();
   applyStoredColorTheme();
   initPwaInstallBanner();
   registerServiceWorker();

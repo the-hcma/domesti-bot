@@ -249,8 +249,8 @@ def test_static_manifest_webmanifest_defines_icons() -> None:
     icons = payload.get("icons")
     assert isinstance(icons, list) and len(icons) >= 2
     srcs = {item.get("src") for item in icons if isinstance(item, dict)}
-    assert "/static/icons/icon-192.png" in srcs
-    assert "/static/icons/icon-512.png" in srcs
+    assert "/static/icons/app-icon-192x192.png" in srcs
+    assert "/static/icons/app-icon-512x512.png" in srcs
 
 
 def test_static_missing_bundle_returns_clean_404() -> None:
