@@ -783,14 +783,20 @@ const COMPACT_ICON_PATHS: Record<string, readonly string[]> = {
     "M16.24 7.76l2.83-2.83",
   ],
   garage_closed: [
-    "M3 12h18v9H3z",
-    "M3 12V9l9-6 9 6v3",
-    "M12 16v5",
+    "M12 6 5 11v10h14V11l-7-5z",
+    "M8 13.5h8",
+    "M8 16h8",
+    "M8 18.5h8",
+    "M17 19.25a1.1 1.1 0 1 1-2.2 0 1.1 1.1 0 0 1 2.2 0",
+    "M16.1 18.35V17.1a0.65 0.65 0 0 1 1.3 0v1.25",
+    "M15.15 18.35h2.1",
   ],
   garage_open: [
-    "M3 13h18v8H3z",
-    "M3 13V8l9-5 9 5v5",
-    "M5 13l7-6 7 6",
+    "M12 6 5 11v10h14V11l-7-5z",
+    "M8 13.5h8",
+    "M8 15.75h8",
+    "M12 20v-4.5",
+    "M9.75 17.25 12 14.75l2.25 2.5",
   ],
   lamp: [
     "M12 22v-2",
@@ -1874,24 +1880,7 @@ function appendTileOverlay(iconWrap: HTMLElement, device: UIDeviceOut): void {
     }
     return;
   }
-  if (device.family_id !== "tailwind" || device.kind !== "door") {
-    return;
-  }
-  if (device.state === "closed") {
-    iconWrap.append(
-      createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-lock", [
-        "M7 11V7a5 5 0 0 1 10 0v4",
-        "M5 11h14v9H5z",
-      ]),
-    );
-  } else if (device.state === "open") {
-    iconWrap.append(
-      createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-open", [
-        "M12 19V5",
-        "M5 12l7-7 7 7",
-      ]),
-    );
-  }
+  // Garage door state is drawn on the base icon (``garage_open`` / ``garage_closed``).
 }
 
 function attachTileHitListeners(
@@ -2093,10 +2082,7 @@ function renderDeviceCompact(
   tile.dataset["deviceId"] = device.id;
   tile.dataset["state"] = device.state;
 
-  tile.append(
-    createTileSaturatedHit(device, controller, connected, "tile-compact-hit"),
-    createTileExcludeInset(device, controller, connected),
-  );
+  tile.append(createTileSaturatedHit(device, controller, connected, "tile-compact-hit"));
   return tile;
 }
 
