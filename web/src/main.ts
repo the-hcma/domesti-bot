@@ -16,6 +16,9 @@ import type {
 
 const APP_ROOT_ID = "app";
 
+/** Viewport breakpoint for the saturated three-column compact tile UI. */
+const COMPACT_LAYOUT_MQ = "(max-width: 768px)";
+
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
 
@@ -133,6 +136,7 @@ class DomestiBotController {
     this.renderLoading("Discovering devices…");
     await this.bootstrap();
     this.schedulePoll();
+    this.registerCompactLayoutListener();
     this.registerVisibilityPollBoost();
   }
 
@@ -478,6 +482,13 @@ class DomestiBotController {
     }
   }
 
+  private registerCompactLayoutListener(): void {
+    const mq = window.matchMedia(COMPACT_LAYOUT_MQ);
+    mq.addEventListener("change", () => {
+      this.rerenderForLayoutChange();
+    });
+  }
+
   private registerVisibilityPollBoost(): void {
     // When the user returns from another app, catch up immediately instead
     // of waiting for the next interval tick.
@@ -492,6 +503,14 @@ class DomestiBotController {
   /** Reload tiles from ``/v1/ui/state`` (e.g. after saving settings). */
   async reloadFromServer(): Promise<void> {
     await this.refresh();
+  }
+
+  /** Rebuild tiles when crossing the compact layout viewport breakpoint. */
+  rerenderForLayoutChange(): void {
+    if (this.state === null) {
+      return;
+    }
+    this.render();
   }
 
   private schedulePoll(): void {
@@ -1607,7 +1626,15 @@ function compactKasaIconPaths(label: string): readonly string[] {
   if (name.includes("guest")) {
     return KASA_COMPACT_ICON_VARIANTS.table;
   }
-  if (name.includes("basement") || name.includes("outlet") || name.includes("plug")) {
+  const isLampLike =
+    name.includes("lamp") || name.includes("light") || name.includes("bulb");
+  if (
+    !isLampLike &&
+    (name.includes("outlet") || name.includes("plug") || name.includes("socket"))
+  ) {
+    return KASA_COMPACT_ICON_VARIANTS.outlet;
+  }
+  if (name.includes("basement") && !isLampLike) {
     return KASA_COMPACT_ICON_VARIANTS.outlet;
   }
   return KASA_COMPACT_ICON_VARIANTS.bulb;
@@ -1707,22 +1734,11 @@ function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown
 }
 
 function isMobileFormFactor(): boolean {
-  const uaData = (
-    navigator as Navigator & { userAgentData?: { mobile?: boolean } }
-  ).userAgentData;
-  if (uaData?.mobile === true) {
-    return true;
-  }
-  if (uaData?.mobile === false) {
-    return false;
-  }
-  // No Client Hints (common on WebKit) — infer compact, touch-first UI without
-  // matching particular browser names.
-  return (
-    window.matchMedia("(any-pointer: coarse)").matches ||
-    window.matchMedia("(pointer: coarse)").matches ||
-    window.matchMedia("(max-width: 768px)").matches
-  );
+  // Viewport width is the single source of truth. ``userAgentData.mobile``
+  // is often ``false`` in desktop devtools and some in-app browsers even
+  // when the viewport is phone-sized, which previously left ``data-layout``
+  // on ``comfortable`` (single column, gray ``.tile`` chrome).
+  return window.matchMedia(COMPACT_LAYOUT_MQ).matches;
 }
 
 function renderDevice(
@@ -1825,7 +1841,10 @@ function renderDeviceCompact(
   connected: boolean,
 ): HTMLElement {
   const tile = document.createElement("article");
-  tile.className = `tile tile-compact tile-${device.kind}`;
+  // Do not add the comfortable ``.tile`` class — its card chrome (gray
+  // background, colored left border) bleeds through when ``data-layout``
+  // is stale or CSS is cached.
+  tile.className = `tile-compact tile-${device.kind}`;
   tile.dataset["familyId"] = device.family_id;
   tile.dataset["deviceId"] = device.id;
   tile.dataset["state"] = device.state;
