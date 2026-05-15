@@ -75,6 +75,7 @@ from app.device_manager import NotInitializedError
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
+from app.tailwind_credentials import resolve_tailwind_token
 
 COMMANDS = (
     "clear-display-name",
@@ -1967,7 +1968,10 @@ async def bootstrap_device_managers(
         force_discovery=args.force_discovery,
     )
 
-    token = (args.tailwind_token or os.environ.get("TAILWIND_TOKEN") or "").strip()
+    token, _tailwind_token_source = resolve_tailwind_token(
+        cli_token=args.tailwind_token,
+        cache_path=cache_path,
+    )
 
     async def boot_androidtv() -> dict[str, Any]:
         slug = "androidtv"

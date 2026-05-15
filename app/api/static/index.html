@@ -297,6 +297,36 @@
       padding: 6px 12px; touch-action: manipulation; }
     .btn-danger { background: var(--danger); color: white; border-color: transparent; }
     .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .app-menu { position: relative; flex-shrink: 0; }
+    .btn-menu { display: inline-flex; align-items: center; justify-content: center;
+      padding: 6px 10px; min-width: 44px; }
+    .app-menu-panel { position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
+      min-width: 11rem; display: flex; flex-direction: column; gap: 2px;
+      padding: 6px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--card); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); }
+    .app-menu-panel[hidden] { display: none !important; }
+    .app-menu-item { font: inherit; text-align: left; cursor: pointer;
+      border: none; border-radius: 6px; padding: 8px 12px; background: transparent;
+      color: var(--fg); width: 100%; touch-action: manipulation; }
+    .app-menu-item:hover { background: var(--border); }
+    .app-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .about-dialog-repo { font-size: 14px; color: var(--accent); word-break: break-all; }
+    .settings-dialog { border: 1px solid var(--border); border-radius: 10px;
+      padding: 0; max-width: min(28rem, calc(100vw - 2rem)); background: var(--card);
+      color: var(--fg); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+    .settings-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+    .settings-dialog form { display: flex; flex-direction: column; gap: 12px;
+      padding: 20px; margin: 0; }
+    .settings-dialog h2 { margin: 0; font-size: 1.15rem; }
+    .settings-dialog-lead, .settings-dialog-status { margin: 0; font-size: 14px;
+      line-height: 1.45; color: var(--muted); }
+    .settings-dialog-field { display: flex; flex-direction: column; gap: 6px;
+      font-size: 14px; }
+    .settings-dialog-field input { font: inherit; padding: 8px 10px;
+      border-radius: 6px; border: 1px solid var(--border); background: var(--bg);
+      color: var(--fg); }
+    .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
+      justify-content: flex-end; }
 
     /* Disabled state — fires whenever the backend is unreachable
        (controller flips ``data-connected="false"`` and sets the

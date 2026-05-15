@@ -34,6 +34,7 @@ from app.api.schemas import (
     UISonosSetIn,
     UIStateOut,
 )
+from app.api.settings_routes import router as settings_router
 from app.api.ui_state import (
     build_kasa_device_view,
     build_sonos_device_view,
@@ -274,6 +275,8 @@ def create_app(args: Any) -> FastAPI:
         version=get_build_info()[0],
         lifespan=lifespan,
     )
+    app.state.cli_args = args
+    app.include_router(settings_router, dependencies=[Depends(_verify_api_key)])
     app.add_middleware(_AccessLogMiddleware)
     app.add_middleware(
         CORSMiddleware,
