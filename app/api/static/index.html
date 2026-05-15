@@ -204,6 +204,7 @@
        replaces the current one and resets the 10s auto-dismiss timer.
        Phone-friendly: the ``calc(100vw - …)`` cap lets the toast hug
        the screen edge on narrow viewports without ever overflowing. */
+    .action-toast-success { border-color: var(--accent); }
     .action-toast { position: fixed; top: 16px; left: 50%;
       transform: translateX(-50%); z-index: 1000;
       max-width: min(480px, calc(100vw - 32px));
@@ -325,6 +326,10 @@
     .settings-dialog-field input { font: inherit; padding: 8px 10px;
       border-radius: 6px; border: 1px solid var(--border); background: var(--bg);
       color: var(--fg); }
+    .settings-dialog-token-row { display: flex; gap: 8px; align-items: stretch; }
+    .settings-dialog-token-row input { flex: 1 1 auto; min-width: 0; }
+    .settings-dialog-reveal { flex: 0 0 auto; white-space: nowrap; }
+    .settings-dialog-lead a { color: var(--accent); }
     .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
       justify-content: flex-end; }
 

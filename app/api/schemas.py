@@ -250,3 +250,10 @@ class TailwindTokenSettingsOut(BaseModel):
         ...,
         description="True when an encrypted ``tailwind_token`` row exists (may be overridden by env/CLI).",
     )
+    stored_token: str | None = Field(
+        default=None,
+        description=(
+            "Decrypted token from the database row when present; ``None`` when "
+            "nothing is stored or decryption is unavailable. Not the env/CLI override."
+        ),
+    )

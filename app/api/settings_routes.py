@@ -14,12 +14,15 @@ from app.api.schemas import (
 )
 from app.db.secrets import (
     SecretsConfigurationError,
+    SecretsDecryptError,
     delete_app_secret,
+    load_tailwind_token_from_db,
     save_tailwind_token_to_db,
     secrets_key_configured,
     secrets_key_source,
     tailwind_token_stored_in_db,
 )
+from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _Theme
 from app.tailwind_credentials import resolve_tailwind_token
 
 router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -49,12 +52,13 @@ async def clear_tailwind_token(request: Request) -> TailwindTokenSettingsOut:
             ),
         )
     delete_app_secret(cache_path, key="tailwind_token")
+    await _reload_tailwind_manager(request)
     return _tailwind_settings_response(request)
 
 
 @router.get("/tailwind-token", response_model=TailwindTokenSettingsOut)
 async def get_tailwind_token_settings(request: Request) -> TailwindTokenSettingsOut:
-    """Return Tailwind credential status without exposing the secret."""
+    """Return Tailwind credential status (includes stored DB token when present)."""
     return _tailwind_settings_response(request)
 
 
@@ -90,10 +94,13 @@ async def put_tailwind_token(
         cache_path=cache_path,
     )
     env_active = source == "env" or source == "cli"
+    reload_ok = False
+    if not env_active:
+        reload_ok = await _reload_tailwind_manager(request)
     return TailwindTokenSetOut(
         configured=bool(resolved),
         source=source,
-        restart_required=not env_active,
+        restart_required=not env_active and not reload_ok,
     )
 
 
@@ -103,6 +110,43 @@ def _cli_tailwind_token(request: Request) -> str | None:
         return None
     raw = getattr(args, "tailwind_token", None)
     return str(raw) if raw else None
+
+
+async def _reload_tailwind_manager(request: Request) -> bool:
+    """Re-bootstrap GoTailwind on the live server after token storage changes."""
+    state: DeviceManagersState | None = getattr(
+        request.app.state, "device_state", None
+    )
+    if state is None:
+        return False
+    cache_path = discovery_cache_path_from_request(request)
+    token, _source = resolve_tailwind_token(
+        cli_token=_cli_tailwind_token(request),
+        cache_path=cache_path,
+    )
+    if state.tailwind_mgr is not None:
+        await state.tailwind_mgr.disconnect()
+    if not token:
+        request.app.state.device_state = state._replace(tailwind_mgr=None)
+        return False
+    mgr, _exc = await _bootstrap_tailwind(
+        args=state.args,
+        cache_path=cache_path,
+        theme=_Theme(enabled=False),
+        token=token,
+        log_failures=True,
+    )
+    request.app.state.device_state = state._replace(tailwind_mgr=mgr)
+    return mgr is not None
+
+
+def _stored_token_for_settings(cache_path: Path | None) -> str | None:
+    if cache_path is None:
+        return None
+    try:
+        return load_tailwind_token_from_db(cache_path)
+    except SecretsDecryptError:
+        return None
 
 
 def _tailwind_settings_response(request: Request) -> TailwindTokenSettingsOut:
@@ -122,4 +166,5 @@ def _tailwind_settings_response(request: Request) -> TailwindTokenSettingsOut:
         secrets_key_configured=secrets_key_configured(),
         secrets_key_source=secrets_key_source(),
         stored_in_database=stored,
+        stored_token=_stored_token_for_settings(cache_path) if stored else None,
     )
