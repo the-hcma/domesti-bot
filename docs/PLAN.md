@@ -10,9 +10,13 @@ This document tracks **remaining** planned work. Shipped items are summarized be
 | --- | --- | --- |
 | **SQLAlchemy persistence** | [#56](https://github.com/the-hcma/domesti-bot/pull/56) | `app/db/`, `kasa_discovery_store` facade, `app_secrets`, legacy `ALTER TABLE` |
 | **Encrypted Tailwind token + desktop settings** | [#56](https://github.com/the-hcma/domesti-bot/pull/56)–[#60](https://github.com/the-hcma/domesti-bot/pull/60) | Fernet, ☰ Settings, `setup-secrets` REPL, hot-reload, dialog UX |
-| **Compact mobile layout (viewport + saturated tiles)** | [#61](https://github.com/the-hcma/domesti-bot/pull/61)–[#64](https://github.com/the-hcma/domesti-bot/pull/64), [#65](https://github.com/the-hcma/domesti-bot/pull/65) | `COMPACT_LAYOUT_MQ`, 3-column grid, green/red/amber tiles; desktop saturated tiles with per-tile actions |
-| **Compact tile UX polish** | [#66](https://github.com/the-hcma/domesti-bot/pull/66)–[#68](https://github.com/the-hcma/domesti-bot/pull/68) | Tile-only tap actions (no Turn/Pause/Close buttons); inset exclude checkbox + `title` hint; 50/50 icon/label grid on phone; `lamp` / `light` / `led` / `bulb` + `room_*` icons via `app/ui_compact_icon.py`; desktop On/Off for Kasa |
-| **PWA shell refresh after deploy** | [#69](https://github.com/the-hcma/domesti-bot/pull/69) | `sw.js` v11: stale-while-revalidate for `GET /` and `main.js` (compact CSS is inline in `index.html`) |
+| **Compact mobile layout (viewport + saturated tiles)** | [#61](https://github.com/the-hcma/domesti-bot/pull/61)–[#65](https://github.com/the-hcma/domesti-bot/pull/65) | `COMPACT_LAYOUT_MQ`, 3-column grid, green/red/amber tiles; desktop saturated tiles with per-tile actions |
+| **Compact tile UX polish** | [#66](https://github.com/the-hcma/domesti-bot/pull/66)–[#68](https://github.com/the-hcma/domesti-bot/pull/68) | Tile-only tap actions; inset exclude checkbox; 50/50 icon/label grid; Kasa lamp/room icons |
+| **PWA shell refresh after deploy** | [#69](https://github.com/the-hcma/domesti-bot/pull/69) | `sw.js` stale-while-revalidate for `/` and `main.js` |
+| **Compact tile label scale + layout tests** | [#74](https://github.com/the-hcma/domesti-bot/pull/74) | Fluid icon/label sizing; Playwright overflow checks at 320/390/768/1024/1440 |
+| **Browser layout CI + dev deps** | [#75](https://github.com/the-hcma/domesti-bot/pull/75) | Parallel `Pytest (browser layout)` job; Playwright in `[dependency-groups] dev` |
+| **Unified About dialog + PWA** | [#76](https://github.com/the-hcma/domesti-bot/pull/76) | Modal About (tagline, version, commit, copyright, GitHub); robot → About on **mobile** only; desktop ☰ → About; PWA v15+ |
+| **Bulk action button color** | [#77](https://github.com/the-hcma/domesti-bot/pull/77) | `--bulk` / `btn-bulk` (orange) for global and per-family bulk-off; per-tile toggles stay red; PWA v18 |
 
 ### Web UI / compact tiles (reference)
 
@@ -20,11 +24,39 @@ This document tracks **remaining** planned work. Shipped items are summarized be
 - **Phone**: square tiles; top half icon, bottom half label (`line-clamp`); state shown by **color only** (no Playing/On text on compact).
 - **Desktop**: same saturated tile chrome; tap toggles; **On/Off**, **Playing/Paused**, **Open/Closed** captions under labels.
 - **Icons**: server resolves `UIDeviceOut.compact_icon` (object name beats room name beats Kasa model); client draws `garage_open` / `garage_closed` from live door state.
-- **Deploy**: `git pull` then `setup-service` / `./scripts/on-deploy` rebuilds when `HEAD`, deploy-input fingerprint, or `dist/main.js` drift (missing bundle, stale mtime, legacy commit-only cache). `--force` bypasses the skip check. Installed PWAs still need a new service worker (v11+) or clear site data for shell HTML.
+- **Bulk buttons**: warm orange (`--bulk`); per-tile off actions stay red (`--danger`).
+- **About**: mobile robot icon or desktop ☰ menu; same modal content everywhere.
+- **Deploy**: `git pull` then `setup-service` / `./scripts/on-deploy` rebuilds when inputs or `dist/main.js` drift. Installed PWAs need a new service worker (currently **`domesti-bot-pwa-v18`** in `sw.js`) or clear site data for shell HTML.
+- **PWA user docs**: root `README.md` *Progressive Web App* section; `web/README.md` points to cache-bump workflow.
 
 ---
 
-## 1. Immediate cross-client perception (optimistic for everyone)
+## 1. PyPI distribution (`pipx` / `pip install`)
+
+### Goal
+
+Ship **`domesti-bot`** on PyPI (`pipx install domesti-bot`) so users get `domesti-bot` and `domesti-bot-server` without a git checkout. **Release Please** on `main` bumps `pyproject.toml` version; merging the release PR tags the repo and CI publishes to PyPI.
+
+### Version everywhere (CLI + server + UI)
+
+All surfaces read **`app.build_info.get_build_info()`** (directly or via **`GET /v1/meta`**):
+
+- **Web UI** — About dialog and bootstrap use `/v1/meta` (`version`, `commit`).
+- **HTTP** — OpenAPI app `version` matches package version.
+- **CLIs** — add **`--version`** on `domesti-bot` and `domesti-bot-server` (not implemented yet).
+
+**PyPI / CI builds** run `scripts/embed_build_metadata.py` before `uv build` so wheels without `.git` still report the release version and tag SHA (`DOMESTI_EMBED_VERSION`, `DOMESTI_EMBED_COMMIT` → `app/_build_metadata.py`). Full resolution order and publish steps: **[`docs/PYPI_PUBLISH_PLAN.md`](PYPI_PUBLISH_PLAN.md)**.
+
+### Checklist (summary)
+
+1. Installable package (`[project.scripts]`, hatchling, static + `dist/main.js` in wheel).
+2. CLI `--version` + embed step in release CI.
+3. `.github/workflows/release-please.yml` + `uv publish` + smoke tests.
+4. `docs/RELEASING.md` and first PyPI release.
+
+---
+
+## 2. Immediate cross-client perception (optimistic for everyone)
 
 ### Goal
 
@@ -58,7 +90,8 @@ Today optimistic updates and pending predictions are centered on **the actor’s
 
 ## Suggested implementation order (remaining)
 
-1. **Broadcast + cross-tab optimistic alignment** — largest architectural change; benefits most now that compact layout, icons, settings, and deploy detection are done.
+1. **PyPI / pipx release** — independent of UI sync; unlocks installs without a git checkout. See [`PYPI_PUBLISH_PLAN.md`](PYPI_PUBLISH_PLAN.md).
+2. **Broadcast + cross-tab optimistic alignment** — largest architectural change; benefits most now that compact layout, About, bulk colors, settings, and deploy detection are done.
 
 ---
 
