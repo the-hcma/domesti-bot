@@ -32,8 +32,11 @@ This file defines the non-negotiable standards for all contributors (human or AI
 ## Package Management
 
 - **Only `uv`** is used for Python package management. Never `pip` directly.
-- Install / sync dependencies: `uv sync` (add `--all-extras` if/when extras are introduced).
-- Add a dependency: `uv add <pkg>` (separates runtime from dev correctly). Do not hand-edit `pyproject.toml` for additions.
+- **Production vs dev dependency groups**:
+  - **`[project] dependencies`** — runtime only (FastAPI, device libraries, uvicorn, …). Used by `scripts/on-deploy` (`uv sync --frozen`), production systemd installs, and a plain `uv sync` when you want a deploy-shaped venv.
+  - **`[dependency-groups] dev`** — contributors and CI only: `pyright`, `pytest`, `pytest-asyncio`, `pytest-xdist`, `playwright`, `icecream`. Install with `uv sync --group dev` (or `uv sync --all-groups`).
+  - Add runtime packages: `uv add <pkg>`. Add tooling: `uv add --group dev <pkg>`. Do not hand-edit `pyproject.toml` for additions.
+- **Contributors** should run `uv sync --group dev` after clone or pull when `pyproject.toml` / `uv.lock` change. Pyright and pytest are not installed by `uv sync` alone.
 - The lock file (`uv.lock`) **must always be committed**.
 - Prefer well-maintained, typed packages. Do not add a dependency for something trivially implementable in ~10 lines of Python.
 
@@ -147,7 +150,12 @@ domesti-bot/
 - **`pytest`** is the framework. Configuration lives in the `[tool.pytest.ini_options]` block of `pyproject.toml`:
   - `testpaths = ["tests/python"]` — pytest discovery is scoped to the canonical test root.
   - `asyncio_mode = "auto"` — `async def test_*` works without `@pytest.mark.asyncio`. Continue using the explicit decorator for clarity in existing files where it is already present.
-  - **Parallel hermetic runs** — CI and the pre-PR gate use **`pytest-xdist`** with **`-n auto`** so the hermetic suite spreads across CPU cores (`uv run pytest -m "not integration" -n auto`). Omit **`-n auto`** when you need a single process (e.g. `pdb`). New tests must stay **process-safe**: no fixed listen ports, no reliance on a shared mutable module global without a lock, no accidental dependence on collection order across workers.
+  - **Parallel hermetic runs** — CI and the pre-PR gate use **`pytest-xdist`** with **`-n auto`** so the hermetic suite spreads across CPU cores (`uv run pytest -m "not integration and not browser" -n auto`). Omit **`-n auto`** when you need a single process (e.g. `pdb`). New tests must stay **process-safe**: no fixed listen ports, no reliance on a shared mutable module global without a lock, no accidental dependence on collection order across workers.
+  - **Browser layout tests** (`@pytest.mark.browser`) — headless Chromium via **Playwright** checks that long device labels stay inside compact/comfortable tiles using production CSS from `app/api/static/index.html`. They are **not** run under xdist (module-scoped browser fixture). CI runs them in a **separate parallel job** (`Pytest (browser layout)` in `ci.yml`). Locally (after `uv sync --group dev` and a one-time `uv run playwright install chromium`):
+    ```
+    uv run pytest tests/python/test_landing_compact_tile_label.py -m browser -v
+    ```
+    Without the dev group or Chromium install, browser tests are **skipped** (`pytest.importorskip`), not failed. The CSS contract test in the same file runs without Playwright.
   - Tests import application code via the full package path: `from app.kasa_device_manager import KasaDeviceManager` (never `from kasa_device_manager import ...`).
   - Mock patch targets follow the same rule: `patch("app.androidtv_device_manager._discover_cast_infos_sync", ...)` — patching by the symbol's defining module, with the full dotted path.
 - **Integration tests** that exercise real LAN hardware are marked `@pytest.mark.integration` and skipped by default in CI/local quick runs. Document required env vars (e.g. `KASA_USERNAME`, `TAILWIND_TOKEN`) at the top of the test file.
@@ -161,12 +169,14 @@ domesti-bot/
 - **Test naming**: `test_<behavior>_<condition>` reads as a sentence (e.g. `test_fetch_skips_mdns_when_sqlite_cache_fully_named`).
 - Each test asserts an **observable outcome** — not merely that a mock was called.
 
-Run the suite:
+Run the suite (requires `uv sync --group dev`):
 ```
-uv run pytest -m "not integration" -n auto   # hermetic, mirrors CI (parallel)
-uv run pytest -m "not integration"          # hermetic, single-process (pdb / isolation)
-uv run pytest                                 # full suite
-uv run pytest -m integration                  # LAN hardware only
+uv run pytest -m "not integration and not browser" -n auto   # hermetic, mirrors CI (parallel)
+uv run pytest -m "not integration and not browser"          # hermetic, single-process (pdb)
+uv run pytest -m "browser"                                  # Playwright layout (single process)
+uv run pytest -m "not integration" -n auto                  # hermetic + browser (browser not under xdist)
+uv run pytest                                                 # full suite
+uv run pytest -m integration                                  # LAN hardware only
 ```
 
 ---
@@ -383,12 +393,15 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 
 ### Pull request workflow
 
-1. **Pre-PR quality gates** — all must pass locally before submit (these mirror the CI jobs in `.github/workflows/ci.yml`):
+1. **Pre-PR quality gates** — all must pass locally before submit (these mirror the CI jobs in `.github/workflows/ci.yml`). Use `uv sync --group dev` first:
    ```
-   uv run pyright                          # type errors over app/, config/, scripts/, tests/
-   uv run pytest -m "not integration" -n auto   # hermetic tests (matches CI parallelism)
+   uv sync --group dev
+   uv run pyright                                    # type errors over app/, config/, scripts/, tests/
+   uv run pytest -m "not integration and not browser" -n auto   # hermetic (CI parallel job)
+   uv run playwright install chromium                # once per machine; Linux may need --with-deps
+   uv run pytest -m "browser"                        # layout probes (CI browser job)
    shellcheck $(git ls-files scripts | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$')
-   uv run --with pip-audit pip-audit       # CVE check (daily in CI; nice locally too)
+   uv run --with pip-audit pip-audit                 # CVE check on runtime deps (daily in CI)
    ```
 2. **Submit**: `gt submit --no-interactive --publish`.
 3. **Verify stack on GitHub**:
@@ -504,9 +517,10 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 
 CI lives in `.github/workflows/`:
 
-- **`ci.yml`** — runs on every PR (skipping merge-queue staging branches and already-merged PRs):
-  - `Pyright` — `uv run pyright`
-  - `Pytest (hermetic)` — `uv run pytest -m "not integration" -n auto` (**pytest-xdist**)
+- **`ci.yml`** — runs on every PR (skipping merge-queue staging branches and already-merged PRs). Jobs after `Guard` run **in parallel**:
+  - `Pyright` — `uv sync --group dev`, then `uv run pyright`
+  - `Pytest (hermetic)` — `uv sync --group dev`, then `uv run pytest -m "not integration and not browser" -n auto` (**pytest-xdist**)
+  - `Pytest (browser layout)` — `uv sync --group dev`, `playwright install --with-deps chromium`, then `uv run pytest -m "browser and not integration"` (single process; parallel to hermetic job)
   - `Shellcheck` — every no-extension script under `scripts/`
   - `Web (typecheck + build)` — `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm run build`, asserts `app/api/static/dist/main.js` exists
   - `Workflow Lint (actionlint)` — validates the YAML in `.github/workflows/`
@@ -527,10 +541,11 @@ No PR may be merged with a failing CI check.
 
 ## Pre-Commit Checklist
 
-Before every commit (mirrors the CI gates above):
+Before every commit (mirrors the CI gates above; `uv sync --group dev` when deps changed):
 
 - [ ] `uv run pyright` — passes with no new errors
-- [ ] `uv run pytest -m "not integration" -n auto` — green, no warnings (or single-process without `-n auto` when debugging)
+- [ ] `uv run pytest -m "not integration and not browser" -n auto` — green (or single-process without `-n auto` when debugging)
+- [ ] If `app/api/static/index.html` or browser tests changed: `uv run pytest -m browser` — green (Playwright Chromium installed)
 - [ ] `shellcheck` clean on any modified shell scripts
 - [ ] `actionlint` clean on any modified workflow files (`uvx actionlint` or the binary)
 - [ ] If any `web/` source changed: `cd web && pnpm run check` (typecheck + build) is green
