@@ -133,13 +133,8 @@ After starting the server, the landing page hydrates a tile UI:
   (every 5 seconds).
 - Per-family bulk button (`Turn off all`, `Pause all`, `Close all`) and a
   global `Turn off / pause / close everything` button at the top.
-- **About** — tap the robot icon in the header on any viewport, or use
-  **☰ → About** on desktop. The modal shows what domesti-bot is, version and
-  commit, copyright, MIT license, and a link to the GitHub repository; it stays
-  open until you dismiss it (close button, Escape, or backdrop click).
-- On **desktop** viewports, a **☰** menu with **Settings** (Tailwind token)
-  and **About**. The menu is hidden on mobile form factors (use the robot icon
-  for About there).
+- On **desktop** viewports, a **☰** menu with **Settings** (Tailwind token).
+  The menu is hidden on mobile form factors.
 - Per-tile "Exclude from all-off" (and analogous) checkbox so the top-of-page
   bulk action skips devices you don't want it touching.
 - Connectivity indicator: family frames turn red when the backend is
