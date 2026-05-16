@@ -88,7 +88,7 @@ jobs:
           echo "✅ Using Python $current"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --group dev
 
       - name: Pyright
         run: uv run pyright
@@ -114,14 +114,40 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
-      - name: Install Playwright Chromium
-        run: uv run playwright install --with-deps chromium
-
       - name: Run pytest (skip integration / LAN hardware tests)
         # ``pytest-xdist`` parallelizes across CPU cores (``-n auto``) so CI
         # stays fast as the hermetic suite grows. Hermetic tests must remain
         # process-safe (no fixed ports, no shared mutable globals).
-        run: uv run pytest -m "not integration" -n auto
+        # ``@pytest.mark.browser`` layout probes run in the parallel job below.
+        run: uv run pytest -m "not integration and not browser" -n auto
+
+  test-browser:
+    name: Pytest (browser layout)
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Install Playwright Chromium
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run browser layout tests
+        # Single process — Playwright shares one module-scoped browser fixture.
+        run: uv run pytest -m "browser and not integration"
 
   shellcheck:
     name: Shellcheck
