@@ -40,5 +40,11 @@ python_files = ["test_*.py"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
+    "browser: layout checks that need headless Chromium (install dev group + playwright)",
     "integration: exercises real LAN hardware; requires env-specific credentials",
+]
+
+[dependency-groups]
+dev = [
+    "playwright>=1.59.0",
 ]

@@ -112,7 +112,10 @@ jobs:
         run: uv python install 3.14
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --group dev
+
+      - name: Install Playwright Chromium
+        run: uv run playwright install --with-deps chromium
 
       - name: Run pytest (skip integration / LAN hardware tests)
         # ``pytest-xdist`` parallelizes across CPU cores (``-n auto``) so CI
