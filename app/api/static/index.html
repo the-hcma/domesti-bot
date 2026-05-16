@@ -314,6 +314,9 @@
     .tile-compact {
       display: grid; grid-template-columns: 1fr; grid-template-rows: 1fr;
       border-radius: 12px; aspect-ratio: 1;
+      /* Scale icon/label with tile size (phones stay small, tablets fill more). */
+      container-type: size;
+      container-name: tile-compact;
     }
     #app[data-layout="compact"] .tile-compact > .tile-compact-hit {
       grid-area: 1 / 1; min-width: 0; min-height: 0;
@@ -395,9 +398,11 @@
       margin: 0; padding: 2px 4px 0;
     }
     #app[data-layout="compact"] .tile-compact-hit .tile-saturated-icon {
-      width: 2.5rem; height: 2.5rem; max-width: 90%; max-height: 90%;
+      width: clamp(2rem, 42cqw, 5.25rem);
+      height: clamp(2rem, 42cqw, 5.25rem);
+      max-width: 92%; max-height: 92%;
       flex-shrink: 0; stroke: currentColor; color: #fff;
-      stroke-width: 1.75;
+      stroke-width: clamp(1.5px, 0.2cqw, 2.25px);
     }
     #app[data-layout="compact"] .tile-saturated-text {
       grid-row: 2; grid-column: 1; display: flex; align-items: center;
@@ -405,7 +410,9 @@
       overflow: hidden; padding: 0 4px 2px; box-sizing: border-box;
     }
     #app[data-layout="compact"] .tile-saturated-overlay {
-      position: absolute; right: 0; bottom: 0; width: 1.05rem; height: 1.05rem;
+      position: absolute; right: 0; bottom: 0;
+      width: clamp(0.85rem, 4.5cqw, 1.35rem);
+      height: clamp(0.85rem, 4.5cqw, 1.35rem);
       pointer-events: none;
     }
     #app[data-layout="compact"] .tile-saturated-overlay-pause,
@@ -434,7 +441,8 @@
       width: 32px; height: 32px;
     }
     #app[data-layout="compact"] .tile-saturated-text .tile-saturated-label {
-      width: 100%; max-height: 100%; margin: 0; font-size: 12px; font-weight: 700;
+      width: 100%; max-height: 100%; margin: 0;
+      font-size: clamp(11px, 5.75cqw, 17px); font-weight: 700;
       line-height: 1.15; overflow: hidden; overflow-wrap: anywhere;
       word-break: break-word; hyphens: auto;
       display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
@@ -639,8 +647,23 @@
       }
       .tile-header-actions { flex: 1 1 auto; min-width: 0; }
       .tile-header-global-off { min-width: 0; font-size: 12px; }
+    }
+
+    /* Fallback when ``container-type: size`` is unavailable (fixed phone sizes). */
+    @supports not (container-type: size) {
+      #app[data-layout="compact"] .tile-compact-hit .tile-saturated-icon {
+        width: 2.5rem; height: 2.5rem; stroke-width: 1.75;
+      }
       #app[data-layout="compact"] .tile-saturated-text .tile-saturated-label {
-        font-size: 11px; -webkit-line-clamp: 3; line-clamp: 3;
+        font-size: 12px;
+      }
+      #app[data-layout="compact"] .tile-saturated-overlay {
+        width: 1.05rem; height: 1.05rem;
+      }
+      @media (max-width: 600px) {
+        #app[data-layout="compact"] .tile-saturated-text .tile-saturated-label {
+          font-size: 11px;
+        }
       }
     }
   </style>
