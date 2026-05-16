@@ -314,7 +314,7 @@
     .tile-compact {
       display: grid; grid-template-columns: 1fr; grid-template-rows: 1fr;
       border-radius: 12px; aspect-ratio: 1;
-      /* Scale icon/label with tile size (phones stay small, tablets fill more). */
+      /* Scale icon/label with tile size; labels grow more on tablets (bottom half). */
       container-type: size;
       container-name: tile-compact;
     }
@@ -398,11 +398,11 @@
       margin: 0; padding: 2px 4px 0;
     }
     #app[data-layout="compact"] .tile-compact-hit .tile-saturated-icon {
-      width: clamp(2rem, 42cqw, 5.25rem);
-      height: clamp(2rem, 42cqw, 5.25rem);
+      width: clamp(2rem, 34cqw, 4rem);
+      height: clamp(2rem, 34cqw, 4rem);
       max-width: 92%; max-height: 92%;
       flex-shrink: 0; stroke: currentColor; color: #fff;
-      stroke-width: clamp(1.5px, 0.2cqw, 2.25px);
+      stroke-width: clamp(1.5px, 0.18cqw, 2px);
     }
     #app[data-layout="compact"] .tile-saturated-text {
       grid-row: 2; grid-column: 1; display: flex; align-items: center;
@@ -442,8 +442,8 @@
     }
     #app[data-layout="compact"] .tile-saturated-text .tile-saturated-label {
       width: 100%; max-height: 100%; margin: 0;
-      font-size: clamp(11px, 5.75cqw, 17px); font-weight: 700;
-      line-height: 1.15; overflow: hidden; overflow-wrap: anywhere;
+      font-size: clamp(11px, 9cqw, 24px); font-weight: 700;
+      line-height: 1.2; overflow: hidden; overflow-wrap: anywhere;
       word-break: break-word; hyphens: auto;
       display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
       line-clamp: 3;
