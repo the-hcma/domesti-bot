@@ -18,6 +18,7 @@
       --accent: #2e7d32;
       --pending: #b58900;
       --bulk: #c2410c;
+      --bulk-fg: #ffffff;
       --danger: #b3261e;
       --card: #ffffff;
       --card-elev: #fafbfc;
@@ -32,7 +33,8 @@
         --muted: #a0a6b1;
         --accent: #7bd389;
         --pending: #f4c54e;
-        --bulk: #fb923c;
+        --bulk: #ea580c;
+        --bulk-fg: #ffffff;
         --danger: #ff7b72;
         --card: #1f2226;
         --card-elev: #262a30;
@@ -48,6 +50,7 @@
       --accent: #2e7d32;
       --pending: #b58900;
       --bulk: #c2410c;
+      --bulk-fg: #ffffff;
       --danger: #b3261e;
       --card: #ffffff;
       --card-elev: #fafbfc;
@@ -61,7 +64,8 @@
       --muted: #a0a6b1;
       --accent: #7bd389;
       --pending: #f4c54e;
-      --bulk: #fb923c;
+      --bulk: #ea580c;
+      --bulk-fg: #ffffff;
       --danger: #ff7b72;
       --card: #1f2226;
       --card-elev: #262a30;
@@ -501,8 +505,9 @@
     .btn { font: inherit; cursor: pointer; border: 1px solid var(--border);
       background: var(--card); color: var(--fg); border-radius: 6px;
       padding: 6px 12px; touch-action: manipulation; }
-    .btn-bulk { background: var(--bulk); color: #fff; border-color: transparent; }
+    .btn-bulk { background: var(--bulk); color: var(--bulk-fg); border-color: transparent; }
     .btn-bulk:hover:not(:disabled) { filter: brightness(0.92); }
+    .btn-bulk:focus-visible { outline: 2px solid var(--bulk); outline-offset: 2px; }
     .btn-danger { background: var(--danger); color: white; border-color: transparent; }
     .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .app-menu { position: relative; flex-shrink: 0; }

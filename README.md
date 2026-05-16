@@ -132,7 +132,8 @@ After starting the server, the landing page hydrates a tile UI:
   tile updates optimistically and reconciles with the next background poll
   (every 5 seconds).
 - Per-family bulk button (`Turn off all`, `Pause all`, `Close all`) and a
-  global `Turn off / pause / close everything` button at the top.
+  global `Turn off / pause / close everything` button at the top (warm orange,
+  distinct from red per-tile off controls).
 - On **desktop** viewports, a **☰** menu with **Settings** (Tailwind token).
   The menu is hidden on mobile form factors.
 - Per-tile "Exclude from all-off" (and analogous) checkbox so the top-of-page
