@@ -995,18 +995,11 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   }
 }
 
-/** Robot-with-apron mascot: opens the About dialog until the user dismisses it. */
+/** Robot mascot: About entry on mobile; decorative on desktop (use ☰ → About). */
 function createBrandMark(meta: MetaOut | null): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "brand-mark";
-
-  const iconBtn = document.createElement("button");
-  iconBtn.type = "button";
-  iconBtn.className = "brand-mark-icon-btn";
-  iconBtn.setAttribute(
-    "aria-label",
-    "About domesti-bot — show product information",
-  );
+  const mobileAbout = isMobileFormFactor();
 
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("class", "brand-mark-svg");
@@ -1106,15 +1099,28 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
     eyeR,
     mouth,
   );
-  iconBtn.append(svg);
-
-  iconBtn.addEventListener("click", () => {
-    openAboutDialog(meta);
-  });
-  wrap.append(iconBtn);
+  if (mobileAbout) {
+    const iconBtn = document.createElement("button");
+    iconBtn.type = "button";
+    iconBtn.className = "brand-mark-icon-btn";
+    iconBtn.setAttribute(
+      "aria-label",
+      "About domesti-bot — show product information",
+    );
+    iconBtn.append(svg);
+    iconBtn.addEventListener("click", () => {
+      openAboutDialog(meta);
+    });
+    wrap.append(iconBtn);
+  } else {
+    const mascot = document.createElement("span");
+    mascot.className = "brand-mark-mascot";
+    mascot.setAttribute("aria-hidden", "true");
+    mascot.append(svg);
+    wrap.append(mascot);
+  }
   return wrap;
 }
-
 
 function createFamilyIcon(familyId: string): SVGElement | null {
   // Returns a configured ``<svg>`` element for the family header,
