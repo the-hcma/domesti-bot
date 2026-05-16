@@ -38,3 +38,13 @@ pnpm run check        # typecheck + build (mirrors CI)
 After a build, the FastAPI server picks up the new `dist/main.js` on the next
 page load — no Python restart required, because `app/api/static/` is served as
 plain static files.
+
+## PWA
+
+The landing page is a Progressive Web App: `app/api/static/manifest.webmanifest`,
+`app/api/static/sw.js` (also at `/sw.js`), and launcher icons under
+`app/api/static/icons/`. The bundle registers the service worker on load. When
+HTML, inline CSS, or this bundle changes in a release, bump the `VERSION`
+string in `sw.js` so installed clients refresh their cache. See the root
+`README.md` *Progressive Web App* section for install requirements (HTTPS or
+loopback).

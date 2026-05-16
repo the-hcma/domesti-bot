@@ -133,12 +133,39 @@ After starting the server, the landing page hydrates a tile UI:
   (every 5 seconds).
 - Per-family bulk button (`Turn off all`, `Pause all`, `Close all`) and a
   global `Turn off / pause / close everything` button at the top.
+- **About** — tap the robot icon in the header on any viewport, or use
+  **☰ → About** on desktop. The modal shows what domesti-bot is, version and
+  commit, copyright, MIT license, and a link to the GitHub repository; it stays
+  open until you dismiss it (close button, Escape, or backdrop click).
 - On **desktop** viewports, a **☰** menu with **Settings** (Tailwind token)
-  and **About** (build info). The menu is hidden on mobile form factors.
+  and **About**. The menu is hidden on mobile form factors (use the robot icon
+  for About there).
 - Per-tile "Exclude from all-off" (and analogous) checkbox so the top-of-page
   bulk action skips devices you don't want it touching.
 - Connectivity indicator: family frames turn red when the backend is
   unreachable; all controls grey out until the next poll succeeds.
+
+## Progressive Web App (PWA)
+
+The landing page is installable as a PWA on phones and desktops that support
+it. Assets live under `app/api/static/`:
+
+- `manifest.webmanifest` — name, icons, `display: standalone`
+- `sw.js` — service worker (also served at `GET /sw.js` so scope covers `/`)
+- `icons/` — launcher icons referenced by the manifest
+
+The TypeScript bundle registers the worker on load. After you deploy a new
+version, the service worker cache version in `sw.js` (for example
+`domesti-bot-pwa-v15`) must be bumped so installed clients pick up HTML, CSS,
+and `dist/main.js` changes.
+
+**Install requirements:** Chromium-based browsers need a secure context
+(`https://` or `http://127.0.0.1`). On a plain HTTP LAN URL, you still get
+manifest metadata in some browsers, but the install prompt may not appear until
+you terminate TLS or use loopback. When the server is reachable with
+`--listen-all`, open the dashboard from your phone at
+`http://<server-lan-ip>:<port>/` and use the in-app install banner when
+offered.
 
 ## Project layout
 

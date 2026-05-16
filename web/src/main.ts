@@ -19,9 +19,6 @@ const APP_ROOT_ID = "app";
 /** Viewport breakpoint for the saturated three-column compact tile UI. */
 const COMPACT_LAYOUT_MQ = "(max-width: 768px)";
 
-/** Delay before hiding the about panel after pointer leaves robot + tooltip. */
-const BRAND_MARK_HOVER_LINGER_MS = 900;
-
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
 
@@ -51,8 +48,13 @@ interface PwaBeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
 }
 
-/** Public source repository (tooltip copy + icon link target). */
+/** Public source repository (About dialog link target). */
 const DOMESTI_BOT_REPO_HREF = "https://github.com/the-hcma/domesti-bot";
+const ABOUT_TAGLINE =
+  "Self-hosted home LAN dashboard for TP-Link Kasa, Sonos, and GoTailwind garage doors.";
+const ABOUT_COPYRIGHT = "\u00a9 2026 Henrique Andrade";
+const ABOUT_LICENSE = "Open-source software under the MIT License.";
+const ABOUT_REPO_LABEL = "github.com/the-hcma/domesti-bot";
 
 /** Tailwind web dashboard (Local Control Key / token). */
 const TAILWIND_WEB_DASHBOARD_HREF = "https://web.gotailwind.com";
@@ -993,17 +995,14 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   }
 }
 
-/** Robot-with-apron mascot: click pins about info; only the repo link opens GitHub. */
+/** Robot-with-apron mascot: opens the About dialog until the user dismisses it. */
 function createBrandMark(meta: MetaOut | null): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "brand-mark";
 
-  const tipId = "brand-mark-about-panel";
   const iconBtn = document.createElement("button");
   iconBtn.type = "button";
   iconBtn.className = "brand-mark-icon-btn";
-  iconBtn.setAttribute("aria-controls", tipId);
-  iconBtn.setAttribute("aria-expanded", "false");
   iconBtn.setAttribute(
     "aria-label",
     "About domesti-bot — show product information",
@@ -1109,186 +1108,13 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   );
   iconBtn.append(svg);
 
-  const tip = document.createElement("div");
-  tip.id = tipId;
-  tip.className = "brand-mark-tooltip";
-  tip.setAttribute("role", "dialog");
-  tip.setAttribute("aria-label", "About domesti-bot");
-
-  const tipHead = document.createElement("div");
-  tipHead.className = "brand-mark-tooltip-head";
-
-  const product = document.createElement("div");
-  product.className = "brand-mark-tooltip-product";
-  product.textContent = "domesti-bot";
-
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.className = "brand-mark-tooltip-dismiss";
-  dismiss.setAttribute("aria-label", "Dismiss about domesti-bot");
-  dismiss.textContent = "\u00d7";
-
-  tipHead.append(product, dismiss);
-
-  const tagline = document.createElement("div");
-  tagline.className = "brand-mark-tooltip-tagline";
-  tagline.textContent =
-    "Home LAN dashboard for Kasa, Sonos, GoTailwind, and more.";
-
-  const rights = document.createElement("div");
-  rights.className = "brand-mark-tooltip-copy";
-  rights.textContent = "\u00a9 2026 Henrique Andrade";
-
-  const license = document.createElement("div");
-  license.className = "brand-mark-tooltip-license";
-  license.textContent = "Open-source software under the MIT License.";
-
-  tip.append(tipHead, tagline, rights, license);
-
-  if (meta) {
-    const v = document.createElement("div");
-    v.className = "brand-mark-tooltip-build";
-    v.textContent = `Version ${meta.version}`;
-    const c = document.createElement("div");
-    c.className = "brand-mark-tooltip-build";
-    c.textContent = `Commit ${meta.commit}`;
-    tip.append(v, c);
-  } else {
-    const pending = document.createElement("div");
-    pending.className = "brand-mark-tooltip-build";
-    pending.textContent = "Loading build info\u2026";
-    tip.append(pending);
-  }
-
-  const repoLink = document.createElement("a");
-  repoLink.className = "brand-mark-tooltip-repo";
-  repoLink.href = DOMESTI_BOT_REPO_HREF;
-  repoLink.target = "_blank";
-  repoLink.rel = "noopener noreferrer";
-  repoLink.textContent = "github.com/the-hcma/domesti-bot";
-  tip.append(repoLink);
-
-  wrap.append(iconBtn, tip);
-
-  let clickPinned = false;
-  let hoverShown = false;
-  const syncPos = (): void => {
-    syncBrandMarkTooltipPosition(iconBtn, tip);
-  };
-  const syncAriaExpanded = (): void => {
-    const open = clickPinned || hoverShown;
-    iconBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  };
-  const showTooltip = (): void => {
-    tip.classList.add("is-open");
-    syncBrandMarkTooltipPosition(iconBtn, tip);
-    syncAriaExpanded();
-    window.addEventListener("resize", syncPos);
-    window.addEventListener("scroll", syncPos, true);
-  };
-  const hideTooltip = (): void => {
-    tip.classList.remove("is-open");
-    tip.style.removeProperty("left");
-    tip.style.removeProperty("top");
-    tip.style.removeProperty("position");
-    tip.style.removeProperty("display");
-    syncAriaExpanded();
-    window.removeEventListener("resize", syncPos);
-    window.removeEventListener("scroll", syncPos, true);
-  };
-  const refreshTooltip = (): void => {
-    if (clickPinned || hoverShown) {
-      showTooltip();
-    } else {
-      hideTooltip();
-    }
-  };
-  const dismissTooltip = (): void => {
-    clickPinned = false;
-    hoverShown = false;
-    hideTooltip();
-  };
   iconBtn.addEventListener("click", () => {
-    clickPinned = !clickPinned;
-    if (clickPinned) {
-      hoverShown = true;
-    }
-    refreshTooltip();
+    openAboutDialog(meta);
   });
-  dismiss.addEventListener("click", () => {
-    dismissTooltip();
-  });
-  repoLink.addEventListener("click", () => {
-    dismissTooltip();
-  });
-  let hoverHideTimer: ReturnType<typeof setTimeout> | null = null;
-  const cancelHoverHide = (): void => {
-    if (hoverHideTimer !== null) {
-      clearTimeout(hoverHideTimer);
-      hoverHideTimer = null;
-    }
-  };
-  const isPointerOverBrandMark = (node: Node | null): boolean =>
-    node !== null && (wrap.contains(node) || tip.contains(node));
-  const scheduleHoverHide = (): void => {
-    cancelHoverHide();
-    hoverHideTimer = setTimeout(() => {
-      hoverHideTimer = null;
-      hoverShown = false;
-      if (!clickPinned) {
-        hideTooltip();
-      }
-    }, BRAND_MARK_HOVER_LINGER_MS);
-  };
-  const onBrandMarkPointerEnter = (): void => {
-    cancelHoverHide();
-    hoverShown = true;
-    refreshTooltip();
-  };
-  const onBrandMarkPointerLeave = (ev: PointerEvent): void => {
-    if (isPointerOverBrandMark(ev.relatedTarget as Node | null)) {
-      return;
-    }
-    scheduleHoverHide();
-  };
-  wrap.addEventListener("pointerenter", onBrandMarkPointerEnter);
-  wrap.addEventListener("pointerleave", onBrandMarkPointerLeave);
-  tip.addEventListener("pointerenter", onBrandMarkPointerEnter);
-  tip.addEventListener("pointerleave", onBrandMarkPointerLeave);
-  wrap.addEventListener("focusin", () => {
-    cancelHoverHide();
-    hoverShown = true;
-    refreshTooltip();
-  });
-  wrap.addEventListener("focusout", (ev) => {
-    if (isPointerOverBrandMark(ev.relatedTarget as Node | null)) {
-      return;
-    }
-    scheduleHoverHide();
-  });
-  document.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Escape" || !clickPinned) {
-      return;
-    }
-    dismissTooltip();
-  });
-  document.addEventListener(
-    "pointerdown",
-    (ev) => {
-      if (!clickPinned) {
-        return;
-      }
-      const target = ev.target as Node | null;
-      if (target !== null && (wrap.contains(target) || tip.contains(target))) {
-        return;
-      }
-      dismissTooltip();
-    },
-    true,
-  );
-
+  wrap.append(iconBtn);
   return wrap;
 }
+
 
 function createFamilyIcon(familyId: string): SVGElement | null {
   // Returns a configured ``<svg>`` element for the family header,
@@ -1437,22 +1263,7 @@ function openAboutDialog(meta: MetaOut | null): void {
   header.append(title, createSettingsDialogCloseButton(dialog));
   const body = document.createElement("div");
   body.className = "settings-dialog-body";
-  const lead = document.createElement("p");
-  lead.className = "settings-dialog-lead";
-  lead.textContent =
-    "Self-hosted LAN dashboard for TP-Link Kasa, Sonos, and GoTailwind garage doors.";
-  const version = document.createElement("p");
-  version.className = "settings-dialog-status";
-  version.textContent = meta
-    ? `Version ${meta.version} · commit ${meta.commit}`
-    : "Loading build info…";
-  const repo = document.createElement("a");
-  repo.className = "about-dialog-repo";
-  repo.href = DOMESTI_BOT_REPO_HREF;
-  repo.target = "_blank";
-  repo.rel = "noopener noreferrer";
-  repo.textContent = "github.com/the-hcma/domesti-bot";
-  body.append(lead, version, repo);
+  appendAboutContent(body, meta);
   panel.append(header, body);
   dialog.append(panel);
   document.body.append(dialog);
@@ -1819,6 +1630,30 @@ function initPwaInstallBanner(): void {
   actions.append(installBtn, dismissBtn);
   banner.append(title, copy, persistRow, actions);
   mainEl.insertBefore(banner, mainEl.firstChild);
+}
+
+function appendAboutContent(body: HTMLElement, meta: MetaOut | null): void {
+  const tagline = document.createElement("p");
+  tagline.className = "settings-dialog-lead";
+  tagline.textContent = ABOUT_TAGLINE;
+  const copyright = document.createElement("p");
+  copyright.className = "about-dialog-meta";
+  copyright.textContent = ABOUT_COPYRIGHT;
+  const license = document.createElement("p");
+  license.className = "about-dialog-meta";
+  license.textContent = ABOUT_LICENSE;
+  const version = document.createElement("p");
+  version.className = "settings-dialog-status";
+  version.textContent = meta
+    ? `Version ${meta.version} · commit ${meta.commit}`
+    : "Loading build info\u2026";
+  const repo = document.createElement("a");
+  repo.className = "about-dialog-repo";
+  repo.href = DOMESTI_BOT_REPO_HREF;
+  repo.target = "_blank";
+  repo.rel = "noopener noreferrer";
+  repo.textContent = ABOUT_REPO_LABEL;
+  body.append(tagline, copyright, license, version, repo);
 }
 
 function appendSaturatedTileVisuals(
@@ -2218,34 +2053,6 @@ function start(): void {
   const controller = new DomestiBotController(root);
   domestiUiController = controller;
   void controller.init();
-}
-
-function syncBrandMarkTooltipPosition(anchor: HTMLElement, tip: HTMLElement): void {
-  if (!tip.classList.contains("is-open")) {
-    return;
-  }
-  const margin = 10;
-  const ar = anchor.getBoundingClientRect();
-  tip.style.position = "fixed";
-  tip.style.display = "block";
-  const tw = tip.offsetWidth;
-  const th = tip.offsetHeight;
-  let top = ar.bottom + margin;
-  if (top + th > window.innerHeight - margin) {
-    top = ar.top - th - margin;
-  }
-  let left = ar.left;
-  if (left + tw > window.innerWidth - margin) {
-    left = window.innerWidth - tw - margin;
-  }
-  if (left < margin) {
-    left = margin;
-  }
-  if (top < margin) {
-    top = margin;
-  }
-  tip.style.left = `${Math.round(left)}px`;
-  tip.style.top = `${Math.round(top)}px`;
 }
 
 if (document.readyState === "loading") {
