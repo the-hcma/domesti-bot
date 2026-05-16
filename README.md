@@ -35,8 +35,8 @@ hosts other always-on services.
   `domesti-secrets.json.example`.
 - **Web UI** (`/`) — tile-based control, family-color frames, optimistic UI
   updates with an 8-second grace window, backend-connectivity status, mobile
-  viewport support, and standardized green-for-active / red-for-destructive
-  colour rules. Talks to a stable, OpenAPI-typed HTTP surface under `/v1/…`.
+  viewport support, and standardized colour rules (green active, red per-tile
+  off, orange bulk actions). Talks to a stable, OpenAPI-typed HTTP surface under `/v1/…`.
 - **REPL CLI** (`scripts/domesti-bot`) — same discovery / control surface
   exposed as an interactive `prompt_toolkit` shell for scripting and
   troubleshooting, including `setup-secrets` to create `domesti-secrets.json`.

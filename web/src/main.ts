@@ -543,7 +543,7 @@ class DomestiBotController {
       actions.className = "tile-header-actions";
       const globalBtn = document.createElement("button");
       globalBtn.type = "button";
-      globalBtn.className = "btn btn-danger tile-header-global-off";
+      globalBtn.className = "btn btn-bulk tile-header-global-off";
       globalBtn.textContent = "Turn off / pause / close everything";
       globalBtn.disabled = !this.connected;
       globalBtn.addEventListener("click", () => {
@@ -1970,12 +1970,11 @@ function renderFamily(
   ) {
     const bulkBtn = document.createElement("button");
     bulkBtn.type = "button";
-    // Per-family bulk-off is always destructive ("Turn off all" /
-    // "Pause all" / "Close all"), so use the same red ``btn-danger``
-    // styling as the global "Turn off / pause / close everything" button —
-    // colors stay consistent with the green/red rule that drives the
-    // state badges and the per-tile toggles.
-    bulkBtn.className = "btn btn-danger";
+    // Per-family bulk-off ("Turn off all" / "Pause all" / "Close all") uses
+    // ``btn-bulk`` (warm orange) so multi-device actions read separately from
+    // per-tile ``btn-danger`` toggles and from green ``--accent`` / amber
+    // ``--pending`` state badges.
+    bulkBtn.className = "btn btn-bulk";
     bulkBtn.textContent =
       family.id === "kasa"
         ? "Turn off all"

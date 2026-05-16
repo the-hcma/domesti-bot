@@ -24,6 +24,7 @@
       --muted: #a0a6b1;
       --accent: #7bd389;
       --pending: #f4c54e;
+      --bulk: #fb923c;
       --danger: #ff7b72;
       --card: #1f2226;
       --border: #2a2e34;
@@ -38,6 +39,7 @@
       --muted: #8d99ab;
       --accent: #2e7d32;
       --pending: #b58900;
+      --bulk: #c2410c;
       --danger: #b3261e;
       --card: #ffffff;
       --border: #e1e4e8;
@@ -101,6 +103,11 @@
       border-radius: 6px;
       padding: 6px 12px;
       touch-action: manipulation;
+    }
+    .btn-bulk {
+      background: var(--bulk);
+      color: #fff;
+      border-color: transparent;
     }
     .btn-danger {
       background: var(--danger);
@@ -309,7 +316,7 @@
           </svg>
         </button>
         <div class="tile-header-actions">
-          <button type="button" class="btn btn-danger tile-header-global-off">
+          <button type="button" class="btn btn-bulk tile-header-global-off">
             Turn off / pause / close everything
           </button>
           <button type="button" class="btn btn-theme-toggle" id="proto-theme-2" title="Theme">☀</button>
@@ -324,7 +331,7 @@
             </svg>
             Lights &amp; plugs
           </h3>
-          <button type="button" class="btn btn-danger">Turn off all</button>
+          <button type="button" class="btn btn-bulk">Turn off all</button>
         </header>
         <div class="tile-grid tile-grid-compact">
           <article class="tile-compact tile-switch">
