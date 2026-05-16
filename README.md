@@ -35,8 +35,8 @@ hosts other always-on services.
   `domesti-secrets.json.example`.
 - **Web UI** (`/`) — tile-based control, family-color frames, optimistic UI
   updates with an 8-second grace window, backend-connectivity status, mobile
-  viewport support, and standardized green-for-active / red-for-destructive
-  colour rules. Talks to a stable, OpenAPI-typed HTTP surface under `/v1/…`.
+  viewport support, and standardized colour rules (green active, red per-tile
+  off, orange bulk actions). Talks to a stable, OpenAPI-typed HTTP surface under `/v1/…`.
 - **REPL CLI** (`scripts/domesti-bot`) — same discovery / control surface
   exposed as an interactive `prompt_toolkit` shell for scripting and
   troubleshooting, including `setup-secrets` to create `domesti-secrets.json`.
@@ -132,7 +132,8 @@ After starting the server, the landing page hydrates a tile UI:
   tile updates optimistically and reconciles with the next background poll
   (every 5 seconds).
 - Per-family bulk button (`Turn off all`, `Pause all`, `Close all`) and a
-  global `Turn off / pause / close everything` button at the top.
+  global `Turn off / pause / close everything` button at the top (warm orange,
+  distinct from red per-tile off controls).
 - On **desktop** viewports, a **☰** menu with **Settings** (Tailwind token).
   The menu is hidden on mobile form factors.
 - Per-tile "Exclude from all-off" (and analogous) checkbox so the top-of-page
