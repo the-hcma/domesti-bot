@@ -222,6 +222,7 @@ uv run pytest -m integration                                  # LAN hardware onl
   - **Persistent** — set `KASA_USERNAME` + `KASA_PASSWORD` (both, or neither — partial is rejected) and rerun with `--force-discovery` to rebuild the cache. The user-facing WARNING gets an actionable suffix from `_klap_auth_recovery_hint`: when credentials are unset, it names the env vars and `--force-discovery`; when they're set, it flags a likely credential mismatch. The systemd unit reads them via `EnvironmentFile=` so they never appear in `ps aux` or shell history.
   - **No-restart REPL** — `KasaDeviceManager` records every auth-skipped host in `skipped_auth_hosts` (cleared at the start of each fetch). After the bootstrap `Ready` banner, `_maybe_print_kasa_auth_notice` surfaces a one-shot suggestion when at least one host was skipped *and* `has_credentials is False`, pointing at the `kasa-creds` REPL command. `kasa-creds` opens a fresh `prompt_toolkit.PromptSession` and asks for email (visible) and password (`is_password=True` — starred); on confirmation it calls `KasaDeviceManager.set_credentials(...)` and triggers `rediscover()`. Credentials are stored **only in memory** — they're not written to the SQLite cache, so to survive a restart the user still needs the env-var path. `_repl_cmd_kasa_creds` takes `prompt_fn` as a dependency so tests can exercise it without prompt_toolkit's terminal layer.
 - **GoTailwind token (encrypted SQLite).** The six-digit Local Control Key can be stored in `app_secrets` (Fernet ciphertext) instead of plain environment variables. Resolution order for the token: CLI `--tailwind-token` → `TAILWIND_TOKEN` env → decrypted row in SQLite (`app.tailwind_credentials.resolve_tailwind_token`). The Fernet master key loads from `DOMESTI_SECRETS_KEY` or from gitignored `domesti-secrets.json` at the repo root (`domesti_secrets_key` field — see `domesti-secrets.json.example`). Override the file path with `DOMESTI_SECRETS_FILE`. **`setup-secrets` REPL command** — interactive helper in `app.domesti_bot_cli` that generates or accepts a Fernet key and writes `domesti-secrets.json` (mode `0600`). **Desktop web UI** — ☰ menu → Settings (`PUT /v1/settings/tailwind-token`); token is never returned on read (`GET /v1/settings/tailwind-token` reports status only). After saving, restart the server so discovery reloads the token.
+- **Compact tile icons (static SVG).** Per-device compact tiles load stroke-style SVG files from `app/api/static/icons/compact/<key>.svg` (keys from `UIDeviceOut.compact_icon` / `app.ui_compact_icon.resolve_compact_icon`). Each file is a committed **24×24** asset with `stroke="currentColor"` so tile tinting works via CSS. The web UI fetches and inlines each file at runtime (`web/src/main.ts` — `COMPACT_ICON_BASE`, `loadCompactTileIconInto`). Garage doors use `garage_open` / `garage_closed` based on live state. Whenever you add or change any file under `icons/compact/`, run `./scripts/internal/generate-compact-icon-preview` and **attach** the generated `$HOME/scratch/domesti-bot/tmp/build/review.html` (or a screenshot) to the **PR description** — the gallery is not committed or served from the repo tree (override output with `DOMESTI_COMPACT_ICON_REVIEW_DIR` or `--output-dir`).
 - **Static assets.** `app/api/static/` is mounted at `/static/` via `StaticFiles`. Source files (HTML, PWA manifest, service worker, icons) live there directly and are committed; the `dist/` subdirectory is gitignored and rebuilt by `pnpm run build` (see "Web UI" below). The mount is unconditional — a missing `dist/main.js` 404s cleanly without breaking `/`.
 - **PWA.** `index.html` links `manifest.webmanifest`; `web/src/main.ts` registers `/sw.js` (served at the URL root, not only under `/static/`, so the worker scope covers the whole app). Install prompts require HTTPS or loopback; LAN-only HTTP still gets manifest metadata in supporting browsers.
 - **Favicon.** `GET /favicon.ico` returns `204 No Content` so browser auto-fetches don't generate 404 noise. Do not ship a real icon binary; if branding is needed in the future, prefer an inline SVG behind a separate route.
@@ -268,9 +269,11 @@ pnpm run check                   # typecheck + build (mirrors the CI job)
 
 ## Shell Scripts
 
-- **No `.sh` extension.** Shell scripts have no file extension. Examples: `scripts/domesti-bot`, `scripts/domesti-bot-server`, `scripts/on-deploy`. The shebang line declares the interpreter.
+- **`scripts/internal/`** — maintainer-only helpers (icon preview regeneration, one-off imports). Not invoked by CI, deploy, or the running server. Prefer a single focused script per workflow instead of growing top-level `scripts/`.
+- **No file extension on executables.** Runnable scripts under `scripts/` (bash **or** Python) are extensionless kebab-case names (`scripts/domesti-bot`, `scripts/on-deploy`, `scripts/internal/generate-compact-icon-preview`). The shebang declares the interpreter. Do **not** add `.sh` or `.py` to entrypoints users execute directly — reserve `.py` for modules invoked only via `uv run python path/to/module.py` (e.g. `scripts/embed_build_metadata.py`, `scripts/verify_google_cast_discovery.py`).
+- **No `.sh` extension.** (Same rule as above; called out because `.sh` is a common mistake for bash.)
 - Use `#!/usr/bin/env bash` and `set -euo pipefail` at the top of every script.
-- **`shellcheck`** is mandatory for all shell scripts. Run `shellcheck <script>` before committing; resolve every finding (or annotate the line with `# shellcheck disable=SCxxxx` plus a comment explaining why).
+- **`shellcheck`** is mandatory for all **bash** scripts (files with `#!/usr/bin/env bash`). Run `shellcheck <script>` before committing; resolve every finding (or annotate the line with `# shellcheck disable=SCxxxx` plus a comment explaining why). CI skips extensionless Python entrypoints under `scripts/` automatically (python shebang); do not rename them to `.py` to satisfy shellcheck.
 - **Non-exported variables are lowercase.** Uppercase is reserved for exported environment variables.
 - **`readonly`** for any script-level variable assigned once. Declare and assign separately to avoid masking exit codes (SC2155):
   ```bash
@@ -284,7 +287,7 @@ pnpm run check                   # typecheck + build (mirrors the CI job)
 
 ## Standalone Python CLI Scripts
 
-- Standalone CLI scripts have **no `.py` extension** (kebab-case names like `scripts/domesti-bot`).
+- Executable Python CLIs use **no `.py` extension** — kebab-case, extensionless paths like `scripts/domesti-bot` or `scripts/internal/generate-compact-icon-preview` (same rule as bash entrypoints above).
 - `chmod +x` them and use shebang `#!/usr/bin/env python3`.
 - They must **auto-activate the uv environment** so they work without manual venv activation:
   ```python
@@ -437,7 +440,7 @@ Typical causes (check in order):
 
 1. **Wrong URL or bind address** — If the unit still used loopback-only (`127.0.0.1`) and you open `http://<this-host's-LAN-IP>:8003/` from another machine, the connection never reaches the process. The `etc/systemd` unit uses `--listen-all` so `0.0.0.0:8003` accepts LAN clients; confirm with `ss -ltnp | grep 8003` (or `lsof -iTCP:8003 -sTCP:LISTEN`). Firewall rules must allow TCP **8003** on the interfaces you use.
 2. **Missing web bundle** — `GET /` returns HTML immediately, but the tile UI lives in `app/api/static/dist/main.js` (gitignored). If that file was never built, the browser shows an empty shell until the static boot hint (or nothing, on older HTML). Run `setup-service` so `scripts/on-deploy` runs `pnpm run build` in `web/`, or build manually once: `cd web && pnpm install --frozen-lockfile && pnpm run build`. Confirm `GET /static/dist/main.js` returns **200** (not **404**).
-3. **`on-deploy` exit 1 (no restart)** — The hook exits **1** only when `HEAD`, the deploy-input fingerprint, and `app/api/static/dist/main.js` all match the last successful deploy. It rebuilds when the bundle is missing, inputs are newer than `dist/`, or the cache file is legacy commit-only. If you still need to force a full rebuild, use `./scripts/on-deploy --force`.
+3. **`on-deploy` exit 1 (no restart)** — The hook exits **1** only when `HEAD`, the deploy-input fingerprint, `.venv`, `app/api/static/dist/main.js`, and the installed systemd unit's checkout path all match the last successful deploy for this worktree. It rebuilds automatically when the bundle is missing, Python/web/icons inputs are newer than the venv or bundle, the cache is legacy or shared across checkouts, or the unit still points at a different checkout (run `setup-service` from the tree you want).
 4. **API key** — With `DOMESTI_API_KEY` set, unauthenticated browser calls to protected JSON routes return **401**; the shell still loads if the bundle exists. Open `GET /health` (no key) to verify HTTP, then configure the key in the client or relax auth for debugging only.
 
 ### Discovery Cache (cache-first startup)
@@ -495,13 +498,13 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 3. Verify `uv` is on `PATH`; exit `2` if missing.
 4. Ensure `.venv/` exists with a usable interpreter — recreate it via `uv sync` if missing or stale (handles brand-new worktrees).
 5. Reset a stuck `domesti-bot.service` failed state for the **user** manager (`systemctl --user`) when not root; when root, reset the system manager (best-effort; ignored if the unit isn't installed yet).
-6. Skip when `HEAD`, a hash of deploy inputs (`pyproject.toml`, `uv.lock`, `web/`, `index.html`, `sw.js`, …), and `app/api/static/dist/main.js` all match the state file (`$HOME/scratch/domesti-bot/on-deploy-sha`, overridable via `ON_DEPLOY_SHA_FILE`; format `commit=` + `inputs=` lines). Also rebuild when the bundle is missing, any input is newer than `dist/main.js`, or the cache is legacy commit-only. `--force` bypasses the skip. Skip → exit `1`.
+6. Skip when `HEAD`, a hash of deploy inputs (`pyproject.toml`, `uv.lock`, `app/`, `config/`, `web/`, `app/api/static/icons/`, `index.html`, `sw.js`, …), `.venv`, `app/api/static/dist/main.js`, and the user unit's `ExecStart` checkout path all match the **per-repo** state file (`$HOME/scratch/domesti-bot/on-deploy-sha-<hash>`, derived from the checkout path so linked worktrees do not share one cache; override with `ON_DEPLOY_SHA_FILE`). Rebuild when the bundle or venv is missing/stale, inputs changed, the cache is legacy or shared (`on-deploy-sha` without a path suffix), or systemd still serves another checkout. Skip → exit `1`.
 7. `uv sync --frozen` — refuse to mutate `uv.lock` on a deploy box; build either matches the committed pin or fails loudly.
 8. `pnpm install` + `pnpm run build` in `web/` when present.
 9. Smoke-import `config.serve` so a broken dep or syntax error fails the hook BEFORE `setup-service` restarts the unit.
 10. Record deploy state (`commit` + `inputs` hash), exit `0`.
 
-**Manual runs**: `./scripts/on-deploy` (idempotent) or `./scripts/on-deploy --force` to bypass the skip check. `--help` prints the header docblock.
+**Manual runs**: `./scripts/on-deploy` (idempotent; auto-detects when a rebuild/restart is needed). `--help` prints the header docblock.
 
 ---
 
@@ -549,6 +552,7 @@ Before every commit (mirrors the CI gates above; `uv sync --group dev` when deps
 - [ ] `shellcheck` clean on any modified shell scripts
 - [ ] `actionlint` clean on any modified workflow files (`uvx actionlint` or the binary)
 - [ ] If any `web/` source changed: `cd web && pnpm run check` (typecheck + build) is green
+- [ ] If any `app/api/static/icons/compact/*.svg` changed: `./scripts/internal/generate-compact-icon-preview` and attach `$HOME/scratch/domesti-bot/tmp/build/review.html` (or a screenshot) to the PR
 - [ ] No trailing whitespace; empty lines have no whitespace
 - [ ] Imports sorted; all imports at module level
 - [ ] New methods / module-level functions inserted in **alphabetical** position

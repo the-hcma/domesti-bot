@@ -169,9 +169,18 @@ jobs:
           # scripts/. Collect every tracked file in that tree that is not a
           # Python / docs / config file.
           mapfile -t targets < <(
-            git ls-files -- scripts \
-              | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$' \
-              || true
+            while IFS= read -r path; do
+              [[ -z "$path" ]] && continue
+              first_line="$(head -n1 "$path" 2>/dev/null || true)"
+              if [[ "$first_line" == *python* ]]; then
+                continue
+              fi
+              printf '%s\n' "$path"
+            done < <(
+              git ls-files -- scripts \
+                | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$' \
+                || true
+            )
           )
           if [[ ${#targets[@]} -eq 0 ]]; then
             echo "No shell scripts found — nothing to lint."

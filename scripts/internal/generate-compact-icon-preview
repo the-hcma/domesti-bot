@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""Write a compact-tile icon review gallery HTML file from committed SVG assets.
+
+Default output: ``$HOME/scratch/domesti-bot/tmp/build/review.html`` (override with
+``--output-dir`` or ``DOMESTI_COMPACT_ICON_REVIEW_DIR``). Attach the file or a
+screenshot to the PR — it is not served from the repo tree.
+
+Usage:
+  ./scripts/internal/generate-compact-icon-preview
+  ./scripts/internal/generate-compact-icon-preview --icon-dir path/to/compact
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import os
+import re
+import shutil
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_ICON_DIR = _REPO_ROOT / "app" / "api" / "static" / "icons" / "compact"
+_REVIEW_FILENAME = "review.html"
+_ROOM_KEY_PREFIXES: tuple[str, ...] = ("room_",)
+_INLINE_SVG_CLASS = "review-inline-icon"
+
+
+def _categorize_icon_keys(keys: list[str]) -> tuple[list[str], list[str]]:
+    objects: list[str] = []
+    rooms: list[str] = []
+    for key in keys:
+        if key.startswith(_ROOM_KEY_PREFIXES):
+            rooms.append(key)
+        else:
+            objects.append(key)
+    return objects, rooms
+
+
+def _default_review_output_dir() -> Path:
+    override = (os.environ.get("DOMESTI_COMPACT_ICON_REVIEW_DIR") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / "scratch" / "domesti-bot" / "tmp" / "build"
+
+
+def _ensure_uv() -> None:
+    if os.environ.get("UV_ACTIVE") or "/.venv/" in (sys.executable or ""):
+        return
+    uv = shutil.which("uv")
+    if uv:
+        os.execv(uv, [uv, "run", sys.argv[0], *sys.argv[1:]])
+
+
+def _inline_svg_markup(icon_dir: Path, key: str) -> str:
+    raw = (icon_dir / f"{key}.svg").read_text(encoding="utf-8")
+    snippet = re.sub(r"<\?xml[^>]*\?>\s*", "", raw, count=1).strip()
+    if f'class="{_INLINE_SVG_CLASS}"' in snippet:
+        return snippet
+    return re.sub(
+        r"<svg\b",
+        f'<svg class="{_INLINE_SVG_CLASS}" aria-hidden="true"',
+        snippet,
+        count=1,
+    )
+
+
+def _preview_card_markup(icon_dir: Path, key: str) -> str:
+    safe_key = html.escape(key, quote=True)
+    safe_label = html.escape(key.replace("_", " "), quote=True)
+    inline = _inline_svg_markup(icon_dir, key)
+    return f"""        <figure class="icon-card" data-icon-key="{safe_key}">
+          <p class="preview-caption">Source (transparent check)</p>
+          <div class="source-preview" aria-hidden="true">
+            {inline}
+          </div>
+          <p class="preview-caption">On tile colors (production tint)</p>
+          <div class="tone-row">
+            <div class="tile-preview" data-tone="active" title="on / active">
+              {inline}
+            </div>
+            <div class="tile-preview" data-tone="inactive" title="off / inactive">
+              {inline}
+            </div>
+            <div class="tile-preview" data-tone="unknown" title="unknown">
+              {inline}
+            </div>
+          </div>
+          <figcaption><code>{safe_key}</code><span>{safe_label}</span></figcaption>
+        </figure>"""
+
+
+def _section_markup(icon_dir: Path, title: str, keys: list[str]) -> str:
+    if not keys:
+        return ""
+    cards = "\n".join(_preview_card_markup(icon_dir, key) for key in keys)
+    safe_title = html.escape(title, quote=True)
+    return f"""      <section class="icon-section">
+        <h2>{safe_title}</h2>
+        <div class="icon-grid">
+{cards}
+        </div>
+      </section>"""
+
+
+def _write_review_html(icon_dir: Path, output_dir: Path) -> Path:
+    keys = sorted(path.stem for path in icon_dir.glob("*.svg"))
+    if not keys:
+        msg = f"Expected at least one .svg in {icon_dir}"
+        raise ValueError(msg)
+
+    objects, rooms = _categorize_icon_keys(keys)
+    generated_at = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    object_section = _section_markup(icon_dir, "Object icons", objects)
+    room_section = _section_markup(icon_dir, "Room icons", rooms)
+    document = f"""<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Compact tile icon review</title>
+  <style>
+    :root {{
+      --accent: #22c55e;
+      --danger: #ef4444;
+      --pending: #fbbf24;
+      --bg: #0f1419;
+      --card: #1a2332;
+      --fg: #e8eaed;
+      --muted: #9aa0a6;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.4;
+    }}
+    main {{
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }}
+    h1 {{ margin: 0 0 8px; font-size: 1.5rem; }}
+    .lede {{ margin: 0 0 16px; color: var(--muted); max-width: 52rem; }}
+    .icon-section {{ margin-bottom: 32px; }}
+    .icon-section h2 {{
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }}
+    .icon-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+    }}
+    .icon-card {{
+      margin: 0;
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--card);
+    }}
+    .preview-caption {{
+      margin: 0 0 6px;
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }}
+    .source-preview {{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 5.5rem;
+      margin-bottom: 12px;
+      border-radius: 10px;
+      background:
+        conic-gradient(#4b5563 25%, #374151 0 50%, #4b5563 0 75%, #374151 0)
+        0 0 / 16px 16px;
+    }}
+    .source-preview svg {{
+      width: 4.5rem;
+      height: 4.5rem;
+    }}
+    .tone-row {{
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }}
+    .tile-preview {{
+      aspect-ratio: 1;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      color: #fff;
+    }}
+    .tile-preview[data-tone="active"] {{ background: var(--accent); }}
+    .tile-preview[data-tone="inactive"] {{ background: var(--danger); }}
+    .tile-preview[data-tone="unknown"] {{ background: var(--pending); color: #1a1a1a; }}
+    .tile-preview svg,
+    .source-preview svg {{
+      width: 72%;
+      height: 72%;
+      max-width: 100%;
+      max-height: 100%;
+    }}
+    figcaption {{
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 0.85rem;
+    }}
+    figcaption code {{
+      font-size: 0.8rem;
+      color: var(--muted);
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Compact tile icon review</h1>
+    <p class="lede">
+      Gallery for <code>app/api/static/icons/compact/*.svg</code>. Regenerate with
+      <code>./scripts/internal/generate-compact-icon-preview</code> whenever SVG
+      assets change; output defaults to
+      <code>~/scratch/domesti-bot/tmp/build/review.html</code>. Attach that file or a
+      screenshot to the PR. Icons are inlined so strokes and fills render reliably.
+    </p>
+    <p class="lede">Generated {html.escape(generated_at, quote=True)} · {len(keys)} icons</p>
+{object_section}
+{room_section}
+  </main>
+</body>
+</html>
+"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dest = output_dir / _REVIEW_FILENAME
+    dest.write_text(document, encoding="utf-8")
+    return dest
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--icon-dir",
+        type=Path,
+        default=_DEFAULT_ICON_DIR,
+        help=f"directory containing compact SVG files (default: {_DEFAULT_ICON_DIR})",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help=(
+            "directory for review.html "
+            f"(default: {_default_review_output_dir()} or DOMESTI_COMPACT_ICON_REVIEW_DIR)"
+        ),
+    )
+    args = parser.parse_args()
+    icon_dir: Path = args.icon_dir
+    if not icon_dir.is_dir():
+        print(f"Expected icon directory at {icon_dir}", file=sys.stderr)
+        return 2
+    output_dir = args.output_dir or _default_review_output_dir()
+    dest = _write_review_html(icon_dir, output_dir)
+    print(f"Wrote {dest}")
+    return 0
+
+
+if __name__ == "__main__":
+    _ensure_uv()
+    raise SystemExit(main())
