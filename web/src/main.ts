@@ -19,9 +19,12 @@ const APP_ROOT_ID = "app";
 /** Viewport breakpoint for the saturated three-column compact tile UI. */
 const COMPACT_LAYOUT_MQ = "(max-width: 768px)";
 
-/** Compact tile labels and global bulk button share one fitted size (px). */
+/** Compact tile labels: binary-search bounds for fitted label size (px). */
 const COMPACT_LABEL_FONT_MIN_PX = 11;
 const COMPACT_LABEL_FONT_MAX_PX = 30;
+/** Global bulk-off button on compact layout (separate from tile labels). */
+const COMPACT_BULK_FONT_MIN_PX = 11;
+const COMPACT_BULK_FONT_MAX_PX = 18;
 
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
@@ -1056,37 +1059,56 @@ function closeAppMenu(): void {
 let compactTypographyFitFrame = 0;
 let compactTypographyResizeObserver: ResizeObserver | null = null;
 
-function compactTypographyFitsAtSize(
+function compactBulkButtonFitsAtSize(
+  appRoot: HTMLElement,
+  button: HTMLElement,
+  fontPx: number,
+): boolean {
+  appRoot.style.setProperty("--compact-global-bulk-px", `${fontPx}px`);
+  return (
+    button.scrollHeight <= button.clientHeight + 1
+    && button.scrollWidth <= button.clientWidth + 1
+  );
+}
+
+function compactLabelFitsAtSize(
   appRoot: HTMLElement,
   labels: readonly HTMLElement[],
-  bulkBtn: HTMLElement | null,
   fontPx: number,
 ): boolean {
   appRoot.style.setProperty("--compact-tile-label-px", `${fontPx}px`);
-  const labelsFit = labels.every((label) => {
+  return labels.every((label) => {
     return (
       label.scrollHeight <= label.clientHeight + 1
       && label.scrollWidth <= label.clientWidth + 1
     );
   });
-  if (!labelsFit) {
-    return false;
+}
+
+function largestCompactBulkFontPx(
+  appRoot: HTMLElement,
+  button: HTMLElement,
+): number {
+  let lo = COMPACT_BULK_FONT_MIN_PX;
+  let hi = COMPACT_BULK_FONT_MAX_PX;
+  let best = lo;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (compactBulkButtonFitsAtSize(appRoot, button, mid)) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
   }
-  if (bulkBtn === null) {
-    return true;
-  }
-  return (
-    bulkBtn.scrollHeight <= bulkBtn.clientHeight + 1
-    && bulkBtn.scrollWidth <= bulkBtn.clientWidth + 1
-  );
+  return best;
 }
 
 function largestCompactLabelFontPx(
   appRoot: HTMLElement,
   labels: readonly HTMLElement[],
-  bulkBtn: HTMLElement | null,
 ): number | null {
-  if (labels.length === 0 && bulkBtn === null) {
+  if (labels.length === 0) {
     return null;
   }
   let lo = COMPACT_LABEL_FONT_MIN_PX;
@@ -1094,7 +1116,7 @@ function largestCompactLabelFontPx(
   let best = lo;
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
-    if (compactTypographyFitsAtSize(appRoot, labels, bulkBtn, mid)) {
+    if (compactLabelFitsAtSize(appRoot, labels, mid)) {
       best = mid;
       lo = mid + 1;
     } else {
@@ -1139,12 +1161,15 @@ function syncCompactTypographyFit(appRoot: HTMLElement): void {
   const labels = [
     ...appRoot.querySelectorAll<HTMLElement>(".tile-compact .tile-saturated-label"),
   ];
-  const bulkBtn = appRoot.querySelector<HTMLElement>(".tile-header-global-off");
-  const labelPx = largestCompactLabelFontPx(appRoot, labels, bulkBtn);
+  const labelPx = largestCompactLabelFontPx(appRoot, labels);
   if (labelPx !== null) {
     appRoot.style.setProperty("--compact-tile-label-px", `${labelPx}px`);
   }
-  appRoot.style.removeProperty("--compact-global-bulk-px");
+  const bulkBtn = appRoot.querySelector<HTMLElement>(".tile-header-global-off");
+  if (bulkBtn !== null) {
+    const bulkPx = largestCompactBulkFontPx(appRoot, bulkBtn);
+    appRoot.style.setProperty("--compact-global-bulk-px", `${bulkPx}px`);
+  }
 }
 
 function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {

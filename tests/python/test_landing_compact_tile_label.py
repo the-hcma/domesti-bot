@@ -45,30 +45,21 @@ _MOCK_KASA_GRID_TILES: tuple[tuple[str, str], ...] = (
 # Keep in sync with web/src/main.ts (COMPACT_*_FONT_*_PX).
 _COMPACT_LABEL_FONT_MIN_PX = 11
 _COMPACT_LABEL_FONT_MAX_PX = 30
-# Mirrors compactTypographyFitsAtSize / largestCompactLabelFontPx in main.ts.
+_COMPACT_BULK_FONT_MIN_PX = 11
+_COMPACT_BULK_FONT_MAX_PX = 18
+# Mirrors largestCompactLabelFontPx in main.ts (tile labels only).
 _COMPACT_LABEL_BINARY_SEARCH_JS = """
 (appRoot, bounds) => {
   const [minPx, maxPx] = bounds;
   const labels = [...appRoot.querySelectorAll(".tile-compact .tile-saturated-label")];
-  const bulkBtn = appRoot.querySelector(".tile-header-global-off");
-  if (labels.length === 0 && bulkBtn === null) {
+  if (labels.length === 0) {
     return null;
   }
-  const typographyFits = (px) => {
+  const labelFits = (px) => {
     appRoot.style.setProperty("--compact-tile-label-px", `${px}px`);
-    const labelsFit = labels.every((label) =>
+    return labels.every((label) =>
       label.scrollHeight <= label.clientHeight + 1
       && label.scrollWidth <= label.clientWidth + 1
-    );
-    if (!labelsFit) {
-      return false;
-    }
-    if (bulkBtn === null) {
-      return true;
-    }
-    return (
-      bulkBtn.scrollHeight <= bulkBtn.clientHeight + 1
-      && bulkBtn.scrollWidth <= bulkBtn.clientWidth + 1
     );
   };
   let lo = minPx;
@@ -76,7 +67,7 @@ _COMPACT_LABEL_BINARY_SEARCH_JS = """
   let best = lo;
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
-    if (typographyFits(mid)) {
+    if (labelFits(mid)) {
       best = mid;
       lo = mid + 1;
     } else {
@@ -88,7 +79,62 @@ _COMPACT_LABEL_BINARY_SEARCH_JS = """
 }
 """
 # Mirrors syncCompactTypographyFit in main.ts.
-_SYNC_COMPACT_TYPOGRAPHY_FIT_JS = _COMPACT_LABEL_BINARY_SEARCH_JS
+_SYNC_COMPACT_TYPOGRAPHY_FIT_JS = """
+(appRoot, bounds) => {
+  const [labelBounds, bulkBounds] = bounds;
+  const [labelMin, labelMax] = labelBounds;
+  const [bulkMin, bulkMax] = bulkBounds;
+  const labels = [...appRoot.querySelectorAll(".tile-compact .tile-saturated-label")];
+  const bulkBtn = appRoot.querySelector(".tile-header-global-off");
+  let labelPx = null;
+  if (labels.length > 0) {
+    const labelFits = (px) => {
+      appRoot.style.setProperty("--compact-tile-label-px", `${px}px`);
+      return labels.every((label) =>
+        label.scrollHeight <= label.clientHeight + 1
+        && label.scrollWidth <= label.clientWidth + 1
+      );
+    };
+    let lo = labelMin;
+    let hi = labelMax;
+    let best = lo;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (labelFits(mid)) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    labelPx = best;
+    appRoot.style.setProperty("--compact-tile-label-px", `${best}px`);
+  }
+  if (bulkBtn !== null) {
+    const bulkFits = (px) => {
+      appRoot.style.setProperty("--compact-global-bulk-px", `${px}px`);
+      return (
+        bulkBtn.scrollHeight <= bulkBtn.clientHeight + 1
+        && bulkBtn.scrollWidth <= bulkBtn.clientWidth + 1
+      );
+    };
+    let lo = bulkMin;
+    let hi = bulkMax;
+    let best = lo;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (bulkFits(mid)) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    appRoot.style.setProperty("--compact-global-bulk-px", `${best}px`);
+  }
+  return labelPx;
+}
+"""
 _PROBE_ICON_MARKUP = (
     '<span class="tile-saturated-icon-host">'
     '<svg class="tile-saturated-icon" viewBox="0 0 24 24" fill="none" '
@@ -430,7 +476,7 @@ def test_index_html_tile_label_css_clips_overflow() -> None:
         "cqw",
     ):
         assert fragment in compact_label_rule, fragment
-    assert "var(--compact-tile-label-px, clamp(" in compact_bulk_rule
+    assert "var(--compact-global-bulk-px, clamp(" in compact_bulk_rule
     for fragment in (
         "overflow: hidden",
         "-webkit-line-clamp: 2",
@@ -580,10 +626,10 @@ def test_compact_label_binary_search_sets_fitting_css_var(
 
 
 @pytest.mark.browser
-def test_compact_global_bulk_uses_same_font_size_as_tile_labels(
+def test_compact_global_bulk_uses_dedicated_fitted_font_size(
     chromium_browser: Any,
 ) -> None:
-    """Global bulk-off button must share --compact-tile-label-px with tile labels."""
+    """Global bulk-off button uses --compact-global-bulk-px capped below tile labels."""
 
     style_css = _extract_index_html_style_block()
     document = _build_compact_typography_probe_html(
@@ -598,20 +644,20 @@ def test_compact_global_bulk_uses_same_font_size_as_tile_labels(
     try:
         page.set_content(document, wait_until="load")
         app_root = page.locator("#app")
-        bounds = [_COMPACT_LABEL_FONT_MIN_PX, _COMPACT_LABEL_FONT_MAX_PX]
-        font_px = app_root.evaluate(_COMPACT_LABEL_BINARY_SEARCH_JS, bounds)
-        assert font_px is not None
-        bulk = page.locator(".tile-header-global-off")
-        label = page.locator(".tile-saturated-label")
-        bulk_font = bulk.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
-        label_font = label.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
-        assert abs(bulk_font - label_font) < 0.5
-        assert (
-            app_root.evaluate(
-                "el => el.style.getPropertyValue('--compact-global-bulk-px')"
-            )
-            == ""
+        label_bounds = [_COMPACT_LABEL_FONT_MIN_PX, _COMPACT_LABEL_FONT_MAX_PX]
+        bulk_bounds = [_COMPACT_BULK_FONT_MIN_PX, _COMPACT_BULK_FONT_MAX_PX]
+        app_root.evaluate(
+            _SYNC_COMPACT_TYPOGRAPHY_FIT_JS,
+            [label_bounds, bulk_bounds],
         )
+        bulk = page.locator(".tile-header-global-off")
+        bulk_font = bulk.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
+        assert bulk_font <= _COMPACT_BULK_FONT_MAX_PX + 0.5
+        bulk_px = app_root.evaluate(
+            "el => el.style.getPropertyValue('--compact-global-bulk-px')"
+        )
+        assert bulk_px.endswith("px")
+        assert float(bulk_px.removesuffix("px")) <= _COMPACT_BULK_FONT_MAX_PX + 0.5
         _assert_compact_global_bulk_button_fits(page)
     finally:
         context.close()
@@ -677,17 +723,18 @@ def test_mock_kasa_grid_compact_typography_fit_avoids_overflow(
     try:
         page.set_content(document, wait_until="load")
         app_root = page.locator("#app")
-        bounds = [_COMPACT_LABEL_FONT_MIN_PX, _COMPACT_LABEL_FONT_MAX_PX]
-        font_px = app_root.evaluate(_SYNC_COMPACT_TYPOGRAPHY_FIT_JS, bounds)
+        label_bounds = [_COMPACT_LABEL_FONT_MIN_PX, _COMPACT_LABEL_FONT_MAX_PX]
+        bulk_bounds = [_COMPACT_BULK_FONT_MIN_PX, _COMPACT_BULK_FONT_MAX_PX]
+        font_px = app_root.evaluate(
+            _SYNC_COMPACT_TYPOGRAPHY_FIT_JS,
+            [label_bounds, bulk_bounds],
+        )
         assert font_px is not None
         assert _COMPACT_LABEL_FONT_MIN_PX <= font_px <= _COMPACT_LABEL_FONT_MAX_PX
         bulk_font = page.locator(".tile-header-global-off").evaluate(
             "el => parseFloat(getComputedStyle(el).fontSize)"
         )
-        label_font = page.locator(".tile-compact .tile-saturated-label").first.evaluate(
-            "el => parseFloat(getComputedStyle(el).fontSize)"
-        )
-        assert abs(bulk_font - label_font) < 0.5
+        assert bulk_font <= _COMPACT_BULK_FONT_MAX_PX + 0.5
         _assert_all_compact_labels_contained_in_tiles(page)
         _assert_compact_global_bulk_button_fits(page)
     finally:

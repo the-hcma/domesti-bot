@@ -40,26 +40,26 @@ def test_secrets_key_configured_when_env_valid(fernet_key: str) -> None:
     assert secrets_key_source() == "env"
 
 
-def test_secrets_json_path_falls_back_to_primary_worktree(
+def test_secrets_json_path_uses_git_repository_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    primary = tmp_path / "main"
-    worktree = tmp_path / "wt"
-    primary.mkdir()
-    worktree.mkdir()
+    repo_root = tmp_path / "domesti-bot"
+    worktree = tmp_path / "domesti-bot" / ".worktrees" / "feature-wt"
+    repo_root.mkdir(parents=True)
+    worktree.mkdir(parents=True)
     key = Fernet.generate_key().decode("ascii")
-    primary_secrets = primary / "domesti-secrets.json"
-    primary_secrets.write_text(
+    repo_secrets = repo_root / "domesti-secrets.json"
+    repo_secrets.write_text(
         json.dumps({"domesti_secrets_key": key}), encoding="utf-8"
     )
     monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
     monkeypatch.delenv("DOMESTI_SECRETS_FILE", raising=False)
     monkeypatch.setattr("app.db.secrets_key._REPO_ROOT", worktree)
     monkeypatch.setattr(
-        "app.db.secrets_key._git_primary_worktree_root",
-        lambda: primary,
+        "app.db.secrets_key._git_repository_root",
+        lambda: repo_root,
     )
-    assert secrets_json_path() == primary_secrets
+    assert secrets_json_path() == repo_secrets
     assert secrets_key_configured() is True
 
 
@@ -117,7 +117,7 @@ def test_save_without_secrets_key_raises(
     monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
     monkeypatch.delenv("DOMESTI_SECRETS_FILE", raising=False)
     monkeypatch.setattr("app.db.secrets_key._REPO_ROOT", worktree)
-    monkeypatch.setattr("app.db.secrets_key._git_primary_worktree_root", lambda: None)
+    monkeypatch.setattr("app.db.secrets_key._git_repository_root", lambda: worktree)
     db = tmp_path / "secrets.sqlite"
     with pytest.raises(SecretsConfigurationError):
         save_tailwind_token_to_db(db, "123456")
