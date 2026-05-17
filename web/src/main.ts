@@ -19,6 +19,13 @@ const APP_ROOT_ID = "app";
 /** Viewport breakpoint for the saturated three-column compact tile UI. */
 const COMPACT_LAYOUT_MQ = "(max-width: 768px)";
 
+/** Compact tile labels: binary-search bounds for one shared fitted size (px). */
+const COMPACT_LABEL_FONT_MIN_PX = 11;
+const COMPACT_LABEL_FONT_MAX_PX = 30;
+/** Global bulk-off button on compact layout. */
+const COMPACT_BULK_FONT_MIN_PX = 11;
+const COMPACT_BULK_FONT_MAX_PX = 22;
+
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
 
@@ -142,6 +149,7 @@ class DomestiBotController {
     await this.bootstrap();
     this.schedulePoll();
     this.registerCompactLayoutListener();
+    this.registerCompactTypographyResize();
     this.registerVisibilityPollBoost();
   }
 
@@ -494,6 +502,10 @@ class DomestiBotController {
     });
   }
 
+  private registerCompactTypographyResize(): void {
+    registerCompactTypographyResize(this.root);
+  }
+
   private registerVisibilityPollBoost(): void {
     // When the user returns from another app, catch up immediately instead
     // of waiting for the next interval tick.
@@ -597,12 +609,14 @@ class DomestiBotController {
       );
       panel.append(h2, lead, list, health);
       this.root.append(panel);
+      scheduleCompactTypographyFit(this.root);
       return;
     }
 
     for (const family of state.families) {
       this.root.append(renderFamily(family, this, this.connected));
     }
+    scheduleCompactTypographyFit(this.root);
   }
 
   private dismissActionError(): void {
@@ -1203,6 +1217,118 @@ function closeAppMenu(): void {
   if (openAppMenuCloser !== null) {
     openAppMenuCloser();
     openAppMenuCloser = null;
+  }
+}
+
+let compactTypographyFitFrame = 0;
+let compactTypographyResizeObserver: ResizeObserver | null = null;
+
+function compactBulkButtonFitsAtSize(
+  appRoot: HTMLElement,
+  button: HTMLElement,
+  fontPx: number,
+): boolean {
+  appRoot.style.setProperty("--compact-global-bulk-px", `${fontPx}px`);
+  return (
+    button.scrollHeight <= button.clientHeight + 1
+    && button.scrollWidth <= button.clientWidth + 1
+  );
+}
+
+function compactLabelFitsAtSize(
+  appRoot: HTMLElement,
+  labels: readonly HTMLElement[],
+  fontPx: number,
+): boolean {
+  appRoot.style.setProperty("--compact-tile-label-px", `${fontPx}px`);
+  return labels.every((label) => {
+    return (
+      label.scrollHeight <= label.clientHeight + 1
+      && label.scrollWidth <= label.clientWidth + 1
+    );
+  });
+}
+
+function largestCompactBulkFontPx(
+  appRoot: HTMLElement,
+  button: HTMLElement,
+): number {
+  let lo = COMPACT_BULK_FONT_MIN_PX;
+  let hi = COMPACT_BULK_FONT_MAX_PX;
+  let best = lo;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (compactBulkButtonFitsAtSize(appRoot, button, mid)) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
+}
+
+function largestCompactLabelFontPx(
+  appRoot: HTMLElement,
+  labels: readonly HTMLElement[],
+): number | null {
+  if (labels.length === 0) {
+    return null;
+  }
+  let lo = COMPACT_LABEL_FONT_MIN_PX;
+  let hi = COMPACT_LABEL_FONT_MAX_PX;
+  let best = lo;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (compactLabelFitsAtSize(appRoot, labels, mid)) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
+}
+
+function registerCompactTypographyResize(appRoot: HTMLElement): void {
+  if (compactTypographyResizeObserver !== null) {
+    return;
+  }
+  compactTypographyResizeObserver = new ResizeObserver(() => {
+    scheduleCompactTypographyFit(appRoot);
+  });
+  compactTypographyResizeObserver.observe(appRoot);
+}
+
+function scheduleCompactTypographyFit(appRoot: HTMLElement): void {
+  if (compactTypographyFitFrame !== 0) {
+    cancelAnimationFrame(compactTypographyFitFrame);
+  }
+  compactTypographyFitFrame = requestAnimationFrame(() => {
+    compactTypographyFitFrame = requestAnimationFrame(() => {
+      compactTypographyFitFrame = 0;
+      syncCompactTypographyFit(appRoot);
+    });
+  });
+}
+
+function syncCompactTypographyFit(appRoot: HTMLElement): void {
+  if (!isMobileFormFactor()) {
+    appRoot.style.removeProperty("--compact-tile-label-px");
+    appRoot.style.removeProperty("--compact-global-bulk-px");
+    return;
+  }
+  const labels = [
+    ...appRoot.querySelectorAll<HTMLElement>(".tile-compact .tile-saturated-label"),
+  ];
+  const labelPx = largestCompactLabelFontPx(appRoot, labels);
+  if (labelPx !== null) {
+    appRoot.style.setProperty("--compact-tile-label-px", `${labelPx}px`);
+  }
+  const bulkBtn = appRoot.querySelector<HTMLElement>(".tile-header-global-off");
+  if (bulkBtn !== null) {
+    const bulkPx = largestCompactBulkFontPx(appRoot, bulkBtn);
+    appRoot.style.setProperty("--compact-global-bulk-px", `${bulkPx}px`);
   }
 }
 

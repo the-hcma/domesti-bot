@@ -14,7 +14,10 @@ from typing import Any, Literal
 
 import pytest
 
+from app.ui_compact_icon import resolve_compact_icon
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_MAIN_TS_PATH = _REPO_ROOT / "web" / "src" / "main.ts"
 _INDEX_HTML_PATH = _REPO_ROOT / "app" / "api" / "static" / "index.html"
 _COMPACT_LABEL_RULE_NEEDLE = (
     '#app[data-layout="compact"] .tile-saturated-text .tile-saturated-label'
@@ -28,6 +31,143 @@ _LONG_DEVICE_LABEL = (
     "Basement workshop outlet strip east wall "
     "Basement workshop outlet strip west wall"
 )
+_GLOBAL_BULK_LABEL = "Turn off / pause / close everything"
+# Mobile-mock Kasa names (short room labels + one object-style alias).
+_MOCK_KASA_GRID_TILES: tuple[tuple[str, str], ...] = (
+    ("Kitchen", "active"),
+    ("Porch", "inactive"),
+    ("Office", "inactive"),
+    ("Hall", "active"),
+    ("Guest", "inactive"),
+    ("Basement", "inactive"),
+    ("Basement lamp", "inactive"),
+)
+# Keep in sync with web/src/main.ts (COMPACT_*_FONT_*_PX).
+_COMPACT_LABEL_FONT_MIN_PX = 11
+_COMPACT_LABEL_FONT_MAX_PX = 30
+_COMPACT_BULK_FONT_MIN_PX = 11
+_COMPACT_BULK_FONT_MAX_PX = 22
+# Mirrors compactLabelFitsAtSize / largestCompactLabelFontPx in main.ts.
+_COMPACT_LABEL_BINARY_SEARCH_JS = """
+(appRoot, bounds) => {
+  const [minPx, maxPx] = bounds;
+  const labels = [...appRoot.querySelectorAll(".tile-compact .tile-saturated-label")];
+  if (labels.length === 0) {
+    return null;
+  }
+  const labelFits = (px) => {
+    appRoot.style.setProperty("--compact-tile-label-px", `${px}px`);
+    return labels.every((label) =>
+      label.scrollHeight <= label.clientHeight + 1
+      && label.scrollWidth <= label.clientWidth + 1
+    );
+  };
+  let lo = minPx;
+  let hi = maxPx;
+  let best = lo;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (labelFits(mid)) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  appRoot.style.setProperty("--compact-tile-label-px", `${best}px`);
+  return best;
+}
+"""
+# Mirrors compactBulkButtonFitsAtSize / largestCompactBulkFontPx in main.ts.
+_COMPACT_BULK_BINARY_SEARCH_JS = """
+(appRoot, bounds) => {
+  const [minPx, maxPx] = bounds;
+  const button = appRoot.querySelector(".tile-header-global-off");
+  if (button === null) {
+    return null;
+  }
+  const bulkFits = (px) => {
+    appRoot.style.setProperty("--compact-global-bulk-px", `${px}px`);
+    return (
+      button.scrollHeight <= button.clientHeight + 1
+      && button.scrollWidth <= button.clientWidth + 1
+    );
+  };
+  let lo = minPx;
+  let hi = maxPx;
+  let best = lo;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (bulkFits(mid)) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  appRoot.style.setProperty("--compact-global-bulk-px", `${best}px`);
+  return best;
+}
+"""
+# Mirrors syncCompactTypographyFit (label search then bulk search) in main.ts.
+_SYNC_COMPACT_TYPOGRAPHY_FIT_JS = """
+(appRoot, bounds) => {
+  const [labelBounds, bulkBounds] = bounds;
+  const [labelMin, labelMax] = labelBounds;
+  const labels = [...appRoot.querySelectorAll(".tile-compact .tile-saturated-label")];
+  let labelPx = null;
+  if (labels.length > 0) {
+    const labelFits = (px) => {
+      appRoot.style.setProperty("--compact-tile-label-px", `${px}px`);
+      return labels.every((label) =>
+        label.scrollHeight <= label.clientHeight + 1
+        && label.scrollWidth <= label.clientWidth + 1
+      );
+    };
+    let lo = labelMin;
+    let hi = labelMax;
+    let best = lo;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (labelFits(mid)) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    labelPx = best;
+    appRoot.style.setProperty("--compact-tile-label-px", `${labelPx}px`);
+  }
+  const button = appRoot.querySelector(".tile-header-global-off");
+  let bulkPx = null;
+  if (button !== null) {
+    const [bulkMin, bulkMax] = bulkBounds;
+    const bulkFits = (px) => {
+      appRoot.style.setProperty("--compact-global-bulk-px", `${px}px`);
+      return (
+        button.scrollHeight <= button.clientHeight + 1
+        && button.scrollWidth <= button.clientWidth + 1
+      );
+    };
+    let lo = bulkMin;
+    let hi = bulkMax;
+    let best = lo;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (bulkFits(mid)) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    bulkPx = best;
+    appRoot.style.setProperty("--compact-global-bulk-px", `${bulkPx}px`);
+  }
+  return { labelPx, bulkPx };
+}
+"""
 _PROBE_ICON_SVG = (
     '<svg class="tile-saturated-icon" viewBox="0 0 24 24" aria-hidden="true">'
     '<path fill="none" stroke="currentColor" stroke-width="1.75" '
@@ -48,6 +188,39 @@ def _assert_box_contains(
     assert inner["y"] >= outer["y"] - tol
     assert inner["x"] + inner["width"] <= outer["x"] + outer["width"] + tol
     assert inner["y"] + inner["height"] <= outer["y"] + outer["height"] + tol
+
+
+def _assert_all_compact_labels_contained_in_tiles(page: Any) -> None:
+    tile_count = page.locator(".tile-compact").count()
+    assert tile_count > 0
+    for index in range(tile_count):
+        tile = page.locator(".tile-compact").nth(index)
+        hit = tile.locator(".tile-compact-hit")
+        text_zone = tile.locator(".tile-saturated-text")
+        label = tile.locator(".tile-saturated-label")
+        tile_box = tile.bounding_box()
+        hit_box = hit.bounding_box()
+        text_box = text_zone.bounding_box()
+        label_box = label.bounding_box()
+        assert tile_box is not None
+        assert hit_box is not None
+        assert text_box is not None
+        assert label_box is not None
+        _assert_box_contains(hit_box, tile_box)
+        _assert_box_contains(label_box, hit_box)
+        _assert_box_contains(label_box, text_box)
+        assert label_box["height"] <= text_box["height"] + 1.5
+
+
+def _assert_compact_global_bulk_button_fits(page: Any) -> None:
+    bulk = page.locator(".tile-header-global-off")
+    fits = bulk.evaluate(
+        """el => (
+          el.scrollHeight <= el.clientHeight + 1
+          && el.scrollWidth <= el.clientWidth + 1
+        )"""
+    )
+    assert fits is True
 
 
 def _assert_long_label_contained_in_tile(
@@ -89,6 +262,52 @@ def _assert_long_label_contained_in_tile(
     assert font_size >= min_font_px
     assert label_height >= min_label_height_px
     assert label_height <= text_box["height"] + 1.5
+
+
+def _build_compact_typography_probe_html(
+    *,
+    device_label: str,
+    style_css: str,
+    include_global_bulk: bool,
+    extra_style: str = "",
+) -> str:
+    safe_label = html.escape(device_label, quote=True)
+    bulk_markup = ""
+    if include_global_bulk:
+        safe_bulk = html.escape(_GLOBAL_BULK_LABEL, quote=True)
+        bulk_markup = f"""
+      <header class="tile-header tile-header-global">
+        <div class="tile-header-actions">
+          <button type="button" class="btn btn-bulk tile-header-global-off">{safe_bulk}</button>
+        </div>
+      </header>"""
+    return f"""<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>{style_css}{extra_style}</style>
+</head>
+<body>
+  <main>
+    <div id="app" data-layout="compact">
+      {bulk_markup}
+      <section class="family" data-connected="true">
+        <div class="tile-grid tile-grid-compact">
+          <article class="tile-compact tile-switch">
+            <button type="button" class="tile-compact-hit" data-tone="active">
+              <span class="tile-saturated-icon-wrap">{_PROBE_ICON_SVG}</span>
+              <div class="tile-saturated-text">
+                <span class="tile-saturated-label">{safe_label}</span>
+              </div>
+            </button>
+          </article>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>"""
 
 
 def _build_layout_probe_html(
@@ -139,6 +358,52 @@ def _build_layout_probe_html(
 </html>"""
 
 
+def _build_mock_kasa_compact_grid_probe_html(style_css: str) -> str:
+    """Three-column Kasa grid with mock room names and per-label compact icons."""
+    icon_paths = _parse_compact_icon_paths_from_main_ts()
+    tiles_markup = "\n".join(
+        _mock_kasa_tile_markup(label=label, tone=tone, icon_paths=icon_paths)
+        for label, tone in _MOCK_KASA_GRID_TILES
+    )
+    safe_bulk = html.escape(_GLOBAL_BULK_LABEL, quote=True)
+    return f"""<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>{style_css}</style>
+</head>
+<body>
+  <main>
+    <div id="app" data-layout="compact">
+      <header class="tile-header tile-header-global">
+        <div class="tile-header-actions">
+          <button type="button" class="btn btn-bulk tile-header-global-off">{safe_bulk}</button>
+        </div>
+      </header>
+      <section class="family" data-connected="true">
+        <div class="tile-grid tile-grid-compact">
+{tiles_markup}
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>"""
+
+
+def _compact_icon_svg_markup(icon_key: str, icon_paths: dict[str, list[str]]) -> str:
+    paths = icon_paths.get(icon_key) or icon_paths["bulb"]
+    path_tags = "".join(
+        f'<path fill="none" stroke="currentColor" stroke-width="1.75" d="{d}"/>'
+        for d in paths
+    )
+    return (
+        '<svg class="tile-saturated-icon" viewBox="0 0 24 24" aria-hidden="true">'
+        f"{path_tags}</svg>"
+    )
+
+
 def _comfortable_label_rule_block(style_css: str) -> str:
     return _css_rule_block(style_css, _COMFORTABLE_LABEL_RULE_NEEDLE)
 
@@ -181,6 +446,61 @@ def _extract_index_html_style_block() -> str:
     return raw[start:end]
 
 
+def _mock_kasa_tile_markup(
+    *,
+    label: str,
+    tone: str,
+    icon_paths: dict[str, list[str]],
+) -> str:
+    icon_key = resolve_compact_icon(
+        family_id="kasa",
+        label=label,
+        kind="switch",
+    )
+    svg = _compact_icon_svg_markup(icon_key, icon_paths)
+    safe_label = html.escape(label, quote=True)
+    return f"""          <article class="tile-compact tile-switch">
+            <button type="button" class="tile-compact-hit" data-tone="{tone}">
+              <span class="tile-saturated-icon-wrap">{svg}</span>
+              <div class="tile-saturated-text">
+                <span class="tile-saturated-label">{safe_label}</span>
+              </div>
+            </button>
+          </article>"""
+
+
+def _parse_compact_icon_paths_from_main_ts() -> dict[str, list[str]]:
+    raw = _MAIN_TS_PATH.read_text(encoding="utf-8")
+    marker = "const COMPACT_ICON_PATHS:"
+    start = raw.index(marker)
+    brace = raw.index("{", start)
+    depth = 0
+    end = brace
+    for offset, char in enumerate(raw[brace:], start=brace):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = offset + 1
+                break
+    block = raw[brace + 1 : end - 1]
+    icons: dict[str, list[str]] = {}
+    current_key: str | None = None
+    for line in block.splitlines():
+        key_match = re.match(r"\s+(\w+):\s*\[", line)
+        if key_match:
+            key = key_match.group(1)
+            icons[key] = []
+            current_key = key
+            continue
+        path_match = re.search(r'"([^"]+)"', line)
+        if path_match is not None and current_key is not None:
+            icons[current_key].append(path_match.group(1))
+    assert icons, "Expected COMPACT_ICON_PATHS entries in web/src/main.ts"
+    return icons
+
+
 @pytest.fixture(scope="module")
 def chromium_browser() -> Iterator[Any]:
     sync_api = pytest.importorskip("playwright.sync_api")
@@ -204,16 +524,21 @@ def test_index_html_tile_label_css_clips_overflow() -> None:
         style,
         '#app[data-layout="compact"] .tile-saturated-text',
     )
+    compact_bulk_rule = _css_rule_block(
+        style,
+        '#app[data-layout="compact"] .tile-header-global-off',
+    )
     for fragment in (
         "overflow: hidden",
         "max-height: 100%",
         "-webkit-line-clamp: 3",
         "line-clamp: 3",
         "overflow-wrap: anywhere",
-        "font-size: clamp(",
+        "var(--compact-tile-label-px, clamp(",
         "cqw",
     ):
         assert fragment in compact_label_rule, fragment
+    assert "var(--compact-global-bulk-px, clamp(" in compact_bulk_rule
     for fragment in (
         "overflow: hidden",
         "-webkit-line-clamp: 2",
@@ -319,5 +644,160 @@ def test_long_device_label_stays_inside_tile_at_viewport(
             min_font_px=min_font_px,
             min_label_height_px=min_label_height_px,
         )
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_compact_label_binary_search_sets_fitting_css_var(
+    chromium_browser: Any,
+) -> None:
+    """Binary-search label sizing (main.ts) must set --compact-tile-label-px so text fits."""
+
+    style_css = _extract_index_html_style_block()
+    document = _build_compact_typography_probe_html(
+        device_label=_LONG_DEVICE_LABEL,
+        style_css=style_css,
+        include_global_bulk=False,
+    )
+    context = chromium_browser.new_context(
+        viewport={"width": 320, "height": 568},
+    )
+    page = context.new_page()
+    try:
+        page.set_content(document, wait_until="load")
+        app_root = page.locator("#app")
+        bounds = [_COMPACT_LABEL_FONT_MIN_PX, _COMPACT_LABEL_FONT_MAX_PX]
+        font_px = app_root.evaluate(_COMPACT_LABEL_BINARY_SEARCH_JS, bounds)
+        assert font_px is not None
+        assert _COMPACT_LABEL_FONT_MIN_PX <= font_px <= _COMPACT_LABEL_FONT_MAX_PX
+        assert (
+            app_root.evaluate(
+                "el => el.style.getPropertyValue('--compact-tile-label-px')"
+            )
+            == f"{font_px}px"
+        )
+        _assert_long_label_contained_in_tile(
+            page,
+            layout="compact",
+            min_font_px=float(_COMPACT_LABEL_FONT_MIN_PX),
+            min_label_height_px=16.0,
+        )
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_compact_global_bulk_binary_search_sets_fitting_css_var(
+    chromium_browser: Any,
+) -> None:
+    """Binary-search bulk button sizing must set --compact-global-bulk-px so label fits."""
+
+    style_css = _extract_index_html_style_block()
+    document = _build_compact_typography_probe_html(
+        device_label="Kitchen",
+        style_css=style_css,
+        include_global_bulk=True,
+    )
+    context = chromium_browser.new_context(
+        viewport={"width": 390, "height": 844},
+    )
+    page = context.new_page()
+    try:
+        page.set_content(document, wait_until="load")
+        app_root = page.locator("#app")
+        bounds = [_COMPACT_BULK_FONT_MIN_PX, _COMPACT_BULK_FONT_MAX_PX]
+        font_px = app_root.evaluate(_COMPACT_BULK_BINARY_SEARCH_JS, bounds)
+        assert font_px is not None
+        assert _COMPACT_BULK_FONT_MIN_PX <= font_px <= _COMPACT_BULK_FONT_MAX_PX
+        assert (
+            app_root.evaluate(
+                "el => el.style.getPropertyValue('--compact-global-bulk-px')"
+            )
+            == f"{font_px}px"
+        )
+        bulk = page.locator(".tile-header-global-off")
+        fits = bulk.evaluate(
+            """el => (
+              el.scrollHeight <= el.clientHeight + 1
+              && el.scrollWidth <= el.clientWidth + 1
+            )"""
+        )
+        assert fits is True
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_compact_label_binary_search_shrinks_when_text_zone_is_short(
+    chromium_browser: Any,
+) -> None:
+    """A cramped text zone must drive the search below the maximum label size."""
+
+    style_css = _extract_index_html_style_block()
+    document = _build_compact_typography_probe_html(
+        device_label=_LONG_DEVICE_LABEL,
+        style_css=style_css,
+        include_global_bulk=False,
+        extra_style=(
+            '#app[data-layout="compact"] .tile-saturated-text { max-height: 2.5rem; }'
+        ),
+    )
+    context = chromium_browser.new_context(
+        viewport={"width": 320, "height": 568},
+    )
+    page = context.new_page()
+    try:
+        page.set_content(document, wait_until="load")
+        app_root = page.locator("#app")
+        bounds = [_COMPACT_LABEL_FONT_MIN_PX, _COMPACT_LABEL_FONT_MAX_PX]
+        font_px = app_root.evaluate(_COMPACT_LABEL_BINARY_SEARCH_JS, bounds)
+        assert font_px is not None
+        assert font_px < _COMPACT_LABEL_FONT_MAX_PX
+        _assert_long_label_contained_in_tile(
+            page,
+            layout="compact",
+            min_font_px=float(_COMPACT_LABEL_FONT_MIN_PX),
+            min_label_height_px=16.0,
+        )
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize(
+    ("viewport_width", "viewport_height"),
+    [
+        pytest.param(320, 568, id="320x568"),
+        pytest.param(390, 844, id="390x844"),
+    ],
+)
+def test_mock_kasa_grid_compact_typography_fit_avoids_overflow(
+    chromium_browser: Any,
+    viewport_width: int,
+    viewport_height: int,
+) -> None:
+    """Mock Kasa room labels + icons must fit inside compact tiles after typography sync."""
+
+    style_css = _extract_index_html_style_block()
+    document = _build_mock_kasa_compact_grid_probe_html(style_css)
+    context = chromium_browser.new_context(
+        viewport={"width": viewport_width, "height": viewport_height},
+    )
+    page = context.new_page()
+    try:
+        page.set_content(document, wait_until="load")
+        app_root = page.locator("#app")
+        bounds = [
+            [_COMPACT_LABEL_FONT_MIN_PX, _COMPACT_LABEL_FONT_MAX_PX],
+            [_COMPACT_BULK_FONT_MIN_PX, _COMPACT_BULK_FONT_MAX_PX],
+        ]
+        result = app_root.evaluate(_SYNC_COMPACT_TYPOGRAPHY_FIT_JS, bounds)
+        assert result["labelPx"] is not None
+        assert result["bulkPx"] is not None
+        assert _COMPACT_LABEL_FONT_MIN_PX <= result["labelPx"] <= _COMPACT_LABEL_FONT_MAX_PX
+        assert _COMPACT_BULK_FONT_MIN_PX <= result["bulkPx"] <= _COMPACT_BULK_FONT_MAX_PX
+        _assert_all_compact_labels_contained_in_tiles(page)
+        _assert_compact_global_bulk_button_fits(page)
     finally:
         context.close()
