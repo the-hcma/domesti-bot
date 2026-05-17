@@ -539,6 +539,9 @@ class DomestiBotController {
   private render(): void {
     const state = this.state;
     if (!state) return;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    blurFocusedElementInApp(this.root);
     this.root.replaceChildren();
     this.root.dataset["connected"] = this.connected ? "true" : "false";
     this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
@@ -608,14 +611,14 @@ class DomestiBotController {
       );
       panel.append(h2, lead, list, health);
       this.root.append(panel);
-      scheduleCompactTypographyFit(this.root);
+      this.restoreScrollAfterRender(scrollX, scrollY);
       return;
     }
 
     for (const family of state.families) {
       this.root.append(renderFamily(family, this, this.connected));
     }
-    scheduleCompactTypographyFit(this.root);
+    this.restoreScrollAfterRender(scrollX, scrollY);
   }
 
   private dismissActionError(): void {
@@ -720,6 +723,18 @@ class DomestiBotController {
     this.root.append(row);
   }
 
+  /** Keep the document scroll position when ``#app`` is rebuilt (mobile Safari jumps to top). */
+  private restoreScrollAfterRender(scrollX: number, scrollY: number): void {
+    const restore = (): void => {
+      window.scrollTo(scrollX, scrollY);
+    };
+    restore();
+    scheduleCompactTypographyFit(this.root, () => {
+      restore();
+      requestAnimationFrame(restore);
+    });
+  }
+
   private static sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
       window.setTimeout(resolve, ms);
@@ -816,6 +831,13 @@ function applyStoredColorTheme(): void {
       : "Switch to dark appearance";
     themeToggleSingleton.title = title;
     themeToggleSingleton.setAttribute("aria-label", title);
+  }
+}
+
+function blurFocusedElementInApp(appRoot: HTMLElement): void {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && appRoot.contains(active)) {
+    active.blur();
   }
 }
 
@@ -1092,7 +1114,10 @@ function registerCompactTypographyResize(appRoot: HTMLElement): void {
   compactTypographyResizeObserver.observe(appRoot);
 }
 
-function scheduleCompactTypographyFit(appRoot: HTMLElement): void {
+function scheduleCompactTypographyFit(
+  appRoot: HTMLElement,
+  afterFit?: () => void,
+): void {
   if (compactTypographyFitFrame !== 0) {
     cancelAnimationFrame(compactTypographyFitFrame);
   }
@@ -1100,6 +1125,7 @@ function scheduleCompactTypographyFit(appRoot: HTMLElement): void {
     compactTypographyFitFrame = requestAnimationFrame(() => {
       compactTypographyFitFrame = 0;
       syncCompactTypographyFit(appRoot);
+      afterFit?.();
     });
   });
 }
