@@ -46,10 +46,13 @@ Examples: `feat/deferred-discovery-lifespan`, `fix/cast-cache-fast-path`, `refac
 2. **This rule** (`alwaysApply: true`) — the agent must never check out `main` to commit, and must never run `git push origin main`.
 3. **Server-side branch protection** is the strongest layer but requires GitHub Pro on private repos. When that's enabled, run:
    ```bash
-   gh api -X POST repos/the-hcma/domesti-bot/rulesets --input - <<'JSON'
+   gh api -X PUT repos/the-hcma/domesti-bot/rulesets/16365386 --input - <<'JSON'
    {
      "name": "protect-main", "target": "branch", "enforcement": "active",
      "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+     "bypass_actors": [
+       {"actor_id": 158384, "actor_type": "Integration", "bypass_mode": "always"}
+     ],
      "rules": [
        {"type": "deletion"},
        {"type": "non_fast_forward"},
@@ -63,6 +66,7 @@ Examples: `feat/deferred-discovery-lifespan`, `fix/cast-cache-fast-path`, `refac
    }
    JSON
    ```
+   Include **Graphite App** (`graphite-app`, `actor_id` 158384) on the bypass list so the merge queue can use optimizations. See `docs/GRAPHITE.md`.
    Then a rejected push will surface as `protected branch hook declined` — working as intended.
 
 ## Exceptions

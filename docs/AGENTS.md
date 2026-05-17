@@ -368,7 +368,7 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 
 ## Commits, Stacking & Pull Requests
 
-> When `docs/GRAPHITE.md` lands in this repo, treat it as the full reference. Until then, follow the conventions below (aligned with sibling repositories in the same GitHub org).
+> See **`docs/GRAPHITE.md`** for stacked PRs, merge queue (`merge-it` label), and GitHub ruleset bypass for `graphite-app`. Conventions below match sibling repos in the org.
 
 - This project uses **Graphite (`gt`)** for branch stacking. All work happens in stacked branches.
 - **Never commit or push directly to `main`.** `main` is updated only via merged PRs. Enforcement layers, in order of strength:
@@ -412,7 +412,7 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 4. **Verify title and description** against the actual diff — titles written before a rebase/restack go stale fast. Update via `gh api ... --method PATCH --field title=... --field body=...`.
 5. **Wait for CI** to pass. Do not ask the user to test before CI is green. Poll with short waits: `sleep 10 && gh pr checks <pr>`.
 6. **User testing & approval** — explicit user approval is required before merge.
-7. **Merge**: add the `merge-it` label via `gh pr edit <pr> --add-label merge-it`. **Never** run `gh pr merge` directly. **Always ask the user for explicit confirmation before adding the merge label** — it triggers an automated merge.
+7. **Merge**: add the `merge-it` label via `gh pr edit <pr> --add-label merge-it` to enqueue on the **Graphite merge queue** (see `docs/GRAPHITE.md`). **Never** run `gh pr merge` directly. **Always ask the user for explicit confirmation before adding the merge label** — it starts automated queue processing.
 
 ### Single Responsibility per PR
 
