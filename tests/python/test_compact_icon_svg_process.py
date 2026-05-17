@@ -18,7 +18,9 @@ def test_process_compact_icon_svg_strips_bulb_label_and_background() -> None:
     assert re.search(r"<path\b", out)
     assert "M582 254" not in out
     assert "M618 333" not in out
-    assert "M520 764" in out
+    assert "M520 764" not in out
+    assert "M651 589" not in out
+    assert "m-421 -388" in out
 
 
 def test_process_compact_icon_svg_strips_garage_bottom_labels() -> None:
