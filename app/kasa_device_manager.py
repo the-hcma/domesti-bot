@@ -506,8 +506,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     if dev is None:
                         cache_ok = False
                         break
-                    kd = KasaDevice(dev.alias or dev.host, dev)
-                    devices_by_host[dev.host] = kd
+                    finalized = await self._ingest_discovered_device(dev, qtimeout)
+                    if finalized is None:
+                        cache_ok = False
+                        break
+                    kd = KasaDevice(finalized.alias or finalized.host, finalized)
+                    devices_by_host[finalized.host] = kd
                 if cache_ok:
                     self._finalize_kasa_lookup(devices_by_host)
                     self._persist_discovery_cache(self._device_name_to_device or {})

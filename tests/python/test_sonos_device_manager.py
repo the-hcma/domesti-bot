@@ -116,6 +116,37 @@ async def test_fetch_skips_udp_when_cache_warm(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_cache_hit_uses_live_zone_name_over_stale_cache_label(
+    tmp_path: Path,
+) -> None:
+    """Renamed Sonos zones must show the current ``player_name``, not SQLite ``zone_name``."""
+
+    db = tmp_path / "sonos.sqlite"
+    kasa_discovery_store.save_sonos_zones(
+        db,
+        [("RINCON_AAA", "192.168.1.10", "Old Kitchen Name")],
+    )
+
+    zone = MagicMock()
+    zone.ip_address = "192.168.1.10"
+    zone.uid = "RINCON_AAA"
+    zone.player_name = "Kitchen"
+
+    mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db)
+    with (
+        patch("app.sonos_device_manager.SoCo", return_value=zone),
+        patch("app.sonos_device_manager.soco_discover") as discover,
+    ):
+        await mgr.fetch()
+
+    discover.assert_not_called()
+    assert mgr.players[0].preferred_label == "Kitchen"
+    assert kasa_discovery_store.load_sonos_zones(db) == [
+        ("RINCON_AAA", "192.168.1.10", "Kitchen"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_fetch_falls_back_to_udp_when_cached_uid_changes(tmp_path: Path) -> None:
     """If a cached host now reports a different UID, the manager must re-probe via UDP."""
 

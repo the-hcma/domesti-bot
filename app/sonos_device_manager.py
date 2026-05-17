@@ -276,13 +276,13 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             zone = await asyncio.to_thread(_probe_one, host, uid)
             if zone is None:
                 return None
-            label = (cached_name or "").strip()
-            if not label:
-                try:
-                    label = (getattr(zone, "player_name", None) or "").strip()
-                except Exception:
-                    label = ""
-            devices.append(SonosSpeakerDevice(uid, zone, display_name=label or uid))
+            try:
+                live_name = (getattr(zone, "player_name", None) or "").strip()
+            except Exception:
+                live_name = ""
+            cached_label = (cached_name or "").strip()
+            label = live_name or cached_label or uid
+            devices.append(SonosSpeakerDevice(uid, zone, display_name=label))
         return devices
 
     async def disconnect(self) -> None:
