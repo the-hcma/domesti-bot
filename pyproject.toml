@@ -10,6 +10,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "click==8.4.0",
     "cryptography>=48.0.0",
     "fastapi>=0.136.1",
     "gotailwind[cli]",
@@ -23,7 +24,7 @@ dependencies = [
     "soco>=0.31.0",
     "sqlalchemy>=2.0.49",
     "uvicorn[standard]>=0.47.0",
-    "zeroconf>=0.148.0",
+    "zeroconf>=0.149.3",
 ]
 
 [tool.uv]
