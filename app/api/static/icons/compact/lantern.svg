@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 114.000000 96.000000">
-<defs><clipPath id="compact-icon-artwork"><rect x="0.0" y="0.0" width="114.0" height="72.960000" /></clipPath></defs><g transform="translate(0.000000,96.000000) scale(0.100000,-0.100000)" fill="currentColor" stroke="none" clip-path="url(#compact-icon-artwork)">
+<g transform="translate(0.000000,96.000000) scale(0.100000,-0.100000)" fill="currentColor" stroke="none">
 <path d="M607 857 c-3 -9 -18 -17 -33 -19 -38 -4 -61 -43 -69 -116 -6 -63 -6 -64 17 -57 34 11 43 22 29 39 -19 23 22 40 76 32 54 -7 70 -15 52 -27 -10 -6 -9 -12 5 -28 34 -38 49 -27 41 27 -5 26 -7 56 -7 67 1 27 -36 65 -64 65 -13 0 -27 7 -32 16 -8 14 -10 14 -15 1z" />
 <path d="M588 703 c12 -2 30 -2 40 0 9 3 -1 5 -23 4 -22 0 -30 -2 -17 -4z" />
 <path d="M560 660 c-7 -17 -10 -33 -7 -37 3 -3 32 -5 64 -5 55 0 58 1 55 23 -4 44 -10 49 -55 49 -40 0 -46 -3 -57 -30z" />

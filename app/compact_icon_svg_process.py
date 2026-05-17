@@ -6,42 +6,7 @@ import re
 from xml.etree import ElementTree as ET
 
 _SVG_NS = "http://www.w3.org/2000/svg"
-_CLIP_HEIGHT_RATIO = 0.76
-_CLIP_ID = "compact-icon-artwork"
 _NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?")
-
-
-def _apply_bottom_clip(root: ET.Element) -> None:
-    viewbox = root.get("viewBox")
-    if viewbox is None:
-        return
-    parts = [float(value) for value in viewbox.replace(",", " ").split()]
-    if len(parts) != 4:
-        return
-    x, y, width, height = parts
-    clip_height = height * _CLIP_HEIGHT_RATIO
-    defs = None
-    for child in root:
-        if _local_tag(child.tag) == "defs":
-            defs = child
-            break
-    if defs is None:
-        defs = ET.Element(f"{{{_SVG_NS}}}defs")
-        root.insert(0, defs)
-    clip_path = ET.SubElement(defs, f"{{{_SVG_NS}}}clipPath", id=_CLIP_ID)
-    ET.SubElement(
-        clip_path,
-        f"{{{_SVG_NS}}}rect",
-        x=str(x),
-        y=str(y),
-        width=str(width),
-        height=f"{clip_height:.6f}",
-    )
-    for child in list(root):
-        if _local_tag(child.tag) != "g":
-            continue
-        child.set("clip-path", f"url(#{_CLIP_ID})")
-        break
 
 
 def _collapse_path_data(d: str) -> str:
@@ -66,9 +31,13 @@ def _is_background_path(d: str) -> bool:
         collapsed,
     ):
         return True
-    if re.search(r"\bl0\s+-\d{2,3}\b", collapsed) and re.search(r"\b0\s+35[0-9]\b", collapsed):
-        if re.search(r"\b4[34]\d\s+0\s+4[34]\d\s+0", collapsed):
-            return True
+    if (
+        re.search(r"\bl0\s+-\d{3}\b", collapsed)
+        and re.search(r"\b0\s+35[0-9]\b", collapsed)
+        and re.search(r"\b4[34]\d\s+0\s+4[34]\d\s+0", collapsed)
+        and re.match(r"^M\d{2,3}\s+\d{3}", collapsed)
+    ):
+        return True
     return False
 
 
@@ -100,9 +69,7 @@ def _is_label_path(d: str, bounds_list: list[tuple[float, float, float, float]])
         return False
     in_bottom_band = ymax < global_ymax * 0.44
     aspect = width / max(height, 1.0)
-    text_like = (height <= 200 and width >= 35) or (
-        aspect >= 0.85 and height <= 400 and width >= 50
-    )
+    text_like = height <= 360 and width >= 40 and aspect >= 0.65
     return in_bottom_band and text_like
 
 
@@ -174,7 +141,6 @@ def process_compact_icon_svg_bytes(raw: bytes) -> bytes:
         del root.attrib["width"]
     if root.get("height") is not None:
         del root.attrib["height"]
-    _apply_bottom_clip(root)
     if root.tag.startswith("{"):
         ET.register_namespace("", _SVG_NS)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)

@@ -13,8 +13,8 @@ _FIXTURES = Path(__file__).resolve().parent / "fixtures" / "compact_icons"
 def test_process_compact_icon_svg_strips_bulb_label_and_background() -> None:
     raw = (_FIXTURES / "bulb_raw.svg").read_bytes()
     out = process_compact_icon_svg_bytes(raw).decode("utf-8")
-    assert "clip-path" in out
-    assert 'fill="currentColor"' in out or 'fill="white"' not in out
+    assert "clip-path" not in out
+    assert 'fill="currentColor"' in out
     assert re.search(r"<path\b", out)
     assert "M582 254" not in out
     assert "M618 333" not in out
