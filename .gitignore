@@ -27,3 +27,6 @@ domesti-secrets.json
 web/node_modules/
 .pnpm-store/
 app/api/static/dist/
+
+# Compact icon review gallery (regenerate via scripts/internal/generate-compact-icon-preview).
+app/api/static/icons/compact/review.html

@@ -19,12 +19,9 @@ const APP_ROOT_ID = "app";
 /** Viewport breakpoint for the saturated three-column compact tile UI. */
 const COMPACT_LAYOUT_MQ = "(max-width: 768px)";
 
-/** Compact tile labels: binary-search bounds for one shared fitted size (px). */
+/** Compact tile labels and global bulk button share one fitted size (px). */
 const COMPACT_LABEL_FONT_MIN_PX = 11;
 const COMPACT_LABEL_FONT_MAX_PX = 30;
-/** Global bulk-off button on compact layout. */
-const COMPACT_BULK_FONT_MIN_PX = 11;
-const COMPACT_BULK_FONT_MAX_PX = 22;
 
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
@@ -774,193 +771,8 @@ const FAMILY_ICON_PATHS: Record<string, readonly string[]> = {
   ],
 };
 
-/** Compact-tile SVG paths keyed by ``UIDeviceOut.compact_icon`` from the API. */
-const COMPACT_ICON_PATHS: Record<string, readonly string[]> = {
-  bulb: [
-    "M9 18h6",
-    "M10 22h4",
-    "M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z",
-  ],
-  desk: [
-    "M6 14h12",
-    "M7.5 14v8",
-    "M10.5 14v8",
-    "M13.5 14v8",
-    "M16.5 14v8",
-  ],
-  fan: [
-    "M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0",
-    "M12 2v4",
-    "M12 18v4",
-    "M4.93 4.93l2.83 2.83",
-    "M16.24 16.24l2.83 2.83",
-    "M2 12h4",
-    "M18 12h4",
-    "M4.93 19.07l2.83-2.83",
-    "M16.24 7.76l2.83-2.83",
-  ],
-  garage_closed: [
-    "M12 6 5 11v10h14V11l-7-5z",
-    "M8 13.5h8",
-    "M8 16h8",
-    "M8 18.5h8",
-    "M17 19.25a1.1 1.1 0 1 1-2.2 0 1.1 1.1 0 0 1 2.2 0",
-    "M16.1 18.35V17.1a0.65 0.65 0 0 1 1.3 0v1.25",
-    "M15.15 18.35h2.1",
-  ],
-  garage_open: [
-    "M12 6 5 11v10h14V11l-7-5z",
-    "M9.25 12.75h5.5v6.5H9.25v-6.5z",
-  ],
-  lamp: [
-    "M8 21h8",
-    "M12 21V12",
-    "M9 12h6",
-    "M7 3h10l2 9H5l2-9z",
-  ],
-  led: [
-    "M10 17h4v3h-4z",
-    "M11 12h2v5",
-    "M12 7v5",
-    "M8 9l4-2 4 2",
-    "M8 11l4-1 4 1",
-  ],
-  lantern: [
-    "M12 2v3",
-    "M9 5h6",
-    "M10 8h4l-1 12h-2L10 8z",
-    "M8 22h8",
-  ],
-  light: [
-    "M12 2v2",
-    "M12 20v2",
-    "M4.9 4.9l1.4 1.4",
-    "M17.7 17.7l1.4 1.4",
-    "M2 12h2",
-    "M20 12h2",
-    "M4.9 19.1l1.4-1.4",
-    "M17.7 6.3l1.4-1.4",
-    "M8 12a4 4 0 1 0 8 0 4 4 0 0 0-8 0",
-  ],
-  outlet: [
-    "M7 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z",
-    "M9 12h2",
-    "M13 12h2",
-  ],
-  pendant: [
-    "M12 2v3",
-    "M7 5h10",
-    "M7.5 5v2",
-    "M12 5v2",
-    "M16.5 5v2",
-    "M6 9h3v3.5H6V9z",
-    "M10.5 9h3v3.5h-3V9z",
-    "M15 9h3v3.5h-3V9z",
-  ],
-  plug: [
-    "M7 8h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z",
-    "M9 12h2",
-    "M13 12h2",
-  ],
-  speaker: [
-    "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z",
-    "M12 18a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
-    "M12 6.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2z",
-  ],
-  strip: [
-    "M4 14h16",
-    "M6 10h12",
-    "M8 6h8",
-    "M10 18h4",
-  ],
-  table: [
-    "M5 12h14",
-    "M7 12v10",
-    "M10 12v10",
-    "M14 12v10",
-    "M17 12v10",
-  ],
-  room_attic: [
-    "M4 20h16",
-    "M6 20V10l6-5 6 5v10",
-    "M9 14h6",
-    "M12 7v3",
-  ],
-  room_basement: [
-    "M4 18h16",
-    "M6 18V11l6-4 6 4v7",
-    "M9 14h6",
-    "M12 8v2",
-  ],
-  room_bathroom: [
-    "M6 20h12",
-    "M8 20v-6h8v6",
-    "M10 10h4v4h-4z",
-    "M12 4v3",
-  ],
-  room_bedroom: [
-    "M4 20h16",
-    "M6 14h12v6",
-    "M8 14V9h8v5",
-    "M10 11h4",
-  ],
-  room_dining: [
-    "M4 20h16",
-    "M8 20v-4h8v4",
-    "M10 8h4v8h-4z",
-    "M6 8h12",
-  ],
-  room_garage: [
-    "M3 14h18v7H3z",
-    "M3 14V9l9-6 9 6v5",
-    "M8 14h8",
-  ],
-  room_guest: [
-    "M4 20h16",
-    "M7 14h10v6",
-    "M9 14V10h6v4",
-    "M12 6v2",
-  ],
-  room_hall: [
-    "M4 20h16",
-    "M6 20V12h12v8",
-    "M9 12h6",
-    "M12 4v5",
-  ],
-  room_kitchen: [
-    "M9 18h6",
-    "M10 22h4",
-    "M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z",
-  ],
-  room_laundry: [
-    "M5 20h14",
-    "M8 20v-6h8v6",
-    "M10 8h4l-1 10h-2L10 8z",
-    "M12 5v2",
-  ],
-  room_living: [
-    "M3 19h18",
-    "M5 19V13h14v6",
-    "M7 13V8h10v5",
-    "M5 10h2v3H5",
-    "M17 10h2v3h-2",
-  ],
-  room_office: [
-    "M5 15h14",
-    "M7 15v6",
-    "M17 15v6",
-    "M9.5 7.5h5v7.5H9.5V7.5z",
-    "M8 15h8",
-    "M9.5 15v1",
-    "M14.5 15v1",
-  ],
-  room_porch: [
-    "M4 20h16",
-    "M6 20V11l6-6 6 6v9",
-    "M9 14h6",
-    "M12 5v3",
-  ],
-};
+/** Static compact-tile icons served from ``/static/icons/compact/<key>.svg``. */
+const COMPACT_ICON_BASE = "/static/icons/compact";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -1215,56 +1027,37 @@ function closeAppMenu(): void {
 let compactTypographyFitFrame = 0;
 let compactTypographyResizeObserver: ResizeObserver | null = null;
 
-function compactBulkButtonFitsAtSize(
-  appRoot: HTMLElement,
-  button: HTMLElement,
-  fontPx: number,
-): boolean {
-  appRoot.style.setProperty("--compact-global-bulk-px", `${fontPx}px`);
-  return (
-    button.scrollHeight <= button.clientHeight + 1
-    && button.scrollWidth <= button.clientWidth + 1
-  );
-}
-
-function compactLabelFitsAtSize(
+function compactTypographyFitsAtSize(
   appRoot: HTMLElement,
   labels: readonly HTMLElement[],
+  bulkBtn: HTMLElement | null,
   fontPx: number,
 ): boolean {
   appRoot.style.setProperty("--compact-tile-label-px", `${fontPx}px`);
-  return labels.every((label) => {
+  const labelsFit = labels.every((label) => {
     return (
       label.scrollHeight <= label.clientHeight + 1
       && label.scrollWidth <= label.clientWidth + 1
     );
   });
-}
-
-function largestCompactBulkFontPx(
-  appRoot: HTMLElement,
-  button: HTMLElement,
-): number {
-  let lo = COMPACT_BULK_FONT_MIN_PX;
-  let hi = COMPACT_BULK_FONT_MAX_PX;
-  let best = lo;
-  while (lo <= hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (compactBulkButtonFitsAtSize(appRoot, button, mid)) {
-      best = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
+  if (!labelsFit) {
+    return false;
   }
-  return best;
+  if (bulkBtn === null) {
+    return true;
+  }
+  return (
+    bulkBtn.scrollHeight <= bulkBtn.clientHeight + 1
+    && bulkBtn.scrollWidth <= bulkBtn.clientWidth + 1
+  );
 }
 
 function largestCompactLabelFontPx(
   appRoot: HTMLElement,
   labels: readonly HTMLElement[],
+  bulkBtn: HTMLElement | null,
 ): number | null {
-  if (labels.length === 0) {
+  if (labels.length === 0 && bulkBtn === null) {
     return null;
   }
   let lo = COMPACT_LABEL_FONT_MIN_PX;
@@ -1272,7 +1065,7 @@ function largestCompactLabelFontPx(
   let best = lo;
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
-    if (compactLabelFitsAtSize(appRoot, labels, mid)) {
+    if (compactTypographyFitsAtSize(appRoot, labels, bulkBtn, mid)) {
       best = mid;
       lo = mid + 1;
     } else {
@@ -1313,15 +1106,12 @@ function syncCompactTypographyFit(appRoot: HTMLElement): void {
   const labels = [
     ...appRoot.querySelectorAll<HTMLElement>(".tile-compact .tile-saturated-label"),
   ];
-  const labelPx = largestCompactLabelFontPx(appRoot, labels);
+  const bulkBtn = appRoot.querySelector<HTMLElement>(".tile-header-global-off");
+  const labelPx = largestCompactLabelFontPx(appRoot, labels, bulkBtn);
   if (labelPx !== null) {
     appRoot.style.setProperty("--compact-tile-label-px", `${labelPx}px`);
   }
-  const bulkBtn = appRoot.querySelector<HTMLElement>(".tile-header-global-off");
-  if (bulkBtn !== null) {
-    const bulkPx = largestCompactBulkFontPx(appRoot, bulkBtn);
-    appRoot.style.setProperty("--compact-global-bulk-px", `${bulkPx}px`);
-  }
+  appRoot.style.removeProperty("--compact-global-bulk-px");
 }
 
 function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
@@ -1801,10 +1591,7 @@ function appendSaturatedTileVisuals(
 ): void {
   const iconWrap = document.createElement("span");
   iconWrap.className = "tile-saturated-icon-wrap";
-  const icon = createTileIcon(device);
-  if (icon !== null) {
-    iconWrap.append(icon);
-  }
+  iconWrap.append(createTileIcon(device));
   appendTileOverlay(iconWrap, device);
   container.append(iconWrap);
 
@@ -1905,26 +1692,48 @@ function compactTileAriaLabel(device: UIDeviceOut): string {
   return `${device.label}, ${statePhrase}, tap to ${next}`;
 }
 
-function createTileIcon(device: UIDeviceOut): SVGSVGElement | null {
-  const paths = tileIconPaths(device);
-  if (paths.length === 0) {
-    return null;
+function compactIconAssetKey(device: UIDeviceOut): string {
+  if (device.compact_icon === "garage" || device.kind === "door") {
+    return device.state === "open" ? "garage_open" : "garage_closed";
   }
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("class", "tile-saturated-icon");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "2");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("aria-hidden", "true");
-  for (const d of paths) {
-    const path = document.createElementNS(SVG_NS, "path");
-    path.setAttribute("d", d);
-    svg.append(path);
+  return device.compact_icon;
+}
+
+function compactIconAssetUrl(key: string): string {
+  return `${COMPACT_ICON_BASE}/${key}.svg`;
+}
+
+function createTileIcon(device: UIDeviceOut): HTMLSpanElement {
+  const host = document.createElement("span");
+  host.className = "tile-saturated-icon-host";
+  void loadCompactTileIconInto(host, compactIconAssetKey(device));
+  return host;
+}
+
+async function loadCompactTileIconInto(
+  host: HTMLSpanElement,
+  key: string,
+): Promise<void> {
+  const candidates = [key, "bulb"];
+  for (const candidate of candidates) {
+    try {
+      const response = await fetch(compactIconAssetUrl(candidate));
+      if (!response.ok) {
+        continue;
+      }
+      const markup = await response.text();
+      host.innerHTML = markup;
+      const svg = host.querySelector("svg");
+      if (svg === null) {
+        continue;
+      }
+      svg.classList.add("tile-saturated-icon");
+      svg.setAttribute("aria-hidden", "true");
+      return;
+    } catch {
+      continue;
+    }
   }
-  return svg;
 }
 
 function createTileOverlaySvg(
@@ -2130,15 +1939,6 @@ function renderFamily(
   }
   section.append(grid);
   return section;
-}
-
-function tileIconPaths(device: UIDeviceOut): readonly string[] {
-  if (device.compact_icon === "garage" || device.kind === "door") {
-    return device.state === "open"
-      ? (COMPACT_ICON_PATHS["garage_open"] ?? [])
-      : (COMPACT_ICON_PATHS["garage_closed"] ?? COMPACT_ICON_PATHS["bulb"] ?? []);
-  }
-  return COMPACT_ICON_PATHS[device.compact_icon] ?? COMPACT_ICON_PATHS["bulb"] ?? [];
 }
 
 function tileStateCaption(device: UIDeviceOut): string | null {
