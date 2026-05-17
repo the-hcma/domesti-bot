@@ -158,6 +158,7 @@ class DomestiBotController {
         this.state = await api.fetchState();
         this.connected = true;
         this.applyPendingPredictionsTo(this.state);
+        warmCompactTileIcons(this.state);
         this.render();
         return;
       } catch (err) {
@@ -483,6 +484,7 @@ class DomestiBotController {
       this.state = await api.fetchState();
       this.connected = true;
       this.applyPendingPredictionsTo(this.state);
+      warmCompactTileIcons(this.state);
       this.render();
     } catch {
       // Network blip mid-session — keep the cached tiles, flip the
@@ -773,6 +775,11 @@ const FAMILY_ICON_PATHS: Record<string, readonly string[]> = {
 
 /** Static compact-tile icons served from ``/static/icons/compact/<key>.svg``. */
 const COMPACT_ICON_BASE = "/static/icons/compact";
+
+/** Prepared markup + cloned DOM per icon key — avoids refetch flicker on every ``render()``. */
+const compactIconInflight = new Map<string, Promise<string | null>>();
+const compactIconMarkupCache = new Map<string, string>();
+const compactIconTemplateCache = new Map<string, HTMLTemplateElement>();
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -1592,7 +1599,6 @@ function appendSaturatedTileVisuals(
   const iconWrap = document.createElement("span");
   iconWrap.className = "tile-saturated-icon-wrap";
   iconWrap.append(createTileIcon(device));
-  appendTileOverlay(iconWrap, device);
   container.append(iconWrap);
 
   const label = document.createElement("span");
@@ -1622,38 +1628,6 @@ function appendSaturatedTileVisuals(
   if (stateEl !== null) {
     container.append(stateEl);
   }
-}
-
-function appendTileOverlay(iconWrap: HTMLElement, device: UIDeviceOut): void {
-  if (device.family_id === "sonos") {
-    if (device.state === "paused") {
-      iconWrap.append(
-        createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-pause", [
-          "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
-          "M10 15V9",
-          "M14 15V9",
-        ]),
-      );
-    } else if (device.state === "playing") {
-      iconWrap.append(
-        createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-playing", [
-          "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
-          "M8 13c1-1.5 2.5-1.5 3.5 0s2.5 1.5 3.5 0",
-          "M14 13c1-1.5 2.5-1.5 3.5 0s2.5 1.5 3.5 0",
-        ]),
-      );
-    } else if (device.state === "unknown") {
-      iconWrap.append(
-        createTileOverlaySvg("tile-saturated-overlay tile-saturated-overlay-unknown", [
-          "M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z",
-          "M12 16v-4",
-          "M12 8h.01",
-        ]),
-      );
-    }
-    return;
-  }
-  // Garage door state is drawn on the base icon (``garage_open`` / ``garage_closed``).
 }
 
 function attachTileHitListeners(
@@ -1696,6 +1670,19 @@ function compactIconAssetKey(device: UIDeviceOut): string {
   if (device.compact_icon === "garage" || device.kind === "door") {
     return device.state === "open" ? "garage_open" : "garage_closed";
   }
+  if (
+    device.compact_icon === "speaker" ||
+    device.kind === "speaker" ||
+    device.family_id === "sonos"
+  ) {
+    if (device.state === "playing") {
+      return "speaker_playing";
+    }
+    if (device.state === "unknown") {
+      return "speaker_unknown";
+    }
+    return "speaker_paused";
+  }
   return device.compact_icon;
 }
 
@@ -1703,58 +1690,142 @@ function compactIconAssetUrl(key: string): string {
   return `${COMPACT_ICON_BASE}/${key}.svg`;
 }
 
+function compactIconFallbackCandidates(key: string): string[] {
+  if (key.startsWith("speaker_")) {
+    return [key, "speaker", "bulb"];
+  }
+  if (key.startsWith("garage_")) {
+    return [key, "garage_closed", "bulb"];
+  }
+  return [key, "bulb"];
+}
+
+function applyCompactIconMarkupToHost(
+  host: HTMLSpanElement,
+  markup: string,
+  key: string,
+): void {
+  rememberCompactIconMarkup(key, markup);
+  mountCompactIconFromCache(host, key);
+}
+
 function createTileIcon(device: UIDeviceOut): HTMLSpanElement {
   const host = document.createElement("span");
   host.className = "tile-saturated-icon-host";
-  void loadCompactTileIconInto(host, compactIconAssetKey(device));
+  const key = compactIconAssetKey(device);
+  if (!mountCompactIconFromCache(host, key)) {
+    void loadCompactTileIconInto(host, key);
+  }
   return host;
+}
+
+async function fetchAndCacheCompactIconMarkup(
+  candidate: string,
+): Promise<string | null> {
+  const cached = compactIconMarkupCache.get(candidate);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const inflight = compactIconInflight.get(candidate);
+  if (inflight !== undefined) {
+    return inflight;
+  }
+  const promise = (async (): Promise<string | null> => {
+    try {
+      const response = await fetch(compactIconAssetUrl(candidate));
+      if (!response.ok) {
+        return null;
+      }
+      const markup = prepareCompactIconMarkup(await response.text());
+      if (!markup.includes("<svg")) {
+        return null;
+      }
+      rememberCompactIconMarkup(candidate, markup);
+      return markup;
+    } catch {
+      return null;
+    } finally {
+      compactIconInflight.delete(candidate);
+    }
+  })();
+  compactIconInflight.set(candidate, promise);
+  return promise;
 }
 
 async function loadCompactTileIconInto(
   host: HTMLSpanElement,
   key: string,
 ): Promise<void> {
-  const candidates = [key, "bulb"];
-  for (const candidate of candidates) {
-    try {
-      const response = await fetch(compactIconAssetUrl(candidate));
-      if (!response.ok) {
-        continue;
-      }
-      const markup = await response.text();
-      host.innerHTML = markup;
-      const svg = host.querySelector("svg");
-      if (svg === null) {
-        continue;
-      }
-      svg.classList.add("tile-saturated-icon");
-      svg.setAttribute("aria-hidden", "true");
+  for (const candidate of compactIconFallbackCandidates(key)) {
+    if (mountCompactIconFromCache(host, candidate)) {
       return;
-    } catch {
-      continue;
+    }
+  }
+  for (const candidate of compactIconFallbackCandidates(key)) {
+    const markup = await fetchAndCacheCompactIconMarkup(candidate);
+    if (markup !== null) {
+      if (host.isConnected) {
+        applyCompactIconMarkupToHost(host, markup, candidate);
+      }
+      return;
     }
   }
 }
 
-function createTileOverlaySvg(
-  className: string,
-  paths: readonly string[],
-): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("class", className);
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "2");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("aria-hidden", "true");
-  for (const d of paths) {
-    const path = document.createElementNS(SVG_NS, "path");
-    path.setAttribute("d", d);
-    svg.append(path);
+function mountCompactIconFromCache(host: HTMLSpanElement, key: string): boolean {
+  const template = compactIconTemplateCache.get(key);
+  if (template === undefined) {
+    const markup = compactIconMarkupCache.get(key);
+    if (markup === undefined) {
+      return false;
+    }
+    rememberCompactIconMarkup(key, markup);
+    return mountCompactIconFromCache(host, key);
   }
-  return svg;
+  host.replaceChildren(template.content.cloneNode(true));
+  host.dataset.iconKey = key;
+  return true;
+}
+
+function prepareCompactIconMarkup(raw: string): string {
+  let snippet = raw.replace(/<\?xml[^>]*\?>\s*/, "").trim();
+  if (!snippet.includes('class="tile-saturated-icon"')) {
+    snippet = snippet.replace(
+      /<svg\b/,
+      '<svg class="tile-saturated-icon" aria-hidden="true"',
+    );
+  }
+  return snippet;
+}
+
+function rememberCompactIconMarkup(key: string, markup: string): void {
+  compactIconMarkupCache.set(key, markup);
+  const template = document.createElement("template");
+  template.innerHTML = markup;
+  compactIconTemplateCache.set(key, template);
+}
+
+function warmCompactTileIcons(state: UIStateOut): void {
+  const keys = new Set<string>([
+    "bulb",
+    "speaker",
+    "speaker_playing",
+    "speaker_paused",
+    "speaker_unknown",
+    "garage_open",
+    "garage_closed",
+  ]);
+  for (const family of state.families) {
+    for (const device of family.devices) {
+      keys.add(compactIconAssetKey(device));
+    }
+  }
+  for (const key of keys) {
+    if (compactIconMarkupCache.has(key)) {
+      continue;
+    }
+    void fetchAndCacheCompactIconMarkup(key);
+  }
 }
 
 function excludeHintForDevice(device: UIDeviceOut): string {

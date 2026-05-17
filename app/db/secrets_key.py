@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Literal
 
@@ -13,6 +14,24 @@ SecretsKeySource = Literal["env", "file", "none"]
 
 _DEFAULT_SECRETS_FILENAME = "domesti-secrets.json"
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _git_primary_worktree_root() -> Path | None:
+    """Return the first (primary) worktree path for this repo, or ``None``."""
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in completed.stdout.splitlines():
+        if line.startswith("worktree "):
+            return Path(line.removeprefix("worktree ").strip())
+    return None
 
 
 def generate_fernet_key() -> str:
@@ -48,7 +67,15 @@ def secrets_json_path() -> Path:
     override = (os.environ.get("DOMESTI_SECRETS_FILE") or "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return _REPO_ROOT / _DEFAULT_SECRETS_FILENAME
+    local = _REPO_ROOT / _DEFAULT_SECRETS_FILENAME
+    if local.is_file():
+        return local
+    primary_root = _git_primary_worktree_root()
+    if primary_root is not None and primary_root != _REPO_ROOT:
+        primary_file = primary_root / _DEFAULT_SECRETS_FILENAME
+        if primary_file.is_file():
+            return primary_file
+    return local
 
 
 def write_secrets_json(domesti_secrets_key: str, *, path: Path | None = None) -> Path:

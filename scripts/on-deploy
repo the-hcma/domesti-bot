@@ -16,13 +16,18 @@
 # hide real failures (we'd exit 0 even after a failed restart).
 #
 # Run manually with:
-#   ./scripts/on-deploy           # ordinary deploy hook
-#   ./scripts/on-deploy --force   # ignore the SHA cache and always rebuild
+#   ./scripts/on-deploy           # ordinary deploy hook (auto-detects when to rebuild)
+#
+# Worktree behaviour: ``repo_dir`` is resolved from this script's path (not the
+# caller's ``$PWD``), so ``setup-service`` always builds the checkout that owns
+# the unit's ``@@REPO_DIR@@``. Deploy state is keyed by that path so main and
+# linked worktrees do not share one skip cache.
 #
 # Environment:
-#   ON_DEPLOY_SHA_FILE  Optional. Override the per-host deploy-state cache
-#                       (default: $HOME/scratch/domesti-bot/on-deploy-sha).
-#                       Format: ``commit=<git-sha>`` and ``inputs=<hash>`` lines.
+#   ON_DEPLOY_SHA_FILE  Optional. Override the deploy-state cache path for this
+#                       repo only (default: a per-repo file under
+#                       ``$HOME/scratch/domesti-bot/``). Format:
+#                       ``commit=<git-sha>`` and ``inputs=<hash>`` lines.
 #                       Legacy single-line SHA files are still read.
 #
 # No-Python rule: per docs/AGENTS.md, this script must not invoke `python3`
@@ -67,6 +72,70 @@ _deploy_collect_input_paths() {
     if [[ -d "$repo/web/src" ]]; then
         find "$repo/web/src" -type f -print | LC_ALL=C sort
     fi
+    if [[ -d "$repo/web/scripts" ]]; then
+        find "$repo/web/scripts" -type f -print | LC_ALL=C sort
+    fi
+    if [[ -d "$repo/app/api/static/icons" ]]; then
+        find "$repo/app/api/static/icons" -type f -print | LC_ALL=C sort
+    fi
+    if [[ -d "$repo/app" ]]; then
+        find "$repo/app" -type f -name '*.py' -print | LC_ALL=C sort
+    fi
+    if [[ -d "$repo/config" ]]; then
+        find "$repo/config" -type f -name '*.py' -print | LC_ALL=C sort
+    fi
+}
+
+_deploy_canonical_dir() {
+    local path="$1"
+    if [[ -d "$path" ]]; then
+        readlink -f "$path" 2>/dev/null || realpath "$path" 2>/dev/null || printf '%s\n' "$path"
+        return 0
+    fi
+    printf '%s\n' "$path"
+}
+
+_deploy_legacy_global_state_file() {
+    printf '%s\n' "${HOME}/scratch/domesti-bot/on-deploy-sha"
+}
+
+_deploy_python_env_stale() {
+    local repo="$1"
+    local lock="$repo/uv.lock"
+    local project="$repo/pyproject.toml"
+    local venv="$repo/.venv"
+    if [[ ! -d "$venv" ]]; then
+        return 0
+    fi
+    if [[ ! -f "$lock" ]]; then
+        return 1
+    fi
+    local newest_input="$lock"
+    local input_mtime venv_mtime
+    if [[ -f "$project" ]]; then
+        input_mtime="$(stat -c '%Y' "$project")"
+        lock_mtime="$(stat -c '%Y' "$lock")"
+        if (( input_mtime > lock_mtime )); then
+            newest_input="$project"
+        fi
+    fi
+    venv_mtime="$(stat -c '%Y' "$venv")"
+    input_mtime="$(stat -c '%Y' "$newest_input")"
+    if (( input_mtime > venv_mtime )); then
+        return 0
+    fi
+    return 1
+}
+
+_deploy_state_file_for_repo() {
+    local repo="$1"
+    if [[ -n "${ON_DEPLOY_SHA_FILE:-}" ]]; then
+        printf '%s\n' "$ON_DEPLOY_SHA_FILE"
+        return 0
+    fi
+    local repo_id
+    repo_id="$(printf '%s' "$repo" | sha256sum | awk '{print $1}')"
+    printf '%s\n' "${HOME}/scratch/domesti-bot/on-deploy-sha-${repo_id}"
 }
 
 _deploy_dist_is_stale() {
@@ -111,6 +180,7 @@ _deploy_read_state() {
     local state_file="$1"
     DEPLOY_RECORDED_COMMIT=""
     DEPLOY_RECORDED_INPUTS=""
+    DEPLOY_RECORDED_REPO=""
     if [[ ! -f "$state_file" ]]; then
         return 1
     fi
@@ -119,6 +189,9 @@ _deploy_read_state() {
         if grep -q '^inputs=' "$state_file"; then
             DEPLOY_RECORDED_INPUTS="$(grep '^inputs=' "$state_file" | head -n1 | cut -d= -f2-)"
         fi
+        if grep -q '^repo=' "$state_file"; then
+            DEPLOY_RECORDED_REPO="$(grep '^repo=' "$state_file" | head -n1 | cut -d= -f2-)"
+        fi
         return 0
     fi
     # Legacy cache: entire file is a single git SHA.
@@ -126,17 +199,59 @@ _deploy_read_state() {
     return 0
 }
 
+_deploy_systemd_unit_repo_mismatch() {
+    local repo="$1"
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 1
+    fi
+    local exec_start=""
+    exec_start="$(
+        systemctl --user show domesti-bot.service -p ExecStart --value 2>/dev/null || true
+    )"
+    if [[ -z "$exec_start" ]]; then
+        return 1
+    fi
+    local server_path="${exec_start%% *}"
+    if [[ "$server_path" != */scripts/domesti-bot-server ]]; then
+        return 1
+    fi
+    local unit_repo="${server_path%/scripts/domesti-bot-server}"
+    local repo_canon unit_canon
+    repo_canon="$(_deploy_canonical_dir "$repo")"
+    unit_canon="$(_deploy_canonical_dir "$unit_repo")"
+    if [[ "$repo_canon" != "$unit_canon" ]]; then
+        echo "  systemd unit serves ${unit_repo}; this checkout is ${repo}."
+        echo "  Run setup-service from this tree to relink the unit, then redeploy."
+        return 0
+    fi
+    return 1
+}
+
 _deploy_write_state() {
-    local state_file="$1" commit="$2" inputs="$3"
+    local state_file="$1" commit="$2" inputs="$3" repo="$4"
     mkdir -p "$(dirname "$state_file")"
     {
         printf 'commit=%s\n' "$commit"
         printf 'inputs=%s\n' "$inputs"
+        printf 'repo=%s\n' "$repo"
     } >"$state_file"
 }
 
 _deploy_should_skip() {
     local repo="$1" state_file="$2" current_sha="$3" current_inputs="$4"
+    local legacy_state_file=""
+    legacy_state_file="$(_deploy_legacy_global_state_file)"
+    if [[ "$state_file" != "$legacy_state_file" && ! -f "$state_file" && -f "$legacy_state_file" ]]; then
+        echo "  Migrating from legacy shared deploy cache — rebuild required."
+        return 1
+    fi
+    if _deploy_systemd_unit_repo_mismatch "$repo"; then
+        return 1
+    fi
+    if _deploy_python_env_stale "$repo"; then
+        echo "  Python inputs newer than .venv — sync required."
+        return 1
+    fi
     if [[ ! -f "$repo/$_DEPLOY_DIST_MAIN" ]]; then
         echo "  Web bundle missing ($_DEPLOY_DIST_MAIN) — rebuild required."
         return 1
@@ -152,6 +267,15 @@ _deploy_should_skip() {
         echo "  Legacy deploy cache (commit-only) — rebuild to refresh fingerprint."
         return 1
     fi
+    if [[ -n "$DEPLOY_RECORDED_REPO" ]]; then
+        local repo_canon recorded_canon
+        repo_canon="$(_deploy_canonical_dir "$repo")"
+        recorded_canon="$(_deploy_canonical_dir "$DEPLOY_RECORDED_REPO")"
+        if [[ "$repo_canon" != "$recorded_canon" ]]; then
+            echo "  Deploy cache is for ${DEPLOY_RECORDED_REPO} — rebuild required for ${repo}."
+            return 1
+        fi
+    fi
     if [[ "$DEPLOY_RECORDED_COMMIT" != "$current_sha" ]]; then
         return 1
     fi
@@ -162,17 +286,20 @@ _deploy_should_skip() {
     return 0
 }
 
-force_rebuild=false
 for arg in "$@"; do
     case "$arg" in
-        --force) force_rebuild=true ;;
         -h|--help)
             sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
+        --force)
+            echo "on-deploy: --force is no longer supported; the hook auto-detects stale bundles," >&2
+            echo "  inputs, venv, and systemd checkout mismatches." >&2
+            exit 2
+            ;;
         *)
             echo "on-deploy: unknown argument '$arg'" >&2
-            echo "Usage: $0 [--force]" >&2
+            echo "Usage: $0" >&2
             exit 2
             ;;
     esac
@@ -212,7 +339,7 @@ if git -C "$repo_dir" rev-parse --is-inside-work-tree &>/dev/null; then
     current_sha="$(git -C "$repo_dir" rev-parse HEAD 2>/dev/null || true)"
 fi
 
-sha_file="${ON_DEPLOY_SHA_FILE:-${HOME}/scratch/domesti-bot/on-deploy-sha}"
+sha_file="$(_deploy_state_file_for_repo "$repo_dir")"
 mkdir -p "$(dirname "$sha_file")"
 
 # Ensure the Python environment exists. setup-service may invoke on-deploy on
@@ -246,7 +373,7 @@ current_inputs=""
 if [[ -d "$repo_dir/web" ]] || [[ -f "$repo_dir/pyproject.toml" ]]; then
     current_inputs="$(_deploy_inputs_hash "$repo_dir")"
 fi
-if [[ "$force_rebuild" != true && -n "$current_sha" ]]; then
+if [[ -n "$current_sha" ]]; then
     if _deploy_should_skip "$repo_dir" "$sha_file" "$current_sha" "$current_inputs"; then
         echo "  Already deployed at commit ${current_sha:0:7} (inputs ${current_inputs:0:7}…) — skipping build."
         echo "on-deploy: no change."
@@ -280,7 +407,7 @@ echo "  Verifying config.serve imports cleanly..."
 uv run python -c "import config.serve"
 
 if [[ -n "$current_sha" ]]; then
-    _deploy_write_state "$sha_file" "$current_sha" "$current_inputs"
+    _deploy_write_state "$sha_file" "$current_sha" "$current_inputs" "$repo_dir"
 fi
 
 echo "on-deploy complete."

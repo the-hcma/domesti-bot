@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Write ``app/api/static/icons/compact/review.html`` from committed SVG files.
+"""Write a compact-tile icon review gallery HTML file from committed SVG assets.
 
-The gallery is gitignored — regenerate for PR review (attach or screenshot in the
-PR description) rather than committing it.
+Default output: ``$HOME/scratch/domesti-bot/tmp/build/review.html`` (override with
+``--output-dir`` or ``DOMESTI_COMPACT_ICON_REVIEW_DIR``). Attach the file or a
+screenshot to the PR — it is not served from the repo tree.
 
 Usage:
   ./scripts/internal/generate-compact-icon-preview
@@ -36,6 +37,13 @@ def _categorize_icon_keys(keys: list[str]) -> tuple[list[str], list[str]]:
         else:
             objects.append(key)
     return objects, rooms
+
+
+def _default_review_output_dir() -> Path:
+    override = (os.environ.get("DOMESTI_COMPACT_ICON_REVIEW_DIR") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / "scratch" / "domesti-bot" / "tmp" / "build"
 
 
 def _ensure_uv() -> None:
@@ -97,7 +105,7 @@ def _section_markup(icon_dir: Path, title: str, keys: list[str]) -> str:
       </section>"""
 
 
-def _write_review_html(icon_dir: Path) -> Path:
+def _write_review_html(icon_dir: Path, output_dir: Path) -> Path:
     keys = sorted(path.stem for path in icon_dir.glob("*.svg"))
     if not keys:
         msg = f"Expected at least one .svg in {icon_dir}"
@@ -223,9 +231,9 @@ def _write_review_html(icon_dir: Path) -> Path:
     <p class="lede">
       Gallery for <code>app/api/static/icons/compact/*.svg</code>. Regenerate with
       <code>./scripts/internal/generate-compact-icon-preview</code> whenever SVG
-      assets change; attach this file or a screenshot to the PR (not committed).
-      Icons are inlined so strokes and fills render reliably. On a running server,
-      open <code>/static/icons/compact/review.html</code> after generating locally.
+      assets change; output defaults to
+      <code>~/scratch/domesti-bot/tmp/build/review.html</code>. Attach that file or a
+      screenshot to the PR. Icons are inlined so strokes and fills render reliably.
     </p>
     <p class="lede">Generated {html.escape(generated_at, quote=True)} · {len(keys)} icons</p>
 {object_section}
@@ -234,7 +242,8 @@ def _write_review_html(icon_dir: Path) -> Path:
 </body>
 </html>
 """
-    dest = icon_dir / _REVIEW_FILENAME
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dest = output_dir / _REVIEW_FILENAME
     dest.write_text(document, encoding="utf-8")
     return dest
 
@@ -247,12 +256,22 @@ def main() -> int:
         default=_DEFAULT_ICON_DIR,
         help=f"directory containing compact SVG files (default: {_DEFAULT_ICON_DIR})",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help=(
+            "directory for review.html "
+            f"(default: {_default_review_output_dir()} or DOMESTI_COMPACT_ICON_REVIEW_DIR)"
+        ),
+    )
     args = parser.parse_args()
     icon_dir: Path = args.icon_dir
     if not icon_dir.is_dir():
         print(f"Expected icon directory at {icon_dir}", file=sys.stderr)
         return 2
-    dest = _write_review_html(icon_dir)
+    output_dir = args.output_dir or _default_review_output_dir()
+    dest = _write_review_html(icon_dir, output_dir)
     print(f"Wrote {dest}")
     return 0
 

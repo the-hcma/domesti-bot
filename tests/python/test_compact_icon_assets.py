@@ -27,6 +27,9 @@ _REQUIRED_KEYS = frozenset(
         "pendant",
         "plug",
         "speaker",
+        "speaker_paused",
+        "speaker_playing",
+        "speaker_unknown",
         "strip",
         "table",
         "room_attic",
@@ -76,18 +79,21 @@ def test_generate_compact_icon_preview_writes_gallery(tmp_path: Path) -> None:
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"/>',
         encoding="utf-8",
     )
+    out_dir = tmp_path / "build"
     proc = subprocess.run(
         [
             str(_PREVIEW_SCRIPT),
             "--icon-dir",
             str(tmp_path),
+            "--output-dir",
+            str(out_dir),
         ],
         check=False,
         capture_output=True,
         text=True,
     )
     assert proc.returncode == 0, proc.stderr
-    dest = tmp_path / _REVIEW_FILENAME
+    dest = out_dir / _REVIEW_FILENAME
     assert dest.is_file()
     html = dest.read_text(encoding="utf-8")
     assert "review-inline-icon" in html

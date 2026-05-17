@@ -1,5 +1,12 @@
-<?xml version='1.0' encoding='utf-8'?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-<g transform="translate(50,50) scale(0.873362) translate(-24.25,-63) translate(0.000000,95.000000) scale(0.100000,-0.100000)" fill="currentColor" stroke="none">
-<path d="m-20 -25 c3 -5 2 -10 -4 -10 -5 0 -13 5 -16 10 -3 6 -2 10 4 10 5 0 13 -4 16 -10z" fill="currentColor" stroke="none" /><path d="M566 778 c-14 -43 -16 -78 -10 -138 6 -64 7 -67 30 -62 16 3 24 11 24 26 0 11 9 50 20 86 29 94 28 100 -20 100 -24 0 -42 -5 -44 -12z" fill="currentColor" stroke="none" /><path d="M320 570 c-16 -30 -12 -58 10 -70 11 -6 58 -10 108 -8 80 3 87 5 88 24 1 17 -9 23 -60 34 -34 8 -63 15 -66 16 -3 0 -13 4 -22 7 -41 16 -48 15 -58 -3z" fill="currentColor" stroke="none" /><path d="M552 548 c-19 -19 -14 -45 10 -62 19 -13 25 -14 43 -2 25 16 31 42 15 61 -15 18 -52 19 -68 3z" fill="currentColor" stroke="none" /><path d="M663 543 c-14 -3 -23 -12 -23 -23 0 -14 9 -20 38 -25 20 -3 65 -14 100 -25 34 -12 67 -18 72 -15 19 11 11 74 -9 85 -19 10 -133 12 -178 3z" fill="currentColor" stroke="none" /><path d="M560 438 c0 -13 -7 -48 -16 -78 -30 -104 -30 -106 7 -114 17 -3 37 -1 44 4 19 16 27 75 20 146 -7 59 -9 64 -31 64 -18 0 -24 -5 -24 -22z" fill="currentColor" stroke="none" /></g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/>
+  <path d="M12 2v4"/>
+  <path d="M12 18v4"/>
+  <path d="M4.93 4.93l2.83 2.83"/>
+  <path d="M16.24 16.24l2.83 2.83"/>
+  <path d="M2 12h4"/>
+  <path d="M18 12h4"/>
+  <path d="M4.93 19.07l2.83-2.83"/>
+  <path d="M16.24 7.76l2.83-2.83"/>
 </svg>
