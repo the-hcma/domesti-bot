@@ -281,8 +281,23 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "$script_dir/.." && pwd)"
 cd "$repo_dir"
 
+_on_deploy_deps_bootstrap=""
+if [[ -n "${REPOSITORY_HELPERS_DIR:-}" && -f "${REPOSITORY_HELPERS_DIR}/scripts/lib/on-deploy-deps-bootstrap" ]]; then
+    _on_deploy_deps_bootstrap="${REPOSITORY_HELPERS_DIR}/scripts/lib/on-deploy-deps-bootstrap"
+elif [[ -f "${repo_dir}/../repository-helpers/scripts/lib/on-deploy-deps-bootstrap" ]]; then
+    _on_deploy_deps_bootstrap="$(cd "${repo_dir}/../repository-helpers" && pwd)/scripts/lib/on-deploy-deps-bootstrap"
+elif [[ -f "${HOME:-}/work/ai/repository-helpers/scripts/lib/on-deploy-deps-bootstrap" ]]; then
+    _on_deploy_deps_bootstrap="${HOME}/work/ai/repository-helpers/scripts/lib/on-deploy-deps-bootstrap"
+fi
+if [[ -z "$_on_deploy_deps_bootstrap" ]]; then
+    echo "on-deploy: repository-helpers scripts/lib/on-deploy-deps-bootstrap not found" >&2
+    echo "  Clone repository-helpers as a sibling, set REPOSITORY_HELPERS_DIR," >&2
+    echo "  or install at ~/work/ai/repository-helpers." >&2
+    exit 2
+fi
 # shellcheck source=/dev/null
-on_deploy_deps_source_from_repo "$repo_dir"
+source "$_on_deploy_deps_bootstrap"
+on_deploy_deps_load_library "$repo_dir"
 
 # Make uv + per-user npm-global discoverable from minimal (non-login) shells
 # (e.g. systemd's environment when setup-service invokes this hook).
