@@ -8,6 +8,7 @@ import { api, HttpError } from "./api.js";
 import type {
   MetaOut,
   TailwindTokenSettingsOut,
+  UIBulkActionOut,
   UIDeviceOut,
   UIDeviceState,
   UIFamilyOut,
@@ -122,8 +123,8 @@ class DomestiBotController {
   // cleared whenever we dismiss or replace the toast so we don't
   // accidentally remove a *newer* toast when an older one's timer
   // fires.
-  private actionErrorToast: HTMLDivElement | null = null;
-  private actionErrorTimer: number | null = null;
+  private actionToast: HTMLDivElement | null = null;
+  private actionToastTimer: number | null = null;
   // Keyed by ``familyId\u0000deviceId``. Survives across polls so the
   // tile keeps showing the predicted state even when the backend
   // momentarily disagrees (transient OPENING, slow Kasa cloud sync,
@@ -204,13 +205,6 @@ class DomestiBotController {
   }
 
   private async onBulkOffFamily(familyId: string): Promise<void> {
-    // A bulk command supersedes any single-tile predictions in that
-    // family. Replace them with one prediction per non-excluded device
-    // pointing at the bulk-off target state ("off" for switches,
-    // "closed" for doors) so the tiles flip immediately, the action
-    // labels swap to "Turn it on" / "Open it", and the grace window
-    // suppresses any contradictory poll readings that arrive while
-    // the devices are still settling.
     if (
       familyId !== "kasa" &&
       familyId !== "sonos" &&
@@ -218,39 +212,57 @@ class DomestiBotController {
     ) {
       return;
     }
+    if (!this.state) {
+      return;
+    }
+    const needing = countDevicesNeedingBulkOff(this.state, {
+      familyId,
+      honorExcludeFromGlobal: false,
+    });
+    if (needing === 0) {
+      this.renderActionToast(bulkOffAlreadyDoneMessage(familyId), "info");
+      return;
+    }
     this.predictBulkOffForFamily(familyId);
     this.render();
     try {
+      let result: UIBulkActionOut;
       if (familyId === "kasa") {
-        await api.bulkOffKasa();
+        result = await api.bulkOffKasa();
       } else if (familyId === "sonos") {
-        await api.pauseAllSonos();
+        result = await api.pauseAllSonos();
       } else {
-        await api.closeAllTailwind();
+        result = await api.closeAllTailwind();
       }
       await this.refresh();
+      this.renderBulkActionFeedback(familyId, result.affected.length, 0);
     } catch (err) {
-      // Bulk dispatch failed — every prediction we just registered
-      // for this family is provably wrong (the request never landed
-      // server-side), so drop the grace windows and let the next
-      // poll show reality.
       this.clearPendingPredictionsForFamily(familyId);
       this.renderError(`Failed to bulk action on ${familyId}`, err);
     }
   }
 
   private async onBulkOffGlobal(): Promise<void> {
-    // Same optimistic pattern as the per-family bulk-off, but spans
-    // every family. Excluded devices keep their current state — the
-    // backend won't touch them, so neither should the prediction
-    // overlay. On dispatch failure we drop every prediction we just
-    // registered so a backend that never received the call doesn't
-    // leave the UI lying about device state.
+    if (!this.state) {
+      return;
+    }
+    const needing = countDevicesNeedingBulkOff(this.state, {
+      honorExcludeFromGlobal: true,
+    });
+    if (needing === 0) {
+      this.renderActionToast(bulkOffAlreadyDoneMessage("global"), "info");
+      return;
+    }
     this.predictBulkOffGlobal();
     this.render();
     try {
-      await api.bulkOffGlobal();
+      const result = await api.bulkOffGlobal();
       await this.refresh();
+      this.renderBulkActionFeedback(
+        "global",
+        result.affected.length,
+        result.skipped.length,
+      );
     } catch (err) {
       this.clearAllPendingPredictions();
       this.renderError("Failed to run global all-off", err);
@@ -405,16 +417,11 @@ class DomestiBotController {
   }
 
   private predictBulkOffForFamily(familyId: string): void {
-    // Register an optimistic prediction for every non-excluded device
-    // in ``familyId`` that the bulk-off command will actually act on.
-    // We deliberately don't touch excluded devices: the backend will
-    // skip them, and showing them flipping off would be a lie that
-    // the next refresh has to correct.
     if (!this.state) return;
     for (const family of this.state.families) {
       if (family.id !== familyId) continue;
       for (const device of family.devices) {
-        if (device.exclude_from_global) continue;
+        if (!deviceNeedsBulkOff(device)) continue;
         this.predictDeviceState(
           family.id,
           device.id,
@@ -425,12 +432,11 @@ class DomestiBotController {
   }
 
   private predictBulkOffGlobal(): void {
-    // Spans every family. Mirrors :meth:`predictBulkOffForFamily` for
-    // the global "Turn off / pause / close everything" button.
     if (!this.state) return;
     for (const family of this.state.families) {
       for (const device of family.devices) {
         if (device.exclude_from_global) continue;
+        if (!deviceNeedsBulkOff(device)) continue;
         this.predictDeviceState(
           family.id,
           device.id,
@@ -624,14 +630,14 @@ class DomestiBotController {
     this.restoreScrollAfterRender(scrollX, scrollY);
   }
 
-  private dismissActionError(): void {
-    if (this.actionErrorTimer !== null) {
-      window.clearTimeout(this.actionErrorTimer);
-      this.actionErrorTimer = null;
+  private dismissActionToast(): void {
+    if (this.actionToastTimer !== null) {
+      window.clearTimeout(this.actionToastTimer);
+      this.actionToastTimer = null;
     }
-    if (this.actionErrorToast !== null) {
-      this.actionErrorToast.remove();
-      this.actionErrorToast = null;
+    if (this.actionToast !== null) {
+      this.actionToast.remove();
+      this.actionToast = null;
     }
   }
 
@@ -645,14 +651,33 @@ class DomestiBotController {
     // Calling this again *replaces* any current toast and resets
     // the auto-dismiss timer; we only ever show one at a time so a
     // burst of failed clicks doesn't pile up a wall of alerts.
-    this.dismissActionError();
+    this.renderActionToast(message, "error");
+  }
+
+  private renderActionToast(
+    message: string,
+    variant: "error" | "info" | "success",
+  ): void {
+    this.dismissActionToast();
 
     const toast = document.createElement("div");
-    toast.className = "action-toast";
-    // ``role=alert`` + ``aria-live=assertive`` make screen readers
-    // announce immediately; sighted users get the visual toast.
-    toast.setAttribute("role", "alert");
-    toast.setAttribute("aria-live", "assertive");
+    const variantClass =
+      variant === "success"
+        ? "action-toast-success"
+        : variant === "info"
+          ? "action-toast-info"
+          : "";
+    toast.className =
+      variantClass.length > 0
+        ? `action-toast ${variantClass}`
+        : "action-toast";
+    if (variant === "error") {
+      toast.setAttribute("role", "alert");
+      toast.setAttribute("aria-live", "assertive");
+    } else {
+      toast.setAttribute("role", "status");
+      toast.setAttribute("aria-live", "polite");
+    }
 
     const text = document.createElement("span");
     text.className = "action-toast-message";
@@ -664,15 +689,30 @@ class DomestiBotController {
     dismiss.setAttribute("aria-label", "Dismiss");
     dismiss.textContent = "\u00d7";
     dismiss.addEventListener("click", () => {
-      this.dismissActionError();
+      this.dismissActionToast();
     });
 
     toast.append(text, dismiss);
     document.body.append(toast);
-    this.actionErrorToast = toast;
-    this.actionErrorTimer = window.setTimeout(() => {
-      this.dismissActionError();
+    this.actionToast = toast;
+    this.actionToastTimer = window.setTimeout(() => {
+      this.dismissActionToast();
     }, DomestiBotController.ACTION_ERROR_TOAST_MS);
+  }
+
+  private renderBulkActionFeedback(
+    scope: BulkOffScope,
+    affectedCount: number,
+    skippedCount: number,
+  ): void {
+    if (affectedCount === 0) {
+      this.renderActionToast(bulkOffAlreadyDoneMessage(scope), "info");
+      return;
+    }
+    this.renderActionToast(
+      bulkOffSuccessMessage(scope, affectedCount, skippedCount),
+      "success",
+    );
   }
 
   private renderError(prefix: string, err: unknown): void {
@@ -844,6 +884,21 @@ function blurFocusedElementInApp(appRoot: HTMLElement): void {
   }
 }
 
+type BulkOffScope = "global" | "kasa" | "sonos" | "tailwind";
+
+function bulkOffAlreadyDoneMessage(scope: BulkOffScope): string {
+  switch (scope) {
+    case "global":
+      return "Everything is already off, paused, or closed.";
+    case "kasa":
+      return "All lights and plugs are already off.";
+    case "sonos":
+      return "All Sonos zones are already paused.";
+    case "tailwind":
+      return "All garage doors are already closed.";
+  }
+}
+
 function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   // What the backend's bulk-off endpoints actually drive each device
   // kind to. Used by the controller's optimistic-prediction helpers
@@ -857,6 +912,43 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
     case "door":
       return "closed";
   }
+}
+
+function bulkOffSuccessMessage(
+  scope: BulkOffScope,
+  affectedCount: number,
+  skippedCount: number,
+): string {
+  const deviceWord = affectedCount === 1 ? "device" : "devices";
+  let base: string;
+  switch (scope) {
+    case "global":
+      base = `Updated ${String(affectedCount)} ${deviceWord}.`;
+      break;
+    case "kasa":
+      base =
+        affectedCount === 1
+          ? "Turned off 1 light or plug."
+          : `Turned off ${String(affectedCount)} lights and plugs.`;
+      break;
+    case "sonos":
+      base =
+        affectedCount === 1
+          ? "Paused 1 zone."
+          : `Paused ${String(affectedCount)} zones.`;
+      break;
+    case "tailwind":
+      base =
+        affectedCount === 1
+          ? "Closed 1 garage door."
+          : `Closed ${String(affectedCount)} garage doors.`;
+      break;
+  }
+  if (scope === "global" && skippedCount > 0) {
+    const skipWord = skippedCount === 1 ? "device was" : "devices were";
+    return `${base} ${String(skippedCount)} excluded ${skipWord} not changed.`;
+  }
+  return base;
 }
 
 /** Robot mascot: About entry on mobile; decorative on desktop (use ☰ → About). */
@@ -1083,6 +1175,30 @@ function compactLabelFitsAtSize(
       && label.scrollWidth <= label.clientWidth + 1
     );
   });
+}
+
+function countDevicesNeedingBulkOff(
+  state: UIStateOut,
+  options: {
+    familyId?: string;
+    honorExcludeFromGlobal: boolean;
+  },
+): number {
+  let count = 0;
+  for (const family of state.families) {
+    if (options.familyId !== undefined && family.id !== options.familyId) {
+      continue;
+    }
+    for (const device of family.devices) {
+      if (options.honorExcludeFromGlobal && device.exclude_from_global) {
+        continue;
+      }
+      if (deviceNeedsBulkOff(device)) {
+        count += 1;
+      }
+    }
+  }
+  return count;
 }
 
 function largestCompactBulkFontPx(
@@ -1936,6 +2052,17 @@ function createTileSaturatedHit(
   appendSaturatedTileVisuals(hit, device, hitClassName === "tile-compact-hit");
   attachTileHitListeners(hit, device, controller);
   return hit;
+}
+
+function deviceNeedsBulkOff(device: UIDeviceOut): boolean {
+  switch (device.kind) {
+    case "switch":
+      return device.state === "on";
+    case "speaker":
+      return device.state === "playing";
+    case "door":
+      return device.state === "open" || device.state === "unknown";
+  }
 }
 
 function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown" {

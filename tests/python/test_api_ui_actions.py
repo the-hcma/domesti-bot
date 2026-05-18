@@ -182,6 +182,18 @@ async def test_bulk_off_kasa_apply_ignores_exclude_from_global(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+async def test_bulk_off_kasa_apply_skips_switches_already_off() -> None:
+    on = _FakeKasa("10.0.0.1", "On", is_on=True)
+    off = _FakeKasa("10.0.0.2", "Off", is_on=False)
+    state = _state(kasa_devices=[on, off])
+    affected, skipped = await bulk_off_kasa_apply(state)
+    assert affected == ["10.0.0.1"]
+    assert skipped == []
+    assert on.calls == ["off"]
+    assert off.calls == []
+
+
+@pytest.mark.asyncio
 async def test_bulk_off_kasa_apply_returns_sorted_affected_list() -> None:
     devices = [
         _FakeKasa("10.0.0.3", "C", is_on=True),
@@ -225,6 +237,20 @@ def test_post_global_bulk_off_returns_affected_and_skipped(tmp_path: Path) -> No
     }
     assert a.is_on is False
     assert b.is_on is True
+
+
+def test_post_kasa_bulk_off_returns_empty_when_every_switch_already_off() -> None:
+    a = _FakeKasa("10.0.0.1", "A", is_on=False)
+    b = _FakeKasa("10.0.0.2", "B", is_on=False)
+    client, app = _client()
+    app.state.device_state = _state(kasa_devices=[a, b])
+    app.state.discovery_error = None
+
+    response = client.post("/v1/ui/kasa/bulk-off")
+    assert response.status_code == HTTPStatus.OK
+    assert response.json() == {"affected": [], "skipped": []}
+    assert a.calls == []
+    assert b.calls == []
 
 
 def test_post_kasa_bulk_off_turns_off_every_kasa_device() -> None:

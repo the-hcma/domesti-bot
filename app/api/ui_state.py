@@ -67,14 +67,11 @@ async def _bulk_close_tailwind_apply_impl(
 ) -> tuple[list[str], list[str]]:
     """Iterate tailwind doors, close non-excluded ones, return ``(affected, skipped)``.
 
-    Doors that are *already* closed (``is_closed=True``) are still passed
-    to ``close()`` — :meth:`GotailwindDevice.close` swallows the
-    ``TailwindDoorAlreadyInStateError`` raised by the upstream
-    controller and reports success, so the call is safely idempotent
-    and the bulk operation can't be aborted by one door that happens
-    to already be shut. Doors in a transient state (``OPENING`` /
-    ``CLOSING``) are also closed; the controller will queue the new
-    command.
+    Doors that are already closed are skipped — nothing to do. Doors in a
+    transient state (``OPENING`` / ``CLOSING``) or open are passed to
+    ``close()``; :meth:`GotailwindDevice.close` swallows
+    ``TailwindDoorAlreadyInStateError`` when the controller reports the
+    door is already shut.
     """
 
     affected: list[str] = []
@@ -83,6 +80,8 @@ async def _bulk_close_tailwind_apply_impl(
         key = gd.identifier
         if key in excluded:
             skipped.append(key)
+            continue
+        if gd.is_closed:
             continue
         await gd.close()
         affected.append(key)
@@ -145,8 +144,9 @@ async def _bulk_off_kasa_apply_impl(
 ) -> tuple[list[str], list[str]]:
     """Iterate kasa switches, turn off non-excluded ones, return ``(affected, skipped)``.
 
-    ``affected`` is the host list the helper called ``turn_off`` on (in
-    sorted order); ``skipped`` is the excluded subset (also sorted). Hosts
+    ``affected`` is the host list the helper called ``turn_off`` on because
+    ``is_on`` was true (already-off switches are omitted). ``skipped`` is
+    the excluded subset (also sorted). Hosts
     that are blank/whitespace are dropped silently — they can't be
     addressed and were already filtered out of :func:`build_ui_state`.
     """
@@ -159,6 +159,8 @@ async def _bulk_off_kasa_apply_impl(
             continue
         if host in excluded:
             skipped.append(host)
+            continue
+        if not kd.is_on:
             continue
         await kd.turn_off()
         affected.append(host)
