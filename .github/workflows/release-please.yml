@@ -1,0 +1,75 @@
+# Release Please opens release PRs from Conventional Commits on main; merging
+# creates a tag and runs the PyPI publish job. See docs/RELEASING.md.
+
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: python
+
+  publish-pypi:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install Python dependencies (dev)
+        run: uv sync --group dev
+
+      - name: Pyright
+        run: uv run pyright
+
+      - name: Pytest (hermetic)
+        run: uv run pytest -m "not integration and not browser" -n auto
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm via corepack
+        run: corepack enable pnpm
+
+      - name: Build web bundle
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Embed build metadata
+        run: |
+          embedded_version="$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          export DOMESTI_EMBED_VERSION="${embedded_version}"
+          export DOMESTI_EMBED_COMMIT="${GITHUB_SHA}"
+          uv run python scripts/embed_build_metadata.py
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

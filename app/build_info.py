@@ -78,6 +78,12 @@ def _resolve_version(repo_root: Path) -> str:
     return _read_pyproject_version(repo_root)
 
 
+def format_cli_version_line(*, prog: str) -> str:
+    """One-line version string for ``--version`` on console entry points."""
+    version, commit = get_build_info()
+    return f"{prog} {version} ({commit})"
+
+
 @functools.lru_cache(maxsize=1)
 def get_build_info() -> tuple[str, str]:
     """Return ``(package_version, commit_short_or_unknown)`` computed once per process."""

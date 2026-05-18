@@ -38,6 +38,7 @@ import webbrowser
 import uvicorn
 
 from app.api.app import create_app
+from app.build_info import format_cli_version_line
 from app.domesti_bot_cli import build_arg_parser
 from app.logging_config import apply_logging_from_env
 
@@ -53,7 +54,7 @@ _BROWSER_OPEN_TIMEOUT_S: float = 5.0
 
 
 def build_serve_parser() -> argparse.ArgumentParser:
-    parent = build_arg_parser(add_help=False)
+    parent = build_arg_parser(add_help=False, add_version=False)
     parser = argparse.ArgumentParser(
         description=(
             "Start the domesti device-control HTTP API (same discovery flags as the REPL CLI)."
@@ -101,6 +102,11 @@ def build_serve_parser() -> argparse.ArgumentParser:
             "uvicorn is serving, when bound to a loopback address and "
             "not running under systemd."
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=format_cli_version_line(prog="domesti-bot-server"),
     )
     return parser
 

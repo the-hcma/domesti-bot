@@ -45,13 +45,33 @@ hosts other always-on services.
 
 ## Quick start
 
-Requires **Python ≥ 3.11** (3.14 is the targeted runtime) and
-[`uv`](https://docs.astral.sh/uv/) for dependency management.
+Requires **Python ≥ 3.11** (3.14 is the targeted runtime).
+
+### Install from PyPI (recommended)
+
+```bash
+pipx install domesti-bot
+domesti-bot-server              # HTTP API + web UI on a free loopback port
+domesti-bot-server --listen-all # LAN-visible bind for phone / tablet testing
+domesti-bot                     # interactive REPL for troubleshooting
+domesti-bot --version           # package version and source commit
+```
+
+Set `DOMESTI_API_KEY` when binding to the LAN or any network you do not fully
+trust. See [Configuration](#configuration) below.
+
+PyPI releases are built with the web bundle included; no Node.js is required at
+runtime. See [`docs/RELEASING.md`](docs/RELEASING.md) for how maintainers publish.
+
+### Develop from a git checkout
+
+Uses [`uv`](https://docs.astral.sh/uv/) for dependency management.
 
 ```bash
 git clone https://github.com/the-hcma/domesti-bot.git
 cd domesti-bot
-uv sync
+uv sync --group dev
+cd web && pnpm install --frozen-lockfile && pnpm run build && cd ..
 
 # Start the HTTP server (binds 127.0.0.1 on a free port; auto-opens browser)
 ./scripts/domesti-bot-server
