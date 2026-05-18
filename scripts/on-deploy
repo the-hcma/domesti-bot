@@ -99,34 +99,6 @@ _deploy_legacy_global_state_file() {
     printf '%s\n' "${HOME}/scratch/domesti-bot/on-deploy-sha"
 }
 
-_deploy_python_env_stale() {
-    local repo="$1"
-    local lock="$repo/uv.lock"
-    local project="$repo/pyproject.toml"
-    local venv="$repo/.venv"
-    if [[ ! -d "$venv" ]]; then
-        return 0
-    fi
-    if [[ ! -f "$lock" ]]; then
-        return 1
-    fi
-    local newest_input="$lock"
-    local input_mtime venv_mtime
-    if [[ -f "$project" ]]; then
-        input_mtime="$(stat -c '%Y' "$project")"
-        lock_mtime="$(stat -c '%Y' "$lock")"
-        if (( input_mtime > lock_mtime )); then
-            newest_input="$project"
-        fi
-    fi
-    venv_mtime="$(stat -c '%Y' "$venv")"
-    input_mtime="$(stat -c '%Y' "$newest_input")"
-    if (( input_mtime > venv_mtime )); then
-        return 0
-    fi
-    return 1
-}
-
 _deploy_state_file_for_repo() {
     local repo="$1"
     if [[ -n "${ON_DEPLOY_SHA_FILE:-}" ]]; then
@@ -248,7 +220,7 @@ _deploy_should_skip() {
     if _deploy_systemd_unit_repo_mismatch "$repo"; then
         return 1
     fi
-    if _deploy_python_env_stale "$repo"; then
+    if on_deploy_deps_python_env_stale "$repo"; then
         echo "  Python inputs newer than .venv — sync required."
         return 1
     fi
@@ -309,6 +281,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "$script_dir/.." && pwd)"
 cd "$repo_dir"
 
+# shellcheck source=/dev/null
+on_deploy_deps_source_from_repo "$repo_dir"
+
 # Make uv + per-user npm-global discoverable from minimal (non-login) shells
 # (e.g. systemd's environment when setup-service invokes this hook).
 if [[ -d "$HOME/.local/bin" ]]; then
@@ -345,14 +320,7 @@ mkdir -p "$(dirname "$sha_file")"
 # Ensure the Python environment exists. setup-service may invoke on-deploy on
 # a brand-new host or worktree without `.venv/`; the systemd ExecStart shells
 # into `scripts/domesti-bot-server`, which requires it.
-if [[ ! -d "$repo_dir/.venv" ]]; then
-    echo "  .venv missing — running 'uv sync'..."
-    uv sync
-elif [[ ! -x "$repo_dir/.venv/bin/python3" ]] && [[ ! -x "$repo_dir/.venv/bin/python" ]]; then
-    echo "  .venv has no usable interpreter — recreating..."
-    rm -rf "$repo_dir/.venv"
-    uv sync
-fi
+on_deploy_deps_bootstrap_python_venv "$repo_dir"
 
 # Clear a stuck "failed" unit state so the next restart isn't reported as
 # failed even on a clean start. Suppress all errors: the unit may not be
@@ -384,19 +352,12 @@ fi
 # Bring the venv exactly in line with the committed lockfile. `--frozen`
 # refuses to mutate uv.lock, which is the right behavior on a deploy box:
 # the build either matches the committed pin or fails loudly.
-echo "  uv sync --frozen"
-uv sync --frozen
+on_deploy_deps_sync_python_frozen "$repo_dir"
 
 # Build the browser bundle. The compiled JS is gitignored (web/node_modules/
 # and app/api/static/dist/), so production must rebuild on every deploy.
-# Corepack pins pnpm via the `packageManager` field in web/package.json, so
-# `pnpm` is always the right version regardless of what (if anything) is on
-# PATH globally.
 if [[ -d "$repo_dir/web" ]]; then
-    echo "  corepack enable pnpm"
-    corepack enable pnpm >/dev/null
-    echo "  pnpm install --frozen-lockfile (web/)"
-    (cd "$repo_dir/web" && pnpm install --frozen-lockfile)
+    on_deploy_deps_install_pnpm_frozen "$repo_dir" web
     echo "  pnpm run build (web/)"
     (cd "$repo_dir/web" && pnpm run build)
 fi
