@@ -187,7 +187,10 @@
        replaces the current one and resets the 10s auto-dismiss timer.
        Phone-friendly: the ``calc(100vw - …)`` cap lets the toast hug
        the screen edge on narrow viewports without ever overflowing. */
-    .action-toast-success { border-color: var(--accent); }
+    .action-toast-success { border-color: var(--accent);
+      background: var(--accent); }
+    .action-toast-info { border-color: var(--border);
+      background: var(--card); color: var(--fg); }
     .action-toast { position: fixed; top: 16px; left: 50%;
       transform: translateX(-50%); z-index: 1000;
       max-width: min(480px, calc(100vw - 32px));

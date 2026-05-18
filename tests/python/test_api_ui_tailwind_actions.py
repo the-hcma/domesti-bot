@@ -148,17 +148,17 @@ def test_build_tailwind_device_view_reflects_position_and_exclusion(
 
 
 @pytest.mark.asyncio
-async def test_bulk_close_tailwind_apply_closes_every_door() -> None:
-    a = _FakeDoor("door-1", "A", is_open=True)
-    b = _FakeDoor("door-2", "B", is_open=False)
-    state = _state(tailwind_doors=[a, b])
+async def test_bulk_close_tailwind_apply_closes_open_doors_only() -> None:
+    open_door = _FakeDoor("door-1", "A", is_open=True)
+    closed_door = _FakeDoor("door-2", "B", is_open=False)
+    state = _state(tailwind_doors=[open_door, closed_door])
     affected, skipped = await bulk_close_tailwind_apply(state)
-    assert affected == ["door-1", "door-2"]
+    assert affected == ["door-1"]
     assert skipped == []
-    assert a.calls == ["close"]
-    assert b.calls == ["close"]
-    assert a.is_closed is True
-    assert b.is_closed is True
+    assert open_door.calls == ["close"]
+    assert closed_door.calls == []
+    assert open_door.is_closed is True
+    assert closed_door.is_closed is True
 
 
 @pytest.mark.asyncio
@@ -237,6 +237,17 @@ def test_post_tailwind_close_all_closes_every_door() -> None:
     assert r.json() == {"affected": ["door-1", "door-2"], "skipped": []}
     assert a.is_closed is True
     assert b.is_closed is True
+
+
+def test_post_tailwind_close_all_returns_empty_when_every_door_already_closed() -> None:
+    closed = _FakeDoor("door-1", "A", is_open=False)
+    client, app = _client()
+    app.state.device_state = _state(tailwind_doors=[closed])
+    app.state.discovery_error = None
+    r = client.post("/v1/ui/tailwind/close-all")
+    assert r.status_code == HTTPStatus.OK
+    assert r.json() == {"affected": [], "skipped": []}
+    assert closed.calls == []
 
 
 def test_post_tailwind_close_all_returns_empty_when_manager_absent() -> None:

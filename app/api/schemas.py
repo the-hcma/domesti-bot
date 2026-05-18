@@ -128,9 +128,11 @@ class UIBulkActionOut(BaseModel):
     """Result of a *family-level* bulk action (kasa-all-off / tailwind-close-all).
 
     Family endpoints return device ids as plain strings because every entry
-    is implicitly scoped to the URL's family. ``skipped`` is always empty
-    in practice (family bulks ignore ``exclude_from_global``); kept in
-    the signature so callers don't have to special-case the return shape.
+    is implicitly scoped to the URL's family. ``affected`` lists only
+    devices that were not already in the target state (off / paused /
+    closed) and were commanded. ``skipped`` is always empty in practice
+    (family bulks ignore ``exclude_from_global``); kept in the signature
+    so callers don't have to special-case the return shape.
     """
 
     affected: list[str] = Field(default_factory=list)
@@ -149,11 +151,11 @@ class UIGlobalBulkActionOut(BaseModel):
     """Result of ``POST /v1/ui/global/bulk-off``.
 
     Mixes kasa hosts, Sonos zone UIDs, and tailwind door ids; the
-    ``family_id`` field disambiguates them. ``skipped`` collects every
-    device with ``exclude_from_global=True``. Sonos zones that were
-    already paused (or in an unknown playback state) are *neither*
-    affected nor skipped — there is nothing for the global action to
-    do to them.
+    ``family_id`` field disambiguates them. ``affected`` lists only
+    devices that were commanded because they were not already off,
+    paused, or closed. ``skipped`` collects every device with
+    ``exclude_from_global=True``. Devices already in the target state
+    are omitted from both lists.
     """
 
     affected: list[UIGlobalBulkActionItem] = Field(default_factory=list)
