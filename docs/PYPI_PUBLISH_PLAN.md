@@ -75,11 +75,11 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 
 ## Current state
 
-- `pyproject.toml` has metadata but **`[tool.uv] package = false`** — not installable as a wheel yet.
-- Entrypoints are repo scripts (`scripts/domesti-bot`, `scripts/domesti-bot-server`) that shell out to `uv run python -m …`.
-- `get_build_info()` and `/v1/meta` already exist; **CLI `--version` does not**.
-- Web bundle: `app/api/static/dist/main.js` is gitignored; **CI must run `pnpm run build`** before `uv build`.
-- No Release Please or PyPI publish workflow yet.
+- `pyproject.toml` is installable (`[tool.uv] package = true`, hatchling, `[project.scripts]`).
+- Repo scripts (`scripts/domesti-bot`, …) remain for git-checkout dev; PyPI users get `domesti-bot` / `domesti-bot-server` console scripts.
+- CLI `--version` on both entry points; `format_cli_version_line()` in `app/build_info.py`.
+- Web bundle: `app/api/static/dist/main.js` is gitignored; **release CI runs `pnpm run build`** before `uv build`; hatch `artifacts` pick up `dist/` without duplicating committed static files.
+- `.github/workflows/release-please.yml` added; **PyPI trusted publisher + GitHub `pypi` environment still required** before the first publish.
 
 ---
 
@@ -87,17 +87,17 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 
 ### Phase 1: Package readiness
 
-- [ ] Enable packaging — `[build-system]` + hatchling; `[tool.uv] package = true`.
-- [ ] `[project.scripts]`: `domesti-bot`, `domesti-bot-server` entry points (see Goal).
-- [ ] Ship static assets in the wheel (`app/api/static/**` including CI-built `dist/main.js`).
-- [ ] PyPI metadata — `project.urls`, keywords, classifiers.
-- [ ] Confirm PyPI project name `domesti-bot` is available.
-- [ ] **`--version` on both console scripts** using `get_build_info()`; tests in `tests/python/`.
-- [ ] Local: `embed_build_metadata` → `uv build` → `pip install dist/*.whl` → verify `--version`, `/v1/meta`, About dialog, `/static/dist/main.js`.
+- [x] Enable packaging — `[build-system]` + hatchling; `[tool.uv] package = true`.
+- [x] `[project.scripts]`: `domesti-bot`, `domesti-bot-server` entry points (see Goal).
+- [x] Ship static assets in the wheel (`app/api/static/**` including CI-built `dist/main.js`).
+- [x] PyPI metadata — `project.urls`, keywords, classifiers.
+- [ ] Confirm PyPI project name `domesti-bot` is available (manual check before first publish).
+- [x] **`--version` on both console scripts** using `get_build_info()`; tests in `tests/python/`.
+- [x] Local: `embed_build_metadata` → `uv build` → `pip install dist/*.whl` → verify `--version` (see `docs/RELEASING.md`; `/v1/meta` + About + `/static/dist/main.js` same metadata path).
 
 ### Phase 2: Automated release (Release Please + PyPI)
 
-- [ ] **`.github/workflows/release-please.yml`**
+- [x] **`.github/workflows/release-please.yml`** (workflow added; PyPI trusted publishing + `pypi` environment still required)
   - **`release-please` job** (push to `main`): `googleapis/release-please-action@v5`, `release-type: python`.
   - **Releasable-commit guard** — fail the workflow if a `feat:`/`fix:` squash lands but Release Please neither opens a release PR nor creates a tag (avoids silent skips from bad commit messages).
   - **`publish-pypi` job** when `release_created == true` (optional `workflow_dispatch` with version matching `pyproject.toml`):
@@ -110,8 +110,8 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 
 ### Phase 3: Documentation
 
-- [ ] **`docs/RELEASING.md`** — contributor flow: Conventional Commits → merge release PR → tag → PyPI; how embedding ties tag SHA to UI/CLI.
-- [ ] **README** — `pipx install`, first-run `domesti-bot-server`, link to secrets/LAN docs.
+- [x] **`docs/RELEASING.md`** — contributor flow: Conventional Commits → merge release PR → tag → PyPI; how embedding ties tag SHA to UI/CLI.
+- [x] **README** — `pipx install`, first-run `domesti-bot-server`, link to secrets/LAN docs.
 - [ ] **First release** — merge Release Please PR for `v0.1.0` (or next semver if already consumed).
 
 ### Phase 4: Post-publish verification
@@ -131,3 +131,25 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 ## Tracking
 
 Check boxes as phases land; keep [`PLAN.md`](PLAN.md) suggested order aligned. Prefer one concern per PR (package vs. workflow vs. CLI `--version` vs. docs).
+
+---
+
+## First release — operator todos (this week)
+
+Use this checklist after the packaging prep PR merges to `main`. Check items off here as you go.
+
+- [ ] **Merge packaging prep PR** — hatchling wheel, console scripts, `--version`, `release-please.yml`, `docs/RELEASING.md`.
+- [ ] **Confirm PyPI project name** — register or reserve `domesti-bot` on [pypi.org](https://pypi.org/) if not already created (name was unclaimed at prep time).
+- [ ] **PyPI trusted publishing** — PyPI account → Publishing → add trusted publisher:
+  - Owner: `the-hcma`
+  - Repository: `domesti-bot`
+  - Workflow: `release-please.yml`
+  - Environment name: `pypi`
+- [ ] **GitHub `pypi` environment** — repo Settings → Environments → create `pypi` (no extra protection rules required unless you want approval gates).
+- [ ] **Wait for Release Please** — after workflow is on `main`, merge the Release Please **release PR** for `v0.1.0` (bumps `pyproject.toml` / `CHANGELOG.md` if needed, creates tag on merge).
+- [ ] **Verify publish workflow** — Actions → Release Please → `publish-pypi` job green; package visible at https://pypi.org/project/domesti-bot/
+- [ ] **Post-publish smoke** (`Phase 4` above):
+  - [ ] `pipx install domesti-bot` on a clean machine
+  - [ ] `domesti-bot --version` and `domesti-bot-server --version`
+  - [ ] `domesti-bot-server`, open UI About — version/commit match `/v1/meta`
+  - [ ] PyPI project page shows README + MIT license

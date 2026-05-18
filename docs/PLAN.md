@@ -43,16 +43,16 @@ All surfaces read **`app.build_info.get_build_info()`** (directly or via **`GET 
 
 - **Web UI** — About dialog and bootstrap use `/v1/meta` (`version`, `commit`).
 - **HTTP** — OpenAPI app `version` matches package version.
-- **CLIs** — add **`--version`** on `domesti-bot` and `domesti-bot-server` (not implemented yet).
+- **CLIs** — **`--version`** on `domesti-bot` and `domesti-bot-server` (via `get_build_info()`).
 
 **PyPI / CI builds** run `scripts/embed_build_metadata.py` before `uv build` so wheels without `.git` still report the release version and tag SHA (`DOMESTI_EMBED_VERSION`, `DOMESTI_EMBED_COMMIT` → `app/_build_metadata.py`). Full resolution order and publish steps: **[`docs/PYPI_PUBLISH_PLAN.md`](PYPI_PUBLISH_PLAN.md)**.
 
 ### Checklist (summary)
 
-1. Installable package (`[project.scripts]`, hatchling, static + `dist/main.js` in wheel).
-2. CLI `--version` + embed step in release CI.
-3. `.github/workflows/release-please.yml` + `uv publish` + smoke tests.
-4. `docs/RELEASING.md` and first PyPI release.
+1. Installable package (`[project.scripts]`, hatchling, static + `dist/main.js` in wheel) — **in progress** on `feat/pypi-package-prep`.
+2. CLI `--version` + embed step in release CI — **done** (CLI flags + release workflow).
+3. `.github/workflows/release-please.yml` + `uv publish` + smoke tests — workflow scaffolded; PyPI trusted publisher pending.
+4. `docs/RELEASING.md` and first PyPI release — docs drafted; first publish pending.
 
 ---
 

@@ -74,6 +74,7 @@ from app.androidtv_device_manager import (
     discover_cast_adb_specs_via_zeroconf,
     _merge_androidtv_host_specs,
 )
+from app.build_info import format_cli_version_line
 from app.device_manager import NotInitializedError
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
@@ -2323,7 +2324,7 @@ async def _async_main_remote(args: argparse.Namespace) -> None:
     )
 
 
-def build_arg_parser(*, add_help: bool = True) -> argparse.ArgumentParser:
+def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
             "Interactive REPL for Google Cast, Kasa switches, Sonos zones, "
@@ -2490,6 +2491,12 @@ def build_arg_parser(*, add_help: bool = True) -> argparse.ArgumentParser:
         metavar="SEC",
         help="Tailwind HTTP request timeout (default: 8)",
     )
+    if add_version:
+        p.add_argument(
+            "--version",
+            action="version",
+            version=format_cli_version_line(prog="domesti-bot"),
+        )
     return p
 
 
