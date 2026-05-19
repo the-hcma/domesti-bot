@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/the-hcma/domesti-bot/compare/v0.1.1...v0.1.2) (2026-05-19)
+
+
+### Documentation
+
+* shrink README mobile UI screenshot ([99e6172](https://github.com/the-hcma/domesti-bot/commit/99e617251c7a4b64cb8855347f50f44a0cdb5b4f))
+* shrink README mobile UI screenshot ([8273a84](https://github.com/the-hcma/domesti-bot/commit/8273a84605e998f888698199461e24ff8df30eef))
+
 ## [0.1.1](https://github.com/the-hcma/domesti-bot/compare/v0.1.0...v0.1.1) (2026-05-19)
 
 Documentation and dependency maintenance since the first PyPI release.
