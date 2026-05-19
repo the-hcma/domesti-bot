@@ -215,12 +215,12 @@ class DomestiBotController {
     if (!this.state) {
       return;
     }
-    const needing = countDevicesNeedingBulkOff(this.state, {
-      familyId,
-      honorExcludeFromGlobal: false,
-    });
-    if (needing === 0) {
-      this.renderActionToast(bulkOffAlreadyDoneMessage(familyId), "info");
+    // Drop optimistic overlays and re-fetch so bulk actions always use
+    // the server's view — stale predictions made the pre-check skip the
+    // API while tiles still looked active.
+    this.clearAllPendingPredictions();
+    await this.refresh();
+    if (!this.state) {
       return;
     }
     this.predictBulkOffForFamily(familyId);
@@ -235,7 +235,12 @@ class DomestiBotController {
         result = await api.closeAllTailwind();
       }
       await this.refresh();
-      this.renderBulkActionFeedback(familyId, result.affected.length, 0);
+      this.renderBulkActionFeedback(
+        familyId,
+        result.affected.length,
+        0,
+        this.state,
+      );
     } catch (err) {
       this.clearPendingPredictionsForFamily(familyId);
       this.renderError(`Failed to bulk action on ${familyId}`, err);
@@ -246,11 +251,9 @@ class DomestiBotController {
     if (!this.state) {
       return;
     }
-    const needing = countDevicesNeedingBulkOff(this.state, {
-      honorExcludeFromGlobal: true,
-    });
-    if (needing === 0) {
-      this.renderActionToast(bulkOffAlreadyDoneMessage("global"), "info");
+    this.clearAllPendingPredictions();
+    await this.refresh();
+    if (!this.state) {
       return;
     }
     this.predictBulkOffGlobal();
@@ -262,6 +265,7 @@ class DomestiBotController {
         "global",
         result.affected.length,
         result.skipped.length,
+        this.state,
       );
     } catch (err) {
       this.clearAllPendingPredictions();
@@ -704,9 +708,13 @@ class DomestiBotController {
     scope: BulkOffScope,
     affectedCount: number,
     skippedCount: number,
+    state: UIStateOut | null,
   ): void {
     if (affectedCount === 0) {
-      this.renderActionToast(bulkOffAlreadyDoneMessage(scope), "info");
+      this.renderActionToast(
+        bulkOffNothingChangedMessage(scope, skippedCount, state),
+        "info",
+      );
       return;
     }
     this.renderActionToast(
@@ -897,6 +905,33 @@ function bulkOffAlreadyDoneMessage(scope: BulkOffScope): string {
     case "tailwind":
       return "All garage doors are already closed.";
   }
+}
+
+function bulkOffNothingChangedMessage(
+  scope: BulkOffScope,
+  skippedCount: number,
+  state: UIStateOut | null,
+): string {
+  if (state === null) {
+    return bulkOffAlreadyDoneMessage(scope);
+  }
+  const needingGlobal = countDevicesNeedingBulkOff(state, {
+    honorExcludeFromGlobal: true,
+  });
+  const needingAny = countDevicesNeedingBulkOff(state, {
+    honorExcludeFromGlobal: false,
+  });
+  if (scope === "global" && needingAny > 0 && needingGlobal === 0) {
+    const deviceWord = needingAny === 1 ? "device is" : "devices are";
+    return `No changes — ${String(needingAny)} ${deviceWord} still active but excluded from global all-off.`;
+  }
+  if (scope === "global" && skippedCount > 0 && needingGlobal === 0) {
+    return bulkOffAlreadyDoneMessage(scope);
+  }
+  if (needingAny > 0) {
+    return "No changes — devices may still be settling; try again in a moment.";
+  }
+  return bulkOffAlreadyDoneMessage(scope);
 }
 
 function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
@@ -2059,7 +2094,8 @@ function deviceNeedsBulkOff(device: UIDeviceOut): boolean {
     case "switch":
       return device.state === "on";
     case "speaker":
-      return device.state === "playing";
+      // Match doors: unknown may still be playing before the first poll.
+      return device.state === "playing" || device.state === "unknown";
     case "door":
       return device.state === "open" || device.state === "unknown";
   }
