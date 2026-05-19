@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.1](https://github.com/the-hcma/domesti-bot/compare/v0.1.0...v0.1.1) (2026-05-19)
+
+Documentation and dependency maintenance since the first PyPI release.
+
+### Documentation
+
+* PyPI badge, published-release notes, and updated publish checklists ([#103](https://github.com/the-hcma/domesti-bot/pull/103))
+* Mobile UI screenshot in README (`docs/images/domesti-bot-mobile-ui.jpeg`) ([#105](https://github.com/the-hcma/domesti-bot/pull/105))
+
+### Chore
+
+* Dependency updates ([#104](https://github.com/the-hcma/domesti-bot/pull/104))
+
 ## 0.1.0 (2026-05-19)
 
 First public release. Install with `pipx install domesti-bot` (see [RELEASING.md](docs/RELEASING.md)).
