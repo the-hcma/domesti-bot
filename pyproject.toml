@@ -43,6 +43,7 @@ dependencies = [
     "gotailwind[cli]",
     "httpx>=0.28.1",
     "idna==3.15",
+    "lxml==6.1.1",
     "prompt_toolkit>=3.0.43",
     "pychromecast>=14.0.10",
     "pyproj",
