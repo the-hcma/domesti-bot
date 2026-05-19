@@ -2,6 +2,10 @@
 
 PyPI publishing is automated from `main` via [Release Please](https://github.com/googleapis/release-please). The full checklist lives in [`PYPI_PUBLISH_PLAN.md`](PYPI_PUBLISH_PLAN.md).
 
+## Published releases
+
+- **[0.1.0](https://pypi.org/project/domesti-bot/0.1.0/)** (2026-05-19) — first PyPI release. Install: `pipx install domesti-bot`.
+
 ## Contributor flow
 
 1. Land changes on `main` with [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, …).

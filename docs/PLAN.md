@@ -49,10 +49,10 @@ All surfaces read **`app.build_info.get_build_info()`** (directly or via **`GET 
 
 ### Checklist (summary)
 
-1. Installable package (`[project.scripts]`, hatchling, static + `dist/main.js` in wheel) — **in progress** on `feat/pypi-package-prep`.
+1. Installable package (`[project.scripts]`, hatchling, static + `dist/main.js` in wheel) — **shipped** ([`0.1.0` on PyPI](https://pypi.org/project/domesti-bot/0.1.0/)).
 2. CLI `--version` + embed step in release CI — **done** (CLI flags + release workflow).
-3. `.github/workflows/release-please.yml` + `uv publish` + smoke tests — workflow scaffolded; PyPI trusted publisher pending.
-4. `docs/RELEASING.md` and first PyPI release — docs drafted; first publish pending.
+3. `.github/workflows/release-please.yml` + `uv publish` + smoke tests — **shipped** (`v0.1.0` tag, publish workflow green).
+4. `docs/RELEASING.md` and first PyPI release — **shipped** (2026-05-19).
 
 ---
 
@@ -90,8 +90,7 @@ Today optimistic updates and pending predictions are centered on **the actor’s
 
 ## Suggested implementation order (remaining)
 
-1. **PyPI / pipx release** — independent of UI sync; unlocks installs without a git checkout. See [`PYPI_PUBLISH_PLAN.md`](PYPI_PUBLISH_PLAN.md).
-2. **Broadcast + cross-tab optimistic alignment** — largest architectural change; benefits most now that compact layout, About, bulk colors, settings, and deploy detection are done.
+1. **Broadcast + cross-tab optimistic alignment** — largest architectural change; benefits most now that compact layout, About, bulk colors, settings, deploy detection, and PyPI distribution are done.
 
 ---
 

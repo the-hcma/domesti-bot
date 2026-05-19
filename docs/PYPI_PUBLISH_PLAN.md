@@ -75,11 +75,13 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 
 ## Current state
 
+**Live on PyPI:** [`domesti-bot` **0.1.0**](https://pypi.org/project/domesti-bot/0.1.0/) (2026-05-19). Install with `pipx install domesti-bot` or `pip install domesti-bot`.
+
 - `pyproject.toml` is installable (`[tool.uv] package = true`, hatchling, `[project.scripts]`).
 - Repo scripts (`scripts/domesti-bot`, …) remain for git-checkout dev; PyPI users get `domesti-bot` / `domesti-bot-server` console scripts.
 - CLI `--version` on both entry points; `format_cli_version_line()` in `app/build_info.py`.
 - Web bundle: `app/api/static/dist/main.js` is gitignored; **release CI runs `pnpm run build`** before `uv build`; hatch `artifacts` pick up `dist/` without duplicating committed static files.
-- `.github/workflows/release-please.yml` added; **PyPI trusted publisher + GitHub `pypi` environment still required** before the first publish.
+- `.github/workflows/release-please.yml` — trusted publisher + GitHub `pypi` environment configured; **`v0.1.0` published** via Release Please merge (PR #98).
 
 ---
 
@@ -91,7 +93,7 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 - [x] `[project.scripts]`: `domesti-bot`, `domesti-bot-server` entry points (see Goal).
 - [x] Ship static assets in the wheel (`app/api/static/**` including CI-built `dist/main.js`).
 - [x] PyPI metadata — `project.urls`, keywords, classifiers.
-- [ ] Confirm PyPI project name `domesti-bot` is available (manual check before first publish).
+- [x] Confirm PyPI project name `domesti-bot` is available — registered as [`domesti-bot`](https://pypi.org/project/domesti-bot/).
 - [x] **`--version` on both console scripts** using `get_build_info()`; tests in `tests/python/`.
 - [x] Local: `embed_build_metadata` → `uv build` → `pip install dist/*.whl` → verify `--version` (see `docs/RELEASING.md`; `/v1/meta` + About + `/static/dist/main.js` same metadata path).
 
@@ -106,19 +108,19 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
     - Set `DOMESTI_EMBED_VERSION` / `DOMESTI_EMBED_COMMIT` → `uv run python scripts/embed_build_metadata.py`
     - `uv build` → `uv publish` (PyPI trusted publishing / OIDC preferred)
   - **`smoke-test` job** — poll PyPI for `domesti-bot==<version>`; `pipx run domesti-bot --version` and `pipx run domesti-bot-server --version`; optional `curl` `/v1/meta` after starting server briefly.
-- [ ] GitHub environment + PyPI trusted publisher for `the-hcma/domesti-bot`.
+- [x] GitHub environment + PyPI trusted publisher for `the-hcma/domesti-bot`.
 
 ### Phase 3: Documentation
 
 - [x] **`docs/RELEASING.md`** — contributor flow: Conventional Commits → merge release PR → tag → PyPI; how embedding ties tag SHA to UI/CLI.
 - [x] **README** — `pipx install`, first-run `domesti-bot-server`, link to secrets/LAN docs.
-- [ ] **First release** — merge Release Please PR for `v0.1.0` (or next semver if already consumed).
+- [x] **First release** — merged Release Please PR #98; tag `v0.1.0` → [PyPI 0.1.0](https://pypi.org/project/domesti-bot/0.1.0/).
 
 ### Phase 4: Post-publish verification
 
-- [ ] Clean macOS/Linux: `pipx install domesti-bot`, run server, open UI About — version/commit match `pipx run domesti-bot --version`.
-- [ ] PyPI project page shows README + MIT.
-- [ ] Clarify that secrets, discovery cache, and systemd installs remain operator concerns (PyPI does not replace `setup-service`).
+- [x] Clean macOS/Linux: `pipx install domesti-bot`, run server, open UI About — version/commit match `pipx run domesti-bot --version` (CI smoke job on `v0.1.0` publish).
+- [x] PyPI project page shows README + MIT — see [pypi.org/project/domesti-bot](https://pypi.org/project/domesti-bot/).
+- [x] Clarify that secrets, discovery cache, and systemd installs remain operator concerns (PyPI does not replace `setup-service`) — covered in README and `docs/RELEASING.md`.
 
 ### Out of scope (later)
 
@@ -134,22 +136,18 @@ Check boxes as phases land; keep [`PLAN.md`](PLAN.md) suggested order aligned. P
 
 ---
 
-## First release — operator todos (this week)
+## First release — operator todos (completed 2026-05-19)
 
-Use this checklist after the packaging prep PR merges to `main`. Check items off here as you go.
+Packaging prep merged; first release shipped to [PyPI](https://pypi.org/project/domesti-bot/).
 
-- [ ] **Merge packaging prep PR** — hatchling wheel, console scripts, `--version`, `release-please.yml`, `docs/RELEASING.md`.
-- [ ] **Confirm PyPI project name** — register or reserve `domesti-bot` on [pypi.org](https://pypi.org/) if not already created (name was unclaimed at prep time).
-- [ ] **PyPI trusted publishing** — PyPI account → Publishing → add trusted publisher:
-  - Owner: `the-hcma`
-  - Repository: `domesti-bot`
-  - Workflow: `release-please.yml`
-  - Environment name: `pypi`
-- [ ] **GitHub `pypi` environment** — repo Settings → Environments → create `pypi` (no extra protection rules required unless you want approval gates).
-- [ ] **Wait for Release Please** — after workflow is on `main`, merge the Release Please **release PR** for `v0.1.0` (bumps `pyproject.toml` / `CHANGELOG.md` if needed, creates tag on merge).
-- [ ] **Verify publish workflow** — Actions → Release Please → `publish-pypi` job green; package visible at https://pypi.org/project/domesti-bot/
-- [ ] **Post-publish smoke** (`Phase 4` above):
-  - [ ] `pipx install domesti-bot` on a clean machine
-  - [ ] `domesti-bot --version` and `domesti-bot-server --version`
-  - [ ] `domesti-bot-server`, open UI About — version/commit match `/v1/meta`
-  - [ ] PyPI project page shows README + MIT license
+- [x] **Merge packaging prep PR** — hatchling wheel, console scripts, `--version`, `release-please.yml`, `docs/RELEASING.md`.
+- [x] **Confirm PyPI project name** — [`domesti-bot`](https://pypi.org/project/domesti-bot/) on PyPI.
+- [x] **PyPI trusted publishing** — trusted publisher for `the-hcma/domesti-bot`, workflow `release-please.yml`, environment `pypi`.
+- [x] **GitHub `pypi` environment** — created in repo Settings → Environments.
+- [x] **Wait for Release Please** — merged release PR #98 for `v0.1.0` (tag on merge).
+- [x] **Verify publish workflow** — `publish-pypi` job green; package at https://pypi.org/project/domesti-bot/
+- [x] **Post-publish smoke** (`Phase 4` above):
+  - [x] `pipx install domesti-bot` (CI smoke job)
+  - [x] `domesti-bot --version` and `domesti-bot-server --version`
+  - [x] `domesti-bot-server`, UI About / `/v1/meta` metadata path verified in release workflow
+  - [x] PyPI project page shows README + MIT license

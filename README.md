@@ -1,6 +1,7 @@
 # domesti-bot
 
 [![CI](https://github.com/the-hcma/domesti-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/the-hcma/domesti-bot/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/domesti-bot)](https://pypi.org/project/domesti-bot/)
 [![Python ≥ 3.11](https://img.shields.io/badge/python-%E2%89%A53.11-brightgreen)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -48,6 +49,8 @@ hosts other always-on services.
 Requires **Python ≥ 3.11** (3.14 is the targeted runtime).
 
 ### Install from PyPI (recommended)
+
+Install from **[PyPI](https://pypi.org/project/domesti-bot/)** (`pipx` recommended):
 
 ```bash
 pipx install domesti-bot
