@@ -146,6 +146,10 @@ of the database path; see [`docs/AGENTS.md`](docs/AGENTS.md) for security notes.
 
 After starting the server, the landing page hydrates a tile UI:
 
+![domesti-bot mobile tile UI — Kasa lights, Sonos zones, and global bulk-off](docs/images/domesti-bot-mobile-ui.jpeg)
+
+*Compact mobile layout on a phone: family sections (green frame = connected), per-device tiles (green = on / playing, red = off / paused), and the global **Turn off / pause / close everything** control at the top.*
+
 - One section per device family (`Lights & plugs`, `Sonos zones`,
   `Garage doors`) with a family-coloured icon and frame.
 - One tile per device. Tap to toggle (on/off, play/pause, open/close); the
@@ -198,6 +202,7 @@ domesti-bot/
 ├── scripts/domesti-bot           REPL CLI
 ├── scripts/domesti-bot-server    HTTP server launcher
 ├── production/                   systemd unit template + on-deploy hooks
+├── docs/images/                  README screenshots and other doc assets
 └── docs/AGENTS.md                Developer reference (canonical)
 ```
 
