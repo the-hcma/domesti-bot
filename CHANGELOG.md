@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.1](https://github.com/the-hcma/domesti-bot/compare/v0.1.0...v0.1.1) (2026-05-19)
+
+
+### Documentation
+
+* add mobile UI screenshot to README ([141cf32](https://github.com/the-hcma/domesti-bot/commit/141cf32dd1f6dd98aee6c4ad8c2871f3b6930654))
+* add mobile UI screenshot to README ([fcbeb21](https://github.com/the-hcma/domesti-bot/commit/fcbeb211843fd59f5950040d9c8785d3ef77b950))
+* add PyPI badge and document first release ([7418a31](https://github.com/the-hcma/domesti-bot/commit/7418a316fabd5f5eb1668927e62f8a5e68471f50))
+* add PyPI badge and document first release ([d02a893](https://github.com/the-hcma/domesti-bot/commit/d02a893923482684cb1d8b360545f38c41660ae5))
+* add PyPI badge and document first release ([4891f52](https://github.com/the-hcma/domesti-bot/commit/4891f52f31d962496e2fb86ada6ba82bc68cc242))
+
 ## 0.1.0 (2026-05-19)
 
 First public release. Install with `pipx install domesti-bot` (see [RELEASING.md](docs/RELEASING.md)).
