@@ -97,10 +97,10 @@ async def _bulk_pause_sonos_apply_impl(
 ) -> tuple[list[str], list[str]]:
     """Iterate Sonos zones, pause non-excluded *playing* ones, return ``(affected, skipped)``.
 
-    Zones with ``is_playing is False`` (already paused) or ``None``
-    (state not yet known) are left alone — a no-op ``pause`` call on a
-    paused zone is harmless but pointless, and the watcher / next
-    refresh will clear ``None`` shortly. Excluded zones are reported
+    Zones with ``is_playing is False`` (already paused) are left alone.
+    Zones with ``is_playing is None`` (no poll yet) still get a
+    ``pause`` attempt so global all-off can catch a zone that is
+    playing before the first watcher tick. Excluded zones are reported
     in ``skipped`` even when they are already paused, matching the
     kasa helper's convention so the UI can honestly say "X devices
     weren't touched because you excluded them".
@@ -120,7 +120,7 @@ async def _bulk_pause_sonos_apply_impl(
         if key in excluded:
             skipped.append(key)
             continue
-        if sp.is_playing is not True:
+        if sp.is_playing is False:
             continue
         try:
             await sp.pause()

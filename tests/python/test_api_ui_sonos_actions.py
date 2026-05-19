@@ -183,11 +183,10 @@ def test_build_sonos_device_view_unknown_when_is_playing_is_none() -> None:
 
 @pytest.mark.asyncio
 async def test_bulk_pause_sonos_apply_only_pauses_playing_zones() -> None:
-    """Already-paused / unknown zones must not contribute LAN traffic.
+    """Already-paused zones are skipped; unknown zones still get a pause attempt.
 
     Asserts the helper iterates :attr:`SonosDeviceManager.players` and
-    skips anything whose cached :attr:`is_playing` isn't ``True`` —
-    that's the contract the per-family ``Pause all`` button relies on.
+    skips only zones whose cached :attr:`is_playing` is ``False``.
     """
 
     playing = _FakeSonosZone("RINCON_A", "A", is_playing=True)
@@ -195,11 +194,11 @@ async def test_bulk_pause_sonos_apply_only_pauses_playing_zones() -> None:
     unknown = _FakeSonosZone("RINCON_C", "C", is_playing=None)
     state = _state(sonos_zones=[playing, paused, unknown])
     affected, skipped = await bulk_pause_sonos_apply(state)
-    assert affected == ["RINCON_A"]
+    assert affected == ["RINCON_A", "RINCON_C"]
     assert skipped == []
     assert playing.calls == ["pause"]
     assert paused.calls == []
-    assert unknown.calls == []
+    assert unknown.calls == ["pause"]
 
 
 @pytest.mark.asyncio
