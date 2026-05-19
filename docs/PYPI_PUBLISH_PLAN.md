@@ -75,7 +75,7 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 
 ## Current state
 
-**Live on PyPI:** [`domesti-bot` **0.1.0**](https://pypi.org/project/domesti-bot/0.1.0/) (2026-05-19). Install with `pipx install domesti-bot` or `pip install domesti-bot`.
+**Live on PyPI:** [`domesti-bot`](https://pypi.org/project/domesti-bot/) **0.1.0** (2026-05-19). Install with `pipx install domesti-bot` or `pip install domesti-bot`.
 
 - `pyproject.toml` is installable (`[tool.uv] package = true`, hatchling, `[project.scripts]`).
 - Repo scripts (`scripts/domesti-bot`, …) remain for git-checkout dev; PyPI users get `domesti-bot` / `domesti-bot-server` console scripts.
@@ -114,7 +114,7 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 
 - [x] **`docs/RELEASING.md`** — contributor flow: Conventional Commits → merge release PR → tag → PyPI; how embedding ties tag SHA to UI/CLI.
 - [x] **README** — `pipx install`, first-run `domesti-bot-server`, link to secrets/LAN docs.
-- [x] **First release** — merged Release Please PR #98; tag `v0.1.0` → [PyPI 0.1.0](https://pypi.org/project/domesti-bot/0.1.0/).
+- [x] **First release** — merged Release Please PR #98; tag `v0.1.0` published to [PyPI](https://pypi.org/project/domesti-bot/).
 
 ### Phase 4: Post-publish verification
 

@@ -4,7 +4,7 @@ PyPI publishing is automated from `main` via [Release Please](https://github.com
 
 ## Published releases
 
-- **[0.1.0](https://pypi.org/project/domesti-bot/0.1.0/)** (2026-05-19) — first PyPI release. Install: `pipx install domesti-bot`.
+- **0.1.0** (2026-05-19) — first PyPI release ([`domesti-bot` on PyPI](https://pypi.org/project/domesti-bot/)). Install: `pipx install domesti-bot`.
 
 ## Contributor flow
 

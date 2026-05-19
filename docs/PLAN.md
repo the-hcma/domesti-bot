@@ -49,7 +49,7 @@ All surfaces read **`app.build_info.get_build_info()`** (directly or via **`GET 
 
 ### Checklist (summary)
 
-1. Installable package (`[project.scripts]`, hatchling, static + `dist/main.js` in wheel) — **shipped** ([`0.1.0` on PyPI](https://pypi.org/project/domesti-bot/0.1.0/)).
+1. Installable package (`[project.scripts]`, hatchling, static + `dist/main.js` in wheel) — **shipped** (0.1.0 on [PyPI](https://pypi.org/project/domesti-bot/)).
 2. CLI `--version` + embed step in release CI — **done** (CLI flags + release workflow).
 3. `.github/workflows/release-please.yml` + `uv publish` + smoke tests — **shipped** (`v0.1.0` tag, publish workflow green).
 4. `docs/RELEASING.md` and first PyPI release — **shipped** (2026-05-19).
