@@ -542,16 +542,17 @@ Aligned with [repository-helpers](https://github.com/the-hcma/repository-helpers
 
 | Layer | Mechanism |
 |-------|-----------|
-| **pnpm** (`web/`) | `minimumReleaseAge: 14400` in `web/pnpm-workspace.yaml`; lockfile grandfathering via `pnpm-release-age-grandfather.tsv` and repository-helpers `scripts/grandfather-pnpm-release-age` / `scripts/prune-pnpm-release-age-grandfather`. |
-| **Dependabot** | 10-day cooldown on version updates (pip, npm, github-actions); security PRs exempt. |
-| **dep-updater** | Same 10-day npm gate for `web/` bumps; Python/Actions via repository-helpers scripts. |
+| **pnpm** (`web/`) | `minimumReleaseAge: 14400` in `web/pnpm-workspace.yaml`. `minimumReleaseAgeExclude: ["*"]` grandfathers the **existing lockfile at cutover** so CI keeps working. |
+| **Dependabot** | 10-day cooldown on **version-update** PRs (pip, npm, github-actions); security PRs exempt. |
+| **dep-updater** | Same 10-day npm gate for `web/` bumps; Python/Actions via repository-helpers. |
 | **CI** | Daily `cve-check.yml` (`pip-audit --strict`) on the uv environment. |
 
 **CVE and security exceptions**
 
 - **Dependabot security updates** ignore the version-update cooldown.
-- **dep-updater:** when **npm** or **Python** audit reports CVE IDs with an available fix, dep-updater **skips** the 10-day npm release-age gate for that package only (regular version bumps still wait 10 days). Prefer `--security-only` / audit-driven security PRs for CVE work.
-- **pnpm install** in `web/` still applies `minimumReleaseAge` unless versions are grandfathered—coordinate CVE fixes with audit fix versions and lockfile updates, not day-zero manual pins.
+- **dep-updater:** when **npm** or **Python** audit reports CVE IDs with an available fix, dep-updater skips the 10-day npm gate for that npm package only.
+
+**Day-to-day:** no grandfather scripts to run. Review Dependabot and dep-updater PRs as usual. Re-run `scripts/grandfather-pnpm-release-age --wildcard` on `web/` only if `pnpm-workspace.yaml` was lost after a major lockfile reset.
 
 **`.github/CODEOWNERS`** maps `*` to `@thehcma` (blanket ownership for now). Adding additional reviewers later is a one-line entry per path glob.
 

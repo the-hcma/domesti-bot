@@ -1,7 +1,0 @@
-# pnpm-release-age-grandfather — managed by repository-helpers scripts.
-# format-version: 1
-# minimumReleaseAge: 14400
-# mode: wildcard
-# generated: 2026-05-20T14:54:59Z
-# Prune aged entries: scripts/prune-pnpm-release-age-grandfather
-# Wildcard excludes all packages until you run prune --expand-wildcard.
