@@ -1,9 +1,6 @@
 # Supply-chain: 10-day minimum release age for new resolutions.
-# Grandfather: "*" skips age checks until tracked excludes are built.
-# Lockfile had 58 pinned package@version entries when last synced.
-# Regenerate: scripts/grandfather-pnpm-release-age
-# Age out excludes: scripts/prune-pnpm-release-age-grandfather
-# Dependabot cooldown + dep-updater enforce 10 days on new non-CVE bumps.
+# Cutover: "*" grandfathers the existing lockfile at policy enable (one-time).
+# Forward: Dependabot cooldown + dep-updater enforce 10 days on new non-CVE bumps.
 
 packages:
   - '.'
