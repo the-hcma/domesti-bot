@@ -534,7 +534,24 @@ CI lives in `.github/workflows/`:
 - **`merged-pr-closer.yml`** — closes open PRs whose changes have already landed on `main` (handles Graphite merge-queue cases where child PRs are left open).
 - **`dependabot-auto-merge.yml`** — auto-labels Dependabot PRs with `merge-it`.
 
-Dependabot itself is configured in **`.github/dependabot.yml`**: weekly Monday sweeps across `pip` (root `pyproject.toml`), `npm` (`/web`), and `github-actions` (`/`), all labeled `dependencies` so the auto-merge workflow picks them up. Patch + minor bumps are grouped into a handful of named buckets (`fastapi-stack`, `pytest-stack`, `typescript`, `esbuild`) to keep the PR count down; major bumps continue to land as individual PRs for review.
+Dependabot itself is configured in **`.github/dependabot.yml`**: weekly Monday sweeps across `pip` (root `pyproject.toml`), `npm` (`/web`), and `github-actions` (`/`), all labeled `dependencies` so the auto-merge workflow picks them up. Patch + minor bumps are grouped into a handful of named buckets (`fastapi-stack`, `pytest-stack`, `typescript`, `esbuild`) to keep the PR count down; major bumps continue to land as individual PRs for review. Version-update PRs use a **10-day cooldown** (`cooldown: default-days: 10`); **security updates are not cooldown-gated**.
+
+### Dependency release age (10 days)
+
+Aligned with [repository-helpers](https://github.com/the-hcma/repository-helpers) `AGENTS.md`:
+
+| Layer | Mechanism |
+|-------|-----------|
+| **pnpm** (`web/`) | `minimumReleaseAge: 14400` in `web/pnpm-workspace.yaml`; lockfile grandfathering via `pnpm-release-age-grandfather.tsv` and repository-helpers `scripts/grandfather-pnpm-release-age` / `scripts/prune-pnpm-release-age-grandfather`. |
+| **Dependabot** | 10-day cooldown on version updates (pip, npm, github-actions); security PRs exempt. |
+| **dep-updater** | Same 10-day npm gate for `web/` bumps; Python/Actions via repository-helpers scripts. |
+| **CI** | Daily `cve-check.yml` (`pip-audit --strict`) on the uv environment. |
+
+**CVE and security exceptions**
+
+- **Dependabot security updates** ignore the version-update cooldown.
+- **dep-updater:** when **npm** or **Python** audit reports CVE IDs with an available fix, dep-updater **skips** the 10-day npm release-age gate for that package only (regular version bumps still wait 10 days). Prefer `--security-only` / audit-driven security PRs for CVE work.
+- **pnpm install** in `web/` still applies `minimumReleaseAge` unless versions are grandfathered—coordinate CVE fixes with audit fix versions and lockfile updates, not day-zero manual pins.
 
 **`.github/CODEOWNERS`** maps `*` to `@thehcma` (blanket ownership for now). Adding additional reviewers later is a one-line entry per path glob.
 
