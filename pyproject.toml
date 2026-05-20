@@ -37,6 +37,7 @@ classifiers = [
     "Topic :: Home Automation",
 ]
 dependencies = [
+    "aiohappyeyeballs==2.6.2",
     "certifi==2026.5.20",
     "click==8.4.0",
     "cryptography>=48.0.0",
@@ -57,7 +58,7 @@ dependencies = [
     "uvicorn[standard]>=0.47.0",
     "watchfiles==1.2.0",
     "yarl==1.24.2",
-    "zeroconf>=0.149.10",
+    "zeroconf>=0.149.12",
 ]
 
 [project.scripts]
