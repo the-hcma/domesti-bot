@@ -1,0 +1,13 @@
+# Supply-chain: 10-day minimum release age for new resolutions.
+# Grandfather: "*" skips age checks for the current lockfile closure.
+# Lockfile had 112 pinned package@version entries when generated.
+# Regenerate after a major lockfile refresh: scripts/grandfather-pnpm-release-age
+# Dependabot cooldown + dep-updater still enforce 10 days on new bumps.
+
+packages:
+  - '.'
+
+minimumReleaseAge: 14400
+minimumReleaseAgeStrict: false
+minimumReleaseAgeExclude:
+  - "*"
