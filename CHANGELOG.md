@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/the-hcma/domesti-bot/compare/v0.1.2...v0.1.3) (2026-05-21)
+
+
+### Documentation
+
+* require squash merge for Release Please changelog ([#120](https://github.com/the-hcma/domesti-bot/issues/120)) ([d74a3fd](https://github.com/the-hcma/domesti-bot/commit/d74a3fd64dd8eb02c5c6de4469f831ac169d0d9e))
+
 ## [0.1.2](https://github.com/the-hcma/domesti-bot/compare/v0.1.1...v0.1.2) (2026-05-21)
 
 
