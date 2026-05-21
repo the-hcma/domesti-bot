@@ -5,11 +5,9 @@
 
 ### Documentation
 
-* document CVE exceptions for 10-day release age policy ([bb73119](https://github.com/the-hcma/domesti-bot/commit/bb7311931da12d3765503e26e1483ee28ff91c89))
-* shrink README mobile UI screenshot ([99e6172](https://github.com/the-hcma/domesti-bot/commit/99e617251c7a4b64cb8855347f50f44a0cdb5b4f))
-* shrink README mobile UI screenshot ([8273a84](https://github.com/the-hcma/domesti-bot/commit/8273a84605e998f888698199461e24ff8df30eef))
-* simplify release-age policy to cutover-only grandfather ([5a26fc1](https://github.com/the-hcma/domesti-bot/commit/5a26fc1744bf2ea3e41af7bfa420be5d29fe006c))
-* simplify release-age policy to cutover-only grandfather ([fac28fb](https://github.com/the-hcma/domesti-bot/commit/fac28fb194b8af0f860e34d7e2dfc53b84d949d9))
+* document CVE exceptions for 10-day release age policy ([#113](https://github.com/the-hcma/domesti-bot/pull/113))
+* shrink README mobile UI screenshot ([#108](https://github.com/the-hcma/domesti-bot/pull/108))
+* simplify release-age policy to cutover-only grandfather ([#115](https://github.com/the-hcma/domesti-bot/pull/115))
 
 ## [0.1.1](https://github.com/the-hcma/domesti-bot/compare/v0.1.0...v0.1.1) (2026-05-19)
 
