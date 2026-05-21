@@ -37,7 +37,7 @@ The repo label **`merge-it`** is wired in Graphite merge-queue settings (“enqu
 
 1. [Graphite merge queue settings](https://app.graphite.com/settings/merge-queue)
 2. **Add merge queue** → select **`the-hcma/domesti-bot`**
-3. Set merge strategy (squash recommended for stacked work), timeout, and confirm the enqueue label is **`merge-it`**
+3. Set merge strategy to **squash** (required for Release Please — merge commits duplicate changelog lines; see [`docs/RELEASING.md`](RELEASING.md)), timeout, and confirm the enqueue label is **`merge-it`**
 
 Requires Graphite Team/Enterprise and the **Graphite GitHub App** on the org.
 
@@ -79,7 +79,7 @@ gh api -X PUT repos/the-hcma/domesti-bot/rulesets/16365386 --input - <<'JSON'
     {
       "type": "pull_request",
       "parameters": {
-        "allowed_merge_methods": ["merge", "squash", "rebase"],
+        "allowed_merge_methods": ["squash"],
         "dismiss_stale_reviews_on_push": false,
         "require_code_owner_review": false,
         "require_last_push_approval": false,
