@@ -206,6 +206,10 @@ _deploy_should_skip() {
         echo "  Python inputs newer than .venv — sync required."
         return 1
     fi
+    if [[ -f "$repo/web/package.json" ]] && on_deploy_deps_pnpm_modules_stale "$repo" web; then
+        echo "  pnpm lockfiles out of sync with web/node_modules — install required."
+        return 1
+    fi
     if [[ ! -f "$repo/$_DEPLOY_DIST_MAIN" ]]; then
         echo "  Web bundle missing ($_DEPLOY_DIST_MAIN) — rebuild required."
         return 1
