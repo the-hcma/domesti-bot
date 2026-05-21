@@ -8,36 +8,18 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     branches-ignore:
       - '**/graphite-base/**'
-  # Release Please opens/updates its PR with GITHUB_TOKEN; those events do not
-  # fire pull_request, so required checks never appear. pull_request_target still
-  # runs (base-branch workflow). Guard limits this path to github-actions[bot].
-  pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
-    branches:
-      - main
   schedule:
     # Weekly full suite — catches new CVEs and regressions between PRs.
     - cron: '0 7 * * 4'
   workflow_dispatch:
 
-# Cancel in-progress runs per event type so pull_request and pull_request_target
-# on the same release PR do not cancel each other.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   guard:
     name: Guard
-    # Human PRs: pull_request. Release Please PRs: pull_request_target (GITHUB_TOKEN
-    # never fires pull_request). Also allow reopen by a human on the release branch.
-    if: >-
-      github.event_name == 'pull_request' ||
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request_target' &&
-        (github.actor == 'github-actions[bot]' ||
-         startsWith(github.head_ref, 'release-please--')))
     runs-on: ubuntu-latest
     outputs:
       skip: ${{ steps.set-skip.outputs.skip }}
@@ -75,216 +57,14 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-  typecheck:
-    name: Pyright
+  ci:
+    name: CI
     needs: guard
     if: needs.guard.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install 3.14
-
-      - name: Verify Python version matches .python-version
-        run: |
-          set -euo pipefail
-          current=$(uv run python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-          required=$(tr -d '[:space:]' < .python-version | cut -d. -f1,2)
-          if [[ "$current" != "$required" ]]; then
-            echo "❌ Python version mismatch: using $current but .python-version pins $required"
-            exit 1
-          fi
-          echo "✅ Using Python $current"
-
-      - name: Install dependencies
-        run: uv sync --group dev
-
-      - name: Pyright
-        run: uv run pyright
-
-  test:
-    name: Pytest (hermetic)
-    needs: guard
-    if: needs.guard.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install 3.14
-
-      - name: Install dependencies
-        run: uv sync --group dev
-
-      - name: Run pytest (skip integration / LAN hardware tests)
-        # ``pytest-xdist`` parallelizes across CPU cores (``-n auto``) so CI
-        # stays fast as the hermetic suite grows. Hermetic tests must remain
-        # process-safe (no fixed ports, no shared mutable globals).
-        # ``@pytest.mark.browser`` layout probes run in the parallel job below.
-        run: uv run pytest -m "not integration and not browser" -n auto
-
-  test-browser:
-    name: Pytest (browser layout)
-    needs: guard
-    if: needs.guard.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        run: uv python install 3.14
-
-      - name: Install dependencies
-        run: uv sync --group dev
-
-      - name: Install Playwright Chromium
-        run: uv run playwright install --with-deps chromium
-
-      - name: Run browser layout tests
-        # Single process — Playwright shares one module-scoped browser fixture.
-        run: uv run pytest -m "browser and not integration"
-
-  shellcheck:
-    name: Shellcheck
-    needs: guard
-    if: needs.guard.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-
-      - name: Lint shell scripts
-        run: |
-          set -euo pipefail
-          # Convention: shell scripts have no file extension and live under
-          # scripts/. Collect every tracked file in that tree that is not a
-          # Python / docs / config file.
-          mapfile -t targets < <(
-            while IFS= read -r path; do
-              [[ -z "$path" ]] && continue
-              first_line="$(head -n1 "$path" 2>/dev/null || true)"
-              if [[ "$first_line" == *python* ]]; then
-                continue
-              fi
-              printf '%s\n' "$path"
-            done < <(
-              git ls-files -- scripts \
-                | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$' \
-                || true
-            )
-          )
-          if [[ ${#targets[@]} -eq 0 ]]; then
-            echo "No shell scripts found — nothing to lint."
-            exit 0
-          fi
-          printf 'shellcheck: %s\n' "${targets[@]}"
-          shellcheck "${targets[@]}"
-
-  web-build:
-    name: Web (typecheck + build)
-    needs: guard
-    if: needs.guard.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          # Match web/package.json#engines.node (>=20).
-          node-version: '20'
-
-      - name: Enable pnpm via corepack
-        # `packageManager` in web/package.json pins the exact pnpm version.
-        run: corepack enable pnpm
-
-      - name: pnpm install --frozen-lockfile
-        run: pnpm install --frozen-lockfile
-
-      - name: pnpm run typecheck
-        run: pnpm run typecheck
-
-      - name: pnpm run build
-        run: pnpm run build
-
-      - name: Assert built bundle exists
-        # Catch silent build regressions (e.g. esbuild succeeding with no
-        # output files) — the deploy hook expects this exact path.
-        run: test -f ../app/api/static/dist/main.js
-
-  workflow-lint:
-    name: Workflow Lint (actionlint)
-    needs: guard
-    if: needs.guard.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Lint GitHub Actions workflows
-        uses: rhysd/actionlint@v1.7.12
-
-  secret-scan:
-    name: Secret Scan
-    needs: guard
-    if: needs.guard.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Install gitleaks
-        run: |
-          set -euo pipefail
-          ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')
-          FALLBACK_VERSION=8.30.0
-          VERSION=$(curl -sf https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
-            | grep '"tag_name"' | cut -d'"' -f4 | tr -d 'v')
-          VERSION=${VERSION:-$FALLBACK_VERSION}
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_${ARCH}.tar.gz" \
-            | tar -xz gitleaks
-          sudo mv gitleaks /usr/local/bin/
-
-      - name: Scan for leaked secrets
-        run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
-          if [ -n "$BASE" ] && [ -n "$HEAD" ]; then
-            gitleaks detect --source . --log-opts "${BASE}..${HEAD}"
-          else
-            gitleaks detect --source .
-          fi
+    permissions:
+      contents: read
+      checks: write
+    uses: ./.github/workflows/ci-reusable.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      gitleaks_base: ${{ github.event.pull_request.base.sha || '' }}
