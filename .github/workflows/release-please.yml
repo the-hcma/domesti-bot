@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  checks: write
 
 jobs:
   release-please:
@@ -44,25 +45,58 @@ jobs:
             exit 1
           fi
 
-      # GITHUB_TOKEN updates do not fire pull_request; CI listens on pull_request_target
-      # for github-actions[bot]. An empty commit ensures synchronize after force-push.
-      - name: Request CI on release PR
-        if: >-
-          steps.release.outputs.pr != '' &&
-          steps.release.outputs.release_created != 'true'
+  validate-release-pr:
+    needs: release-please
+    if: >-
+      always() &&
+      needs.release-please.result == 'success' &&
+      needs.release-please.outputs.pr != '' &&
+      needs.release-please.outputs.release_created != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Resolve release PR head
+        id: pr
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_PR_JSON: ${{ steps.release.outputs.pr }}
+          RELEASE_PR_JSON: ${{ needs.release-please.outputs.pr }}
         run: |
           set -euo pipefail
           pr_number=$(jq -r '.number' <<<"$RELEASE_PR_JSON")
-          head_branch=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json headRefName -q .headRefName)
-          git fetch origin "$head_branch"
-          git checkout "$head_branch"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "chore: request CI checks on release PR"
-          git push origin "HEAD:${head_branch}"
+          head_sha=$(gh pr view "$pr_number" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json headRefOid \
+            -q .headRefOid)
+          echo "pr_number=${pr_number}" >>"$GITHUB_OUTPUT"
+          echo "head_sha=${head_sha}" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.pr.outputs.head_sha }}
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install Python dependencies (dev)
+        run: uv sync --group dev
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm via corepack
+        run: corepack enable pnpm
+
+      - name: Publish required checks on release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: bash .github/scripts/release-pr-checks.sh
 
   publish-pypi:
     needs: release-please
