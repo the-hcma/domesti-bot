@@ -20,20 +20,24 @@ on:
     - cron: '0 7 * * 4'
   workflow_dispatch:
 
-# Cancel any in-progress run for the same PR when a newer one starts.
+# Cancel in-progress runs per event type so pull_request and pull_request_target
+# on the same release PR do not cancel each other.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
   guard:
     name: Guard
-    # Human PRs use pull_request; Release Please uses pull_request_target only.
+    # Human PRs: pull_request. Release Please PRs: pull_request_target (GITHUB_TOKEN
+    # never fires pull_request). Also allow reopen by a human on the release branch.
     if: >-
       github.event_name == 'pull_request' ||
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request_target' && github.actor == 'github-actions[bot]')
+      (github.event_name == 'pull_request_target' &&
+        (github.actor == 'github-actions[bot]' ||
+         startsWith(github.head_ref, 'release-please--')))
     runs-on: ubuntu-latest
     outputs:
       skip: ${{ steps.set-skip.outputs.skip }}
