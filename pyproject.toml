@@ -58,7 +58,7 @@ dependencies = [
     "uvicorn[standard]>=0.47.0",
     "watchfiles==1.2.0",
     "yarl==1.24.2",
-    "zeroconf>=0.149.12",
+    "zeroconf>=0.149.13",
 ]
 
 [project.scripts]
