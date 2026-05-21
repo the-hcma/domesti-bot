@@ -110,24 +110,6 @@ _deploy_state_file_for_repo() {
     printf '%s\n' "${HOME}/scratch/domesti-bot/on-deploy-sha-${repo_id}"
 }
 
-_deploy_dist_is_stale() {
-    local repo="$1"
-    local dist="$repo/$_DEPLOY_DIST_MAIN"
-    if [[ ! -f "$dist" ]]; then
-        return 0
-    fi
-    local dist_mtime path_mtime
-    dist_mtime="$(stat -c '%Y' "$dist")"
-    while IFS= read -r path; do
-        [[ -z "$path" ]] && continue
-        path_mtime="$(stat -c '%Y' "$path")"
-        if (( path_mtime > dist_mtime )); then
-            return 0
-        fi
-    done < <(_deploy_collect_input_paths "$repo")
-    return 1
-}
-
 _deploy_inputs_hash() {
     local repo="$1"
     local list_file
@@ -226,10 +208,6 @@ _deploy_should_skip() {
     fi
     if [[ ! -f "$repo/$_DEPLOY_DIST_MAIN" ]]; then
         echo "  Web bundle missing ($_DEPLOY_DIST_MAIN) — rebuild required."
-        return 1
-    fi
-    if _deploy_dist_is_stale "$repo"; then
-        echo "  Deploy inputs newer than web bundle — rebuild required."
         return 1
     fi
     if ! _deploy_read_state "$state_file"; then
