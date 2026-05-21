@@ -18,6 +18,7 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       - uses: actions/checkout@v6
 
@@ -42,6 +43,26 @@ jobs:
             echo "This usually means the commit message could not be parsed. Check that squash_merge_commit_message=BLANK is set on the repository." >&2
             exit 1
           fi
+
+      # GITHUB_TOKEN updates do not fire pull_request; CI listens on pull_request_target
+      # for github-actions[bot]. An empty commit ensures synchronize after force-push.
+      - name: Request CI on release PR
+        if: >-
+          steps.release.outputs.pr != '' &&
+          steps.release.outputs.release_created != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+          pr_number=$(jq -r '.number' <<<"$RELEASE_PR_JSON")
+          head_branch=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json headRefName -q .headRefName)
+          git fetch origin "$head_branch"
+          git checkout "$head_branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: request CI checks on release PR"
+          git push origin "HEAD:${head_branch}"
 
   publish-pypi:
     needs: release-please
