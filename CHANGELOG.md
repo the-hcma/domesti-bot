@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.4](https://github.com/the-hcma/domesti-bot/compare/v0.1.3...v0.1.4) (2026-05-21)
+
+
+### Bug Fixes
+
+* **ci:** publish release-please checks correctly ([#128](https://github.com/the-hcma/domesti-bot/issues/128)) ([40f551d](https://github.com/the-hcma/domesti-bot/commit/40f551d3fbadf0235657b449c1dc4a0b323a55a2))
+* **ci:** publish required checks on release-please PRs ([#127](https://github.com/the-hcma/domesti-bot/issues/127)) ([7ccb593](https://github.com/the-hcma/domesti-bot/commit/7ccb593148b04cd3a68d5183f6f369f6fc895207))
+* **ci:** run release-PR checks on reopen ([#126](https://github.com/the-hcma/domesti-bot/issues/126)) ([8d1d869](https://github.com/the-hcma/domesti-bot/commit/8d1d869e08fef46fad90068393dab341006224cd))
+* **ci:** run required checks on Release Please PRs ([#125](https://github.com/the-hcma/domesti-bot/issues/125)) ([28fe3e6](https://github.com/the-hcma/domesti-bot/commit/28fe3e64d0255ce7df9be56eb99d611cba5803f3))
+* **on-deploy:** check web/node_modules before skipping deploy ([#124](https://github.com/the-hcma/domesti-bot/issues/124)) ([7d1d06b](https://github.com/the-hcma/domesti-bot/commit/7d1d06b01c0f8796e376239e3e0641b684586c79))
+* **on-deploy:** stop false rebuilds from deploy-input mtimes ([#122](https://github.com/the-hcma/domesti-bot/issues/122)) ([0ea6382](https://github.com/the-hcma/domesti-bot/commit/0ea6382cdefa990029c132e35e6d6402d7ec4211))
+
 ## [0.1.3](https://github.com/the-hcma/domesti-bot/compare/v0.1.2...v0.1.3) (2026-05-21)
 
 
