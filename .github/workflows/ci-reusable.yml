@@ -1,0 +1,155 @@
+# Release-please CI — same scripts as ci.yml, published via checks-action on inputs.ref.
+# GITHUB_TOKEN pushes never fire pull_request; branch protection needs named checks
+# on the release PR head commit (not "CI / …" prefixed reusable-workflow job names).
+name: CI (release PR)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit SHA to check out and attach check runs to
+        required: true
+        type: string
+      gitleaks_base:
+        description: Base SHA for gitleaks diff scan (empty = full repo scan)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  pyright:
+    name: Pyright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Pyright
+          script: bash .github/ci/pyright
+
+  test:
+    name: Pytest (hermetic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Pytest (hermetic)
+          script: bash .github/ci/pytest-hermetic
+
+  test-browser:
+    name: Pytest (browser layout)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Pytest (browser layout)
+          script: bash .github/ci/pytest-browser
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Shellcheck
+          script: bash .github/ci/shellcheck
+
+  web-build:
+    name: Web (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Web (typecheck + build)
+          script: bash .github/ci/web-build
+
+  workflow-lint:
+    name: Workflow Lint (actionlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install actionlint
+        run: |
+          curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          sudo mv actionlint /usr/local/bin/
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Workflow Lint (actionlint)
+          script: bash .github/ci/workflow-lint
+
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        env:
+          GITLEAKS_BASE: ${{ inputs.gitleaks_base }}
+          GITLEAKS_HEAD: ${{ inputs.ref }}
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Secret Scan
+          script: bash .github/ci/secret-scan
