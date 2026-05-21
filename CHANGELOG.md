@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.2](https://github.com/the-hcma/domesti-bot/compare/v0.1.1...v0.1.2) (2026-05-21)
+
+
+### Documentation
+
+* document CVE exceptions for 10-day release age policy ([#113](https://github.com/the-hcma/domesti-bot/pull/113))
+* shrink README mobile UI screenshot ([#108](https://github.com/the-hcma/domesti-bot/pull/108))
+* simplify release-age policy to cutover-only grandfather ([#115](https://github.com/the-hcma/domesti-bot/pull/115))
+
 ## [0.1.1](https://github.com/the-hcma/domesti-bot/compare/v0.1.0...v0.1.1) (2026-05-19)
 
 Documentation and dependency maintenance since the first PyPI release.
