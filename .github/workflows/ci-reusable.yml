@@ -33,12 +33,17 @@ jobs:
         with:
           version: latest
 
+      - id: run
+        name: Pyright
+        run: bash .github/ci/pyright
+
       - uses: LouisBrunner/checks-action@v2.0.0
+        if: always()
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Pyright
-          script: bash .github/ci/pyright
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
 
   test:
     name: Pytest (hermetic)
@@ -52,12 +57,17 @@ jobs:
         with:
           version: latest
 
+      - id: run
+        name: Pytest (hermetic)
+        run: bash .github/ci/pytest-hermetic
+
       - uses: LouisBrunner/checks-action@v2.0.0
+        if: always()
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Pytest (hermetic)
-          script: bash .github/ci/pytest-hermetic
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
 
   test-browser:
     name: Pytest (browser layout)
@@ -71,12 +81,17 @@ jobs:
         with:
           version: latest
 
+      - id: run
+        name: Pytest (browser layout)
+        run: bash .github/ci/pytest-browser
+
       - uses: LouisBrunner/checks-action@v2.0.0
+        if: always()
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Pytest (browser layout)
-          script: bash .github/ci/pytest-browser
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
 
   shellcheck:
     name: Shellcheck
@@ -89,12 +104,17 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
+      - id: run
+        name: Shellcheck
+        run: bash .github/ci/shellcheck
+
       - uses: LouisBrunner/checks-action@v2.0.0
+        if: always()
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Shellcheck
-          script: bash .github/ci/shellcheck
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
 
   web-build:
     name: Web (typecheck + build)
@@ -108,12 +128,17 @@ jobs:
         with:
           node-version: "20"
 
+      - id: run
+        name: Web (typecheck + build)
+        run: bash .github/ci/web-build
+
       - uses: LouisBrunner/checks-action@v2.0.0
+        if: always()
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Web (typecheck + build)
-          script: bash .github/ci/web-build
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
 
   workflow-lint:
     name: Workflow Lint (actionlint)
@@ -128,12 +153,17 @@ jobs:
           curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
           sudo mv actionlint /usr/local/bin/
 
+      - id: run
+        name: Workflow Lint (actionlint)
+        run: bash .github/ci/workflow-lint
+
       - uses: LouisBrunner/checks-action@v2.0.0
+        if: always()
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Workflow Lint (actionlint)
-          script: bash .github/ci/workflow-lint
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
 
   secret-scan:
     name: Secret Scan
@@ -144,12 +174,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.ref }}
 
-      - uses: LouisBrunner/checks-action@v2.0.0
+      - id: run
+        name: Secret Scan
         env:
           GITLEAKS_BASE: ${{ inputs.gitleaks_base }}
           GITLEAKS_HEAD: ${{ inputs.ref }}
+        run: bash .github/ci/secret-scan
+
+      - uses: LouisBrunner/checks-action@v2.0.0
+        if: always()
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Secret Scan
-          script: bash .github/ci/secret-scan
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
