@@ -8,6 +8,13 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     branches-ignore:
       - '**/graphite-base/**'
+  # Release Please opens/updates its PR with GITHUB_TOKEN; those events do not
+  # fire pull_request, so required checks never appear. pull_request_target still
+  # runs (base-branch workflow). Guard limits this path to github-actions[bot].
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches:
+      - main
   schedule:
     # Weekly full suite — catches new CVEs and regressions between PRs.
     - cron: '0 7 * * 4'
@@ -21,6 +28,12 @@ concurrency:
 jobs:
   guard:
     name: Guard
+    # Human PRs use pull_request; Release Please uses pull_request_target only.
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' && github.actor == 'github-actions[bot]')
     runs-on: ubuntu-latest
     outputs:
       skip: ${{ steps.set-skip.outputs.skip }}
