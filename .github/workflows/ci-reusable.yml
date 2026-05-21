@@ -38,7 +38,7 @@ jobs:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Pyright
-          script: bash .github/ci/pyright.sh
+          script: bash .github/ci/pyright
 
   test:
     name: Pytest (hermetic)
@@ -57,7 +57,7 @@ jobs:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Pytest (hermetic)
-          script: bash .github/ci/pytest-hermetic.sh
+          script: bash .github/ci/pytest-hermetic
 
   test-browser:
     name: Pytest (browser layout)
@@ -76,7 +76,7 @@ jobs:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Pytest (browser layout)
-          script: bash .github/ci/pytest-browser.sh
+          script: bash .github/ci/pytest-browser
 
   shellcheck:
     name: Shellcheck
@@ -94,7 +94,7 @@ jobs:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Shellcheck
-          script: bash .github/ci/shellcheck.sh
+          script: bash .github/ci/shellcheck
 
   web-build:
     name: Web (typecheck + build)
@@ -113,7 +113,7 @@ jobs:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Web (typecheck + build)
-          script: bash .github/ci/web-build.sh
+          script: bash .github/ci/web-build
 
   workflow-lint:
     name: Workflow Lint (actionlint)
@@ -133,7 +133,7 @@ jobs:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Workflow Lint (actionlint)
-          script: bash .github/ci/workflow-lint.sh
+          script: bash .github/ci/workflow-lint
 
   secret-scan:
     name: Secret Scan
@@ -152,4 +152,4 @@ jobs:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
           name: Secret Scan
-          script: bash .github/ci/secret-scan.sh
+          script: bash .github/ci/secret-scan

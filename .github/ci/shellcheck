@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-mapfile -t targets < <(
+
+collect_shell_targets() {
+  local root="$1"
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     first_line="$(head -n1 "$path" 2>/dev/null || true)"
@@ -9,12 +11,20 @@ mapfile -t targets < <(
     fi
     printf '%s\n' "$path"
   done < <(
-    git ls-files -- scripts \
+    git ls-files -- "$root" \
       | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$' \
       || true
   )
+}
+
+mapfile -t targets < <(
+  {
+    collect_shell_targets scripts
+    collect_shell_targets .github/ci
+  } | sort -u
 )
 if [[ ${#targets[@]} -eq 0 ]]; then
   exit 0
 fi
+printf 'shellcheck: %s\n' "${targets[@]}"
 shellcheck "${targets[@]}"

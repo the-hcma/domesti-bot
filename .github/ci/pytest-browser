@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-bash .github/ci/setup-python.sh
+bash .github/ci/setup-python
 uv run playwright install --with-deps chromium
 uv run pytest -m "browser and not integration"
