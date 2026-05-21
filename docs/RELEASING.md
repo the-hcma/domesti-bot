@@ -6,6 +6,16 @@ PyPI publishing is automated from `main` via [Release Please](https://github.com
 
 - **0.1.0** (2026-05-19) — first PyPI release ([`domesti-bot` on PyPI](https://pypi.org/project/domesti-bot/)). Install: `pipx install domesti-bot`.
 
+## Merge strategy (avoid duplicate changelog lines)
+
+Release Please walks **every** commit on `main` since the last tag. If a PR is merged with **Create a merge commit**, GitHub records both the branch commit (e.g. `docs: …`) and a merge commit whose body repeats that line. Release Please treats them as two changes, so the release PR lists the same item twice in **`CHANGELOG.md` and the PR description** ([upstream discussion](https://github.com/googleapis/release-please/issues/2476)).
+
+This repository allows **squash merge only** (merge commits and rebase merges are disabled in GitHub settings). Squash uses the PR title as the commit subject and an empty squash body (`squash_merge_commit_message: BLANK`), which matches the assert step in `.github/workflows/release-please.yml`.
+
+The Graphite merge queue on `main` must use **squash** as its merge strategy (not merge commits). See [`docs/GRAPHITE.md`](GRAPHITE.md).
+
+Duplicate lines in [release PR #112](https://github.com/the-hcma/domesti-bot/pull/112) came from merge commits on `main` before squash-only was enforced.
+
 ## Contributor flow
 
 1. Land changes on `main` with [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, …).

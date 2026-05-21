@@ -20,10 +20,28 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: actions/checkout@v6
+
       - uses: googleapis/release-please-action@v5
         id: release
         with:
           release-type: python
+
+      - name: Assert release-please acted on releasable commits
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          commit_title=$(git log -1 --format='%s' "$COMMIT_SHA")
+          if echo "$commit_title" | grep -qE '^(feat|fix)(\([^)]*\))?!?:' && \
+             [[ "$RELEASE_CREATED" != "true" ]] && \
+             [[ -z "$RELEASE_PR" ]]; then
+            echo "ERROR: Commit '$commit_title' looks releasable but release-please neither created a release nor opened/updated a release PR." >&2
+            echo "This usually means the commit message could not be parsed. Check that squash_merge_commit_message=BLANK is set on the repository." >&2
+            exit 1
+          fi
 
   publish-pypi:
     needs: release-please
