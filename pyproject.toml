@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "domesti-bot"
-version = "0.1.2"
+version = "0.1.3"
 description = "Self-hosted LAN control surface for TP-Link Kasa, Sonos, and GoTailwind devices, with a tile-based web UI."
 readme = "README.md"
 license = "MIT"
