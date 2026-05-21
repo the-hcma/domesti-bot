@@ -1,7 +1,7 @@
-# Reusable CI — single source of truth for pull_request and release-please PR runs.
-# Uses LouisBrunner/checks-action so results attach to inputs.ref (required for
-# release PRs, which never receive pull_request events from GITHUB_TOKEN pushes).
-name: CI (reusable)
+# Release-please CI — same scripts as ci.yml, published via checks-action on inputs.ref.
+# GITHUB_TOKEN pushes never fire pull_request; branch protection needs named checks
+# on the release PR head commit (not "CI / …" prefixed reusable-workflow job names).
+name: CI (release PR)
 
 on:
   workflow_call:
@@ -33,7 +33,7 @@ jobs:
         with:
           version: latest
 
-      - uses: LouisBrunner/checks-action@v2.0.2
+      - uses: LouisBrunner/checks-action@v2.0.0
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
@@ -52,7 +52,7 @@ jobs:
         with:
           version: latest
 
-      - uses: LouisBrunner/checks-action@v2.0.2
+      - uses: LouisBrunner/checks-action@v2.0.0
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
@@ -71,7 +71,7 @@ jobs:
         with:
           version: latest
 
-      - uses: LouisBrunner/checks-action@v2.0.2
+      - uses: LouisBrunner/checks-action@v2.0.0
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
@@ -89,7 +89,7 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
-      - uses: LouisBrunner/checks-action@v2.0.2
+      - uses: LouisBrunner/checks-action@v2.0.0
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
@@ -108,7 +108,7 @@ jobs:
         with:
           node-version: "20"
 
-      - uses: LouisBrunner/checks-action@v2.0.2
+      - uses: LouisBrunner/checks-action@v2.0.0
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
@@ -128,7 +128,7 @@ jobs:
           curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
           sudo mv actionlint /usr/local/bin/
 
-      - uses: LouisBrunner/checks-action@v2.0.2
+      - uses: LouisBrunner/checks-action@v2.0.0
         with:
           token: ${{ github.token }}
           sha: ${{ inputs.ref }}
@@ -144,7 +144,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.ref }}
 
-      - uses: LouisBrunner/checks-action@v2.0.2
+      - uses: LouisBrunner/checks-action@v2.0.0
         env:
           GITLEAKS_BASE: ${{ inputs.gitleaks_base }}
           GITLEAKS_HEAD: ${{ inputs.ref }}

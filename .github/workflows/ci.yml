@@ -57,14 +57,121 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-  ci:
-    name: CI
+  pyright:
+    name: Pyright
     needs: guard
     if: needs.guard.outputs.skip != 'true'
-    permissions:
-      contents: read
-      checks: write
-    uses: ./.github/workflows/ci-reusable.yml
-    with:
-      ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      gitleaks_base: ${{ github.event.pull_request.base.sha || '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+
+      - name: Pyright
+        run: bash .github/ci/pyright
+
+  test:
+    name: Pytest (hermetic)
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+
+      - name: Pytest (hermetic)
+        run: bash .github/ci/pytest-hermetic
+
+  test-browser:
+    name: Pytest (browser layout)
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: latest
+
+      - name: Pytest (browser layout)
+        run: bash .github/ci/pytest-browser
+
+  shellcheck:
+    name: Shellcheck
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Shellcheck
+        run: bash .github/ci/shellcheck
+
+  web-build:
+    name: Web (typecheck + build)
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Web (typecheck + build)
+        run: bash .github/ci/web-build
+
+  workflow-lint:
+    name: Workflow Lint (actionlint)
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install actionlint
+        run: |
+          curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+          sudo mv actionlint /usr/local/bin/
+
+      - name: Workflow Lint (actionlint)
+        run: bash .github/ci/workflow-lint
+
+  secret-scan:
+    name: Secret Scan
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Secret Scan
+        env:
+          GITLEAKS_BASE: ${{ github.event.pull_request.base.sha || '' }}
+          GITLEAKS_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash .github/ci/secret-scan
