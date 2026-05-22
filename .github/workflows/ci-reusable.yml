@@ -37,7 +37,7 @@ jobs:
         name: Pyright
         run: bash .github/ci/pyright
 
-      - uses: LouisBrunner/checks-action@v2.0.0
+      - uses: LouisBrunner/checks-action@v3.1.0
         if: always()
         with:
           token: ${{ github.token }}
@@ -61,7 +61,7 @@ jobs:
         name: Pytest (hermetic)
         run: bash .github/ci/pytest-hermetic
 
-      - uses: LouisBrunner/checks-action@v2.0.0
+      - uses: LouisBrunner/checks-action@v3.1.0
         if: always()
         with:
           token: ${{ github.token }}
@@ -85,7 +85,7 @@ jobs:
         name: Pytest (browser layout)
         run: bash .github/ci/pytest-browser
 
-      - uses: LouisBrunner/checks-action@v2.0.0
+      - uses: LouisBrunner/checks-action@v3.1.0
         if: always()
         with:
           token: ${{ github.token }}
@@ -108,7 +108,7 @@ jobs:
         name: Shellcheck
         run: bash .github/ci/shellcheck
 
-      - uses: LouisBrunner/checks-action@v2.0.0
+      - uses: LouisBrunner/checks-action@v3.1.0
         if: always()
         with:
           token: ${{ github.token }}
@@ -132,7 +132,7 @@ jobs:
         name: Web (typecheck + build)
         run: bash .github/ci/web-build
 
-      - uses: LouisBrunner/checks-action@v2.0.0
+      - uses: LouisBrunner/checks-action@v3.1.0
         if: always()
         with:
           token: ${{ github.token }}
@@ -157,7 +157,7 @@ jobs:
         name: Workflow Lint (actionlint)
         run: bash .github/ci/workflow-lint
 
-      - uses: LouisBrunner/checks-action@v2.0.0
+      - uses: LouisBrunner/checks-action@v3.1.0
         if: always()
         with:
           token: ${{ github.token }}
@@ -181,7 +181,7 @@ jobs:
           GITLEAKS_HEAD: ${{ inputs.ref }}
         run: bash .github/ci/secret-scan
 
-      - uses: LouisBrunner/checks-action@v2.0.0
+      - uses: LouisBrunner/checks-action@v3.1.0
         if: always()
         with:
           token: ${{ github.token }}
