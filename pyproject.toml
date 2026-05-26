@@ -44,6 +44,7 @@ dependencies = [
     "fastapi>=0.136.3",
     "gotailwind[cli]",
     "greenlet==3.5.1",
+    "httptools==0.8.0",
     "httpx>=0.28.1",
     "idna>=3.16",
     "lxml==6.1.1",
