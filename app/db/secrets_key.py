@@ -16,6 +16,20 @@ _DEFAULT_SECRETS_FILENAME = "domesti-bot.config.json"
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+def _format_json_decode_error(path: Path, text: str, exc: json.JSONDecodeError) -> str:
+    lineno = int(getattr(exc, "lineno", 0) or 0)
+    colno = int(getattr(exc, "colno", 0) or 0)
+    msg = str(getattr(exc, "msg", "") or "Invalid JSON")
+    if lineno <= 0 or colno <= 0:
+        return f"{path}: invalid JSON: {msg}"
+
+    lines = text.splitlines()
+    line = lines[lineno - 1] if 1 <= lineno <= len(lines) else ""
+    caret = (" " * max(colno - 1, 0)) + "^" if line else ""
+    snippet = f"\n{line}\n{caret}" if line else ""
+    return f"{path}: invalid JSON at line {lineno} column {colno}: {msg}{snippet}"
+
+
 def _git_repository_root() -> Path:
     """Return the checkout that owns the shared ``.git`` directory (same for all worktrees)."""
     try:
@@ -55,10 +69,11 @@ def load_secrets_key_material() -> tuple[str | None, SecretsKeySource]:
     if not path.is_file():
         return None, "none"
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        raw = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ValueError(
-            f"Expected {path} to contain JSON, got invalid JSON: {exc}"
+            f"Expected {path} to contain JSON, got {_format_json_decode_error(path, text, exc)}"
         ) from exc
     if not isinstance(raw, dict):
         raise ValueError(f"Expected {path} to contain a JSON object, got {type(raw).__name__}")
@@ -93,7 +108,8 @@ def write_secrets_json(domesti_secrets_key: str, *, path: Path | None = None) ->
     existing: dict[str, object] = {}
     if target.is_file():
         try:
-            loaded = json.loads(target.read_text(encoding="utf-8"))
+            text = target.read_text(encoding="utf-8")
+            loaded = json.loads(text)
         except json.JSONDecodeError:
             loaded = None
         if isinstance(loaded, dict):

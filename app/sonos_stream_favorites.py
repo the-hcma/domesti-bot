@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from app.db.secrets_key import secrets_json_path
+from app.db.secrets_key import _format_json_decode_error, secrets_json_path
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,30 +28,22 @@ def load_sonos_stream_favorites() -> tuple[SonosStreamFavorite, ...]:
     if not path.is_file():
         return ()
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        raw = json.loads(text)
     except json.JSONDecodeError as exc:
-        _LOGGER.warning(
-            "Skipping sonos_stream_favorites: expected valid JSON in %s, got %s",
-            path,
-            exc,
-        )
-        return ()
+        detail = _format_json_decode_error(path, text, exc)
+        raise ValueError(detail) from exc
     if not isinstance(raw, dict):
-        _LOGGER.warning(
-            "Skipping sonos_stream_favorites: expected JSON object in %s, got %s",
-            path,
-            type(raw).__name__,
+        raise ValueError(
+            f"Expected JSON object in {path}, got {type(raw).__name__}"
         )
-        return ()
     block = raw.get(_SECRETS_FAVORITES_KEY)
     if block is None:
         return ()
     if not isinstance(block, list):
-        _LOGGER.warning(
-            "Skipping sonos_stream_favorites: expected list, got %s",
-            type(block).__name__,
+        raise ValueError(
+            f"Expected {_SECRETS_FAVORITES_KEY} to be a list, got {type(block).__name__}"
         )
-        return ()
     parsed: list[SonosStreamFavorite] = []
     for index, entry in enumerate(block):
         favorite = _parse_favorite_entry(entry, index=index)

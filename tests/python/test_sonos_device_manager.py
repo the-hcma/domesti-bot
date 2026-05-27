@@ -43,7 +43,11 @@ def test_transport_state_summary_maps_soco_states() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pause_resume_invokes_soco() -> None:
+async def test_pause_resume_invokes_soco(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(tmp_path / "missing-config.json"))
     zone = MagicMock()
     zone.uid = "RINCON_TEST12345678"
     zone.player_name = "Living room"
