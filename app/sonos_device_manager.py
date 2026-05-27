@@ -156,9 +156,9 @@ class SonosSpeakerDevice(SpeakerDevice):
                 # endpoint maps to 409.
                 await self.update_playback_state()
                 raise SonosTransitionUnavailableError(
-                    f"Sonos zone {self.preferred_label!r} cannot resume — "
-                    f"the queue is empty or the zone is mid-transition. "
-                    f"Pick something to play from the Sonos app first."
+                    f"Sonos zone {self.preferred_label!r} has nothing to resume. "
+                    f"Configure a stream favorite in domesti-bot.config.json or start "
+                    f"playback from the Sonos app first."
                 ) from exc
             raise
         self._is_playing = True

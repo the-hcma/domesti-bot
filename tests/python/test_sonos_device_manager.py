@@ -455,6 +455,7 @@ async def test_resume_raises_domain_error_on_upnp_701_empty_queue() -> None:
     with pytest.raises(SonosTransitionUnavailableError) as exc_info:
         await dev.resume()
     assert "Living Room" in str(exc_info.value)
+    assert "nothing to resume" in str(exc_info.value).lower()
     assert isinstance(exc_info.value.__cause__, SoCoUPnPException)
     # Cache reflects reality after the failed action — the zone is
     # stopped, not playing.
