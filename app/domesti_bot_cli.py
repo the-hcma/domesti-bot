@@ -14,7 +14,7 @@ Credentials:
 * Tailwind **Local Control Key**: ``TAILWIND_TOKEN`` or ``--tailwind-token`` (see
   :mod:`app.gotailwind_device_manager`).
 * **Encrypted SQLite secrets** (e.g. Tailwind token saved from the web UI): Fernet key in
-  ``domesti-bot.config.json`` at the repo root (gitignored) or ``DOMESTI_SECRETS_KEY`` in the
+  ``domesti-bot.config.json`` at the repo root (gitignored) or ``DOMESTI_BOT_SECRETS_KEY`` in the
   environment. Use the ``setup-secrets`` REPL command to create the JSON file.
 
 * **Sonos**: zones on your LAN (S1-class UPnP stacks included) via optional ``soco``;
@@ -441,10 +441,10 @@ async def _repl_cmd_setup_secrets(
         f"{theme.header('Secrets file')} "
         f"{theme.dim(f'({path})')}"
     )
-    if (os.environ.get("DOMESTI_SECRETS_KEY") or "").strip():
+    if (os.environ.get("DOMESTI_BOT_SECRETS_KEY") or "").strip():
         print(
             theme.warn(
-                "DOMESTI_SECRETS_KEY is set in the environment and overrides the JSON file."
+                "DOMESTI_BOT_SECRETS_KEY is set in the environment and overrides the JSON file."
             )
         )
     if path.is_file():

@@ -275,7 +275,7 @@ class TailwindTokenSettingsOut(BaseModel):
     )
     secrets_key_source: SecretsKeySourceOut = Field(
         ...,
-        description="``env`` → ``DOMESTI_SECRETS_KEY``; ``file`` → ``domesti-bot.config.json`` at repo root.",
+        description="``env`` → ``DOMESTI_BOT_SECRETS_KEY``; ``file`` → ``domesti-bot.config.json`` at repo root.",
     )
     stored_in_database: bool = Field(
         ...,

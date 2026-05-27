@@ -48,7 +48,7 @@ def generate_fernet_key() -> str:
 
 def load_secrets_key_material() -> tuple[str | None, SecretsKeySource]:
     """Return ``(key material, source)`` without validating Fernet encoding."""
-    env = (os.environ.get("DOMESTI_SECRETS_KEY") or "").strip()
+    env = (os.environ.get("DOMESTI_BOT_SECRETS_KEY") or "").strip()
     if env:
         return env, "env"
     path = secrets_json_path()
@@ -70,8 +70,8 @@ def load_secrets_key_material() -> tuple[str | None, SecretsKeySource]:
 
 
 def secrets_json_path() -> Path:
-    """Path to the gitignored config file (override with ``DOMESTI_CONFIG_FILE``)."""
-    override = (os.environ.get("DOMESTI_CONFIG_FILE") or "").strip()
+    """Path to the gitignored config file (override with ``DOMESTI_BOT_CONFIG_FILE``)."""
+    override = (os.environ.get("DOMESTI_BOT_CONFIG_FILE") or "").strip()
     if override:
         return Path(override).expanduser().resolve()
     return _git_repository_root() / _DEFAULT_SECRETS_FILENAME

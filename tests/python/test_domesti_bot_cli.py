@@ -241,8 +241,8 @@ async def test_repl_setup_secrets_writes_json_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     secrets_file = tmp_path / "domesti-bot.config.json"
-    monkeypatch.setenv("DOMESTI_CONFIG_FILE", str(secrets_file))
-    monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(secrets_file))
+    monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
 
     async def prompt(_message: str, _is_password: bool) -> str:
         return ""

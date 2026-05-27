@@ -37,7 +37,7 @@ def test_load_sonos_stream_favorites_from_secrets_file(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("DOMESTI_CONFIG_FILE", str(secrets))
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(secrets))
 
     favorites = load_sonos_stream_favorites()
     assert len(favorites) == 2

@@ -79,7 +79,7 @@ async def test_resume_uses_play_uri_when_stream_favorites_configured(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("DOMESTI_CONFIG_FILE", str(secrets))
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(secrets))
 
     zone = MagicMock()
     zone.uid = "RINCON_TEST12345678"

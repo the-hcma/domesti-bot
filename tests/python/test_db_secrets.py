@@ -31,7 +31,7 @@ from app.tailwind_credentials import resolve_tailwind_token
 @pytest.fixture
 def fernet_key(monkeypatch: pytest.MonkeyPatch) -> str:
     key = Fernet.generate_key().decode("ascii")
-    monkeypatch.setenv("DOMESTI_SECRETS_KEY", key)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", key)
     return key
 
 
@@ -52,8 +52,8 @@ def test_secrets_json_path_uses_git_repository_root(
     repo_secrets.write_text(
         json.dumps({"domesti_secrets_key": key}), encoding="utf-8"
     )
-    monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
-    monkeypatch.delenv("DOMESTI_CONFIG_FILE", raising=False)
+    monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
+    monkeypatch.delenv("DOMESTI_BOT_CONFIG_FILE", raising=False)
     monkeypatch.setattr("app.db.secrets_key._REPO_ROOT", worktree)
     monkeypatch.setattr(
         "app.db.secrets_key._git_repository_root",
@@ -71,8 +71,8 @@ def test_secrets_key_from_json_file(
     secrets_file.write_text(
         json.dumps({"domesti_secrets_key": key}), encoding="utf-8"
     )
-    monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
-    monkeypatch.setenv("DOMESTI_CONFIG_FILE", str(secrets_file))
+    monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(secrets_file))
     material, source = load_secrets_key_material()
     assert material == key
     assert source == "file"
@@ -134,8 +134,8 @@ def test_save_without_secrets_key_raises(
 ) -> None:
     worktree = tmp_path / "wt"
     worktree.mkdir()
-    monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
-    monkeypatch.delenv("DOMESTI_CONFIG_FILE", raising=False)
+    monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
+    monkeypatch.delenv("DOMESTI_BOT_CONFIG_FILE", raising=False)
     monkeypatch.setattr("app.db.secrets_key._REPO_ROOT", worktree)
     monkeypatch.setattr("app.db.secrets_key._git_repository_root", lambda: worktree)
     db = tmp_path / "secrets.sqlite"
@@ -147,9 +147,9 @@ def test_load_with_wrong_key_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db = tmp_path / "secrets.sqlite"
-    monkeypatch.setenv("DOMESTI_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     save_tailwind_token_to_db(db, "123456")
-    monkeypatch.setenv("DOMESTI_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     with pytest.raises(SecretsDecryptError):
         load_tailwind_token_from_db(db)
 

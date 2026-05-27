@@ -100,14 +100,14 @@ startups are fast.
 ### `domesti-bot.config.json`
 
 Some features read a small gitignored JSON config file at the repo root:
-`domesti-bot.config.json` (override with `DOMESTI_CONFIG_FILE`). A template is
+`domesti-bot.config.json` (override with `DOMESTI_BOT_CONFIG_FILE`). A template is
 committed at `domesti-bot.config.json.example`.
 
 Supported keys:
 
 - `domesti_secrets_key` (string): Fernet master key for encrypting secrets stored
   in SQLite (used when saving Tailwind tokens from the web UI). This must be a
-  valid url-safe base64 Fernet key. Precedence: `DOMESTI_SECRETS_KEY` env →
+  valid url-safe base64 Fernet key. Precedence: `DOMESTI_BOT_SECRETS_KEY` env →
   `domesti_secrets_key` in this file.
 - `sonos_stream_favorites` (list): global radio stream favorites used when
   resuming Sonos playback.
@@ -123,8 +123,8 @@ Optional environment variables:
 | `DOMESTI_LISTEN_PORT` | Default TCP port. `0` = OS-allocated (the dev default). |
 | `KASA_USERNAME` / `KASA_PASSWORD` | TP-Link cloud credentials for KLAP-encrypted devices (Tapo / newer Kasa). Required only if you have at least one such device. |
 | `TAILWIND_TOKEN` | GoTailwind Local Control Key (six-digit code from the Tailwind dashboard). Overrides the encrypted DB copy when set. |
-| `DOMESTI_SECRETS_KEY` | Fernet master key for encrypted SQLite secrets. Overrides `domesti-bot.config.json` when set. |
-| `DOMESTI_CONFIG_FILE` | Override path to the config JSON file (default: `./domesti-bot.config.json` at repo root). |
+| `DOMESTI_BOT_SECRETS_KEY` | Fernet master key for encrypted SQLite secrets. Overrides `domesti-bot.config.json` when set. |
+| `DOMESTI_BOT_CONFIG_FILE` | Override path to the config JSON file (default: `./domesti-bot.config.json` at repo root). |
 
 Pass `--help` to either script for the complete flag list.
 
@@ -157,7 +157,7 @@ UI), configure a Fernet master key:
 
 **Precedence for the Tailwind token:** `--tailwind-token` → `TAILWIND_TOKEN`
 env → encrypted row in SQLite. **Precedence for the Fernet key:**
-`DOMESTI_SECRETS_KEY` env → `domesti_secrets_key` in `domesti-bot.config.json`.
+`DOMESTI_BOT_SECRETS_KEY` env → `domesti_secrets_key` in `domesti-bot.config.json`.
 
 For systemd, you can still use `EnvironmentFile=` for `TAILWIND_TOKEN` instead
 of the database path; see [`docs/AGENTS.md`](docs/AGENTS.md) for security notes.
