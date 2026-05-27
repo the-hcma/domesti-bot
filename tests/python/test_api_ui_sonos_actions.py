@@ -85,6 +85,7 @@ class _FakeSonosZone:
         self.identifier = identifier
         self.preferred_label = label
         self.is_playing = is_playing
+        self.stream_favorites: tuple = ()
         self.calls: list[str] = []
         self._raise_on = raise_transition_unavailable_on
 
@@ -97,8 +98,8 @@ class _FakeSonosZone:
             )
         self.is_playing = False
 
-    async def resume(self) -> None:
-        self.calls.append("resume")
+    async def resume(self, *, favorite_index: int = 0) -> None:
+        self.calls.append(f"resume:{favorite_index}")
         if self._raise_on == "resume":
             self.is_playing = False
             raise SonosTransitionUnavailableError(
@@ -332,7 +333,7 @@ def test_post_sonos_toggle_resumes_zone() -> None:
     assert r.status_code == HTTPStatus.OK
     assert r.json()["device"]["state"] == "playing"
     assert zone.is_playing is True
-    assert zone.calls == ["resume"]
+    assert zone.calls == ["resume:0"]
 
 
 def test_post_sonos_toggle_returns_409_when_resume_hits_upnp_transition_error() -> None:
@@ -364,7 +365,7 @@ def test_post_sonos_toggle_returns_409_when_resume_hits_upnp_transition_error() 
     # the exception escaped, so a subsequent ``GET /v1/ui/state`` (or
     # the front-end's failure-path refresh) sees the right answer.
     assert zone.is_playing is False
-    assert zone.calls == ["resume"]
+    assert zone.calls == ["resume:0"]
 
 
 def test_post_sonos_toggle_returns_409_when_pause_hits_upnp_transition_error() -> None:

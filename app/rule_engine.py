@@ -139,8 +139,8 @@ class SpeakerDevice(Device, ABC):
         """Pause whatever is currently playing."""
 
     @abstractmethod
-    async def resume(self) -> None:
-        """Resume the last transport state (typically unpause / continue queue)."""
+    async def resume(self, *, favorite_index: int = 0) -> None:
+        """Resume playback (optionally from a configured stream favorite)."""
 
 
 class SwitchDevice(Device, ABC):

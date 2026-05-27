@@ -50,6 +50,13 @@ class MetaOut(BaseModel):
     )
 
 
+class UISonosStreamFavoriteOut(BaseModel):
+    """One configured Sonos radio stream favorite."""
+
+    name: str = Field(..., description="Human-readable station label.")
+    uri: str = Field(..., description="Direct HTTP(S) stream URI for ``play_uri``.")
+
+
 class UIDeviceOut(BaseModel):
     """One tile on the landing page.
 
@@ -94,6 +101,13 @@ class UIDeviceOut(BaseModel):
     exclude_from_global: bool = Field(
         default=False,
         description="True → skip this device on global turn-off/close-all.",
+    )
+    stream_favorites: list[UISonosStreamFavoriteOut] = Field(
+        default_factory=list,
+        description=(
+            "Configured radio streams for Sonos zones (empty for other families). "
+            "Resume uses ``favorite_index`` into this list."
+        ),
     )
 
 
@@ -185,6 +199,14 @@ class UISonosSetIn(BaseModel):
     playing: bool = Field(
         ...,
         description="``True`` → resume (play); ``False`` → pause.",
+    )
+    favorite_index: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "When ``playing`` is ``True``, which configured stream favorite to "
+            "play (``0`` = first entry in ``domesti-secrets.json``)."
+        ),
     )
 
 

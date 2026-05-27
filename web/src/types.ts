@@ -19,6 +19,11 @@ export type UIDeviceState =
   | "closed"
   | "unknown";
 
+export interface UISonosStreamFavoriteOut {
+  name: string;
+  uri: string;
+}
+
 export interface UIDeviceOut {
   id: string;
   family_id: string;
@@ -28,6 +33,8 @@ export interface UIDeviceOut {
   /** Server-resolved compact-tile SVG key (bulb, outlet, garage, speaker, …). */
   compact_icon: string;
   exclude_from_global: boolean;
+  /** Configured radio streams for Sonos zones (empty for other families). */
+  stream_favorites: UISonosStreamFavoriteOut[];
 }
 
 export interface UIFamilyOut {

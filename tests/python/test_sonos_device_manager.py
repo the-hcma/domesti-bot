@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -56,6 +57,47 @@ async def test_pause_resume_invokes_soco() -> None:
 
     await mgr.resume("Living room")
     zone.play.assert_called_once()
+    zone.play_uri.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resume_uses_play_uri_when_stream_favorites_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    secrets = tmp_path / "domesti-secrets.json"
+    secrets.write_text(
+        json.dumps(
+            {
+                "sonos_stream_favorites": {
+                    "Living room": [
+                        {
+                            "name": "Alvorada FM",
+                            "uri": "https://example.com/stream.aac",
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DOMESTI_SECRETS_FILE", str(secrets))
+
+    zone = MagicMock()
+    zone.uid = "RINCON_TEST12345678"
+    zone.player_name = "Living room"
+
+    mgr = SonosDeviceManager(discovery_timeout=0.1)
+    with patch("app.sonos_device_manager.soco_discover", return_value={zone}):
+        await mgr.fetch()
+
+    await mgr.resume("Living room", favorite_index=0)
+    zone.play_uri.assert_called_once_with(
+        "https://example.com/stream.aac",
+        title="Alvorada FM",
+        force_radio=True,
+    )
+    zone.play.assert_not_called()
 
 
 @pytest.mark.asyncio

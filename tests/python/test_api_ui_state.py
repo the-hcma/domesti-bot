@@ -440,4 +440,5 @@ def test_ui_state_out_is_a_pydantic_model_with_expected_fields() -> None:
         "state",
         "compact_icon",
         "exclude_from_global",
+        "stream_favorites",
     }

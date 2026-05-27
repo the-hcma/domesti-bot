@@ -28,7 +28,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from app import kasa_discovery_store
-from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
+from app.api.schemas import UIDeviceOut, UIFamilyOut, UISonosStreamFavoriteOut, UIStateOut
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
@@ -270,10 +270,21 @@ def _sonos_devices(
                     kind="speaker",
                 ),
                 exclude_from_global=key in excluded,
+                stream_favorites=_sonos_stream_favorites_out(sp),
             )
         )
     out.sort(key=lambda d: (d.label.lower(), d.id))
     return out
+
+
+def _sonos_stream_favorites_out(
+    sp: SonosSpeakerDevice,
+) -> list[UISonosStreamFavoriteOut]:
+    favorites = getattr(sp, "stream_favorites", ())
+    return [
+        UISonosStreamFavoriteOut(name=favorite.name, uri=favorite.uri)
+        for favorite in favorites
+    ]
 
 
 def _sonos_state(is_playing: bool | None) -> str:
@@ -401,6 +412,7 @@ def build_sonos_device_view(
             kind="speaker",
         ),
         exclude_from_global=device_id in excluded,
+        stream_favorites=_sonos_stream_favorites_out(sp),
     )
 
 

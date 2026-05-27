@@ -27,6 +27,11 @@ from soco.exceptions import SoCoUPnPException
 from app import kasa_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SpeakerDeviceManager
 from app.rule_engine import SpeakerDevice
+from app.sonos_stream_favorites import (
+    SonosStreamFavorite,
+    favorites_for_zone,
+    load_sonos_stream_favorites_config,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +64,7 @@ class SonosTransitionUnavailableError(Exception):
 
 
 class SonosSpeakerDevice(SpeakerDevice):
-    __slots__ = ("_is_playing", "_soco")
+    __slots__ = ("_is_playing", "_soco", "_stream_favorites")
 
     def __init__(
         self,
@@ -67,9 +72,11 @@ class SonosSpeakerDevice(SpeakerDevice):
         soco_zone: Any,
         *,
         display_name: str | None = None,
+        stream_favorites: tuple[SonosStreamFavorite, ...] = (),
     ) -> None:
         super().__init__(identifier, display_name=display_name)
         self._soco = soco_zone
+        self._stream_favorites = stream_favorites
         # Tri-state cache: ``True``/``False`` once we've successfully read
         # the transport state at least once, ``None`` while we still don't
         # know. The UI maps the three values to ``playing`` / ``paused`` /
@@ -109,7 +116,34 @@ class SonosSpeakerDevice(SpeakerDevice):
         # state is more accurate than a re-poll racing the transition.
         self._is_playing = False
 
-    async def resume(self) -> None:
+    async def resume(self, *, favorite_index: int = 0) -> None:
+        favorite: SonosStreamFavorite | None = None
+        if self._stream_favorites:
+            if favorite_index < 0 or favorite_index >= len(self._stream_favorites):
+                raise ValueError(
+                    f"Expected favorite_index in 0..{len(self._stream_favorites) - 1}, "
+                    f"got {favorite_index}"
+                )
+            favorite = self._stream_favorites[favorite_index]
+        if favorite is not None:
+            try:
+                await asyncio.to_thread(
+                    self._soco.play_uri,
+                    favorite.uri,
+                    title=favorite.name,
+                    force_radio=True,
+                )
+            except SoCoUPnPException as exc:
+                if str(getattr(exc, "error_code", "")) == _SONOS_UPNP_TRANSITION_UNAVAILABLE:
+                    await self.update_playback_state()
+                    raise SonosTransitionUnavailableError(
+                        f"Sonos zone {self.preferred_label!r} cannot resume "
+                        f"{favorite.name!r} — the stream may be unavailable or the "
+                        f"zone is mid-transition."
+                    ) from exc
+                raise
+            self._is_playing = True
+            return
         try:
             await asyncio.to_thread(self._soco.play)
         except SoCoUPnPException as exc:
@@ -128,6 +162,12 @@ class SonosSpeakerDevice(SpeakerDevice):
                 ) from exc
             raise
         self._is_playing = True
+
+    @property
+    def stream_favorites(self) -> tuple[SonosStreamFavorite, ...]:
+        """Configured radio streams for this zone (from ``domesti-secrets.json``)."""
+
+        return self._stream_favorites
 
     def transport_state_summary(self) -> str:
         """Best-effort playback view from UPnP AV transport (``playing`` / ``paused`` / …).
@@ -197,6 +237,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             else None
         )
         self._force_discovery = bool(force_discovery)
+        self._stream_favorites_config = load_sonos_stream_favorites_config()
         # Set by :meth:`fetch` to ``"cache"`` (every cached zone reconnected
         # with a matching UID, no UDP traffic) or ``"discovery"`` (full
         # ``soco_discover`` UDP sweep). ``None`` before the first ``fetch``.
@@ -282,8 +323,27 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 live_name = ""
             cached_label = (cached_name or "").strip()
             label = live_name or cached_label or uid
-            devices.append(SonosSpeakerDevice(uid, zone, display_name=label))
+            devices.append(self._speaker_device(uid, zone, display_name=label))
         return devices
+
+    def _speaker_device(
+        self,
+        uid: str,
+        zone: Any,
+        *,
+        display_name: str,
+    ) -> SonosSpeakerDevice:
+        favorites = favorites_for_zone(
+            self._stream_favorites_config,
+            zone_uid=uid,
+            zone_name=display_name,
+        )
+        return SonosSpeakerDevice(
+            uid,
+            zone,
+            display_name=display_name,
+            stream_favorites=favorites,
+        )
 
     async def disconnect(self) -> None:
         self._alias_to_device = None
@@ -314,7 +374,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         for z in zones:
             uid = getattr(z, "uid", None) or str(id(z))
             name = (getattr(z, "player_name", None) or "").strip() or uid
-            sd = SonosSpeakerDevice(uid, z, display_name=name)
+            sd = self._speaker_device(uid, z, display_name=name)
             devices.append(sd)
         self._finalize(devices)
         self._persist_cache(devices)
@@ -389,5 +449,5 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         finally:
             self._force_discovery = previous
 
-    async def resume(self, identifier: str) -> None:
-        await self._device_for(identifier).resume()
+    async def resume(self, identifier: str, *, favorite_index: int = 0) -> None:
+        await self._device_for(identifier).resume(favorite_index=favorite_index)

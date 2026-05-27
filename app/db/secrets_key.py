@@ -90,7 +90,15 @@ def write_secrets_json(domesti_secrets_key: str, *, path: Path | None = None) ->
         ) from exc
     target = (path or secrets_json_path()).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"domesti_secrets_key": key}
+    existing: dict[str, object] = {}
+    if target.is_file():
+        try:
+            loaded = json.loads(target.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            loaded = None
+        if isinstance(loaded, dict):
+            existing = loaded
+    payload = {**existing, "domesti_secrets_key": key}
     target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     os.chmod(target, 0o600)
     return target

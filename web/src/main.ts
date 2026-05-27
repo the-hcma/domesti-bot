@@ -356,7 +356,11 @@ class DomestiBotController {
     );
     this.render();
     try {
-      await api.toggleSonos(device.id, nextPlaying);
+      // Resume requests always use favorite_index 0 (first entry in
+      // domesti-secrets.json → sonos_stream_favorites for this zone).
+      const favoriteIndex =
+        nextPlaying && device.stream_favorites.length > 0 ? 0 : 0;
+      await api.toggleSonos(device.id, nextPlaying, favoriteIndex);
     } catch (err) {
       this.clearPendingPrediction(device.family_id, device.id);
       if (err instanceof HttpError && err.status === 409) {
