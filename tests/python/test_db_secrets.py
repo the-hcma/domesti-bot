@@ -48,12 +48,12 @@ def test_secrets_json_path_uses_git_repository_root(
     repo_root.mkdir(parents=True)
     worktree.mkdir(parents=True)
     key = Fernet.generate_key().decode("ascii")
-    repo_secrets = repo_root / "domesti-secrets.json"
+    repo_secrets = repo_root / "domesti-bot.config.json"
     repo_secrets.write_text(
         json.dumps({"domesti_secrets_key": key}), encoding="utf-8"
     )
     monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
-    monkeypatch.delenv("DOMESTI_SECRETS_FILE", raising=False)
+    monkeypatch.delenv("DOMESTI_CONFIG_FILE", raising=False)
     monkeypatch.setattr("app.db.secrets_key._REPO_ROOT", worktree)
     monkeypatch.setattr(
         "app.db.secrets_key._git_repository_root",
@@ -67,12 +67,12 @@ def test_secrets_key_from_json_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     key = Fernet.generate_key().decode("ascii")
-    secrets_file = tmp_path / "domesti-secrets.json"
+    secrets_file = tmp_path / "domesti-bot.config.json"
     secrets_file.write_text(
         json.dumps({"domesti_secrets_key": key}), encoding="utf-8"
     )
     monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
-    monkeypatch.setenv("DOMESTI_SECRETS_FILE", str(secrets_file))
+    monkeypatch.setenv("DOMESTI_CONFIG_FILE", str(secrets_file))
     material, source = load_secrets_key_material()
     assert material == key
     assert source == "file"
@@ -82,7 +82,7 @@ def test_secrets_key_from_json_file(
 
 def test_write_secrets_json_sets_mode_600(tmp_path: Path) -> None:
     key = generate_fernet_key()
-    target = tmp_path / "domesti-secrets.json"
+    target = tmp_path / "domesti-bot.config.json"
     written = write_secrets_json(key, path=target)
     assert written == target
     assert oct(target.stat().st_mode & 0o777) == "0o600"
@@ -92,7 +92,7 @@ def test_write_secrets_json_sets_mode_600(tmp_path: Path) -> None:
 
 def test_write_secrets_json_preserves_sonos_stream_favorites(tmp_path: Path) -> None:
     key = generate_fernet_key()
-    target = tmp_path / "domesti-secrets.json"
+    target = tmp_path / "domesti-bot.config.json"
     target.write_text(
         json.dumps(
             {
@@ -135,7 +135,7 @@ def test_save_without_secrets_key_raises(
     worktree = tmp_path / "wt"
     worktree.mkdir()
     monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
-    monkeypatch.delenv("DOMESTI_SECRETS_FILE", raising=False)
+    monkeypatch.delenv("DOMESTI_CONFIG_FILE", raising=False)
     monkeypatch.setattr("app.db.secrets_key._REPO_ROOT", worktree)
     monkeypatch.setattr("app.db.secrets_key._git_repository_root", lambda: worktree)
     db = tmp_path / "secrets.sqlite"

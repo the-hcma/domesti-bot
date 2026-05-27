@@ -19,7 +19,7 @@ def test_load_sonos_stream_favorites_from_secrets_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    secrets = tmp_path / "domesti-secrets.json"
+    secrets = tmp_path / "domesti-bot.config.json"
     secrets.write_text(
         json.dumps(
             {
@@ -42,7 +42,7 @@ def test_load_sonos_stream_favorites_from_secrets_file(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("DOMESTI_SECRETS_FILE", str(secrets))
+    monkeypatch.setenv("DOMESTI_CONFIG_FILE", str(secrets))
 
     config = load_sonos_stream_favorites_config()
     assert list(config.keys()) == ["Kitchen", "*"]

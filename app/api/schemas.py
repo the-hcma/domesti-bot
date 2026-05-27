@@ -205,7 +205,7 @@ class UISonosSetIn(BaseModel):
         ge=0,
         description=(
             "When ``playing`` is ``True``, which configured stream favorite to "
-            "play (``0`` = first entry in ``domesti-secrets.json``)."
+            "play (``0`` = first entry in ``domesti-bot.config.json``)."
         ),
     )
 
@@ -271,11 +271,11 @@ class TailwindTokenSettingsOut(BaseModel):
     )
     secrets_key_configured: bool = Field(
         ...,
-        description="True when a valid Fernet key is available (environment or ``domesti-secrets.json``).",
+        description="True when a valid Fernet key is available (environment or ``domesti-bot.config.json``).",
     )
     secrets_key_source: SecretsKeySourceOut = Field(
         ...,
-        description="``env`` → ``DOMESTI_SECRETS_KEY``; ``file`` → ``domesti-secrets.json`` at repo root.",
+        description="``env`` → ``DOMESTI_SECRETS_KEY``; ``file`` → ``domesti-bot.config.json`` at repo root.",
     )
     stored_in_database: bool = Field(
         ...,

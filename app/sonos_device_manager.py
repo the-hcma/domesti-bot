@@ -165,7 +165,7 @@ class SonosSpeakerDevice(SpeakerDevice):
 
     @property
     def stream_favorites(self) -> tuple[SonosStreamFavorite, ...]:
-        """Configured radio streams for this zone (from ``domesti-secrets.json``)."""
+        """Configured radio streams for this zone (from ``domesti-bot.config.json``)."""
 
         return self._stream_favorites
 

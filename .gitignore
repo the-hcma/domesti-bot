@@ -18,8 +18,8 @@ __pycache__/
 logs/
 *.log
 
-# Fernet master key for encrypted SQLite secrets (see domesti-secrets.json.example).
-domesti-secrets.json
+# Fernet master key for encrypted SQLite secrets (see domesti-bot.config.json.example).
+domesti-bot.config.json
 
 # Web bundle: source lives under web/, built output under app/api/static/dist/.
 # The dist/ directory is rebuilt by `pnpm run build` (locally, in CI, and via

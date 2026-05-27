@@ -240,8 +240,8 @@ def test_print_family_parallel_line_falls_back_to_bare_ready_without_source_or_c
 async def test_repl_setup_secrets_writes_json_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    secrets_file = tmp_path / "domesti-secrets.json"
-    monkeypatch.setenv("DOMESTI_SECRETS_FILE", str(secrets_file))
+    secrets_file = tmp_path / "domesti-bot.config.json"
+    monkeypatch.setenv("DOMESTI_CONFIG_FILE", str(secrets_file))
     monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
 
     async def prompt(_message: str, _is_password: bool) -> str:

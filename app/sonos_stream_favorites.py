@@ -1,4 +1,4 @@
-"""Per-zone Sonos radio stream favorites loaded from ``domesti-secrets.json``."""
+"""Per-zone Sonos radio stream favorites loaded from ``domesti-bot.config.json``."""
 
 from __future__ import annotations
 

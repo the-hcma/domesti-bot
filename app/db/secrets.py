@@ -118,7 +118,7 @@ def _require_fernet() -> Fernet:
     fernet = _fernet_from_config()
     if fernet is None:
         raise SecretsConfigurationError(
-            "Expected domesti_secrets_key in domesti-secrets.json at the repo root "
+            "Expected domesti_secrets_key in domesti-bot.config.json at the repo root "
             "(gitignored) or DOMESTI_SECRETS_KEY in the environment before storing "
             "encrypted secrets"
         )
