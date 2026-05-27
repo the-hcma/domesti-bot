@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.0](https://github.com/the-hcma/domesti-bot/compare/v0.1.4...v1.0.0) (2026-05-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* resume Sonos zones from stream favorites ([#143](https://github.com/the-hcma/domesti-bot/issues/143))
+
+### Features
+
+* resume Sonos zones from domesti-secrets stream favorites ([#141](https://github.com/the-hcma/domesti-bot/issues/141)) ([140dbcf](https://github.com/the-hcma/domesti-bot/commit/140dbcfdb963e0241e6695e72c2e06db54cc6ef6))
+* resume Sonos zones from stream favorites ([#143](https://github.com/the-hcma/domesti-bot/issues/143)) ([67690f2](https://github.com/the-hcma/domesti-bot/commit/67690f2856f6ecf84aac0b6d2eacc585ded9bf28))
+
 ## [0.1.4](https://github.com/the-hcma/domesti-bot/compare/v0.1.3...v0.1.4) (2026-05-21)
 
 
