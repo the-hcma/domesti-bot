@@ -1,0 +1,13 @@
+{
+  "domesti_secrets_key": "REPLACE_WITH_FERNET_KEY",
+  "sonos_stream_favorites": [
+    {
+      "name": "Rádio Alvorada FM 94.9",
+      "uri": "https://playerservices.streamtheworld.com/api/livestream-redirect/RADIO_ALVORADAAAC.aac"
+    },
+    {
+      "name": "Jazz24",
+      "uri": "https://knkx-live-a.edge.audiocdn.com/6285_256k"
+    }
+  ]
+}

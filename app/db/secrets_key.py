@@ -1,4 +1,4 @@
-"""Resolve the Fernet master key from environment or ``domesti-secrets.json``."""
+"""Resolve the Fernet master key from environment or ``domesti-bot.config.json``."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from cryptography.fernet import Fernet
 
 SecretsKeySource = Literal["env", "file", "none"]
 
-_DEFAULT_SECRETS_FILENAME = "domesti-secrets.json"
+_DEFAULT_SECRETS_FILENAME = "domesti-bot.config.json"
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -48,7 +48,7 @@ def generate_fernet_key() -> str:
 
 def load_secrets_key_material() -> tuple[str | None, SecretsKeySource]:
     """Return ``(key material, source)`` without validating Fernet encoding."""
-    env = (os.environ.get("DOMESTI_SECRETS_KEY") or "").strip()
+    env = (os.environ.get("DOMESTI_BOT_SECRETS_KEY") or "").strip()
     if env:
         return env, "env"
     path = secrets_json_path()
@@ -70,15 +70,15 @@ def load_secrets_key_material() -> tuple[str | None, SecretsKeySource]:
 
 
 def secrets_json_path() -> Path:
-    """Path to the gitignored secrets file (override with ``DOMESTI_SECRETS_FILE``)."""
-    override = (os.environ.get("DOMESTI_SECRETS_FILE") or "").strip()
+    """Path to the gitignored config file (override with ``DOMESTI_BOT_CONFIG_FILE``)."""
+    override = (os.environ.get("DOMESTI_BOT_CONFIG_FILE") or "").strip()
     if override:
         return Path(override).expanduser().resolve()
     return _git_repository_root() / _DEFAULT_SECRETS_FILENAME
 
 
 def write_secrets_json(domesti_secrets_key: str, *, path: Path | None = None) -> Path:
-    """Write ``domesti-secrets.json`` (mode ``0600``) after validating the Fernet key."""
+    """Write ``domesti-bot.config.json`` (mode ``0600``) after validating the Fernet key."""
     key = domesti_secrets_key.strip()
     if not key:
         raise ValueError("Expected a non-empty domesti_secrets_key, got whitespace only")

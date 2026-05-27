@@ -65,23 +65,21 @@ async def test_resume_uses_play_uri_when_stream_favorites_configured(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    secrets = tmp_path / "domesti-secrets.json"
+    secrets = tmp_path / "domesti-bot.config.json"
     secrets.write_text(
         json.dumps(
             {
-                "sonos_stream_favorites": {
-                    "Living room": [
-                        {
-                            "name": "Alvorada FM",
-                            "uri": "https://example.com/stream.aac",
-                        }
-                    ]
-                }
+                "sonos_stream_favorites": [
+                    {
+                        "name": "Alvorada FM",
+                        "uri": "https://example.com/stream.aac",
+                    }
+                ]
             }
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("DOMESTI_SECRETS_FILE", str(secrets))
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(secrets))
 
     zone = MagicMock()
     zone.uid = "RINCON_TEST12345678"
@@ -455,6 +453,7 @@ async def test_resume_raises_domain_error_on_upnp_701_empty_queue() -> None:
     with pytest.raises(SonosTransitionUnavailableError) as exc_info:
         await dev.resume()
     assert "Living Room" in str(exc_info.value)
+    assert "nothing to resume" in str(exc_info.value).lower()
     assert isinstance(exc_info.value.__cause__, SoCoUPnPException)
     # Cache reflects reality after the failed action — the zone is
     # stopped, not playing.

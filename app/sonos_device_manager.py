@@ -27,11 +27,7 @@ from soco.exceptions import SoCoUPnPException
 from app import kasa_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SpeakerDeviceManager
 from app.rule_engine import SpeakerDevice
-from app.sonos_stream_favorites import (
-    SonosStreamFavorite,
-    favorites_for_zone,
-    load_sonos_stream_favorites_config,
-)
+from app.sonos_stream_favorites import SonosStreamFavorite, load_sonos_stream_favorites
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -156,16 +152,16 @@ class SonosSpeakerDevice(SpeakerDevice):
                 # endpoint maps to 409.
                 await self.update_playback_state()
                 raise SonosTransitionUnavailableError(
-                    f"Sonos zone {self.preferred_label!r} cannot resume — "
-                    f"the queue is empty or the zone is mid-transition. "
-                    f"Pick something to play from the Sonos app first."
+                    f"Sonos zone {self.preferred_label!r} has nothing to resume. "
+                    f"Configure a stream favorite in domesti-bot.config.json or start "
+                    f"playback from the Sonos app first."
                 ) from exc
             raise
         self._is_playing = True
 
     @property
     def stream_favorites(self) -> tuple[SonosStreamFavorite, ...]:
-        """Configured radio streams for this zone (from ``domesti-secrets.json``)."""
+        """Configured radio streams for this zone (from ``domesti-bot.config.json``)."""
 
         return self._stream_favorites
 
@@ -237,7 +233,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             else None
         )
         self._force_discovery = bool(force_discovery)
-        self._stream_favorites_config = load_sonos_stream_favorites_config()
+        self._stream_favorites = load_sonos_stream_favorites()
         # Set by :meth:`fetch` to ``"cache"`` (every cached zone reconnected
         # with a matching UID, no UDP traffic) or ``"discovery"`` (full
         # ``soco_discover`` UDP sweep). ``None`` before the first ``fetch``.
@@ -333,16 +329,11 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         *,
         display_name: str,
     ) -> SonosSpeakerDevice:
-        favorites = favorites_for_zone(
-            self._stream_favorites_config,
-            zone_uid=uid,
-            zone_name=display_name,
-        )
         return SonosSpeakerDevice(
             uid,
             zone,
             display_name=display_name,
-            stream_favorites=favorites,
+            stream_favorites=self._stream_favorites,
         )
 
     async def disconnect(self) -> None:

@@ -42,7 +42,7 @@ def test_put_tailwind_token_persists_when_secrets_key_from_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
-    monkeypatch.setenv("DOMESTI_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
     r = client.put("/v1/settings/tailwind-token", json={"token": "123456"})
@@ -55,11 +55,11 @@ def test_put_tailwind_token_persists_when_secrets_key_in_json_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
-    monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
+    monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
     key = Fernet.generate_key().decode("ascii")
-    secrets_file = tmp_path / "domesti-secrets.json"
+    secrets_file = tmp_path / "domesti-bot.config.json"
     secrets_file.write_text(json.dumps({"domesti_secrets_key": key}), encoding="utf-8")
-    monkeypatch.setenv("DOMESTI_SECRETS_FILE", str(secrets_file))
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(secrets_file))
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
     r = client.put("/v1/settings/tailwind-token", json={"token": "123456"})
@@ -79,13 +79,13 @@ def test_put_tailwind_token_persists_when_secrets_key_in_json_file(
 def test_put_tailwind_token_without_secrets_key_returns_503(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.delenv("DOMESTI_SECRETS_KEY", raising=False)
-    monkeypatch.setenv("DOMESTI_SECRETS_FILE", str(tmp_path / "missing-secrets.json"))
+    monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(tmp_path / "missing-config.json"))
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     r = client.put("/v1/settings/tailwind-token", json={"token": "123456"})
     assert r.status_code == HTTPStatus.SERVICE_UNAVAILABLE
-    assert "domesti-secrets.json" in r.json()["detail"]
+    assert "domesti-bot.config.json" in r.json()["detail"]
 
 
 def test_put_tailwind_token_without_cache_returns_409(tmp_path: Path) -> None:
@@ -100,7 +100,7 @@ def test_delete_tailwind_token_clears_database_row(
 ) -> None:
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
     key = Fernet.generate_key().decode("ascii")
-    monkeypatch.setenv("DOMESTI_SECRETS_KEY", key)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", key)
     db = tmp_path / "ui.sqlite"
     save_tailwind_token_to_db(db, "123456")
     client, _app = _client(cache_path=db)
