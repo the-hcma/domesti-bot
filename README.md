@@ -109,11 +109,8 @@ Supported keys:
   in SQLite (used when saving Tailwind tokens from the web UI). This must be a
   valid url-safe base64 Fernet key. Precedence: `DOMESTI_SECRETS_KEY` env →
   `domesti_secrets_key` in this file.
-- `sonos_stream_favorites` (object): per-zone radio stream favorites used when
-  resuming Sonos playback. The value is a mapping of zone key → list of
-  favorites.
-  - Zone keys: `RINCON_…` UID, zone name (e.g. `"Kitchen"`), or `"*"` as a
-    default for any zone without a specific entry.
+- `sonos_stream_favorites` (list): global radio stream favorites used when
+  resuming Sonos playback.
   - Each favorite entry: `{ "name": "<label>", "uri": "<https://...>" }`.
   - Current behavior: resume uses the **first** favorite (`favorite_index = 0`).
 

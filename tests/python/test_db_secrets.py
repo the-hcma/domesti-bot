@@ -97,9 +97,9 @@ def test_write_secrets_json_preserves_sonos_stream_favorites(tmp_path: Path) -> 
         json.dumps(
             {
                 "domesti_secrets_key": "old-key-should-be-replaced",
-                "sonos_stream_favorites": {
-                    "Kitchen": [{"name": "Alvorada", "uri": "https://example.com/a"}]
-                },
+                "sonos_stream_favorites": [
+                    {"name": "Alvorada", "uri": "https://example.com/a"}
+                ],
             }
         ),
         encoding="utf-8",
@@ -107,7 +107,7 @@ def test_write_secrets_json_preserves_sonos_stream_favorites(tmp_path: Path) -> 
     write_secrets_json(key, path=target)
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["domesti_secrets_key"] == key
-    assert payload["sonos_stream_favorites"]["Kitchen"][0]["name"] == "Alvorada"
+    assert payload["sonos_stream_favorites"][0]["name"] == "Alvorada"
 
 
 def test_save_and_load_tailwind_token_roundtrip(

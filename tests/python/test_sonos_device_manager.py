@@ -69,14 +69,12 @@ async def test_resume_uses_play_uri_when_stream_favorites_configured(
     secrets.write_text(
         json.dumps(
             {
-                "sonos_stream_favorites": {
-                    "Living room": [
-                        {
-                            "name": "Alvorada FM",
-                            "uri": "https://example.com/stream.aac",
-                        }
-                    ]
-                }
+                "sonos_stream_favorites": [
+                    {
+                        "name": "Alvorada FM",
+                        "uri": "https://example.com/stream.aac",
+                    }
+                ]
             }
         ),
         encoding="utf-8",
