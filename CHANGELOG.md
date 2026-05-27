@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/the-hcma/domesti-bot/compare/v1.0.0...v1.0.1) (2026-05-27)
+
+
+### Bug Fixes
+
+* hard-fail on invalid domesti-bot.config.json ([#144](https://github.com/the-hcma/domesti-bot/issues/144)) ([52ecad5](https://github.com/the-hcma/domesti-bot/commit/52ecad5365b8c845b8fa68fa20fb5d16b6ddba8d))
+
 ## [1.0.0](https://github.com/the-hcma/domesti-bot/compare/v0.1.4...v1.0.0) (2026-05-27)
 
 
