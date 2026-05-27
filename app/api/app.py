@@ -530,9 +530,14 @@ def create_app(args: Any) -> FastAPI:
             )
         try:
             if body.playing:
-                await sp.resume()
+                await sp.resume(favorite_index=body.favorite_index)
             else:
                 await sp.pause()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
         except SonosTransitionUnavailableError as exc:
             # UPnP 701 from Sonos: empty queue, mid-transition, or any
             # other state the zone can't transition out of right now.

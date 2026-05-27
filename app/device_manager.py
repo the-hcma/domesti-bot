@@ -85,7 +85,7 @@ class SpeakerDeviceManager(DeviceManager[SpeakerT], ABC):
         """Pause playback on the resolved zone."""
 
     @abstractmethod
-    async def resume(self, identifier: str) -> None:
+    async def resume(self, identifier: str, *, favorite_index: int = 0) -> None:
         """Resume playback on the resolved zone."""
 
 

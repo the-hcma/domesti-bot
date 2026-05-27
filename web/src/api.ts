@@ -161,11 +161,17 @@ export const api = {
       { on },
     );
   },
-  toggleSonos(deviceId: string, playing: boolean): Promise<UIDeviceActionOut> {
+  toggleSonos(
+    deviceId: string,
+    playing: boolean,
+    favoriteIndex = 0,
+  ): Promise<UIDeviceActionOut> {
     return call<UIDeviceActionOut>(
       "POST",
       `/v1/ui/sonos/zones/${encodeURIComponent(deviceId)}/toggle`,
-      { playing },
+      playing
+        ? { playing: true, favorite_index: favoriteIndex }
+        : { playing: false },
     );
   },
 };
