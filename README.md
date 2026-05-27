@@ -97,6 +97,26 @@ broadcast probes, and discovered configurations are persisted in an SQLite
 cache (`~/.config/domesti-bot/kasa_discovery.sqlite3` by default) so subsequent
 startups are fast.
 
+### `domesti-bot.config.json`
+
+Some features read a small gitignored JSON config file at the repo root:
+`domesti-bot.config.json` (override with `DOMESTI_CONFIG_FILE`). A template is
+committed at `domesti-bot.config.json.example`.
+
+Supported keys:
+
+- `domesti_secrets_key` (string): Fernet master key for encrypting secrets stored
+  in SQLite (used when saving Tailwind tokens from the web UI). This must be a
+  valid url-safe base64 Fernet key. Precedence: `DOMESTI_SECRETS_KEY` env →
+  `domesti_secrets_key` in this file.
+- `sonos_stream_favorites` (object): per-zone radio stream favorites used when
+  resuming Sonos playback. The value is a mapping of zone key → list of
+  favorites.
+  - Zone keys: `RINCON_…` UID, zone name (e.g. `"Kitchen"`), or `"*"` as a
+    default for any zone without a specific entry.
+  - Each favorite entry: `{ "name": "<label>", "uri": "<https://...>" }`.
+  - Current behavior: resume uses the **first** favorite (`favorite_index = 0`).
+
 Optional environment variables:
 
 | Variable | Effect |
