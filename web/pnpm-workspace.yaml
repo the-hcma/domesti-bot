@@ -1,11 +1,11 @@
-# Supply-chain: 10-day minimum release age for new resolutions.
+# Supply-chain: 9-day minimum release age for new resolutions.
 # Cutover: "*" grandfathers the existing lockfile at policy enable (one-time).
-# Forward: Dependabot cooldown + dep-updater enforce 10 days on new non-CVE bumps.
+# Forward: dep-updater enforces 9 days; Dependabot cooldown is one day later.
 
 packages:
   - '.'
 
-minimumReleaseAge: 14400
+minimumReleaseAge: 12960
 minimumReleaseAgeStrict: false
 minimumReleaseAgeExclude:
   - "*"

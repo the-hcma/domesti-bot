@@ -536,21 +536,21 @@ CI lives in `.github/workflows/`:
 
 Dependabot itself is configured in **`.github/dependabot.yml`**: weekly Monday sweeps across `pip` (root `pyproject.toml`), `npm` (`/web`), and `github-actions` (`/`), all labeled `dependencies` so the auto-merge workflow picks them up. Patch + minor bumps are grouped into a handful of named buckets (`fastapi-stack`, `pytest-stack`, `typescript`, `esbuild`) to keep the PR count down; major bumps continue to land as individual PRs for review. Version-update PRs use a **10-day cooldown** (`cooldown: default-days: 10`); **security updates are not cooldown-gated**.
 
-### Dependency release age (10 days)
+### Dependency release age (dep-updater 9 days, Dependabot 10 days)
 
-Aligned with [repository-helpers](https://github.com/the-hcma/repository-helpers) `AGENTS.md`:
+Aligned with [repository-helpers](https://github.com/the-hcma/repository-helpers) `AGENTS.md` — **dep-updater** lands updates before Dependabot:
 
 | Layer | Mechanism |
 |-------|-----------|
-| **pnpm** (`web/`) | `minimumReleaseAge: 14400` in `web/pnpm-workspace.yaml`. `minimumReleaseAgeExclude: ["*"]` grandfathers the **existing lockfile at cutover** so CI keeps working. |
-| **Dependabot** | 10-day cooldown on **version-update** PRs (pip, npm, github-actions); security PRs exempt. |
-| **dep-updater** | Same 10-day npm gate for `web/` bumps; Python/Actions via repository-helpers. |
+| **pnpm** (`web/`) | `minimumReleaseAge: 12960` (9 days) in `web/pnpm-workspace.yaml`. `minimumReleaseAgeExclude: ["*"]` grandfathers the **existing lockfile at cutover** so CI keeps working. |
+| **dep-updater** | 9-day gate for npm, Python/PyPI, and GitHub Actions bumps. |
+| **Dependabot** | `cooldown: default-days: 10` on **version-update** PRs (pip, npm, github-actions; one day after dep-updater). |
 | **CI** | Daily `cve-check.yml` (`pip-audit --strict`) on the uv environment. |
 
 **CVE and security exceptions**
 
 - **Dependabot security updates** ignore the version-update cooldown.
-- **dep-updater:** when **npm** or **Python** audit reports CVE IDs with an available fix, dep-updater skips the 10-day npm gate for that npm package only.
+- **dep-updater:** when **npm** or **Python** audit reports CVE IDs with an available fix, dep-updater skips the 9-day gate for that package only.
 
 **Day-to-day:** no grandfather scripts to run. Review Dependabot and dep-updater PRs as usual. Re-run `scripts/grandfather-pnpm-release-age --wildcard` on `web/` only if `pnpm-workspace.yaml` was lost after a major lockfile reset.
 
