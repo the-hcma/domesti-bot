@@ -38,7 +38,7 @@ classifiers = [
 ]
 dependencies = [
     "aiohappyeyeballs==2.6.2",
-    "aiohttp==3.14.0",
+    "aiohttp>=3.14.1",
     "certifi==2026.5.20",
     "click>=8.4.1",
     "cryptography>=48.0.0",
@@ -62,7 +62,7 @@ dependencies = [
     "typer>=0.26.7",
     "uvicorn[standard]>=0.49.0",
     "watchfiles==1.2.0",
-    "wcwidth==0.8.0",
+    "wcwidth>=0.8.1",
     "yarl==1.24.2",
     "zeroconf>=0.149.16",
 ]
