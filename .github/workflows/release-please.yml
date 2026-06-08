@@ -107,7 +107,7 @@ jobs:
         with:
           ref: ${{ needs.resolve-release-pr.outputs.head_sha }}
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v8.1.0
 
       - name: Regenerate uv.lock
         run: uv lock
@@ -163,7 +163,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v8.1.0
 
       - name: Install Python dependencies (dev)
         run: uv sync --group dev
