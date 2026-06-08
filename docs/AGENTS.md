@@ -544,15 +544,16 @@ Aligned with [repository-helpers](https://github.com/the-hcma/repository-helpers
 |-------|-----------|
 | **pnpm** (`web/`) | `minimumReleaseAge: 12960` (9 days) in `web/pnpm-workspace.yaml`. `minimumReleaseAgeExclude: ["*"]` grandfathers the **existing lockfile at cutover** so CI keeps working. |
 | **dep-updater** | 9-day gate for npm, Python/PyPI, and GitHub Actions bumps. |
-| **Dependabot** | `cooldown: default-days: 10` on **version-update** PRs (pip, npm, github-actions; one day after dep-updater). |
+| **Dependabot** | Weekly scan + `cooldown: default-days: 10` on **version-update** PRs (pip, npm, github-actions; one day after dep-updater). Do **not** set `open-pull-requests-limit: 0` — version updates stay enabled as a backup. |
 | **CI** | Daily `cve-check.yml` (`pip-audit --strict`) on the uv environment. |
 
-**CVE and security exceptions**
+**Dependabot: version bumps vs security**
 
-- **Dependabot security updates** ignore the version-update cooldown.
-- **dep-updater:** when **npm** or **Python** audit reports CVE IDs with an available fix, dep-updater skips the 9-day gate for that package only.
+- **Version updates** — Dependabot checks on the weekly schedule; each proposed bump must pass the **10-day cooldown** (release age). dep-updater usually lands the same bump first (9-day gate); Dependabot version PRs after that are redundant and can be closed.
+- **Security updates** — **not** subject to the version-update cooldown. Dependabot may open a security PR as soon as GitHub has an alert and a fix; merge these promptly.
+- **dep-updater CVE bypass** — when **npm** or **Python** audit reports CVE IDs with an available fix, dep-updater skips the 9-day gate for that package only (`--security-only` mode is available).
 
-**Day-to-day:** no grandfather scripts to run. Review Dependabot and dep-updater PRs as usual. Re-run `scripts/grandfather-pnpm-release-age --wildcard` on `web/` only if `pnpm-workspace.yaml` was lost after a major lockfile reset.
+**Day-to-day:** merge dep-updater batch PRs for routine bumps; close duplicate Dependabot version PRs when dep-updater already has the change. Re-run `scripts/grandfather-pnpm-release-age --wildcard` on `web/` only if `pnpm-workspace.yaml` was lost after a major lockfile reset.
 
 **`.github/CODEOWNERS`** maps `*` to `@thehcma` (blanket ownership for now). Adding additional reviewers later is a one-line entry per path glob.
 
