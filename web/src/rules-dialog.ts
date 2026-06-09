@@ -393,6 +393,7 @@ class RulesHubController {
     geofences: GeofenceOut[],
     participants: ParticipantStatusOut[],
     options: {
+      includeParticipantIdInTooltip?: boolean;
       showParticipantFilters: boolean;
       showTextDetails: boolean;
     },
@@ -404,6 +405,9 @@ class RulesHubController {
       geofences,
       participants: participants.map(participantStatusToMapParticipant),
       showParticipantFilters: options.showParticipantFilters,
+      ...(options.includeParticipantIdInTooltip === true
+        ? { includeParticipantIdInTooltip: true as const }
+        : {}),
     });
     if (options.showTextDetails) {
       const details = document.createElement("div");
@@ -1151,7 +1155,11 @@ class RulesHubController {
       mapSection,
       geofences,
       mapParticipants,
-      { showParticipantFilters: true, showTextDetails: true },
+      {
+        includeParticipantIdInTooltip: true,
+        showParticipantFilters: true,
+        showTextDetails: false,
+      },
     );
 
     this.body.append(lead, syncRow, mapSection);
