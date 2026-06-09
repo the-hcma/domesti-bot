@@ -34,6 +34,7 @@ def test_ensure_schema_upgrades_legacy_database(tmp_path: Path) -> None:
         assert "kasa_discovered_devices" in names
         assert "sonos_known_zones" in names
         assert "app_secrets" in names
+        assert "smtp_settings" in names
         assert "ui_preferences" in names
 
 

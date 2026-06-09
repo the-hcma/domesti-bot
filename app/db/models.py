@@ -54,6 +54,19 @@ class SonosKnownZone(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class SmtpSettings(Base):
+    __tablename__ = "smtp_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    host: Mapped[str] = mapped_column(String, nullable=False)
+    port: Mapped[int] = mapped_column(Integer, nullable=False)
+    username: Mapped[str] = mapped_column(String, nullable=False, default="")
+    mail_domain: Mapped[str] = mapped_column(String, nullable=False)
+    from_address: Mapped[str] = mapped_column(String, nullable=False)
+    last_test_recipient: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class TailwindLastHost(Base):
     __tablename__ = "tailwind_last_host"
 

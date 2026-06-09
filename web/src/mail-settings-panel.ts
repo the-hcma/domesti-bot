@@ -1,4 +1,4 @@
-// SMTP / mail settings panel (mock-backed).
+// SMTP / mail settings panel (persisted via ``/v1/settings/smtp`` when available).
 
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
