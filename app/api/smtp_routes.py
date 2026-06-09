@@ -103,7 +103,11 @@ async def post_smtp_test_email(
         username=body.username.strip(),
     )
     try:
-        send_test_email(params, to_address=body.to_address)
+        send_test_email(
+            params,
+            instance_url=str(request.base_url),
+            to_address=body.to_address,
+        )
     except Exception as exc:
         return SmtpTestEmailOut(ok=False, message=smtp_friendly_error(exc, host=params.host))
     if cache_path is not None:
