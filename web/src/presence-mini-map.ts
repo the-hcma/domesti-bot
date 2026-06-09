@@ -68,26 +68,35 @@ export function mountPresenceMiniMap(
   }
 
   const boundsForLayer = (layer: L.Layer): L.LatLngBounds => {
-    if (layer instanceof L.Circle) {
-      return layer.getBounds();
-    }
+    // CircleMarker extends Circle — check the subclass first.
     if (layer instanceof L.CircleMarker) {
       const latlng = layer.getLatLng();
       return L.latLngBounds(latlng, latlng);
     }
+    if (layer instanceof L.Circle) {
+      return layer.getBounds();
+    }
     return L.latLngBounds([options.lat, options.lon], [options.lat, options.lon]);
   };
 
-  if (boundsLayers.length > 0) {
-    const first = boundsLayers[0];
-    if (first !== undefined) {
-      let bounds = boundsForLayer(first);
-      for (const layer of boundsLayers.slice(1)) {
-        bounds = bounds.extend(boundsForLayer(layer));
+  const fitToLayers = (): void => {
+    if (boundsLayers.length > 0) {
+      const first = boundsLayers[0];
+      if (first !== undefined) {
+        let bounds = boundsForLayer(first);
+        for (const layer of boundsLayers.slice(1)) {
+          bounds = bounds.extend(boundsForLayer(layer));
+        }
+        map.fitBounds(bounds, { padding: [12, 12] });
+        return;
       }
-      map.fitBounds(bounds, { padding: [12, 12] });
     }
-  } else {
     map.setView([options.lat, options.lon], 14);
-  }
+  };
+
+  fitToLayers();
+  window.requestAnimationFrame(() => {
+    map.invalidateSize();
+    fitToLayers();
+  });
 }

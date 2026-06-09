@@ -663,8 +663,9 @@
     .rules-mail-mount .settings-dialog-field select { width: 100%; }
     .rules-mail-test-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .rules-mail-test-row input { flex: 1 1 12rem; min-width: 0; }
-    .rules-presence-mini-map { width: 100%; height: 160px; border-radius: 8px;
-      border: 1px solid var(--border); margin-top: 8px; z-index: 0; }
+    .rules-presence-mini-map { position: relative; width: 100%; height: 160px;
+      border-radius: 8px; border: 1px solid var(--border); margin-top: 8px;
+      overflow: hidden; z-index: 0; }
     .rules-participant-card { display: flex; flex-direction: column; gap: 4px; }
     .rules-participants-sync { display: flex; flex-wrap: wrap; align-items: center;
       justify-content: space-between; gap: 8px; margin-bottom: 12px; }
