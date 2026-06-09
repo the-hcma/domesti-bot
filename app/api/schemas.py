@@ -350,23 +350,18 @@ class MyTracksSettingsIn(BaseModel):
     """Body for ``PUT /v1/settings/my-tracks``."""
 
     domain: str = Field(..., min_length=1)
-    password: str | None = Field(
-        default=None,
-        description="Null keeps the stored admin password on update.",
-    )
     username: str = Field(..., min_length=1)
 
 
 class MyTracksSettingsOut(BaseModel):
-    """Stored My Tracks connection settings (no password)."""
+    """Stored My Tracks connection settings."""
 
     domain: str
-    password_configured: bool
     username: str
 
 
 class MyTracksSyncIn(BaseModel):
-    """Optional admin credentials for a one-shot sync request."""
+    """Admin credentials for a one-shot sync request (password is never stored)."""
 
-    password: str | None = None
+    password: str = Field(..., min_length=1)
     username: str | None = None

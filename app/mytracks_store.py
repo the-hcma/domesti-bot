@@ -8,13 +8,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.db.models import MyTracksSettings
-from app.db.secrets import (
-    SecretsConfigurationError,
-    delete_app_secret,
-    load_mytracks_admin_password_from_db,
-    mytracks_admin_password_stored_in_db,
-    save_mytracks_admin_password_to_db,
-)
 from app.db.session import discovery_session
 
 _MYTRACKS_SETTINGS_ID = 1
@@ -25,33 +18,25 @@ class MyTracksConfigRecord:
     domain: str
     last_geofences_sync_at: str | None
     last_participants_sync_at: str | None
-    password_configured: bool
     username: str
 
 
 @dataclass(frozen=True)
 class MyTracksConfigSave:
     domain: str
-    password: str | None
     username: str
 
 
 def delete_mytracks_settings(path: Path) -> None:
-    """Remove My Tracks settings and the stored admin password."""
-    delete_app_secret(path, key="mytracks_admin_password")
+    """Remove My Tracks settings."""
     with discovery_session(path) as session:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is not None:
             session.delete(row)
 
 
-def load_mytracks_admin_password(path: Path) -> str | None:
-    """Return the decrypted My Tracks admin password, or ``None`` when unset."""
-    return load_mytracks_admin_password_from_db(path)
-
-
 def load_mytracks_config(path: Path) -> MyTracksConfigRecord | None:
-    """Return stored My Tracks settings without the password."""
+    """Return stored My Tracks settings."""
     with discovery_session(path) as session:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -60,7 +45,6 @@ def load_mytracks_config(path: Path) -> MyTracksConfigRecord | None:
             domain=row.domain,
             last_geofences_sync_at=_iso_from_epoch(row.last_geofences_sync_at),
             last_participants_sync_at=_iso_from_epoch(row.last_participants_sync_at),
-            password_configured=mytracks_admin_password_stored_in_db(path),
             username=row.username,
         )
 
@@ -97,20 +81,8 @@ def record_mytracks_participants_sync(path: Path, *, count: int) -> MyTracksConf
     return saved
 
 
-def resolve_mytracks_password(
-    path: Path,
-    *,
-    draft_password: str | None,
-) -> str:
-    """Use the draft password when provided; otherwise reuse the stored secret."""
-    if draft_password is not None and draft_password != "":
-        return draft_password
-    stored = load_mytracks_admin_password(path)
-    return stored or ""
-
-
 def save_mytracks_config(path: Path, config: MyTracksConfigSave) -> MyTracksConfigRecord:
-    """Upsert My Tracks settings and optionally replace the stored password."""
+    """Upsert My Tracks domain and default admin username."""
     now = time.time()
     with discovery_session(path) as session:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
@@ -128,11 +100,6 @@ def save_mytracks_config(path: Path, config: MyTracksConfigSave) -> MyTracksConf
             row.domain = config.domain.strip()
             row.username = config.username.strip()
             row.updated_at = now
-    if config.password is not None:
-        try:
-            save_mytracks_admin_password_to_db(path, config.password)
-        except SecretsConfigurationError:
-            raise
     saved = load_mytracks_config(path)
     if saved is None:
         raise RuntimeError("Expected My Tracks settings after save, got None")

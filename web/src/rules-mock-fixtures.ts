@@ -31,7 +31,6 @@ export interface MockGeofencesSync {
 export interface MockMyTracksSettings {
   domain: string;
   username: string;
-  password: string;
 }
 
 /** House geofence center (41.194072, -73.888325) — 250 m radius. */

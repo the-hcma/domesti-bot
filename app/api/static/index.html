@@ -593,8 +593,12 @@
     .settings-dialog h2 { margin: 0; font-size: 1.15rem; }
     .settings-dialog-lead, .settings-dialog-status { margin: 0; font-size: 14px;
       line-height: 1.45; color: var(--muted); }
-    .settings-dialog-field { display: flex; flex-direction: column; gap: 6px;
-      flex: 1 1 12rem; min-width: 0; }
+    .settings-dialog.settings-hub-dialog { position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%); margin: 0;
+      max-width: min(40rem, calc(100vw - 2rem));
+      width: min(40rem, calc(100vw - 2rem)); }
+    .settings-hub-body { min-height: min(40vh, 360px); }
+    .settings-hub-tab-mount { padding-top: 4px; }
     .settings-dialog-field-row { display: flex; flex-wrap: wrap; gap: 12px;
       align-items: flex-end; margin-bottom: 12px; }
     .settings-dialog-field-row .settings-dialog-field { margin-bottom: 0; }

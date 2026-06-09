@@ -5,6 +5,7 @@ import {
   createMockStoreSeed,
   haversineM,
   mockSunRow,
+  type MockMyTracksSettings,
   type MockStoreSeed,
 } from "./rules-mock-fixtures.js";
 import { evaluateRule } from "./rules-evaluate.js";
@@ -44,10 +45,10 @@ export interface RulesDataSource {
   saveMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut>;
   saveParticipant(participant: ParticipantOut): Promise<ParticipantOut>;
   syncGeofencesFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksGeofencesSyncOut>;
   syncParticipantsFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksParticipantsSyncOut>;
   listRules(): Promise<RuleOut[]>;
   listTimeConditionTemplates(): Promise<TimeConditionTemplateOut[]>;
@@ -68,18 +69,16 @@ export interface RulesDataSource {
   listActionDevices(): Promise<RuleActionDeviceOut[]>;
 }
 
-function resolveMyTracksPassword(
-  store: MockStoreSeed,
-  credentials: MyTracksSyncIn | undefined,
-): string {
-  if (credentials?.password !== undefined && credentials.password !== "") {
-    return credentials.password;
+function requireSyncPassword(credentials: MyTracksSyncIn): string {
+  const password = credentials.password.trim();
+  if (password === "") {
+    throw new Error("Expected My Tracks admin password, got empty value");
   }
-  return store.my_tracks_settings?.password ?? "";
+  return password;
 }
 
-function requireMyTracksDomain(store: MockStoreSeed): string {
-  const domain = store.my_tracks_settings?.domain.trim() ?? "";
+function requireMyTracksDomain(settings: MockMyTracksSettings | null): string {
+  const domain = settings?.domain.trim() ?? "";
   if (domain === "") {
     throw new Error(
       "Expected My Tracks domain in Settings, got empty value — configure domain first",
@@ -251,7 +250,6 @@ export class MockRulesDataSource implements RulesDataSource {
     return {
       domain: cfg.domain,
       username: cfg.username,
-      password_configured: cfg.password.length > 0,
     };
   }
 
@@ -262,13 +260,9 @@ export class MockRulesDataSource implements RulesDataSource {
   async saveMyTracksSettings(
     config: MyTracksSettingsIn,
   ): Promise<MyTracksSettingsOut> {
-    const existing = this.store.my_tracks_settings;
-    const password =
-      config.password ?? existing?.password ?? "";
     this.store.my_tracks_settings = {
       domain: config.domain.trim(),
       username: config.username.trim(),
-      password,
     };
     const saved = await this.getMyTracksSettings();
     if (saved === null) {
@@ -278,26 +272,20 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 
   async syncGeofencesFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksGeofencesSyncOut> {
-    requireMyTracksDomain(this.store);
-    const password = resolveMyTracksPassword(this.store, credentials);
-    if (password === "") {
-      throw new Error("Expected My Tracks admin password, got empty value");
-    }
+    requireMyTracksDomain(this.store.my_tracks_settings);
+    requireSyncPassword(credentials);
     this.store.geofences = structuredClone(this.store.my_tracks_geofence_catalog);
     this.store.geofences_sync.last_synced_at = new Date().toISOString();
     return this.getMyTracksGeofencesSync();
   }
 
   async syncParticipantsFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksParticipantsSyncOut> {
-    requireMyTracksDomain(this.store);
-    const password = resolveMyTracksPassword(this.store, credentials);
-    if (password === "") {
-      throw new Error("Expected My Tracks admin password, got empty value");
-    }
+    requireMyTracksDomain(this.store.my_tracks_settings);
+    requireSyncPassword(credentials);
     this.store.participants = structuredClone(this.store.my_tracks_participant_catalog);
     this.store.participants_sync.last_synced_at = new Date().toISOString();
     return this.getMyTracksParticipantsSync();
