@@ -4,13 +4,16 @@ import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
 import {
+  ALL_DAYS_OF_WEEK,
+  createDayOfWeekPicker,
   createEnableToggle,
   createFieldLabel,
   FAMILY_ACTION_GROUP_LABELS,
 } from "./rules-ui-helpers.js";
 import type {
   GeofenceOut,
-  ParticipantOut,
+  ParticipantFixOut,
+  ParticipantStatusOut,
   RuleActionDeviceOut,
   RuleActionType,
   RuleConditionOut,
@@ -23,11 +26,11 @@ import type {
 } from "./types.js";
 
 type RulesTabId =
-  | "automations"
   | "conditions"
   | "geofences"
   | "mail"
   | "participants"
+  | "rules"
   | "status";
 
 function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
@@ -106,7 +109,20 @@ function slugifyId(raw: string): string {
     .slice(0, 64);
 }
 
-function sunStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: string } {
+function sunriseStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: string } {
+  if (!sun.is_dark) {
+    return {
+      dynamicLabel: "Before sunrise (dynamic)",
+      primary: `Daytime — next sunrise at ${formatLocalTime(sun.sunrise_at)}`,
+    };
+  }
+  return {
+    dynamicLabel: "Sunrise (dynamic)",
+    primary: `Dark until sunrise at ${formatLocalTime(sun.sunrise_at)}`,
+  };
+}
+
+function sunsetStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: string } {
   if (sun.is_dark) {
     return {
       dynamicLabel: "After sunset (dynamic)",
@@ -117,6 +133,10 @@ function sunStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: st
     dynamicLabel: "Sunset (dynamic)",
     primary: `Light until sunset at ${formatLocalTime(sun.sunset_at)}`,
   };
+}
+
+function sunStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: string } {
+  return sunsetStatusMessage(sun);
 }
 
 function templateToCondition(
@@ -161,7 +181,7 @@ class RulesHubController {
     for (const tab of [
       ["status", "Status"],
       ["conditions", "Conditions"],
-      ["automations", "Automations"],
+      ["rules", "Rules"],
       ["geofences", "Geofences"],
       ["participants", "Participants"],
       ["mail", "Mail"],
@@ -289,7 +309,7 @@ class RulesHubController {
     idInput.readOnly = existing !== null;
     appendLabeledField(
       form,
-      createFieldLabel("Automation id"),
+      createFieldLabel("Rule id"),
       idInput,
     );
 
@@ -339,6 +359,15 @@ class RulesHubController {
       createFieldLabel("Geofence"),
       whereSelect,
     );
+
+    const existingDayCondition = existing?.conditions.all.find(
+      (c): c is Extract<RuleConditionOut, { type: "days_of_week" }> =>
+        c.type === "days_of_week",
+    );
+    const dayPicker = createDayOfWeekPicker(
+      existingDayCondition?.days ?? ALL_DAYS_OF_WEEK,
+    );
+    conditionsField.append(dayPicker.fieldset);
 
     const timeField = document.createElement("fieldset");
     timeField.className = "rules-editor-fieldset rules-editor-subfieldset";
@@ -480,7 +509,7 @@ class RulesHubController {
     notifyCb.checked = existing?.notify_on_fire ?? false;
     notifyRow.append(
       notifyCb,
-      document.createTextNode(" Send email when this automation fires"),
+      document.createTextNode(" Send email when this rule fires"),
     );
     notifyField.append(notifyRow);
     const notifyEmail = document.createElement("input");
@@ -520,7 +549,7 @@ class RulesHubController {
     const saveBtn = document.createElement("button");
     saveBtn.type = "submit";
     saveBtn.className = "btn";
-    saveBtn.textContent = "Save automation";
+    saveBtn.textContent = "Save rule";
     actions.append(cancelBtn, saveBtn);
 
     form.append(notifyField, actionsWrap, actions);
@@ -553,6 +582,12 @@ class RulesHubController {
       if (beforeTime.value !== "") {
         conditions.push({ type: "before_local_time", time_hhmm: beforeTime.value });
       }
+      const selectedDays = dayPicker.getSelectedDays();
+      if (selectedDays.length === 0) {
+        window.alert("Select at least one day of the week.");
+        return;
+      }
+      conditions.push({ type: "days_of_week", days: selectedDays });
       for (const cb of timeField.querySelectorAll<HTMLInputElement>(
         "input.rules-template-pick",
       )) {
@@ -602,70 +637,43 @@ class RulesHubController {
     labelInput.focus();
   }
 
-  private openParticipantEditor(existing: ParticipantOut | null): void {
-    const editor = document.createElement("div");
-    editor.className = "rules-editor-panel";
-    const form = document.createElement("form");
-    form.className = "rules-editor-form";
-
-    const idInput = document.createElement("input");
-    idInput.value = existing?.participant_id ?? "";
-    idInput.required = true;
-    idInput.pattern = "[a-z0-9_-]+";
-    idInput.readOnly = existing !== null;
-    appendLabeledField(form, createFieldLabel("Participant id"), idInput);
-
-    const nameInput = document.createElement("input");
-    nameInput.value = existing?.display_name ?? "";
-    nameInput.required = true;
-    appendLabeledField(form, createFieldLabel("Display name"), nameInput);
-
-    const deviceInput = document.createElement("input");
-    deviceInput.value = existing?.tracking_device_label ?? "";
-    deviceInput.required = true;
-    deviceInput.placeholder = "Henrique's iPhone";
-    const deviceLabel = createFieldLabel("Tracking device");
-    const deviceHint = document.createElement("small");
-    deviceHint.className = "rules-field-hint";
-    deviceHint.textContent =
-      "Phone or tracker that reports this person's location via my-tracks";
-    const deviceLabelWrap = document.createElement("span");
-    deviceLabelWrap.append(deviceLabel, deviceHint);
-    appendLabeledField(form, deviceLabelWrap, deviceInput);
-
-    const actions = document.createElement("div");
-    actions.className = "settings-dialog-actions";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "btn";
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.addEventListener("click", () => {
-      editor.remove();
+  private appendParticipantMiniMap(
+    card: HTMLElement,
+    geofences: GeofenceOut[],
+    participant: {
+      display_name: string;
+      last_fix: ParticipantFixOut | null;
+    },
+  ): void {
+    const mapEl = document.createElement("div");
+    mapEl.className = "rules-presence-mini-map";
+    card.append(mapEl);
+    const fallback = geofences.find((g) => g.enabled);
+    const fix = participant.last_fix;
+    if (fix === null && fallback === undefined) {
+      return;
+    }
+    void import("./presence-mini-map.js").then(({ mountPresenceMiniMap }) => {
+      if (fix !== null) {
+        mountPresenceMiniMap(mapEl, {
+          accuracy_m: fix.accuracy_m,
+          geofences,
+          label: participant.display_name,
+          lat: fix.lat,
+          lon: fix.lon,
+        });
+        return;
+      }
+      if (fallback !== undefined) {
+        mountPresenceMiniMap(mapEl, {
+          accuracy_m: null,
+          geofences,
+          label: "No location yet",
+          lat: fallback.center_lat,
+          lon: fallback.center_lon,
+        });
+      }
     });
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "submit";
-    saveBtn.className = "btn";
-    saveBtn.textContent = existing === null ? "Add participant" : "Save participant";
-    actions.append(cancelBtn, saveBtn);
-
-    form.append(actions);
-    form.addEventListener("submit", (ev) => {
-      ev.preventDefault();
-      const participant: ParticipantOut = {
-        participant_id: idInput.value.trim(),
-        display_name: nameInput.value.trim(),
-        tracking_device_label: deviceInput.value.trim(),
-        enabled: existing?.enabled ?? true,
-      };
-      void this.dataSource.saveParticipant(participant).then(() => {
-        editor.remove();
-        void this.refresh();
-      });
-    });
-
-    editor.append(form);
-    this.body.append(editor);
-    nameInput.focus();
   }
 
   private async refresh(): Promise<void> {
@@ -686,8 +694,8 @@ class RulesHubController {
       case "conditions":
         void this.renderConditionsTab(this.status);
         break;
-      case "automations":
-        void this.renderAutomationsTab();
+      case "rules":
+        void this.renderRulesTab();
         break;
       case "geofences":
         void this.renderGeofencesTab();
@@ -711,14 +719,20 @@ class RulesHubController {
 
   private async renderConditionsTab(status: RulesStatusOut): Promise<void> {
     const templates = await this.dataSource.listTimeConditionTemplates();
-    const sunMsg = sunStatusMessage(status.sun);
+    const sunsetMsg = sunsetStatusMessage(status.sun);
+    const sunriseMsg = sunriseStatusMessage(status.sun);
 
-    const sunHeading = document.createElement("h3");
-    sunHeading.className = "rules-section-title";
-    sunHeading.textContent = "Astronomical (dynamic)";
-    const sunCard = document.createElement("article");
-    sunCard.className = "rules-card";
-    sunCard.innerHTML = `<p class="rules-card-meta"><span class="rules-dynamic-badge">${sunMsg.dynamicLabel}</span></p><p>${sunMsg.primary}</p><p class="rules-card-meta">Sunrise ${formatLocalTime(status.sun.sunrise_at)} · recalculated from home location daily.</p><p class="settings-dialog-lead">Attach <strong>After sunset</strong> or <strong>Before sunrise</strong> in each rule's Conditions section, or open the Conditions tab when editing a rule.</p>`;
+    const dynamicHeading = document.createElement("h3");
+    dynamicHeading.className = "rules-section-title";
+    dynamicHeading.textContent = "Astronomical (dynamic)";
+
+    const sunsetCard = document.createElement("article");
+    sunsetCard.className = "rules-card";
+    sunsetCard.innerHTML = `<p class="rules-card-meta"><span class="rules-dynamic-badge">${sunsetMsg.dynamicLabel}</span></p><p>${sunsetMsg.primary}</p><p class="rules-card-meta">Recalculated from home location daily. Enable per rule as <strong>After sunset</strong>.</p>`;
+
+    const sunriseCard = document.createElement("article");
+    sunriseCard.className = "rules-card";
+    sunriseCard.innerHTML = `<p class="rules-card-meta"><span class="rules-dynamic-badge">${sunriseMsg.dynamicLabel}</span></p><p>${sunriseMsg.primary}</p><p class="rules-card-meta">Recalculated from home location daily. Enable per rule as <strong>Before sunrise</strong>.</p>`;
 
     const clockHeading = document.createElement("h3");
     clockHeading.className = "rules-section-title";
@@ -794,7 +808,15 @@ class RulesHubController {
       });
     });
 
-    this.body.append(sunHeading, sunCard, clockHeading, clockLead, list, form);
+    this.body.append(
+      dynamicHeading,
+      sunsetCard,
+      sunriseCard,
+      clockHeading,
+      clockLead,
+      list,
+      form,
+    );
   }
 
   private renderStatusTab(status: RulesStatusOut): void {
@@ -820,7 +842,7 @@ class RulesHubController {
     for (const p of status.participants) {
       const card = document.createElement("button");
       card.type = "button";
-      card.className = "rules-card rules-clickable-card";
+      card.className = "rules-card rules-clickable-card rules-participant-card";
       const name = document.createElement("strong");
       name.textContent = p.display_name;
       const deviceMeta = document.createElement("p");
@@ -851,17 +873,19 @@ class RulesHubController {
           card.append(warn);
         }
       }
+      this.appendParticipantMiniMap(card, status.geofences, {
+        display_name: p.display_name,
+        last_fix: p.last_fix,
+      });
       card.addEventListener("click", () => {
-        void this.setTab("participants").then(() => {
-          this.openParticipantEditor(p);
-        });
+        void this.setTab("participants");
       });
       participantList.append(card);
     }
 
     const rulesHeading = document.createElement("h3");
     rulesHeading.className = "rules-section-title";
-    rulesHeading.textContent = "Automations";
+    rulesHeading.textContent = "Rules";
     const ruleList = document.createElement("div");
     ruleList.className = "rules-card-list";
     for (const rule of status.rules) {
@@ -876,7 +900,7 @@ class RulesHubController {
       nameBtn.addEventListener("click", () => {
         void this.dataSource.getRule(rule.id).then((full) => {
           if (full !== null) {
-            void this.setTab("automations").then(() => {
+            void this.setTab("rules").then(() => {
               void this.openRuleEditor(full);
             });
           }
@@ -922,12 +946,12 @@ class RulesHubController {
     this.body.append(sunBtn, participantsHeading, participantList, rulesHeading, ruleList);
   }
 
-  private async renderAutomationsTab(): Promise<void> {
+  private async renderRulesTab(): Promise<void> {
     const rules = await this.dataSource.listRules();
     const addBtn = document.createElement("button");
     addBtn.type = "button";
     addBtn.className = "btn";
-    addBtn.textContent = "Add automation";
+    addBtn.textContent = "Add rule";
     addBtn.addEventListener("click", () => {
       void this.openRuleEditor(null);
     });
@@ -954,7 +978,7 @@ class RulesHubController {
       delBtn.className = "btn btn-danger";
       delBtn.textContent = "Delete";
       delBtn.addEventListener("click", () => {
-        if (window.confirm(`Delete automation "${rule.label}"?`)) {
+        if (window.confirm(`Delete rule "${rule.label}"?`)) {
           void this.dataSource.deleteRule(rule.id).then(() => this.refresh());
         }
       });
@@ -987,43 +1011,62 @@ class RulesHubController {
 
   private async renderParticipantsTab(): Promise<void> {
     const participants = await this.dataSource.listParticipants();
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "btn";
-    addBtn.textContent = "Add participant";
-    addBtn.addEventListener("click", () => {
-      this.openParticipantEditor(null);
+    const geofences = await this.dataSource.listGeofences();
+    const sync = await this.dataSource.getMyTracksParticipantsSync();
+    const status = this.status;
+
+    const lead = document.createElement("p");
+    lead.className = "settings-dialog-lead";
+    lead.textContent =
+      "Participants are synced from my-tracks. Presence updates arrive via webhook; edit people in my-tracks, then sync here.";
+
+    const syncRow = document.createElement("div");
+    syncRow.className = "rules-participants-sync";
+    const syncMeta = document.createElement("p");
+    syncMeta.className = "rules-card-meta";
+    const syncedAt =
+      sync.last_synced_at === null
+        ? "never"
+        : formatAge(
+            Math.max(
+              0,
+              Math.floor((Date.now() - Date.parse(sync.last_synced_at)) / 1000),
+            ),
+          );
+    syncMeta.textContent = `${sync.participant_count} participants · last synced ${syncedAt}`;
+    const syncBtn = document.createElement("button");
+    syncBtn.type = "button";
+    syncBtn.className = "btn btn-secondary";
+    syncBtn.textContent = "Sync from my-tracks";
+    syncBtn.addEventListener("click", () => {
+      void this.dataSource.syncParticipantsFromMyTracks().then(() => this.refresh());
     });
+    syncRow.append(syncMeta, syncBtn);
+
     const list = document.createElement("div");
     list.className = "rules-card-list";
     for (const p of participants) {
       const card = document.createElement("article");
-      card.className = "rules-card";
-      const row = document.createElement("div");
-      row.className = "rules-card-row";
+      card.className = "rules-card rules-participant-card";
       const name = document.createElement("strong");
       name.textContent = `${p.display_name} (${p.participant_id})`;
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "btn btn-secondary";
-      editBtn.textContent = "Edit";
-      editBtn.addEventListener("click", () => {
-        this.openParticipantEditor(p);
-      });
-      row.append(name, editBtn);
       const deviceMeta = document.createElement("p");
       deviceMeta.className = "rules-card-meta";
       deviceMeta.textContent = `Tracking device: ${p.tracking_device_label}`;
-      card.append(row, deviceMeta);
+      card.append(name, deviceMeta);
+      const fix =
+        status?.participants.find(
+          (row): row is ParticipantStatusOut =>
+            row.participant_id === p.participant_id,
+        )?.last_fix ?? null;
+      this.appendParticipantMiniMap(card, geofences, {
+        display_name: p.display_name,
+        last_fix: fix,
+      });
       list.append(card);
     }
 
-    const webhook = document.createElement("p");
-    webhook.className = "settings-dialog-lead";
-    webhook.textContent =
-      "my-tracks relays fixes via POST /v1/webhooks/presence with participant_id matching the id slug above.";
-
-    this.body.append(addBtn, list, webhook);
+    this.body.append(lead, syncRow, list);
   }
 
   private async setTab(tab: RulesTabId): Promise<void> {

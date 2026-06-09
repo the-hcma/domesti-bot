@@ -16,7 +16,12 @@ export interface MockSmtpConfig {
   port: number;
   username: string;
   password: string;
+  mail_domain: string;
   from_address: string;
+}
+
+export interface MockParticipantsSync {
+  last_synced_at: string | null;
 }
 
 /** House geofence center (41.194072, -73.888325) — 250 m radius. */
@@ -41,6 +46,8 @@ export interface MockStoreSeed {
   time_condition_templates: TimeConditionTemplateOut[];
   smtp_config: MockSmtpConfig | null;
   smtp_last_test_recipient: string | null;
+  my_tracks_participant_catalog: ParticipantOut[];
+  participants_sync: MockParticipantsSync;
 }
 
 function isoMinutesAgo(minutes: number): string {
@@ -61,6 +68,21 @@ function todaySunTimes(): { sunset_at: string; sunrise_at: string; is_dark: bool
   };
 }
 
+const MOCK_MY_TRACKS_PARTICIPANTS: ParticipantOut[] = [
+  {
+    participant_id: "henrique",
+    display_name: "Henrique",
+    tracking_device_label: "Henrique's iPhone",
+    enabled: true,
+  },
+  {
+    participant_id: "kristen",
+    display_name: "Kristen",
+    tracking_device_label: "Kristen's iPhone",
+    enabled: true,
+  },
+];
+
 export function createMockStoreSeed(): MockStoreSeed {
   return {
     geofences: [
@@ -74,20 +96,11 @@ export function createMockStoreSeed(): MockStoreSeed {
         owntracks_rid: null,
       },
     ],
-    participants: [
-      {
-        participant_id: "henrique",
-        display_name: "Henrique",
-        tracking_device_label: "Henrique's iPhone",
-        enabled: true,
-      },
-      {
-        participant_id: "kristen",
-        display_name: "Kristen",
-        tracking_device_label: "Kristen's iPhone",
-        enabled: true,
-      },
-    ],
+    my_tracks_participant_catalog: structuredClone(MOCK_MY_TRACKS_PARTICIPANTS),
+    participants: structuredClone(MOCK_MY_TRACKS_PARTICIPANTS),
+    participants_sync: {
+      last_synced_at: isoMinutesAgo(30),
+    },
     participant_fixes: {
       henrique: {
         lat: MOCK_HENRIQUE_AT_HOME_LAT,

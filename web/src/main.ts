@@ -1398,7 +1398,7 @@ function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
       openAboutDialog(meta);
     });
   });
-  panel.append(settingsItem, rulesItem, aboutItem);
+  panel.append(rulesItem, settingsItem, aboutItem);
   wrap.append(trigger, panel);
 
   const openPanel = (): void => {

@@ -1,10 +1,106 @@
 // Shared Automations hub UI helpers (info badges, family labels, toggles).
 
+export const ALL_DAYS_OF_WEEK = [0, 1, 2, 3, 4, 5, 6] as const;
+
+export const DAY_OF_WEEK_LABELS = [
+  "Sun",
+  "Mon",
+  "Tue",
+  "Wed",
+  "Thu",
+  "Fri",
+  "Sat",
+] as const;
+
 export const FAMILY_ACTION_GROUP_LABELS: Record<string, string> = {
   kasa: "Lights & plugs",
   sonos: "Sonos zones",
   tailwind: "Garage doors",
 };
+
+export const WEEKDAY_DAYS = [1, 2, 3, 4, 5] as const;
+
+export const WEEKEND_DAYS = [0, 6] as const;
+
+export interface DayOfWeekPicker {
+  fieldset: HTMLFieldSetElement;
+  getSelectedDays: () => number[];
+  setSelectedDays: (days: readonly number[]) => void;
+}
+
+export function createDayOfWeekPicker(
+  initialDays: readonly number[],
+): DayOfWeekPicker {
+  const selected = new Set(initialDays);
+  const fieldset = document.createElement("fieldset");
+  fieldset.className = "rules-editor-fieldset rules-editor-subfieldset";
+  const legend = document.createElement("legend");
+  legend.textContent = "Days of week";
+  fieldset.append(legend);
+
+  const shortcutRow = document.createElement("div");
+  shortcutRow.className = "rules-day-shortcuts";
+  const dayRows = document.createElement("div");
+  dayRows.className = "rules-day-grid";
+  const dayInputs: HTMLInputElement[] = [];
+
+  const syncDayInputs = (): void => {
+    for (const input of dayInputs) {
+      input.checked = selected.has(Number(input.value));
+    }
+  };
+
+  const applyDays = (days: readonly number[]): void => {
+    selected.clear();
+    for (const day of days) {
+      selected.add(day);
+    }
+    syncDayInputs();
+  };
+
+  for (const [label, days] of [
+    ["Weekdays", WEEKDAY_DAYS],
+    ["Weekend", WEEKEND_DAYS],
+    ["All days", ALL_DAYS_OF_WEEK],
+  ] as const) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-secondary rules-day-shortcut";
+    btn.textContent = label;
+    btn.addEventListener("click", () => {
+      applyDays(days);
+    });
+    shortcutRow.append(btn);
+  }
+  fieldset.append(shortcutRow);
+
+  for (let day = 0; day < 7; day += 1) {
+    const row = document.createElement("label");
+    row.className = "rules-check-row rules-day-toggle";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = String(day);
+    cb.checked = selected.has(day);
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        selected.add(day);
+      } else {
+        selected.delete(day);
+      }
+    });
+    dayInputs.push(cb);
+    row.append(cb, document.createTextNode(` ${DAY_OF_WEEK_LABELS[day] ?? String(day)}`));
+    dayRows.append(row);
+  }
+  fieldset.append(dayRows);
+
+  return {
+    fieldset,
+    getSelectedDays: () =>
+      [...selected].sort((a, b) => a - b),
+    setSelectedDays: applyDays,
+  };
+}
 
 let infoPopoverDocumentListenerInstalled = false;
 let closeOpenInfoPopover: (() => void) | null = null;

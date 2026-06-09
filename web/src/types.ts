@@ -124,7 +124,12 @@ export type RuleConditionOut =
   | { type: "after_sunset"; offset_minutes: number }
   | { type: "before_sunrise"; offset_minutes: number }
   | { type: "after_local_time"; time_hhmm: string }
-  | { type: "before_local_time"; time_hhmm: string };
+  | { type: "before_local_time"; time_hhmm: string }
+  | {
+      /** JavaScript ``Date.getDay()`` values: 0 = Sunday … 6 = Saturday. */
+      type: "days_of_week";
+      days: number[];
+    };
 
 export interface TimeConditionTemplateOut {
   template_id: string;
@@ -158,6 +163,8 @@ export interface SmtpConfigIn {
   username: string;
   /** Null keeps the stored password on update. */
   password: string | null;
+  /** Mail domain for default From address (e.g. ``hcma.info``). */
+  mail_domain: string;
   from_address: string;
 }
 
@@ -165,9 +172,17 @@ export interface SmtpConfigOut {
   host: string;
   port: number;
   username: string;
+  mail_domain: string;
   from_address: string;
   password_configured: boolean;
   last_test_recipient: string | null;
+}
+
+export interface MyTracksParticipantsSyncOut {
+  source: "my-tracks";
+  last_synced_at: string | null;
+  participant_count: number;
+  webhook_ready: boolean;
 }
 
 export interface SmtpTestEmailIn extends SmtpConfigIn {
