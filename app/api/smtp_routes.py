@@ -97,6 +97,7 @@ async def post_smtp_test_email(
     params = SmtpConnectionParams(
         from_address=body.from_address.strip(),
         host=body.host.strip(),
+        mail_domain=body.mail_domain.strip(),
         password=password,
         port=body.port,
         username=body.username.strip(),

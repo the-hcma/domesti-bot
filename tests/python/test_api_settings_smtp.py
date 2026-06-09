@@ -91,6 +91,8 @@ def test_post_smtp_test_email_sends_via_plain_smtp(
     assert body["ok"] is True
     smtp_cls.assert_called_once_with("localhost", 25, timeout=10.0)
     smtp_instance.send_message.assert_called_once()
+    message = smtp_instance.send_message.call_args[0][0]
+    assert "https://hcma.info/" in message.as_string()
 
 
 def test_put_smtp_without_secrets_key_returns_503(

@@ -7,6 +7,7 @@ import smtplib
 import socket
 from dataclasses import dataclass
 from email.message import EmailMessage
+from html import escape
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,9 +18,18 @@ _SMTP_TIMEOUT_S = 10.0
 class SmtpConnectionParams:
     from_address: str
     host: str
+    mail_domain: str
     password: str
     port: int
     username: str
+
+
+def instance_url_from_mail_domain(mail_domain: str) -> str:
+    """Build the public dashboard URL for the configured instance domain."""
+    domain = mail_domain.strip().rstrip("/")
+    if domain == "":
+        return ""
+    return f"https://{domain}/"
 
 
 def send_test_email(params: SmtpConnectionParams, *, to_address: str) -> None:
@@ -27,13 +37,25 @@ def send_test_email(params: SmtpConnectionParams, *, to_address: str) -> None:
     recipient = to_address.strip()
     if recipient == "":
         raise ValueError("Expected recipient email, got empty value")
+    instance_url = instance_url_from_mail_domain(params.mail_domain)
     message = EmailMessage()
     message["Subject"] = "domesti-bot SMTP test"
     message["From"] = params.from_address
     message["To"] = recipient
-    message.set_content(
+    plain_lines = [
         "SMTP is configured correctly. This is a test message from domesti-bot.",
-    )
+    ]
+    html_lines = [
+        "<p>SMTP is configured correctly. This is a test message from domesti-bot.</p>",
+    ]
+    if instance_url != "":
+        plain_lines.append(f"Open your dashboard: {instance_url}")
+        safe_url = escape(instance_url, quote=True)
+        html_lines.append(
+            f'<p>Open your dashboard: <a href="{safe_url}">{safe_url}</a></p>',
+        )
+    message.set_content("\n\n".join(plain_lines))
+    message.add_alternative("\n".join(html_lines), subtype="html")
     _send_message(params, message)
     _LOGGER.info(
         "SMTP test email sent to %s via %s:%s",
