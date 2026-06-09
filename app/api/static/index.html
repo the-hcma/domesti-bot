@@ -522,6 +522,7 @@
     .btn-bulk:hover:not(:disabled) { filter: brightness(0.92); }
     .btn-bulk:focus-visible { outline: 2px solid var(--bulk); outline-offset: 2px; }
     .btn-danger { background: var(--danger); color: white; border-color: transparent; }
+    .btn-secondary { background: transparent; color: var(--fg); }
     .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .app-menu { position: relative; flex-shrink: 0; }
     .btn-menu { display: inline-flex; align-items: center; justify-content: center;
@@ -595,6 +596,57 @@
     .settings-dialog-lead a { color: var(--accent); }
     .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
       justify-content: flex-end; }
+
+    .rules-dialog.rules-dialog-wide { max-width: min(56rem, calc(100vw - 2rem)); }
+    .rules-dialog-title-wrap { display: flex; flex-wrap: wrap; align-items: center;
+      gap: 8px; }
+    .rules-mock-pill { font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px;
+      background: var(--pending); color: #1a1a1a; }
+    .rules-tab-bar { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px;
+      padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .rules-tab { font: inherit; cursor: pointer; border: 1px solid transparent;
+      border-radius: 6px; padding: 6px 12px; background: transparent;
+      color: var(--muted); touch-action: manipulation; }
+    .rules-tab-active { color: var(--fg); border-color: var(--border);
+      background: var(--card-elev); }
+    .rules-dialog-body { max-height: min(70vh, 640px); overflow: auto; }
+    .rules-section-title { margin: 16px 0 8px; font-size: 0.85rem;
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .rules-section-title:first-child { margin-top: 0; }
+    .rules-card-list { display: flex; flex-direction: column; gap: 8px; }
+    .rules-card { border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; background: var(--card-elev); }
+    .rules-card-row { display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; }
+    .rules-card-meta { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+    .rules-status-sun { margin: 0 0 12px; font-size: 14px; }
+    .rules-inline-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .rules-editor-panel { margin-top: 12px; padding-top: 12px;
+      border-top: 1px solid var(--border); }
+    .rules-editor-form { display: flex; flex-direction: column; gap: 10px; }
+    .rules-editor-fieldset { border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; margin: 0; }
+    .rules-editor-fieldset legend { padding: 0 4px; font-size: 13px; }
+    .rules-check-row { display: flex; align-items: center; gap: 8px;
+      font-size: 14px; margin: 4px 0; }
+    .rules-action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+    .rules-action-row select { font: inherit; padding: 6px 8px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+    .rules-geofence-map { width: 100%; height: 280px; border-radius: 8px;
+      border: 1px solid var(--border); margin-bottom: 12px; z-index: 0; }
+    .rules-geofence-map.rules-geofence-draw-mode { cursor: crosshair; }
+    .rules-geofence-map-toolbar { display: flex; flex-wrap: wrap; align-items: center;
+      gap: 8px; margin-bottom: 8px; }
+    .rules-geofence-draw-hint { font-size: 13px; color: var(--muted); }
+    .rules-geofence-table { width: 100%; border-collapse: collapse; font-size: 14px;
+      margin-bottom: 12px; }
+    .rules-geofence-table th, .rules-geofence-table td { text-align: left;
+      padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    .rules-geofence-form-panel { margin: 12px 0; padding: 12px;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--card-elev); }
+    .rules-participant-form { display: flex; flex-direction: column; gap: 10px;
+      margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 
     /* Disabled state — fires whenever the backend is unreachable
        (controller flips ``data-connected="false"`` and sets the

@@ -5,6 +5,7 @@
 // device, plus per-family and global bulk actions.
 
 import { api, HttpError } from "./api.js";
+import { openRulesHubDialog } from "./rules-dialog.js";
 import type {
   MetaOut,
   TailwindTokenSettingsOut,
@@ -1354,6 +1355,15 @@ function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
     closeAppMenu();
     void openTailwindSettingsDialog();
   });
+  const rulesItem = document.createElement("button");
+  rulesItem.type = "button";
+  rulesItem.className = "app-menu-item";
+  rulesItem.setAttribute("role", "menuitem");
+  rulesItem.textContent = "Rules";
+  rulesItem.addEventListener("click", () => {
+    closeAppMenu();
+    void openRulesHubDialog();
+  });
   const aboutItem = document.createElement("button");
   aboutItem.type = "button";
   aboutItem.className = "app-menu-item";
@@ -1363,7 +1373,7 @@ function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
     closeAppMenu();
     openAboutDialog(meta);
   });
-  panel.append(settingsItem, aboutItem);
+  panel.append(settingsItem, rulesItem, aboutItem);
   wrap.append(trigger, panel);
 
   const onDocumentClick = (ev: MouseEvent): void => {
