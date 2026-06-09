@@ -443,11 +443,17 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 }
 
-/** Rules stay mock-backed; SMTP and My Tracks settings use live HTTP APIs when available. */
+/** Rules evaluation stays mock-backed; settings and roster/geofences use live HTTP when available. */
 class RulesDataSourceWithHttpSettings implements RulesDataSource {
-  constructor(private readonly inner: MockRulesDataSource) {}
+  constructor(
+    private readonly inner: MockRulesDataSource,
+    private readonly rulesLive: boolean,
+  ) {}
 
   deleteGeofence(geofenceId: string): Promise<void> {
+    if (this.rulesLive) {
+      return api.deleteRulesGeofence(geofenceId);
+    }
     return this.inner.deleteGeofence(geofenceId);
   }
 
@@ -487,8 +493,35 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return api.fetchSmtpConfig();
   }
 
-  getStatus(): Promise<RulesStatusOut> {
-    return this.inner.getStatus();
+  async getStatus(): Promise<RulesStatusOut> {
+    const status = await this.inner.getStatus();
+    if (!this.rulesLive) {
+      return status;
+    }
+    const [geofences, participants] = await Promise.all([
+      api.fetchRulesGeofences(),
+      api.fetchRulesParticipants(),
+    ]);
+    const participantRows: ParticipantStatusOut[] = participants.map((p) => {
+      const existing = status.participants.find(
+        (row) => row.participant_id === p.participant_id,
+      );
+      if (existing !== undefined) {
+        return { ...existing, ...p };
+      }
+      return {
+        ...p,
+        age_seconds: null,
+        inside_geofence_ids: [],
+        last_fix: null,
+      };
+    });
+    return {
+      ...status,
+      geofences,
+      participants: participantRows,
+      using_mock: true,
+    };
   }
 
   isMailLive(): boolean {
@@ -504,10 +537,16 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   listGeofences(): Promise<GeofenceOut[]> {
+    if (this.rulesLive) {
+      return api.fetchRulesGeofences();
+    }
     return this.inner.listGeofences();
   }
 
   listParticipants(): Promise<ParticipantOut[]> {
+    if (this.rulesLive) {
+      return api.fetchRulesParticipants();
+    }
     return this.inner.listParticipants();
   }
 
@@ -528,6 +567,9 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   saveGeofence(geofence: GeofenceOut): Promise<GeofenceOut> {
+    if (this.rulesLive) {
+      return api.putRulesGeofence(geofence);
+    }
     return this.inner.saveGeofence(geofence);
   }
 
@@ -566,15 +608,24 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   syncGeofencesFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksGeofencesSyncOut> {
     return api.syncMyTracksGeofences(credentials);
   }
 
   syncParticipantsFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksParticipantsSyncOut> {
     return api.syncMyTracksParticipants(credentials);
+  }
+}
+
+async function rulesApiAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch("/v1/rules/geofences", { headers: authHeaders() });
+    return res.ok || res.status === 401;
+  } catch {
+    return false;
   }
 }
 
@@ -595,8 +646,12 @@ async function settingsApiAvailable(): Promise<boolean> {
 
 export async function createRulesDataSource(): Promise<RulesDataSource> {
   const mock = new MockRulesDataSource();
-  if (await settingsApiAvailable()) {
-    return new RulesDataSourceWithHttpSettings(mock);
+  const [settingsLive, rulesLive] = await Promise.all([
+    settingsApiAvailable(),
+    rulesApiAvailable(),
+  ]);
+  if (settingsLive) {
+    return new RulesDataSourceWithHttpSettings(mock, rulesLive);
   }
   return mock;
 }

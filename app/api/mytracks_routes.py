@@ -17,9 +17,9 @@ from app.api.schemas import (
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.mytracks_service import (
     MyTracksSyncError,
+    fetch_geofences_from_my_tracks,
+    fetch_participants_from_my_tracks,
     normalize_mytracks_base_url,
-    sync_geofences_from_my_tracks,
-    sync_participants_from_my_tracks,
 )
 from app.mytracks_store import (
     MyTracksConfigRecord,
@@ -29,6 +29,14 @@ from app.mytracks_store import (
     record_mytracks_geofences_sync,
     record_mytracks_participants_sync,
     save_mytracks_config,
+)
+from app.rules_store import (
+    GeofenceRecord,
+    ParticipantRecord,
+    count_geofences,
+    count_participants,
+    replace_geofences,
+    replace_participants,
 )
 
 settings_router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -80,10 +88,11 @@ async def get_mytracks_geofences_sync_status(
     if cache_path is None:
         return MyTracksGeofencesSyncOut(geofence_count=0, last_synced_at=None)
     record = load_mytracks_config(cache_path)
+    geofence_count = count_geofences(cache_path)
     if record is None:
-        return MyTracksGeofencesSyncOut(geofence_count=0, last_synced_at=None)
+        return MyTracksGeofencesSyncOut(geofence_count=geofence_count, last_synced_at=None)
     return MyTracksGeofencesSyncOut(
-        geofence_count=0,
+        geofence_count=geofence_count,
         last_synced_at=record.last_geofences_sync_at,
     )
 
@@ -100,14 +109,15 @@ async def get_mytracks_participants_sync_status(
             participant_count=0,
         )
     record = load_mytracks_config(cache_path)
+    participant_count = count_participants(cache_path)
     if record is None:
         return MyTracksParticipantsSyncOut(
             last_synced_at=None,
-            participant_count=0,
+            participant_count=participant_count,
         )
     return MyTracksParticipantsSyncOut(
         last_synced_at=record.last_participants_sync_at,
-        participant_count=0,
+        participant_count=participant_count,
     )
 
 
@@ -120,7 +130,7 @@ async def post_mytracks_geofences_sync(
     record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
     try:
-        count = sync_geofences_from_my_tracks(
+        exported = fetch_geofences_from_my_tracks(
             base_url=base_url,
             password=body.password,
             username=username,
@@ -130,6 +140,21 @@ async def post_mytracks_geofences_sync(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+    count = replace_geofences(
+        cache_path,
+        [
+            GeofenceRecord(
+                geofence_id=row.geofence_id,
+                label=row.label,
+                center_lat=row.center_lat,
+                center_lon=row.center_lon,
+                radius_m=row.radius_m,
+                enabled=row.enabled,
+                owntracks_rid=row.owntracks_rid,
+            )
+            for row in exported
+        ],
+    )
     updated = record_mytracks_geofences_sync(cache_path, count=count)
     return MyTracksGeofencesSyncOut(
         geofence_count=count,
@@ -146,7 +171,7 @@ async def post_mytracks_participants_sync(
     record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
     try:
-        count = sync_participants_from_my_tracks(
+        exported = fetch_participants_from_my_tracks(
             base_url=base_url,
             password=body.password,
             username=username,
@@ -156,6 +181,18 @@ async def post_mytracks_participants_sync(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+    count = replace_participants(
+        cache_path,
+        [
+            ParticipantRecord(
+                participant_id=row.participant_id,
+                display_name=row.display_name,
+                tracking_device_label=row.tracking_device_label,
+                enabled=row.enabled,
+            )
+            for row in exported
+        ],
+    )
     updated = record_mytracks_participants_sync(cache_path, count=count)
     return MyTracksParticipantsSyncOut(
         last_synced_at=updated.last_participants_sync_at,

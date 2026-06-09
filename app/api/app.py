@@ -37,6 +37,7 @@ from app.api.schemas import (
 from app.api.settings_routes import router as settings_router
 from app.api.mytracks_routes import rules_router as mytracks_rules_router
 from app.api.mytracks_routes import settings_router as mytracks_settings_router
+from app.api.rules_routes import router as rules_router
 from app.api.smtp_routes import router as smtp_router
 from app.api.ui_state import (
     build_kasa_device_view,
@@ -283,6 +284,7 @@ def create_app(args: Any) -> FastAPI:
     app.include_router(smtp_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(mytracks_settings_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(mytracks_rules_router, dependencies=[Depends(_verify_api_key)])
+    app.include_router(rules_router, dependencies=[Depends(_verify_api_key)])
     app.add_middleware(_AccessLogMiddleware)
     app.add_middleware(
         CORSMiddleware,
