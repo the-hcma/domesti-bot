@@ -563,7 +563,16 @@
     }
     .settings-dialog { border: 1px solid var(--border); border-radius: 12px;
       padding: 0; max-width: min(28rem, calc(100vw - 2rem)); background: var(--card);
-      color: var(--fg); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+      color: var(--fg); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      color-scheme: light dark; }
+    html[data-theme="light"] .settings-dialog { color-scheme: light; }
+    html[data-theme="dark"] .settings-dialog { color-scheme: dark; }
+    @media (prefers-color-scheme: light) {
+      html:not([data-theme]) .settings-dialog { color-scheme: light; }
+    }
+    @media (prefers-color-scheme: dark) {
+      html:not([data-theme]) .settings-dialog { color-scheme: dark; }
+    }
     .settings-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
     .settings-dialog-panel { display: flex; flex-direction: column; padding: 20px 22px 22px;
       margin: 0; }
@@ -586,7 +595,9 @@
       line-height: 1.45; color: var(--muted); }
     .settings-dialog-field { display: flex; flex-direction: column; gap: 6px;
       font-size: 14px; }
-    .settings-dialog-field input { font: inherit; padding: 8px 10px;
+    .settings-dialog-field input,
+    .settings-dialog-field select,
+    .settings-dialog-field textarea { font: inherit; padding: 8px 10px;
       border-radius: 6px; border: 1px solid var(--border); background: var(--bg);
       color: var(--fg); }
     .settings-dialog-token-row { display: flex; gap: 8px; align-items: stretch; }
@@ -607,7 +618,7 @@
       gap: 8px; }
     .rules-mock-pill { font-size: 11px; font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px;
-      background: var(--pending); color: #1a1a1a; }
+      background: var(--pending); color: var(--fg); }
     .rules-tab-bar { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px;
       padding-bottom: 8px; border-bottom: 1px solid var(--border); }
     .rules-tab { font: inherit; cursor: pointer; border: 1px solid transparent;
@@ -669,7 +680,22 @@
     .rules-mail-mount .settings-dialog-field input,
     .rules-mail-mount .settings-dialog-field select { width: 100%; }
     .rules-mail-test-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .rules-mail-test-row input { flex: 1 1 12rem; min-width: 0; }
+    .rules-mail-test-row input { flex: 1 1 12rem; min-width: 0; font: inherit;
+      padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--fg); }
+    .automations-dialog .rules-editor-form input:not([type="checkbox"]):not([type="radio"]),
+    .automations-dialog .rules-geofence-form-panel input:not([type="checkbox"]):not([type="radio"]),
+    .automations-dialog .rules-participant-form input:not([type="checkbox"]):not([type="radio"]) {
+      font: inherit; padding: 8px 10px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+    .automations-dialog .leaflet-bar a { background: var(--card-elev); color: var(--fg);
+      border-bottom-color: var(--border); }
+    .automations-dialog .leaflet-bar a:hover { background: var(--border); }
+    .automations-dialog .leaflet-control-attribution {
+      background: color-mix(in srgb, var(--card) 88%, transparent); color: var(--muted); }
+    .automations-dialog .leaflet-tooltip,
+    .automations-dialog .rules-presence-map-tooltip { background: var(--card-elev);
+      color: var(--fg); border-color: var(--border); }
     .rules-presence-map-mount { display: flex; flex-direction: column; gap: 8px; }
     .rules-presence-map-filters { display: flex; flex-wrap: wrap; gap: 10px 16px;
       align-items: center; }

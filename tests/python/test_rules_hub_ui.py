@@ -61,6 +61,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-presence-map",
         "rules-presence-map-filters",
         "rules-day-shortcuts",
+        "automations-dialog .leaflet-tooltip",
+        "color-scheme: dark",
         "leaflet@1.9.4",
     ):
         assert needle in html, needle

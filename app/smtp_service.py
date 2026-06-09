@@ -32,12 +32,40 @@ def instance_url_from_mail_domain(mail_domain: str) -> str:
     return f"https://{domain}/"
 
 
-def send_test_email(params: SmtpConnectionParams, *, to_address: str) -> None:
+def normalize_instance_url(url: str) -> str:
+    """Ensure a trailing slash; return empty when input is blank."""
+    trimmed = url.strip()
+    if trimmed == "":
+        return ""
+    return trimmed if trimmed.endswith("/") else f"{trimmed}/"
+
+
+def resolve_instance_url(
+    *,
+    instance_url: str | None,
+    mail_domain: str,
+) -> str:
+    """Prefer the live UI origin; fall back to ``https://{mail_domain}/``."""
+    resolved = normalize_instance_url(instance_url or "")
+    if resolved != "":
+        return resolved
+    return instance_url_from_mail_domain(mail_domain)
+
+
+def send_test_email(
+    params: SmtpConnectionParams,
+    *,
+    instance_url: str | None = None,
+    to_address: str,
+) -> None:
     """Send a test message using the given connection parameters. Raises on failure."""
     recipient = to_address.strip()
     if recipient == "":
         raise ValueError("Expected recipient email, got empty value")
-    instance_url = instance_url_from_mail_domain(params.mail_domain)
+    dashboard_url = resolve_instance_url(
+        instance_url=instance_url,
+        mail_domain=params.mail_domain,
+    )
     message = EmailMessage()
     message["Subject"] = "domesti-bot SMTP test"
     message["From"] = params.from_address
@@ -48,9 +76,9 @@ def send_test_email(params: SmtpConnectionParams, *, to_address: str) -> None:
     html_lines = [
         "<p>SMTP is configured correctly. This is a test message from domesti-bot.</p>",
     ]
-    if instance_url != "":
-        plain_lines.append(f"Open your dashboard: {instance_url}")
-        safe_url = escape(instance_url, quote=True)
+    if dashboard_url != "":
+        plain_lines.append(f"Open your dashboard: {dashboard_url}")
+        safe_url = escape(dashboard_url, quote=True)
         html_lines.append(
             f'<p>Open your dashboard: <a href="{safe_url}">{safe_url}</a></p>',
         )
