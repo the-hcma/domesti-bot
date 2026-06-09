@@ -96,16 +96,18 @@ export interface TailwindTokenSetOut {
 
 export type RuleTrigger = "edge_true" | "while_true";
 
-export type RuleActionType = "turn_on" | "turn_off" | "open" | "close" | "pause";
+export type RuleActionType =
+  | "turn_on"
+  | "turn_off"
+  | "open"
+  | "close"
+  | "pause"
+  | "resume";
 
-export interface RuleActionTarget {
-  family_id: string;
+export interface RuleDeviceActionOut {
+  action: RuleActionType;
   device_id: string;
-}
-
-export interface RuleActionOut {
-  type: RuleActionType;
-  targets: RuleActionTarget[];
+  family_id: string;
 }
 
 export type RuleConditionOut =
@@ -132,8 +134,10 @@ export interface RuleOut {
   enabled: boolean;
   trigger: RuleTrigger;
   cooldown_s: number;
+  /** Fixes with horizontal accuracy worse than this (meters) are ignored. */
+  min_fix_accuracy_m: number;
   conditions: RuleConditionsOut;
-  actions: RuleActionOut[];
+  device_actions: RuleDeviceActionOut[];
 }
 
 export interface GeofenceOut {
@@ -149,6 +153,8 @@ export interface GeofenceOut {
 export interface ParticipantOut {
   participant_id: string;
   display_name: string;
+  /** Phone or tracker that reports this participant's location (my-tracks device). */
+  tracking_device_label: string;
   enabled: boolean;
 }
 
@@ -172,11 +178,19 @@ export interface RulesSunOut {
   is_dark: boolean;
 }
 
+export interface RuleConditionStatusOut {
+  condition: RuleConditionOut;
+  detail: string;
+  label: string;
+  met: boolean;
+}
+
 export interface RuleStatusSummaryOut {
   id: string;
   label: string;
   enabled: boolean;
   condition_currently_true: boolean;
+  conditions: RuleConditionStatusOut[];
   last_fired_at: string | null;
   last_error: string | null;
 }

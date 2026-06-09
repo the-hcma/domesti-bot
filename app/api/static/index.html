@@ -612,7 +612,8 @@
       color: var(--muted); touch-action: manipulation; }
     .rules-tab-active { color: var(--fg); border-color: var(--border);
       background: var(--card-elev); }
-    .rules-dialog-body { max-height: min(70vh, 640px); overflow: auto; }
+    .rules-dialog-body { position: relative; max-height: min(70vh, 640px);
+      overflow: auto; }
     .rules-section-title { margin: 16px 0 8px; font-size: 0.85rem;
       text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
     .rules-section-title:first-child { margin-top: 0; }
@@ -622,7 +623,39 @@
     .rules-card-row { display: flex; align-items: center; justify-content: space-between;
       gap: 8px; }
     .rules-card-meta { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
-    .rules-status-sun { margin: 0 0 12px; font-size: 14px; }
+    .rules-card-warn { margin: 4px 0 0; font-size: 13px; color: var(--pending); }
+    .rules-card-title-btn { font: inherit; font-weight: 600; cursor: pointer;
+      border: none; background: transparent; color: var(--fg); text-align: left;
+      padding: 0; touch-action: manipulation; }
+    .rules-card-title-btn:hover { text-decoration: underline; }
+    .rules-clickable-card { width: 100%; text-align: left; cursor: pointer;
+      font: inherit; color: inherit; touch-action: manipulation; }
+    .rules-clickable-card:hover { border-color: var(--accent); }
+    .rules-condition-list { margin: 8px 0 0; padding-left: 1.1rem; font-size: 13px; }
+    .rules-condition-met { color: var(--accent); }
+    .rules-condition-unmet { color: var(--danger); }
+    .rules-device-action-row { margin: 6px 0; }
+    .rules-device-action-label { display: flex; flex-wrap: wrap; align-items: center;
+      gap: 8px; font-size: 14px; }
+    .rules-device-action-label select { font: inherit; padding: 4px 8px;
+      border-radius: 6px; border: 1px solid var(--border); background: var(--bg);
+      color: var(--fg); }
+    .rules-dynamic-badge { display: inline-block; margin-left: 8px; font-size: 11px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+      padding: 2px 8px; border-radius: 999px; background: var(--border);
+      color: var(--muted); vertical-align: middle; }
+    .rules-field-hint { display: block; margin-top: 2px; font-size: 12px;
+      color: var(--muted); font-weight: normal; }
+    .rules-inline-dialog { position: absolute; inset: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.35); border-radius: inherit; }
+    .rules-inline-dialog-panel { max-width: 24rem; margin: 12px; padding: 16px;
+      border-radius: 8px; border: 1px solid var(--border);
+      background: var(--card-elev); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); }
+    .rules-status-sun { display: flex; flex-wrap: wrap; align-items: center;
+      gap: 4px; margin: 0 0 12px; font-size: 14px; border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px; background: var(--card-elev); }
+    .rules-sun-times { margin: 8px 0 12px; padding-left: 1.2rem; font-size: 14px; }
     .rules-inline-actions { display: flex; gap: 6px; flex-wrap: wrap; }
     .rules-editor-panel { margin-top: 12px; padding-top: 12px;
       border-top: 1px solid var(--border); }
