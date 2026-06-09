@@ -76,11 +76,8 @@ function apiKeyFromMeta(): string | null {
   return v ? v : null;
 }
 
-async function call<T>(
-  method: "DELETE" | "GET" | "POST" | "PUT",
-  path: string,
-  body?: unknown,
-): Promise<T> {
+/** Headers for protected ``/v1/...`` routes (rules wire-up, manual fetch). */
+export function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/json",
   };
@@ -88,6 +85,15 @@ async function call<T>(
   if (apiKey) {
     headers["X-Domesti-Api-Key"] = apiKey;
   }
+  return headers;
+}
+
+async function call<T>(
+  method: "DELETE" | "GET" | "POST" | "PUT",
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const headers = authHeaders();
   const init: RequestInit = { method, headers };
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
