@@ -10,6 +10,7 @@ import {
 import { evaluateRule } from "./rules-evaluate.js";
 import type {
   GeofenceOut,
+  MyTracksParticipantsSyncOut,
   ParticipantOut,
   ParticipantStatusOut,
   RuleActionDeviceOut,
@@ -31,9 +32,11 @@ export interface RulesDataSource {
   listGeofences(): Promise<GeofenceOut[]>;
   saveGeofence(geofence: GeofenceOut): Promise<GeofenceOut>;
   deleteGeofence(geofenceId: string): Promise<void>;
+  deleteParticipant(participantId: string): Promise<void>;
+  getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut>;
   listParticipants(): Promise<ParticipantOut[]>;
   saveParticipant(participant: ParticipantOut): Promise<ParticipantOut>;
-  deleteParticipant(participantId: string): Promise<void>;
+  syncParticipantsFromMyTracks(): Promise<MyTracksParticipantsSyncOut>;
   listRules(): Promise<RuleOut[]>;
   listTimeConditionTemplates(): Promise<TimeConditionTemplateOut[]>;
   getRule(ruleId: string): Promise<RuleOut | null>;
@@ -164,6 +167,22 @@ export class MockRulesDataSource implements RulesDataSource {
     );
   }
 
+  async deleteParticipant(participantId: string): Promise<void> {
+    this.store.participants = this.store.participants.filter(
+      (p) => p.participant_id !== participantId,
+    );
+    delete this.store.participant_fixes[participantId];
+  }
+
+  async getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
+    return {
+      source: "my-tracks",
+      last_synced_at: this.store.participants_sync.last_synced_at,
+      participant_count: this.store.participants.length,
+      webhook_ready: true,
+    };
+  }
+
   async listParticipants(): Promise<ParticipantOut[]> {
     return structuredClone(this.store.participants);
   }
@@ -180,11 +199,10 @@ export class MockRulesDataSource implements RulesDataSource {
     return structuredClone(participant);
   }
 
-  async deleteParticipant(participantId: string): Promise<void> {
-    this.store.participants = this.store.participants.filter(
-      (p) => p.participant_id !== participantId,
-    );
-    delete this.store.participant_fixes[participantId];
+  async syncParticipantsFromMyTracks(): Promise<MyTracksParticipantsSyncOut> {
+    this.store.participants = structuredClone(this.store.my_tracks_participant_catalog);
+    this.store.participants_sync.last_synced_at = new Date().toISOString();
+    return this.getMyTracksParticipantsSync();
   }
 
   async listRules(): Promise<RuleOut[]> {
@@ -244,6 +262,7 @@ export class MockRulesDataSource implements RulesDataSource {
       host: cfg.host,
       port: cfg.port,
       username: cfg.username,
+      mail_domain: cfg.mail_domain,
       from_address: cfg.from_address,
       password_configured: cfg.password.length > 0,
       last_test_recipient: this.store.smtp_last_test_recipient,
@@ -285,6 +304,7 @@ export class MockRulesDataSource implements RulesDataSource {
       port: config.port,
       username: config.username,
       password,
+      mail_domain: config.mail_domain,
       from_address: config.from_address,
     };
     const out = await this.getSmtpConfig();

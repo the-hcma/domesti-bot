@@ -152,6 +152,23 @@ function evaluateCondition(
             : `Past ${formatHhmmDisplay(condition.time_hhmm)} for today`,
     };
   }
+  if (condition.type === "days_of_week") {
+    const today = new Date().getDay();
+    const met = condition.days.includes(today);
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const selected = [...condition.days]
+      .sort((a, b) => a - b)
+      .map((d) => dayNames[d] ?? String(d))
+      .join(", ");
+    return {
+      condition,
+      label: "Days of week",
+      met,
+      detail: met
+        ? `Today (${dayNames[today] ?? "?"}) is in ${selected}`
+        : `Today (${dayNames[today] ?? "?"}) not in ${selected}`,
+    };
+  }
 
   const geofence = store.geofences.find((g) => g.geofence_id === condition.geofence_id);
   const fenceLabel = geofenceLabel(store, condition.geofence_id);

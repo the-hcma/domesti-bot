@@ -64,12 +64,15 @@ flowchart TB
   subgraph mytracks [my-tracks]
     MQTT[OwnTracks MQTT]
     SAVE[save_location_to_db]
-    RELAY[presence relay POST]
-    MQTT --> SAVE --> RELAY
+    PRES_RELAY[presence relay POST]
+    ROSTER_RELAY[participants roster POST]
+    MQTT --> SAVE --> PRES_RELAY
+    USER_CHG[User or device change] --> ROSTER_RELAY
   end
 
   subgraph api [domesti-bot HTTP API]
-    WH["POST /v1/webhooks/presence"]
+    WH_PRES["POST /v1/webhooks/presence"]
+    WH_ROSTER["POST /v1/webhooks/participants"]
     GEO_CRUD["/v1/rules/geofences"]
     RULE_CRUD["/v1/rules"]
     RULE_STATUS["GET /v1/rules/status"]
@@ -90,8 +93,10 @@ flowchart TB
     STATUS[Presence + last-fired panel]
   end
 
-  RELAY --> WH
-  WH --> REG
+  PRES_RELAY --> WH_PRES
+  ROSTER_RELAY --> WH_ROSTER
+  WH_PRES --> REG
+  WH_ROSTER --> STORE
   REG --> EVAL
   GEO_CRUD --> STORE
   RULE_CRUD --> STORE
@@ -102,7 +107,7 @@ flowchart TB
   MENU --> RULE_CRUD
   EDITOR --> RULE_CRUD
   STATUS --> RULE_STATUS
-  STATUS --> PRES
+  STATUS --> REG
 ```
 
 ### Runtime responsibilities
@@ -127,14 +132,16 @@ Participants are **not** LAN devices. They are logical identities located by ext
 # Conceptual fields (persisted + in-memory)
 participant_id: str          # stable slug, e.g. "henrique", "kristen"
 display_name: str            # "Henrique", "Kristen"
+tracking_device_label: str   # "Henrique's iPhone" — primary reporting device in my-tracks
 enabled: bool = True
-last_lat: float | None
+last_lat: float | None       # from presence webhook only
 last_lon: float | None
 last_accuracy_m: float | None
 last_received_at: float | None   # monotonic or UTC epoch
 ```
 
-- **Create** participants via API or desktop UI before location pushes are accepted (reject unknown IDs with `404`, or auto-create when a feature flag `DOMESTI_PRESENCE_AUTO_REGISTER=1` is set — default off for predictable security).
+- **Roster source of truth is my-tracks** — domesti-bot does **not** offer add/edit/delete for participants in the desktop UI. my-tracks pushes the catalog via `POST /v1/webhooks/participants` whenever users or owner-linked devices change (see below). Operators may also click **Sync from my-tracks** in the Participants tab, which calls `POST /v1/rules/participants/sync` and pulls the same snapshot from my-tracks’ read API (fallback when a webhook was missed).
+- **Presence webhook is separate** — `POST /v1/webhooks/presence` updates coordinates only for **known** `participant_id` rows. Reject unknown IDs with `404` (do not auto-create from GPS alone — roster must exist first).
 - **Staleness**: a participant with no fix within `PRESENCE_STALE_AFTER_S` (default 30 minutes) is treated as **not home** for geofence conditions (configurable per participant later).
 
 ### Geofences
@@ -262,9 +269,72 @@ That pattern is insufficient for domesti-bot’s rule engine because:
 | my-tracks | domesti-bot |
 | --- | --- |
 | `User.username` (e.g. `henrique`, `kristen`) | `participant_id` |
-| `User.get_full_name()` or profile name | `display_name` (operator sets once in domesti-bot UI) |
+| `User.get_full_name()` or profile display name | `display_name` |
+| Primary `Device` label for that owner (e.g. phone name) | `tracking_device_label` |
 
-Create matching `presence_participants` rows in domesti-bot before the relay starts. Reject unknown IDs with `404` (auto-register stays off by default).
+**Roster is webhook-driven** — my-tracks POSTs the full participant catalog (or deltas) to domesti-bot; operators do not hand-create rows in the Automations hub. Until the roster webhook has run at least once, presence ingest for that `participant_id` returns `404`.
+
+### Participants roster webhook (my-tracks → domesti-bot)
+
+Distinct from the **presence** webhook (GPS fixes). This endpoint owns **who exists** and how they are labeled.
+
+```
+POST /v1/webhooks/participants
+Content-Type: application/json
+X-Domesti-Api-Key: <shared secret>
+```
+
+**Body** (`ParticipantsRosterWebhookIn`) — full-catalog snapshot (simplest v1 contract):
+
+```json
+{
+  "synced_at": "2026-06-09T23:00:00Z",
+  "source": "my-tracks",
+  "participants": [
+    {
+      "participant_id": "henrique",
+      "display_name": "Henrique",
+      "tracking_device_label": "Henrique's iPhone",
+      "enabled": true
+    },
+    {
+      "participant_id": "kristen",
+      "display_name": "Kristen",
+      "tracking_device_label": "Kristen's iPhone",
+      "enabled": true
+    }
+  ]
+}
+```
+
+| Field | Source in my-tracks |
+| --- | --- |
+| `participant_id` | `User.username` |
+| `display_name` | `User.get_full_name()` or profile name |
+| `tracking_device_label` | Label of the owner’s primary tracking `Device` (most recently seen, or admin-selected) |
+| `enabled` | `User.is_active` (and device not disabled) |
+
+**Responses:**
+
+- `204 No Content` — roster replaced/merged; `participants_sync.last_synced_at` updated.
+- `422` — duplicate `participant_id`, empty slug, or malformed body.
+
+**When my-tracks should POST:**
+
+- On startup (if URL configured) — seed domesti-bot after deploy.
+- When a `User` is created, renamed, deactivated, or deleted.
+- When an owner-linked `Device` is added, renamed, or becomes the primary tracker.
+
+Suggested settings (Django / env):
+
+| Setting | Purpose |
+| --- | --- |
+| `DOMESTI_BOT_PARTICIPANTS_WEBHOOK_URL` | e.g. `http://192.168.1.10:8003/v1/webhooks/participants` |
+| `DOMESTI_BOT_API_KEY` | Same shared secret as presence relay |
+
+Implementation mirrors the presence relay (`urllib` POST, 5s timeout, log + swallow failures).
+
+**Operator fallback (domesti-bot):** `POST /v1/rules/participants/sync` triggers a pull from my-tracks’ export API (companion PR **M1b**). The desktop **Sync from my-tracks** button calls this; mock Phase 1 uses `syncParticipantsFromMyTracks()` against an in-memory catalog.
 
 ### my-tracks relay hook (companion PR in my-tracks)
 
@@ -317,6 +387,7 @@ my-tracks should POST JSON on **every** saved location fix for watched owners:
 
 ### End-to-end path for the motivating rule
 
+0. my-tracks → `POST /v1/webhooks/participants` → domesti-bot `presence_participants` rows (`henrique`, `kristen`).
 1. Phone → OwnTracks → MQTT → my-tracks `save_location_to_db`.
 2. my-tracks → `POST /v1/webhooks/presence` → domesti-bot `PresenceRegistry`.
 3. domesti-bot evaluator runs (presence-triggered + 60s sun tick).
@@ -346,8 +417,9 @@ Geofence circles are configured **once** in domesti-bot (operator UI with map). 
 
 | Item | Action |
 | --- | --- |
-| `relay_presence_to_domesti_bot(owner, location)` | POST every saved fix (see below) |
-| `DOMESTI_BOT_PRESENCE_WEBHOOK_URL`, `DOMESTI_BOT_API_KEY` | Settings |
+| `relay_presence_to_domesti_bot(owner, location)` | POST every saved fix to `/v1/webhooks/presence` |
+| `relay_participants_roster_to_domesti_bot()` | POST catalog snapshot to `/v1/webhooks/participants` on user/device changes + startup |
+| `DOMESTI_BOT_PRESENCE_WEBHOOK_URL`, `DOMESTI_BOT_PARTICIPANTS_WEBHOOK_URL`, `DOMESTI_BOT_API_KEY` | Settings |
 | Deprecation notice on `/geofences/` automations that pointed at global rules | Banner: “Home automations moved to domesti-bot” |
 
 ### Feature parity matrix
@@ -365,9 +437,9 @@ Geofence circles are configured **once** in domesti-bot (operator UI with map). 
 ### Cutover checklist
 
 1. Export / recreate geofences in domesti-bot (import API or manual draw on map).
-2. Create `presence_participants` matching my-tracks usernames.
+2. Enable my-tracks **participants roster** webhook (or run one-time sync); verify `GET /v1/rules/participants` lists `henrique` / `kristen`.
 3. Recreate rules in domesti-bot UI (lights + garage + sunset).
-4. Enable my-tracks presence relay; verify `/v1/rules/status`.
+4. Enable my-tracks **presence** relay; verify `/v1/rules/status` shows live fixes.
 5. Disable / delete `GlobalAutomationRule` rows in my-tracks.
 6. Deploy my-tracks PR that removes `_evaluate_global_automations_for_user`.
 7. (Optional) Point my-tracks `setWaypoints` sync at domesti-bot geofence export.
@@ -429,9 +501,49 @@ Response rows match `Waypoint.as_device_sync_row()` shape: `{desc, lat, lon, rad
 
 All routes below require `X-Domesti-Api-Key` when `DOMESTI_API_KEY` is set (same as existing protected routes). Presence ingest is **high sensitivity** — mandatory on `--listen-all` deployments where my-tracks posts from another host.
 
-Prefix: `/v1/rules` for rule CRUD; `/v1/webhooks/presence` for my-tracks location relay.
+Prefix: `/v1/rules` for rule CRUD; `/v1/webhooks/*` for my-tracks pushes (participants roster + presence fixes).
 
-### Presence webhook (primary — my-tracks)
+### Participants roster webhook (primary — my-tracks)
+
+```
+POST /v1/webhooks/participants
+Content-Type: application/json
+X-Domesti-Api-Key: <shared secret>
+```
+
+**Body** (`ParticipantsRosterWebhookIn`): see [Participants roster webhook](#participants-roster-webhook-my-tracks--domesti-bot) above.
+
+**Responses:**
+
+- `204 No Content` — catalog stored; `participants_sync.last_synced_at` set from `synced_at` or server time.
+- `422` — validation error (duplicate ids, empty slug).
+
+**Side effect:** upsert/replace rows in `presence_participants`; remove participants absent from the snapshot only when `replace: true` is set in the body (default `true` for full snapshot). Disabled participants remain in the DB but are excluded from rule editor pickers.
+
+**Read-only in UI:** the desktop Participants tab lists rows and last sync time; it does not expose create/edit/delete forms.
+
+### Operator sync fallback
+
+```
+POST /v1/rules/participants/sync
+```
+
+Pulls the same roster snapshot from my-tracks (server-side HTTP to my-tracks export API). Returns `MyTracksParticipantsSyncOut`:
+
+```json
+{
+  "source": "my-tracks",
+  "last_synced_at": "2026-06-09T23:00:00Z",
+  "participant_count": 2,
+  "webhook_ready": true
+}
+```
+
+`GET /v1/rules/participants/sync-status` returns the same shape without mutating.
+
+Phase 1 mock: `getMyTracksParticipantsSync()` / `syncParticipantsFromMyTracks()` on `MockRulesDataSource`.
+
+### Presence webhook (location fixes — my-tracks)
 
 ```
 POST /v1/webhooks/presence
@@ -489,14 +601,15 @@ Body: `{ "updates": [ { "participant_id", "lat", "lon", ... }, ... ] }` → `204
 | `PUT` | `/v1/rules/geofences/{geofence_id}` | Update |
 | `DELETE` | `/v1/rules/geofences/{geofence_id}` | Delete (409 if referenced by enabled rules) |
 
-### Participant CRUD
+### Participants (read + sync — roster owned by my-tracks)
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/v1/rules/participants` | List with last known location (no history) |
-| `POST` | `/v1/rules/participants` | Create |
-| `PUT` | `/v1/rules/participants/{participant_id}` | Update display name / enabled |
-| `DELETE` | `/v1/rules/participants/{participant_id}` | Delete |
+| `GET` | `/v1/rules/participants/sync-status` | Last roster sync metadata (`MyTracksParticipantsSyncOut`) |
+| `POST` | `/v1/rules/participants/sync` | Pull roster from my-tracks export API (operator / UI button) |
+
+Manual `POST` / `PUT` / `DELETE` on participants are **not** exposed in v1 — use my-tracks as the editor and the roster webhook (or sync fallback) as transport.
 
 ### Rule CRUD
 
@@ -544,8 +657,9 @@ Add tables via `app/db/models.py` + `bootstrap_schema` (additive only).
 
 | Table | Purpose |
 | --- | --- |
-| `presence_participants` | id, display_name, enabled, updated_at |
+| `presence_participants` | participant_id PK, display_name, tracking_device_label, enabled, updated_at |
 | `presence_last_fix` | participant_id PK, lat, lon, accuracy_m, received_at, source |
+| `participants_sync` | singleton: last_synced_at, source (`my-tracks`) |
 | `rule_geofences` | geofence_id PK, label, center_lat, center_lon, radius_m, enabled, owntracks_rid (nullable), updated_at |
 | `automation_rules` | rule_id PK, label, enabled, trigger, cooldown_s, conditions_json, actions_json, updated_at |
 | `automation_rule_state` | rule_id PK, last_condition_bool, last_fired_at |
@@ -616,7 +730,9 @@ Before any `/v1/rules/*` routes exist, the web bundle implements the full operat
 | --- | --- | --- |
 | `getStatus()` | `GET /v1/rules/status` | Return fixture below |
 | `listGeofences()` / `saveGeofence()` / `deleteGeofence()` | geofence CRUD | In-memory array; map UI reads/writes same store |
-| `listParticipants()` / `saveParticipant()` / … | participant CRUD | In-memory |
+| `listParticipants()` | `GET /v1/rules/participants` | In-memory catalog |
+| `getMyTracksParticipantsSync()` | `GET …/participants/sync-status` | Fixture `last_synced_at` |
+| `syncParticipantsFromMyTracks()` | `POST …/participants/sync` | Replace from `my_tracks_participant_catalog` |
 | `listRules()` / `saveRule()` / `setRuleEnabled()` / … | rule CRUD | In-memory |
 | `getSettingsLocation()` / `saveSettingsLocation()` | settings location | Fixture home pin (41.194072, -73.888325) |
 | `listActionDevices()` | `GET /v1/ui/state` (kasa + tailwind) | **Try live** `UIStateOut` when discovery ready; else mock switches/doors |
@@ -651,10 +767,12 @@ Default **mock on** until `GET /v1/rules/status` exists (404/503 → mock). Opti
 
 ```
 ☰ Menu
+├── Automations       (new — opens Automations hub dialog; first item)
 ├── Settings          (existing — Tailwind token)
-├── Rules             (new — opens Rules hub dialog)
 └── About             (existing)
 ```
+
+Dialog title: **Automations**. Internal tabs use **Rules** (not “Automations”) for the rule list/editor tab.
 
 ### Rules hub (modal / full-height dialog)
 
@@ -672,9 +790,10 @@ Use the existing `settings-dialog` visual system (`app/api/static/index.html` CS
    - “Add rule” → editor (see below).
 
 3. **Geofences** — Leaflet + OpenStreetMap editor (desktop; port UX from my-tracks `/geofences/`)
-4. **Participants**
-   - List + add: id slug, display name.
-   - Copyable webhook snippet (my-tracks relay config); manual curl uses `POST /v1/webhooks/presence`.
+4. **Participants** (read-only)
+   - Sync status row: participant count, last synced time, **Sync from my-tracks** button (`POST /v1/rules/participants/sync`).
+   - List: display name, `participant_id`, tracking device label; mini OSM map per person (last fix + geofences).
+   - No add/edit forms — roster arrives via `POST /v1/webhooks/participants` from my-tracks.
 
 ### Rule editor (desktop)
 
@@ -831,52 +950,63 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 #### PR4 — `feat/rules-persistence-and-geofence-utm`
 
 - UTM zone auto-selection (fix hardcoded 18N).
-- SQLite tables + `rules_store` for geofences (`owntracks_rid`, `enabled`) and participants.
-- Geofence + participant CRUD API; optional `POST /v1/rules/geofences/import`.
+- SQLite tables + `rules_store` for geofences (`owntracks_rid`, `enabled`) and `presence_participants` + `participants_sync` metadata.
+- Geofence CRUD API; optional `POST /v1/rules/geofences/import`.
+- `GET /v1/rules/participants` + sync-status (read-only roster).
 - Hermetic tests; Haversine-vs-UTM spot-check with my-tracks coordinates.
 
-#### PR5 — `feat/presence-webhook-ingest`
+#### PR5 — `feat/participants-roster-webhook`
+
+- `POST /v1/webhooks/participants` — full-catalog snapshot from my-tracks.
+- `POST /v1/rules/participants/sync` + `GET …/sync-status` (operator pull fallback).
+- Persist `tracking_device_label`, `participants_sync.last_synced_at`.
+- Hermetic tests: unknown participant rejected by presence ingest until roster webhook runs.
+- **Companion (my-tracks):** `feat/domesti-participants-roster-relay` (startup + user/device hooks).
+
+#### PR6 — `feat/presence-webhook-ingest`
 
 - `PresenceRegistry` + `POST /v1/webhooks/presence` + `PUT /v1/presence/{id}` (debug).
 - Parse ISO-8601 `timestamp` (my-tracks format).
-- **Companion (my-tracks):** `feat/domesti-presence-relay` after deploy.
+- **Companion (my-tracks):** `feat/domesti-presence-relay` after PR5 roster is live.
 
-#### PR6 — `feat/sun-times-service`
+#### PR7 — `feat/sun-times-service`
 
 - `uv add astral`
 - `automation_settings` + `GET/PUT /v1/rules/settings/location`
 - `SunTimesService` + frozen-clock tests.
 
-#### PR7 — `feat/rule-engine-core`
+#### PR8 — `feat/rule-engine-core`
 
 - Rule tables + `RuleEngine` condition evaluation (geofence + sunset + boolean ops).
 - Rule CRUD API; **no firing yet**.
 - Extend `test_rule_engine.py` for Henrique+Kristen scenario.
 
-#### PR8 — `feat/rule-evaluator-and-status-api`
+#### PR9 — `feat/rule-evaluator-and-status-api`
 
 - `RuleEvaluator` asyncio task + action dispatcher.
 - `GET /v1/rules/status` (shape matches `RulesStatusOut`).
 - Simulated presence + `SimulatedSwitchDevice` tests.
 
-#### PR9 — `feat/rules-ui-http-wire-up`
+#### PR10 — `feat/rules-ui-http-wire-up`
 
 - `HttpRulesDataSource` implementation.
 - Default to HTTP when `GET /v1/rules/status` returns 200; remove or dim “Mock data” pill.
 - Import flow: optional button in Geofences tab calling `POST …/geofences/import` (paste JSON).
 - End-to-end: edit rule in UI → persists across server restart.
 
-#### PR10 — `docs/rules-operators-guide`
+#### PR11 — `docs/rules-operators-guide`
 
-- my-tracks relay env vars, cutover checklist, API key on LAN.
+- my-tracks roster + presence webhook env vars, cutover checklist, API key on LAN.
 
-### my-tracks companion stack (separate repo — after domesti-bot PR5+)
+### my-tracks companion stack (separate repo — after domesti-bot PR5 roster webhook)
 
 | PR | Branch | Contents |
 | --- | --- | --- |
-| M1 | `feat/domesti-presence-relay` | Webhook relay from `save_location_to_db` |
-| M2 | `feat/domesti-geofence-export-pull` | Optional: fetch `GET …/export/owntracks` for `setWaypoints` |
-| M3 | `chore/sunset-global-automations` | Remove `GlobalAutomationRule`, evaluator, admin UI; deprecation banners on `/geofences/` |
+| M1 | `feat/domesti-participants-roster-relay` | `POST /v1/webhooks/participants` on startup + user/device changes; export API for domesti-bot sync pull |
+| M1b | (same PR or follow-up) | `GET /api/.../participants/export` for domesti-bot `POST …/participants/sync` |
+| M2 | `feat/domesti-presence-relay` | `POST /v1/webhooks/presence` from `save_location_to_db` (after roster webhook verified) |
+| M3 | `feat/domesti-geofence-export-pull` | Optional: fetch `GET …/export/owntracks` for `setWaypoints` |
+| M4 | `chore/sunset-global-automations` | Remove `GlobalAutomationRule`, evaluator, admin UI; deprecation banners on `/geofences/` |
 
 ---
 
@@ -911,8 +1041,8 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 
 ## Example end-to-end flow
 
-1. Operator creates geofence `house` (41.194072, -73.888325, 250 m) and participants `henrique`, `kristen` via desktop Rules UI (IDs match my-tracks usernames).
-2. Operator sets `DOMESTI_BOT_PRESENCE_WEBHOOK_URL` + `DOMESTI_BOT_API_KEY` on my-tracks; enables the presence relay for those users.
+1. Operator creates geofence `house` (41.194072, -73.888325, 250 m) in the Automations hub. my-tracks pushes participants `henrique`, `kristen` via `POST /v1/webhooks/participants` (or operator clicks **Sync from my-tracks**).
+2. Operator sets `DOMESTI_BOT_PARTICIPANTS_WEBHOOK_URL`, `DOMESTI_BOT_PRESENCE_WEBHOOK_URL`, and `DOMESTI_BOT_API_KEY` on my-tracks; enables both relays.
 3. Operator creates rule “Welcome home — lights + garage” with conditions (both inside `house`, after sunset) and actions (two Kasa hosts, one Tailwind door).
 4. Kristen’s phone reports GPS → OwnTracks → MQTT → my-tracks saves `Location` → POST webhook:
    `{"participant_id":"kristen","lat":41.1941,"lon":-73.8884,"timestamp":"2026-06-09T00:15:00Z","source":"my-tracks"}`

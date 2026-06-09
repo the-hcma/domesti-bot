@@ -56,6 +56,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-info-badge",
         "rules-info-popover[hidden]",
         "rules-mail-test-row",
+        "rules-presence-mini-map",
+        "rules-day-shortcuts",
         "leaflet@1.9.4",
     ):
         assert needle in html, needle
@@ -138,7 +140,10 @@ def test_rules_hub_opens_with_mock_seed_rule(
         dialog.wait_for(state="visible", timeout=10_000)
         assert page.locator(".rules-mock-pill").is_visible()
         assert "Automations" in dialog.inner_text()
+        assert "Rules" in dialog.inner_text()
         assert "Welcome home" in dialog.inner_text()
+        page.locator('.rules-tab[data-tab="rules"]').click()
+        assert "Add rule" in dialog.inner_text()
     finally:
         context.close()
 
