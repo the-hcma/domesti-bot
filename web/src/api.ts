@@ -11,12 +11,14 @@
 // unset and the page works without the meta tag.
 
 import type {
+  GeofenceOut,
   MetaOut,
   MyTracksGeofencesSyncOut,
   MyTracksParticipantsSyncOut,
   MyTracksSettingsIn,
   MyTracksSettingsOut,
   MyTracksSyncIn,
+  ParticipantOut,
   SmtpConfigIn,
   SmtpConfigOut,
   SmtpTestEmailIn,
@@ -169,6 +171,12 @@ export const api = {
   clearTailwindToken(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("DELETE", "/v1/settings/tailwind-token");
   },
+  deleteRulesGeofence(geofenceId: string): Promise<void> {
+    return callNoContent(
+      "DELETE",
+      `/v1/rules/geofences/${encodeURIComponent(geofenceId)}`,
+    );
+  },
   fetchMeta(): Promise<MetaOut> {
     return call<MetaOut>("GET", "/v1/meta");
   },
@@ -180,6 +188,12 @@ export const api = {
   },
   fetchMyTracksSettings(): Promise<MyTracksSettingsOut | null> {
     return callNullableJson<MyTracksSettingsOut>("GET", "/v1/settings/my-tracks");
+  },
+  fetchRulesGeofences(): Promise<GeofenceOut[]> {
+    return call<GeofenceOut[]>("GET", "/v1/rules/geofences");
+  },
+  fetchRulesParticipants(): Promise<ParticipantOut[]> {
+    return call<ParticipantOut[]>("GET", "/v1/rules/participants");
   },
   fetchSmtpConfig(): Promise<SmtpConfigOut | null> {
     return callNullableJson<SmtpConfigOut>("GET", "/v1/settings/smtp");
@@ -206,26 +220,33 @@ export const api = {
   putMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut> {
     return call<MyTracksSettingsOut>("PUT", "/v1/settings/my-tracks", config);
   },
+  putRulesGeofence(geofence: GeofenceOut): Promise<GeofenceOut> {
+    return call<GeofenceOut>(
+      "PUT",
+      `/v1/rules/geofences/${encodeURIComponent(geofence.geofence_id)}`,
+      geofence,
+    );
+  },
   putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
     return call<TailwindTokenSetOut>("PUT", "/v1/settings/tailwind-token", { token });
   },
   sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut> {
     return call<SmtpTestEmailOut>("POST", "/v1/settings/smtp/test", input);
   },
-  syncMyTracksGeofences(credentials?: MyTracksSyncIn): Promise<MyTracksGeofencesSyncOut> {
+  syncMyTracksGeofences(credentials: MyTracksSyncIn): Promise<MyTracksGeofencesSyncOut> {
     return call<MyTracksGeofencesSyncOut>(
       "POST",
       "/v1/rules/geofences/sync",
-      credentials ?? {},
+      credentials,
     );
   },
   syncMyTracksParticipants(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksParticipantsSyncOut> {
     return call<MyTracksParticipantsSyncOut>(
       "POST",
       "/v1/rules/participants/sync",
-      credentials ?? {},
+      credentials,
     );
   },
   setExclude(

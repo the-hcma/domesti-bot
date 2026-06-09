@@ -5,6 +5,7 @@ import {
   createMockStoreSeed,
   haversineM,
   mockSunRow,
+  type MockMyTracksSettings,
   type MockStoreSeed,
 } from "./rules-mock-fixtures.js";
 import { evaluateRule } from "./rules-evaluate.js";
@@ -44,10 +45,10 @@ export interface RulesDataSource {
   saveMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut>;
   saveParticipant(participant: ParticipantOut): Promise<ParticipantOut>;
   syncGeofencesFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksGeofencesSyncOut>;
   syncParticipantsFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksParticipantsSyncOut>;
   listRules(): Promise<RuleOut[]>;
   listTimeConditionTemplates(): Promise<TimeConditionTemplateOut[]>;
@@ -68,18 +69,16 @@ export interface RulesDataSource {
   listActionDevices(): Promise<RuleActionDeviceOut[]>;
 }
 
-function resolveMyTracksPassword(
-  store: MockStoreSeed,
-  credentials: MyTracksSyncIn | undefined,
-): string {
-  if (credentials?.password !== undefined && credentials.password !== "") {
-    return credentials.password;
+function requireSyncPassword(credentials: MyTracksSyncIn): string {
+  const password = credentials.password.trim();
+  if (password === "") {
+    throw new Error("Expected My Tracks admin password, got empty value");
   }
-  return store.my_tracks_settings?.password ?? "";
+  return password;
 }
 
-function requireMyTracksDomain(store: MockStoreSeed): string {
-  const domain = store.my_tracks_settings?.domain.trim() ?? "";
+function requireMyTracksDomain(settings: MockMyTracksSettings | null): string {
+  const domain = settings?.domain.trim() ?? "";
   if (domain === "") {
     throw new Error(
       "Expected My Tracks domain in Settings, got empty value — configure domain first",
@@ -251,7 +250,6 @@ export class MockRulesDataSource implements RulesDataSource {
     return {
       domain: cfg.domain,
       username: cfg.username,
-      password_configured: cfg.password.length > 0,
     };
   }
 
@@ -262,13 +260,9 @@ export class MockRulesDataSource implements RulesDataSource {
   async saveMyTracksSettings(
     config: MyTracksSettingsIn,
   ): Promise<MyTracksSettingsOut> {
-    const existing = this.store.my_tracks_settings;
-    const password =
-      config.password ?? existing?.password ?? "";
     this.store.my_tracks_settings = {
       domain: config.domain.trim(),
       username: config.username.trim(),
-      password,
     };
     const saved = await this.getMyTracksSettings();
     if (saved === null) {
@@ -278,26 +272,20 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 
   async syncGeofencesFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksGeofencesSyncOut> {
-    requireMyTracksDomain(this.store);
-    const password = resolveMyTracksPassword(this.store, credentials);
-    if (password === "") {
-      throw new Error("Expected My Tracks admin password, got empty value");
-    }
+    requireMyTracksDomain(this.store.my_tracks_settings);
+    requireSyncPassword(credentials);
     this.store.geofences = structuredClone(this.store.my_tracks_geofence_catalog);
     this.store.geofences_sync.last_synced_at = new Date().toISOString();
     return this.getMyTracksGeofencesSync();
   }
 
   async syncParticipantsFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksParticipantsSyncOut> {
-    requireMyTracksDomain(this.store);
-    const password = resolveMyTracksPassword(this.store, credentials);
-    if (password === "") {
-      throw new Error("Expected My Tracks admin password, got empty value");
-    }
+    requireMyTracksDomain(this.store.my_tracks_settings);
+    requireSyncPassword(credentials);
     this.store.participants = structuredClone(this.store.my_tracks_participant_catalog);
     this.store.participants_sync.last_synced_at = new Date().toISOString();
     return this.getMyTracksParticipantsSync();
@@ -455,11 +443,17 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 }
 
-/** Rules stay mock-backed; SMTP and My Tracks settings use live HTTP APIs when available. */
+/** Rules evaluation stays mock-backed; settings and roster/geofences use live HTTP when available. */
 class RulesDataSourceWithHttpSettings implements RulesDataSource {
-  constructor(private readonly inner: MockRulesDataSource) {}
+  constructor(
+    private readonly inner: MockRulesDataSource,
+    private readonly rulesLive: boolean,
+  ) {}
 
   deleteGeofence(geofenceId: string): Promise<void> {
+    if (this.rulesLive) {
+      return api.deleteRulesGeofence(geofenceId);
+    }
     return this.inner.deleteGeofence(geofenceId);
   }
 
@@ -499,8 +493,35 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return api.fetchSmtpConfig();
   }
 
-  getStatus(): Promise<RulesStatusOut> {
-    return this.inner.getStatus();
+  async getStatus(): Promise<RulesStatusOut> {
+    const status = await this.inner.getStatus();
+    if (!this.rulesLive) {
+      return status;
+    }
+    const [geofences, participants] = await Promise.all([
+      api.fetchRulesGeofences(),
+      api.fetchRulesParticipants(),
+    ]);
+    const participantRows: ParticipantStatusOut[] = participants.map((p) => {
+      const existing = status.participants.find(
+        (row) => row.participant_id === p.participant_id,
+      );
+      if (existing !== undefined) {
+        return { ...existing, ...p };
+      }
+      return {
+        ...p,
+        age_seconds: null,
+        inside_geofence_ids: [],
+        last_fix: null,
+      };
+    });
+    return {
+      ...status,
+      geofences,
+      participants: participantRows,
+      using_mock: true,
+    };
   }
 
   isMailLive(): boolean {
@@ -516,10 +537,16 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   listGeofences(): Promise<GeofenceOut[]> {
+    if (this.rulesLive) {
+      return api.fetchRulesGeofences();
+    }
     return this.inner.listGeofences();
   }
 
   listParticipants(): Promise<ParticipantOut[]> {
+    if (this.rulesLive) {
+      return api.fetchRulesParticipants();
+    }
     return this.inner.listParticipants();
   }
 
@@ -540,6 +567,9 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   saveGeofence(geofence: GeofenceOut): Promise<GeofenceOut> {
+    if (this.rulesLive) {
+      return api.putRulesGeofence(geofence);
+    }
     return this.inner.saveGeofence(geofence);
   }
 
@@ -578,15 +608,24 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   syncGeofencesFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksGeofencesSyncOut> {
     return api.syncMyTracksGeofences(credentials);
   }
 
   syncParticipantsFromMyTracks(
-    credentials?: MyTracksSyncIn,
+    credentials: MyTracksSyncIn,
   ): Promise<MyTracksParticipantsSyncOut> {
     return api.syncMyTracksParticipants(credentials);
+  }
+}
+
+async function rulesApiAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch("/v1/rules/geofences", { headers: authHeaders() });
+    return res.ok || res.status === 401;
+  } catch {
+    return false;
   }
 }
 
@@ -607,8 +646,12 @@ async function settingsApiAvailable(): Promise<boolean> {
 
 export async function createRulesDataSource(): Promise<RulesDataSource> {
   const mock = new MockRulesDataSource();
-  if (await settingsApiAvailable()) {
-    return new RulesDataSourceWithHttpSettings(mock);
+  const [settingsLive, rulesLive] = await Promise.all([
+    settingsApiAvailable(),
+    rulesApiAvailable(),
+  ]);
+  if (settingsLive) {
+    return new RulesDataSourceWithHttpSettings(mock, rulesLive);
   }
   return mock;
 }

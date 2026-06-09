@@ -56,6 +56,29 @@ class MyTracksSettings(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class RuleGeofence(Base):
+    __tablename__ = "rule_geofences"
+
+    geofence_id: Mapped[str] = mapped_column(String, primary_key=True)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    center_lat: Mapped[float] = mapped_column(Float, nullable=False)
+    center_lon: Mapped[float] = mapped_column(Float, nullable=False)
+    radius_m: Mapped[int] = mapped_column(Integer, nullable=False)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    owntracks_rid: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class RuleParticipant(Base):
+    __tablename__ = "rule_participants"
+
+    participant_id: Mapped[str] = mapped_column(String, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    tracking_device_label: Mapped[str] = mapped_column(String, nullable=False)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class SonosKnownZone(Base):
     __tablename__ = "sonos_known_zones"
 

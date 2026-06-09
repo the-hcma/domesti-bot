@@ -1,4 +1,4 @@
-// My Tracks connection settings (domain + admin credentials).
+// My Tracks connection settings (domain + default admin username).
 
 import { HttpError } from "./api.js";
 import type { RulesDataSource } from "./rules-data-source.js";
@@ -44,7 +44,7 @@ export async function mountMyTracksSettingsPanel(
   const lead = document.createElement("p");
   lead.className = "settings-dialog-lead";
   lead.textContent =
-    "My Tracks domain and admin credentials used by Sync from My Tracks on the Participants and Geofences tabs.";
+    "My Tracks domain and default admin username. Sync prompts for the admin password each time — it is not stored.";
 
   const form = document.createElement("form");
   form.className = "mytracks-settings-form";
@@ -68,20 +68,8 @@ export async function mountMyTracksSettingsPanel(
   usernameInput.value = existing?.username ?? "";
   appendLabeledField(
     form,
-    createFieldLabel("Admin username"),
+    createFieldLabel("Default admin username"),
     usernameInput,
-  );
-
-  const passwordInput = document.createElement("input");
-  passwordInput.type = "password";
-  passwordInput.autocomplete = "new-password";
-  passwordInput.placeholder = existing?.password_configured === true
-    ? "Leave blank to keep stored password"
-    : "";
-  appendLabeledField(
-    form,
-    createFieldLabel("Admin password"),
-    passwordInput,
   );
 
   const actions = document.createElement("div");
@@ -103,7 +91,6 @@ export async function mountMyTracksSettingsPanel(
     const payload: MyTracksSettingsIn = {
       domain: domainInput.value.trim(),
       username: usernameInput.value.trim(),
-      password: passwordInput.value === "" ? null : passwordInput.value,
     };
     void dataSource
       .saveMyTracksSettings(payload)
@@ -111,10 +98,6 @@ export async function mountMyTracksSettingsPanel(
         status.textContent = "My Tracks settings saved.";
         domainInput.value = saved.domain;
         usernameInput.value = saved.username;
-        passwordInput.value = "";
-        passwordInput.placeholder = saved.password_configured
-          ? "Leave blank to keep stored password"
-          : "";
       })
       .catch((err: unknown) => {
         status.textContent = formatError(err);
@@ -130,8 +113,6 @@ export async function mountMyTracksSettingsPanel(
       .then(() => {
         domainInput.value = "";
         usernameInput.value = "";
-        passwordInput.value = "";
-        passwordInput.placeholder = "";
         status.hidden = false;
         status.textContent = "My Tracks settings cleared.";
       })

@@ -146,9 +146,15 @@ export async function runMyTracksSyncAction(
   }
   try {
     if (kind === "participants") {
-      await dataSource.syncParticipantsFromMyTracks(credentials);
+      await dataSource.syncParticipantsFromMyTracks({
+        username: credentials.username,
+        password: credentials.password,
+      });
     } else {
-      await dataSource.syncGeofencesFromMyTracks(credentials);
+      await dataSource.syncGeofencesFromMyTracks({
+        username: credentials.username,
+        password: credentials.password,
+      });
     }
     await onComplete();
   } catch (err) {

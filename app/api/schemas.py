@@ -329,6 +329,18 @@ class TailwindTokenSettingsOut(BaseModel):
     )
 
 
+class GeofenceOut(BaseModel):
+    """Automation geofence definition."""
+
+    center_lat: float
+    center_lon: float
+    enabled: bool
+    geofence_id: str
+    label: str
+    owntracks_rid: str | None = None
+    radius_m: int
+
+
 class MyTracksGeofencesSyncOut(BaseModel):
     """Result of a geofence sync pull from My Tracks."""
 
@@ -350,23 +362,27 @@ class MyTracksSettingsIn(BaseModel):
     """Body for ``PUT /v1/settings/my-tracks``."""
 
     domain: str = Field(..., min_length=1)
-    password: str | None = Field(
-        default=None,
-        description="Null keeps the stored admin password on update.",
-    )
     username: str = Field(..., min_length=1)
 
 
 class MyTracksSettingsOut(BaseModel):
-    """Stored My Tracks connection settings (no password)."""
+    """Stored My Tracks connection settings."""
 
     domain: str
-    password_configured: bool
     username: str
 
 
 class MyTracksSyncIn(BaseModel):
-    """Optional admin credentials for a one-shot sync request."""
+    """Admin credentials for a one-shot sync request (password is never stored)."""
 
-    password: str | None = None
+    password: str = Field(..., min_length=1)
     username: str | None = None
+
+
+class ParticipantOut(BaseModel):
+    """Automation participant roster row."""
+
+    display_name: str
+    enabled: bool
+    participant_id: str
+    tracking_device_label: str

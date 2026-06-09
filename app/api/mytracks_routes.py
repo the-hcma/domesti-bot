@@ -15,12 +15,11 @@ from app.api.schemas import (
     MyTracksSyncIn,
 )
 from app.api.settings_routes import discovery_cache_path_from_request
-from app.db.secrets import SecretsConfigurationError
 from app.mytracks_service import (
     MyTracksSyncError,
+    fetch_geofences_from_my_tracks,
+    fetch_participants_from_my_tracks,
     normalize_mytracks_base_url,
-    sync_geofences_from_my_tracks,
-    sync_participants_from_my_tracks,
 )
 from app.mytracks_store import (
     MyTracksConfigRecord,
@@ -29,8 +28,15 @@ from app.mytracks_store import (
     load_mytracks_config,
     record_mytracks_geofences_sync,
     record_mytracks_participants_sync,
-    resolve_mytracks_password,
     save_mytracks_config,
+)
+from app.rules_store import (
+    GeofenceRecord,
+    ParticipantRecord,
+    count_geofences,
+    count_participants,
+    replace_geofences,
+    replace_participants,
 )
 
 settings_router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -39,7 +45,7 @@ rules_router = APIRouter(prefix="/v1/rules", tags=["rules"])
 
 @settings_router.delete("/my-tracks", status_code=HTTPStatus.NO_CONTENT)
 async def delete_mytracks_settings_route(request: Request) -> None:
-    """Remove stored My Tracks settings and the encrypted admin password."""
+    """Remove stored My Tracks settings."""
     cache_path = _require_discovery_cache(request)
     delete_mytracks_settings(cache_path)
 
@@ -60,23 +66,16 @@ async def get_mytracks_settings(request: Request) -> MyTracksSettingsOut | None:
 async def put_mytracks_settings(
     body: MyTracksSettingsIn, request: Request
 ) -> MyTracksSettingsOut:
-    """Persist My Tracks settings and optionally update the encrypted password."""
+    """Persist My Tracks domain and default admin username."""
     cache_path = _require_discovery_cache(request)
     _validate_mytracks_body(body)
-    try:
-        saved = save_mytracks_config(
-            cache_path,
-            MyTracksConfigSave(
-                domain=body.domain,
-                password=body.password,
-                username=body.username,
-            ),
-        )
-    except SecretsConfigurationError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
+    saved = save_mytracks_config(
+        cache_path,
+        MyTracksConfigSave(
+            domain=body.domain,
+            username=body.username,
+        ),
+    )
     return _settings_to_schema(saved)
 
 
@@ -89,10 +88,11 @@ async def get_mytracks_geofences_sync_status(
     if cache_path is None:
         return MyTracksGeofencesSyncOut(geofence_count=0, last_synced_at=None)
     record = load_mytracks_config(cache_path)
+    geofence_count = count_geofences(cache_path)
     if record is None:
-        return MyTracksGeofencesSyncOut(geofence_count=0, last_synced_at=None)
+        return MyTracksGeofencesSyncOut(geofence_count=geofence_count, last_synced_at=None)
     return MyTracksGeofencesSyncOut(
-        geofence_count=0,
+        geofence_count=geofence_count,
         last_synced_at=record.last_geofences_sync_at,
     )
 
@@ -109,14 +109,15 @@ async def get_mytracks_participants_sync_status(
             participant_count=0,
         )
     record = load_mytracks_config(cache_path)
+    participant_count = count_participants(cache_path)
     if record is None:
         return MyTracksParticipantsSyncOut(
             last_synced_at=None,
-            participant_count=0,
+            participant_count=participant_count,
         )
     return MyTracksParticipantsSyncOut(
         last_synced_at=record.last_participants_sync_at,
-        participant_count=0,
+        participant_count=participant_count,
     )
 
 
@@ -126,12 +127,12 @@ async def post_mytracks_geofences_sync(
 ) -> MyTracksGeofencesSyncOut:
     """Pull geofence definitions from My Tracks using admin credentials."""
     cache_path = _require_discovery_cache(request)
-    record, username, password = _resolve_sync_credentials(request, body)
+    record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
     try:
-        count = sync_geofences_from_my_tracks(
+        exported = fetch_geofences_from_my_tracks(
             base_url=base_url,
-            password=password,
+            password=body.password,
             username=username,
         )
     except MyTracksSyncError as exc:
@@ -139,6 +140,21 @@ async def post_mytracks_geofences_sync(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+    count = replace_geofences(
+        cache_path,
+        [
+            GeofenceRecord(
+                geofence_id=row.geofence_id,
+                label=row.label,
+                center_lat=row.center_lat,
+                center_lon=row.center_lon,
+                radius_m=row.radius_m,
+                enabled=row.enabled,
+                owntracks_rid=row.owntracks_rid,
+            )
+            for row in exported
+        ],
+    )
     updated = record_mytracks_geofences_sync(cache_path, count=count)
     return MyTracksGeofencesSyncOut(
         geofence_count=count,
@@ -152,12 +168,12 @@ async def post_mytracks_participants_sync(
 ) -> MyTracksParticipantsSyncOut:
     """Pull the participant roster from My Tracks using admin credentials."""
     cache_path = _require_discovery_cache(request)
-    record, username, password = _resolve_sync_credentials(request, body)
+    record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
     try:
-        count = sync_participants_from_my_tracks(
+        exported = fetch_participants_from_my_tracks(
             base_url=base_url,
-            password=password,
+            password=body.password,
             username=username,
         )
     except MyTracksSyncError as exc:
@@ -165,6 +181,18 @@ async def post_mytracks_participants_sync(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=str(exc),
         ) from exc
+    count = replace_participants(
+        cache_path,
+        [
+            ParticipantRecord(
+                participant_id=row.participant_id,
+                display_name=row.display_name,
+                tracking_device_label=row.tracking_device_label,
+                enabled=row.enabled,
+            )
+            for row in exported
+        ],
+    )
     updated = record_mytracks_participants_sync(cache_path, count=count)
     return MyTracksParticipantsSyncOut(
         last_synced_at=updated.last_participants_sync_at,
@@ -204,28 +232,25 @@ def _require_mytracks_config(request: Request) -> MyTracksConfigRecord:
 def _resolve_sync_credentials(
     request: Request,
     body: MyTracksSyncIn,
-) -> tuple[MyTracksConfigRecord, str, str]:
+) -> tuple[MyTracksConfigRecord, str]:
     record = _require_mytracks_config(request)
-    cache_path = _require_discovery_cache(request)
     username = (body.username or record.username).strip()
     if username == "":
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail="Expected My Tracks admin username, got empty value",
         )
-    password = resolve_mytracks_password(cache_path, draft_password=body.password)
-    if password == "":
+    if body.password.strip() == "":
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail="Expected My Tracks admin password, got empty value",
         )
-    return record, username, password
+    return record, username
 
 
 def _settings_to_schema(record: MyTracksConfigRecord) -> MyTracksSettingsOut:
     return MyTracksSettingsOut(
         domain=record.domain,
-        password_configured=record.password_configured,
         username=record.username,
     )
 

@@ -204,18 +204,16 @@ export interface MyTracksParticipantsSyncOut {
 
 export interface MyTracksSettingsIn {
   domain: string;
-  password: string | null;
   username: string;
 }
 
 export interface MyTracksSettingsOut {
   domain: string;
-  password_configured: boolean;
   username: string;
 }
 
 export interface MyTracksSyncIn {
-  password?: string;
+  password: string;
   username?: string;
 }
 
