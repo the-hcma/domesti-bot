@@ -3,6 +3,7 @@
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
+import { haversineM } from "./rules-mock-fixtures.js";
 import { mountPresenceMiniMap } from "./presence-mini-map.js";
 import {
   ALL_DAYS_OF_WEEK,
@@ -22,9 +23,13 @@ import type {
   RuleOut,
   RulesStatusOut,
   RulesSunOut,
+  SettingsLocationOut,
   TimeConditionTemplateOut,
   UIDeviceKind,
 } from "./types.js";
+
+/** Match settings home coordinates to a geofence center (meters). */
+const HOME_GEOFENCE_MATCH_TOLERANCE_M = 50;
 
 type RulesTabId =
   | "conditions"
@@ -43,6 +48,65 @@ function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
     case "speaker":
       return ["pause", "resume"];
   }
+}
+
+function appendAstronomicalConditionCard(
+  dynamicLabel: string,
+  primary: string,
+  ruleEnableLabel: string,
+  homeGeofence: GeofenceOut | null,
+  settings: SettingsLocationOut,
+  onHomeClick: (geofenceId: string | null) => void,
+): HTMLElement {
+  const card = document.createElement("article");
+  card.className = "rules-card";
+  const badgeRow = document.createElement("p");
+  badgeRow.className = "rules-card-meta";
+  const badge = document.createElement("span");
+  badge.className = "rules-dynamic-badge";
+  badge.textContent = dynamicLabel;
+  badgeRow.append(badge);
+  const primaryRow = document.createElement("p");
+  primaryRow.textContent = primary;
+  card.append(badgeRow, primaryRow);
+  appendAstronomicalRecalcNote(
+    card,
+    homeGeofence,
+    settings,
+    ruleEnableLabel,
+    onHomeClick,
+  );
+  return card;
+}
+
+function appendAstronomicalRecalcNote(
+  card: HTMLElement,
+  homeGeofence: GeofenceOut | null,
+  settings: SettingsLocationOut,
+  ruleEnableLabel: string,
+  onHomeClick: (geofenceId: string | null) => void,
+): void {
+  const meta = document.createElement("p");
+  meta.className = "rules-card-meta";
+  meta.append(document.createTextNode("Recalculated from "));
+  const linkLabel =
+    homeGeofence?.label
+    ?? (settings.home_label !== null && settings.home_label.trim() !== ""
+      ? settings.home_label.trim()
+      : "home location");
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "rules-inline-link";
+  link.textContent = linkLabel;
+  link.addEventListener("click", () => {
+    onHomeClick(homeGeofence?.geofence_id ?? null);
+  });
+  meta.append(link);
+  meta.append(document.createTextNode(" daily. Enable per rule as "));
+  const strong = document.createElement("strong");
+  strong.textContent = ruleEnableLabel;
+  meta.append(strong, document.createTextNode("."));
+  card.append(meta);
 }
 
 function appendLabeledField(
@@ -101,6 +165,40 @@ function hhmmToTimeInput(hhmm: string): string {
   return "";
 }
 
+function resolveHomeGeofence(
+  geofences: GeofenceOut[],
+  settings: SettingsLocationOut,
+): GeofenceOut | null {
+  if (settings.lat !== 0 || settings.lon !== 0) {
+    for (const geofence of geofences) {
+      if (!geofence.enabled) {
+        continue;
+      }
+      const dist = haversineM(
+        settings.lat,
+        settings.lon,
+        geofence.center_lat,
+        geofence.center_lon,
+      );
+      if (dist <= HOME_GEOFENCE_MATCH_TOLERANCE_M) {
+        return geofence;
+      }
+    }
+  }
+  if (settings.home_label !== null && settings.home_label.trim() !== "") {
+    const normalized = settings.home_label.trim().toLowerCase();
+    const byLabel = geofences.find(
+      (geofence) =>
+        geofence.enabled
+        && geofence.label.trim().toLowerCase() === normalized,
+    );
+    if (byLabel !== undefined) {
+      return byLabel;
+    }
+  }
+  return geofences.find((geofence) => geofence.enabled) ?? null;
+}
+
 function slugifyId(raw: string): string {
   return raw
     .trim()
@@ -156,6 +254,7 @@ class RulesHubController {
   private readonly panel: HTMLDivElement;
   private activeTab: RulesTabId = "status";
   private dataSource: RulesDataSource;
+  private pendingGeofenceFocusId: string | null = null;
   private status: RulesStatusOut | null = null;
 
   constructor(dataSource: RulesDataSource) {
@@ -718,20 +817,35 @@ class RulesHubController {
 
   private async renderConditionsTab(status: RulesStatusOut): Promise<void> {
     const templates = await this.dataSource.listTimeConditionTemplates();
+    const settings = await this.dataSource.getSettingsLocation();
+    const homeGeofence = resolveHomeGeofence(status.geofences, settings);
     const sunsetMsg = sunsetStatusMessage(status.sun);
     const sunriseMsg = sunriseStatusMessage(status.sun);
+    const openHomeGeofence = (geofenceId: string | null): void => {
+      this.pendingGeofenceFocusId = geofenceId;
+      void this.setTab("geofences");
+    };
 
     const dynamicHeading = document.createElement("h3");
     dynamicHeading.className = "rules-section-title";
     dynamicHeading.textContent = "Astronomical (dynamic)";
 
-    const sunsetCard = document.createElement("article");
-    sunsetCard.className = "rules-card";
-    sunsetCard.innerHTML = `<p class="rules-card-meta"><span class="rules-dynamic-badge">${sunsetMsg.dynamicLabel}</span></p><p>${sunsetMsg.primary}</p><p class="rules-card-meta">Recalculated from home location daily. Enable per rule as <strong>After sunset</strong>.</p>`;
-
-    const sunriseCard = document.createElement("article");
-    sunriseCard.className = "rules-card";
-    sunriseCard.innerHTML = `<p class="rules-card-meta"><span class="rules-dynamic-badge">${sunriseMsg.dynamicLabel}</span></p><p>${sunriseMsg.primary}</p><p class="rules-card-meta">Recalculated from home location daily. Enable per rule as <strong>Before sunrise</strong>.</p>`;
+    const sunsetCard = appendAstronomicalConditionCard(
+      sunsetMsg.dynamicLabel,
+      sunsetMsg.primary,
+      "After sunset",
+      homeGeofence,
+      settings,
+      openHomeGeofence,
+    );
+    const sunriseCard = appendAstronomicalConditionCard(
+      sunriseMsg.dynamicLabel,
+      sunriseMsg.primary,
+      "Before sunrise",
+      homeGeofence,
+      settings,
+      openHomeGeofence,
+    );
 
     const clockHeading = document.createElement("h3");
     clockHeading.className = "rules-section-title";
@@ -1014,6 +1128,17 @@ class RulesHubController {
     this.body.append(mount);
     const { mountGeofenceMapPanel } = await import("./geofence-map.js");
     await mountGeofenceMapPanel(mount, this.dataSource, () => this.refresh());
+    const focusId = this.pendingGeofenceFocusId;
+    if (focusId !== null) {
+      this.pendingGeofenceFocusId = null;
+      const row = mount.querySelector<HTMLTableRowElement>(
+        `tr[data-geofence-id="${CSS.escape(focusId)}"]`,
+      );
+      if (row !== null) {
+        row.classList.add("rules-geofence-row-focused");
+        row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+    }
   }
 
   private async renderParticipantsTab(): Promise<void> {
