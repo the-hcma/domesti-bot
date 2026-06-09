@@ -1,4 +1,4 @@
-// Rules hub data access — mock store for Phase 1; HTTP implementation in Phase 2.
+// Rules hub data access — mock store for rules; SMTP uses the HTTP API when available.
 
 import { api, authHeaders } from "./api.js";
 import {
@@ -357,18 +357,129 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 }
 
+/** Rules stay mock-backed; SMTP settings use the live ``/v1/settings/smtp`` API. */
+class RulesDataSourceWithHttpSmtp implements RulesDataSource {
+  constructor(private readonly inner: MockRulesDataSource) {}
+
+  deleteGeofence(geofenceId: string): Promise<void> {
+    return this.inner.deleteGeofence(geofenceId);
+  }
+
+  deleteParticipant(participantId: string): Promise<void> {
+    return this.inner.deleteParticipant(participantId);
+  }
+
+  deleteRule(ruleId: string): Promise<void> {
+    return this.inner.deleteRule(ruleId);
+  }
+
+  deleteTimeConditionTemplate(templateId: string): Promise<void> {
+    return this.inner.deleteTimeConditionTemplate(templateId);
+  }
+
+  getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
+    return this.inner.getMyTracksParticipantsSync();
+  }
+
+  getRule(ruleId: string): Promise<RuleOut | null> {
+    return this.inner.getRule(ruleId);
+  }
+
+  getSettingsLocation(): Promise<SettingsLocationOut> {
+    return this.inner.getSettingsLocation();
+  }
+
+  getSmtpConfig(): Promise<SmtpConfigOut | null> {
+    return api.fetchSmtpConfig();
+  }
+
+  getStatus(): Promise<RulesStatusOut> {
+    return this.inner.getStatus();
+  }
+
+  isMock(): boolean {
+    return this.inner.isMock();
+  }
+
+  listActionDevices(): Promise<RuleActionDeviceOut[]> {
+    return this.inner.listActionDevices();
+  }
+
+  listGeofences(): Promise<GeofenceOut[]> {
+    return this.inner.listGeofences();
+  }
+
+  listParticipants(): Promise<ParticipantOut[]> {
+    return this.inner.listParticipants();
+  }
+
+  listRules(): Promise<RuleOut[]> {
+    return this.inner.listRules();
+  }
+
+  listTimeConditionTemplates(): Promise<TimeConditionTemplateOut[]> {
+    return this.inner.listTimeConditionTemplates();
+  }
+
+  resetSmtpConfig(): Promise<void> {
+    return api.clearSmtpConfig();
+  }
+
+  saveGeofence(geofence: GeofenceOut): Promise<GeofenceOut> {
+    return this.inner.saveGeofence(geofence);
+  }
+
+  saveParticipant(participant: ParticipantOut): Promise<ParticipantOut> {
+    return this.inner.saveParticipant(participant);
+  }
+
+  saveRule(rule: RuleOut): Promise<RuleOut> {
+    return this.inner.saveRule(rule);
+  }
+
+  saveSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut> {
+    return this.inner.saveSettingsLocation(location);
+  }
+
+  saveSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {
+    return api.putSmtpConfig(config);
+  }
+
+  saveTimeConditionTemplate(
+    template: TimeConditionTemplateOut,
+  ): Promise<TimeConditionTemplateOut> {
+    return this.inner.saveTimeConditionTemplate(template);
+  }
+
+  sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut> {
+    return api.sendSmtpTestEmail(input);
+  }
+
+  setRuleEnabled(ruleId: string, enabled: boolean): Promise<RuleOut> {
+    return this.inner.setRuleEnabled(ruleId, enabled);
+  }
+
+  syncParticipantsFromMyTracks(): Promise<MyTracksParticipantsSyncOut> {
+    return this.inner.syncParticipantsFromMyTracks();
+  }
+}
+
+async function smtpApiAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch("/v1/settings/smtp", { headers: authHeaders() });
+    return res.ok || res.status === 401;
+  } catch {
+    return false;
+  }
+}
+
 export async function createRulesDataSource(): Promise<RulesDataSource> {
   if (typeof DOMESTI_RULES_FORCE_MOCK !== "undefined" && DOMESTI_RULES_FORCE_MOCK) {
     return new MockRulesDataSource();
   }
-  try {
-    const res = await fetch("/v1/rules/status", { headers: authHeaders() });
-    if (res.ok) {
-      // HttpRulesDataSource lands in Phase 2 wire-up PR.
-      return new MockRulesDataSource();
-    }
-  } catch {
-    // Server down or route missing.
+  const mock = new MockRulesDataSource();
+  if (await smtpApiAvailable()) {
+    return new RulesDataSourceWithHttpSmtp(mock);
   }
-  return new MockRulesDataSource();
+  return mock;
 }

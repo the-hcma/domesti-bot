@@ -12,6 +12,10 @@
 
 import type {
   MetaOut,
+  SmtpConfigIn,
+  SmtpConfigOut,
+  SmtpTestEmailIn,
+  SmtpTestEmailOut,
   TailwindTokenSetOut,
   TailwindTokenSettingsOut,
   UIBulkActionOut,
@@ -107,6 +111,33 @@ async function call<T>(
   return (await response.json()) as T;
 }
 
+async function callNoContent(
+  method: "DELETE",
+  path: string,
+): Promise<void> {
+  const response = await fetch(path, { method, headers: authHeaders() });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new HttpError(response.status, text);
+  }
+}
+
+async function callNullableJson<T>(
+  method: "GET",
+  path: string,
+): Promise<T | null> {
+  const response = await fetch(path, { method, headers: authHeaders() });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new HttpError(response.status, text);
+  }
+  const text = await response.text();
+  if (text === "" || text === "null") {
+    return null;
+  }
+  return JSON.parse(text) as T;
+}
+
 export const api = {
   bulkOffGlobal(): Promise<UIGlobalBulkActionOut> {
     return call<UIGlobalBulkActionOut>("POST", "/v1/ui/global/bulk-off", {});
@@ -124,20 +155,23 @@ export const api = {
       {},
     );
   },
-  fetchMeta(): Promise<MetaOut> {
-    return call<MetaOut>("GET", "/v1/meta");
+  clearSmtpConfig(): Promise<void> {
+    return callNoContent("DELETE", "/v1/settings/smtp");
   },
   clearTailwindToken(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("DELETE", "/v1/settings/tailwind-token");
+  },
+  fetchMeta(): Promise<MetaOut> {
+    return call<MetaOut>("GET", "/v1/meta");
+  },
+  fetchSmtpConfig(): Promise<SmtpConfigOut | null> {
+    return callNullableJson<SmtpConfigOut>("GET", "/v1/settings/smtp");
   },
   fetchState(): Promise<UIStateOut> {
     return call<UIStateOut>("GET", "/v1/ui/state");
   },
   fetchTailwindTokenSettings(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("GET", "/v1/settings/tailwind-token");
-  },
-  putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
-    return call<TailwindTokenSetOut>("PUT", "/v1/settings/tailwind-token", { token });
   },
   openTailwindDoor(deviceId: string): Promise<UIDeviceActionOut> {
     return call<UIDeviceActionOut>(
@@ -148,6 +182,15 @@ export const api = {
   },
   pauseAllSonos(): Promise<UIBulkActionOut> {
     return call<UIBulkActionOut>("POST", "/v1/ui/sonos/pause-all", {});
+  },
+  putSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {
+    return call<SmtpConfigOut>("PUT", "/v1/settings/smtp", config);
+  },
+  putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
+    return call<TailwindTokenSetOut>("PUT", "/v1/settings/tailwind-token", { token });
+  },
+  sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut> {
+    return call<SmtpTestEmailOut>("POST", "/v1/settings/smtp/test", input);
   },
   setExclude(
     familyId: string,

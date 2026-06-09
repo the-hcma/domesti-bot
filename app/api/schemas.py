@@ -227,6 +227,45 @@ class UIPreferenceOut(BaseModel):
     exclude_from_global: bool
 
 
+class SmtpConfigIn(BaseModel):
+    """SMTP settings payload (password optional on update)."""
+
+    from_address: str = Field(..., min_length=1)
+    host: str = Field(..., min_length=1)
+    mail_domain: str = Field(..., min_length=1)
+    password: str | None = Field(
+        default=None,
+        description="Null keeps the stored password on update.",
+    )
+    port: int = Field(..., ge=1, le=65535)
+    username: str = Field(default="")
+
+
+class SmtpConfigOut(BaseModel):
+    """Stored SMTP settings without the password."""
+
+    from_address: str
+    host: str
+    last_test_recipient: str | None
+    mail_domain: str
+    password_configured: bool
+    port: int
+    username: str
+
+
+class SmtpTestEmailIn(SmtpConfigIn):
+    """Transient SMTP settings plus a test recipient."""
+
+    to_address: str = Field(..., min_length=1)
+
+
+class SmtpTestEmailOut(BaseModel):
+    """Result of a test email attempt."""
+
+    message: str
+    ok: bool
+
+
 class TailwindTokenSetIn(BaseModel):
     """Body for ``PUT /v1/settings/tailwind-token`` (token is never returned)."""
 

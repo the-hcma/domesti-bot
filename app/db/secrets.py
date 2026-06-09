@@ -12,6 +12,7 @@ from app.db.models import AppSecret
 from app.db.secrets_key import SecretsKeySource, load_secrets_key_material
 from app.db.session import discovery_session
 
+_SMTP_PASSWORD_KEY = "smtp_password"
 _TAILWIND_SECRET_KEY = "tailwind_token"
 
 
@@ -31,43 +32,33 @@ def delete_app_secret(path: Path, *, key: str) -> None:
             session.delete(row)
 
 
+def load_smtp_password_from_db(path: Path) -> str | None:
+    """Return the decrypted SMTP password from the database, or ``None``."""
+    return _load_app_secret_plaintext(path, _SMTP_PASSWORD_KEY)
+
+
 def load_tailwind_token_from_db(path: Path) -> str | None:
     """Return the decrypted Tailwind token from the database, or ``None``."""
-    fernet = _fernet_from_config()
-    if fernet is None:
+    token = _load_app_secret_plaintext(path, _TAILWIND_SECRET_KEY)
+    if token is None:
         return None
-    with discovery_session(path) as session:
-        row = session.get(AppSecret, _TAILWIND_SECRET_KEY)
-        if row is None:
-            return None
-        try:
-            plain = fernet.decrypt(row.ciphertext)
-        except InvalidToken as exc:
-            raise SecretsDecryptError(
-                "Expected valid Fernet ciphertext for tailwind_token, got undecryptable data"
-            ) from exc
-        token = plain.decode("utf-8").strip()
-        return token if token else None
+    stripped = token.strip()
+    return stripped if stripped else None
+
+
+def save_smtp_password_to_db(path: Path, password: str) -> None:
+    """Encrypt and persist the SMTP password."""
+    _save_app_secret_plaintext(path, _SMTP_PASSWORD_KEY, password)
 
 
 def save_tailwind_token_to_db(path: Path, token: str) -> None:
     """Encrypt and persist the Tailwind Local Control Key."""
-    fernet = _require_fernet()
-    ciphertext = fernet.encrypt(token.strip().encode("utf-8"))
-    now = time.time()
-    with discovery_session(path) as session:
-        row = session.get(AppSecret, _TAILWIND_SECRET_KEY)
-        if row is None:
-            session.add(
-                AppSecret(
-                    key=_TAILWIND_SECRET_KEY,
-                    ciphertext=ciphertext,
-                    updated_at=now,
-                )
-            )
-        else:
-            row.ciphertext = ciphertext
-            row.updated_at = now
+    _save_app_secret_plaintext(path, _TAILWIND_SECRET_KEY, token.strip())
+
+
+def smtp_password_stored_in_db(path: Path) -> bool:
+    """True when an ``app_secrets`` row exists for the SMTP password."""
+    return _app_secret_stored_in_db(path, _SMTP_PASSWORD_KEY)
 
 
 def secrets_key_configured() -> bool:
@@ -89,13 +80,15 @@ def secrets_key_source() -> SecretsKeySource:
 
 def tailwind_token_stored_in_db(path: Path) -> bool:
     """True when an ``app_secrets`` row exists for the Tailwind token."""
+    return _app_secret_stored_in_db(path, _TAILWIND_SECRET_KEY)
+
+
+def _app_secret_stored_in_db(path: Path, key: str) -> bool:
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
         return False
     with discovery_session(path) as session:
-        row = session.scalar(
-            select(AppSecret.key).where(AppSecret.key == _TAILWIND_SECRET_KEY)
-        )
+        row = session.scalar(select(AppSecret.key).where(AppSecret.key == key))
         return row is not None
 
 
@@ -114,6 +107,24 @@ def _fernet_from_config() -> Fernet | None:
         ) from exc
 
 
+def _load_app_secret_plaintext(path: Path, key: str) -> str | None:
+    fernet = _fernet_from_config()
+    if fernet is None:
+        return None
+    with discovery_session(path) as session:
+        row = session.get(AppSecret, key)
+        if row is None:
+            return None
+        try:
+            plain = fernet.decrypt(row.ciphertext)
+        except InvalidToken as exc:
+            raise SecretsDecryptError(
+                f"Expected valid Fernet ciphertext for {key}, got undecryptable data"
+            ) from exc
+        text = plain.decode("utf-8")
+        return text if text else None
+
+
 def _require_fernet() -> Fernet:
     fernet = _fernet_from_config()
     if fernet is None:
@@ -123,3 +134,22 @@ def _require_fernet() -> Fernet:
             "encrypted secrets"
         )
     return fernet
+
+
+def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
+    fernet = _require_fernet()
+    ciphertext = fernet.encrypt(value.encode("utf-8"))
+    now = time.time()
+    with discovery_session(path) as session:
+        row = session.get(AppSecret, key)
+        if row is None:
+            session.add(
+                AppSecret(
+                    key=key,
+                    ciphertext=ciphertext,
+                    updated_at=now,
+                )
+            )
+        else:
+            row.ciphertext = ciphertext
+            row.updated_at = now
