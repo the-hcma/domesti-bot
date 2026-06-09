@@ -4,6 +4,7 @@ import { HttpError } from "./api.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
 import type { SmtpConfigIn, SmtpConfigOut } from "./types.js";
+import { defaultMailDomainFromUi } from "./ui-instance.js";
 
 const DEFAULT_SMTP_HOST = "localhost";
 const DEFAULT_SMTP_PORT = 25;
@@ -49,11 +50,15 @@ function configToForm(config: SmtpConfigOut | null): {
   port: number;
   username: string;
 } {
+  const mailDomain =
+    config?.mail_domain !== undefined && config.mail_domain !== ""
+      ? config.mail_domain
+      : defaultMailDomainFromUi();
   return {
     host: config?.host ?? DEFAULT_SMTP_HOST,
     port: config?.port ?? DEFAULT_SMTP_PORT,
     username: config?.username ?? "",
-    mail_domain: config?.mail_domain ?? "",
+    mail_domain: mailDomain,
     from_address: config?.from_address ?? "",
   };
 }
@@ -106,14 +111,16 @@ export async function mountMailSettingsPanel(
 
   const domainInput = document.createElement("input");
   domainInput.type = "text";
-  domainInput.placeholder = "hcma.info";
+  const uiMailDomain = defaultMailDomainFromUi();
+  domainInput.placeholder = uiMailDomain !== "" ? uiMailDomain : "hcma.info";
   domainInput.value = defaults.mail_domain;
   domainInput.required = true;
   appendLabeledField(
     form,
     createFieldLabel("Mail domain", {
       detail:
-        "Domain used for the default From address when sending rule notifications.",
+        "Domain used for the default From address when sending rule notifications. "
+        + "Defaults to the hostname from the URL you opened in the browser.",
       example: "hcma.info → domestibot-noreply@hcma.info",
     }),
     domainInput,

@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 from app.smtp_service import (
     SmtpConnectionParams,
     instance_url_from_mail_domain,
+    normalize_instance_url,
+    resolve_instance_url,
     send_test_email,
 )
 
@@ -14,6 +16,25 @@ from app.smtp_service import (
 def test_instance_url_from_mail_domain_strips_whitespace_and_slash() -> None:
     assert instance_url_from_mail_domain(" hcma.info/ ") == "https://hcma.info/"
     assert instance_url_from_mail_domain("") == ""
+
+
+def test_normalize_instance_url_adds_trailing_slash() -> None:
+    assert normalize_instance_url("http://192.168.0.5:8003") == "http://192.168.0.5:8003/"
+    assert normalize_instance_url("") == ""
+
+
+def test_resolve_instance_url_prefers_ui_origin() -> None:
+    assert (
+        resolve_instance_url(
+            instance_url="http://192.168.0.5:8003/",
+            mail_domain="hcma.info",
+        )
+        == "http://192.168.0.5:8003/"
+    )
+    assert (
+        resolve_instance_url(instance_url=None, mail_domain="hcma.info")
+        == "https://hcma.info/"
+    )
 
 
 @patch("app.smtp_service.smtplib.SMTP")
@@ -29,10 +50,14 @@ def test_send_test_email_includes_instance_dashboard_link(smtp_cls: MagicMock) -
         username="",
     )
 
-    send_test_email(params, to_address="ops@hcma.info")
+    send_test_email(
+        params,
+        instance_url="http://192.168.0.5:8003",
+        to_address="ops@hcma.info",
+    )
 
     smtp_instance.send_message.assert_called_once()
     message = smtp_instance.send_message.call_args[0][0]
     payload = message.as_string()
-    assert "https://hcma.info/" in payload
+    assert "http://192.168.0.5:8003/" in payload
     assert "<a href" in payload
