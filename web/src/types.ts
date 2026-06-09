@@ -91,3 +91,120 @@ export interface TailwindTokenSetOut {
   source: TailwindTokenSource;
   restart_required: boolean;
 }
+
+// --- Rule engine (mirror planned ``app/api/schemas.py`` rule models) ---
+
+export type RuleTrigger = "edge_true" | "while_true";
+
+export type RuleActionType = "turn_on" | "turn_off" | "open" | "close" | "pause";
+
+export interface RuleActionTarget {
+  family_id: string;
+  device_id: string;
+}
+
+export interface RuleActionOut {
+  type: RuleActionType;
+  targets: RuleActionTarget[];
+}
+
+export type RuleConditionOut =
+  | {
+      type: "participants_inside_geofence";
+      geofence_id: string;
+      participant_ids: string[];
+    }
+  | {
+      type: "participants_outside_geofence";
+      geofence_id: string;
+      participant_ids: string[];
+    }
+  | { type: "after_sunset"; offset_minutes: number }
+  | { type: "before_sunrise"; offset_minutes: number };
+
+export interface RuleConditionsOut {
+  all: RuleConditionOut[];
+}
+
+export interface RuleOut {
+  id: string;
+  label: string;
+  enabled: boolean;
+  trigger: RuleTrigger;
+  cooldown_s: number;
+  conditions: RuleConditionsOut;
+  actions: RuleActionOut[];
+}
+
+export interface GeofenceOut {
+  geofence_id: string;
+  label: string;
+  center_lat: number;
+  center_lon: number;
+  radius_m: number;
+  enabled: boolean;
+  owntracks_rid?: string | null;
+}
+
+export interface ParticipantOut {
+  participant_id: string;
+  display_name: string;
+  enabled: boolean;
+}
+
+export interface ParticipantFixOut {
+  lat: number;
+  lon: number;
+  accuracy_m: number | null;
+  received_at: string;
+  source: string | null;
+}
+
+export interface ParticipantStatusOut extends ParticipantOut {
+  last_fix: ParticipantFixOut | null;
+  inside_geofence_ids: string[];
+  age_seconds: number | null;
+}
+
+export interface RulesSunOut {
+  sunset_at: string;
+  sunrise_at: string;
+  is_dark: boolean;
+}
+
+export interface RuleStatusSummaryOut {
+  id: string;
+  label: string;
+  enabled: boolean;
+  condition_currently_true: boolean;
+  last_fired_at: string | null;
+  last_error: string | null;
+}
+
+export interface RulesEvaluatorOut {
+  last_run_at: string | null;
+  next_sun_check_at: string | null;
+}
+
+export interface RulesStatusOut {
+  participants: ParticipantStatusOut[];
+  geofences: GeofenceOut[];
+  rules: RuleStatusSummaryOut[];
+  sun: RulesSunOut;
+  evaluator: RulesEvaluatorOut;
+  using_mock: boolean;
+}
+
+export interface SettingsLocationOut {
+  lat: number;
+  lon: number;
+  timezone: string;
+  home_label: string | null;
+}
+
+export interface RuleActionDeviceOut {
+  family_id: string;
+  device_id: string;
+  label: string;
+  kind: UIDeviceKind;
+}
