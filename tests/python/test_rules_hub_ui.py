@@ -54,6 +54,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-device-action-group",
         "rules-enable-toggle",
         "rules-info-badge",
+        "rules-inline-link",
+        "rules-geofence-row-focused",
         "rules-info-popover[hidden]",
         "rules-mail-test-row",
         "rules-presence-mini-map",
@@ -192,6 +194,32 @@ def test_participant_presence_mini_maps_render_osm_tiles(
                 );
             }""",
             timeout=15_000,
+        )
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_conditions_home_location_link_opens_geofences_tab(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Sunset/sunrise cards link home location to the matching geofence row."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator('.rules-tab[data-tab="conditions"]').click()
+        page.locator(".rules-inline-link").first.wait_for(state="visible", timeout=10_000)
+        assert page.locator(".rules-inline-link").first.inner_text() == "House"
+        page.locator(".rules-inline-link").first.click()
+        page.locator("#rules-geofence-map").wait_for(state="visible", timeout=10_000)
+        page.locator("tr.rules-geofence-row-focused").wait_for(state="visible", timeout=10_000)
+        assert page.locator('.rules-tab[data-tab="geofences"]').evaluate(
+            "(el) => el.classList.contains('rules-tab-active')",
         )
     finally:
         context.close()
