@@ -4,10 +4,12 @@ import type { RulesSunOut } from "./types.js";
 
 export type AstronomicalWindowBoundary = "midnight";
 
+export const MINUTES_PER_DAY = 24 * 60;
+
 export const AFTER_SUNSET_WINDOW_DESCRIPTION =
-  "Default window: sunset to midnight (midnight boundary will be configurable per rule).";
+  "Evening window: local sunset through midnight.";
 export const BEFORE_SUNRISE_WINDOW_DESCRIPTION =
-  "Default window: midnight to sunrise (midnight boundary will be configurable per rule).";
+  "Morning window: local midnight through sunrise.";
 
 export function localMinutesFromIso(iso: string): number {
   const d = new Date(iso);
@@ -19,22 +21,47 @@ export function localMinutesNow(): number {
   return now.getHours() * 60 + now.getMinutes();
 }
 
+export function isInAfterSunsetWindowAt(
+  nowMinutes: number,
+  sunsetMinutes: number,
+  offsetMinutes: number,
+): boolean {
+  const start = sunsetMinutes + offsetMinutes;
+  if (start >= MINUTES_PER_DAY) {
+    return false;
+  }
+  return nowMinutes >= start && nowMinutes < MINUTES_PER_DAY;
+}
+
+export function isInBeforeSunriseWindowAt(
+  nowMinutes: number,
+  sunriseMinutes: number,
+  offsetMinutes: number,
+): boolean {
+  const end = sunriseMinutes + offsetMinutes;
+  return nowMinutes >= 0 && nowMinutes < end;
+}
+
 export function isInAfterSunsetWindow(
   sunsetAtIso: string,
   offsetMinutes: number,
 ): boolean {
-  const now = localMinutesNow();
-  const sunset = localMinutesFromIso(sunsetAtIso) + offsetMinutes;
-  return now >= sunset;
+  return isInAfterSunsetWindowAt(
+    localMinutesNow(),
+    localMinutesFromIso(sunsetAtIso),
+    offsetMinutes,
+  );
 }
 
 export function isInBeforeSunriseWindow(
   sunriseAtIso: string,
   offsetMinutes: number,
 ): boolean {
-  const now = localMinutesNow();
-  const sunrise = localMinutesFromIso(sunriseAtIso) + offsetMinutes;
-  return now < sunrise;
+  return isInBeforeSunriseWindowAt(
+    localMinutesNow(),
+    localMinutesFromIso(sunriseAtIso),
+    offsetMinutes,
+  );
 }
 
 export function afterSunsetStatusMessage(sun: RulesSunOut): {
