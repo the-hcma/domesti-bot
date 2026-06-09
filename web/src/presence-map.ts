@@ -34,6 +34,8 @@ export interface PresenceMapParticipant {
 
 export interface PresenceMapMountOptions {
   geofences: GeofenceOut[];
+  /** When true, tooltip title includes ``participant_id`` (Participants tab). */
+  includeParticipantIdInTooltip?: boolean;
   participants: PresenceMapParticipant[];
   showParticipantFilters: boolean;
 }
@@ -60,8 +62,14 @@ export function formatAge(seconds: number | null): string {
   return `${Math.floor(seconds / 3600)} h ago`;
 }
 
-export function formatParticipantTooltipHtml(participant: PresenceMapParticipant): string {
-  const lines: string[] = [`<strong>${escapeHtml(participant.display_name)}</strong>`];
+export function formatParticipantTooltipHtml(
+  participant: PresenceMapParticipant,
+  options?: { includeParticipantId?: boolean },
+): string {
+  const title = options?.includeParticipantId === true
+    ? `${participant.display_name} (${participant.participant_id})`
+    : participant.display_name;
+  const lines: string[] = [`<strong>${escapeHtml(title)}</strong>`];
   lines.push(`Tracking device: ${escapeHtml(participant.tracking_device_label)}`);
   const inside =
     participant.inside_geofence_ids.length > 0
@@ -187,17 +195,25 @@ export function mountPresenceMap(
       PARTICIPANT_MARKER_COLORS[index % PARTICIPANT_MARKER_COLORS.length]
       ?? PARTICIPANT_MARKER_COLORS[0];
     const marker = L.circleMarker([fix.lat, fix.lon], {
+      className: "rules-presence-participant-marker",
       color: "var(--fg)",
       fillColor: color,
       fillOpacity: 0.9,
       radius: 8,
       weight: 2,
     })
-      .bindTooltip(formatParticipantTooltipHtml(participant), {
-        className: "rules-presence-map-tooltip",
-        direction: "top",
-        sticky: true,
-      })
+      .bindTooltip(
+        formatParticipantTooltipHtml(participant, {
+          includeParticipantId: options.includeParticipantIdInTooltip === true,
+        }),
+        {
+          className: "rules-presence-map-tooltip",
+          direction: "auto",
+          offset: [0, -10],
+          opacity: 1,
+          sticky: false,
+        },
+      )
       .addTo(map);
     let accuracy: L.Circle | null = null;
     if (fix.accuracy_m !== null && fix.accuracy_m > 0) {
@@ -206,6 +222,7 @@ export function mountPresenceMap(
         dashArray: "4 4",
         fillColor: "var(--pending)",
         fillOpacity: 0.08,
+        interactive: false,
         radius: fix.accuracy_m,
         weight: 1,
       }).addTo(map);

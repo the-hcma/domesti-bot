@@ -180,10 +180,7 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
         assert page.locator(".leaflet-control-zoom").count() >= 1
 
         page.locator('.rules-tab[data-tab="participants"]').click()
-        page.locator(".rules-participant-details-list").wait_for(
-            state="visible",
-            timeout=10_000,
-        )
+        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
         page.wait_for_function(
             """() => {
               const map = document.querySelector('.rules-presence-map.leaflet-container');
@@ -191,7 +188,52 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
             }""",
             timeout=15_000,
         )
-        assert "Henrique" in dialog.inner_text()
+        marker = page.locator(".rules-presence-participant-marker").first
+        marker.hover()
+        tooltip = page.locator(".rules-presence-map-tooltip")
+        tooltip.wait_for(state="visible", timeout=5_000)
+        assert "Henrique" in tooltip.inner_text()
+        assert "(" in tooltip.inner_text()
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Participant map tooltips must not widen/tall the Automations dialog body."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        body = page.locator(".rules-dialog-body")
+        before = body.evaluate(
+            """(el) => ({
+              scrollWidth: el.scrollWidth,
+              clientWidth: el.clientWidth,
+              scrollHeight: el.scrollHeight,
+              clientHeight: el.clientHeight,
+            })""",
+        )
+        marker = page.locator(".rules-presence-participant-marker").first
+        marker.hover()
+        page.locator(".rules-presence-map-tooltip").wait_for(state="visible", timeout=5_000)
+        after = body.evaluate(
+            """(el) => ({
+              scrollWidth: el.scrollWidth,
+              clientWidth: el.clientWidth,
+              scrollHeight: el.scrollHeight,
+              clientHeight: el.clientHeight,
+            })""",
+        )
+        assert after["scrollWidth"] <= before["scrollWidth"]
+        assert after["scrollHeight"] <= before["scrollHeight"]
     finally:
         context.close()
 
