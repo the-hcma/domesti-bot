@@ -28,6 +28,20 @@ function appendLabeledField(
   parent.append(field);
 }
 
+function appendFieldRow(parent: HTMLElement, ...fields: HTMLElement[]): void {
+  const row = document.createElement("div");
+  row.className = "settings-dialog-field-row";
+  row.append(...fields);
+  parent.append(row);
+}
+
+function createLabeledField(labelEl: HTMLElement, control: HTMLElement): HTMLElement {
+  const field = document.createElement("label");
+  field.className = "settings-dialog-field";
+  field.append(labelEl, control);
+  return field;
+}
+
 function defaultFromAddress(domain: string): string {
   const trimmed = domain.trim();
   if (trimmed === "") {
@@ -97,7 +111,6 @@ export async function mountMailSettingsPanel(
   hostInput.placeholder = DEFAULT_SMTP_HOST;
   hostInput.value = defaults.host;
   hostInput.required = true;
-  appendLabeledField(form, createFieldLabel("SMTP host"), hostInput);
 
   const portSelect = document.createElement("select");
   for (const opt of SMTP_PORT_OPTIONS) {
@@ -107,7 +120,11 @@ export async function mountMailSettingsPanel(
     portSelect.append(el);
   }
   portSelect.value = String(defaults.port);
-  appendLabeledField(form, createFieldLabel("Port"), portSelect);
+  appendFieldRow(
+    form,
+    createLabeledField(createFieldLabel("SMTP host"), hostInput),
+    createLabeledField(createFieldLabel("Port"), portSelect),
+  );
 
   const domainInput = document.createElement("input");
   domainInput.type = "text";
@@ -115,39 +132,6 @@ export async function mountMailSettingsPanel(
   domainInput.placeholder = uiMailDomain !== "" ? uiMailDomain : "hcma.info";
   domainInput.value = defaults.mail_domain;
   domainInput.required = true;
-  appendLabeledField(
-    form,
-    createFieldLabel("Mail domain", {
-      detail:
-        "Domain used for the default From address when sending rule notifications. "
-        + "Defaults to the hostname from the URL you opened in the browser.",
-      example: "hcma.info → domestibot-noreply@hcma.info",
-    }),
-    domainInput,
-  );
-
-  const usernameInput = document.createElement("input");
-  usernameInput.type = "text";
-  usernameInput.autocomplete = "off";
-  usernameInput.placeholder = "leave blank if not required";
-  usernameInput.value = defaults.username;
-  appendLabeledField(
-    form,
-    createFieldLabel("Username (optional)"),
-    usernameInput,
-  );
-
-  const passwordInput = document.createElement("input");
-  passwordInput.type = "password";
-  passwordInput.autocomplete = "new-password";
-  passwordInput.placeholder = existing?.password_configured
-    ? "leave blank to keep current"
-    : "leave blank if not required";
-  appendLabeledField(
-    form,
-    createFieldLabel("Password (optional)"),
-    passwordInput,
-  );
 
   const fromInput = document.createElement("input");
   fromInput.type = "email";
@@ -156,10 +140,36 @@ export async function mountMailSettingsPanel(
     defaults.from_address !== ""
       ? defaults.from_address
       : defaultFromAddress(defaults.mail_domain);
-  appendLabeledField(
+  appendFieldRow(
     form,
-    createFieldLabel("From address"),
-    fromInput,
+    createLabeledField(
+      createFieldLabel("Mail domain", {
+        detail:
+          "Domain used for the default From address when sending rule notifications. "
+          + "Defaults to the hostname from the URL you opened in the browser.",
+        example: "hcma.info → domestibot-noreply@hcma.info",
+      }),
+      domainInput,
+    ),
+    createLabeledField(createFieldLabel("From address"), fromInput),
+  );
+
+  const usernameInput = document.createElement("input");
+  usernameInput.type = "text";
+  usernameInput.autocomplete = "off";
+  usernameInput.placeholder = "leave blank if not required";
+  usernameInput.value = defaults.username;
+
+  const passwordInput = document.createElement("input");
+  passwordInput.type = "password";
+  passwordInput.autocomplete = "new-password";
+  passwordInput.placeholder = existing?.password_configured
+    ? "leave blank to keep current"
+    : "leave blank if not required";
+  appendFieldRow(
+    form,
+    createLabeledField(createFieldLabel("Username (optional)"), usernameInput),
+    createLabeledField(createFieldLabel("Password (optional)"), passwordInput),
   );
 
   const saveSmtpSettings = (): void => {
