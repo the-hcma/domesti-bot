@@ -16,6 +16,7 @@ import type {
   RuleOut,
   RulesStatusOut,
   SettingsLocationOut,
+  TimeConditionTemplateOut,
 } from "./types.js";
 
 declare const DOMESTI_RULES_FORCE_MOCK: boolean | undefined;
@@ -30,12 +31,17 @@ export interface RulesDataSource {
   saveParticipant(participant: ParticipantOut): Promise<ParticipantOut>;
   deleteParticipant(participantId: string): Promise<void>;
   listRules(): Promise<RuleOut[]>;
+  listTimeConditionTemplates(): Promise<TimeConditionTemplateOut[]>;
   getRule(ruleId: string): Promise<RuleOut | null>;
   saveRule(rule: RuleOut): Promise<RuleOut>;
   deleteRule(ruleId: string): Promise<void>;
+  deleteTimeConditionTemplate(templateId: string): Promise<void>;
   setRuleEnabled(ruleId: string, enabled: boolean): Promise<RuleOut>;
   getSettingsLocation(): Promise<SettingsLocationOut>;
   saveSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut>;
+  saveTimeConditionTemplate(
+    template: TimeConditionTemplateOut,
+  ): Promise<TimeConditionTemplateOut>;
   listActionDevices(): Promise<RuleActionDeviceOut[]>;
 }
 
@@ -177,6 +183,10 @@ export class MockRulesDataSource implements RulesDataSource {
     return structuredClone(this.store.rules);
   }
 
+  async listTimeConditionTemplates(): Promise<TimeConditionTemplateOut[]> {
+    return structuredClone(this.store.time_condition_templates);
+  }
+
   async getRule(ruleId: string): Promise<RuleOut | null> {
     const rule = this.store.rules.find((r) => r.id === ruleId);
     return rule === undefined ? null : structuredClone(rule);
@@ -198,6 +208,12 @@ export class MockRulesDataSource implements RulesDataSource {
     delete this.store.rule_last_fired_at[ruleId];
   }
 
+  async deleteTimeConditionTemplate(templateId: string): Promise<void> {
+    this.store.time_condition_templates = this.store.time_condition_templates.filter(
+      (t) => t.template_id !== templateId,
+    );
+  }
+
   async setRuleEnabled(ruleId: string, enabled: boolean): Promise<RuleOut> {
     const rule = this.store.rules.find((r) => r.id === ruleId);
     if (rule === undefined) {
@@ -216,6 +232,20 @@ export class MockRulesDataSource implements RulesDataSource {
   ): Promise<SettingsLocationOut> {
     this.store.settings_location = structuredClone(location);
     return structuredClone(location);
+  }
+
+  async saveTimeConditionTemplate(
+    template: TimeConditionTemplateOut,
+  ): Promise<TimeConditionTemplateOut> {
+    const idx = this.store.time_condition_templates.findIndex(
+      (t) => t.template_id === template.template_id,
+    );
+    if (idx >= 0) {
+      this.store.time_condition_templates[idx] = structuredClone(template);
+    } else {
+      this.store.time_condition_templates.push(structuredClone(template));
+    }
+    return structuredClone(template);
   }
 
   async listActionDevices(): Promise<RuleActionDeviceOut[]> {

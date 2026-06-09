@@ -1353,65 +1353,75 @@ function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
   settingsItem.className = "app-menu-item";
   settingsItem.setAttribute("role", "menuitem");
   settingsItem.textContent = "Settings";
-  settingsItem.addEventListener("click", () => {
-    closeAppMenu();
-    void openTailwindSettingsDialog();
+  let outsideClickListener: ((ev: MouseEvent) => void) | null = null;
+
+  const detachOutsideClickListener = (): void => {
+    if (outsideClickListener !== null) {
+      document.removeEventListener("click", outsideClickListener, true);
+      outsideClickListener = null;
+    }
+  };
+
+  const runMenuItemAction = (action: () => void): void => {
+    detachOutsideClickListener();
+    panel.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    appMenuOpen = false;
+    openAppMenuCloser = null;
+    action();
+  };
+  settingsItem.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    runMenuItemAction(() => {
+      void openTailwindSettingsDialog();
+    });
   });
   const rulesItem = document.createElement("button");
   rulesItem.type = "button";
   rulesItem.className = "app-menu-item";
   rulesItem.setAttribute("role", "menuitem");
   rulesItem.textContent = "Rules";
-  rulesItem.addEventListener("click", () => {
-    closeAppMenu();
-    void openRulesHubDialog();
+  rulesItem.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    runMenuItemAction(() => {
+      void openRulesHubDialog();
+    });
   });
   const aboutItem = document.createElement("button");
   aboutItem.type = "button";
   aboutItem.className = "app-menu-item";
   aboutItem.setAttribute("role", "menuitem");
   aboutItem.textContent = "About";
-  aboutItem.addEventListener("click", () => {
-    closeAppMenu();
-    openAboutDialog(meta);
+  aboutItem.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    runMenuItemAction(() => {
+      openAboutDialog(meta);
+    });
   });
   panel.append(settingsItem, rulesItem, aboutItem);
   wrap.append(trigger, panel);
-
-  let outsidePointerListener: ((ev: PointerEvent) => void) | null = null;
-
-  const detachOutsidePointerListener = (): void => {
-    if (outsidePointerListener !== null) {
-      document.removeEventListener("pointerdown", outsidePointerListener, true);
-      outsidePointerListener = null;
-    }
-  };
 
   const openPanel = (): void => {
     panel.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
     appMenuOpen = true;
-    detachOutsidePointerListener();
-    outsidePointerListener = (ev: PointerEvent): void => {
+    detachOutsideClickListener();
+    outsideClickListener = (ev: MouseEvent): void => {
       if (!wrap.contains(ev.target as Node)) {
         closeAppMenu();
       }
     };
-    window.requestAnimationFrame(() => {
-      if (outsidePointerListener !== null) {
-        document.addEventListener("pointerdown", outsidePointerListener, true);
+    window.setTimeout(() => {
+      if (outsideClickListener !== null) {
+        document.addEventListener("click", outsideClickListener, true);
       }
-    });
+    }, 0);
     openAppMenuCloser = () => {
       panel.hidden = true;
       trigger.setAttribute("aria-expanded", "false");
-      detachOutsidePointerListener();
+      detachOutsideClickListener();
     };
   };
-
-  panel.addEventListener("pointerdown", (ev) => {
-    ev.stopPropagation();
-  });
 
   trigger.addEventListener("click", (ev) => {
     ev.stopPropagation();

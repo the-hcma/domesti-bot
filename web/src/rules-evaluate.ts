@@ -11,6 +11,36 @@ import type {
 
 export const DEFAULT_MIN_FIX_ACCURACY_M = 50;
 
+function formatHhmmDisplay(hhmm: string): string {
+  const parsed = parseHhmm(hhmm);
+  if (parsed === null) {
+    return hhmm;
+  }
+  const h = Math.floor(parsed / 60);
+  const m = parsed % 60;
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function localMinutesNow(): number {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+function parseHhmm(hhmm: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (match === null) {
+    return null;
+  }
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h < 0 || h > 23 || m < 0 || m > 59) {
+    return null;
+  }
+  return h * 60 + m;
+}
+
 export interface RuleEvaluationOut {
   all_met: boolean;
   conditions: RuleConditionStatusOut[];
@@ -88,6 +118,38 @@ function evaluateCondition(
       detail: met
         ? `Daytime until sunrise (${new Date(sun.sunrise_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})`
         : `After sunrise window (sunrise was ${new Date(sun.sunrise_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})`,
+    };
+  }
+  if (condition.type === "after_local_time") {
+    const target = parseHhmm(condition.time_hhmm);
+    const now = localMinutesNow();
+    const met = target !== null && now >= target;
+    return {
+      condition,
+      label: `After ${formatHhmmDisplay(condition.time_hhmm)}`,
+      met,
+      detail:
+        target === null
+          ? `Invalid time ${condition.time_hhmm}`
+          : met
+            ? `Local time is past ${formatHhmmDisplay(condition.time_hhmm)}`
+            : `Waiting until ${formatHhmmDisplay(condition.time_hhmm)}`,
+    };
+  }
+  if (condition.type === "before_local_time") {
+    const target = parseHhmm(condition.time_hhmm);
+    const now = localMinutesNow();
+    const met = target !== null && now < target;
+    return {
+      condition,
+      label: `Before ${formatHhmmDisplay(condition.time_hhmm)}`,
+      met,
+      detail:
+        target === null
+          ? `Invalid time ${condition.time_hhmm}`
+          : met
+            ? `Local time is before ${formatHhmmDisplay(condition.time_hhmm)}`
+            : `Past ${formatHhmmDisplay(condition.time_hhmm)} for today`,
     };
   }
 

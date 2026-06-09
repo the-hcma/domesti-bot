@@ -122,7 +122,16 @@ export type RuleConditionOut =
       participant_ids: string[];
     }
   | { type: "after_sunset"; offset_minutes: number }
-  | { type: "before_sunrise"; offset_minutes: number };
+  | { type: "before_sunrise"; offset_minutes: number }
+  | { type: "after_local_time"; time_hhmm: string }
+  | { type: "before_local_time"; time_hhmm: string };
+
+export interface TimeConditionTemplateOut {
+  template_id: string;
+  label: string;
+  type: "after_local_time" | "before_local_time";
+  time_hhmm: string;
+}
 
 export interface RuleConditionsOut {
   all: RuleConditionOut[];

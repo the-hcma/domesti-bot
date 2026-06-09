@@ -1,23 +1,28 @@
-// Desktop Rules hub — Status, Rules, Geofences, Participants (mock-backed).
+// Desktop Rules hub — Status, Rules, Conditions, Geofences, Participants (mock-backed).
 
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
+import {
+  createEnableToggle,
+  createFieldLabel,
+  FAMILY_ACTION_GROUP_LABELS,
+} from "./rules-ui-helpers.js";
 import type {
   GeofenceOut,
   ParticipantOut,
   RuleActionDeviceOut,
   RuleActionType,
+  RuleConditionOut,
   RuleDeviceActionOut,
   RuleOut,
   RulesStatusOut,
   RulesSunOut,
+  TimeConditionTemplateOut,
   UIDeviceKind,
 } from "./types.js";
 
-type RulesTabId = "status" | "rules" | "geofences" | "participants";
-
-type SunConditionMode = "after_sunset" | "before_sunrise" | "none";
+type RulesTabId = "conditions" | "geofences" | "participants" | "rules" | "status";
 
 function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
   switch (kind) {
@@ -28,6 +33,17 @@ function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
     case "speaker":
       return ["pause", "resume"];
   }
+}
+
+function appendLabeledField(
+  parent: HTMLElement,
+  labelEl: HTMLElement,
+  control: HTMLElement,
+): void {
+  const field = document.createElement("label");
+  field.className = "settings-dialog-field";
+  field.append(labelEl, control);
+  parent.append(field);
 }
 
 function createDialogCloseButton(dialog: HTMLDialogElement): HTMLButtonElement {
@@ -67,6 +83,14 @@ function formatLocalTime(iso: string): string {
   }
 }
 
+function hhmmToTimeInput(hhmm: string): string {
+  if (/^\d{1,2}:\d{2}$/.test(hhmm)) {
+    const [h, m] = hhmm.split(":");
+    return `${h?.padStart(2, "0") ?? "00"}:${m ?? "00"}`;
+  }
+  return "";
+}
+
 function slugifyId(raw: string): string {
   return raw
     .trim()
@@ -74,19 +98,6 @@ function slugifyId(raw: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
-}
-
-function sunConditionModeFromRule(rule: RuleOut | null): SunConditionMode {
-  if (rule === null) {
-    return "after_sunset";
-  }
-  if (rule.conditions.all.some((c) => c.type === "before_sunrise")) {
-    return "before_sunrise";
-  }
-  if (rule.conditions.all.some((c) => c.type === "after_sunset")) {
-    return "after_sunset";
-  }
-  return "none";
 }
 
 function sunStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: string } {
@@ -100,6 +111,15 @@ function sunStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: st
     dynamicLabel: "Sunset (dynamic)",
     primary: `Light until sunset at ${formatLocalTime(sun.sunset_at)}`,
   };
+}
+
+function templateToCondition(
+  template: TimeConditionTemplateOut,
+): RuleConditionOut {
+  if (template.type === "after_local_time") {
+    return { type: "after_local_time", time_hhmm: template.time_hhmm };
+  }
+  return { type: "before_local_time", time_hhmm: template.time_hhmm };
 }
 
 class RulesHubController {
@@ -134,6 +154,7 @@ class RulesHubController {
     tabBar.setAttribute("role", "tablist");
     for (const tab of [
       ["status", "Status"],
+      ["conditions", "Conditions"],
       ["rules", "Rules"],
       ["geofences", "Geofences"],
       ["participants", "Participants"],
@@ -169,104 +190,110 @@ class RulesHubController {
     this.dialog.showModal();
   }
 
-  private openParticipantEditor(existing: ParticipantOut | null): void {
-    const editor = document.createElement("div");
-    editor.className = "rules-editor-panel";
-    const form = document.createElement("form");
-    form.className = "rules-editor-form";
-
-    const idField = document.createElement("label");
-    idField.className = "settings-dialog-field";
-    idField.innerHTML = "<span>Participant id</span>";
-    const idInput = document.createElement("input");
-    idInput.value = existing?.participant_id ?? "";
-    idInput.required = true;
-    idInput.pattern = "[a-z0-9_-]+";
-    idInput.readOnly = existing !== null;
-    idField.append(idInput);
-
-    const nameField = document.createElement("label");
-    nameField.className = "settings-dialog-field";
-    nameField.innerHTML = "<span>Display name</span>";
-    const nameInput = document.createElement("input");
-    nameInput.value = existing?.display_name ?? "";
-    nameInput.required = true;
-    nameField.append(nameInput);
-
-    const deviceField = document.createElement("label");
-    deviceField.className = "settings-dialog-field";
-    deviceField.innerHTML =
-      "<span>Tracking device</span><small class=\"rules-field-hint\">Phone or tracker that reports this person's location via my-tracks</small>";
-    const deviceInput = document.createElement("input");
-    deviceInput.value = existing?.tracking_device_label ?? "";
-    deviceInput.required = true;
-    deviceInput.placeholder = "Henrique's iPhone";
-    deviceField.append(deviceInput);
-
-    const actions = document.createElement("div");
-    actions.className = "settings-dialog-actions";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "btn";
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.addEventListener("click", () => {
-      editor.remove();
-    });
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "submit";
-    saveBtn.className = "btn";
-    saveBtn.textContent = existing === null ? "Add participant" : "Save participant";
-    actions.append(cancelBtn, saveBtn);
-
-    form.append(idField, nameField, deviceField, actions);
-    form.addEventListener("submit", (ev) => {
-      ev.preventDefault();
-      const participant: ParticipantOut = {
-        participant_id: idInput.value.trim(),
-        display_name: nameInput.value.trim(),
-        tracking_device_label: deviceInput.value.trim(),
-        enabled: existing?.enabled ?? true,
-      };
-      void this.dataSource.saveParticipant(participant).then(() => {
-        editor.remove();
-        void this.refresh();
-      });
-    });
-
-    editor.append(form);
-    this.body.append(editor);
-    nameInput.focus();
+  private appendDeviceActionGroups(
+    actionsWrap: HTMLElement,
+    actionDevices: RuleActionDeviceOut[],
+    existing: RuleOut | null,
+  ): {
+    actionSelect: HTMLSelectElement;
+    checkbox: HTMLInputElement;
+    device: RuleActionDeviceOut;
+  }[] {
+    const deviceActionState = new Map<string, RuleDeviceActionOut>();
+    for (const entry of existing?.device_actions ?? []) {
+      deviceActionState.set(`${entry.family_id}\0${entry.device_id}`, entry);
+    }
+    const byFamily = new Map<string, RuleActionDeviceOut[]>();
+    for (const device of actionDevices) {
+      const list = byFamily.get(device.family_id) ?? [];
+      list.push(device);
+      byFamily.set(device.family_id, list);
+    }
+    const deviceRows: {
+      actionSelect: HTMLSelectElement;
+      checkbox: HTMLInputElement;
+      device: RuleActionDeviceOut;
+    }[] = [];
+    for (const familyId of [...byFamily.keys()].sort()) {
+      const group = document.createElement("div");
+      group.className = "rules-device-action-group";
+      const heading = document.createElement("h4");
+      heading.className = "rules-device-action-group-title";
+      heading.textContent = FAMILY_ACTION_GROUP_LABELS[familyId] ?? familyId;
+      group.append(heading);
+      for (const device of byFamily.get(familyId) ?? []) {
+        const row = document.createElement("div");
+        row.className = "rules-device-action-row";
+        const key = `${device.family_id}\0${device.device_id}`;
+        const existingAction = deviceActionState.get(key);
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = existingAction !== undefined;
+        const label = document.createElement("label");
+        label.className = "rules-device-action-label";
+        const name = document.createElement("span");
+        name.textContent = device.label;
+        const actionSelect = document.createElement("select");
+        for (const action of actionOptionsForKind(device.kind)) {
+          const opt = document.createElement("option");
+          opt.value = action;
+          opt.textContent = formatActionLabel(action);
+          actionSelect.append(opt);
+        }
+        const defaultAction = actionOptionsForKind(device.kind)[0] ?? "turn_on";
+        actionSelect.value = existingAction?.action ?? defaultAction;
+        actionSelect.disabled = !checkbox.checked;
+        checkbox.addEventListener("change", () => {
+          actionSelect.disabled = !checkbox.checked;
+        });
+        label.append(checkbox, name, actionSelect);
+        row.append(label);
+        group.append(row);
+        deviceRows.push({ actionSelect, checkbox, device });
+      }
+      actionsWrap.append(group);
+    }
+    return deviceRows;
   }
 
   private async openRuleEditor(existing: RuleOut | null): Promise<void> {
     const geofences = await this.dataSource.listGeofences();
     const participants = await this.dataSource.listParticipants();
     const actionDevices = await this.dataSource.listActionDevices();
+    const timeTemplates = await this.dataSource.listTimeConditionTemplates();
 
     const editor = document.createElement("div");
     editor.className = "rules-editor-panel";
     const form = document.createElement("form");
     form.className = "rules-editor-form";
 
-    const labelField = document.createElement("label");
-    labelField.className = "settings-dialog-field";
-    labelField.innerHTML = "<span>Name</span>";
     const labelInput = document.createElement("input");
     labelInput.value = existing?.label ?? "";
     labelInput.required = true;
-    labelField.append(labelInput);
+    appendLabeledField(
+      form,
+      createFieldLabel("Name"),
+      labelInput,
+    );
 
-    const idField = document.createElement("label");
-    idField.className = "settings-dialog-field";
-    idField.innerHTML = "<span>Rule id</span>";
     const idInput = document.createElement("input");
     idInput.value = existing?.id ?? "";
     idInput.required = true;
     idInput.readOnly = existing !== null;
-    idField.append(idInput);
+    appendLabeledField(
+      form,
+      createFieldLabel("Rule id"),
+      idInput,
+    );
+
+    const conditionsField = document.createElement("fieldset");
+    conditionsField.className = "rules-editor-fieldset";
+    const conditionsLegend = document.createElement("legend");
+    conditionsLegend.textContent = "Conditions";
+    conditionsField.append(conditionsLegend);
 
     const whoField = document.createElement("fieldset");
-    whoField.className = "rules-editor-fieldset";
+    whoField.className = "rules-editor-fieldset rules-editor-subfieldset";
     const whoLegend = document.createElement("legend");
     whoLegend.textContent = "Who must be home";
     whoField.append(whoLegend);
@@ -287,10 +314,8 @@ class RulesHubController {
       );
       whoField.append(row);
     }
+    conditionsField.append(whoField);
 
-    const whereField = document.createElement("label");
-    whereField.className = "settings-dialog-field";
-    whereField.innerHTML = "<span>Geofence</span>";
     const whereSelect = document.createElement("select");
     for (const g of geofences) {
       const opt = document.createElement("option");
@@ -302,93 +327,150 @@ class RulesHubController {
       existing?.conditions.all.find((c) => c.type === "participants_inside_geofence")
         ?.geofence_id ?? "house";
     whereSelect.value = existingGeofence;
-    whereField.append(whereSelect);
+    appendLabeledField(
+      conditionsField,
+      createFieldLabel("Geofence"),
+      whereSelect,
+    );
 
-    const sunField = document.createElement("label");
-    sunField.className = "settings-dialog-field";
-    sunField.innerHTML =
-      "<span>Time of day (dynamic)</span><small class=\"rules-field-hint\">Evaluated from home location sunset/sunrise</small>";
-    const sunSelect = document.createElement("select");
-    for (const [value, label] of [
-      ["after_sunset", "After sunset"],
-      ["before_sunrise", "Before sunrise"],
-      ["none", "Any time of day"],
-    ] as const) {
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = label;
-      sunSelect.append(opt);
+    const timeField = document.createElement("fieldset");
+    timeField.className = "rules-editor-fieldset rules-editor-subfieldset";
+    const timeLegend = document.createElement("legend");
+    timeLegend.textContent = "Time of day";
+    timeField.append(timeLegend);
+
+    const sunsetRow = document.createElement("label");
+    sunsetRow.className = "rules-check-row";
+    const sunsetCb = document.createElement("input");
+    sunsetCb.type = "checkbox";
+    sunsetCb.checked =
+      existing?.conditions.all.some((c) => c.type === "after_sunset") ?? true;
+    sunsetRow.append(sunsetCb, document.createTextNode(" After sunset (dynamic)"));
+    timeField.append(sunsetRow);
+
+    const sunriseRow = document.createElement("label");
+    sunriseRow.className = "rules-check-row";
+    const sunriseCb = document.createElement("input");
+    sunriseCb.type = "checkbox";
+    sunriseCb.checked =
+      existing?.conditions.all.some((c) => c.type === "before_sunrise") ?? false;
+    sunriseRow.append(sunriseCb, document.createTextNode(" Before sunrise (dynamic)"));
+    timeField.append(sunriseRow);
+
+    const afterTime = document.createElement("input");
+    afterTime.type = "time";
+    const existingAfter =
+      existing?.conditions.all.find((c) => c.type === "after_local_time")?.time_hhmm ?? "";
+    afterTime.value = hhmmToTimeInput(existingAfter);
+    appendLabeledField(
+      timeField,
+      createFieldLabel(
+        "After clock time (optional)",
+        {
+          detail:
+            "Require local time to be at or past this hour on days the rule is evaluated.",
+          example: "22:00 so porch lights wait until 10 PM even when you arrive earlier.",
+        },
+      ),
+      afterTime,
+    );
+
+    const beforeTime = document.createElement("input");
+    beforeTime.type = "time";
+    const existingBefore =
+      existing?.conditions.all.find((c) => c.type === "before_local_time")?.time_hhmm ?? "";
+    beforeTime.value = hhmmToTimeInput(existingBefore);
+    appendLabeledField(
+      timeField,
+      createFieldLabel(
+        "Before clock time (optional)",
+        {
+          detail:
+            "Require local time to be before this hour. Leave blank when not needed.",
+          example: "06:00 for a quiet-hours rule that ends at sunrise routines.",
+        },
+      ),
+      beforeTime,
+    );
+
+    if (timeTemplates.length > 0) {
+      const templatesLegend = document.createElement("p");
+      templatesLegend.className = "rules-field-hint";
+      templatesLegend.textContent = "Reusable templates from the Conditions tab:";
+      timeField.append(templatesLegend);
+      const selectedTemplateIds = new Set(
+        existing?.conditions.all
+          .filter(
+            (c) => c.type === "after_local_time" || c.type === "before_local_time",
+          )
+          .map((c) =>
+            timeTemplates.find(
+              (t) => t.type === c.type && t.time_hhmm === c.time_hhmm,
+            )?.template_id,
+          )
+          .filter((id): id is string => id !== undefined),
+      );
+      for (const template of timeTemplates) {
+        const row = document.createElement("label");
+        row.className = "rules-check-row";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.className = "rules-template-pick";
+        cb.value = template.template_id;
+        cb.checked = selectedTemplateIds.has(template.template_id);
+        const kind =
+          template.type === "after_local_time" ? "After" : "Before";
+        row.append(
+          cb,
+          document.createTextNode(` ${template.label} (${kind} ${template.time_hhmm})`),
+        );
+        timeField.append(row);
+      }
     }
-    sunSelect.value = sunConditionModeFromRule(existing);
-    sunField.append(sunSelect);
+    conditionsField.append(timeField);
+    form.append(conditionsField);
 
-    const accuracyField = document.createElement("label");
-    accuracyField.className = "settings-dialog-field";
-    accuracyField.innerHTML =
-      "<span>Min location accuracy (meters)</span><small class=\"rules-field-hint\">Ignore fixes with horizontal accuracy worse than this</small>";
     const accuracyInput = document.createElement("input");
     accuracyInput.type = "number";
     accuracyInput.min = "1";
     accuracyInput.step = "1";
     accuracyInput.value = String(existing?.min_fix_accuracy_m ?? DEFAULT_MIN_FIX_ACCURACY_M);
-    accuracyField.append(accuracyInput);
+    appendLabeledField(
+      form,
+      createFieldLabel("Min location accuracy (meters)", {
+        detail:
+          "Ignore GPS fixes whose horizontal accuracy is worse than this threshold. Prevents a fuzzy phone fix from falsely placing someone inside a geofence.",
+        example:
+          "50 m drops a ±120 m fix in a parking lot while still accepting a ±12 m fix in the driveway.",
+      }),
+      accuracyInput,
+    );
 
-    const cooldownField = document.createElement("label");
-    cooldownField.className = "settings-dialog-field";
-    cooldownField.innerHTML = "<span>Cooldown (seconds)</span>";
     const cooldownInput = document.createElement("input");
     cooldownInput.type = "number";
     cooldownInput.min = "0";
     cooldownInput.value = String(existing?.cooldown_s ?? 300);
-    cooldownField.append(cooldownInput);
+    appendLabeledField(
+      form,
+      createFieldLabel("Cooldown (seconds)", {
+        detail:
+          "Minimum wait before the same rule can fire again after a successful run.",
+        example:
+          "300 prevents the garage from re-opening every poll when both people linger on the fence edge.",
+      }),
+      cooldownInput,
+    );
 
     const actionsWrap = document.createElement("fieldset");
     actionsWrap.className = "rules-editor-fieldset";
     const actionsTitle = document.createElement("legend");
     actionsTitle.textContent = "Device actions";
     actionsWrap.append(actionsTitle);
-
-    const deviceActionState = new Map<string, RuleDeviceActionOut>();
-    for (const entry of existing?.device_actions ?? []) {
-      deviceActionState.set(`${entry.family_id}\0${entry.device_id}`, entry);
-    }
-
-    const deviceRows: {
-      actionSelect: HTMLSelectElement;
-      checkbox: HTMLInputElement;
-      device: RuleActionDeviceOut;
-    }[] = [];
-
-    for (const device of actionDevices) {
-      const row = document.createElement("div");
-      row.className = "rules-device-action-row";
-      const key = `${device.family_id}\0${device.device_id}`;
-      const existingAction = deviceActionState.get(key);
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = existingAction !== undefined;
-      const label = document.createElement("label");
-      label.className = "rules-device-action-label";
-      const name = document.createElement("span");
-      name.textContent = `${device.label} (${device.family_id})`;
-      const actionSelect = document.createElement("select");
-      for (const action of actionOptionsForKind(device.kind)) {
-        const opt = document.createElement("option");
-        opt.value = action;
-        opt.textContent = formatActionLabel(action);
-        actionSelect.append(opt);
-      }
-      const defaultAction = actionOptionsForKind(device.kind)[0] ?? "turn_on";
-      actionSelect.value = existingAction?.action ?? defaultAction;
-      actionSelect.disabled = !checkbox.checked;
-      checkbox.addEventListener("change", () => {
-        actionSelect.disabled = !checkbox.checked;
-      });
-      label.append(checkbox, name, actionSelect);
-      row.append(label);
-      actionsWrap.append(row);
-      deviceRows.push({ actionSelect, checkbox, device });
-    }
+    const deviceRows = this.appendDeviceActionGroups(
+      actionsWrap,
+      actionDevices,
+      existing,
+    );
 
     const actions = document.createElement("div");
     actions.className = "settings-dialog-actions";
@@ -405,17 +487,7 @@ class RulesHubController {
     saveBtn.textContent = "Save rule";
     actions.append(cancelBtn, saveBtn);
 
-    form.append(
-      labelField,
-      idField,
-      whoField,
-      whereField,
-      sunField,
-      accuracyField,
-      cooldownField,
-      actionsWrap,
-      actions,
-    );
+    form.append(actionsWrap, actions);
 
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
@@ -433,10 +505,28 @@ class RulesHubController {
           participant_ids: participantIds,
         },
       ];
-      if (sunSelect.value === "after_sunset") {
+      if (sunsetCb.checked) {
         conditions.push({ type: "after_sunset", offset_minutes: 0 });
-      } else if (sunSelect.value === "before_sunrise") {
+      }
+      if (sunriseCb.checked) {
         conditions.push({ type: "before_sunrise", offset_minutes: 0 });
+      }
+      if (afterTime.value !== "") {
+        conditions.push({ type: "after_local_time", time_hhmm: afterTime.value });
+      }
+      if (beforeTime.value !== "") {
+        conditions.push({ type: "before_local_time", time_hhmm: beforeTime.value });
+      }
+      for (const cb of timeField.querySelectorAll<HTMLInputElement>(
+        "input.rules-template-pick",
+      )) {
+        if (!cb.checked) {
+          continue;
+        }
+        const template = timeTemplates.find((t) => t.template_id === cb.value);
+        if (template !== undefined) {
+          conditions.push(templateToCondition(template));
+        }
       }
       const device_actions: RuleDeviceActionOut[] = deviceRows
         .filter((row) => row.checkbox.checked)
@@ -470,36 +560,70 @@ class RulesHubController {
     labelInput.focus();
   }
 
-  private openSunInfoDialog(sun: RulesSunOut): void {
-    const overlay = document.createElement("div");
-    overlay.className = "rules-inline-dialog";
-    const panel = document.createElement("div");
-    panel.className = "rules-inline-dialog-panel";
-    const title = document.createElement("h3");
-    title.className = "rules-section-title";
-    title.textContent = "Dynamic sun conditions";
-    const body = document.createElement("p");
-    body.className = "settings-dialog-lead";
-    body.textContent =
-      "Sunset and sunrise times are computed from your home location. Rules can require after sunset or before sunrise as dynamic conditions.";
-    const times = document.createElement("ul");
-    times.className = "rules-sun-times";
-    times.innerHTML = `<li>Sunset: ${formatLocalTime(sun.sunset_at)}</li><li>Sunrise: ${formatLocalTime(sun.sunrise_at)}</li><li>Currently: ${sun.is_dark ? "dark" : "daylight"}</li>`;
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "btn";
-    closeBtn.textContent = "Close";
-    closeBtn.addEventListener("click", () => {
-      overlay.remove();
+  private openParticipantEditor(existing: ParticipantOut | null): void {
+    const editor = document.createElement("div");
+    editor.className = "rules-editor-panel";
+    const form = document.createElement("form");
+    form.className = "rules-editor-form";
+
+    const idInput = document.createElement("input");
+    idInput.value = existing?.participant_id ?? "";
+    idInput.required = true;
+    idInput.pattern = "[a-z0-9_-]+";
+    idInput.readOnly = existing !== null;
+    appendLabeledField(form, createFieldLabel("Participant id"), idInput);
+
+    const nameInput = document.createElement("input");
+    nameInput.value = existing?.display_name ?? "";
+    nameInput.required = true;
+    appendLabeledField(form, createFieldLabel("Display name"), nameInput);
+
+    const deviceInput = document.createElement("input");
+    deviceInput.value = existing?.tracking_device_label ?? "";
+    deviceInput.required = true;
+    deviceInput.placeholder = "Henrique's iPhone";
+    const deviceLabel = createFieldLabel("Tracking device");
+    const deviceHint = document.createElement("small");
+    deviceHint.className = "rules-field-hint";
+    deviceHint.textContent =
+      "Phone or tracker that reports this person's location via my-tracks";
+    const deviceLabelWrap = document.createElement("span");
+    deviceLabelWrap.append(deviceLabel, deviceHint);
+    appendLabeledField(form, deviceLabelWrap, deviceInput);
+
+    const actions = document.createElement("div");
+    actions.className = "settings-dialog-actions";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "btn";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", () => {
+      editor.remove();
     });
-    panel.append(title, body, times, closeBtn);
-    overlay.append(panel);
-    overlay.addEventListener("click", (ev) => {
-      if (ev.target === overlay) {
-        overlay.remove();
-      }
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "submit";
+    saveBtn.className = "btn";
+    saveBtn.textContent = existing === null ? "Add participant" : "Save participant";
+    actions.append(cancelBtn, saveBtn);
+
+    form.append(actions);
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const participant: ParticipantOut = {
+        participant_id: idInput.value.trim(),
+        display_name: nameInput.value.trim(),
+        tracking_device_label: deviceInput.value.trim(),
+        enabled: existing?.enabled ?? true,
+      };
+      void this.dataSource.saveParticipant(participant).then(() => {
+        editor.remove();
+        void this.refresh();
+      });
     });
-    this.body.append(overlay);
+
+    editor.append(form);
+    this.body.append(editor);
+    nameInput.focus();
   }
 
   private async refresh(): Promise<void> {
@@ -517,6 +641,9 @@ class RulesHubController {
       case "status":
         this.renderStatusTab(this.status);
         break;
+      case "conditions":
+        void this.renderConditionsTab(this.status);
+        break;
       case "rules":
         void this.renderRulesTab();
         break;
@@ -527,6 +654,94 @@ class RulesHubController {
         void this.renderParticipantsTab();
         break;
     }
+  }
+
+  private async renderConditionsTab(status: RulesStatusOut): Promise<void> {
+    const templates = await this.dataSource.listTimeConditionTemplates();
+    const sunMsg = sunStatusMessage(status.sun);
+
+    const sunHeading = document.createElement("h3");
+    sunHeading.className = "rules-section-title";
+    sunHeading.textContent = "Astronomical (dynamic)";
+    const sunCard = document.createElement("article");
+    sunCard.className = "rules-card";
+    sunCard.innerHTML = `<p class="rules-card-meta"><span class="rules-dynamic-badge">${sunMsg.dynamicLabel}</span></p><p>${sunMsg.primary}</p><p class="rules-card-meta">Sunrise ${formatLocalTime(status.sun.sunrise_at)} · recalculated from home location daily.</p><p class="settings-dialog-lead">Attach <strong>After sunset</strong> or <strong>Before sunrise</strong> in each rule's Conditions section, or open the Conditions tab when editing a rule.</p>`;
+
+    const clockHeading = document.createElement("h3");
+    clockHeading.className = "rules-section-title";
+    clockHeading.textContent = "Clock-time templates";
+    const clockLead = document.createElement("p");
+    clockLead.className = "settings-dialog-lead";
+    clockLead.textContent =
+      "Fixed local times complement sunset/sunrise. Save templates here, then enable them per rule.";
+
+    const list = document.createElement("div");
+    list.className = "rules-card-list";
+    for (const template of templates) {
+      const card = document.createElement("article");
+      card.className = "rules-card";
+      const row = document.createElement("div");
+      row.className = "rules-card-row";
+      const title = document.createElement("strong");
+      const kind = template.type === "after_local_time" ? "After" : "Before";
+      title.textContent = `${template.label} (${kind} ${template.time_hhmm})`;
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn btn-danger";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", () => {
+        if (window.confirm(`Delete template "${template.label}"?`)) {
+          void this.dataSource
+            .deleteTimeConditionTemplate(template.template_id)
+            .then(() => this.refresh());
+        }
+      });
+      row.append(title, delBtn);
+      card.append(row);
+      list.append(card);
+    }
+
+    const form = document.createElement("form");
+    form.className = "rules-participant-form";
+    const labelInput = document.createElement("input");
+    labelInput.required = true;
+    labelInput.placeholder = "Weekend late night";
+    appendLabeledField(form, createFieldLabel("Template label"), labelInput);
+    const typeSelect = document.createElement("select");
+    for (const [value, label] of [
+      ["after_local_time", "After"],
+      ["before_local_time", "Before"],
+    ] as const) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = label;
+      typeSelect.append(opt);
+    }
+    appendLabeledField(form, createFieldLabel("Kind"), typeSelect);
+    const timeInput = document.createElement("input");
+    timeInput.type = "time";
+    timeInput.required = true;
+    appendLabeledField(form, createFieldLabel("Local time"), timeInput);
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "submit";
+    saveBtn.className = "btn";
+    saveBtn.textContent = "Add template";
+    form.append(saveBtn);
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const template: TimeConditionTemplateOut = {
+        template_id: slugifyId(labelInput.value),
+        label: labelInput.value.trim(),
+        type: typeSelect.value as TimeConditionTemplateOut["type"],
+        time_hhmm: timeInput.value,
+      };
+      void this.dataSource.saveTimeConditionTemplate(template).then(() => {
+        form.reset();
+        void this.refresh();
+      });
+    });
+
+    this.body.append(sunHeading, sunCard, clockHeading, clockLead, list, form);
   }
 
   private renderStatusTab(status: RulesStatusOut): void {
@@ -541,7 +756,7 @@ class RulesHubController {
     sunBadge.textContent = sunMsg.dynamicLabel;
     sunBtn.append(sunPrimary, sunBadge);
     sunBtn.addEventListener("click", () => {
-      this.openSunInfoDialog(status.sun);
+      void this.setTab("conditions");
     });
 
     const participantsHeading = document.createElement("h3");
@@ -614,19 +829,12 @@ class RulesHubController {
           }
         });
       });
-      const toggle = document.createElement("input");
-      toggle.type = "checkbox";
-      toggle.checked = rule.enabled;
-      toggle.title = "Enable rule";
-      toggle.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-      });
-      toggle.addEventListener("change", () => {
+      const enableToggle = createEnableToggle(rule.enabled, (next) => {
         void this.dataSource
-          .setRuleEnabled(rule.id, toggle.checked)
+          .setRuleEnabled(rule.id, next)
           .then(() => this.refresh());
       });
-      row.append(nameBtn, toggle);
+      row.append(nameBtn, enableToggle);
       const meta = document.createElement("p");
       meta.className = "rules-card-meta";
       const met = rule.condition_currently_true ? "conditions met" : "conditions not met";
@@ -755,7 +963,10 @@ class RulesHubController {
 
   private async setTab(tab: RulesTabId): Promise<void> {
     this.activeTab = tab;
-    this.dialog.classList.toggle("rules-dialog-wide", tab === "geofences");
+    this.dialog.classList.toggle(
+      "rules-dialog-wide",
+      tab === "geofences" || tab === "conditions",
+    );
     await this.refresh();
   }
 
