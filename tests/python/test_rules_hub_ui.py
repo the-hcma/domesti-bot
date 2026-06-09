@@ -61,6 +61,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-presence-map",
         "rules-presence-map-filters",
         "rules-day-shortcuts",
+        "rules-presence-map-tooltip-line",
+        "width: max-content",
         "leaflet@1.9.4",
     ):
         assert needle in html, needle
@@ -192,6 +194,9 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
         marker.hover()
         tooltip = page.locator(".rules-presence-map-tooltip")
         tooltip.wait_for(state="visible", timeout=5_000)
+        box = tooltip.bounding_box()
+        assert box is not None
+        assert box["width"] >= 120
         assert "Henrique" in tooltip.inner_text()
         assert "(" in tooltip.inner_text()
     finally:
@@ -223,7 +228,11 @@ def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
         )
         marker = page.locator(".rules-presence-participant-marker").first
         marker.hover()
-        page.locator(".rules-presence-map-tooltip").wait_for(state="visible", timeout=5_000)
+        tooltip = page.locator(".rules-presence-map-tooltip")
+        tooltip.wait_for(state="visible", timeout=5_000)
+        box = tooltip.bounding_box()
+        assert box is not None
+        assert box["width"] >= 120
         after = body.evaluate(
             """(el) => ({
               scrollWidth: el.scrollWidth,

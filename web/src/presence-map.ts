@@ -93,7 +93,9 @@ export function formatParticipantTooltipHtml(
   } else {
     lines.push("No location fix yet");
   }
-  return lines.join("<br>");
+  return lines
+    .map((line) => `<span class="rules-presence-map-tooltip-line">${line}</span>`)
+    .join("");
 }
 
 export function participantNearEnabledGeofence(
