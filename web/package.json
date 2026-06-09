@@ -11,6 +11,7 @@
     "check": "pnpm run typecheck && pnpm run build"
   },
   "devDependencies": {
+    "@types/leaflet": "1.9.21",
     "esbuild": "0.28.0",
     "sharp": "^0.34.5",
     "typescript": "6.0.3"
@@ -24,5 +25,8 @@
       "esbuild",
       "sharp"
     ]
+  },
+  "dependencies": {
+    "leaflet": "1.9.4"
   }
 }

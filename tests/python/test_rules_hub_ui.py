@@ -48,6 +48,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-mock-pill",
         "rules-tab-bar",
         "rules-geofence-map",
+        "rules-geofence-draw-mode",
+        "leaflet@1.9.4",
     ):
         assert needle in html, needle
 
@@ -129,6 +131,28 @@ def test_rules_hub_opens_with_mock_seed_rule(
         dialog.wait_for(state="visible", timeout=10_000)
         assert page.locator(".rules-mock-pill").is_visible()
         assert "Welcome home" in dialog.inner_text()
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_geofence_draw_mode_adds_crosshair_class(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Geofences tab draw toolbar toggles map crosshair mode."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Rules").click()
+        page.locator('.rules-tab[data-tab="geofences"]').click()
+        page.locator("#rules-geofence-map").wait_for(state="visible", timeout=15_000)
+        page.get_by_role("button", name="Draw geofence").click()
+        map_el = page.locator("#rules-geofence-map")
+        assert "rules-geofence-draw-mode" in (map_el.get_attribute("class") or "")
     finally:
         context.close()
 

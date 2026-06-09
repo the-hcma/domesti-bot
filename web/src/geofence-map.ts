@@ -25,6 +25,7 @@ export async function mountGeofenceMapPanel(
   mapSlot.className = "rules-geofence-map";
   mapSlot.dataset.testid = "rules-geofence-map";
   container.append(mapSlot);
+  await attachGeofenceLeafletMap(mapSlot, dataSource, onChanged, geofences);
 
   const table = document.createElement("table");
   table.className = "rules-geofence-table";
@@ -72,6 +73,16 @@ export async function mountGeofenceMapPanel(
   });
 
   container.append(table, addBtn);
+}
+
+async function attachGeofenceLeafletMap(
+  mapSlot: HTMLElement,
+  dataSource: RulesDataSource,
+  onChanged: () => void | Promise<void>,
+  geofences: GeofenceOut[],
+): Promise<void> {
+  const { initGeofenceLeafletMap } = await import("./geofence-map-leaflet.js");
+  await initGeofenceLeafletMap(mapSlot, dataSource, onChanged, geofences);
 }
 
 async function showGeofenceForm(
