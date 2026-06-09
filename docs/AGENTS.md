@@ -14,6 +14,23 @@ This file defines the non-negotiable standards for all contributors (human or AI
   - **`--refresh`** (first): syncs `main` with Graphite (`gt sync`), prunes merged worktrees and branches, pulls latest `main`, and ensures the systemd user unit (`domesti-bot.service` from `etc/systemd/`) is installed and running via `setup-service`. Exits immediately — it does **not** prompt for a worktree.
   - **plain** (second): repeats the sync/cleanup, then prompts you to name a new worktree for the upcoming work. Pass `--worktree <name> --no-interactive` to skip the prompt.
 - Both commands are required. This replaces any manual `gt sync --force` step.
+- After `start-development` finishes, **`cd` into the stack worktree** (`.worktrees/<stack-name>-wt`) before any other work. Do not stay in the primary clone.
+
+### Main worktree is off-limits (agents)
+
+The **primary clone** (repo root — first entry in `git worktree list`, usually on branch `main`) is the **main worktree**. Treat it as **read-only** unless the user explicitly authorizes touching it in the current conversation.
+
+**Never on the main worktree** (without explicit user authorization):
+
+- Edit, create, or delete source files, config, or lockfiles
+- Run `uv sync`, tests, builds, or formatters
+- Run `dep-updater` with `--dir` pointing at the primary clone (it may fast-forward `main` and mutate git state)
+- Run `gt create`, `gt modify`, `gt submit`, `gt sync`, `gt restack`, or other Graphite/git write operations
+- Leave uncommitted changes, stray branches, or detached HEAD state
+
+**Always** do implementation, investigation that mutates state, and validation in a **stack worktree** under `.worktrees/<stack-name>-wt`. Pass that path to tools (`--dir`, `cd`, etc.).
+
+`start-development` may update the main worktree for environment sync only; that is not permission to work there. If you need to inspect `main` without changing it, use read-only commands (`git log`, `git show`, `gh pr view`) or a **detached temporary worktree** — not the primary clone.
 
 ---
 
