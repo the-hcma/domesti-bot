@@ -1,5 +1,9 @@
 // Shared rule condition evaluation for mock data source and Status tab display.
 
+import {
+  isInAfterSunsetWindow,
+  isInBeforeSunriseWindow,
+} from "./astronomical-conditions.js";
 import { haversineM, mockSunRow, type MockStoreSeed } from "./rules-mock-fixtures.js";
 import type {
   GeofenceOut,
@@ -23,10 +27,28 @@ function formatHhmmDisplay(hhmm: string): string {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+function isInLocalTimeWindow(startHhmm: string, endHhmm: string): boolean | null {
+  const start = parseHhmm(startHhmm);
+  const end = parseHhmm(endHhmm);
+  if (start === null || end === null) {
+    return null;
+  }
+  const now = localMinutesNow();
+  if (start <= end) {
+    return now >= start && now < end;
+  }
+  return now >= start || now < end;
+}
+
+function formatWindowDisplay(startHhmm: string, endHhmm: string): string {
+  return `${formatHhmmDisplay(startHhmm)} – ${formatHhmmDisplay(endHhmm)}`;
+}
+
 function localMinutesNow(): number {
   const now = new Date();
   return now.getHours() * 60 + now.getMinutes();
 }
+
 
 function parseHhmm(hhmm: string): number | null {
   const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
@@ -98,26 +120,49 @@ function evaluateCondition(
   const minAccuracyM = rule.min_fix_accuracy_m;
   if (condition.type === "after_sunset") {
     const sun = mockSunRow();
-    const met = sun.is_dark;
+    const met = isInAfterSunsetWindow(sun.sunset_at, condition.offset_minutes);
+    const sunsetLabel = new Date(sun.sunset_at).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
     return {
       condition,
       label: "After sunset",
       met,
       detail: met
-        ? `Dark now (sunset ${new Date(sun.sunset_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})`
-        : `Still light until sunset (${new Date(sun.sunset_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})`,
+        ? `Evening window active (sunset ${sunsetLabel} to midnight)`
+        : `Outside sunset–midnight window (sunset ${sunsetLabel})`,
     };
   }
   if (condition.type === "before_sunrise") {
     const sun = mockSunRow();
-    const met = !sun.is_dark;
+    const met = isInBeforeSunriseWindow(sun.sunrise_at, condition.offset_minutes);
+    const sunriseLabel = new Date(sun.sunrise_at).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
     return {
       condition,
       label: "Before sunrise",
       met,
       detail: met
-        ? `Daytime until sunrise (${new Date(sun.sunrise_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})`
-        : `After sunrise window (sunrise was ${new Date(sun.sunrise_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})`,
+        ? `Morning window active (midnight to sunrise ${sunriseLabel})`
+        : `Outside midnight–sunrise window (sunrise ${sunriseLabel})`,
+    };
+  }
+  if (condition.type === "local_time_window") {
+    const met = isInLocalTimeWindow(condition.start_hhmm, condition.end_hhmm);
+    const windowLabel = formatWindowDisplay(condition.start_hhmm, condition.end_hhmm);
+    return {
+      condition,
+      label: `Clock window ${windowLabel}`,
+      met: met === true,
+      detail:
+        met === null
+          ? `Invalid window ${condition.start_hhmm}–${condition.end_hhmm}`
+          : met
+            ? `Local time is within ${windowLabel}`
+            : `Waiting for clock window ${windowLabel}`,
     };
   }
   if (condition.type === "after_local_time") {

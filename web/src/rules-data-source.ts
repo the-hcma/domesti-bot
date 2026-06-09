@@ -10,7 +10,11 @@ import {
 import { evaluateRule } from "./rules-evaluate.js";
 import type {
   GeofenceOut,
+  MyTracksGeofencesSyncOut,
   MyTracksParticipantsSyncOut,
+  MyTracksSettingsIn,
+  MyTracksSettingsOut,
+  MyTracksSyncIn,
   ParticipantOut,
   ParticipantStatusOut,
   RuleActionDeviceOut,
@@ -32,10 +36,19 @@ export interface RulesDataSource {
   saveGeofence(geofence: GeofenceOut): Promise<GeofenceOut>;
   deleteGeofence(geofenceId: string): Promise<void>;
   deleteParticipant(participantId: string): Promise<void>;
+  getMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut>;
   getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut>;
+  getMyTracksSettings(): Promise<MyTracksSettingsOut | null>;
   listParticipants(): Promise<ParticipantOut[]>;
+  resetMyTracksSettings(): Promise<void>;
+  saveMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut>;
   saveParticipant(participant: ParticipantOut): Promise<ParticipantOut>;
-  syncParticipantsFromMyTracks(): Promise<MyTracksParticipantsSyncOut>;
+  syncGeofencesFromMyTracks(
+    credentials?: MyTracksSyncIn,
+  ): Promise<MyTracksGeofencesSyncOut>;
+  syncParticipantsFromMyTracks(
+    credentials?: MyTracksSyncIn,
+  ): Promise<MyTracksParticipantsSyncOut>;
   listRules(): Promise<RuleOut[]>;
   listTimeConditionTemplates(): Promise<TimeConditionTemplateOut[]>;
   getRule(ruleId: string): Promise<RuleOut | null>;
@@ -53,6 +66,26 @@ export interface RulesDataSource {
     template: TimeConditionTemplateOut,
   ): Promise<TimeConditionTemplateOut>;
   listActionDevices(): Promise<RuleActionDeviceOut[]>;
+}
+
+function resolveMyTracksPassword(
+  store: MockStoreSeed,
+  credentials: MyTracksSyncIn | undefined,
+): string {
+  if (credentials?.password !== undefined && credentials.password !== "") {
+    return credentials.password;
+  }
+  return store.my_tracks_settings?.password ?? "";
+}
+
+function requireMyTracksDomain(store: MockStoreSeed): string {
+  const domain = store.my_tracks_settings?.domain.trim() ?? "";
+  if (domain === "") {
+    throw new Error(
+      "Expected My Tracks domain in Settings, got empty value — configure domain first",
+    );
+  }
+  return domain;
 }
 
 function cloneSeed(seed: MockStoreSeed): MockStoreSeed {
@@ -177,6 +210,14 @@ export class MockRulesDataSource implements RulesDataSource {
     delete this.store.participant_fixes[participantId];
   }
 
+  async getMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut> {
+    return {
+      source: "my-tracks",
+      last_synced_at: this.store.geofences_sync.last_synced_at,
+      geofence_count: this.store.geofences.length,
+    };
+  }
+
   async getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
     return {
       source: "my-tracks",
@@ -202,7 +243,61 @@ export class MockRulesDataSource implements RulesDataSource {
     return structuredClone(participant);
   }
 
-  async syncParticipantsFromMyTracks(): Promise<MyTracksParticipantsSyncOut> {
+  async getMyTracksSettings(): Promise<MyTracksSettingsOut | null> {
+    const cfg = this.store.my_tracks_settings;
+    if (cfg === null) {
+      return null;
+    }
+    return {
+      domain: cfg.domain,
+      username: cfg.username,
+      password_configured: cfg.password.length > 0,
+    };
+  }
+
+  async resetMyTracksSettings(): Promise<void> {
+    this.store.my_tracks_settings = null;
+  }
+
+  async saveMyTracksSettings(
+    config: MyTracksSettingsIn,
+  ): Promise<MyTracksSettingsOut> {
+    const existing = this.store.my_tracks_settings;
+    const password =
+      config.password ?? existing?.password ?? "";
+    this.store.my_tracks_settings = {
+      domain: config.domain.trim(),
+      username: config.username.trim(),
+      password,
+    };
+    const saved = await this.getMyTracksSettings();
+    if (saved === null) {
+      throw new Error("Expected My Tracks settings after save, got null");
+    }
+    return saved;
+  }
+
+  async syncGeofencesFromMyTracks(
+    credentials?: MyTracksSyncIn,
+  ): Promise<MyTracksGeofencesSyncOut> {
+    requireMyTracksDomain(this.store);
+    const password = resolveMyTracksPassword(this.store, credentials);
+    if (password === "") {
+      throw new Error("Expected My Tracks admin password, got empty value");
+    }
+    this.store.geofences = structuredClone(this.store.my_tracks_geofence_catalog);
+    this.store.geofences_sync.last_synced_at = new Date().toISOString();
+    return this.getMyTracksGeofencesSync();
+  }
+
+  async syncParticipantsFromMyTracks(
+    credentials?: MyTracksSyncIn,
+  ): Promise<MyTracksParticipantsSyncOut> {
+    requireMyTracksDomain(this.store);
+    const password = resolveMyTracksPassword(this.store, credentials);
+    if (password === "") {
+      throw new Error("Expected My Tracks admin password, got empty value");
+    }
     this.store.participants = structuredClone(this.store.my_tracks_participant_catalog);
     this.store.participants_sync.last_synced_at = new Date().toISOString();
     return this.getMyTracksParticipantsSync();
@@ -360,8 +455,8 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 }
 
-/** Rules stay mock-backed; SMTP settings use the live ``/v1/settings/smtp`` API. */
-class RulesDataSourceWithHttpSmtp implements RulesDataSource {
+/** Rules stay mock-backed; SMTP and My Tracks settings use live HTTP APIs when available. */
+class RulesDataSourceWithHttpSettings implements RulesDataSource {
   constructor(private readonly inner: MockRulesDataSource) {}
 
   deleteGeofence(geofenceId: string): Promise<void> {
@@ -380,8 +475,16 @@ class RulesDataSourceWithHttpSmtp implements RulesDataSource {
     return this.inner.deleteTimeConditionTemplate(templateId);
   }
 
+  getMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut> {
+    return api.fetchMyTracksGeofencesSync();
+  }
+
   getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
-    return this.inner.getMyTracksParticipantsSync();
+    return api.fetchMyTracksParticipantsSync();
+  }
+
+  getMyTracksSettings(): Promise<MyTracksSettingsOut | null> {
+    return api.fetchMyTracksSettings();
   }
 
   getRule(ruleId: string): Promise<RuleOut | null> {
@@ -428,12 +531,20 @@ class RulesDataSourceWithHttpSmtp implements RulesDataSource {
     return this.inner.listTimeConditionTemplates();
   }
 
+  resetMyTracksSettings(): Promise<void> {
+    return api.clearMyTracksSettings();
+  }
+
   resetSmtpConfig(): Promise<void> {
     return api.clearSmtpConfig();
   }
 
   saveGeofence(geofence: GeofenceOut): Promise<GeofenceOut> {
     return this.inner.saveGeofence(geofence);
+  }
+
+  saveMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut> {
+    return api.putMyTracksSettings(config);
   }
 
   saveParticipant(participant: ParticipantOut): Promise<ParticipantOut> {
@@ -466,15 +577,29 @@ class RulesDataSourceWithHttpSmtp implements RulesDataSource {
     return this.inner.setRuleEnabled(ruleId, enabled);
   }
 
-  syncParticipantsFromMyTracks(): Promise<MyTracksParticipantsSyncOut> {
-    return this.inner.syncParticipantsFromMyTracks();
+  syncGeofencesFromMyTracks(
+    credentials?: MyTracksSyncIn,
+  ): Promise<MyTracksGeofencesSyncOut> {
+    return api.syncMyTracksGeofences(credentials);
+  }
+
+  syncParticipantsFromMyTracks(
+    credentials?: MyTracksSyncIn,
+  ): Promise<MyTracksParticipantsSyncOut> {
+    return api.syncMyTracksParticipants(credentials);
   }
 }
 
-async function smtpApiAvailable(): Promise<boolean> {
+async function settingsApiAvailable(): Promise<boolean> {
   try {
-    const res = await fetch("/v1/settings/smtp", { headers: authHeaders() });
-    return res.ok || res.status === 401;
+    const headers = authHeaders();
+    const [smtp, myTracks] = await Promise.all([
+      fetch("/v1/settings/smtp", { headers }),
+      fetch("/v1/settings/my-tracks", { headers }),
+    ]);
+    const smtpOk = smtp.ok || smtp.status === 401;
+    const myTracksOk = myTracks.ok || myTracks.status === 401;
+    return smtpOk && myTracksOk;
   } catch {
     return false;
   }
@@ -482,8 +607,8 @@ async function smtpApiAvailable(): Promise<boolean> {
 
 export async function createRulesDataSource(): Promise<RulesDataSource> {
   const mock = new MockRulesDataSource();
-  if (await smtpApiAvailable()) {
-    return new RulesDataSourceWithHttpSmtp(mock);
+  if (await settingsApiAvailable()) {
+    return new RulesDataSourceWithHttpSettings(mock);
   }
   return mock;
 }

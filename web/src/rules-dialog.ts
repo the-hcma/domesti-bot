@@ -1,5 +1,12 @@
 // Desktop Automations hub — Status, Conditions, automations, geofences, mail (mock-backed).
 
+import {
+  AFTER_SUNSET_WINDOW_DESCRIPTION,
+  afterSunsetStatusMessage,
+  beforeSunriseStatusMessage,
+  BEFORE_SUNRISE_WINDOW_DESCRIPTION,
+} from "./astronomical-conditions.js";
+import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
@@ -25,7 +32,6 @@ import type {
   RuleDeviceActionOut,
   RuleOut,
   RulesStatusOut,
-  RulesSunOut,
   SettingsLocationOut,
   TimeConditionTemplateOut,
   UIDeviceKind,
@@ -57,6 +63,7 @@ function appendAstronomicalConditionCard(
   dynamicLabel: string,
   primary: string,
   ruleEnableLabel: string,
+  windowDescription: string,
   homeGeofence: GeofenceOut | null,
   settings: SettingsLocationOut,
   onHomeClick: (geofenceId: string | null) => void,
@@ -71,7 +78,10 @@ function appendAstronomicalConditionCard(
   badgeRow.append(badge);
   const primaryRow = document.createElement("p");
   primaryRow.textContent = primary;
-  card.append(badgeRow, primaryRow);
+  const windowRow = document.createElement("p");
+  windowRow.className = "rules-card-meta";
+  windowRow.textContent = windowDescription;
+  card.append(badgeRow, primaryRow, windowRow);
   appendAstronomicalRecalcNote(
     card,
     homeGeofence,
@@ -152,14 +162,6 @@ function formatAge(seconds: number | null): string {
   return `${Math.floor(seconds / 3600)} h ago`;
 }
 
-function formatLocalTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  } catch {
-    return iso;
-  }
-}
-
 function hhmmToTimeInput(hhmm: string): string {
   if (/^\d{1,2}:\d{2}$/.test(hhmm)) {
     const [h, m] = hhmm.split(":");
@@ -211,43 +213,14 @@ function slugifyId(raw: string): string {
     .slice(0, 64);
 }
 
-function sunriseStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: string } {
-  if (!sun.is_dark) {
-    return {
-      dynamicLabel: "Before sunrise (dynamic)",
-      primary: `Daytime — next sunrise at ${formatLocalTime(sun.sunrise_at)}`,
-    };
-  }
-  return {
-    dynamicLabel: "Sunrise (dynamic)",
-    primary: `Dark until sunrise at ${formatLocalTime(sun.sunrise_at)}`,
-  };
-}
-
-function sunsetStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: string } {
-  if (sun.is_dark) {
-    return {
-      dynamicLabel: "After sunset (dynamic)",
-      primary: `Dark now — sunset was ${formatLocalTime(sun.sunset_at)}`,
-    };
-  }
-  return {
-    dynamicLabel: "Sunset (dynamic)",
-    primary: `Light until sunset at ${formatLocalTime(sun.sunset_at)}`,
-  };
-}
-
-function sunStatusMessage(sun: RulesSunOut): { dynamicLabel: string; primary: string } {
-  return sunsetStatusMessage(sun);
-}
-
 function templateToCondition(
   template: TimeConditionTemplateOut,
 ): RuleConditionOut {
-  if (template.type === "after_local_time") {
-    return { type: "after_local_time", time_hhmm: template.time_hhmm };
-  }
-  return { type: "before_local_time", time_hhmm: template.time_hhmm };
+  return {
+    type: "local_time_window",
+    start_hhmm: template.start_hhmm,
+    end_hhmm: template.end_hhmm,
+  };
 }
 
 class RulesHubController {
@@ -447,12 +420,23 @@ class RulesHubController {
     const idInput = document.createElement("input");
     idInput.value = existing?.id ?? "";
     idInput.required = true;
-    idInput.readOnly = existing !== null;
     appendLabeledField(
       form,
       createFieldLabel("Rule id"),
       idInput,
     );
+    let idManuallyEdited = existing !== null;
+    labelInput.addEventListener("input", () => {
+      if (!idManuallyEdited) {
+        idInput.value = slugifyId(labelInput.value);
+      }
+    });
+    idInput.addEventListener("input", () => {
+      idManuallyEdited = true;
+    });
+    if (existing === null && idInput.value === "") {
+      idInput.value = slugifyId(labelInput.value);
+    }
 
     const conditionsField = document.createElement("fieldset");
     conditionsField.className = "rules-editor-fieldset";
@@ -522,7 +506,7 @@ class RulesHubController {
     sunsetCb.type = "checkbox";
     sunsetCb.checked =
       existing?.conditions.all.some((c) => c.type === "after_sunset") ?? true;
-    sunsetRow.append(sunsetCb, document.createTextNode(" After sunset (dynamic)"));
+    sunsetRow.append(sunsetCb, document.createTextNode(" After sunset (sunset to midnight)"));
     timeField.append(sunsetRow);
 
     const sunriseRow = document.createElement("label");
@@ -531,43 +515,44 @@ class RulesHubController {
     sunriseCb.type = "checkbox";
     sunriseCb.checked =
       existing?.conditions.all.some((c) => c.type === "before_sunrise") ?? false;
-    sunriseRow.append(sunriseCb, document.createTextNode(" Before sunrise (dynamic)"));
+    sunriseRow.append(
+      sunriseCb,
+      document.createTextNode(" Before sunrise (midnight to sunrise)"),
+    );
     timeField.append(sunriseRow);
 
-    const afterTime = document.createElement("input");
-    afterTime.type = "time";
-    const existingAfter =
-      existing?.conditions.all.find((c) => c.type === "after_local_time")?.time_hhmm ?? "";
-    afterTime.value = hhmmToTimeInput(existingAfter);
+    const existingWindow = existing?.conditions.all.find(
+      (c): c is Extract<RuleConditionOut, { type: "local_time_window" }> =>
+        c.type === "local_time_window",
+    );
+    const clockStart = document.createElement("input");
+    clockStart.type = "time";
+    clockStart.value = hhmmToTimeInput(existingWindow?.start_hhmm ?? "");
     appendLabeledField(
       timeField,
       createFieldLabel(
-        "After clock time (optional)",
+        "Clock window start (optional)",
         {
-          detail:
-            "Require local time to be at or past this hour on days the rule is evaluated.",
-          example: "22:00 so porch lights wait until 10 PM even when you arrive earlier.",
+          detail: "Local start of a fixed daily window (paired with end below).",
+          example: "22:00 for evening-only automations.",
         },
       ),
-      afterTime,
+      clockStart,
     );
 
-    const beforeTime = document.createElement("input");
-    beforeTime.type = "time";
-    const existingBefore =
-      existing?.conditions.all.find((c) => c.type === "before_local_time")?.time_hhmm ?? "";
-    beforeTime.value = hhmmToTimeInput(existingBefore);
+    const clockEnd = document.createElement("input");
+    clockEnd.type = "time";
+    clockEnd.value = hhmmToTimeInput(existingWindow?.end_hhmm ?? "");
     appendLabeledField(
       timeField,
       createFieldLabel(
-        "Before clock time (optional)",
+        "Clock window end (optional)",
         {
-          detail:
-            "Require local time to be before this hour. Leave blank when not needed.",
-          example: "06:00 for a quiet-hours rule that ends at sunrise routines.",
+          detail: "Local end of the window. Both start and end are required to enable.",
+          example: "06:00 for an overnight quiet-hours band.",
         },
       ),
-      beforeTime,
+      clockEnd,
     );
 
     if (timeTemplates.length > 0) {
@@ -578,11 +563,12 @@ class RulesHubController {
       const selectedTemplateIds = new Set(
         existing?.conditions.all
           .filter(
-            (c) => c.type === "after_local_time" || c.type === "before_local_time",
+            (c): c is Extract<RuleConditionOut, { type: "local_time_window" }> =>
+              c.type === "local_time_window",
           )
           .map((c) =>
             timeTemplates.find(
-              (t) => t.type === c.type && t.time_hhmm === c.time_hhmm,
+              (t) => t.start_hhmm === c.start_hhmm && t.end_hhmm === c.end_hhmm,
             )?.template_id,
           )
           .filter((id): id is string => id !== undefined),
@@ -595,11 +581,11 @@ class RulesHubController {
         cb.className = "rules-template-pick";
         cb.value = template.template_id;
         cb.checked = selectedTemplateIds.has(template.template_id);
-        const kind =
-          template.type === "after_local_time" ? "After" : "Before";
         row.append(
           cb,
-          document.createTextNode(` ${template.label} (${kind} ${template.time_hhmm})`),
+          document.createTextNode(
+            ` ${template.label} (${template.start_hhmm}–${template.end_hhmm})`,
+          ),
         );
         timeField.append(row);
       }
@@ -697,80 +683,108 @@ class RulesHubController {
 
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
-      const participantIds = [...whoField.querySelectorAll<HTMLInputElement>("input:checked")].map(
-        (el) => el.value,
-      );
-      if (participantIds.length === 0) {
-        window.alert("Select at least one participant.");
-        return;
-      }
-      const conditions: RuleOut["conditions"]["all"] = [
-        {
-          type: "participants_inside_geofence",
-          geofence_id: whereSelect.value,
-          participant_ids: participantIds,
-        },
-      ];
-      if (sunsetCb.checked) {
-        conditions.push({ type: "after_sunset", offset_minutes: 0 });
-      }
-      if (sunriseCb.checked) {
-        conditions.push({ type: "before_sunrise", offset_minutes: 0 });
-      }
-      if (afterTime.value !== "") {
-        conditions.push({ type: "after_local_time", time_hhmm: afterTime.value });
-      }
-      if (beforeTime.value !== "") {
-        conditions.push({ type: "before_local_time", time_hhmm: beforeTime.value });
-      }
-      const selectedDays = dayPicker.getSelectedDays();
-      if (selectedDays.length === 0) {
-        window.alert("Select at least one day of the week.");
-        return;
-      }
-      conditions.push({ type: "days_of_week", days: selectedDays });
-      for (const cb of timeField.querySelectorAll<HTMLInputElement>(
-        "input.rules-template-pick",
-      )) {
-        if (!cb.checked) {
-          continue;
+      void (async () => {
+        const participantIds = [
+          ...whoField.querySelectorAll<HTMLInputElement>("input:checked"),
+        ].map((el) => el.value);
+        if (participantIds.length === 0) {
+          window.alert("Select at least one participant.");
+          return;
         }
-        const template = timeTemplates.find((t) => t.template_id === cb.value);
-        if (template !== undefined) {
-          conditions.push(templateToCondition(template));
+        const conditions: RuleOut["conditions"]["all"] = [
+          {
+            type: "participants_inside_geofence",
+            geofence_id: whereSelect.value,
+            participant_ids: participantIds,
+          },
+        ];
+        if (sunsetCb.checked) {
+          conditions.push({
+            type: "after_sunset",
+            offset_minutes: 0,
+            window_end: "midnight",
+          });
         }
-      }
-      const device_actions: RuleDeviceActionOut[] = deviceRows
-        .filter((row) => row.checkbox.checked)
-        .map((row) => ({
-          family_id: row.device.family_id,
-          device_id: row.device.device_id,
-          action: row.actionSelect.value as RuleActionType,
-        }));
-      if (device_actions.length === 0) {
-        window.alert("Select at least one device action.");
-        return;
-      }
-      if (notifyCb.checked && notifyEmail.value.trim() === "") {
-        window.alert("Enter a notification email or disable email notification.");
-        return;
-      }
-      const rule: RuleOut = {
-        id: existing?.id ?? slugifyId(idInput.value || labelInput.value),
-        label: labelInput.value.trim(),
-        enabled: existing?.enabled ?? false,
-        trigger: "edge_true",
-        cooldown_s: Number(cooldownInput.value) || 300,
-        min_fix_accuracy_m: Number(accuracyInput.value) || DEFAULT_MIN_FIX_ACCURACY_M,
-        notify_on_fire: notifyCb.checked,
-        notification_email: notifyCb.checked ? notifyEmail.value.trim() : null,
-        conditions: { all: conditions },
-        device_actions,
-      };
-      void this.dataSource.saveRule(rule).then(() => {
+        if (sunriseCb.checked) {
+          conditions.push({
+            type: "before_sunrise",
+            offset_minutes: 0,
+            window_start: "midnight",
+          });
+        }
+        if (clockStart.value !== "" && clockEnd.value !== "") {
+          conditions.push({
+            type: "local_time_window",
+            start_hhmm: clockStart.value,
+            end_hhmm: clockEnd.value,
+          });
+        } else if (clockStart.value !== "" || clockEnd.value !== "") {
+          window.alert("Clock window requires both start and end times.");
+          return;
+        }
+        const selectedDays = dayPicker.getSelectedDays();
+        if (selectedDays.length === 0) {
+          window.alert("Select at least one day of the week.");
+          return;
+        }
+        conditions.push({ type: "days_of_week", days: selectedDays });
+        for (const cb of timeField.querySelectorAll<HTMLInputElement>(
+          "input.rules-template-pick",
+        )) {
+          if (!cb.checked) {
+            continue;
+          }
+          const template = timeTemplates.find((t) => t.template_id === cb.value);
+          if (template !== undefined) {
+            conditions.push(templateToCondition(template));
+          }
+        }
+        const device_actions: RuleDeviceActionOut[] = deviceRows
+          .filter((row) => row.checkbox.checked)
+          .map((row) => ({
+            family_id: row.device.family_id,
+            device_id: row.device.device_id,
+            action: row.actionSelect.value as RuleActionType,
+          }));
+        if (device_actions.length === 0) {
+          window.alert("Select at least one device action.");
+          return;
+        }
+        if (notifyCb.checked && notifyEmail.value.trim() === "") {
+          window.alert("Enter a notification email or disable email notification.");
+          return;
+        }
+        const ruleId = slugifyId(idInput.value.trim());
+        if (ruleId === "") {
+          window.alert("Rule id is required.");
+          return;
+        }
+        const allRules = await this.dataSource.listRules();
+        const duplicate = allRules.find(
+          (candidate) => candidate.id === ruleId && candidate.id !== existing?.id,
+        );
+        if (duplicate !== undefined) {
+          window.alert(
+            `Rule id "${ruleId}" is already used by "${duplicate.label}".`,
+          );
+          return;
+        }
+        const rule: RuleOut = {
+          id: ruleId,
+          label: labelInput.value.trim(),
+          enabled: existing?.enabled ?? false,
+          trigger: "edge_true",
+          cooldown_s: Number(cooldownInput.value) || 300,
+          min_fix_accuracy_m: Number(accuracyInput.value) || DEFAULT_MIN_FIX_ACCURACY_M,
+          notify_on_fire: notifyCb.checked,
+          notification_email: notifyCb.checked ? notifyEmail.value.trim() : null,
+          conditions: { all: conditions },
+          device_actions,
+        };
+        await this.dataSource.saveRule(rule);
         editor.remove();
         void this.refresh();
-      });
+      })();
     });
 
     editor.append(form);
@@ -823,8 +837,8 @@ class RulesHubController {
     const templates = await this.dataSource.listTimeConditionTemplates();
     const settings = await this.dataSource.getSettingsLocation();
     const homeGeofence = resolveHomeGeofence(status.geofences, settings);
-    const sunsetMsg = sunsetStatusMessage(status.sun);
-    const sunriseMsg = sunriseStatusMessage(status.sun);
+    const sunsetMsg = afterSunsetStatusMessage(status.sun);
+    const sunriseMsg = beforeSunriseStatusMessage(status.sun);
     const openHomeGeofence = (geofenceId: string | null): void => {
       this.pendingGeofenceFocusId = geofenceId;
       void this.setTab("geofences");
@@ -838,6 +852,7 @@ class RulesHubController {
       sunsetMsg.dynamicLabel,
       sunsetMsg.primary,
       "After sunset",
+      AFTER_SUNSET_WINDOW_DESCRIPTION,
       homeGeofence,
       settings,
       openHomeGeofence,
@@ -846,6 +861,7 @@ class RulesHubController {
       sunriseMsg.dynamicLabel,
       sunriseMsg.primary,
       "Before sunrise",
+      BEFORE_SUNRISE_WINDOW_DESCRIPTION,
       homeGeofence,
       settings,
       openHomeGeofence,
@@ -857,7 +873,7 @@ class RulesHubController {
     const clockLead = document.createElement("p");
     clockLead.className = "settings-dialog-lead";
     clockLead.textContent =
-      "Fixed local times complement sunset/sunrise. Save templates here, then enable them per rule.";
+      "Fixed local-time windows complement sunset/sunrise. Each template has a start and end time.";
 
     const list = document.createElement("div");
     list.className = "rules-card-list";
@@ -867,8 +883,7 @@ class RulesHubController {
       const row = document.createElement("div");
       row.className = "rules-card-row";
       const title = document.createElement("strong");
-      const kind = template.type === "after_local_time" ? "After" : "Before";
-      title.textContent = `${template.label} (${kind} ${template.time_hhmm})`;
+      title.textContent = `${template.label} (${template.start_hhmm}–${template.end_hhmm})`;
       const delBtn = document.createElement("button");
       delBtn.type = "button";
       delBtn.className = "btn btn-danger";
@@ -891,21 +906,14 @@ class RulesHubController {
     labelInput.required = true;
     labelInput.placeholder = "Weekend late night";
     appendLabeledField(form, createFieldLabel("Template label"), labelInput);
-    const typeSelect = document.createElement("select");
-    for (const [value, label] of [
-      ["after_local_time", "After"],
-      ["before_local_time", "Before"],
-    ] as const) {
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = label;
-      typeSelect.append(opt);
-    }
-    appendLabeledField(form, createFieldLabel("Kind"), typeSelect);
-    const timeInput = document.createElement("input");
-    timeInput.type = "time";
-    timeInput.required = true;
-    appendLabeledField(form, createFieldLabel("Local time"), timeInput);
+    const startInput = document.createElement("input");
+    startInput.type = "time";
+    startInput.required = true;
+    appendLabeledField(form, createFieldLabel("Start time"), startInput);
+    const endInput = document.createElement("input");
+    endInput.type = "time";
+    endInput.required = true;
+    appendLabeledField(form, createFieldLabel("End time"), endInput);
     const saveBtn = document.createElement("button");
     saveBtn.type = "submit";
     saveBtn.className = "btn";
@@ -916,8 +924,8 @@ class RulesHubController {
       const template: TimeConditionTemplateOut = {
         template_id: slugifyId(labelInput.value),
         label: labelInput.value.trim(),
-        type: typeSelect.value as TimeConditionTemplateOut["type"],
-        time_hhmm: timeInput.value,
+        start_hhmm: startInput.value,
+        end_hhmm: endInput.value,
       };
       void this.dataSource.saveTimeConditionTemplate(template).then(() => {
         form.reset();
@@ -937,7 +945,7 @@ class RulesHubController {
   }
 
   private renderStatusTab(status: RulesStatusOut): void {
-    const sunMsg = sunStatusMessage(status.sun);
+    const sunMsg = afterSunsetStatusMessage(status.sun);
     const sunBtn = document.createElement("button");
     sunBtn.type = "button";
     sunBtn.className = "rules-status-sun rules-clickable-card";
@@ -1109,7 +1117,7 @@ class RulesHubController {
     const lead = document.createElement("p");
     lead.className = "settings-dialog-lead";
     lead.textContent =
-      "Participants are synced from my-tracks. Presence updates arrive via webhook; edit people in my-tracks, then sync here.";
+      "Participants are synced from My Tracks. Presence updates arrive via webhook; edit people in My Tracks, then sync here.";
 
     const syncRow = document.createElement("div");
     syncRow.className = "rules-participants-sync";
@@ -1128,9 +1136,9 @@ class RulesHubController {
     const syncBtn = document.createElement("button");
     syncBtn.type = "button";
     syncBtn.className = "btn btn-secondary";
-    syncBtn.textContent = "Sync from my-tracks";
+    syncBtn.textContent = "Sync from My Tracks";
     syncBtn.addEventListener("click", () => {
-      void this.dataSource.syncParticipantsFromMyTracks().then(() => this.refresh());
+      void runMyTracksSyncAction(this.dataSource, "participants", () => this.refresh());
     });
     syncRow.append(syncMeta, syncBtn);
 

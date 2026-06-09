@@ -327,3 +327,46 @@ class TailwindTokenSettingsOut(BaseModel):
             "nothing is stored or decryption is unavailable. Not the env/CLI override."
         ),
     )
+
+
+class MyTracksGeofencesSyncOut(BaseModel):
+    """Result of a geofence sync pull from My Tracks."""
+
+    geofence_count: int
+    last_synced_at: str | None
+    source: Literal["my-tracks"] = "my-tracks"
+
+
+class MyTracksParticipantsSyncOut(BaseModel):
+    """Result of a participant roster sync pull from My Tracks."""
+
+    last_synced_at: str | None
+    participant_count: int
+    source: Literal["my-tracks"] = "my-tracks"
+    webhook_ready: bool = True
+
+
+class MyTracksSettingsIn(BaseModel):
+    """Body for ``PUT /v1/settings/my-tracks``."""
+
+    domain: str = Field(..., min_length=1)
+    password: str | None = Field(
+        default=None,
+        description="Null keeps the stored admin password on update.",
+    )
+    username: str = Field(..., min_length=1)
+
+
+class MyTracksSettingsOut(BaseModel):
+    """Stored My Tracks connection settings (no password)."""
+
+    domain: str
+    password_configured: bool
+    username: str
+
+
+class MyTracksSyncIn(BaseModel):
+    """Optional admin credentials for a one-shot sync request."""
+
+    password: str | None = None
+    username: str | None = None

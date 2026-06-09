@@ -12,6 +12,11 @@
 
 import type {
   MetaOut,
+  MyTracksGeofencesSyncOut,
+  MyTracksParticipantsSyncOut,
+  MyTracksSettingsIn,
+  MyTracksSettingsOut,
+  MyTracksSyncIn,
   SmtpConfigIn,
   SmtpConfigOut,
   SmtpTestEmailIn,
@@ -158,11 +163,23 @@ export const api = {
   clearSmtpConfig(): Promise<void> {
     return callNoContent("DELETE", "/v1/settings/smtp");
   },
+  clearMyTracksSettings(): Promise<void> {
+    return callNoContent("DELETE", "/v1/settings/my-tracks");
+  },
   clearTailwindToken(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("DELETE", "/v1/settings/tailwind-token");
   },
   fetchMeta(): Promise<MetaOut> {
     return call<MetaOut>("GET", "/v1/meta");
+  },
+  fetchMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut> {
+    return call<MyTracksGeofencesSyncOut>("GET", "/v1/rules/geofences/sync-status");
+  },
+  fetchMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
+    return call<MyTracksParticipantsSyncOut>("GET", "/v1/rules/participants/sync-status");
+  },
+  fetchMyTracksSettings(): Promise<MyTracksSettingsOut | null> {
+    return callNullableJson<MyTracksSettingsOut>("GET", "/v1/settings/my-tracks");
   },
   fetchSmtpConfig(): Promise<SmtpConfigOut | null> {
     return callNullableJson<SmtpConfigOut>("GET", "/v1/settings/smtp");
@@ -186,11 +203,30 @@ export const api = {
   putSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {
     return call<SmtpConfigOut>("PUT", "/v1/settings/smtp", config);
   },
+  putMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut> {
+    return call<MyTracksSettingsOut>("PUT", "/v1/settings/my-tracks", config);
+  },
   putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
     return call<TailwindTokenSetOut>("PUT", "/v1/settings/tailwind-token", { token });
   },
   sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut> {
     return call<SmtpTestEmailOut>("POST", "/v1/settings/smtp/test", input);
+  },
+  syncMyTracksGeofences(credentials?: MyTracksSyncIn): Promise<MyTracksGeofencesSyncOut> {
+    return call<MyTracksGeofencesSyncOut>(
+      "POST",
+      "/v1/rules/geofences/sync",
+      credentials ?? {},
+    );
+  },
+  syncMyTracksParticipants(
+    credentials?: MyTracksSyncIn,
+  ): Promise<MyTracksParticipantsSyncOut> {
+    return call<MyTracksParticipantsSyncOut>(
+      "POST",
+      "/v1/rules/participants/sync",
+      credentials ?? {},
+    );
   },
   setExclude(
     familyId: string,

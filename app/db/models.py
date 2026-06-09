@@ -45,6 +45,17 @@ class KasaDiscoveredDevice(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class MyTracksSettings(Base):
+    __tablename__ = "mytracks_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domain: Mapped[str] = mapped_column(String, nullable=False)
+    username: Mapped[str] = mapped_column(String, nullable=False, default="")
+    last_geofences_sync_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_participants_sync_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class SonosKnownZone(Base):
     __tablename__ = "sonos_known_zones"
 
