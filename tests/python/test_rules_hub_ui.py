@@ -54,6 +54,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-device-action-group",
         "rules-enable-toggle",
         "rules-info-badge",
+        "rules-info-popover[hidden]",
+        "rules-mail-test-row",
         "leaflet@1.9.4",
     ):
         assert needle in html, needle
@@ -106,7 +108,7 @@ def test_rules_menu_hidden_on_compact_viewport(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """☰ menu (and Rules entry) is desktop-only — absent at phone widths."""
+    """☰ menu (and Automations entry) is desktop-only — absent at phone widths."""
 
     context = chromium_browser.new_context(viewport={"width": 390, "height": 844})
     page = context.new_page()
@@ -123,7 +125,7 @@ def test_rules_hub_opens_with_mock_seed_rule(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Desktop ☰ → Rules opens the hub and shows the seeded arrive-home rule."""
+    """Desktop ☰ → Automations opens the hub and shows the seeded arrive-home rule."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -131,10 +133,11 @@ def test_rules_hub_opens_with_mock_seed_rule(
         page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
         page.wait_for_selector(".app-menu", timeout=15_000)
         page.locator(".btn-menu").click()
-        page.get_by_role("menuitem", name="Rules").click()
+        page.get_by_role("menuitem", name="Automations").click()
         dialog = page.locator("dialog.rules-dialog")
         dialog.wait_for(state="visible", timeout=10_000)
         assert page.locator(".rules-mock-pill").is_visible()
+        assert "Automations" in dialog.inner_text()
         assert "Welcome home" in dialog.inner_text()
     finally:
         context.close()
@@ -152,7 +155,7 @@ def test_geofence_draw_mode_adds_crosshair_class(
     try:
         page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
         page.locator(".btn-menu").click()
-        page.get_by_role("menuitem", name="Rules").click()
+        page.get_by_role("menuitem", name="Automations").click()
         page.locator('.rules-tab[data-tab="geofences"]').click()
         page.locator("#rules-geofence-map").wait_for(state="visible", timeout=15_000)
         page.get_by_role("button", name="Draw geofence").click()

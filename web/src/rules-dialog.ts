@@ -1,4 +1,4 @@
-// Desktop Rules hub — Status, Rules, Conditions, Geofences, Participants (mock-backed).
+// Desktop Automations hub — Status, Conditions, automations, geofences, mail (mock-backed).
 
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
@@ -22,7 +22,13 @@ import type {
   UIDeviceKind,
 } from "./types.js";
 
-type RulesTabId = "conditions" | "geofences" | "participants" | "rules" | "status";
+type RulesTabId =
+  | "automations"
+  | "conditions"
+  | "geofences"
+  | "mail"
+  | "participants"
+  | "status";
 
 function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
   switch (kind) {
@@ -134,7 +140,7 @@ class RulesHubController {
   constructor(dataSource: RulesDataSource) {
     this.dataSource = dataSource;
     this.dialog = document.createElement("dialog");
-    this.dialog.className = "settings-dialog rules-dialog";
+    this.dialog.className = "settings-dialog rules-dialog automations-dialog";
     this.panel = document.createElement("div");
     this.panel.className = "settings-dialog-panel";
     const header = document.createElement("header");
@@ -142,7 +148,7 @@ class RulesHubController {
     const titleWrap = document.createElement("div");
     titleWrap.className = "rules-dialog-title-wrap";
     const title = document.createElement("h2");
-    title.textContent = "Rules";
+    title.textContent = "Automations";
     this.mockPill = document.createElement("span");
     this.mockPill.className = "rules-mock-pill";
     this.mockPill.textContent = "Mock data";
@@ -155,9 +161,10 @@ class RulesHubController {
     for (const tab of [
       ["status", "Status"],
       ["conditions", "Conditions"],
-      ["rules", "Rules"],
+      ["automations", "Automations"],
       ["geofences", "Geofences"],
       ["participants", "Participants"],
+      ["mail", "Mail"],
     ] as const) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -282,7 +289,7 @@ class RulesHubController {
     idInput.readOnly = existing !== null;
     appendLabeledField(
       form,
-      createFieldLabel("Rule id"),
+      createFieldLabel("Automation id"),
       idInput,
     );
 
@@ -461,6 +468,35 @@ class RulesHubController {
       cooldownInput,
     );
 
+    const notifyField = document.createElement("fieldset");
+    notifyField.className = "rules-editor-fieldset";
+    const notifyLegend = document.createElement("legend");
+    notifyLegend.textContent = "Email notification";
+    notifyField.append(notifyLegend);
+    const notifyRow = document.createElement("label");
+    notifyRow.className = "rules-check-row";
+    const notifyCb = document.createElement("input");
+    notifyCb.type = "checkbox";
+    notifyCb.checked = existing?.notify_on_fire ?? false;
+    notifyRow.append(
+      notifyCb,
+      document.createTextNode(" Send email when this automation fires"),
+    );
+    notifyField.append(notifyRow);
+    const notifyEmail = document.createElement("input");
+    notifyEmail.type = "email";
+    notifyEmail.placeholder = "you@example.com";
+    notifyEmail.value = existing?.notification_email ?? "";
+    notifyEmail.disabled = !notifyCb.checked;
+    notifyCb.addEventListener("change", () => {
+      notifyEmail.disabled = !notifyCb.checked;
+    });
+    appendLabeledField(
+      notifyField,
+      createFieldLabel("Notification recipient"),
+      notifyEmail,
+    );
+
     const actionsWrap = document.createElement("fieldset");
     actionsWrap.className = "rules-editor-fieldset";
     const actionsTitle = document.createElement("legend");
@@ -484,10 +520,10 @@ class RulesHubController {
     const saveBtn = document.createElement("button");
     saveBtn.type = "submit";
     saveBtn.className = "btn";
-    saveBtn.textContent = "Save rule";
+    saveBtn.textContent = "Save automation";
     actions.append(cancelBtn, saveBtn);
 
-    form.append(actionsWrap, actions);
+    form.append(notifyField, actionsWrap, actions);
 
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
@@ -539,6 +575,10 @@ class RulesHubController {
         window.alert("Select at least one device action.");
         return;
       }
+      if (notifyCb.checked && notifyEmail.value.trim() === "") {
+        window.alert("Enter a notification email or disable email notification.");
+        return;
+      }
       const rule: RuleOut = {
         id: existing?.id ?? slugifyId(idInput.value || labelInput.value),
         label: labelInput.value.trim(),
@@ -546,6 +586,8 @@ class RulesHubController {
         trigger: "edge_true",
         cooldown_s: Number(cooldownInput.value) || 300,
         min_fix_accuracy_m: Number(accuracyInput.value) || DEFAULT_MIN_FIX_ACCURACY_M,
+        notify_on_fire: notifyCb.checked,
+        notification_email: notifyCb.checked ? notifyEmail.value.trim() : null,
         conditions: { all: conditions },
         device_actions,
       };
@@ -644,16 +686,27 @@ class RulesHubController {
       case "conditions":
         void this.renderConditionsTab(this.status);
         break;
-      case "rules":
-        void this.renderRulesTab();
+      case "automations":
+        void this.renderAutomationsTab();
         break;
       case "geofences":
         void this.renderGeofencesTab();
+        break;
+      case "mail":
+        void this.renderMailTab();
         break;
       case "participants":
         void this.renderParticipantsTab();
         break;
     }
+  }
+
+  private async renderMailTab(): Promise<void> {
+    const mount = document.createElement("div");
+    mount.className = "rules-mail-mount";
+    this.body.append(mount);
+    const { mountMailSettingsPanel } = await import("./mail-settings-panel.js");
+    await mountMailSettingsPanel(mount, this.dataSource);
   }
 
   private async renderConditionsTab(status: RulesStatusOut): Promise<void> {
@@ -808,7 +861,7 @@ class RulesHubController {
 
     const rulesHeading = document.createElement("h3");
     rulesHeading.className = "rules-section-title";
-    rulesHeading.textContent = "Rules";
+    rulesHeading.textContent = "Automations";
     const ruleList = document.createElement("div");
     ruleList.className = "rules-card-list";
     for (const rule of status.rules) {
@@ -823,7 +876,7 @@ class RulesHubController {
       nameBtn.addEventListener("click", () => {
         void this.dataSource.getRule(rule.id).then((full) => {
           if (full !== null) {
-            void this.setTab("rules").then(() => {
+            void this.setTab("automations").then(() => {
               void this.openRuleEditor(full);
             });
           }
@@ -845,6 +898,14 @@ class RulesHubController {
         : "";
       meta.textContent = `${met}${fired}`;
       card.append(row, meta);
+      void this.dataSource.getRule(rule.id).then((full) => {
+        if (full?.notify_on_fire && full.notification_email !== null) {
+          const notifyMeta = document.createElement("p");
+          notifyMeta.className = "rules-card-meta";
+          notifyMeta.textContent = `Email on fire → ${full.notification_email}`;
+          card.append(notifyMeta);
+        }
+      });
 
       const condList = document.createElement("ul");
       condList.className = "rules-condition-list";
@@ -861,12 +922,12 @@ class RulesHubController {
     this.body.append(sunBtn, participantsHeading, participantList, rulesHeading, ruleList);
   }
 
-  private async renderRulesTab(): Promise<void> {
+  private async renderAutomationsTab(): Promise<void> {
     const rules = await this.dataSource.listRules();
     const addBtn = document.createElement("button");
     addBtn.type = "button";
     addBtn.className = "btn";
-    addBtn.textContent = "Add rule";
+    addBtn.textContent = "Add automation";
     addBtn.addEventListener("click", () => {
       void this.openRuleEditor(null);
     });
@@ -893,7 +954,7 @@ class RulesHubController {
       delBtn.className = "btn btn-danger";
       delBtn.textContent = "Delete";
       delBtn.addEventListener("click", () => {
-        if (window.confirm(`Delete rule "${rule.label}"?`)) {
+        if (window.confirm(`Delete automation "${rule.label}"?`)) {
           void this.dataSource.deleteRule(rule.id).then(() => this.refresh());
         }
       });
@@ -904,7 +965,11 @@ class RulesHubController {
       const actionSummary = rule.device_actions
         .map((a) => `${formatActionLabel(a.action)} ${a.device_id}`)
         .join(", ");
-      meta.textContent = `${rule.id} · ${rule.enabled ? "enabled" : "disabled"} · ${actionSummary}`;
+      const notify =
+        rule.notify_on_fire && rule.notification_email !== null
+          ? ` · email ${rule.notification_email}`
+          : "";
+      meta.textContent = `${rule.id} · ${rule.enabled ? "enabled" : "disabled"}${notify} · ${actionSummary}`;
       card.append(row, meta);
       list.append(card);
     }
@@ -963,10 +1028,6 @@ class RulesHubController {
 
   private async setTab(tab: RulesTabId): Promise<void> {
     this.activeTab = tab;
-    this.dialog.classList.toggle(
-      "rules-dialog-wide",
-      tab === "geofences" || tab === "conditions",
-    );
     await this.refresh();
   }
 
@@ -981,8 +1042,13 @@ class RulesHubController {
   }
 }
 
-export async function openRulesHubDialog(): Promise<void> {
+export async function openAutomationsHubDialog(): Promise<void> {
   const dataSource = await createRulesDataSource();
   const hub = new RulesHubController(dataSource);
   await hub.open();
+}
+
+/** @deprecated Use openAutomationsHubDialog */
+export async function openRulesHubDialog(): Promise<void> {
+  await openAutomationsHubDialog();
 }

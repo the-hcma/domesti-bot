@@ -16,6 +16,10 @@ import type {
   RuleOut,
   RulesStatusOut,
   SettingsLocationOut,
+  SmtpConfigIn,
+  SmtpConfigOut,
+  SmtpTestEmailIn,
+  SmtpTestEmailOut,
   TimeConditionTemplateOut,
 } from "./types.js";
 
@@ -38,7 +42,11 @@ export interface RulesDataSource {
   deleteTimeConditionTemplate(templateId: string): Promise<void>;
   setRuleEnabled(ruleId: string, enabled: boolean): Promise<RuleOut>;
   getSettingsLocation(): Promise<SettingsLocationOut>;
+  getSmtpConfig(): Promise<SmtpConfigOut | null>;
   saveSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut>;
+  resetSmtpConfig(): Promise<void>;
+  saveSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut>;
+  sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut>;
   saveTimeConditionTemplate(
     template: TimeConditionTemplateOut,
   ): Promise<TimeConditionTemplateOut>;
@@ -227,6 +235,21 @@ export class MockRulesDataSource implements RulesDataSource {
     return structuredClone(this.store.settings_location);
   }
 
+  async getSmtpConfig(): Promise<SmtpConfigOut | null> {
+    const cfg = this.store.smtp_config;
+    if (cfg === null) {
+      return null;
+    }
+    return {
+      host: cfg.host,
+      port: cfg.port,
+      username: cfg.username,
+      from_address: cfg.from_address,
+      password_configured: cfg.password.length > 0,
+      last_test_recipient: this.store.smtp_last_test_recipient,
+    };
+  }
+
   async saveSettingsLocation(
     location: SettingsLocationOut,
   ): Promise<SettingsLocationOut> {
@@ -246,6 +269,43 @@ export class MockRulesDataSource implements RulesDataSource {
       this.store.time_condition_templates.push(structuredClone(template));
     }
     return structuredClone(template);
+  }
+
+  async resetSmtpConfig(): Promise<void> {
+    this.store.smtp_config = null;
+    this.store.smtp_last_test_recipient = null;
+  }
+
+  async saveSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {
+    const existing = this.store.smtp_config;
+    const password =
+      config.password ?? existing?.password ?? "";
+    this.store.smtp_config = {
+      host: config.host,
+      port: config.port,
+      username: config.username,
+      password,
+      from_address: config.from_address,
+    };
+    const out = await this.getSmtpConfig();
+    if (out === null) {
+      throw new Error("Expected SMTP config after save, got null");
+    }
+    return out;
+  }
+
+  async sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut> {
+    if (input.host.trim() === "") {
+      return { ok: false, message: "Expected SMTP host, got empty value" };
+    }
+    if (input.to_address.trim() === "") {
+      return { ok: false, message: "Expected recipient email, got empty value" };
+    }
+    this.store.smtp_last_test_recipient = input.to_address.trim();
+    return {
+      ok: true,
+      message: `Test email queued to ${input.to_address.trim()} (mock — no message sent)`,
+    };
   }
 
   async listActionDevices(): Promise<RuleActionDeviceOut[]> {

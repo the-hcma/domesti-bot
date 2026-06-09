@@ -11,6 +11,14 @@ import type {
   TimeConditionTemplateOut,
 } from "./types.js";
 
+export interface MockSmtpConfig {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  from_address: string;
+}
+
 /** House geofence center (41.194072, -73.888325) — 250 m radius. */
 export const MOCK_HOUSE_CENTER_LAT = 41.194072;
 export const MOCK_HOUSE_CENTER_LON = -73.8883254;
@@ -31,6 +39,8 @@ export interface MockStoreSeed {
   settings_location: SettingsLocationOut;
   action_devices: RuleActionDeviceOut[];
   time_condition_templates: TimeConditionTemplateOut[];
+  smtp_config: MockSmtpConfig | null;
+  smtp_last_test_recipient: string | null;
 }
 
 function isoMinutesAgo(minutes: number): string {
@@ -102,6 +112,8 @@ export function createMockStoreSeed(): MockStoreSeed {
         trigger: "edge_true",
         cooldown_s: 300,
         min_fix_accuracy_m: 50,
+        notify_on_fire: false,
+        notification_email: null,
         conditions: {
           all: [
             {
@@ -140,6 +152,8 @@ export function createMockStoreSeed(): MockStoreSeed {
       timezone: "America/New_York",
       home_label: "Home",
     },
+    smtp_config: null,
+    smtp_last_test_recipient: null,
     time_condition_templates: [
       {
         template_id: "weeknight-quiet",

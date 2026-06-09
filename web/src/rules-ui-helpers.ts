@@ -1,4 +1,4 @@
-// Shared Rules hub UI helpers (info badges, family labels, toggles).
+// Shared Automations hub UI helpers (info badges, family labels, toggles).
 
 export const FAMILY_ACTION_GROUP_LABELS: Record<string, string> = {
   kasa: "Lights & plugs",
@@ -6,18 +6,35 @@ export const FAMILY_ACTION_GROUP_LABELS: Record<string, string> = {
   tailwind: "Garage doors",
 };
 
+let infoPopoverDocumentListenerInstalled = false;
+let closeOpenInfoPopover: (() => void) | null = null;
+
+function ensureInfoPopoverDocumentListener(): void {
+  if (infoPopoverDocumentListenerInstalled) {
+    return;
+  }
+  infoPopoverDocumentListenerInstalled = true;
+  document.addEventListener("click", () => {
+    if (closeOpenInfoPopover !== null) {
+      closeOpenInfoPopover();
+      closeOpenInfoPopover = null;
+    }
+  });
+}
+
 export function createInfoBadge(
   label: string,
   detail: string,
   example: string,
 ): HTMLSpanElement {
+  ensureInfoPopoverDocumentListener();
   const wrap = document.createElement("span");
   wrap.className = "rules-info-badge-wrap";
   const badge = document.createElement("button");
   badge.type = "button";
   badge.className = "rules-info-badge";
   badge.setAttribute("aria-label", `About ${label}`);
-  badge.title = `About ${label}`;
+  badge.setAttribute("aria-expanded", "false");
   badge.textContent = "i";
   const popover = document.createElement("span");
   popover.className = "rules-info-popover";
@@ -35,7 +52,21 @@ export function createInfoBadge(
   badge.addEventListener("click", (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    popover.hidden = !popover.hidden;
+    const willOpen = popover.hidden;
+    if (closeOpenInfoPopover !== null) {
+      closeOpenInfoPopover();
+      closeOpenInfoPopover = null;
+    }
+    if (willOpen) {
+      popover.hidden = false;
+      badge.setAttribute("aria-expanded", "true");
+      closeOpenInfoPopover = () => {
+        popover.hidden = true;
+        badge.setAttribute("aria-expanded", "false");
+      };
+    } else {
+      badge.setAttribute("aria-expanded", "false");
+    }
   });
   wrap.append(badge, popover);
   return wrap;

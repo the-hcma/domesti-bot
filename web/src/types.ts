@@ -145,8 +145,38 @@ export interface RuleOut {
   cooldown_s: number;
   /** Fixes with horizontal accuracy worse than this (meters) are ignored. */
   min_fix_accuracy_m: number;
+  /** Send email when this automation fires (requires SMTP in Mail tab). */
+  notify_on_fire: boolean;
+  notification_email: string | null;
   conditions: RuleConditionsOut;
   device_actions: RuleDeviceActionOut[];
+}
+
+export interface SmtpConfigIn {
+  host: string;
+  port: number;
+  username: string;
+  /** Null keeps the stored password on update. */
+  password: string | null;
+  from_address: string;
+}
+
+export interface SmtpConfigOut {
+  host: string;
+  port: number;
+  username: string;
+  from_address: string;
+  password_configured: boolean;
+  last_test_recipient: string | null;
+}
+
+export interface SmtpTestEmailIn extends SmtpConfigIn {
+  to_address: string;
+}
+
+export interface SmtpTestEmailOut {
+  message: string;
+  ok: boolean;
 }
 
 export interface GeofenceOut {

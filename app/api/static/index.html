@@ -599,9 +599,9 @@
     .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
       justify-content: flex-end; }
 
-    .settings-dialog.rules-dialog { max-width: min(72rem, calc(100vw - 2rem));
-      width: min(72rem, calc(100vw - 2rem)); }
-    .rules-dialog.rules-dialog-wide { max-width: min(80rem, calc(100vw - 2rem));
+    .settings-dialog.rules-dialog { position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%); margin: 0;
+      max-width: min(80rem, calc(100vw - 2rem));
       width: min(80rem, calc(100vw - 2rem)); }
     .rules-dialog-title-wrap { display: flex; flex-wrap: wrap; align-items: center;
       gap: 8px; }
@@ -615,8 +615,8 @@
       color: var(--muted); touch-action: manipulation; }
     .rules-tab-active { color: var(--fg); border-color: var(--border);
       background: var(--card-elev); }
-    .rules-dialog-body { position: relative; max-height: min(70vh, 640px);
-      overflow: auto; }
+    .rules-dialog-body { position: relative; min-height: min(52vh, 480px);
+      max-height: min(70vh, 640px); overflow: auto; }
     .rules-section-title { margin: 16px 0 8px; font-size: 0.85rem;
       text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
     .rules-section-title:first-child { margin-top: 0; }
@@ -651,13 +651,18 @@
     .rules-info-badge-wrap { position: relative; display: inline-flex; }
     .rules-info-badge { width: 1.1rem; height: 1.1rem; padding: 0; border-radius: 999px;
       border: 1px solid var(--border); background: var(--card-elev); color: var(--muted);
-      font: inherit; font-size: 11px; font-weight: 700; line-height: 1; cursor: help;
+      font: inherit; font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer;
       touch-action: manipulation; }
-    .rules-info-popover { position: absolute; left: 0; top: calc(100% + 6px); z-index: 60;
-      display: flex; flex-direction: column; gap: 4px; min-width: 14rem; max-width: 20rem;
-      padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    .rules-info-popover[hidden] { display: none !important; }
+    .rules-info-popover:not([hidden]) { position: absolute; left: 0; top: calc(100% + 6px);
+      z-index: 60; display: flex; flex-direction: column; gap: 4px; min-width: 14rem;
+      max-width: 20rem; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
       background: var(--card-elev); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
       font-size: 13px; font-weight: normal; color: var(--fg); }
+    .rules-mail-mount .settings-dialog-field input,
+    .rules-mail-mount .settings-dialog-field select { width: 100%; }
+    .rules-mail-test-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .rules-mail-test-row input { flex: 1 1 12rem; min-width: 0; }
     .rules-info-popover-example { color: var(--muted); font-size: 12px; }
     .rules-device-action-label { display: flex; flex-wrap: wrap; align-items: center;
       gap: 8px; font-size: 14px; }
