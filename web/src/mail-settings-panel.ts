@@ -1,5 +1,6 @@
 // SMTP / mail settings panel (persisted via ``/v1/settings/smtp`` when available).
 
+import { HttpError } from "./api.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
 import type { SmtpConfigIn, SmtpConfigOut } from "./types.js";
@@ -34,6 +35,13 @@ function defaultFromAddress(domain: string): string {
   return `${DEFAULT_FROM_LOCALPART}@${trimmed}`;
 }
 
+function formatMailError(err: unknown): string {
+  if (err instanceof HttpError) {
+    return err.detail;
+  }
+  return err instanceof Error ? err.message : "Unexpected error";
+}
+
 function configToForm(config: SmtpConfigOut | null): {
   from_address: string;
   host: string;
@@ -55,7 +63,17 @@ export async function mountMailSettingsPanel(
   dataSource: RulesDataSource,
 ): Promise<void> {
   container.replaceChildren();
-  const existing = await dataSource.getSmtpConfig();
+  const status = document.createElement("p");
+  status.className = "settings-dialog-status";
+  status.hidden = true;
+
+  let existing: SmtpConfigOut | null = null;
+  try {
+    existing = await dataSource.getSmtpConfig();
+  } catch (err) {
+    status.hidden = false;
+    status.textContent = `Could not load SMTP settings: ${formatMailError(err)}`;
+  }
   const defaults = configToForm(existing);
   let testPassed = existing !== null;
   let fromAddressManual = existing !== null && defaults.from_address !== "";
@@ -136,10 +154,6 @@ export async function mountMailSettingsPanel(
     createFieldLabel("From address"),
     fromInput,
   );
-
-  const status = document.createElement("p");
-  status.className = "settings-dialog-status";
-  status.hidden = true;
 
   const actions = document.createElement("div");
   actions.className = "settings-dialog-actions";
@@ -239,6 +253,9 @@ export async function mountMailSettingsPanel(
           syncSaveEnabled();
         }
       })
+      .catch((err: unknown) => {
+        status.textContent = formatMailError(err);
+      })
       .finally(() => {
         testBtn.disabled = false;
       });
@@ -249,14 +266,20 @@ export async function mountMailSettingsPanel(
     if (!testPassed) {
       return;
     }
-    void dataSource.saveSmtpConfig(readDraft()).then((saved) => {
-      status.hidden = false;
-      status.textContent = `Saved SMTP settings for ${saved.host}:${saved.port}`;
-      passwordInput.value = "";
-      passwordInput.placeholder = "leave blank to keep current";
-      resetBtn.disabled = false;
-      fromAddressManual = true;
-    });
+    void dataSource
+      .saveSmtpConfig(readDraft())
+      .then((saved) => {
+        status.hidden = false;
+        status.textContent = `Saved SMTP settings for ${saved.host}:${saved.port}`;
+        passwordInput.value = "";
+        passwordInput.placeholder = "leave blank to keep current";
+        resetBtn.disabled = false;
+        fromAddressManual = true;
+      })
+      .catch((err: unknown) => {
+        status.hidden = false;
+        status.textContent = formatMailError(err);
+      });
   });
 
   resetBtn.addEventListener("click", () => {

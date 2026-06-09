@@ -141,7 +141,9 @@ def test_rules_hub_opens_with_mock_seed_rule(
         page.get_by_role("menuitem", name="Automations").click()
         dialog = page.locator("dialog.rules-dialog")
         dialog.wait_for(state="visible", timeout=10_000)
-        assert page.locator(".rules-mock-pill").is_visible()
+        mock_pill = page.locator(".rules-mock-pill")
+        assert mock_pill.is_visible()
+        assert mock_pill.inner_text().lower() == "mock rules"
         assert "Automations" in dialog.inner_text()
         assert "Rules" in dialog.inner_text()
         assert "Welcome home" in dialog.inner_text()
@@ -216,6 +218,34 @@ def test_conditions_home_location_link_opens_geofences_tab(
         assert page.locator('.rules-tab[data-tab="geofences"]').evaluate(
             "(el) => el.classList.contains('rules-tab-active')",
         )
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_mail_tab_loads_smtp_settings_from_api(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Mail tab reads persisted SMTP config via GET /v1/settings/smtp."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator("dialog.rules-dialog").wait_for(state="visible", timeout=10_000)
+        with page.expect_request(
+            lambda req: req.url.endswith("/v1/settings/smtp") and req.method == "GET",
+        ) as smtp_get:
+            page.locator('.rules-tab[data-tab="mail"]').click()
+        response = smtp_get.value.response()
+        assert response is not None
+        assert response.status == 200
+        page.locator(".rules-mail-form").wait_for(state="visible", timeout=10_000)
+        host_input = page.locator(".rules-mail-form input").first
+        assert host_input.input_value() == "localhost"
     finally:
         context.close()
 

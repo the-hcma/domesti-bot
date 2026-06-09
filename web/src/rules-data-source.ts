@@ -24,9 +24,8 @@ import type {
   TimeConditionTemplateOut,
 } from "./types.js";
 
-declare const DOMESTI_RULES_FORCE_MOCK: boolean | undefined;
-
 export interface RulesDataSource {
+  isMailLive(): boolean;
   isMock(): boolean;
   getStatus(): Promise<RulesStatusOut>;
   listGeofences(): Promise<GeofenceOut[]>;
@@ -81,6 +80,10 @@ export class MockRulesDataSource implements RulesDataSource {
 
   constructor(seed: MockStoreSeed = createMockStoreSeed()) {
     this.store = cloneSeed(seed);
+  }
+
+  isMailLive(): boolean {
+    return false;
   }
 
   isMock(): boolean {
@@ -397,6 +400,10 @@ class RulesDataSourceWithHttpSmtp implements RulesDataSource {
     return this.inner.getStatus();
   }
 
+  isMailLive(): boolean {
+    return true;
+  }
+
   isMock(): boolean {
     return this.inner.isMock();
   }
@@ -474,9 +481,6 @@ async function smtpApiAvailable(): Promise<boolean> {
 }
 
 export async function createRulesDataSource(): Promise<RulesDataSource> {
-  if (typeof DOMESTI_RULES_FORCE_MOCK !== "undefined" && DOMESTI_RULES_FORCE_MOCK) {
-    return new MockRulesDataSource();
-  }
   const mock = new MockRulesDataSource();
   if (await smtpApiAvailable()) {
     return new RulesDataSourceWithHttpSmtp(mock);

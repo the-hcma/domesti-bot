@@ -274,7 +274,9 @@ class RulesHubController {
     title.textContent = "Automations";
     this.mockPill = document.createElement("span");
     this.mockPill.className = "rules-mock-pill";
-    this.mockPill.textContent = "Mock data";
+    this.mockPill.textContent = dataSource.isMailLive()
+      ? "Mock rules"
+      : "Mock data";
     this.mockPill.hidden = !dataSource.isMock();
     titleWrap.append(title, this.mockPill);
     header.append(titleWrap, createDialogCloseButton(this.dialog));
