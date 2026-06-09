@@ -33,10 +33,6 @@ const options = {
   minify: !watch,
   logLevel: "info",
   legalComments: "none",
-  define: {
-  // Playwright and local dev keep mock rules until ``GET /v1/rules/status`` ships.
-    DOMESTI_RULES_FORCE_MOCK: "true",
-  },
   // Stable filename; index.html refers to /static/dist/main.js by name.
   // Hashing/cache-busting is added in a later PR once we wire up real assets.
   entryNames: "[name]",
