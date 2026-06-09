@@ -155,12 +155,33 @@ export async function mountMailSettingsPanel(
     fromInput,
   );
 
+  const saveSmtpSettings = (): void => {
+    if (!testPassed) {
+      return;
+    }
+    void dataSource
+      .saveSmtpConfig(readDraft())
+      .then((saved) => {
+        status.hidden = false;
+        status.textContent = `Saved SMTP settings for ${saved.host}:${saved.port}`;
+        passwordInput.value = "";
+        passwordInput.placeholder = "leave blank to keep current";
+        resetBtn.disabled = false;
+        fromAddressManual = true;
+      })
+      .catch((err: unknown) => {
+        status.hidden = false;
+        status.textContent = formatMailError(err);
+      });
+  };
+
   const actions = document.createElement("div");
   actions.className = "settings-dialog-actions";
   const saveBtn = document.createElement("button");
-  saveBtn.type = "submit";
+  saveBtn.type = "button";
   saveBtn.className = "btn";
   saveBtn.textContent = "Save SMTP settings";
+  saveBtn.addEventListener("click", saveSmtpSettings);
   const resetBtn = document.createElement("button");
   resetBtn.type = "button";
   resetBtn.className = "btn btn-danger";
@@ -263,23 +284,7 @@ export async function mountMailSettingsPanel(
 
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    if (!testPassed) {
-      return;
-    }
-    void dataSource
-      .saveSmtpConfig(readDraft())
-      .then((saved) => {
-        status.hidden = false;
-        status.textContent = `Saved SMTP settings for ${saved.host}:${saved.port}`;
-        passwordInput.value = "";
-        passwordInput.placeholder = "leave blank to keep current";
-        resetBtn.disabled = false;
-        fromAddressManual = true;
-      })
-      .catch((err: unknown) => {
-        status.hidden = false;
-        status.textContent = formatMailError(err);
-      });
+    saveSmtpSettings();
   });
 
   resetBtn.addEventListener("click", () => {
@@ -290,10 +295,17 @@ export async function mountMailSettingsPanel(
     ) {
       return;
     }
-    void dataSource.resetSmtpConfig().then(() => {
-      void mountMailSettingsPanel(container, dataSource);
-    });
+    void dataSource
+      .resetSmtpConfig()
+      .then(() => {
+        void mountMailSettingsPanel(container, dataSource);
+      })
+      .catch((err: unknown) => {
+        status.hidden = false;
+        status.textContent = formatMailError(err);
+      });
   });
 
-  container.append(lead, form, actions, status, testHeading, testLead, testRow);
+  form.append(actions);
+  container.append(lead, form, status, testHeading, testLead, testRow);
 }
