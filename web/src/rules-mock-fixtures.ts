@@ -8,6 +8,7 @@ import type {
   RuleActionDeviceOut,
   RuleOut,
   SettingsLocationOut,
+  TimeConditionTemplateOut,
 } from "./types.js";
 
 /** House geofence center (41.194072, -73.888325) — 250 m radius. */
@@ -29,6 +30,7 @@ export interface MockStoreSeed {
   rule_last_fired_at: Record<string, string | null>;
   settings_location: SettingsLocationOut;
   action_devices: RuleActionDeviceOut[];
+  time_condition_templates: TimeConditionTemplateOut[];
 }
 
 function isoMinutesAgo(minutes: number): string {
@@ -138,6 +140,14 @@ export function createMockStoreSeed(): MockStoreSeed {
       timezone: "America/New_York",
       home_label: "Home",
     },
+    time_condition_templates: [
+      {
+        template_id: "weeknight-quiet",
+        label: "Weeknight quiet hours (after 10 PM)",
+        type: "after_local_time",
+        time_hhmm: "22:00",
+      },
+    ],
     action_devices: [
       {
         family_id: "kasa",
