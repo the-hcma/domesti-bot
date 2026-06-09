@@ -58,7 +58,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-geofence-row-focused",
         "rules-info-popover[hidden]",
         "rules-mail-test-row",
-        "rules-presence-mini-map",
+        "rules-presence-map",
+        "rules-presence-map-filters",
         "rules-day-shortcuts",
         "leaflet@1.9.4",
     ):
@@ -151,11 +152,11 @@ def test_rules_hub_opens_with_mock_seed_rule(
 
 
 @pytest.mark.browser
-def test_participant_presence_mini_maps_render_osm_tiles(
+def test_participant_presence_map_renders_osm_tiles_with_filters(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Status and Participants tabs mount Leaflet mini maps with OSM tiles."""
+    """Status and Participants tabs share one filtered presence map with zoom controls."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -165,36 +166,30 @@ def test_participant_presence_mini_maps_render_osm_tiles(
         page.get_by_role("menuitem", name="Automations").click()
         dialog = page.locator("dialog.rules-dialog")
         dialog.wait_for(state="visible", timeout=10_000)
-        page.locator(".rules-presence-mini-map").first.wait_for(
-            state="visible",
-            timeout=10_000,
-        )
+        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
         page.wait_for_function(
             """() => {
-              const map = document.querySelector('.rules-presence-mini-map.leaflet-container');
+              const map = document.querySelector('.rules-presence-map.leaflet-container');
               return map !== null && map.querySelectorAll('img.leaflet-tile').length > 0;
             }""",
             timeout=15_000,
         )
-        assert page.locator(".rules-presence-mini-map").count() >= 2
+        assert page.locator(".rules-presence-map-filter").count() >= 2
+        assert page.locator(".leaflet-control-zoom").count() >= 1
 
         page.locator('.rules-tab[data-tab="participants"]').click()
-        page.locator(".rules-presence-mini-map").first.wait_for(
+        page.locator(".rules-participant-details-list").wait_for(
             state="visible",
             timeout=10_000,
         )
         page.wait_for_function(
             """() => {
-              const maps = document.querySelectorAll(
-                '.rules-presence-mini-map.leaflet-container',
-              );
-              return maps.length >= 2
-                && [...maps].every(
-                  (m) => m.querySelectorAll('img.leaflet-tile').length > 0,
-                );
+              const map = document.querySelector('.rules-presence-map.leaflet-container');
+              return map !== null && map.querySelectorAll('img.leaflet-tile').length > 0;
             }""",
             timeout=15_000,
         )
+        assert "Henrique" in dialog.inner_text()
     finally:
         context.close()
 

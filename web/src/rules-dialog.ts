@@ -3,8 +3,12 @@
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
+import {
+  mountPresenceMap,
+  participantStatusToMapParticipant,
+  renderParticipantDetailText,
+} from "./presence-map.js";
 import { haversineM } from "./rules-mock-fixtures.js";
-import { mountPresenceMiniMap } from "./presence-mini-map.js";
 import {
   ALL_DAYS_OF_WEEK,
   createDayOfWeekPicker,
@@ -14,7 +18,6 @@ import {
 } from "./rules-ui-helpers.js";
 import type {
   GeofenceOut,
-  ParticipantFixOut,
   ParticipantStatusOut,
   RuleActionDeviceOut,
   RuleActionType,
@@ -383,6 +386,38 @@ class RulesHubController {
     return deviceRows;
   }
 
+  private mountParticipantPresenceMap(
+    parent: HTMLElement,
+    geofences: GeofenceOut[],
+    participants: ParticipantStatusOut[],
+    options: {
+      showParticipantFilters: boolean;
+      showTextDetails: boolean;
+    },
+  ): void {
+    const mount = document.createElement("div");
+    mount.className = "rules-presence-map-mount";
+    parent.append(mount);
+    mountPresenceMap(mount, {
+      geofences,
+      participants: participants.map(participantStatusToMapParticipant),
+      showParticipantFilters: options.showParticipantFilters,
+    });
+    if (options.showTextDetails) {
+      const details = document.createElement("div");
+      details.className = "rules-participant-details-list";
+      for (const participant of participants) {
+        details.append(
+          renderParticipantDetailText(
+            participantStatusToMapParticipant(participant),
+            true,
+          ),
+        );
+      }
+      parent.append(details);
+    }
+  }
+
   private async openRuleEditor(existing: RuleOut | null): Promise<void> {
     const geofences = await this.dataSource.listGeofences();
     const participants = await this.dataSource.listParticipants();
@@ -737,43 +772,6 @@ class RulesHubController {
     labelInput.focus();
   }
 
-  private appendParticipantMiniMap(
-    card: HTMLElement,
-    geofences: GeofenceOut[],
-    participant: {
-      display_name: string;
-      last_fix: ParticipantFixOut | null;
-    },
-  ): void {
-    const mapEl = document.createElement("div");
-    mapEl.className = "rules-presence-mini-map";
-    card.append(mapEl);
-    const fallback = geofences.find((g) => g.enabled);
-    const fix = participant.last_fix;
-    if (fix === null && fallback === undefined) {
-      return;
-    }
-    if (fix !== null) {
-      mountPresenceMiniMap(mapEl, {
-        accuracy_m: fix.accuracy_m,
-        geofences,
-        label: participant.display_name,
-        lat: fix.lat,
-        lon: fix.lon,
-      });
-      return;
-    }
-    if (fallback !== undefined) {
-      mountPresenceMiniMap(mapEl, {
-        accuracy_m: null,
-        geofences,
-        label: "No location yet",
-        lat: fallback.center_lat,
-        lon: fallback.center_lon,
-      });
-    }
-  }
-
   private async refresh(): Promise<void> {
     this.status = await this.dataSource.getStatus();
     this.renderBody();
@@ -950,59 +948,14 @@ class RulesHubController {
     const participantsHeading = document.createElement("h3");
     participantsHeading.className = "rules-section-title";
     participantsHeading.textContent = "Participants";
-    const participantList = document.createElement("div");
-    participantList.className = "rules-card-list";
-    for (const p of status.participants) {
-      const card = document.createElement("article");
-      card.className = "rules-card rules-clickable-card rules-participant-card";
-      card.tabIndex = 0;
-      card.setAttribute("role", "button");
-      const name = document.createElement("strong");
-      name.textContent = p.display_name;
-      const deviceMeta = document.createElement("p");
-      deviceMeta.className = "rules-card-meta";
-      deviceMeta.textContent = `Tracking device: ${p.tracking_device_label}`;
-      const meta = document.createElement("p");
-      meta.className = "rules-card-meta";
-      const inside =
-        p.inside_geofence_ids.length > 0
-          ? `Inside ${p.inside_geofence_ids.join(", ")}`
-          : "Outside all geofences";
-      meta.textContent = `${formatAge(p.age_seconds)} · ${inside}`;
-      card.append(name, deviceMeta, meta);
-      if (p.last_fix !== null) {
-        const coords = document.createElement("p");
-        coords.className = "rules-card-meta";
-        const accuracy =
-          p.last_fix.accuracy_m === null ? "unknown" : `±${p.last_fix.accuracy_m} m`;
-        coords.textContent = `${p.last_fix.lat.toFixed(5)}, ${p.last_fix.lon.toFixed(5)} · ${accuracy}`;
-        card.append(coords);
-        if (
-          p.last_fix.accuracy_m !== null
-          && p.last_fix.accuracy_m > DEFAULT_MIN_FIX_ACCURACY_M
-        ) {
-          const warn = document.createElement("p");
-          warn.className = "rules-card-warn";
-          warn.textContent = `Low accuracy — ignored by rules (>${DEFAULT_MIN_FIX_ACCURACY_M} m)`;
-          card.append(warn);
-        }
-      }
-      this.appendParticipantMiniMap(card, status.geofences, {
-        display_name: p.display_name,
-        last_fix: p.last_fix,
-      });
-      const openParticipants = (): void => {
-        void this.setTab("participants");
-      };
-      card.addEventListener("click", openParticipants);
-      card.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" || ev.key === " ") {
-          ev.preventDefault();
-          openParticipants();
-        }
-      });
-      participantList.append(card);
-    }
+    const participantsSection = document.createElement("section");
+    participantsSection.className = "rules-participants-section";
+    this.mountParticipantPresenceMap(
+      participantsSection,
+      status.geofences,
+      status.participants,
+      { showParticipantFilters: true, showTextDetails: false },
+    );
 
     const rulesHeading = document.createElement("h3");
     rulesHeading.className = "rules-section-title";
@@ -1064,7 +1017,7 @@ class RulesHubController {
       ruleList.append(card);
     }
 
-    this.body.append(sunBtn, participantsHeading, participantList, rulesHeading, ruleList);
+    this.body.append(sunBtn, participantsHeading, participantsSection, rulesHeading, ruleList);
   }
 
   private async renderRulesTab(): Promise<void> {
@@ -1175,30 +1128,31 @@ class RulesHubController {
     });
     syncRow.append(syncMeta, syncBtn);
 
-    const list = document.createElement("div");
-    list.className = "rules-card-list";
-    for (const p of participants) {
-      const card = document.createElement("article");
-      card.className = "rules-card rules-participant-card";
-      const name = document.createElement("strong");
-      name.textContent = `${p.display_name} (${p.participant_id})`;
-      const deviceMeta = document.createElement("p");
-      deviceMeta.className = "rules-card-meta";
-      deviceMeta.textContent = `Tracking device: ${p.tracking_device_label}`;
-      card.append(name, deviceMeta);
-      const fix =
-        status?.participants.find(
-          (row): row is ParticipantStatusOut =>
-            row.participant_id === p.participant_id,
-        )?.last_fix ?? null;
-      this.appendParticipantMiniMap(card, geofences, {
-        display_name: p.display_name,
-        last_fix: fix,
-      });
-      list.append(card);
-    }
+    const mapSection = document.createElement("section");
+    mapSection.className = "rules-participants-section";
+    const statusParticipants = status?.participants ?? [];
+    const mapParticipants: ParticipantStatusOut[] = participants.map((p) => {
+      const row = statusParticipants.find(
+        (candidate) => candidate.participant_id === p.participant_id,
+      );
+      if (row !== undefined) {
+        return row;
+      }
+      return {
+        ...p,
+        age_seconds: null,
+        inside_geofence_ids: [],
+        last_fix: null,
+      };
+    });
+    this.mountParticipantPresenceMap(
+      mapSection,
+      geofences,
+      mapParticipants,
+      { showParticipantFilters: true, showTextDetails: true },
+    );
 
-    this.body.append(lead, syncRow, list);
+    this.body.append(lead, syncRow, mapSection);
   }
 
   private async setTab(tab: RulesTabId): Promise<void> {

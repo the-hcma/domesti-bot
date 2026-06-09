@@ -1,7 +1,7 @@
 // Geofence list + map editor (Leaflet/OSM). Map draw lands in PR3; form list in PR2.
 
 import type { RulesDataSource } from "./rules-data-source.js";
-import type { GeofenceOut } from "./types.js";
+import type { GeofenceOut, ParticipantStatusOut } from "./types.js";
 
 function slugifyGeofenceId(label: string): string {
   return label
@@ -19,13 +19,20 @@ export async function mountGeofenceMapPanel(
 ): Promise<void> {
   container.replaceChildren();
   const geofences = await dataSource.listGeofences();
+  const status = await dataSource.getStatus();
 
   const mapSlot = document.createElement("div");
   mapSlot.id = "rules-geofence-map";
   mapSlot.className = "rules-geofence-map";
   mapSlot.dataset.testid = "rules-geofence-map";
   container.append(mapSlot);
-  await attachGeofenceLeafletMap(mapSlot, dataSource, onChanged, geofences);
+  await attachGeofenceLeafletMap(
+    mapSlot,
+    dataSource,
+    onChanged,
+    geofences,
+    status.participants,
+  );
 
   const table = document.createElement("table");
   table.className = "rules-geofence-table";
@@ -80,9 +87,16 @@ async function attachGeofenceLeafletMap(
   dataSource: RulesDataSource,
   onChanged: () => void | Promise<void>,
   geofences: GeofenceOut[],
+  participants: ParticipantStatusOut[],
 ): Promise<void> {
   const { initGeofenceLeafletMap } = await import("./geofence-map-leaflet.js");
-  await initGeofenceLeafletMap(mapSlot, dataSource, onChanged, geofences);
+  await initGeofenceLeafletMap(
+    mapSlot,
+    dataSource,
+    onChanged,
+    geofences,
+    participants,
+  );
 }
 
 async function showGeofenceForm(

@@ -1,8 +1,14 @@
 // Leaflet + OpenStreetMap geofence editor (ported from my-tracks ``geofences.html``).
 
 import L from "leaflet";
+import {
+  formatParticipantTooltipHtml,
+  participantNearEnabledGeofence,
+  participantStatusToMapParticipant,
+  type PresenceMapParticipant,
+} from "./presence-map.js";
 import type { RulesDataSource } from "./rules-data-source.js";
-import type { GeofenceOut, SettingsLocationOut } from "./types.js";
+import type { GeofenceOut, ParticipantStatusOut, SettingsLocationOut } from "./types.js";
 
 type DrawState = "idle" | "placing-center" | "placing-radius";
 
@@ -20,6 +26,7 @@ export async function initGeofenceLeafletMap(
   dataSource: RulesDataSource,
   onChanged: () => void | Promise<void>,
   geofences: GeofenceOut[],
+  participants: ParticipantStatusOut[] = [],
 ): Promise<void> {
   if (mapEl.dataset.leafletInit === "1") {
     return;
@@ -70,16 +77,52 @@ export async function initGeofenceLeafletMap(
     circleLayer[g.geofence_id] = circle;
   }
 
-  const circles = Object.values(circleLayer);
-  const firstCircle = circles[0];
-  if (circles.length === 1 && firstCircle !== undefined) {
-    map.fitBounds(firstCircle.getBounds(), { padding: [40, 40] });
-  } else if (circles.length > 1 && firstCircle !== undefined) {
-    let bounds = firstCircle.getBounds();
-    for (const c of circles.slice(1)) {
-      bounds = bounds.extend(c.getBounds());
+  const nearbyParticipants = participants
+    .map(participantStatusToMapParticipant)
+    .filter(
+      (participant): participant is PresenceMapParticipant & {
+        last_fix: NonNullable<PresenceMapParticipant["last_fix"]>;
+      } =>
+        participant.last_fix !== null
+        && participantNearEnabledGeofence(participant.last_fix, geofences),
+    );
+  const participantMarkers: L.CircleMarker[] = [];
+  for (const [index, participant] of nearbyParticipants.entries()) {
+    const fix = participant.last_fix;
+    const marker = L.circleMarker([fix.lat, fix.lon], {
+      color: "var(--fg)",
+      fillColor: index % 2 === 0 ? "#1565c0" : "#2e7d32",
+      fillOpacity: 0.9,
+      radius: 8,
+      weight: 2,
+    })
+      .bindTooltip(formatParticipantTooltipHtml(participant), {
+        className: "rules-presence-map-tooltip",
+        direction: "top",
+        sticky: true,
+      })
+      .addTo(map);
+    participantMarkers.push(marker);
+  }
+
+  const boundsLayers: L.Layer[] = [...Object.values(circleLayer), ...participantMarkers];
+  const firstBoundsLayer = boundsLayers[0];
+  if (firstBoundsLayer !== undefined) {
+    const boundsForLayer = (layer: L.Layer): L.LatLngBounds => {
+      if (layer instanceof L.CircleMarker) {
+        const latlng = layer.getLatLng();
+        return L.latLngBounds(latlng, latlng);
+      }
+      if (layer instanceof L.Circle) {
+        return layer.getBounds();
+      }
+      return map.getBounds();
+    };
+    let bounds = boundsForLayer(firstBoundsLayer);
+    for (const layer of boundsLayers.slice(1)) {
+      bounds = bounds.extend(boundsForLayer(layer));
     }
-    map.fitBounds(bounds, { padding: [40, 40] });
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
   }
 
   const toolbar = document.createElement("div");
