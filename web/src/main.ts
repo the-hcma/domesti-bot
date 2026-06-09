@@ -5,7 +5,7 @@
 // device, plus per-family and global bulk actions.
 
 import { api, HttpError } from "./api.js";
-import { openRulesHubDialog } from "./rules-dialog.js";
+import { openAutomationsHubDialog } from "./rules-dialog.js";
 import type {
   MetaOut,
   TailwindTokenSettingsOut,
@@ -1380,11 +1380,11 @@ function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
   rulesItem.type = "button";
   rulesItem.className = "app-menu-item";
   rulesItem.setAttribute("role", "menuitem");
-  rulesItem.textContent = "Rules";
+  rulesItem.textContent = "Automations";
   rulesItem.addEventListener("click", (ev) => {
     ev.stopPropagation();
     runMenuItemAction(() => {
-      void openRulesHubDialog();
+      void openAutomationsHubDialog();
     });
   });
   const aboutItem = document.createElement("button");
