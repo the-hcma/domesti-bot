@@ -24,6 +24,16 @@ export interface MockParticipantsSync {
   last_synced_at: string | null;
 }
 
+export interface MockGeofencesSync {
+  last_synced_at: string | null;
+}
+
+export interface MockMyTracksSettings {
+  domain: string;
+  username: string;
+  password: string;
+}
+
 /** House geofence center (41.194072, -73.888325) — 250 m radius. */
 export const MOCK_HOUSE_CENTER_LAT = 41.194072;
 export const MOCK_HOUSE_CENTER_LON = -73.8883254;
@@ -47,7 +57,10 @@ export interface MockStoreSeed {
   smtp_config: MockSmtpConfig | null;
   smtp_last_test_recipient: string | null;
   my_tracks_participant_catalog: ParticipantOut[];
+  my_tracks_geofence_catalog: GeofenceOut[];
+  my_tracks_settings: MockMyTracksSettings | null;
   participants_sync: MockParticipantsSync;
+  geofences_sync: MockGeofencesSync;
 }
 
 function isoMinutesAgo(minutes: number): string {
@@ -98,8 +111,23 @@ export function createMockStoreSeed(): MockStoreSeed {
     ],
     my_tracks_participant_catalog: structuredClone(MOCK_MY_TRACKS_PARTICIPANTS),
     participants: structuredClone(MOCK_MY_TRACKS_PARTICIPANTS),
+    my_tracks_geofence_catalog: [
+      {
+        geofence_id: "house",
+        label: "House",
+        center_lat: MOCK_HOUSE_CENTER_LAT,
+        center_lon: MOCK_HOUSE_CENTER_LON,
+        radius_m: MOCK_HOUSE_RADIUS_M,
+        enabled: true,
+        owntracks_rid: null,
+      },
+    ],
+    my_tracks_settings: null,
     participants_sync: {
       last_synced_at: isoMinutesAgo(30),
+    },
+    geofences_sync: {
+      last_synced_at: null,
     },
     participant_fixes: {
       henrique: {
@@ -134,7 +162,7 @@ export function createMockStoreSeed(): MockStoreSeed {
               geofence_id: "house",
               participant_ids: ["henrique", "kristen"],
             },
-            { type: "after_sunset", offset_minutes: 0 },
+            { type: "after_sunset", offset_minutes: 0, window_end: "midnight" },
           ],
         },
         device_actions: [
@@ -170,9 +198,9 @@ export function createMockStoreSeed(): MockStoreSeed {
     time_condition_templates: [
       {
         template_id: "weeknight-quiet",
-        label: "Weeknight quiet hours (after 10 PM)",
-        type: "after_local_time",
-        time_hhmm: "22:00",
+        label: "Weeknight quiet hours",
+        start_hhmm: "22:00",
+        end_hhmm: "06:00",
       },
     ],
     action_devices: [

@@ -1373,7 +1373,7 @@ function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
   settingsItem.addEventListener("click", (ev) => {
     ev.stopPropagation();
     runMenuItemAction(() => {
-      void openTailwindSettingsDialog();
+      void openSettingsHubDialog();
     });
   });
   const rulesItem = document.createElement("button");
@@ -1464,6 +1464,87 @@ function openAboutDialog(meta: MetaOut | null): void {
     }
   });
   dialog.showModal();
+}
+
+async function openSettingsHubDialog(): Promise<void> {
+  const dialog = document.createElement("dialog");
+  dialog.className = "settings-dialog settings-hub-dialog";
+  const panel = document.createElement("div");
+  panel.className = "settings-dialog-panel";
+  const header = document.createElement("header");
+  header.className = "settings-dialog-header";
+  const title = document.createElement("h2");
+  title.textContent = "Settings";
+  header.append(title, createSettingsDialogCloseButton(dialog));
+  const body = document.createElement("div");
+  body.className = "settings-dialog-body settings-hub-body";
+  const lead = document.createElement("p");
+  lead.className = "settings-dialog-lead";
+  lead.textContent = "Configure integrations used by domesti-bot.";
+  const list = document.createElement("div");
+  list.className = "settings-hub-list";
+  const tailwindBtn = document.createElement("button");
+  tailwindBtn.type = "button";
+  tailwindBtn.className = "btn btn-secondary settings-hub-item";
+  tailwindBtn.textContent = "GoTailwind token";
+  tailwindBtn.addEventListener("click", () => {
+    dialog.close();
+    void openTailwindSettingsDialog();
+  });
+  const myTracksBtn = document.createElement("button");
+  myTracksBtn.type = "button";
+  myTracksBtn.className = "btn btn-secondary settings-hub-item";
+  myTracksBtn.textContent = "My Tracks connection";
+  myTracksBtn.addEventListener("click", () => {
+    dialog.close();
+    void openMyTracksSettingsDialog();
+  });
+  list.append(tailwindBtn, myTracksBtn);
+  body.append(lead, list);
+  panel.append(header, body);
+  dialog.append(panel);
+  document.body.append(dialog);
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+  });
+  dialog.addEventListener("click", (ev) => {
+    if (ev.target === dialog) {
+      dialog.close();
+    }
+  });
+  dialog.showModal();
+}
+
+async function openMyTracksSettingsDialog(): Promise<void> {
+  const dialog = document.createElement("dialog");
+  dialog.className = "settings-dialog mytracks-settings-dialog";
+  const panel = document.createElement("div");
+  panel.className = "settings-dialog-panel";
+  const header = document.createElement("header");
+  header.className = "settings-dialog-header";
+  const title = document.createElement("h2");
+  title.textContent = "My Tracks connection";
+  header.append(title, createSettingsDialogCloseButton(dialog));
+  const body = document.createElement("div");
+  body.className = "settings-dialog-body";
+  const mount = document.createElement("div");
+  body.append(mount);
+  panel.append(header, body);
+  dialog.append(panel);
+  document.body.append(dialog);
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+  });
+  dialog.addEventListener("click", (ev) => {
+    if (ev.target === dialog) {
+      dialog.close();
+    }
+  });
+  dialog.showModal();
+  const { createRulesDataSource } = await import("./rules-data-source.js");
+  const { mountMyTracksSettingsPanel } = await import("./my-tracks-settings-panel.js");
+  const dataSource = await createRulesDataSource();
+  await mountMyTracksSettingsPanel(mount, dataSource);
 }
 
 async function openTailwindSettingsDialog(): Promise<void> {

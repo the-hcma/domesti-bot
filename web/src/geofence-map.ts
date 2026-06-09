@@ -2,6 +2,7 @@
 
 import type { RulesDataSource } from "./rules-data-source.js";
 import type { GeofenceOut, ParticipantStatusOut } from "./types.js";
+import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
 
 function slugifyGeofenceId(label: string): string {
   return label
@@ -20,6 +21,29 @@ export async function mountGeofenceMapPanel(
   container.replaceChildren();
   const geofences = await dataSource.listGeofences();
   const status = await dataSource.getStatus();
+  const sync = await dataSource.getMyTracksGeofencesSync();
+
+  const syncRow = document.createElement("div");
+  syncRow.className = "rules-geofences-sync";
+  const syncMeta = document.createElement("p");
+  syncMeta.className = "rules-card-meta";
+  const syncedAt =
+    sync.last_synced_at === null
+      ? "never"
+      : new Date(sync.last_synced_at).toLocaleString();
+  syncMeta.textContent = `${sync.geofence_count} geofences · last synced ${syncedAt}`;
+  const syncBtn = document.createElement("button");
+  syncBtn.type = "button";
+  syncBtn.className = "btn btn-secondary";
+  syncBtn.textContent = "Sync from My Tracks";
+  syncBtn.dataset.testid = "rules-geofences-sync-btn";
+  syncBtn.addEventListener("click", () => {
+    void runMyTracksSyncAction(dataSource, "geofences", () =>
+      mountGeofenceMapPanel(container, dataSource, onChanged),
+    );
+  });
+  syncRow.append(syncMeta, syncBtn);
+  container.append(syncRow);
 
   const mapSlot = document.createElement("div");
   mapSlot.id = "rules-geofence-map";

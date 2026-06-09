@@ -121,10 +121,21 @@ export type RuleConditionOut =
       geofence_id: string;
       participant_ids: string[];
     }
-  | { type: "after_sunset"; offset_minutes: number }
-  | { type: "before_sunrise"; offset_minutes: number }
+  | {
+      type: "after_sunset";
+      offset_minutes: number;
+      /** Default ``midnight`` — evening window ends at local midnight. */
+      window_end?: "midnight";
+    }
+  | {
+      type: "before_sunrise";
+      offset_minutes: number;
+      /** Default ``midnight`` — morning window starts at local midnight. */
+      window_start?: "midnight";
+    }
   | { type: "after_local_time"; time_hhmm: string }
   | { type: "before_local_time"; time_hhmm: string }
+  | { type: "local_time_window"; start_hhmm: string; end_hhmm: string }
   | {
       /** JavaScript ``Date.getDay()`` values: 0 = Sunday … 6 = Saturday. */
       type: "days_of_week";
@@ -134,8 +145,8 @@ export type RuleConditionOut =
 export interface TimeConditionTemplateOut {
   template_id: string;
   label: string;
-  type: "after_local_time" | "before_local_time";
-  time_hhmm: string;
+  start_hhmm: string;
+  end_hhmm: string;
 }
 
 export interface RuleConditionsOut {
@@ -178,11 +189,34 @@ export interface SmtpConfigOut {
   last_test_recipient: string | null;
 }
 
-export interface MyTracksParticipantsSyncOut {
+export interface MyTracksGeofencesSyncOut {
+  geofence_count: number;
+  last_synced_at: string | null;
   source: "my-tracks";
+}
+
+export interface MyTracksParticipantsSyncOut {
   last_synced_at: string | null;
   participant_count: number;
+  source: "my-tracks";
   webhook_ready: boolean;
+}
+
+export interface MyTracksSettingsIn {
+  domain: string;
+  password: string | null;
+  username: string;
+}
+
+export interface MyTracksSettingsOut {
+  domain: string;
+  password_configured: boolean;
+  username: string;
+}
+
+export interface MyTracksSyncIn {
+  password?: string;
+  username?: string;
 }
 
 export interface SmtpTestEmailIn extends SmtpConfigIn {
