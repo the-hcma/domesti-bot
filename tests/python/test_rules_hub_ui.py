@@ -49,6 +49,9 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-tab-bar",
         "rules-geofence-map",
         "rules-geofence-draw-mode",
+        "rules-dynamic-badge",
+        "rules-condition-list",
+        "rules-device-action-row",
         "leaflet@1.9.4",
     ):
         assert needle in html, needle

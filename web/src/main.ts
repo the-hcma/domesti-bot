@@ -1161,6 +1161,7 @@ function createSettingsDialogCloseButton(
   return closeBtn;
 }
 
+let appMenuOpen = false;
 let openAppMenuCloser: (() => void) | null = null;
 
 function appendTailwindTokenIntro(parent: HTMLElement): void {
@@ -1182,6 +1183,7 @@ function appendTailwindTokenIntro(parent: HTMLElement): void {
 }
 
 function closeAppMenu(): void {
+  appMenuOpen = false;
   if (openAppMenuCloser !== null) {
     openAppMenuCloser();
     openAppMenuCloser = null;
@@ -1376,28 +1378,53 @@ function createDesktopMenuButton(meta: MetaOut | null): HTMLDivElement | null {
   panel.append(settingsItem, rulesItem, aboutItem);
   wrap.append(trigger, panel);
 
-  const onDocumentClick = (ev: MouseEvent): void => {
-    if (!wrap.contains(ev.target as Node)) {
-      closeAppMenu();
+  let outsidePointerListener: ((ev: PointerEvent) => void) | null = null;
+
+  const detachOutsidePointerListener = (): void => {
+    if (outsidePointerListener !== null) {
+      document.removeEventListener("pointerdown", outsidePointerListener, true);
+      outsidePointerListener = null;
     }
   };
 
-  trigger.addEventListener("click", () => {
+  const openPanel = (): void => {
+    panel.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    appMenuOpen = true;
+    detachOutsidePointerListener();
+    outsidePointerListener = (ev: PointerEvent): void => {
+      if (!wrap.contains(ev.target as Node)) {
+        closeAppMenu();
+      }
+    };
+    window.requestAnimationFrame(() => {
+      if (outsidePointerListener !== null) {
+        document.addEventListener("pointerdown", outsidePointerListener, true);
+      }
+    });
+    openAppMenuCloser = () => {
+      panel.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+      detachOutsidePointerListener();
+    };
+  };
+
+  panel.addEventListener("pointerdown", (ev) => {
+    ev.stopPropagation();
+  });
+
+  trigger.addEventListener("click", (ev) => {
+    ev.stopPropagation();
     if (panel.hidden) {
-      panel.hidden = false;
-      trigger.setAttribute("aria-expanded", "true");
-      openAppMenuCloser = () => {
-        panel.hidden = true;
-        trigger.setAttribute("aria-expanded", "false");
-        document.removeEventListener("click", onDocumentClick, true);
-      };
-      window.setTimeout(() => {
-        document.addEventListener("click", onDocumentClick, true);
-      }, 0);
+      openPanel();
     } else {
       closeAppMenu();
     }
   });
+
+  if (appMenuOpen) {
+    openPanel();
+  }
 
   return wrap;
 }

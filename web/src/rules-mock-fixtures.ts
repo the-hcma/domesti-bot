@@ -66,11 +66,13 @@ export function createMockStoreSeed(): MockStoreSeed {
       {
         participant_id: "henrique",
         display_name: "Henrique",
+        tracking_device_label: "Henrique's iPhone",
         enabled: true,
       },
       {
         participant_id: "kristen",
         display_name: "Kristen",
+        tracking_device_label: "Kristen's iPhone",
         enabled: true,
       },
     ],
@@ -97,6 +99,7 @@ export function createMockStoreSeed(): MockStoreSeed {
         enabled: false,
         trigger: "edge_true",
         cooldown_s: 300,
+        min_fix_accuracy_m: 50,
         conditions: {
           all: [
             {
@@ -107,17 +110,21 @@ export function createMockStoreSeed(): MockStoreSeed {
             { type: "after_sunset", offset_minutes: 0 },
           ],
         },
-        actions: [
+        device_actions: [
           {
-            type: "turn_on",
-            targets: [
-              { family_id: "kasa", device_id: "192.168.1.42" },
-              { family_id: "kasa", device_id: "192.168.1.43" },
-            ],
+            family_id: "kasa",
+            device_id: "192.168.1.42",
+            action: "turn_on",
           },
           {
-            type: "open",
-            targets: [{ family_id: "tailwind", device_id: "main-garage" }],
+            family_id: "kasa",
+            device_id: "192.168.1.43",
+            action: "turn_on",
+          },
+          {
+            family_id: "tailwind",
+            device_id: "main-garage",
+            action: "open",
           },
         ],
       },

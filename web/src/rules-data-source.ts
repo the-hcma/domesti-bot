@@ -7,6 +7,7 @@ import {
   mockSunRow,
   type MockStoreSeed,
 } from "./rules-mock-fixtures.js";
+import { evaluateRule } from "./rules-evaluate.js";
 import type {
   GeofenceOut,
   ParticipantOut,
@@ -58,43 +59,6 @@ function participantInsideGeofence(
   return dist <= geofence.radius_m;
 }
 
-function evaluateRuleConditionsMet(rule: RuleOut, store: MockStoreSeed): boolean {
-  if (!rule.enabled) {
-    return false;
-  }
-  for (const condition of rule.conditions.all) {
-    if (condition.type === "after_sunset") {
-      if (!mockSunRow().is_dark) {
-        return false;
-      }
-      continue;
-    }
-    if (condition.type === "before_sunrise") {
-      if (mockSunRow().is_dark) {
-        return false;
-      }
-      continue;
-    }
-    const geofence = store.geofences.find(
-      (g) => g.geofence_id === condition.geofence_id,
-    );
-    if (geofence === undefined) {
-      return false;
-    }
-    for (const participantId of condition.participant_ids) {
-      const fix = store.participant_fixes[participantId] ?? null;
-      const inside = participantInsideGeofence(fix, geofence);
-      if (condition.type === "participants_inside_geofence" && !inside) {
-        return false;
-      }
-      if (condition.type === "participants_outside_geofence" && inside) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 export class MockRulesDataSource implements RulesDataSource {
   private store: MockStoreSeed;
 
@@ -130,14 +94,18 @@ export class MockRulesDataSource implements RulesDataSource {
     return {
       participants,
       geofences: structuredClone(this.store.geofences),
-      rules: this.store.rules.map((rule) => ({
-        id: rule.id,
-        label: rule.label,
-        enabled: rule.enabled,
-        condition_currently_true: evaluateRuleConditionsMet(rule, this.store),
-        last_fired_at: this.store.rule_last_fired_at[rule.id] ?? null,
-        last_error: null,
-      })),
+      rules: this.store.rules.map((rule) => {
+        const evaluation = evaluateRule(rule, this.store);
+        return {
+          id: rule.id,
+          label: rule.label,
+          enabled: rule.enabled,
+          condition_currently_true: evaluation.all_met,
+          conditions: evaluation.conditions,
+          last_fired_at: this.store.rule_last_fired_at[rule.id] ?? null,
+          last_error: null,
+        };
+      }),
       sun,
       evaluator: {
         last_run_at: new Date(now - 15_000).toISOString(),
