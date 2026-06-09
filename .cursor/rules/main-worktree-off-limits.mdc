@@ -1,0 +1,38 @@
+---
+description: Never modify the primary (main) git worktree unless the user explicitly authorizes it
+alwaysApply: true
+---
+
+# Main worktree is off-limits
+
+The **primary clone** at the repo root (first line of `git worktree list`) is the **main worktree**. Do **not** modify it unless the user explicitly authorizes that in the current conversation.
+
+## Do all work in a stack worktree
+
+1. Run `~/work/ai/repository-helpers/scripts/dev/start-development --worktree <stack-name> --no-interactive`.
+2. `cd` into `.worktrees/<stack-name>-wt` before any implementation, tests, or git writes.
+3. Point tools at the stack worktree (`--dir`, working directory, file paths).
+
+## Forbidden on the main worktree (without explicit user authorization)
+
+- File edits, dependency installs, tests, builds, linters, formatters
+- `dep-updater --dir <repo-root>` (fast-forwards the primary clone and changes git state)
+- `gt create` / `gt modify` / `gt submit` / `gt sync` / `gt restack` / commits / checkouts
+- Leaving uncommitted changes or stray branches
+
+## Read-only on main is OK
+
+`git log`, `git show`, `gh pr view`, and reading files without writing are fine on the main worktree.
+
+## Investigating without polluting main
+
+Use a detached temporary worktree, not the primary clone:
+
+```bash
+git worktree add --detach /tmp/repo-inspect-<id> origin/main
+# ... read-only or isolated experiments ...
+git worktree remove --force /tmp/repo-inspect-<id>
+```
+
+`start-development` may sync the main worktree for environment setup; that does **not** grant permission to implement or run mutating commands there.
+
