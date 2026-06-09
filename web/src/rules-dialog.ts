@@ -3,6 +3,7 @@
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
+import { mountPresenceMiniMap } from "./presence-mini-map.js";
 import {
   ALL_DAYS_OF_WEEK,
   createDayOfWeekPicker,
@@ -213,8 +214,8 @@ class RulesHubController {
 
   async open(): Promise<void> {
     document.body.append(this.dialog);
-    await this.refresh();
     this.dialog.showModal();
+    await this.refresh();
   }
 
   private appendDeviceActionGroups(
@@ -653,27 +654,25 @@ class RulesHubController {
     if (fix === null && fallback === undefined) {
       return;
     }
-    void import("./presence-mini-map.js").then(({ mountPresenceMiniMap }) => {
-      if (fix !== null) {
-        mountPresenceMiniMap(mapEl, {
-          accuracy_m: fix.accuracy_m,
-          geofences,
-          label: participant.display_name,
-          lat: fix.lat,
-          lon: fix.lon,
-        });
-        return;
-      }
-      if (fallback !== undefined) {
-        mountPresenceMiniMap(mapEl, {
-          accuracy_m: null,
-          geofences,
-          label: "No location yet",
-          lat: fallback.center_lat,
-          lon: fallback.center_lon,
-        });
-      }
-    });
+    if (fix !== null) {
+      mountPresenceMiniMap(mapEl, {
+        accuracy_m: fix.accuracy_m,
+        geofences,
+        label: participant.display_name,
+        lat: fix.lat,
+        lon: fix.lon,
+      });
+      return;
+    }
+    if (fallback !== undefined) {
+      mountPresenceMiniMap(mapEl, {
+        accuracy_m: null,
+        geofences,
+        label: "No location yet",
+        lat: fallback.center_lat,
+        lon: fallback.center_lon,
+      });
+    }
   }
 
   private async refresh(): Promise<void> {
@@ -840,9 +839,10 @@ class RulesHubController {
     const participantList = document.createElement("div");
     participantList.className = "rules-card-list";
     for (const p of status.participants) {
-      const card = document.createElement("button");
-      card.type = "button";
+      const card = document.createElement("article");
       card.className = "rules-card rules-clickable-card rules-participant-card";
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
       const name = document.createElement("strong");
       name.textContent = p.display_name;
       const deviceMeta = document.createElement("p");
@@ -877,8 +877,15 @@ class RulesHubController {
         display_name: p.display_name,
         last_fix: p.last_fix,
       });
-      card.addEventListener("click", () => {
+      const openParticipants = (): void => {
         void this.setTab("participants");
+      };
+      card.addEventListener("click", openParticipants);
+      card.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          openParticipants();
+        }
       });
       participantList.append(card);
     }

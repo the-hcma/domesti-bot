@@ -149,6 +149,55 @@ def test_rules_hub_opens_with_mock_seed_rule(
 
 
 @pytest.mark.browser
+def test_participant_presence_mini_maps_render_osm_tiles(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Status and Participants tabs mount Leaflet mini maps with OSM tiles."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        dialog = page.locator("dialog.rules-dialog")
+        dialog.wait_for(state="visible", timeout=10_000)
+        page.locator(".rules-presence-mini-map").first.wait_for(
+            state="visible",
+            timeout=10_000,
+        )
+        page.wait_for_function(
+            """() => {
+              const map = document.querySelector('.rules-presence-mini-map.leaflet-container');
+              return map !== null && map.querySelectorAll('img.leaflet-tile').length > 0;
+            }""",
+            timeout=15_000,
+        )
+        assert page.locator(".rules-presence-mini-map").count() >= 2
+
+        page.locator('.rules-tab[data-tab="participants"]').click()
+        page.locator(".rules-presence-mini-map").first.wait_for(
+            state="visible",
+            timeout=10_000,
+        )
+        page.wait_for_function(
+            """() => {
+              const maps = document.querySelectorAll(
+                '.rules-presence-mini-map.leaflet-container',
+              );
+              return maps.length >= 2
+                && [...maps].every(
+                  (m) => m.querySelectorAll('img.leaflet-tile').length > 0,
+                );
+            }""",
+            timeout=15_000,
+        )
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
 def test_geofence_draw_mode_adds_crosshair_class(
     chromium_browser: Any,
     landing_base_url: str,
