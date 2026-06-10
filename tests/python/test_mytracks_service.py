@@ -49,12 +49,14 @@ class _FakeClient:
             return httpx.Response(
                 200,
                 json=self._export_payload,
+                headers={"content-type": "application/json"},
                 request=MagicMock(),
             )
         if path == "/api/admin/waypoints/":
             return httpx.Response(
                 200,
                 json=self._export_payload,
+                headers={"content-type": "application/json"},
                 request=MagicMock(),
             )
         raise AssertionError(f"Unexpected GET {path}")
@@ -134,3 +136,70 @@ def test_fetch_geofences_from_my_tracks_parses_export_payload(
             owntracks_rid="rid-1",
         ),
     ]
+
+
+def test_fetch_geofences_uses_login_client_without_context_manager_reentry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: httpx rejects `with client` after login GET/POST on the same instance."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/login/" and request.method == "GET":
+            return httpx.Response(
+                200,
+                headers={"set-cookie": "csrftoken=csrf-token; Path=/"},
+                text='<input name="csrfmiddlewaretoken" value="csrf-token" />',
+            )
+        if request.url.path == "/login/" and request.method == "POST":
+            return httpx.Response(
+                302,
+                headers={"set-cookie": "sessionid=session-token; Path=/"},
+            )
+        if request.url.path == "/api/admin/waypoints/":
+            return httpx.Response(
+                200,
+                json={"waypoints": []},
+                headers={"content-type": "application/json"},
+            )
+        raise AssertionError(f"Unexpected {request.method} {request.url.path}")
+
+    transport = httpx.MockTransport(_handler)
+    original_client = httpx.Client
+
+    def _client_with_transport(*args: object, **kwargs: object) -> httpx.Client:
+        kwargs["transport"] = transport
+        return original_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", _client_with_transport)
+    rows = fetch_geofences_from_my_tracks(
+        base_url="https://tracks.example.com",
+        username="admin",
+        password="secret",
+    )
+    assert rows == []
+
+
+def test_fetch_participants_rejects_html_export_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _HtmlExportClient(_FakeClient):
+        def get(self, path: str) -> httpx.Response:
+            if path in {"/api/admin/users-with-devices/", "/api/admin/waypoints/"}:
+                return httpx.Response(
+                    200,
+                    text="<html>login</html>",
+                    headers={"content-type": "text/html"},
+                    request=MagicMock(),
+                )
+            return super().get(path)
+
+    monkeypatch.setattr(
+        "app.mytracks_service._login_client",
+        lambda *_args, **_kwargs: _HtmlExportClient(export_payload={}),
+    )
+    with pytest.raises(MyTracksSyncError, match="non-JSON"):
+        fetch_participants_from_my_tracks(
+            base_url="https://tracks.example.com",
+            username="admin",
+            password="secret",
+        )

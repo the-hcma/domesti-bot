@@ -8,6 +8,7 @@ import {
   type PresenceMapParticipant,
 } from "./presence-map.js";
 import type { RulesDataSource } from "./rules-data-source.js";
+import type { GeofenceDrawToolbar } from "./geofence-map.js";
 import type { GeofenceOut, ParticipantStatusOut, SettingsLocationOut } from "./types.js";
 
 type DrawState = "idle" | "placing-center" | "placing-radius";
@@ -23,6 +24,9 @@ function slugifyGeofenceId(label: string): string {
 
 export async function initGeofenceLeafletMap(
   mapEl: HTMLElement,
+  panel: HTMLElement,
+  drawGroup: HTMLElement,
+  toolbar: GeofenceDrawToolbar,
   dataSource: RulesDataSource,
   onChanged: () => void | Promise<void>,
   geofences: GeofenceOut[],
@@ -125,8 +129,6 @@ export async function initGeofenceLeafletMap(
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
   }
 
-  const toolbar = document.createElement("div");
-  toolbar.className = "rules-geofence-map-toolbar";
   const drawBtn = document.createElement("button");
   drawBtn.type = "button";
   drawBtn.className = "btn";
@@ -136,10 +138,7 @@ export async function initGeofenceLeafletMap(
   cancelDrawBtn.className = "btn btn-secondary";
   cancelDrawBtn.textContent = "Cancel draw";
   cancelDrawBtn.hidden = true;
-  const hint = document.createElement("span");
-  hint.className = "rules-geofence-draw-hint";
-  toolbar.append(drawBtn, cancelDrawBtn, hint);
-  mapEl.insertAdjacentElement("beforebegin", toolbar);
+  toolbar.drawActions.replaceChildren(drawBtn, cancelDrawBtn);
 
   let drawState: DrawState = "idle";
   let drawCenter: L.LatLng | null = null;
@@ -162,9 +161,11 @@ export async function initGeofenceLeafletMap(
   const exitDraw = (): void => {
     drawState = "idle";
     mapEl.classList.remove("rules-geofence-draw-mode");
+    panel.classList.remove("rules-geofence-draw-active");
+    drawGroup.classList.remove("rules-geofence-toolbar-draw-active");
     drawBtn.hidden = false;
     cancelDrawBtn.hidden = true;
-    hint.textContent = "";
+    toolbar.drawHint.textContent = "";
     clearPreview();
   };
 
@@ -239,9 +240,11 @@ export async function initGeofenceLeafletMap(
   drawBtn.addEventListener("click", () => {
     drawState = "placing-center";
     mapEl.classList.add("rules-geofence-draw-mode");
+    panel.classList.add("rules-geofence-draw-active");
+    drawGroup.classList.add("rules-geofence-toolbar-draw-active");
     drawBtn.hidden = true;
     cancelDrawBtn.hidden = false;
-    hint.textContent = "Click the map to place the geofence center.";
+    toolbar.drawHint.textContent = "Click the map to place the geofence center.";
   });
 
   cancelDrawBtn.addEventListener("click", () => {
@@ -258,7 +261,7 @@ export async function initGeofenceLeafletMap(
     if (drawState === "placing-center") {
       drawCenter = e.latlng;
       drawState = "placing-radius";
-      hint.textContent = "Click again to set the radius.";
+      toolbar.drawHint.textContent = "Click again to set the radius.";
       previewMarker = L.circleMarker(drawCenter, {
         radius: 5,
         color: "var(--accent)",
@@ -289,9 +292,11 @@ export async function initGeofenceLeafletMap(
       showDrawForm(drawCenter.lat, drawCenter.lng, radius);
       drawState = "idle";
       mapEl.classList.remove("rules-geofence-draw-mode");
+      panel.classList.remove("rules-geofence-draw-active");
+      drawGroup.classList.remove("rules-geofence-toolbar-draw-active");
       drawBtn.hidden = false;
       cancelDrawBtn.hidden = true;
-      hint.textContent = "";
+      toolbar.drawHint.textContent = "";
     }
   });
 

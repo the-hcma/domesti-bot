@@ -1,5 +1,6 @@
 // Admin credential prompt for My Tracks roster / geofence sync.
 
+import { HttpError } from "./api.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 
 export interface MyTracksSyncCredentialDefaults {
@@ -158,6 +159,12 @@ export async function runMyTracksSyncAction(
     }
     await onComplete();
   } catch (err) {
-    window.alert(err instanceof Error ? err.message : String(err));
+    const message =
+      err instanceof HttpError
+        ? err.detail
+        : err instanceof Error
+          ? err.message
+          : String(err);
+    window.alert(message);
   }
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from http import HTTPStatus
 from pathlib import Path
 
@@ -41,6 +42,8 @@ from app.rules_store import (
 
 settings_router = APIRouter(prefix="/v1/settings", tags=["settings"])
 rules_router = APIRouter(prefix="/v1/rules", tags=["rules"])
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @settings_router.delete("/my-tracks", status_code=HTTPStatus.NO_CONTENT)
@@ -129,6 +132,11 @@ async def post_mytracks_geofences_sync(
     cache_path = _require_discovery_cache(request)
     record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
+    _LOGGER.info(
+        "[mytracks] geofence sync starting for %s as %s",
+        base_url,
+        username,
+    )
     try:
         exported = fetch_geofences_from_my_tracks(
             base_url=base_url,
@@ -136,6 +144,12 @@ async def post_mytracks_geofences_sync(
             username=username,
         )
     except MyTracksSyncError as exc:
+        _LOGGER.warning(
+            "[mytracks] geofence sync failed for %s as %s: %s",
+            base_url,
+            username,
+            exc,
+        )
         raise HTTPException(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=str(exc),
@@ -156,6 +170,11 @@ async def post_mytracks_geofences_sync(
         ],
     )
     updated = record_mytracks_geofences_sync(cache_path, count=count)
+    _LOGGER.info(
+        "[mytracks] geofence sync complete for %s: %d geofence(s)",
+        base_url,
+        count,
+    )
     return MyTracksGeofencesSyncOut(
         geofence_count=count,
         last_synced_at=updated.last_geofences_sync_at,
@@ -170,6 +189,11 @@ async def post_mytracks_participants_sync(
     cache_path = _require_discovery_cache(request)
     record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
+    _LOGGER.info(
+        "[mytracks] participant sync starting for %s as %s",
+        base_url,
+        username,
+    )
     try:
         exported = fetch_participants_from_my_tracks(
             base_url=base_url,
@@ -177,6 +201,12 @@ async def post_mytracks_participants_sync(
             username=username,
         )
     except MyTracksSyncError as exc:
+        _LOGGER.warning(
+            "[mytracks] participant sync failed for %s as %s: %s",
+            base_url,
+            username,
+            exc,
+        )
         raise HTTPException(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=str(exc),
@@ -194,6 +224,11 @@ async def post_mytracks_participants_sync(
         ],
     )
     updated = record_mytracks_participants_sync(cache_path, count=count)
+    _LOGGER.info(
+        "[mytracks] participant sync complete for %s: %d participant(s)",
+        base_url,
+        count,
+    )
     return MyTracksParticipantsSyncOut(
         last_synced_at=updated.last_participants_sync_at,
         participant_count=count,
