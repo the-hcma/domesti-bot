@@ -8,7 +8,16 @@ import type {
   LocationHistoryRetentionIn,
   MyTracksPairIn,
   MyTracksPairStatusOut,
+  MyTracksSettingsIn,
+  MyTracksSettingsOut,
 } from "./types.js";
+
+export interface MyTracksPairingPanelOptions {
+  clearConnectionFields: () => void;
+  readConnectionSettings: () => MyTracksSettingsIn;
+  resetAllSettings: () => Promise<void>;
+  saveConnectionSettings: (config: MyTracksSettingsIn) => Promise<MyTracksSettingsOut>;
+}
 
 function appendLabeledField(
   parent: HTMLElement,
@@ -107,6 +116,16 @@ function updateSaveRetentionButton(
   saveRetentionBtn.title = unchanged ? "No changes to save" : "";
 }
 
+function validateConnectionSettings(settings: MyTracksSettingsIn): string | null {
+  if (settings.domain === "") {
+    return "Enter a My Tracks domain before pairing.";
+  }
+  if (settings.username === "") {
+    return "Enter a default admin username before pairing.";
+  }
+  return null;
+}
+
 async function promptPairPassword(
   username: string,
   rePair: boolean,
@@ -202,7 +221,10 @@ async function promptPairPassword(
   });
 }
 
-export async function mountMyTracksPairingPanel(container: HTMLElement): Promise<void> {
+export async function mountMyTracksPairingPanel(
+  container: HTMLElement,
+  options: MyTracksPairingPanelOptions,
+): Promise<void> {
   const section = document.createElement("section");
   section.className = "mytracks-pairing-section";
 
@@ -214,8 +236,7 @@ export async function mountMyTracksPairingPanel(container: HTMLElement): Promise
   lead.className = "settings-dialog-lead";
   lead.textContent =
     "Register domesti-bot webhook URLs and a relay secret on my-tracks. " +
-    "The public domesti-bot URL is derived from this browser session. " +
-    "Location history retention applies to live GPS fixes stored on this server.";
+    "The public domesti-bot URL is derived from this browser session.";
 
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
@@ -245,7 +266,8 @@ export async function mountMyTracksPairingPanel(container: HTMLElement): Promise
   const retentionHelp = document.createElement("p");
   retentionHelp.className = "settings-dialog-help";
   retentionHelp.textContent =
-    "Default keeps fixes from the last 24 hours and always keeps at least the 20 most recent fixes.";
+    "Default keeps per-participant locations from the last 24 hours and always keeps " +
+    "at least the 20 most recent per-participant locations.";
   retentionGroup.append(retentionHelp);
 
   const unlimitedInput = document.createElement("input");
@@ -268,7 +290,7 @@ export async function mountMyTracksPairingPanel(container: HTMLElement): Promise
   maxAgeHoursInput.value = "24";
   appendLabeledField(
     retentionRow,
-    createFieldLabel("Keep fixes from the last (hours)"),
+    createFieldLabel("Keep per-participant locations from the last (hours)"),
     maxAgeHoursInput,
   );
 
@@ -280,7 +302,7 @@ export async function mountMyTracksPairingPanel(container: HTMLElement): Promise
   minKeepCountInput.value = "20";
   appendLabeledField(
     retentionRow,
-    createFieldLabel("Minimum recent fixes to keep"),
+    createFieldLabel("Minimum recent per-participant locations to keep"),
     minKeepCountInput,
   );
   retentionGroup.append(retentionRow);
@@ -296,12 +318,11 @@ export async function mountMyTracksPairingPanel(container: HTMLElement): Promise
   saveRetentionBtn.type = "button";
   saveRetentionBtn.className = "btn btn-secondary";
   saveRetentionBtn.textContent = "Save retention";
-  const resetPairingBtn = document.createElement("button");
-  resetPairingBtn.type = "button";
-  resetPairingBtn.className = "btn btn-secondary";
-  resetPairingBtn.textContent = "Reset pairing";
-  resetPairingBtn.hidden = true;
-  actions.append(pairBtn, saveRetentionBtn, resetPairingBtn);
+  const resetBtn = document.createElement("button");
+  resetBtn.type = "button";
+  resetBtn.className = "btn btn-secondary";
+  resetBtn.textContent = "Reset";
+  actions.append(pairBtn, saveRetentionBtn, resetBtn);
   form.append(actions);
 
   section.append(heading, lead, status, form);
@@ -331,7 +352,6 @@ export async function mountMyTracksPairingPanel(container: HTMLElement): Promise
     const show = pairStatus?.paired_at !== null && pairStatus?.paired_at !== undefined
       && storedRelayKey !== null;
     relayKeyField.hidden = !show;
-    resetPairingBtn.hidden = !show;
     if (storedRelayKey) {
       relayKeyRow.input.value = storedRelayKey;
       if (!relayKeyRevealed) {
@@ -386,21 +406,31 @@ export async function mountMyTracksPairingPanel(container: HTMLElement): Promise
 
   pairBtn.addEventListener("click", () => {
     void (async () => {
-      const settings = await api.fetchMyTracksSettings();
-      if (settings === null) {
-        showErrorToast("Save My Tracks domain and username before pairing.");
+      const connection = options.readConnectionSettings();
+      const validationError = validateConnectionSettings(connection);
+      if (validationError !== null) {
+        showErrorToast(validationError);
         return;
       }
       const rePair = pairStatus?.paired_at !== null && pairStatus?.paired_at !== undefined;
-      const password = await promptPairPassword(settings.username, rePair);
+      const password = await promptPairPassword(connection.username, rePair);
       if (password === null) {
         return;
       }
+      let savedConnection: MyTracksSettingsOut;
+      try {
+        savedConnection = await options.saveConnectionSettings(connection);
+      } catch (err) {
+        const message = formatError(err);
+        status.textContent = message;
+        showErrorToast(message);
+        return;
+      }
       const payload: MyTracksPairIn = {
-        domain: settings.domain,
+        domain: savedConnection.domain,
         location_history_retention: readRetentionFromForm(retentionControls),
         password,
-        username: settings.username,
+        username: savedConnection.username,
       };
       try {
         pairStatus = await api.postMyTracksPair(payload);
@@ -437,27 +467,34 @@ export async function mountMyTracksPairingPanel(container: HTMLElement): Promise
       });
   });
 
-  resetPairingBtn.addEventListener("click", () => {
+  resetBtn.addEventListener("click", () => {
     void confirmAction({
-      title: "Reset My Tracks pairing?",
+      title: "Reset My Tracks settings?",
       message:
-        "This clears the relay API key on domesti-bot and revokes local pairing metadata. " +
-        "my-tracks may still accept the old key until you re-pair or clear it there.",
-      confirmLabel: "Reset pairing",
+        "This clears the domain, admin username, relay API key, and pairing metadata on domesti-bot. " +
+        "my-tracks may still accept the old relay key until you re-pair or clear it there.",
+      confirmLabel: "Reset",
       variant: "danger",
     }).then((confirmed) => {
       if (!confirmed) {
         return;
       }
-      void api
-        .clearMyTracksPairing()
-        .then((cleared) => {
-          pairStatus = cleared;
+      void options
+        .resetAllSettings()
+        .then(() => {
+          options.clearConnectionFields();
+          pairStatus = null;
           storedRelayKey = null;
+          savedRetention = null;
           renderPairStatus(status, pairStatus);
           updatePairButtonLabel(pairBtn, pairStatus);
           applyRelayKeyDisplay();
-          showSuccessToast("My Tracks pairing reset.");
+          applyRetentionToForm(
+            { max_age_hours: 24, min_keep_count: 20, unlimited: false },
+            retentionControls,
+          );
+          syncRetentionSaveState();
+          showSuccessToast("My Tracks settings reset.");
         })
         .catch((err: unknown) => {
           const message = formatError(err);

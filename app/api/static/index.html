@@ -627,8 +627,14 @@
     .settings-dialog-lead a { color: var(--accent); }
     .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
       justify-content: flex-end; }
-    .mytracks-pairing-section { margin-top: 20px; padding-top: 16px;
-      border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 12px; }
+    .mytracks-settings-tab { display: flex; flex-direction: column; gap: 10px; }
+    .mytracks-connection-section { margin: 0; }
+    .mytracks-pairing-mount { margin: 0; }
+    .mytracks-pairing-section { margin: 0; padding-top: 12px;
+      border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+    .mytracks-pairing-section .settings-dialog-lead,
+    .mytracks-settings-tab > .settings-dialog-lead { margin: 0; }
+    .mytracks-pairing-form { display: flex; flex-direction: column; gap: 10px; }
     .settings-dialog-subheading { margin: 0; font-size: 1rem; font-weight: 600; }
     .settings-dialog-fieldset { border: 1px solid var(--border); border-radius: 8px;
       padding: 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; }

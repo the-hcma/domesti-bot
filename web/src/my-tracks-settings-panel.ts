@@ -5,7 +5,6 @@ import { mountMyTracksPairingPanel } from "./my-tracks-pairing-panel.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
-import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type { MyTracksSettingsIn } from "./types.js";
 
 function appendLabeledField(
@@ -31,6 +30,7 @@ export async function mountMyTracksSettingsPanel(
   dataSource: RulesDataSource,
 ): Promise<void> {
   container.replaceChildren();
+  container.classList.add("mytracks-settings-tab");
 
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
@@ -50,13 +50,11 @@ export async function mountMyTracksSettingsPanel(
     before: "Connect to ",
     domain: existing?.domain ?? "",
     after:
-      " for participant and geofence sync. Save the domain and default admin username; sync prompts for the admin password each time — it is not stored.",
+      " for participant and geofence sync. Pairing saves the domain and admin username; sync prompts for the admin password each time — it is not stored.",
   });
 
-  const form = document.createElement("form");
-  form.className = "mytracks-settings-form";
-  form.noValidate = true;
-  form.setAttribute("autocomplete", "off");
+  const connectionSection = document.createElement("div");
+  connectionSection.className = "mytracks-connection-section";
 
   const fieldsRow = document.createElement("div");
   fieldsRow.className = "settings-dialog-field-row mytracks-settings-fields-row";
@@ -84,74 +82,28 @@ export async function mountMyTracksSettingsPanel(
     createFieldLabel("Default admin username"),
     usernameInput,
   );
-  form.append(fieldsRow);
+  connectionSection.append(fieldsRow);
 
-  const actions = document.createElement("div");
-  actions.className = "settings-dialog-actions";
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "submit";
-  saveBtn.className = "btn";
-  saveBtn.textContent = "Save";
-  const resetBtn = document.createElement("button");
-  resetBtn.type = "button";
-  resetBtn.className = "btn btn-secondary";
-  resetBtn.textContent = "Clear";
-  actions.append(saveBtn, resetBtn);
-  form.append(actions);
-
-  form.addEventListener("submit", (ev) => {
-    ev.preventDefault();
-    status.hidden = false;
-    const payload: MyTracksSettingsIn = {
-      domain: domainInput.value.trim(),
-      username: usernameInput.value.trim(),
-    };
-    void dataSource
-      .saveMyTracksSettings(payload)
-      .then((saved) => {
-        showSuccessToast("My Tracks settings saved.");
-        status.textContent = "My Tracks settings saved.";
-        domainInput.value = saved.domain;
-        usernameInput.value = saved.username;
-      })
-      .catch((err: unknown) => {
-        const message = formatError(err);
-        status.textContent = message;
-        showErrorToast(message);
-      });
-  });
-
-  resetBtn.addEventListener("click", () => {
-    void confirmAction({
-      message: "Clear stored My Tracks settings?",
-      confirmLabel: "Clear",
-      variant: "danger",
-    }).then((confirmed) => {
-      if (!confirmed) {
-        return;
-      }
-      void dataSource
-        .resetMyTracksSettings()
-        .then(() => {
-          domainInput.value = "";
-          usernameInput.value = "";
-          status.hidden = false;
-          status.textContent = "My Tracks settings cleared.";
-          showSuccessToast("My Tracks settings cleared.");
-        })
-        .catch((err: unknown) => {
-          const message = formatError(err);
-          status.hidden = false;
-          status.textContent = message;
-          showErrorToast(message);
-        });
-    });
-  });
-
-  container.append(lead, status, form);
+  container.append(lead, status, connectionSection);
 
   const pairingMount = document.createElement("div");
   pairingMount.className = "mytracks-pairing-mount";
   container.append(pairingMount);
-  await mountMyTracksPairingPanel(pairingMount);
+
+  const readConnectionSettings = (): MyTracksSettingsIn => ({
+    domain: domainInput.value.trim(),
+    username: usernameInput.value.trim(),
+  });
+
+  const clearConnectionFields = (): void => {
+    domainInput.value = "";
+    usernameInput.value = "";
+  };
+
+  await mountMyTracksPairingPanel(pairingMount, {
+    clearConnectionFields,
+    readConnectionSettings,
+    resetAllSettings: () => dataSource.resetMyTracksSettings(),
+    saveConnectionSettings: (config) => dataSource.saveMyTracksSettings(config),
+  });
 }
