@@ -144,7 +144,7 @@ function formatDaysOfWeek(days: readonly number[]): string {
   return `On ${joinNames(labels)}`;
 }
 
-function formatPresenceCondition(
+export function formatPresenceEventLabel(
   condition: Extract<
     RuleConditionOut,
     { type: "participants_inside_geofence" | "participants_outside_geofence" }
@@ -223,7 +223,7 @@ export function summarizeRule(
       condition.type === "participants_inside_geofence"
       || condition.type === "participants_outside_geofence"
     ) {
-      presence.push(formatPresenceCondition(condition, context));
+      presence.push(formatPresenceEventLabel(condition, context));
       continue;
     }
     const timingLine = formatTimingCondition(condition);
@@ -262,6 +262,26 @@ function appendSummarySection(
   parent.append(section);
 }
 
+function appendPresenceSummarySection(
+  parent: HTMLElement,
+  lines: readonly string[],
+): void {
+  if (lines.length === 0) {
+    return;
+  }
+  if (lines.length === 1) {
+    const section = document.createElement("section");
+    section.className = "rules-rule-summary-section";
+    const title = document.createElement("h4");
+    title.className = "rules-rule-summary-heading rules-rule-summary-heading-event";
+    title.textContent = lines[0] ?? "";
+    section.append(title);
+    parent.append(section);
+    return;
+  }
+  appendSummarySection(parent, "Presence", lines);
+}
+
 /** Mount human-readable condition and action sections on a rule card. */
 export function appendRuleSummaryBody(
   parent: HTMLElement,
@@ -269,7 +289,7 @@ export function appendRuleSummaryBody(
 ): void {
   const body = document.createElement("div");
   body.className = "rules-rule-summary";
-  appendSummarySection(body, "Who", sections.presence);
+  appendPresenceSummarySection(body, sections.presence);
   appendSummarySection(body, "When", sections.timing);
   appendSummarySection(body, "Then", sections.actions);
   if (body.childElementCount > 0) {

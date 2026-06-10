@@ -3,7 +3,7 @@
 import { HttpError } from "./api.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
-import { createFieldLabel } from "./rules-ui-helpers.js";
+import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
 import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type { MyTracksSettingsIn } from "./types.js";
 
@@ -65,7 +65,7 @@ export async function mountMyTracksSettingsPanel(
   domainInput.placeholder = "https://tracks.example.com";
   domainInput.required = true;
   domainInput.value = existing?.domain ?? "";
-  domainInput.setAttribute("autocomplete", "off");
+  preventBrowserAutofill(domainInput);
   appendLabeledField(
     fieldsRow,
     createFieldLabel("My Tracks domain"),
@@ -74,7 +74,8 @@ export async function mountMyTracksSettingsPanel(
 
   const usernameInput = document.createElement("input");
   usernameInput.type = "text";
-  usernameInput.setAttribute("autocomplete", "off");
+  usernameInput.name = "mytracks-default-admin";
+  preventBrowserAutofill(usernameInput);
   usernameInput.required = true;
   usernameInput.value = existing?.username ?? "";
   appendLabeledField(

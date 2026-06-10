@@ -3,6 +3,7 @@
 import { HttpError } from "./api.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
+import { preventBrowserAutofill } from "./rules-ui-helpers.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
 import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 
@@ -77,9 +78,9 @@ export function promptMyTracksSyncCredentials(
     const usernameInput = document.createElement("input");
     usernameInput.type = "text";
     usernameInput.name = "mytracks-sync-username";
-    usernameInput.setAttribute("autocomplete", "off");
     usernameInput.required = true;
     usernameInput.value = defaults.username;
+    preventBrowserAutofill(usernameInput);
     appendInlineField(credentialsRow, "Admin username", usernameInput);
 
     const passwordRow = createSecretInputRow({
