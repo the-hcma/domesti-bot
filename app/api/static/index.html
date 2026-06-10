@@ -637,7 +637,11 @@
     .mytracks-settings-tab > .settings-dialog-lead { margin: 0; }
     .settings-hub-dialog .mytracks-pairing-form { display: flex; flex-direction: column;
       gap: 8px; padding: 0; margin: 0; }
+    /* .settings-dialog-field defaults to flex-grow: 1 for horizontal rows; stop
+       direct column children (e.g. relay key) from stretching vertically. */
+    .mytracks-pairing-form > .settings-dialog-field { flex: 0 0 auto; }
     .mytracks-settings-tab .settings-dialog-field-row { margin-bottom: 0; }
+    .mytracks-relay-key-field { gap: 4px; }
     .mytracks-relay-key-pending { margin: 0; font-style: italic; }
     .mytracks-relay-key-field .settings-dialog-token-row input { cursor: default; }
     .settings-dialog-subheading { margin: 0; font-size: 1rem; font-weight: 600; }
