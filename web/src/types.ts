@@ -189,6 +189,18 @@ export interface SmtpConfigOut {
   last_test_recipient: string | null;
 }
 
+export interface LocationHistoryRetentionIn {
+  max_age_hours: number;
+  min_keep_count: number;
+  unlimited: boolean;
+}
+
+export interface LocationHistoryRetentionOut {
+  max_age_hours: number;
+  min_keep_count: number;
+  unlimited: boolean;
+}
+
 export interface MyTracksGeofencesSyncOut {
   geofence_count: number;
   last_synced_at: string | null;
@@ -200,6 +212,30 @@ export interface MyTracksParticipantsSyncOut {
   participant_count: number;
   source: "my-tracks";
   webhook_ready: boolean;
+}
+
+export interface MyTracksPairIn {
+  domain: string;
+  domesti_public_base_url: string;
+  location_history_retention: LocationHistoryRetentionIn;
+  password: string;
+  username: string;
+}
+
+export interface MyTracksPairStatusOut {
+  domain: string;
+  domesti_public_base_url: string | null;
+  last_pair_error: string | null;
+  last_verify_at: string | null;
+  last_verify_ok: boolean | null;
+  location_history_retention: LocationHistoryRetentionOut;
+  location_updates_accepted: boolean;
+  mytracks_location_updates_enabled: boolean | null;
+  paired_at: string | null;
+  participant_location_test_url: string | null;
+  participant_location_update_url: string | null;
+  relay_key_configured: boolean;
+  username: string;
 }
 
 export interface MyTracksSettingsIn {

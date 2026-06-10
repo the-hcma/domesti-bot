@@ -341,12 +341,72 @@ class GeofenceOut(BaseModel):
     radius_m: int
 
 
+class LocationHistoryRetentionIn(BaseModel):
+    """Location-history retention policy for my-tracks pairing."""
+
+    max_age_hours: float = Field(default=24.0, gt=0)
+    min_keep_count: int = Field(default=20, ge=1)
+    unlimited: bool = False
+
+
+class LocationHistoryRetentionOut(BaseModel):
+    """Effective location-history retention policy."""
+
+    max_age_hours: float
+    min_keep_count: int
+    unlimited: bool
+
+
 class MyTracksGeofencesSyncOut(BaseModel):
     """Result of a geofence sync pull from My Tracks."""
 
     geofence_count: int
     last_synced_at: str | None
     source: Literal["my-tracks"] = "my-tracks"
+
+
+class MyTracksLocationUpdatesIn(BaseModel):
+    """Body for ``PATCH /v1/settings/my-tracks/location-updates``."""
+
+    accepted: bool
+    password: str | None = None
+
+
+class MyTracksLocationUpdatesOut(BaseModel):
+    """Result of toggling whether domesti-bot accepts live location relays."""
+
+    accepted: bool
+    mytracks_location_updates_enabled: bool | None = None
+
+
+class MyTracksPairIn(BaseModel):
+    """Body for ``POST /v1/settings/my-tracks/pair``."""
+
+    domain: str = Field(..., min_length=1)
+    domesti_public_base_url: str = Field(..., min_length=1)
+    location_history_retention: LocationHistoryRetentionIn = Field(
+        default_factory=LocationHistoryRetentionIn
+    )
+    password: str = Field(..., min_length=1)
+    username: str = Field(..., min_length=1)
+
+
+class MyTracksPairStatusOut(BaseModel):
+    """Pairing status for domesti-bot ↔ my-tracks integration."""
+
+    domain: str
+    domesti_public_base_url: str | None = None
+    last_pair_error: str | None = None
+    last_verify_at: str | None = None
+    last_verify_ok: bool | None = None
+    location_history_retention: LocationHistoryRetentionOut
+    location_updates_accepted: bool = True
+    mytracks_location_updates_enabled: bool | None = None
+    paired_at: str | None = None
+    participant_location_test_url: str | None = None
+    participant_location_update_url: str | None = None
+    relay_key_configured: bool = False
+    username: str
 
 
 class MyTracksParticipantsSyncOut(BaseModel):
@@ -396,6 +456,19 @@ class ParticipantFixOut(BaseModel):
     lon: float
     received_at: str
     source: str | None = None
+
+
+class LocationUpdateWebhookIn(BaseModel):
+    """Live or test location-update payload from my-tracks."""
+
+    accuracy_m: int | None = None
+    device_id: str | None = None
+    lat: float = Field(..., ge=-90.0, le=90.0)
+    lon: float = Field(..., ge=-180.0, le=180.0)
+    mqtt_user: str | None = None
+    participant_id: str = Field(..., min_length=1)
+    source: str | None = None
+    timestamp: str = Field(..., min_length=1)
 
 
 class ParticipantStatusOut(ParticipantOut):

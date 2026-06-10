@@ -1,0 +1,419 @@
+#!/usr/bin/env python3
+"""Verify domesti-bot ↔ my-tracks pairing and webhook ingest."""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import json
+import os
+import shutil
+import sys
+from typing import Any
+
+_DEFAULT_DOMESTI_BASE_URL = "https://db.hcma.info"
+_DEFAULT_MYTRACKS_DOMAIN = "https://mytracks.hcma.info"
+_DEFAULT_SYNTHETIC_PARTICIPANT_ID = "domesti-bot-verify"
+_MYTRACKS_CONFIG_PATH = "/api/admin/domesti-bot/config/"
+_MYTRACKS_PAIR_PATH = "/api/admin/domesti-bot/pair/"
+_VERIFY_STEPS = 4
+
+
+def _ensure_uv() -> None:
+    if os.environ.get("UV_ACTIVE") or "/.venv/" in (sys.executable or ""):
+        return
+    uv = shutil.which("uv")
+    if uv:
+        os.execv(uv, [uv, "run", sys.argv[0], *sys.argv[1:]])
+    print("Expected uv on PATH for verify-mytracks-pairing", file=sys.stderr)
+    raise SystemExit(2)
+
+
+_ensure_uv()
+
+import httpx  # noqa: E402
+from cryptography.fernet import Fernet  # noqa: E402
+
+from app.mytracks_service import (  # noqa: E402
+    DomestiBotConfigFromMyTracks,
+    MyTracksSyncError,
+    build_location_update_webhook_urls,
+    fetch_mytracks_domesti_config,
+    normalize_mytracks_base_url,
+    normalize_public_base_url,
+    pair_with_my_tracks,
+)
+
+
+def _config_matches_expected(
+    *,
+    actual: str | None,
+    expected: str,
+    label: str,
+) -> bool:
+    if actual is None:
+        _log_detail(f"{label}: (not reported by my-tracks)")
+        return True
+    if actual.rstrip("/") == expected.rstrip("/"):
+        _log_detail(f"{label}: {actual}")
+        return True
+    _log_detail(f"{label}: {actual}")
+    print(
+        f"  WARNING: my-tracks {label} does not match what we registered ({expected})",
+        file=sys.stderr,
+    )
+    return False
+
+
+def _explain_webhook_failure(
+    *,
+    body: str,
+    domesti_base: str,
+    label: str,
+    participant_id: str,
+    status_code: int,
+    url: str,
+) -> None:
+    print(f"  FAILED: {label} webhook check at {url}", file=sys.stderr)
+    detail = body.strip()
+    if detail:
+        print(f"  Response: {detail[:500]}", file=sys.stderr)
+    if status_code == 401:
+        print(
+            "  Likely cause: X-Domesti-Api-Key does not match the relay secret stored on "
+            f"{domesti_base}.",
+            file=sys.stderr,
+        )
+        print(
+            "  This script generates a fresh relay key for my-tracks only. Pair through "
+            "domesti-bot Settings (or POST /v1/settings/my-tracks/pair) so both sides "
+            "share the same secret.",
+            file=sys.stderr,
+        )
+        return
+    if status_code == 404:
+        if "Unknown participant_id" in detail:
+            print(
+                f"  Likely cause: participant {participant_id!r} is not in the domesti-bot "
+                "roster on that host.",
+                file=sys.stderr,
+            )
+            print(
+                "  Sync participants from my-tracks, or pass --participant-id for someone "
+                "already on the roster.",
+                file=sys.stderr,
+            )
+            return
+        print(
+            f"  Likely cause: {domesti_base} does not expose POST {url} yet.",
+            file=sys.stderr,
+        )
+        print(
+            "  Deploy a domesti-bot build with /v1/webhooks/location_update routes "
+            "(my-tracks pairing PR).",
+            file=sys.stderr,
+        )
+        return
+    if status_code == 503:
+        print(
+            "  Likely cause: domesti-bot emergency switch paused live location ingest "
+            "(test webhook should still work).",
+            file=sys.stderr,
+        )
+        return
+    print(
+        "  See the response body above and domesti-bot logs on the target host.",
+        file=sys.stderr,
+    )
+
+
+def _log_detail(message: str) -> None:
+    print(f"  {message}")
+
+
+def _log_step(step: int, title: str) -> None:
+    print()
+    print(f"Step {step} of {_VERIFY_STEPS}: {title}")
+
+
+def _log_success(message: str) -> None:
+    print(f"  OK: {message}")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    option_specs: list[tuple[tuple[str, ...], dict[str, object]]] = [
+        (
+            ("--domesti-base-url",),
+            {
+                "default": None,
+                "help": (
+                    f"Public domesti-bot HTTPS origin registered at pair time "
+                    f"(default: {_DEFAULT_DOMESTI_BASE_URL})"
+                ),
+            },
+        ),
+        (
+            ("--mytracks-domain",),
+            {
+                "default": None,
+                "help": (
+                    f"My Tracks public HTTPS origin (default: {_DEFAULT_MYTRACKS_DOMAIN})"
+                ),
+            },
+        ),
+        (
+            ("--no-interactive",),
+            {
+                "action": "store_true",
+                "help": "Use flag defaults without confirmation prompts",
+            },
+        ),
+        (
+            ("--participant-id",),
+            {
+                "default": None,
+                "help": (
+                    f"Synthetic participant id for webhook smoke test "
+                    f"(default: {_DEFAULT_SYNTHETIC_PARTICIPANT_ID})"
+                ),
+            },
+        ),
+        (
+            ("--username",),
+            {
+                "default": os.environ.get("MYTRACKS_ADMIN_USERNAME", "house_meister"),
+                "help": (
+                    "My Tracks admin username "
+                    "(default: house_meister or $MYTRACKS_ADMIN_USERNAME)"
+                ),
+            },
+        ),
+    ]
+    for option_strings, kwargs in sorted(option_specs, key=lambda spec: spec[0][0]):
+        parser.add_argument(*option_strings, **kwargs)
+    return parser.parse_args()
+
+
+def _post_webhook_smoke(
+    *,
+    domesti_base: str,
+    label: str,
+    participant_id: str,
+    payload: dict[str, Any],
+    relay_key: str,
+    url: str,
+) -> bool:
+    _log_detail(f"POST {url}")
+    _log_detail(f"participant_id: {participant_id}")
+    _log_detail("auth: X-Domesti-Api-Key (relay secret generated for this run)")
+    _log_detail(f"body: {json.dumps(payload, sort_keys=True)}")
+    try:
+        response = httpx.post(
+            url,
+            json=payload,
+            headers={"X-Domesti-Api-Key": relay_key},
+            timeout=15.0,
+        )
+    except httpx.HTTPError as exc:
+        print(f"  FAILED: network error talking to {url}: {exc!r}", file=sys.stderr)
+        return False
+    _log_detail(f"HTTP {response.status_code}")
+    if response.status_code >= 400:
+        _explain_webhook_failure(
+            body=response.text,
+            domesti_base=domesti_base,
+            label=label,
+            participant_id=participant_id,
+            status_code=response.status_code,
+            url=url,
+        )
+        return False
+    _log_success(f"{label} webhook accepted (HTTP {response.status_code})")
+    return True
+
+
+def _print_banner() -> None:
+    print("domesti-bot ↔ my-tracks pairing verify")
+    print()
+    _log_detail(
+        "Registers webhook URLs and a relay API key on my-tracks, reads the stored "
+        "config back, then POSTs synthetic location payloads to domesti-bot."
+    )
+    _log_detail(
+        "Webhook checks call the remote domesti-bot origin you enter. That host must "
+        "expose /v1/webhooks/location_update routes and store the same relay secret."
+    )
+
+
+def _prompt_editable(label: str, default: str) -> str:
+    """Return ``default`` on Enter, or a trimmed replacement when the operator edits."""
+    print(f"{label} [{default}]: ", end="", flush=True)
+    entered = input().strip()
+    return entered if entered != "" else default
+
+
+def _resolve_domesti_base_url(args: argparse.Namespace) -> str:
+    initial = (args.domesti_base_url or _DEFAULT_DOMESTI_BASE_URL).strip()
+    if args.no_interactive or not sys.stdin.isatty():
+        raw = initial
+    else:
+        raw = _prompt_editable("domesti-bot public HTTPS URL", initial)
+    try:
+        return normalize_public_base_url(raw)
+    except MyTracksSyncError as exc:
+        print(f"Expected public base URL, got {raw!r}: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+
+def _resolve_mytracks_domain(args: argparse.Namespace) -> str:
+    initial = (args.mytracks_domain or _DEFAULT_MYTRACKS_DOMAIN).strip()
+    if args.no_interactive or not sys.stdin.isatty():
+        raw = initial
+    else:
+        raw = _prompt_editable("My Tracks public HTTPS URL", initial)
+    try:
+        return normalize_mytracks_base_url(raw)
+    except MyTracksSyncError as exc:
+        print(f"Expected My Tracks domain, got {raw!r}: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+
+def _resolve_participant_id(args: argparse.Namespace) -> str:
+    initial = (args.participant_id or _DEFAULT_SYNTHETIC_PARTICIPANT_ID).strip()
+    if initial == "":
+        print("Expected synthetic participant id, got empty value", file=sys.stderr)
+        raise SystemExit(2)
+    if args.no_interactive or not sys.stdin.isatty():
+        return initial
+    return _prompt_editable("Synthetic participant id", initial)
+
+
+def _verify_mytracks_config(
+    *,
+    config: DomestiBotConfigFromMyTracks,
+    domesti_base: str,
+    mytracks_base: str,
+    test_url: str,
+    update_url: str,
+) -> None:
+    _log_detail(f"GET {mytracks_base.rstrip('/')}{_MYTRACKS_CONFIG_PATH}")
+    enabled = config.location_updates_enabled
+    if enabled is None:
+        _log_detail("location_updates_enabled: (not reported)")
+    else:
+        _log_detail(f"location_updates_enabled: {enabled}")
+    _config_matches_expected(
+        actual=config.domesti_base_url,
+        expected=domesti_base,
+        label="domesti_base_url",
+    )
+    _config_matches_expected(
+        actual=config.participant_location_update_url,
+        expected=update_url,
+        label="participant_location_update_url",
+    )
+    _config_matches_expected(
+        actual=config.participant_location_test_url,
+        expected=test_url,
+        label="participant_location_test_url",
+    )
+    _log_success("my-tracks reports domesti-bot integration config")
+
+
+def main() -> int:
+    _print_banner()
+    args = _parse_args()
+    domesti_base = _resolve_domesti_base_url(args)
+    mytracks_base = _resolve_mytracks_domain(args)
+    participant_id = _resolve_participant_id(args)
+    password = getpass.getpass(f"My Tracks admin password ({args.username}): ").strip()
+    if password == "":
+        print("Expected My Tracks admin password, got empty value", file=sys.stderr)
+        return 2
+
+    update_url, test_url = build_location_update_webhook_urls(domesti_base)
+    relay_key = Fernet.generate_key().decode("ascii")[:32]
+    pair_url = f"{mytracks_base.rstrip('/')}{_MYTRACKS_PAIR_PATH}"
+
+    _log_step(1, "Register pairing on my-tracks")
+    _log_detail(f"Logging in to {mytracks_base} as {args.username}")
+    _log_detail(f"POST {pair_url}")
+    _log_detail(f"domesti_base_url: {domesti_base}")
+    _log_detail(f"participant_location_update_url: {update_url}")
+    _log_detail(f"participant_location_test_url: {test_url}")
+    _log_detail("relay API key: (generated for this run; not printed)")
+    try:
+        pair_status = pair_with_my_tracks(
+            api_key=relay_key,
+            base_url=mytracks_base,
+            domesti_base_url=domesti_base,
+            participant_location_update_url=update_url,
+            participant_location_test_url=test_url,
+            password=password,
+            username=args.username,
+        )
+    except MyTracksSyncError as exc:
+        print(f"  FAILED: my-tracks pairing: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"  FAILED: unexpected pairing error: {exc}", file=sys.stderr)
+        return 1
+    _log_success(f"my-tracks accepted pairing (HTTP {pair_status})")
+
+    _log_step(2, "Confirm my-tracks stored configuration")
+    try:
+        config = fetch_mytracks_domesti_config(
+            base_url=mytracks_base,
+            password=password,
+            username=args.username,
+        )
+    except MyTracksSyncError as exc:
+        print(f"  FAILED: could not read my-tracks config: {exc}", file=sys.stderr)
+        return 1
+    _verify_mytracks_config(
+        config=config,
+        domesti_base=domesti_base,
+        mytracks_base=mytracks_base,
+        test_url=test_url,
+        update_url=update_url,
+    )
+
+    payload = {
+        "participant_id": participant_id,
+        "lat": 41.194085,
+        "lon": -73.888365,
+        "accuracy_m": 12,
+        "timestamp": "2026-06-09T23:14:58+00:00",
+        "source": "verify-mytracks-pairing",
+    }
+
+    _log_step(3, "POST synthetic location update to test webhook (no persistence)")
+    if not _post_webhook_smoke(
+        domesti_base=domesti_base,
+        label="test",
+        participant_id=participant_id,
+        payload=payload,
+        relay_key=relay_key,
+        url=test_url,
+    ):
+        return 1
+
+    _log_step(4, "POST synthetic location update to live webhook")
+    if not _post_webhook_smoke(
+        domesti_base=domesti_base,
+        label="live",
+        participant_id=participant_id,
+        payload=payload,
+        relay_key=relay_key,
+        url=update_url,
+    ):
+        return 1
+
+    print()
+    print("All checks passed: my-tracks pairing is configured and domesti-bot webhooks responded.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
