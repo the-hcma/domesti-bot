@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
@@ -132,6 +133,47 @@ def test_location_update_webhook_returns_404_for_unknown_participant(
         headers={"X-Domesti-Api-Key": relay_key},
     )
     assert response.status_code == HTTPStatus.NOT_FOUND
+
+
+def test_location_update_test_webhook_logs_without_location_prefix(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_participant(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    records: list[logging.LogRecord] = []
+
+    class _ListHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _ListHandler()
+    location_logger = logging.getLogger("location")
+    old_handlers = list(location_logger.handlers)
+    old_level = location_logger.level
+    old_propagate = location_logger.propagate
+    location_logger.handlers.clear()
+    location_logger.addHandler(handler)
+    location_logger.setLevel(logging.INFO)
+    location_logger.propagate = False
+    try:
+        response = client.post(
+            "/v1/webhooks/location_update/test",
+            json=_LOCATION_UPDATE_PAYLOAD,
+            headers={"X-Domesti-Api-Key": relay_key},
+        )
+    finally:
+        location_logger.removeHandler(handler)
+        location_logger.handlers = old_handlers
+        location_logger.setLevel(old_level)
+        location_logger.propagate = old_propagate
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    messages = [record.getMessage() for record in records]
+    assert messages == ["test webhook accepted for henrique (discarded)"]
+    assert "[location]" not in messages[0]
 
 
 def test_location_update_test_webhook_does_not_persist_fix(

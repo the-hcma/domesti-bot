@@ -2,7 +2,7 @@
 
 Goals (per the conventions documented in ``docs/AGENTS.md``):
 
-* **One log record per event**. Formatter shows ``YYYYMMDD-HH:MM:SS.mmm | LEVEL    | module       | message``.
+* **One log record per event**. Formatter shows ``YYYYMMDD-HH:MM:SS.mmm | LEVEL    | logtag       | message``.
 * **System-local timestamps** by default (set ``LOG_UTC=1`` for UTC).
 * **TRACE level** below DEBUG for noisy per-request lines (e.g. health checks).
 * **File logging** with rotation when ``LOG_FILE`` is set; console logging when ``DOMESTI_LOG_CONSOLE=1``.
@@ -74,7 +74,32 @@ def _install_trace_level() -> None:
     logging.Logger.trace = _trace  # type: ignore[attr-defined]
 
 
+_LOGTAG_ALIASES: Final[dict[str, str]] = {
+    "location_update_ingest": "location",
+    "mytracks_routes": "mytracks",
+    "mytracks_service": "mytracks",
+    "presence_store": "presence",
+}
+
 _install_trace_level()
+
+
+def format_log_timestamp(epoch: float) -> str:
+    """Return a human-readable local (or UTC) timestamp for log messages."""
+    tz: ZoneInfo | _tz = _tz.utc if os.environ.get("LOG_UTC") else SYSTEM_TIMEZONE
+    return datetime.fromtimestamp(epoch, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def logtag_for_record(record: logging.LogRecord) -> str:
+    """Return a fixed-width-friendly logger tag for ``%(logtag)s``."""
+    leaf = record.name.rsplit(".", 1)[-1]
+    if leaf in _LOGTAG_ALIASES:
+        return _LOGTAG_ALIASES[leaf]
+    if record.module in _LOGTAG_ALIASES:
+        return _LOGTAG_ALIASES[record.module]
+    if len(leaf) <= 12:
+        return leaf
+    return record.module[:12]
 
 
 class HealthCheckFilter(logging.Filter):
@@ -85,6 +110,14 @@ class HealthCheckFilter(logging.Filter):
         if "/health" in msg or "/health/" in msg:
             record.levelno = TRACE_LEVEL
             record.levelname = "TRACE"
+        return True
+
+
+class LogTagFilter(logging.Filter):
+    """Attach a short ``logtag`` field so the module column stays 12 characters wide."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.logtag = logtag_for_record(record)  # type: ignore[attr-defined]
         return True
 
 
@@ -149,7 +182,7 @@ def build_dict_config(
         handlers["console"] = {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
-            "filters": ["health_check_filter"],
+            "filters": ["health_check_filter", "log_tag_filter"],
         }
         active.append("console")
 
@@ -161,7 +194,7 @@ def build_dict_config(
             "maxBytes": 10 * 1024 * 1024,  # 10 MB
             "backupCount": 5,
             "formatter": "verbose",
-            "filters": ["health_check_filter"],
+            "filters": ["health_check_filter", "log_tag_filter"],
         }
         active.append("file")
 
@@ -171,7 +204,7 @@ def build_dict_config(
         handlers["console"] = {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
-            "filters": ["health_check_filter"],
+            "filters": ["health_check_filter", "log_tag_filter"],
         }
         active.append("console")
 
@@ -180,13 +213,14 @@ def build_dict_config(
         "disable_existing_loggers": False,
         "filters": {
             "health_check_filter": {"()": f"{__name__}.HealthCheckFilter"},
+            "log_tag_filter": {"()": f"{__name__}.LogTagFilter"},
         },
         "formatters": {
             "verbose": {
                 "()": f"{__name__}.LocalTimeFormatter",
                 "format": (
                     "%(asctime)s.%(msecs)03d | %(levelname)-8s | "
-                    "%(module)-12s | %(message)s"
+                    "%(logtag)-12s | %(message)s"
                 ),
                 "datefmt": "%Y%m%d-%H:%M:%S",
             },
@@ -213,6 +247,11 @@ def build_dict_config(
                 "propagate": False,
             },
             "uvicorn.access": {
+                "handlers": active,
+                "level": level,
+                "propagate": False,
+            },
+            "location": {
                 "handlers": active,
                 "level": level,
                 "propagate": False,

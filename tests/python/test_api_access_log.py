@@ -3,10 +3,9 @@
 The middleware emits one ``[http]`` line per request. The level is
 picked at emit time based on path + status:
 
-* Successful responses to :data:`_QUIET_ACCESS_LOG_PATHS` → DEBUG
-  (poll heartbeats; ``/v1/ui/state`` is hit every 5s by the web UI
-  and would otherwise dominate INFO output);
-* Successful responses to any other path → INFO;
+* Successful responses to :data:`_QUIET_ACCESS_LOG_PATHS` → TRACE
+  (poll heartbeats; ``/v1/ui/state`` is hit every 5s by the web UI);
+* Other successful responses → DEBUG (routine client traffic stays below INFO);
 * 4xx/5xx responses to any path (including the quiet paths) → INFO,
   so genuine failures stay visible at the default log level.
 
@@ -20,12 +19,46 @@ from __future__ import annotations
 
 import argparse
 import logging
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.app import _QUIET_ACCESS_LOG_PATHS, create_app
+from app.logging_config import TRACE_LEVEL
+
+
+class _ListHandler(logging.Handler):
+    def __init__(self, records: list[logging.LogRecord]) -> None:
+        super().__init__(level=TRACE_LEVEL)
+        self._records = records
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._records.append(record)
+
+
+@pytest.fixture
+def api_http_log_records() -> Any:
+    """Capture ``app.api`` access-log lines even when dict-config disables propagation."""
+
+    records: list[logging.LogRecord] = []
+    handler = _ListHandler(records)
+    logger = logging.getLogger("app.api")
+    old_handlers = list(logger.handlers)
+    old_level = logger.level
+    old_propagate = logger.propagate
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.setLevel(TRACE_LEVEL)
+    logger.propagate = False
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.handlers = old_handlers
+        logger.setLevel(old_level)
+        logger.propagate = old_propagate
 
 
 def _client() -> tuple[TestClient, FastAPI]:
@@ -48,18 +81,10 @@ def test_quiet_paths_constant_lists_ui_state() -> None:
     assert "/v1/ui/state" in _QUIET_ACCESS_LOG_PATHS
 
 
-def test_successful_ui_state_poll_is_logged_at_debug(
-    caplog: pytest.LogCaptureFixture,
+def test_successful_ui_state_poll_is_logged_at_trace(
+    api_http_log_records: list[logging.LogRecord],
 ) -> None:
     client, app = _client()
-    # ``GET /v1/ui/state`` returns 503 Retry-After while discovery is
-    # in flight; we want the *200* branch, which means flagging
-    # discovery as finished and giving the dependency a populated
-    # ``device_state``. Easiest path: just plant an empty state object
-    # via the ``_device_state`` route's contract — the route doesn't
-    # care about manager contents for this test, only that
-    # ``app.state.device_state`` is truthy and ``discovery_error`` is
-    # falsy.
     from unittest.mock import MagicMock
 
     app.state.device_state = MagicMock(
@@ -70,24 +95,20 @@ def test_successful_ui_state_poll_is_logged_at_debug(
     )
     app.state.discovery_error = None
 
-    with caplog.at_level(logging.DEBUG, logger="app.api"):
-        r = client.get("/v1/ui/state")
+    r = client.get("/v1/ui/state")
     assert r.status_code == 200
 
-    records = _http_records(caplog.records)
+    records = _http_records(api_http_log_records)
     matching = [r for r in records if "/v1/ui/state" in r.getMessage()]
     assert matching, f"expected an [http] line for /v1/ui/state, got: {records}"
-    # Every emitted line for ``/v1/ui/state`` on success must be DEBUG
-    # — not INFO. A future regression to INFO would re-introduce the
-    # log spam the user reported.
     for rec in matching:
-        assert rec.levelno == logging.DEBUG, (
-            f"expected DEBUG, got {rec.levelname}: {rec.getMessage()}"
+        assert rec.levelno == TRACE_LEVEL, (
+            f"expected TRACE, got {rec.levelname}: {rec.getMessage()}"
         )
 
 
 def test_failed_ui_state_poll_is_still_logged_at_info(
-    caplog: pytest.LogCaptureFixture,
+    api_http_log_records: list[logging.LogRecord],
 ) -> None:
     """Discovery-in-progress returns 503 with ``Retry-After: 2``. The
     failure path must stay at INFO so problems are visible without
@@ -95,12 +116,10 @@ def test_failed_ui_state_poll_is_still_logged_at_info(
     is demoted."""
 
     client, _app = _client()
-    # No ``app.state.device_state`` set, so the dependency 503s.
-    with caplog.at_level(logging.DEBUG, logger="app.api"):
-        r = client.get("/v1/ui/state")
+    r = client.get("/v1/ui/state")
     assert r.status_code == 503
 
-    records = _http_records(caplog.records)
+    records = _http_records(api_http_log_records)
     matching = [r for r in records if "/v1/ui/state" in r.getMessage()]
     assert matching
     for rec in matching:
@@ -109,20 +128,32 @@ def test_failed_ui_state_poll_is_still_logged_at_info(
         )
 
 
-def test_non_quiet_path_is_logged_at_info(
-    caplog: pytest.LogCaptureFixture,
+def test_non_quiet_path_is_logged_at_debug(
+    api_http_log_records: list[logging.LogRecord],
 ) -> None:
-    """Sanity check the negative: a request to an arbitrary other
-    path must keep its INFO level. Uses the OpenAPI schema route
-    since it's unauthenticated and always 200."""
+    """Routine successful client traffic stays below INFO at the default level."""
 
     client, _app = _client()
-    with caplog.at_level(logging.DEBUG, logger="app.api"):
+    r = client.get("/openapi.json")
+    assert r.status_code == 200
+
+    records = _http_records(api_http_log_records)
+    matching = [r for r in records if "/openapi.json" in r.getMessage()]
+    assert matching
+    for rec in matching:
+        assert rec.levelno == logging.DEBUG, (
+            f"expected DEBUG, got {rec.levelname}: {rec.getMessage()}"
+        )
+
+
+def test_successful_http_is_not_logged_at_info(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, _app = _client()
+    with caplog.at_level(logging.INFO, logger="app.api"):
         r = client.get("/openapi.json")
     assert r.status_code == 200
 
     records = _http_records(caplog.records)
     matching = [r for r in records if "/openapi.json" in r.getMessage()]
-    assert matching
-    for rec in matching:
-        assert rec.levelno == logging.INFO
+    assert matching == []

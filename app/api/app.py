@@ -19,6 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, HTMLResponse, Response
 
 from app import kasa_discovery_store
+from app.logging_config import TRACE_LEVEL
 from app.api.schemas import (
     CompletionAliasesOut,
     ExecuteLineIn,
@@ -85,16 +86,14 @@ _LANDING_PAGE_PATH = _STATIC_DIR / "index.html"
 
 
 # Paths whose *successful* (HTTP < 400) access log lines are emitted
-# at DEBUG instead of INFO. These are the high-frequency polling
-# endpoints whose [http] records would otherwise dominate INFO
+# at TRACE instead of DEBUG. These are the highest-frequency polling
+# endpoints whose [http] records would otherwise dominate DEBUG
 # output. Failure responses (>= 400) for the same paths still log at
 # INFO so genuine errors stay visible at the default level.
 #
 # This complements :class:`app.logging_config.HealthCheckFilter`,
-# which post-hoc demotes ``/health`` lines all the way to TRACE
-# (effectively invisible). The DEBUG path here is the right level
-# for endpoints worth seeing when you turn the dial up to debug a
-# real issue, but not worth seeing on every poll otherwise.
+# which post-hoc demotes ``/health`` lines all the way to TRACE as
+# well. All other successful requests log at DEBUG (below INFO).
 _QUIET_ACCESS_LOG_PATHS: frozenset[str] = frozenset({
     # The web UI polls this on a 5s cadence (see ``main.ts``).
     "/v1/ui/state",
@@ -108,9 +107,9 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
 
     * 5xx raised exceptions → ``logger.exception(...)`` (ERROR with traceback).
     * 4xx/5xx responses     → INFO (errors should stay visible at the default level).
-    * Successful responses to paths in :data:`_QUIET_ACCESS_LOG_PATHS` → DEBUG
+    * Successful responses to paths in :data:`_QUIET_ACCESS_LOG_PATHS` → TRACE
       (poll heartbeats; see the constant's docstring).
-    * Everything else       → INFO.
+    * Other successful responses → DEBUG (routine client traffic stays below INFO).
 
     The :class:`app.logging_config.HealthCheckFilter` demotes ``/health`` lines
     further to TRACE so they never surface even at DEBUG. Each record looks like::
@@ -134,12 +133,12 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             )
             raise
         elapsed_ms = (time.perf_counter() - started) * 1000.0
-        level = (
-            logging.DEBUG
-            if response.status_code < 400
-            and request.url.path in _QUIET_ACCESS_LOG_PATHS
-            else logging.INFO
-        )
+        if response.status_code >= 400:
+            level = logging.INFO
+        elif request.url.path in _QUIET_ACCESS_LOG_PATHS:
+            level = TRACE_LEVEL
+        else:
+            level = logging.DEBUG
         _LOGGER.log(
             level,
             "[http] %s %s %s %d (%.1f ms)",

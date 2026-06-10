@@ -14,8 +14,10 @@ from app.logging_config import (
     TRACE_LEVEL,
     HealthCheckFilter,
     LocalTimeFormatter,
+    LogTagFilter,
     apply_logging_from_env,
     build_dict_config,
+    logtag_for_record,
 )
 
 
@@ -75,13 +77,40 @@ def test_local_time_formatter_uses_my_tracks_format(monkeypatch: pytest.MonkeyPa
     monkeypatch.delenv("LOG_UTC", raising=False)
     record = _make_record("hello %s", level=logging.INFO)
     record.args = ("world",)
+    assert LogTagFilter().filter(record) is True
     formatted = LocalTimeFormatter(
-        fmt="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(module)-12s | %(message)s",
+        fmt="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(logtag)-12s | %(message)s",
         datefmt="%Y%m%d-%H:%M:%S",
     ).format(record)
-    # Format: 20260512-15:23:45.123 | INFO     | test_logging | hello world
-    pattern = r"^\d{8}-\d{2}:\d{2}:\d{2}\.\d{3} \| INFO\s+\| [\w_\-]+\s+\| hello world$"
+    # Format: 20260512-15:23:45.123 | INFO     | test         | hello world
+    pattern = r"^\d{8}-\d{2}:\d{2}:\d{2}\.\d{3} \| INFO\s+\| test\s+\| hello world$"
     assert re.match(pattern, formatted), f"unexpected formatted line: {formatted!r}"
+
+
+def test_logtag_for_record_aliases_long_module_names() -> None:
+    record = logging.LogRecord(
+        name="app.api.mytracks_routes",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="sync",
+        args=None,
+        exc_info=None,
+    )
+    record.module = "mytracks_routes"
+    assert logtag_for_record(record) == "mytracks"
+
+    location_record = logging.LogRecord(
+        name="location",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="test",
+        args=None,
+        exc_info=None,
+    )
+    location_record.module = "location_update_ingest"
+    assert logtag_for_record(location_record) == "location"
 
 
 def test_local_time_formatter_honours_log_utc(monkeypatch: pytest.MonkeyPatch) -> None:
