@@ -41,6 +41,13 @@ def count_participants(path: Path) -> int:
         return len(session.scalars(select(RuleParticipant.participant_id)).all())
 
 
+def participant_exists(path: Path, participant_id: str) -> bool:
+    """True when ``participant_id`` is present in the automation roster."""
+    with discovery_session(path) as session:
+        row = session.get(RuleParticipant, participant_id.strip())
+        return row is not None
+
+
 def delete_geofence(path: Path, geofence_id: str) -> None:
     with discovery_session(path) as session:
         row = session.get(RuleGeofence, geofence_id)

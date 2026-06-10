@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +10,10 @@ from urllib.parse import urlparse
 
 import httpx
 
+_LOGGER = logging.getLogger(__name__)
+
+_DOMESTI_BOT_CONFIG_PATH = "/api/admin/domesti-bot/config/"
+_DOMESTI_BOT_PAIR_PATH = "/api/admin/domesti-bot/pair/"
 _USERS_WITH_DEVICES_PATH = "/api/admin/users-with-devices/"
 _WAYPOINTS_PATH = "/api/admin/waypoints/"
 _REQUEST_TIMEOUT_S = 30.0
@@ -19,6 +24,14 @@ _CSRF_INPUT_RE = re.compile(
 
 class MyTracksSyncError(ValueError):
     """Raised when My Tracks export HTTP or payload parsing fails."""
+
+
+@dataclass(frozen=True)
+class DomestiBotConfigFromMyTracks:
+    domesti_base_url: str | None = None
+    location_updates_enabled: bool | None = None
+    participant_location_test_url: str | None = None
+    participant_location_update_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +62,15 @@ class ExportedParticipantLocation:
     received_at: str
 
 
+def build_location_update_webhook_urls(domesti_public_base_url: str) -> tuple[str, str]:
+    """Return live and test location-update webhook URLs for a public domesti-bot origin."""
+    base = normalize_public_base_url(domesti_public_base_url)
+    return (
+        f"{base}/v1/webhooks/location_update",
+        f"{base}/v1/webhooks/location_update/test",
+    )
+
+
 def fetch_geofences_from_my_tracks(
     *,
     base_url: str,
@@ -64,6 +86,48 @@ def fetch_geofences_from_my_tracks(
     )
     rows = _extract_rows(payload, key="waypoints")
     return [_parse_geofence(row) for row in rows]
+
+
+def fetch_mytracks_domesti_config(
+    *,
+    base_url: str,
+    password: str,
+    username: str,
+) -> DomestiBotConfigFromMyTracks:
+    """Read domesti-bot integration config from my-tracks."""
+    client = _login_client(base_url, username=username, password=password)
+    try:
+        try:
+            response = client.get(_DOMESTI_BOT_CONFIG_PATH)
+        except httpx.HTTPError as exc:
+            raise MyTracksSyncError(
+                f"My Tracks domesti-bot config request failed for {base_url}: {exc!r}"
+            ) from exc
+    finally:
+        client.close()
+    payload = _parse_export_response(
+        response,
+        base_url=base_url,
+        export_path=_DOMESTI_BOT_CONFIG_PATH,
+    )
+    if not isinstance(payload, dict):
+        raise MyTracksSyncError(
+            f"Expected domesti-bot config object, got {type(payload).__name__}"
+        )
+    enabled_raw = payload.get("location_updates_enabled")
+    location_updates_enabled = (
+        bool(enabled_raw) if enabled_raw is not None else None
+    )
+    return DomestiBotConfigFromMyTracks(
+        domesti_base_url=_optional_str(payload.get("domesti_base_url")),
+        location_updates_enabled=location_updates_enabled,
+        participant_location_test_url=_optional_str(
+            payload.get("participant_location_test_url")
+        ),
+        participant_location_update_url=_optional_str(
+            payload.get("participant_location_update_url")
+        ),
+    )
 
 
 def fetch_participants_from_my_tracks(
@@ -83,6 +147,21 @@ def fetch_participants_from_my_tracks(
     return [_parse_user_with_device(row) for row in rows]
 
 
+def normalize_public_base_url(url: str) -> str:
+    """Return a canonical public HTTPS (or dev HTTP) origin for domesti-bot."""
+    trimmed = url.strip().rstrip("/")
+    if trimmed == "":
+        raise MyTracksSyncError("Expected public base URL, got empty value")
+    if not trimmed.startswith(("http://", "https://")):
+        trimmed = f"https://{trimmed}"
+    parsed = urlparse(trimmed)
+    if parsed.netloc == "":
+        raise MyTracksSyncError(f"Expected public base URL, got {url!r}")
+    if parsed.scheme not in {"http", "https"}:
+        raise MyTracksSyncError(f"Expected http or https public base URL, got {url!r}")
+    return trimmed
+
+
 def normalize_mytracks_base_url(domain: str) -> str:
     """Return a canonical base URL for My Tracks admin export calls."""
     trimmed = domain.strip().rstrip("/")
@@ -94,6 +173,129 @@ def normalize_mytracks_base_url(domain: str) -> str:
     if parsed.netloc == "":
         raise MyTracksSyncError(f"Expected My Tracks domain, got {domain!r}")
     return trimmed
+
+
+def pair_with_my_tracks(
+    *,
+    api_key: str,
+    base_url: str,
+    domesti_base_url: str,
+    participant_location_test_url: str,
+    participant_location_update_url: str,
+    password: str,
+    username: str,
+) -> int:
+    """Register domesti-bot webhook URLs and relay secret on my-tracks.
+
+    Returns the HTTP status code on success (typically ``200``).
+    """
+    if api_key.strip() == "":
+        raise MyTracksSyncError("Expected relay API key, got empty value")
+    _LOGGER.info(
+        "[mytracks] pair request starting for %s as %s (domesti public %s)",
+        base_url,
+        username,
+        domesti_base_url,
+    )
+    client = _login_client(base_url, username=username, password=password)
+    try:
+        csrf = _session_csrf_token(client)
+        try:
+            response = client.post(
+                _DOMESTI_BOT_PAIR_PATH,
+                json={
+                    "api_key": api_key,
+                    "domesti_base_url": domesti_base_url,
+                    "participant_location_update_url": participant_location_update_url,
+                    "participant_location_test_url": participant_location_test_url,
+                },
+                headers={"X-CSRFToken": csrf, "Referer": f"{base_url.rstrip('/')}/"},
+            )
+        except httpx.HTTPError as exc:
+            raise MyTracksSyncError(
+                f"My Tracks pair request failed for {base_url}: {exc!r}"
+            ) from exc
+    finally:
+        client.close()
+    if response.status_code in {401, 403}:
+        message = (
+            "My Tracks rejected the admin session during pairing (staff account required)"
+        )
+        _LOGGER.warning(
+            "[mytracks] pair request failed for %s as %s: %s",
+            base_url,
+            username,
+            message,
+        )
+        raise MyTracksSyncError(message)
+    if response.status_code == 404:
+        message = (
+            "My Tracks domesti-bot pair endpoint not found — upgrade my-tracks to a build "
+            "with /api/admin/domesti-bot/pair/"
+        )
+        _LOGGER.warning(
+            "[mytracks] pair request failed for %s as %s: %s",
+            base_url,
+            username,
+            message,
+        )
+        raise MyTracksSyncError(message)
+    if response.status_code >= 400:
+        detail = _response_error_detail(response)
+        message = f"My Tracks pair returned HTTP {response.status_code}: {detail}"
+        _LOGGER.warning(
+            "[mytracks] pair request failed for %s as %s: %s",
+            base_url,
+            username,
+            message,
+        )
+        raise MyTracksSyncError(message)
+    _LOGGER.info(
+        "[mytracks] pair request accepted for %s as %s (HTTP %d)",
+        base_url,
+        username,
+        response.status_code,
+    )
+    return response.status_code
+
+
+def patch_mytracks_location_updates(
+    *,
+    base_url: str,
+    enabled: bool,
+    password: str,
+    username: str,
+) -> None:
+    """Enable or disable live location relays on my-tracks."""
+    client = _login_client(base_url, username=username, password=password)
+    try:
+        csrf = _session_csrf_token(client)
+        try:
+            response = client.patch(
+                _DOMESTI_BOT_CONFIG_PATH,
+                json={"location_updates_enabled": enabled},
+                headers={"X-CSRFToken": csrf, "Referer": f"{base_url.rstrip('/')}/"},
+            )
+        except httpx.HTTPError as exc:
+            raise MyTracksSyncError(
+                f"My Tracks location-updates patch failed for {base_url}: {exc!r}"
+            ) from exc
+    finally:
+        client.close()
+    if response.status_code in {401, 403}:
+        raise MyTracksSyncError(
+            "My Tracks rejected the admin session during location-updates patch"
+        )
+    if response.status_code == 404:
+        raise MyTracksSyncError(
+            "My Tracks domesti-bot config endpoint not found — upgrade my-tracks to a build "
+            "with /api/admin/domesti-bot/config/"
+        )
+    if response.status_code >= 400:
+        detail = _response_error_detail(response)
+        raise MyTracksSyncError(
+            f"My Tracks location-updates patch returned HTTP {response.status_code}: {detail}"
+        )
 
 
 def _extract_rows(payload: Any, *, key: str) -> list[dict[str, Any]]:
@@ -179,6 +381,13 @@ def _login_client(base_url: str, *, username: str, password: str) -> httpx.Clien
     except Exception:
         client.close()
         raise
+
+
+def _optional_str(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed if trimmed != "" else None
 
 
 def _parse_export_response(
@@ -292,6 +501,28 @@ def _parse_user_with_device(row: dict[str, Any]) -> ExportedParticipant:
         enabled=enabled,
         latest_location=_parse_latest_location(row),
     )
+
+
+def _response_error_detail(response: httpx.Response) -> str:
+    content_type = response.headers.get("content-type", "")
+    if "json" in content_type.lower():
+        try:
+            payload = response.json()
+        except ValueError:
+            return response.text[:200]
+        if isinstance(payload, dict):
+            detail = payload.get("detail") or payload.get("error")
+            if detail is not None:
+                return str(detail)
+    text = response.text.strip()
+    return text[:200] if text else "no response body"
+
+
+def _session_csrf_token(client: httpx.Client) -> str:
+    csrf = client.cookies.get("csrftoken")
+    if csrf is not None and csrf.strip() != "":
+        return csrf
+    raise MyTracksSyncError("Expected CSRF token from My Tracks session, got none")
 
 
 def _resolve_csrf_token(client: httpx.Client, login_page: httpx.Response) -> str:

@@ -1,6 +1,7 @@
 // My Tracks connection settings (domain + default admin username).
 
 import { HttpError } from "./api.js";
+import { mountMyTracksPairingPanel } from "./my-tracks-pairing-panel.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
@@ -148,4 +149,9 @@ export async function mountMyTracksSettingsPanel(
   });
 
   container.append(lead, status, form);
+
+  const pairingMount = document.createElement("div");
+  pairingMount.className = "mytracks-pairing-mount";
+  container.append(pairingMount);
+  await mountMyTracksPairingPanel(pairingMount);
 }

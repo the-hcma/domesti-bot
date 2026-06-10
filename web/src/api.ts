@@ -12,8 +12,12 @@
 
 import type {
   GeofenceOut,
+  LocationHistoryRetentionIn,
+  LocationHistoryRetentionOut,
   MetaOut,
   MyTracksGeofencesSyncOut,
+  MyTracksPairIn,
+  MyTracksPairStatusOut,
   MyTracksParticipantsSyncOut,
   MyTracksSettingsIn,
   MyTracksSettingsOut,
@@ -101,7 +105,7 @@ export function authHeaders(): Record<string, string> {
 }
 
 async function call<T>(
-  method: "DELETE" | "GET" | "POST" | "PUT",
+  method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT",
   path: string,
   body?: unknown,
 ): Promise<T> {
@@ -184,11 +188,26 @@ export const api = {
   fetchMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut> {
     return call<MyTracksGeofencesSyncOut>("GET", "/v1/rules/geofences/sync-status");
   },
+  fetchMyTracksPairStatus(): Promise<MyTracksPairStatusOut | null> {
+    return callNullableJson<MyTracksPairStatusOut>("GET", "/v1/settings/my-tracks/pair-status");
+  },
   fetchMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
     return call<MyTracksParticipantsSyncOut>("GET", "/v1/rules/participants/sync-status");
   },
   fetchMyTracksSettings(): Promise<MyTracksSettingsOut | null> {
     return callNullableJson<MyTracksSettingsOut>("GET", "/v1/settings/my-tracks");
+  },
+  patchMyTracksLocationHistoryRetention(
+    body: LocationHistoryRetentionIn,
+  ): Promise<LocationHistoryRetentionOut> {
+    return call<LocationHistoryRetentionOut>(
+      "PATCH",
+      "/v1/settings/my-tracks/location-history-retention",
+      body,
+    );
+  },
+  postMyTracksPair(body: MyTracksPairIn): Promise<MyTracksPairStatusOut> {
+    return call<MyTracksPairStatusOut>("POST", "/v1/settings/my-tracks/pair", body);
   },
   fetchRulesGeofences(): Promise<GeofenceOut[]> {
     return call<GeofenceOut[]>("GET", "/v1/rules/geofences");

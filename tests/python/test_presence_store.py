@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.location_history_retention import default_location_history_retention
 from app.presence_store import (
     ParticipantFixRecord,
     geofence_ids_containing_fix,
@@ -27,6 +28,7 @@ def test_replace_and_list_participant_fixes(tmp_path: Path) -> None:
                 source="my-tracks",
             ),
         ],
+        retention=default_location_history_retention(),
     )
     fixes = list_participant_fixes(db)
     assert fixes["henrique"].lat == 41.194072

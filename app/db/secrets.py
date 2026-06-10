@@ -14,6 +14,7 @@ from app.db.session import discovery_session
 
 _SMTP_PASSWORD_KEY = "smtp_password"
 _MYTRACKS_ADMIN_PASSWORD_KEY = "mytracks_admin_password"
+_MYTRACKS_RELAY_API_KEY = "mytracks_relay_api_key"
 _TAILWIND_SECRET_KEY = "tailwind_token"
 
 
@@ -43,6 +44,11 @@ def load_mytracks_admin_password_from_db(path: Path) -> str | None:
     return _load_app_secret_plaintext(path, _MYTRACKS_ADMIN_PASSWORD_KEY)
 
 
+def load_mytracks_relay_api_key_from_db(path: Path) -> str | None:
+    """Return the decrypted my-tracks relay API key, or ``None``."""
+    return _load_app_secret_plaintext(path, _MYTRACKS_RELAY_API_KEY)
+
+
 def load_tailwind_token_from_db(path: Path) -> str | None:
     """Return the decrypted Tailwind token from the database, or ``None``."""
     token = _load_app_secret_plaintext(path, _TAILWIND_SECRET_KEY)
@@ -62,6 +68,11 @@ def save_mytracks_admin_password_to_db(path: Path, password: str) -> None:
     _save_app_secret_plaintext(path, _MYTRACKS_ADMIN_PASSWORD_KEY, password)
 
 
+def save_mytracks_relay_api_key_to_db(path: Path, api_key: str) -> None:
+    """Encrypt and persist the my-tracks relay API key."""
+    _save_app_secret_plaintext(path, _MYTRACKS_RELAY_API_KEY, api_key.strip())
+
+
 def save_tailwind_token_to_db(path: Path, token: str) -> None:
     """Encrypt and persist the Tailwind Local Control Key."""
     _save_app_secret_plaintext(path, _TAILWIND_SECRET_KEY, token.strip())
@@ -75,6 +86,11 @@ def smtp_password_stored_in_db(path: Path) -> bool:
 def mytracks_admin_password_stored_in_db(path: Path) -> bool:
     """True when an ``app_secrets`` row exists for the My Tracks admin password."""
     return _app_secret_stored_in_db(path, _MYTRACKS_ADMIN_PASSWORD_KEY)
+
+
+def mytracks_relay_api_key_stored_in_db(path: Path) -> bool:
+    """True when an ``app_secrets`` row exists for the my-tracks relay API key."""
+    return _app_secret_stored_in_db(path, _MYTRACKS_RELAY_API_KEY)
 
 
 def secrets_key_configured() -> bool:

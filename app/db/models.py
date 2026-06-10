@@ -49,10 +49,34 @@ class MyTracksSettings(Base):
     __tablename__ = "mytracks_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domesti_public_base_url: Mapped[str | None] = mapped_column(String, nullable=True)
     domain: Mapped[str] = mapped_column(String, nullable=False)
-    username: Mapped[str] = mapped_column(String, nullable=False, default="")
     last_geofences_sync_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_pair_error: Mapped[str | None] = mapped_column(String, nullable=True)
     last_participants_sync_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_verify_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_verify_ok: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    location_history_max_age_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_history_min_keep_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    location_history_unlimited: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    location_updates_accepted: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    paired_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    participant_location_test_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    participant_location_update_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+    username: Mapped[str] = mapped_column(String, nullable=False, default="")
+
+
+class RuleParticipantLocationHistory(Base):
+    __tablename__ = "rule_participant_location_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    participant_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    received_at: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
