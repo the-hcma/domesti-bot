@@ -17,6 +17,11 @@ import {
 } from "./presence-map.js";
 import { haversineM } from "./rules-mock-fixtures.js";
 import {
+  appendRuleSummaryBody,
+  buildRuleSummaryContext,
+  summarizeRule,
+} from "./rule-summary.js";
+import {
   ALL_DAYS_OF_WEEK,
   createDayOfWeekPicker,
   createEnableToggle,
@@ -1035,7 +1040,17 @@ class RulesHubController {
   }
 
   private async renderRulesTab(): Promise<void> {
-    const rules = await this.dataSource.listRules();
+    const [rules, participants, geofences, actionDevices] = await Promise.all([
+      this.dataSource.listRules(),
+      this.dataSource.listParticipants(),
+      this.dataSource.listGeofences(),
+      this.dataSource.listActionDevices(),
+    ]);
+    const summaryContext = buildRuleSummaryContext(
+      participants,
+      geofences,
+      actionDevices,
+    );
     const addBtn = document.createElement("button");
     addBtn.type = "button";
     addBtn.className = "btn";
@@ -1048,9 +1063,17 @@ class RulesHubController {
     for (const rule of rules) {
       const card = document.createElement("article");
       card.className = "rules-card";
-      const row = document.createElement("div");
-      row.className = "rules-card-row";
-      const title = document.createElement("strong");
+      card.classList.toggle("rules-card-disabled", !rule.enabled);
+
+      const top = document.createElement("div");
+      top.className = "rules-rule-card-top";
+      const enableToggle = createEnableToggle(rule.enabled, (next) => {
+        void this.dataSource
+          .setRuleEnabled(rule.id, next)
+          .then(() => this.refresh());
+      });
+      const title = document.createElement("h3");
+      title.className = "rules-rule-card-title";
       title.textContent = rule.label;
       const actions = document.createElement("div");
       actions.className = "rules-inline-actions";
@@ -1071,18 +1094,18 @@ class RulesHubController {
         }
       });
       actions.append(editBtn, delBtn);
-      row.append(title, actions);
-      const meta = document.createElement("p");
-      meta.className = "rules-card-meta";
-      const actionSummary = rule.device_actions
-        .map((a) => `${formatActionLabel(a.action)} ${a.device_id}`)
-        .join(", ");
-      const notify =
-        rule.notify_on_fire && rule.notification_email !== null
-          ? ` · email ${rule.notification_email}`
-          : "";
-      meta.textContent = `${rule.id} · ${rule.enabled ? "enabled" : "disabled"}${notify} · ${actionSummary}`;
-      card.append(row, meta);
+      top.append(enableToggle, title, actions);
+      card.append(top);
+
+      appendRuleSummaryBody(card, summarizeRule(rule, summaryContext));
+
+      if (rule.notify_on_fire && rule.notification_email !== null) {
+        const notifyMeta = document.createElement("p");
+        notifyMeta.className = "rules-card-meta";
+        notifyMeta.textContent = `Email on fire → ${rule.notification_email}`;
+        card.append(notifyMeta);
+      }
+
       list.append(card);
     }
     this.body.append(addBtn, list);

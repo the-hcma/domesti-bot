@@ -55,6 +55,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-enable-toggle",
         "rules-info-badge",
         "rules-inline-link",
+        "rules-rule-card-top",
+        "rules-rule-summary-list",
         "rules-geofence-row-focused",
         "rules-info-popover[hidden]",
         "rules-mail-test-row",
@@ -153,7 +155,17 @@ def test_rules_hub_opens_with_mock_seed_rule(
         assert "Rules" in dialog.inner_text()
         assert "Welcome home" in dialog.inner_text()
         page.locator('.rules-tab[data-tab="rules"]').click()
-        assert "Add rule" in dialog.inner_text()
+        page.get_by_role("button", name="Add rule").wait_for(state="visible", timeout=10_000)
+        rules_card = page.locator(".rules-card").first
+        rules_card.wait_for(state="visible", timeout=10_000)
+        card_text = rules_card.inner_text()
+        assert "Henrique and Kristen are both inside House" in card_text
+        assert "After sunset until midnight" in card_text
+        assert "Turn on Kitchen lights" in card_text
+        assert "Turn on Porch lights" in card_text
+        assert "Open Main garage" in card_text
+        assert "192.168.1.42" not in card_text
+        assert rules_card.locator(".rules-enable-toggle").count() == 1
     finally:
         context.close()
 

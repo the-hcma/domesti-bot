@@ -518,8 +518,9 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     });
     return {
       ...status,
-      geofences,
-      participants: participantRows,
+      geofences: geofences.length > 0 ? geofences : status.geofences,
+      participants:
+        participantRows.length > 0 ? participantRows : status.participants,
       using_mock: true,
     };
   }
@@ -536,16 +537,22 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return this.inner.listActionDevices();
   }
 
-  listGeofences(): Promise<GeofenceOut[]> {
+  async listGeofences(): Promise<GeofenceOut[]> {
     if (this.rulesLive) {
-      return api.fetchRulesGeofences();
+      const live = await api.fetchRulesGeofences();
+      if (live.length > 0) {
+        return live;
+      }
     }
     return this.inner.listGeofences();
   }
 
-  listParticipants(): Promise<ParticipantOut[]> {
+  async listParticipants(): Promise<ParticipantOut[]> {
     if (this.rulesLive) {
-      return api.fetchRulesParticipants();
+      const live = await api.fetchRulesParticipants();
+      if (live.length > 0) {
+        return live;
+      }
     }
     return this.inner.listParticipants();
   }
