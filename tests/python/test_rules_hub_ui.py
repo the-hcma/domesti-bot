@@ -319,6 +319,72 @@ def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
 
 
 @pytest.mark.browser
+def test_participants_tab_tooltip_not_clipped_at_map_edge(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Sticky participant tooltips must paint outside the 280px map without clipping."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator('.rules-tab[data-tab="participants"]').click()
+        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        page.wait_for_function(
+            """() => {
+              const map = document.querySelector('.rules-presence-map.leaflet-container');
+              return map !== null && map.querySelectorAll('img.leaflet-tile').length > 0;
+            }""",
+            timeout=15_000,
+        )
+        overflow = page.locator(".rules-presence-map").evaluate(
+            "(el) => getComputedStyle(el).overflow",
+        )
+        assert overflow == "visible"
+
+        top_marker_y = float("inf")
+        top_marker = None
+        for marker in page.locator(".rules-presence-participant-marker").all():
+            box = marker.bounding_box()
+            if box is None:
+                continue
+            if box["y"] < top_marker_y:
+                top_marker_y = box["y"]
+                top_marker = marker
+        assert top_marker is not None
+        top_marker.hover()
+        tooltip = page.locator(".rules-presence-map-tooltip")
+        tooltip.wait_for(state="visible", timeout=5_000)
+        allows_overflow = page.evaluate(
+            """() => {
+              const tooltip = document.querySelector('.leaflet-tooltip.rules-presence-map-tooltip');
+              if (tooltip === null) return false;
+              let el = tooltip.parentElement;
+              while (el !== null) {
+                if (el.classList.contains('rules-presence-map-shell')) {
+                  return true;
+                }
+                const style = getComputedStyle(el);
+                if (style.overflow === 'hidden') {
+                  return false;
+                }
+                el = el.parentElement;
+              }
+              return false;
+            }""",
+        )
+        assert allows_overflow
+        box = tooltip.bounding_box()
+        assert box is not None
+        assert box["width"] >= 120
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
 def test_conditions_home_location_link_opens_geofences_tab(
     chromium_browser: Any,
     landing_base_url: str,
