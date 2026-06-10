@@ -13,7 +13,7 @@ from app.mytracks_store import load_location_history_retention, load_mytracks_pa
 from app.presence_store import ParticipantFixRecord, parse_iso_timestamp_to_epoch, upsert_participant_fix
 from app.rules_store import participant_exists
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("location")
 
 
 def apply_location_update_webhook(
@@ -32,10 +32,7 @@ def apply_location_update_webhook(
         )
     participant_id = body.participant_id.strip()
     if not persist_fix:
-        _LOGGER.info(
-            "[location] test webhook accepted for %s (discarded)",
-            participant_id,
-        )
+        _LOGGER.info("test webhook accepted for %s (discarded)", participant_id)
         return
     if not participant_exists(cache_path, participant_id):
         raise HTTPException(

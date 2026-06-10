@@ -17,9 +17,10 @@ from app.location_history_retention import (
     LocationHistoryRetention,
     retained_history_row_ids,
 )
+from app.logging_config import format_log_timestamp
 from app.rules_store import GeofenceRecord
 
-_LOGGER = logging.getLogger(__name__)
+_LOCATION_LOGGER = logging.getLogger("location")
 
 
 @dataclass(frozen=True)
@@ -133,9 +134,9 @@ def prune_participant_location_history(
                 RuleParticipantLocationHistory.id.in_(delete_ids)
             )
         )
-        if _LOGGER.isEnabledFor(logging.INFO):
-            _LOGGER.info(
-                "[location] pruned %d history row(s) for %s (kept %d)",
+        if _LOCATION_LOGGER.isEnabledFor(logging.INFO):
+            _LOCATION_LOGGER.info(
+                "pruned %d history row(s) for %s (kept %d)",
                 len(delete_ids),
                 participant_id,
                 len(keep_ids),
@@ -230,12 +231,12 @@ def upsert_participant_fix(
         )
         stored = True
     if stored:
-        _LOGGER.info(
-            "[location] stored fix for %s (%.5f, %.5f) received_at=%.0f",
+        _LOCATION_LOGGER.info(
+            "stored fix for %s (%.5f, %.5f) at %s",
             fix.participant_id,
             fix.lat,
             fix.lon,
-            fix.received_at,
+            format_log_timestamp(fix.received_at),
         )
         prune_participant_location_history(
             path,
