@@ -1,6 +1,7 @@
 // Leaflet + OpenStreetMap geofence editor (ported from my-tracks ``geofences.html``).
 
 import L from "leaflet";
+import { participantMarkerColor } from "./map-device-colors.js";
 import {
   formatParticipantTooltipHtml,
   participantNearEnabledGeofence,
@@ -91,18 +92,24 @@ export async function initGeofenceLeafletMap(
         && participantNearEnabledGeofence(participant.last_fix, geofences),
     );
   const participantMarkers: L.CircleMarker[] = [];
-  for (const [index, participant] of nearbyParticipants.entries()) {
+  for (const participant of nearbyParticipants) {
     const fix = participant.last_fix;
+    const color = participantMarkerColor(
+      participant.tracking_device_label,
+      participant.participant_id,
+    );
     const marker = L.circleMarker([fix.lat, fix.lon], {
-      color: "var(--fg)",
-      fillColor: index % 2 === 0 ? "#1565c0" : "#2e7d32",
+      color: "#fff",
+      fillColor: color,
       fillOpacity: 0.9,
-      radius: 8,
+      opacity: 1,
+      radius: 10,
       weight: 2,
     })
       .bindTooltip(formatParticipantTooltipHtml(participant), {
         className: "rules-presence-map-tooltip",
         direction: "top",
+        offset: [0, -12],
         sticky: true,
       })
       .addTo(map);

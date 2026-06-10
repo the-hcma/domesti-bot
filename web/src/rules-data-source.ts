@@ -40,6 +40,7 @@ export interface RulesDataSource {
   getMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut>;
   getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut>;
   getMyTracksSettings(): Promise<MyTracksSettingsOut | null>;
+  listParticipantStatus(): Promise<ParticipantStatusOut[]>;
   listParticipants(): Promise<ParticipantOut[]>;
   resetMyTracksSettings(): Promise<void>;
   saveMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut>;
@@ -124,24 +125,7 @@ export class MockRulesDataSource implements RulesDataSource {
 
   async getStatus(): Promise<RulesStatusOut> {
     const now = Date.now();
-    const participants: ParticipantStatusOut[] = this.store.participants.map(
-      (p) => {
-        const fix = this.store.participant_fixes[p.participant_id] ?? null;
-        const age_seconds =
-          fix === null
-            ? null
-            : Math.max(0, Math.floor((now - Date.parse(fix.received_at)) / 1000));
-        const inside_geofence_ids = this.store.geofences
-          .filter((g) => participantInsideGeofence(fix, g))
-          .map((g) => g.geofence_id);
-        return {
-          ...p,
-          last_fix: fix,
-          inside_geofence_ids,
-          age_seconds,
-        };
-      },
-    );
+    const participants = await this.listParticipantStatus();
     const sun = mockSunRow();
     return {
       participants,
@@ -224,6 +208,26 @@ export class MockRulesDataSource implements RulesDataSource {
       participant_count: this.store.participants.length,
       webhook_ready: true,
     };
+  }
+
+  async listParticipantStatus(): Promise<ParticipantStatusOut[]> {
+    const now = Date.now();
+    return this.store.participants.map((participant) => {
+      const fix = this.store.participant_fixes[participant.participant_id] ?? null;
+      const age_seconds =
+        fix === null
+          ? null
+          : Math.max(0, Math.floor((now - Date.parse(fix.received_at)) / 1000));
+      const inside_geofence_ids = this.store.geofences
+        .filter((geofence) => participantInsideGeofence(fix, geofence))
+        .map((geofence) => geofence.geofence_id);
+      return {
+        ...participant,
+        age_seconds,
+        inside_geofence_ids,
+        last_fix: fix,
+      };
+    });
   }
 
   async listParticipants(): Promise<ParticipantOut[]> {
@@ -531,6 +535,16 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
       }
     }
     return this.inner.listGeofences();
+  }
+
+  async listParticipantStatus(): Promise<ParticipantStatusOut[]> {
+    if (this.rulesLive) {
+      const live = await api.fetchRulesParticipantStatus();
+      if (live.length > 0) {
+        return live;
+      }
+    }
+    return this.inner.listParticipantStatus();
   }
 
   async listParticipants(): Promise<ParticipantOut[]> {

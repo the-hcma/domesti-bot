@@ -63,6 +63,9 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-info-popover[hidden]",
         "rules-mail-test-row",
         "rules-presence-map",
+        "rules-presence-map-shell",
+        "rules-presence-map-legend",
+        "rules-presence-map-filter-swatch",
         "rules-presence-map-filters",
         "rules-day-shortcuts",
         "automations-dialog .leaflet-bar a",
@@ -216,6 +219,29 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
         assert box["width"] >= 120
         assert "Henrique" in tooltip.inner_text()
         assert "(" in tooltip.inner_text()
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_participant_presence_map_shows_color_legend(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Status map shows a participant/device legend when multiple fixes are visible."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        legend = page.locator(".rules-presence-map-legend")
+        legend.wait_for(state="visible", timeout=10_000)
+        assert legend.locator(".rules-presence-map-legend-item").count() >= 2
+        assert "Henrique" in legend.inner_text()
+        assert page.locator(".rules-presence-map-filter-swatch").count() >= 2
     finally:
         context.close()
 

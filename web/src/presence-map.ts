@@ -2,6 +2,7 @@
 
 import L from "leaflet";
 import { formatLocalTimestamp, formatUtcTimestampTitle } from "./format-timestamp.js";
+import { participantMarkerColor } from "./map-device-colors.js";
 import { haversineM } from "./rules-mock-fixtures.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
 import type { GeofenceOut, ParticipantFixOut, ParticipantStatusOut } from "./types.js";
@@ -14,15 +15,6 @@ const SINGLE_PARTICIPANT_BOUNDS_RADIUS_M = 220;
 
 const SINGLE_PARTICIPANT_MAX_ZOOM = 17;
 const MULTI_PARTICIPANT_MAX_ZOOM = 15;
-
-const PARTICIPANT_MARKER_COLORS = [
-  "#2e7d32",
-  "#1565c0",
-  "#6a1b9a",
-  "#c62828",
-  "#ef6c00",
-  "#00838f",
-] as const;
 
 export interface PresenceMapParticipant {
   age_seconds: number | null;
@@ -43,6 +35,7 @@ export interface PresenceMapMountOptions {
 
 export interface PresenceMapController {
   destroy(): void;
+  updateParticipants(participants: PresenceMapParticipant[]): void;
 }
 
 interface ParticipantLayers {
@@ -124,6 +117,71 @@ export function participantNearEnabledGeofence(
   return false;
 }
 
+function participantMarkerOptions(color: string): L.CircleMarkerOptions {
+  return {
+    className: "rules-presence-participant-marker",
+    color: "#fff",
+    fillColor: color,
+    fillOpacity: 0.9,
+    opacity: 1,
+    radius: 10,
+    weight: 2,
+  };
+}
+
+function renderPresenceMapLegend(
+  legendEl: HTMLElement,
+  participants: PresenceMapParticipant[],
+  visibleIds: ReadonlySet<string>,
+): void {
+  legendEl.replaceChildren();
+  const withFix = participants.filter((participant) => participant.last_fix !== null);
+  if (withFix.length < 2) {
+    legendEl.hidden = true;
+    return;
+  }
+  legendEl.hidden = false;
+
+  const title = document.createElement("div");
+  title.className = "rules-presence-map-legend-title";
+  title.textContent = "Participants";
+  legendEl.append(title);
+
+  const sorted = [...withFix].sort((left, right) =>
+    left.display_name.localeCompare(right.display_name, undefined, {
+      sensitivity: "base",
+    }),
+  );
+  for (const participant of sorted) {
+    const color = participantMarkerColor(
+      participant.tracking_device_label,
+      participant.participant_id,
+    );
+    const item = document.createElement("div");
+    item.className = "rules-presence-map-legend-item";
+    if (!visibleIds.has(participant.participant_id)) {
+      item.classList.add("rules-presence-map-legend-item-hidden");
+    }
+
+    const swatch = document.createElement("div");
+    swatch.className = "rules-presence-map-legend-color";
+    swatch.style.backgroundColor = color;
+    item.append(swatch);
+
+    const labels = document.createElement("div");
+    labels.className = "rules-presence-map-legend-labels";
+    const name = document.createElement("span");
+    name.className = "rules-presence-map-legend-name";
+    name.textContent = participant.display_name;
+    const device = document.createElement("span");
+    device.className = "rules-presence-map-legend-device";
+    device.textContent = participant.tracking_device_label;
+    labels.append(name, device);
+    item.append(labels);
+    legendEl.append(item);
+  }
+}
+
 export function mountPresenceMap(
   rootEl: HTMLElement,
   options: PresenceMapMountOptions,
@@ -133,20 +191,30 @@ export function mountPresenceMap(
   const visibleIds = new Set(
     options.participants.map((p) => p.participant_id),
   );
+  let participants = [...options.participants];
+  const includeParticipantIdInTooltip =
+    options.includeParticipantIdInTooltip === true;
 
   const filtersEl = document.createElement("div");
   filtersEl.className = "rules-presence-map-filters";
   if (options.showParticipantFilters) {
     for (const participant of options.participants) {
+      const color = participantMarkerColor(
+        participant.tracking_device_label,
+        participant.participant_id,
+      );
       const label = document.createElement("label");
       label.className = "rules-presence-map-filter";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = true;
       checkbox.dataset.participantId = participant.participant_id;
+      const swatch = document.createElement("span");
+      swatch.className = "rules-presence-map-filter-swatch";
+      swatch.style.backgroundColor = color;
       const name = document.createElement("span");
       name.textContent = participant.display_name;
-      label.append(checkbox, name);
+      label.append(checkbox, swatch, name);
       checkbox.addEventListener("change", () => {
         if (checkbox.checked) {
           visibleIds.add(participant.participant_id);
@@ -154,6 +222,7 @@ export function mountPresenceMap(
           visibleIds.delete(participant.participant_id);
         }
         syncParticipantVisibility();
+        renderPresenceMapLegend(legendEl, participants, visibleIds);
         fitVisibleBounds();
       });
       filtersEl.append(label);
@@ -162,9 +231,15 @@ export function mountPresenceMap(
     filtersEl.hidden = true;
   }
 
+  const shellEl = document.createElement("div");
+  shellEl.className = "rules-presence-map-shell";
   const mapEl = document.createElement("div");
   mapEl.className = "rules-presence-map";
-  rootEl.append(filtersEl, mapEl);
+  const legendEl = document.createElement("div");
+  legendEl.className = "rules-presence-map-legend";
+  legendEl.hidden = true;
+  shellEl.append(mapEl, legendEl);
+  rootEl.append(filtersEl, shellEl);
 
   const map = L.map(mapEl, {
     attributionControl: false,
@@ -193,49 +268,6 @@ export function mountPresenceMap(
   }
 
   const participantLayerById = new Map<string, ParticipantLayers>();
-  options.participants.forEach((participant, index) => {
-    const fix = participant.last_fix;
-    if (fix === null) {
-      return;
-    }
-    const color =
-      PARTICIPANT_MARKER_COLORS[index % PARTICIPANT_MARKER_COLORS.length]
-      ?? PARTICIPANT_MARKER_COLORS[0];
-    const marker = L.circleMarker([fix.lat, fix.lon], {
-      className: "rules-presence-participant-marker",
-      color: "var(--fg)",
-      fillColor: color,
-      fillOpacity: 0.9,
-      radius: 8,
-      weight: 2,
-    })
-      .bindTooltip(
-        formatParticipantTooltipHtml(participant, {
-          includeParticipantId: options.includeParticipantIdInTooltip === true,
-        }),
-        {
-          className: "rules-presence-map-tooltip",
-          direction: "auto",
-          offset: [0, -10],
-          opacity: 1,
-          sticky: false,
-        },
-      )
-      .addTo(map);
-    let accuracy: L.Circle | null = null;
-    if (fix.accuracy_m !== null && fix.accuracy_m > 0) {
-      accuracy = L.circle([fix.lat, fix.lon], {
-        color: "var(--pending)",
-        dashArray: "4 4",
-        fillColor: "var(--pending)",
-        fillOpacity: 0.08,
-        interactive: false,
-        radius: fix.accuracy_m,
-        weight: 1,
-      }).addTo(map);
-    }
-    participantLayerById.set(participant.participant_id, { accuracy, marker });
-  });
 
   const boundsForLayer = (layer: L.Layer): L.LatLngBounds => {
     if (layer instanceof L.CircleMarker) {
@@ -251,10 +283,9 @@ export function mountPresenceMap(
   const syncParticipantVisibility = (): void => {
     for (const [participantId, layers] of participantLayerById) {
       const show = visibleIds.has(participantId);
-      const opacity = show ? 1 : 0;
-      layers.marker.setStyle({ fillOpacity: show ? 0.9 : 0, opacity });
+      layers.marker.setStyle({ fillOpacity: show ? 0.9 : 0, opacity: show ? 1 : 0 });
       if (layers.accuracy !== null) {
-        layers.accuracy.setStyle({ fillOpacity: show ? 0.08 : 0, opacity });
+        layers.accuracy.setStyle({ fillOpacity: show ? 0.08 : 0, opacity: show ? 1 : 0 });
       }
     }
   };
@@ -271,7 +302,7 @@ export function mountPresenceMap(
       }
     }
 
-    const visibleWithFix = options.participants.filter(
+    const visibleWithFix = participants.filter(
       (p) => visibleIds.has(p.participant_id) && p.last_fix !== null,
     );
 
@@ -308,7 +339,101 @@ export function mountPresenceMap(
     }
   };
 
-  syncParticipantVisibility();
+  const removeParticipantLayer = (participantId: string): void => {
+    const layers = participantLayerById.get(participantId);
+    if (layers === undefined) {
+      return;
+    }
+    map.removeLayer(layers.marker);
+    if (layers.accuracy !== null) {
+      map.removeLayer(layers.accuracy);
+    }
+    participantLayerById.delete(participantId);
+  };
+
+  const upsertParticipantLayer = (participant: PresenceMapParticipant): void => {
+    const fix = participant.last_fix;
+    if (fix === null) {
+      removeParticipantLayer(participant.participant_id);
+      return;
+    }
+    const color = participantMarkerColor(
+      participant.tracking_device_label,
+      participant.participant_id,
+    );
+    const tooltipHtml = formatParticipantTooltipHtml(participant, {
+      includeParticipantId: includeParticipantIdInTooltip,
+    });
+    const tooltipOptions: L.TooltipOptions = {
+      className: "rules-presence-map-tooltip",
+      direction: "auto",
+      offset: [0, -12],
+      opacity: 1,
+      sticky: true,
+    };
+    const existing = participantLayerById.get(participant.participant_id);
+    if (existing !== undefined) {
+      existing.marker.setLatLng([fix.lat, fix.lon]);
+      existing.marker.setStyle(participantMarkerOptions(color));
+      existing.marker.setTooltipContent(tooltipHtml);
+      if (fix.accuracy_m !== null && fix.accuracy_m > 0) {
+        if (existing.accuracy === null) {
+          existing.accuracy = L.circle([fix.lat, fix.lon], {
+            color: "var(--pending)",
+            dashArray: "4 4",
+            fillColor: "var(--pending)",
+            fillOpacity: 0.08,
+            interactive: false,
+            radius: fix.accuracy_m,
+            weight: 1,
+          }).addTo(map);
+        } else {
+          existing.accuracy.setLatLng([fix.lat, fix.lon]);
+          existing.accuracy.setRadius(fix.accuracy_m);
+        }
+      } else if (existing.accuracy !== null) {
+        map.removeLayer(existing.accuracy);
+        existing.accuracy = null;
+      }
+      return;
+    }
+    const marker = L.circleMarker(
+      [fix.lat, fix.lon],
+      participantMarkerOptions(color),
+    )
+      .bindTooltip(tooltipHtml, tooltipOptions)
+      .addTo(map);
+    let accuracy: L.Circle | null = null;
+    if (fix.accuracy_m !== null && fix.accuracy_m > 0) {
+      accuracy = L.circle([fix.lat, fix.lon], {
+        color: "var(--pending)",
+        dashArray: "4 4",
+        fillColor: "var(--pending)",
+        fillOpacity: 0.08,
+        interactive: false,
+        radius: fix.accuracy_m,
+        weight: 1,
+      }).addTo(map);
+    }
+    participantLayerById.set(participant.participant_id, { accuracy, marker });
+  };
+
+  const applyParticipants = (nextParticipants: PresenceMapParticipant[]): void => {
+    participants = [...nextParticipants];
+    const nextIds = new Set(participants.map((participant) => participant.participant_id));
+    for (const participantId of [...participantLayerById.keys()]) {
+      if (!nextIds.has(participantId)) {
+        removeParticipantLayer(participantId);
+      }
+    }
+    for (const participant of participants) {
+      upsertParticipantLayer(participant);
+    }
+    syncParticipantVisibility();
+    renderPresenceMapLegend(legendEl, participants, visibleIds);
+  };
+
+  applyParticipants(options.participants);
   fitVisibleBounds();
   window.requestAnimationFrame(() => {
     map.invalidateSize();
@@ -319,6 +444,9 @@ export function mountPresenceMap(
     destroy(): void {
       map.remove();
       rootEl.replaceChildren();
+    },
+    updateParticipants(nextParticipants: PresenceMapParticipant[]): void {
+      applyParticipants(nextParticipants);
     },
   };
 }

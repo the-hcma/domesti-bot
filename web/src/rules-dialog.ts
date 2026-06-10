@@ -15,6 +15,7 @@ import {
   mountPresenceMap,
   participantStatusToMapParticipant,
   renderParticipantDetailText,
+  type PresenceMapController,
 } from "./presence-map.js";
 import { haversineM } from "./rules-mock-fixtures.js";
 import {
@@ -235,6 +236,8 @@ function templateToCondition(
 }
 
 class RulesHubController {
+  private static readonly PRESENCE_POLL_MS = 5000;
+
   private readonly body: HTMLDivElement;
   private readonly dialog: HTMLDialogElement;
   private readonly mockPill: HTMLSpanElement;
@@ -242,6 +245,8 @@ class RulesHubController {
   private activeTab: RulesTabId = "status";
   private dataSource: RulesDataSource;
   private pendingGeofenceFocusId: string | null = null;
+  private presenceMap: PresenceMapController | null = null;
+  private presencePollTimer: ReturnType<typeof window.setInterval> | null = null;
   private status: RulesStatusOut | null = null;
 
   constructor(dataSource: RulesDataSource) {
@@ -292,6 +297,9 @@ class RulesHubController {
     this.panel.append(header, tabBar, this.body);
     this.dialog.append(this.panel);
     this.dialog.addEventListener("close", () => {
+      this.stopPresencePoll();
+      this.presenceMap?.destroy();
+      this.presenceMap = null;
       this.dialog.remove();
     });
     this.dialog.addEventListener("click", (ev) => {
@@ -386,7 +394,7 @@ class RulesHubController {
     const mount = document.createElement("div");
     mount.className = "rules-presence-map-mount";
     parent.append(mount);
-    mountPresenceMap(mount, {
+    this.presenceMap = mountPresenceMap(mount, {
       geofences,
       participants: participants.map(participantStatusToMapParticipant),
       showParticipantFilters: options.showParticipantFilters,
@@ -394,6 +402,7 @@ class RulesHubController {
         ? { includeParticipantIdInTooltip: true as const }
         : {}),
     });
+    this.startPresencePoll();
     if (options.showTextDetails) {
       const details = document.createElement("div");
       details.className = "rules-participant-details-list";
@@ -857,7 +866,24 @@ class RulesHubController {
     this.syncTabUi();
   }
 
+  private async refreshPresenceMap(): Promise<void> {
+    if (this.presenceMap === null) {
+      return;
+    }
+    try {
+      const participants = await this.dataSource.listParticipantStatus();
+      this.presenceMap.updateParticipants(
+        participants.map(participantStatusToMapParticipant),
+      );
+    } catch (err) {
+      console.warn("Participant presence map refresh failed", err);
+    }
+  }
+
   private renderBody(): void {
+    this.stopPresencePoll();
+    this.presenceMap?.destroy();
+    this.presenceMap = null;
     this.body.replaceChildren();
     if (this.status === null) {
       return;
@@ -1199,11 +1225,10 @@ class RulesHubController {
   }
 
   private async renderParticipantsTab(): Promise<void> {
-    const participants = await this.dataSource.listParticipants();
     const geofences = await this.dataSource.listGeofences();
     const sync = await this.dataSource.getMyTracksParticipantsSync();
     const settings = await this.dataSource.getMyTracksSettings();
-    const status = this.status;
+    const mapParticipants = await this.dataSource.listParticipantStatus();
 
     const lead = document.createElement("p");
     lead.className = "settings-dialog-lead";
@@ -1237,21 +1262,6 @@ class RulesHubController {
 
     const mapSection = document.createElement("section");
     mapSection.className = "rules-participants-section";
-    const statusParticipants = status?.participants ?? [];
-    const mapParticipants: ParticipantStatusOut[] = participants.map((p) => {
-      const row = statusParticipants.find(
-        (candidate) => candidate.participant_id === p.participant_id,
-      );
-      if (row !== undefined) {
-        return row;
-      }
-      return {
-        ...p,
-        age_seconds: null,
-        inside_geofence_ids: [],
-        last_fix: null,
-      };
-    });
     this.mountParticipantPresenceMap(
       mapSection,
       geofences,
@@ -1269,6 +1279,20 @@ class RulesHubController {
   private async setTab(tab: RulesTabId): Promise<void> {
     this.activeTab = tab;
     await this.refresh();
+  }
+
+  private startPresencePoll(): void {
+    this.stopPresencePoll();
+    this.presencePollTimer = window.setInterval(() => {
+      void this.refreshPresenceMap();
+    }, RulesHubController.PRESENCE_POLL_MS);
+  }
+
+  private stopPresencePoll(): void {
+    if (this.presencePollTimer !== null) {
+      window.clearInterval(this.presencePollTimer);
+      this.presencePollTimer = null;
+    }
   }
 
   private syncTabUi(): void {
