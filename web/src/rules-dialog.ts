@@ -20,6 +20,7 @@ import { haversineM } from "./rules-mock-fixtures.js";
 import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
+  joinNames,
   summarizeRule,
 } from "./rule-summary.js";
 import {
@@ -28,6 +29,8 @@ import {
   createEnableToggle,
   createFieldLabel,
   FAMILY_ACTION_GROUP_LABELS,
+  firstNameFromDisplayName,
+  preventBrowserAutofill,
 } from "./rules-ui-helpers.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
 import type {
@@ -244,6 +247,7 @@ class RulesHubController {
     this.dataSource = dataSource;
     this.dialog = document.createElement("dialog");
     this.dialog.className = "settings-dialog rules-dialog automations-dialog";
+    this.dialog.setAttribute("autocomplete", "off");
     this.panel = document.createElement("div");
     this.panel.className = "settings-dialog-panel";
     const header = document.createElement("header");
@@ -414,20 +418,24 @@ class RulesHubController {
     editor.className = "rules-editor-panel";
     const form = document.createElement("form");
     form.className = "rules-editor-form";
+    form.setAttribute("autocomplete", "off");
 
-    const editorTop = document.createElement("div");
-    editorTop.className = "rules-rule-editor-top";
     let ruleEnabled = existing?.enabled ?? true;
+    const editorHeader = document.createElement("div");
+    editorHeader.className = "rules-rule-editor-header";
+    const editorTitle = document.createElement("h3");
+    editorTitle.className = "rules-rule-editor-title";
+    editorTitle.textContent = existing === null ? "New rule" : "Edit rule";
     const enableToggle = createEnableToggle(ruleEnabled, (next) => {
       ruleEnabled = next;
     });
-    editorTop.append(enableToggle);
-    form.append(editorTop);
+    editorHeader.append(editorTitle, enableToggle);
+    form.append(editorHeader);
 
     const labelInput = document.createElement("input");
     labelInput.value = existing?.label ?? "";
     labelInput.required = true;
-    labelInput.setAttribute("autocomplete", "off");
+    preventBrowserAutofill(labelInput);
     appendLabeledField(
       form,
       createFieldLabel("Name"),
@@ -437,13 +445,13 @@ class RulesHubController {
     const idInput = document.createElement("input");
     idInput.value = existing?.id ?? "";
     idInput.required = true;
-    idInput.setAttribute("autocomplete", "off");
+    preventBrowserAutofill(idInput);
     appendLabeledField(
       form,
       createFieldLabel("Rule id"),
       idInput,
     );
-    let idManuallyEdited = existing !== null;
+    let idManuallyEdited = Boolean(existing?.id);
     labelInput.addEventListener("input", () => {
       if (!idManuallyEdited) {
         idInput.value = slugifyId(labelInput.value);
@@ -467,12 +475,24 @@ class RulesHubController {
     const whoField = document.createElement("fieldset");
     whoField.className = "rules-editor-fieldset rules-editor-subfieldset";
     const whoLegend = document.createElement("legend");
-    whoLegend.textContent = "Who must be home";
     whoField.append(whoLegend);
     const selectedParticipants = new Set<string>(
       existing?.conditions.all.find((c) => c.type === "participants_inside_geofence")
         ?.participant_ids ?? ["henrique", "kristen"],
     );
+    const syncWhoLegend = (): void => {
+      const names = participants
+        .filter((p) => selectedParticipants.has(p.participant_id))
+        .map((p) => firstNameFromDisplayName(p.display_name));
+      const fenceLabel =
+        geofences.find((g) => g.geofence_id === whereSelect.value)?.label
+        ?? whereSelect.value;
+      const who = joinNames(names);
+      whoLegend.textContent =
+        names.length === 0
+          ? "When someone enters a geofence"
+          : `When ${who} enter ${fenceLabel}`;
+    };
     for (const p of participants) {
       const row = document.createElement("label");
       row.className = "rules-check-row";
@@ -480,13 +500,20 @@ class RulesHubController {
       cb.type = "checkbox";
       cb.value = p.participant_id;
       cb.checked = selectedParticipants.has(p.participant_id);
+      cb.addEventListener("change", () => {
+        if (cb.checked) {
+          selectedParticipants.add(p.participant_id);
+        } else {
+          selectedParticipants.delete(p.participant_id);
+        }
+        syncWhoLegend();
+      });
       row.append(
         cb,
         document.createTextNode(` ${p.display_name} (${p.tracking_device_label})`),
       );
       whoField.append(row);
     }
-    conditionsField.append(whoField);
 
     const whereSelect = document.createElement("select");
     for (const g of geofences) {
@@ -499,11 +526,16 @@ class RulesHubController {
       existing?.conditions.all.find((c) => c.type === "participants_inside_geofence")
         ?.geofence_id ?? "house";
     whereSelect.value = existingGeofence;
+    whereSelect.addEventListener("change", () => {
+      syncWhoLegend();
+    });
     appendLabeledField(
-      conditionsField,
+      whoField,
       createFieldLabel("Geofence"),
       whereSelect,
     );
+    syncWhoLegend();
+    conditionsField.append(whoField);
 
     const existingDayCondition = existing?.conditions.all.find(
       (c): c is Extract<RuleConditionOut, { type: "days_of_week" }> =>
@@ -545,11 +577,13 @@ class RulesHubController {
       (c): c is Extract<RuleConditionOut, { type: "local_time_window" }> =>
         c.type === "local_time_window",
     );
+    const clockRow = document.createElement("div");
+    clockRow.className = "settings-dialog-field-row rules-editor-clock-row";
     const clockStart = document.createElement("input");
     clockStart.type = "time";
     clockStart.value = hhmmToTimeInput(existingWindow?.start_hhmm ?? "");
     appendLabeledField(
-      timeField,
+      clockRow,
       createFieldLabel(
         "Clock window start (optional)",
         {
@@ -564,7 +598,7 @@ class RulesHubController {
     clockEnd.type = "time";
     clockEnd.value = hhmmToTimeInput(existingWindow?.end_hhmm ?? "");
     appendLabeledField(
-      timeField,
+      clockRow,
       createFieldLabel(
         "Clock window end (optional)",
         {
@@ -574,6 +608,7 @@ class RulesHubController {
       ),
       clockEnd,
     );
+    timeField.append(clockRow);
 
     if (timeTemplates.length > 0) {
       const templatesLegend = document.createElement("p");

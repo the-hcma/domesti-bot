@@ -26,6 +26,7 @@ export async function mountGeofenceMapPanel(
 
   const panel = document.createElement("div");
   panel.className = "rules-geofence-panel";
+  panel.setAttribute("autocomplete", "off");
 
   const toolbar = document.createElement("div");
   toolbar.className = "rules-geofence-toolbar";
@@ -214,8 +215,10 @@ async function showGeofenceForm(
       idInput.value = slugifyGeofenceId(labelInput.value);
     }
   });
-  idInput.addEventListener("input", () => {
-    idInput.dataset.touched = "1";
+  idInput.addEventListener("input", (ev) => {
+    if (ev.isTrusted) {
+      idInput.dataset.touched = "1";
+    }
   });
   idField.append(idInput);
   const latField = document.createElement("label");

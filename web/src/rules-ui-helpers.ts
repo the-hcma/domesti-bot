@@ -212,3 +212,16 @@ export function createEnableToggle(
   });
   return btn;
 }
+
+/** Reduce Chrome / password-manager autofill on non-login admin fields. */
+export function preventBrowserAutofill(input: HTMLInputElement): void {
+  input.setAttribute("autocomplete", "off");
+  input.setAttribute("data-1p-ignore", "true");
+  input.setAttribute("data-bwignore", "true");
+  input.setAttribute("data-form-type", "other");
+  input.setAttribute("data-lpignore", "true");
+  input.setAttribute("readonly", "readonly");
+  input.addEventListener("focus", () => {
+    input.removeAttribute("readonly");
+  });
+}
