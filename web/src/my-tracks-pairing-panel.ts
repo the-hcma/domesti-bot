@@ -1,6 +1,7 @@
 // My Tracks domesti-bot pairing and location-history retention settings.
 
 import { api, HttpError } from "./api.js";
+import { setAuditedTimestampLine } from "./format-timestamp.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
 import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
@@ -90,7 +91,10 @@ function applyRetentionToForm(
 function renderPairStatus(statusEl: HTMLElement, status: MyTracksPairStatusOut | null): void {
   if (status?.paired_at) {
     statusEl.hidden = false;
-    statusEl.textContent = `Paired at ${status.paired_at}`;
+    setAuditedTimestampLine(statusEl, {
+      iso: status.paired_at,
+      prefix: "Paired at ",
+    });
     return;
   }
   if (status?.last_pair_error) {

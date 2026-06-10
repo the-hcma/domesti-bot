@@ -1,6 +1,7 @@
 // Unified Leaflet map for participant locations + geofence overlays.
 
 import L from "leaflet";
+import { formatLocalTimestamp, formatUtcTimestampTitle } from "./format-timestamp.js";
 import { haversineM } from "./rules-mock-fixtures.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
 import type { GeofenceOut, ParticipantFixOut, ParticipantStatusOut } from "./types.js";
@@ -81,6 +82,10 @@ export function formatParticipantTooltipHtml(
     const accuracy = fix.accuracy_m === null ? "unknown" : `±${fix.accuracy_m} m`;
     lines.push(
       `${fix.lat.toFixed(5)}, ${fix.lon.toFixed(5)} · ${escapeHtml(accuracy)}`,
+    );
+    lines.push(
+      `Fix at <span title="${escapeHtml(formatUtcTimestampTitle(fix.received_at))}">`
+        + `${escapeHtml(formatLocalTimestamp(fix.received_at))}</span>`,
     );
     if (
       fix.accuracy_m !== null

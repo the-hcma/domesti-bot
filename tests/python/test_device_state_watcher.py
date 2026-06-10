@@ -89,6 +89,24 @@ def _fake_tailwind_mgr(identifiers: list[str]) -> GotailwindDeviceManager:
     return cast(GotailwindDeviceManager, mgr)
 
 
+async def _wait_for_await_count(
+    mock: AsyncMock,
+    minimum: int,
+    *,
+    timeout_s: float = 1.0,
+) -> None:
+    """Poll until ``mock`` has been awaited at least ``minimum`` times."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while mock.await_count < minimum:
+        if loop.time() >= deadline:
+            break
+        await asyncio.sleep(0)
+    assert mock.await_count >= minimum, (
+        f"Expected at least {minimum} await calls, got {mock.await_count}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_kasa_watcher_calls_is_on_per_switch_per_cycle() -> None:
     mgr = _fake_kasa_mgr(["host-a", "host-b"])
@@ -120,13 +138,10 @@ async def test_kasa_watcher_keeps_going_when_one_device_raises() -> None:
     watcher = KasaPollingWatcher(mgr, interval_s=0.01)
     stop = asyncio.Event()
     task = asyncio.create_task(watcher.run(stop=stop))
-    await asyncio.sleep(0.05)
+    is_on = cast(AsyncMock, mgr.is_on)
+    await _wait_for_await_count(is_on, 3)
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
-
-    is_on = cast(AsyncMock, mgr.is_on)
-    # We must keep polling after the first device blew up.
-    assert is_on.await_count >= 3
 
 
 @pytest.mark.asyncio
@@ -171,11 +186,10 @@ async def test_sonos_watcher_keeps_going_when_one_zone_raises() -> None:
     watcher = SonosPollingWatcher(mgr, interval_s=0.01)
     stop = asyncio.Event()
     task = asyncio.create_task(watcher.run(stop=stop))
-    await asyncio.sleep(0.05)
+    is_playing = cast(AsyncMock, mgr.is_playing)
+    await _wait_for_await_count(is_playing, 3)
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
-
-    assert cast(AsyncMock, mgr.is_playing).await_count >= 3
 
 
 @pytest.mark.asyncio
@@ -206,11 +220,10 @@ async def test_tailwind_watcher_keeps_going_when_one_door_raises() -> None:
     watcher = TailwindPollingWatcher(mgr, interval_s=0.01)
     stop = asyncio.Event()
     task = asyncio.create_task(watcher.run(stop=stop))
-    await asyncio.sleep(0.05)
+    is_open = cast(AsyncMock, mgr.is_open)
+    await _wait_for_await_count(is_open, 3)
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
-
-    assert cast(AsyncMock, mgr.is_open).await_count >= 3
 
 
 def test_build_default_watchers_omits_optional_when_managers_are_none() -> None:
