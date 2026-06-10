@@ -2,6 +2,7 @@
 
 import type { RulesDataSource } from "./rules-data-source.js";
 import type { GeofenceOut, ParticipantStatusOut } from "./types.js";
+import { createAuditedTimeElement } from "./format-timestamp.js";
 import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
 
@@ -48,11 +49,14 @@ export async function mountGeofenceMapPanel(
   });
   const syncMeta = document.createElement("span");
   syncMeta.className = "rules-geofence-sync-meta";
-  const syncedAt =
-    sync.last_synced_at === null
-      ? "never"
-      : new Date(sync.last_synced_at).toLocaleString();
-  syncMeta.textContent = `${sync.geofence_count} geofences · last synced ${syncedAt}`;
+  syncMeta.replaceChildren(
+    document.createTextNode(`${sync.geofence_count} geofences · last synced `),
+  );
+  if (sync.last_synced_at === null) {
+    syncMeta.append(document.createTextNode("never"));
+  } else {
+    syncMeta.append(createAuditedTimeElement(sync.last_synced_at));
+  }
   importGroup.append(importLabel, syncBtn, syncMeta);
 
   const drawGroup = document.createElement("div");

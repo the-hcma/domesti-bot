@@ -32,6 +32,7 @@ import {
   firstNameFromDisplayName,
   preventBrowserAutofill,
 } from "./rules-ui-helpers.js";
+import { createAuditedTimeElement } from "./format-timestamp.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
 import type {
   GeofenceOut,
@@ -1068,12 +1069,11 @@ class RulesHubController {
       const meta = document.createElement("p");
       meta.className = "rules-card-meta";
       const met = rule.condition_currently_true ? "conditions met" : "conditions not met";
-      const fired = rule.last_fired_at
-        ? ` · last fired ${formatAge(
-            Math.floor((Date.now() - Date.parse(rule.last_fired_at)) / 1000),
-          )}`
-        : "";
-      meta.textContent = `${met}${fired}`;
+      meta.replaceChildren(document.createTextNode(met));
+      if (rule.last_fired_at !== null) {
+        meta.append(document.createTextNode(" · last fired "));
+        meta.append(createAuditedTimeElement(rule.last_fired_at));
+      }
       card.append(row, meta);
       void this.dataSource.getRule(rule.id).then((full) => {
         if (full?.notify_on_fire && full.notification_email !== null) {
@@ -1218,16 +1218,14 @@ class RulesHubController {
     syncRow.className = "rules-participants-sync";
     const syncMeta = document.createElement("p");
     syncMeta.className = "rules-card-meta";
-    const syncedAt =
-      sync.last_synced_at === null
-        ? "never"
-        : formatAge(
-            Math.max(
-              0,
-              Math.floor((Date.now() - Date.parse(sync.last_synced_at)) / 1000),
-            ),
-          );
-    syncMeta.textContent = `${sync.participant_count} participants · last synced ${syncedAt}`;
+    syncMeta.replaceChildren(
+      document.createTextNode(`${sync.participant_count} participants · last synced `),
+    );
+    if (sync.last_synced_at === null) {
+      syncMeta.append(document.createTextNode("never"));
+    } else {
+      syncMeta.append(createAuditedTimeElement(sync.last_synced_at));
+    }
     const syncBtn = document.createElement("button");
     syncBtn.type = "button";
     syncBtn.className = "btn btn-secondary";
