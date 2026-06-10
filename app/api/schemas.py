@@ -383,12 +383,24 @@ class MyTracksPairIn(BaseModel):
     """Body for ``POST /v1/settings/my-tracks/pair``."""
 
     domain: str = Field(..., min_length=1)
-    domesti_public_base_url: str = Field(..., min_length=1)
     location_history_retention: LocationHistoryRetentionIn = Field(
         default_factory=LocationHistoryRetentionIn
     )
     password: str = Field(..., min_length=1)
     username: str = Field(..., min_length=1)
+
+
+class MyTracksRelayKeySettingsOut(BaseModel):
+    """Relay API key status for my-tracks webhook authentication."""
+
+    configured: bool = Field(
+        ...,
+        description="True when an encrypted relay key row exists in the discovery database.",
+    )
+    stored_relay_key: str | None = Field(
+        default=None,
+        description="Decrypted relay key when stored; never returned when unpaired.",
+    )
 
 
 class MyTracksPairStatusOut(BaseModel):

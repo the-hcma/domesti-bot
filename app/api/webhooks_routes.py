@@ -23,7 +23,7 @@ async def post_location_update_test_webhook(
     request: Request,
     _auth: RelayAuth,
 ) -> Response:
-    """Validate a synthetic test payload without mutating live location state."""
+    """Accept a synthetic test payload and discard it without mutating live location state."""
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
         return Response(status_code=HTTPStatus.UNAUTHORIZED)

@@ -152,6 +152,23 @@ def test_location_update_test_webhook_does_not_persist_fix(
     assert list_participant_fixes(db) == {}
 
 
+def test_location_update_test_webhook_accepts_unknown_participant(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    response = client.post(
+        "/v1/webhooks/location_update/test",
+        json={**_LOCATION_UPDATE_PAYLOAD, "participant_id": "house_meister"},
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    assert list_participant_fixes(db) == {}
+
+
 @patch("app.api.mytracks_routes.pair_with_my_tracks")
 def test_post_mytracks_pair_persists_relay_key_and_status(
     pair_mock: object,
@@ -164,7 +181,6 @@ def test_post_mytracks_pair_persists_relay_key_and_status(
         "/v1/settings/my-tracks/pair",
         json={
             "domain": "https://tracks.example.com",
-            "domesti_public_base_url": "https://domesti.example.com",
             "username": "admin",
             "password": "secret",
         },
@@ -179,10 +195,10 @@ def test_post_mytracks_pair_persists_relay_key_and_status(
         "unlimited": False,
     }
     assert body["participant_location_update_url"] == (
-        "https://domesti.example.com/v1/webhooks/location_update"
+        "http://testserver/v1/webhooks/location_update"
     )
     assert body["participant_location_test_url"] == (
-        "https://domesti.example.com/v1/webhooks/location_update/test"
+        "http://testserver/v1/webhooks/location_update/test"
     )
     stored_key = load_mytracks_relay_api_key_from_db(db)
     assert stored_key is not None
@@ -203,7 +219,6 @@ def test_patch_location_updates_returns_dedicated_response(
             "/v1/settings/my-tracks/pair",
             json={
                 "domain": "https://tracks.example.com",
-                "domesti_public_base_url": "https://domesti.example.com",
                 "username": "admin",
                 "password": "secret",
             },
@@ -231,7 +246,6 @@ def test_location_update_webhook_returns_503_when_emergency_switch_off(
             "/v1/settings/my-tracks/pair",
             json={
                 "domain": "https://tracks.example.com",
-                "domesti_public_base_url": "https://domesti.example.com",
                 "username": "admin",
                 "password": "secret",
             },
@@ -262,7 +276,6 @@ def test_patch_location_history_retention_updates_policy(
             "/v1/settings/my-tracks/pair",
             json={
                 "domain": "https://tracks.example.com",
-                "domesti_public_base_url": "https://domesti.example.com",
                 "username": "admin",
                 "password": "secret",
             },
@@ -313,7 +326,6 @@ def test_location_update_test_webhook_works_when_emergency_switch_off(
             "/v1/settings/my-tracks/pair",
             json={
                 "domain": "https://tracks.example.com",
-                "domesti_public_base_url": "https://domesti.example.com",
                 "username": "admin",
                 "password": "secret",
             },
@@ -328,3 +340,83 @@ def test_location_update_test_webhook_works_when_emergency_switch_off(
         headers={"X-Domesti-Api-Key": load_mytracks_relay_api_key_from_db(db) or ""},
     )
     assert response.status_code == HTTPStatus.NO_CONTENT
+
+
+def test_post_mytracks_pair_uses_forwarded_public_url(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=200):
+        response = client.post(
+            "/v1/settings/my-tracks/pair",
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "domesti.example.com",
+            },
+            json={
+                "domain": "https://tracks.example.com",
+                "username": "admin",
+                "password": "secret",
+            },
+        )
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["domesti_public_base_url"] == "https://domesti.example.com"
+    assert body["participant_location_update_url"] == (
+        "https://domesti.example.com/v1/webhooks/location_update"
+    )
+
+
+def test_get_mytracks_relay_key_returns_stored_secret(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=200):
+        client.post(
+            "/v1/settings/my-tracks/pair",
+            json={
+                "domain": "https://tracks.example.com",
+                "username": "admin",
+                "password": "secret",
+            },
+        )
+    response = client.get("/v1/settings/my-tracks/relay-key")
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["configured"] is True
+    stored = load_mytracks_relay_api_key_from_db(db)
+    assert stored is not None
+    assert body["stored_relay_key"] == stored
+
+
+def test_delete_mytracks_pair_clears_relay_key(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=200):
+        client.post(
+            "/v1/settings/my-tracks/pair",
+            json={
+                "domain": "https://tracks.example.com",
+                "username": "admin",
+                "password": "secret",
+            },
+        )
+    assert load_mytracks_relay_api_key_from_db(db) is not None
+    response = client.delete("/v1/settings/my-tracks/pair")
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["paired_at"] is None
+    assert body["relay_key_configured"] is False
+    assert load_mytracks_relay_api_key_from_db(db) is None
+    relay_response = client.get("/v1/settings/my-tracks/relay-key")
+    assert relay_response.json() == {
+        "configured": False,
+        "stored_relay_key": None,
+    }

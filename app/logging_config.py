@@ -217,5 +217,18 @@ def build_dict_config(
                 "level": level,
                 "propagate": False,
             },
+            "mytracks": {
+                "handlers": active,
+                "level": level,
+                "propagate": False,
+            },
+            "httpx": {
+                "level": "WARNING",
+                "propagate": False,
+            },
+            "httpcore": {
+                "level": "WARNING",
+                "propagate": False,
+            },
         },
     }
