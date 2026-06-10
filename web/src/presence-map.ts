@@ -47,41 +47,90 @@ interface ShellTooltipController {
   attach(marker: L.CircleMarker, getTooltipHtml: () => string): void;
   detach(marker: L.CircleMarker): void;
   destroy(): void;
+  refresh(): void;
 }
 
-interface MarkerTooltipHandlers {
-  getTooltipHtml: () => string;
-  onMouseOut: () => void;
-  onMouseOver: (event: L.LeafletMouseEvent) => void;
-  onMouseMove: (event: L.LeafletMouseEvent) => void;
+function isParticipantMarkerVisible(marker: L.CircleMarker): boolean {
+  return (marker.options.fillOpacity ?? 1) > 0 && (marker.options.opacity ?? 1) > 0;
 }
 
-export function createShellTooltipController(shellEl: HTMLElement): ShellTooltipController {
+function participantMarkerAtClientPoint(
+  map: L.Map,
+  markers: Iterable<L.CircleMarker>,
+  clientX: number,
+  clientY: number,
+): L.CircleMarker | null {
+  const mapRect = map.getContainer().getBoundingClientRect();
+  if (
+    clientX < mapRect.left
+    || clientX > mapRect.right
+    || clientY < mapRect.top
+    || clientY > mapRect.bottom
+  ) {
+    return null;
+  }
+  const containerPoint = L.point(clientX - mapRect.left, clientY - mapRect.top);
+  const layerPoint = map.containerPointToLayerPoint(containerPoint);
+  let hit: L.CircleMarker | null = null;
+  let hitDistance = Infinity;
+  for (const marker of markers) {
+    if (!isParticipantMarkerVisible(marker)) {
+      continue;
+    }
+    const center = map.latLngToLayerPoint(marker.getLatLng());
+    const distance = layerPoint.distanceTo(center);
+    const radius = marker.getRadius() + (marker.options.weight ?? 1);
+    if (distance <= radius && distance < hitDistance) {
+      hit = marker;
+      hitDistance = distance;
+    }
+  }
+  return hit;
+}
+
+export function createShellTooltipController(
+  shellEl: HTMLElement,
+  map: L.Map,
+): ShellTooltipController {
   const tooltipEl = document.createElement("div");
   tooltipEl.className = "rules-presence-map-tooltip rules-presence-map-hover-tooltip";
-  tooltipEl.hidden = true;
   shellEl.append(tooltipEl);
 
+  const tooltipHtmlByMarker = new Map<L.CircleMarker, () => string>();
   let activeMarker: L.CircleMarker | null = null;
-  const handlersByMarker = new Map<L.CircleMarker, MarkerTooltipHandlers>();
+  let lastPointer: { clientX: number; clientY: number } | null = null;
+
+  const hide = (): void => {
+    activeMarker = null;
+    tooltipEl.classList.remove("is-visible");
+    tooltipEl.style.transform = "";
+    tooltipEl.replaceChildren();
+  };
 
   const positionAtPointer = (
     clientX: number,
     clientY: number,
     getTooltipHtml: () => string,
   ): void => {
-    tooltipEl.innerHTML = getTooltipHtml();
-    tooltipEl.hidden = false;
-
     const shellRect = shellEl.getBoundingClientRect();
+    if (
+      clientX < shellRect.left
+      || clientX > shellRect.right
+      || clientY < shellRect.top
+      || clientY > shellRect.bottom
+    ) {
+      hide();
+      return;
+    }
+
+    tooltipEl.classList.remove("is-visible");
+    tooltipEl.innerHTML = getTooltipHtml();
+
     const margin = 8;
     const pointerX = clientX - shellRect.left;
     const pointerY = clientY - shellRect.top;
-    const placeAbove = (): void => {
-      tooltipEl.style.transform =
-        `translate(${pointerX}px, ${pointerY - 12}px) translate(-50%, -100%)`;
-    };
-    placeAbove();
+    tooltipEl.style.transform =
+      `translate(${pointerX}px, ${pointerY - 12}px) translate(-50%, -100%)`;
 
     let tRect = tooltipEl.getBoundingClientRect();
     if (tRect.top < shellRect.top + margin) {
@@ -100,67 +149,79 @@ export function createShellTooltipController(shellEl: HTMLElement): ShellTooltip
       const current = tooltipEl.style.transform;
       tooltipEl.style.transform = `${current} translateX(${shiftX}px)`;
     }
+
+    tooltipEl.classList.add("is-visible");
   };
 
-  const hide = (): void => {
-    activeMarker = null;
-    tooltipEl.hidden = true;
-    tooltipEl.style.transform = "";
+  const updateForPointer = (clientX: number, clientY: number): void => {
+    const marker = participantMarkerAtClientPoint(
+      map,
+      tooltipHtmlByMarker.keys(),
+      clientX,
+      clientY,
+    );
+    if (marker === null) {
+      hide();
+      return;
+    }
+    const getTooltipHtml = tooltipHtmlByMarker.get(marker);
+    if (getTooltipHtml === undefined) {
+      hide();
+      return;
+    }
+    activeMarker = marker;
+    positionAtPointer(clientX, clientY, getTooltipHtml);
   };
+
+  const onMapMouseMove = (event: L.LeafletMouseEvent): void => {
+    lastPointer = {
+      clientX: event.originalEvent.clientX,
+      clientY: event.originalEvent.clientY,
+    };
+    updateForPointer(lastPointer.clientX, lastPointer.clientY);
+  };
+
+  const onMapMouseOut = (): void => {
+    lastPointer = null;
+    hide();
+  };
+
+  const onMapInteractionStart = (): void => {
+    lastPointer = null;
+    hide();
+  };
+
+  map.on("mousemove", onMapMouseMove);
+  map.on("mouseout", onMapMouseOut);
+  map.on("movestart", onMapInteractionStart);
+  map.on("zoomstart", onMapInteractionStart);
+  shellEl.addEventListener("mouseleave", onMapMouseOut);
 
   return {
     attach(marker, getTooltipHtml) {
-      const onMouseOver = (event: L.LeafletMouseEvent): void => {
-        activeMarker = marker;
-        positionAtPointer(
-          event.originalEvent.clientX,
-          event.originalEvent.clientY,
-          getTooltipHtml,
-        );
-      };
-      const onMouseMove = (event: L.LeafletMouseEvent): void => {
-        if (activeMarker !== marker) {
-          return;
-        }
-        positionAtPointer(
-          event.originalEvent.clientX,
-          event.originalEvent.clientY,
-          getTooltipHtml,
-        );
-      };
-      const onMouseOut = (): void => {
-        if (activeMarker === marker) {
-          hide();
-        }
-      };
-      handlersByMarker.set(marker, {
-        getTooltipHtml,
-        onMouseOut,
-        onMouseOver,
-        onMouseMove,
-      });
-      marker.on("mouseover", onMouseOver);
-      marker.on("mousemove", onMouseMove);
-      marker.on("mouseout", onMouseOut);
+      tooltipHtmlByMarker.set(marker, getTooltipHtml);
     },
     detach(marker) {
-      const handlers = handlersByMarker.get(marker);
-      if (handlers === undefined) {
-        return;
-      }
-      marker.off("mouseover", handlers.onMouseOver);
-      marker.off("mousemove", handlers.onMouseMove);
-      marker.off("mouseout", handlers.onMouseOut);
-      handlersByMarker.delete(marker);
+      tooltipHtmlByMarker.delete(marker);
       if (activeMarker === marker) {
         hide();
       }
     },
     destroy() {
-      for (const marker of handlersByMarker.keys()) {
-        this.detach(marker);
-      }
+      map.off("mousemove", onMapMouseMove);
+      map.off("mouseout", onMapMouseOut);
+      map.off("movestart", onMapInteractionStart);
+      map.off("zoomstart", onMapInteractionStart);
+      shellEl.removeEventListener("mouseleave", onMapMouseOut);
+      hide();
       tooltipEl.remove();
+    },
+    refresh() {
+      if (lastPointer === null) {
+        hide();
+        return;
+      }
+      updateForPointer(lastPointer.clientX, lastPointer.clientY);
     },
   };
 }
@@ -345,6 +406,7 @@ export function mountPresenceMap(
         }
         syncParticipantVisibility();
         renderPresenceMapLegend(legendEl, participants, visibleIds);
+        shellTooltip.refresh();
         fitVisibleBounds();
       });
       filtersEl.append(label);
@@ -363,7 +425,6 @@ export function mountPresenceMap(
   shellEl.append(mapEl, legendEl);
   rootEl.append(filtersEl, shellEl);
 
-  const shellTooltip = createShellTooltipController(shellEl);
   const tooltipHtmlByParticipantId = new Map<string, string>();
 
   const map = L.map(mapEl, {
@@ -374,6 +435,8 @@ export function mountPresenceMap(
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
   }).addTo(map);
+
+  const shellTooltip = createShellTooltipController(shellEl, map);
 
   const geofenceLayers: L.Circle[] = [];
   for (const geofence of options.geofences) {
@@ -551,6 +614,7 @@ export function mountPresenceMap(
     }
     syncParticipantVisibility();
     renderPresenceMapLegend(legendEl, participants, visibleIds);
+    shellTooltip.refresh();
   };
 
   applyParticipants(options.participants);

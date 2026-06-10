@@ -55,7 +55,7 @@ export async function initGeofenceLeafletMap(
   map.setView(defaultCenter, defaultZoom);
 
   const tooltipShell = mapEl.parentElement ?? mapEl;
-  const shellTooltip = createShellTooltipController(tooltipShell);
+  const shellTooltip = createShellTooltipController(tooltipShell, map);
 
   if (settings.home_label !== null && settings.lat !== 0) {
     const homeIcon = L.divIcon({
