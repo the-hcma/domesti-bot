@@ -371,6 +371,58 @@ def test_participants_tab_tooltip_not_clipped_at_map_edge(
         box = tooltip.bounding_box()
         assert box is not None
         assert box["width"] >= 120
+        away_from_origin = page.evaluate(
+            """() => {
+              const tooltip = document.querySelector('.rules-presence-map-hover-tooltip.is-visible');
+              const shell = document.querySelector('.rules-presence-map-shell');
+              if (tooltip === null || shell === null) return false;
+              const t = tooltip.getBoundingClientRect();
+              const s = shell.getBoundingClientRect();
+              return t.left > s.left + 24 || t.top > s.top + 24;
+            }""",
+        )
+        assert away_from_origin
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+def test_participant_tooltip_hides_when_pointer_leaves_marker(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Map-level hit testing must not leave a parked tooltip after the pointer moves away."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator('.rules-tab[data-tab="participants"]').click()
+        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        page.wait_for_function(
+            """() => {
+              const tooltip = document.querySelector('.rules-presence-map-hover-tooltip');
+              return tooltip !== null && !tooltip.classList.contains('is-visible');
+            }""",
+            timeout=10_000,
+        )
+        marker = page.locator(".rules-presence-participant-marker").first
+        marker.hover()
+        tooltip = page.locator(".rules-presence-map-hover-tooltip.is-visible")
+        tooltip.wait_for(state="visible", timeout=5_000)
+
+        map_box = page.locator(".rules-presence-map").bounding_box()
+        assert map_box is not None
+        page.mouse.move(map_box["x"] + 12, map_box["y"] + 12)
+        page.wait_for_function(
+            """() => {
+              const tooltip = document.querySelector('.rules-presence-map-hover-tooltip');
+              return tooltip !== null && !tooltip.classList.contains('is-visible');
+            }""",
+            timeout=5_000,
+        )
     finally:
         context.close()
 

@@ -803,8 +803,9 @@
       overflow-wrap: break-word; word-break: normal; pointer-events: none;
       background: var(--card-elev); color: var(--fg); border-color: var(--border); }
     .rules-presence-map-hover-tooltip { position: absolute; left: 0; top: 0; z-index: 1100;
-      border: 1px solid var(--border); border-radius: 4px;
+      visibility: hidden; opacity: 0; border: 1px solid var(--border); border-radius: 4px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+    .rules-presence-map-hover-tooltip.is-visible { visibility: visible; opacity: 1; }
     .rules-presence-map-tooltip-line { display: block; }
     .rules-presence-map-tooltip-line + .rules-presence-map-tooltip-line { margin-top: 2px; }
     .rules-participants-section { margin-bottom: 12px; }
