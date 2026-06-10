@@ -224,6 +224,34 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
 
 
 @pytest.mark.browser
+def test_participants_tab_osm_tiles_are_visible(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Participants tab must paint OSM tiles after async mount (not only markers)."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator('.rules-tab[data-tab="participants"]').click()
+        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        page.wait_for_function(
+            """() => {
+              const tile = document.querySelector('.rules-presence-map img.leaflet-tile');
+              if (tile === null) return false;
+              const rect = tile.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0;
+            }""",
+            timeout=15_000,
+        )
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
 def test_participant_presence_map_shows_color_legend(
     chromium_browser: Any,
     landing_base_url: str,

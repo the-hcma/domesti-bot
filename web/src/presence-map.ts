@@ -434,10 +434,16 @@ export function mountPresenceMap(
   };
 
   applyParticipants(options.participants);
-  fitVisibleBounds();
-  window.requestAnimationFrame(() => {
+
+  const refreshMapLayout = (): void => {
     map.invalidateSize();
     fitVisibleBounds();
+  };
+
+  refreshMapLayout();
+  window.requestAnimationFrame(() => {
+    refreshMapLayout();
+    window.requestAnimationFrame(refreshMapLayout);
   });
 
   return {
