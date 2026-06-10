@@ -3,6 +3,7 @@
 import type { RulesDataSource } from "./rules-data-source.js";
 import type { GeofenceOut, ParticipantStatusOut } from "./types.js";
 import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
+import { confirmAction, showErrorToast } from "./ui-toast.js";
 
 function slugifyGeofenceId(label: string): string {
   return label
@@ -120,15 +121,21 @@ export async function mountGeofenceMapPanel(
     delBtn.className = "btn btn-danger";
     delBtn.textContent = "Delete";
     delBtn.addEventListener("click", () => {
-      if (!window.confirm(`Delete geofence "${g.label}"?`)) {
-        return;
-      }
-      void dataSource
-        .deleteGeofence(g.geofence_id)
-        .then(() => mountGeofenceMapPanel(container, dataSource, onChanged))
-        .catch((err: unknown) => {
-          window.alert(err instanceof Error ? err.message : String(err));
-        });
+      void confirmAction({
+        message: `Delete geofence "${g.label}"?`,
+        confirmLabel: "Delete",
+        variant: "danger",
+      }).then((confirmed) => {
+        if (!confirmed) {
+          return;
+        }
+        void dataSource
+          .deleteGeofence(g.geofence_id)
+          .then(() => mountGeofenceMapPanel(container, dataSource, onChanged))
+          .catch((err: unknown) => {
+            showErrorToast(err instanceof Error ? err.message : String(err));
+          });
+      });
     });
     actions.append(editBtn, delBtn);
     tbody.append(tr);
@@ -185,12 +192,14 @@ async function showGeofenceForm(
   const panel = document.createElement("div");
   panel.className = "rules-geofence-form-panel";
   const form = document.createElement("form");
+  form.setAttribute("autocomplete", "off");
   const labelField = document.createElement("label");
   labelField.className = "settings-dialog-field";
   labelField.innerHTML = "<span>Label</span>";
   const labelInput = document.createElement("input");
   labelInput.value = existing?.label ?? "";
   labelInput.required = true;
+  labelInput.setAttribute("autocomplete", "off");
   labelField.append(labelInput);
   const idField = document.createElement("label");
   idField.className = "settings-dialog-field";
@@ -199,6 +208,7 @@ async function showGeofenceForm(
   idInput.value = existing?.geofence_id ?? "";
   idInput.required = true;
   idInput.readOnly = existing !== null;
+  idInput.setAttribute("autocomplete", "off");
   labelInput.addEventListener("input", () => {
     if (existing === null && !idInput.dataset.touched) {
       idInput.value = slugifyGeofenceId(labelInput.value);

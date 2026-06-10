@@ -22,6 +22,14 @@ export const WEEKDAY_DAYS = [1, 2, 3, 4, 5] as const;
 
 export const WEEKEND_DAYS = [0, 6] as const;
 
+export function firstNameFromDisplayName(displayName: string): string {
+  const trimmed = displayName.trim();
+  if (trimmed === "") {
+    return trimmed;
+  }
+  return trimmed.split(/\s+/)[0] ?? trimmed;
+}
+
 export interface DayOfWeekPicker {
   fieldset: HTMLFieldSetElement;
   getSelectedDays: () => number[];

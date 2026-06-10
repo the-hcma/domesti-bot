@@ -4,6 +4,7 @@ import { HttpError } from "./api.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
+import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type { MyTracksSettingsIn } from "./types.js";
 
 function appendLabeledField(
@@ -54,28 +55,34 @@ export async function mountMyTracksSettingsPanel(
   const form = document.createElement("form");
   form.className = "mytracks-settings-form";
   form.noValidate = true;
+  form.setAttribute("autocomplete", "off");
+
+  const fieldsRow = document.createElement("div");
+  fieldsRow.className = "settings-dialog-field-row mytracks-settings-fields-row";
 
   const domainInput = document.createElement("input");
   domainInput.type = "url";
   domainInput.placeholder = "https://tracks.example.com";
   domainInput.required = true;
   domainInput.value = existing?.domain ?? "";
+  domainInput.setAttribute("autocomplete", "off");
   appendLabeledField(
-    form,
+    fieldsRow,
     createFieldLabel("My Tracks domain"),
     domainInput,
   );
 
   const usernameInput = document.createElement("input");
   usernameInput.type = "text";
-  usernameInput.autocomplete = "username";
+  usernameInput.setAttribute("autocomplete", "off");
   usernameInput.required = true;
   usernameInput.value = existing?.username ?? "";
   appendLabeledField(
-    form,
+    fieldsRow,
     createFieldLabel("Default admin username"),
     usernameInput,
   );
+  form.append(fieldsRow);
 
   const actions = document.createElement("div");
   actions.className = "settings-dialog-actions";
@@ -100,31 +107,43 @@ export async function mountMyTracksSettingsPanel(
     void dataSource
       .saveMyTracksSettings(payload)
       .then((saved) => {
+        showSuccessToast("My Tracks settings saved.");
         status.textContent = "My Tracks settings saved.";
         domainInput.value = saved.domain;
         usernameInput.value = saved.username;
       })
       .catch((err: unknown) => {
-        status.textContent = formatError(err);
+        const message = formatError(err);
+        status.textContent = message;
+        showErrorToast(message);
       });
   });
 
   resetBtn.addEventListener("click", () => {
-    if (!window.confirm("Clear stored My Tracks settings?")) {
-      return;
-    }
-    void dataSource
-      .resetMyTracksSettings()
-      .then(() => {
-        domainInput.value = "";
-        usernameInput.value = "";
-        status.hidden = false;
-        status.textContent = "My Tracks settings cleared.";
-      })
-      .catch((err: unknown) => {
-        status.hidden = false;
-        status.textContent = formatError(err);
-      });
+    void confirmAction({
+      message: "Clear stored My Tracks settings?",
+      confirmLabel: "Clear",
+      variant: "danger",
+    }).then((confirmed) => {
+      if (!confirmed) {
+        return;
+      }
+      void dataSource
+        .resetMyTracksSettings()
+        .then(() => {
+          domainInput.value = "";
+          usernameInput.value = "";
+          status.hidden = false;
+          status.textContent = "My Tracks settings cleared.";
+          showSuccessToast("My Tracks settings cleared.");
+        })
+        .catch((err: unknown) => {
+          const message = formatError(err);
+          status.hidden = false;
+          status.textContent = message;
+          showErrorToast(message);
+        });
+    });
   });
 
   container.append(lead, status, form);

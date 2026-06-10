@@ -3,6 +3,7 @@
 import {
   ALL_DAYS_OF_WEEK,
   DAY_OF_WEEK_LABELS,
+  firstNameFromDisplayName,
   WEEKDAY_DAYS,
   WEEKEND_DAYS,
 } from "./rules-ui-helpers.js";
@@ -35,14 +36,6 @@ function deviceKey(familyId: string, deviceId: string): string {
 }
 
 const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
-
-function firstNameFromDisplayName(displayName: string): string {
-  const trimmed = displayName.trim();
-  if (trimmed === "") {
-    return trimmed;
-  }
-  return trimmed.split(/\s+/)[0] ?? trimmed;
-}
 
 function looksLikeIpv4(value: string): boolean {
   return IPV4_RE.test(value.trim());
@@ -161,15 +154,10 @@ function formatPresenceCondition(
   const names = participantNames(condition.participant_ids, context);
   const where = geofenceLabel(condition.geofence_id, context);
   const who = joinNames(names);
-  const count = names.length;
   if (condition.type === "participants_inside_geofence") {
-    const verb = count === 1 ? "is" : "are";
-    const qualifier = count > 1 ? "both " : "";
-    return `${who} ${verb} ${qualifier}inside ${where}`;
+    return `When ${who} enter ${where}`;
   }
-  const verb = count === 1 ? "is" : "are";
-  const qualifier = count > 1 ? "both " : "";
-  return `${who} ${verb} ${qualifier}outside ${where}`;
+  return `When ${who} leave ${where}`;
 }
 
 function formatTimingCondition(condition: RuleConditionOut): string | null {

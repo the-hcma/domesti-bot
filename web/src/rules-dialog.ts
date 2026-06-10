@@ -29,6 +29,7 @@ import {
   createFieldLabel,
   FAMILY_ACTION_GROUP_LABELS,
 } from "./rules-ui-helpers.js";
+import { confirmAction, showErrorToast } from "./ui-toast.js";
 import type {
   GeofenceOut,
   ParticipantStatusOut,
@@ -414,9 +415,19 @@ class RulesHubController {
     const form = document.createElement("form");
     form.className = "rules-editor-form";
 
+    const editorTop = document.createElement("div");
+    editorTop.className = "rules-rule-editor-top";
+    let ruleEnabled = existing?.enabled ?? true;
+    const enableToggle = createEnableToggle(ruleEnabled, (next) => {
+      ruleEnabled = next;
+    });
+    editorTop.append(enableToggle);
+    form.append(editorTop);
+
     const labelInput = document.createElement("input");
     labelInput.value = existing?.label ?? "";
     labelInput.required = true;
+    labelInput.setAttribute("autocomplete", "off");
     appendLabeledField(
       form,
       createFieldLabel("Name"),
@@ -426,6 +437,7 @@ class RulesHubController {
     const idInput = document.createElement("input");
     idInput.value = existing?.id ?? "";
     idInput.required = true;
+    idInput.setAttribute("autocomplete", "off");
     appendLabeledField(
       form,
       createFieldLabel("Rule id"),
@@ -437,8 +449,10 @@ class RulesHubController {
         idInput.value = slugifyId(labelInput.value);
       }
     });
-    idInput.addEventListener("input", () => {
-      idManuallyEdited = true;
+    idInput.addEventListener("input", (ev) => {
+      if (ev.isTrusted) {
+        idManuallyEdited = true;
+      }
     });
     if (existing === null && idInput.value === "") {
       idInput.value = slugifyId(labelInput.value);
@@ -599,13 +613,15 @@ class RulesHubController {
     conditionsField.append(timeField);
     form.append(conditionsField);
 
+    const tuningRow = document.createElement("div");
+    tuningRow.className = "settings-dialog-field-row rules-editor-tuning-row";
     const accuracyInput = document.createElement("input");
     accuracyInput.type = "number";
     accuracyInput.min = "1";
     accuracyInput.step = "1";
     accuracyInput.value = String(existing?.min_fix_accuracy_m ?? DEFAULT_MIN_FIX_ACCURACY_M);
     appendLabeledField(
-      form,
+      tuningRow,
       createFieldLabel("Min location accuracy (meters)", {
         detail:
           "Ignore GPS fixes whose horizontal accuracy is worse than this threshold. Prevents a fuzzy phone fix from falsely placing someone inside a geofence.",
@@ -620,7 +636,7 @@ class RulesHubController {
     cooldownInput.min = "0";
     cooldownInput.value = String(existing?.cooldown_s ?? 300);
     appendLabeledField(
-      form,
+      tuningRow,
       createFieldLabel("Cooldown (seconds)", {
         detail:
           "Minimum wait before the same rule can fire again after a successful run.",
@@ -629,6 +645,7 @@ class RulesHubController {
       }),
       cooldownInput,
     );
+    form.append(tuningRow);
 
     const notifyField = document.createElement("fieldset");
     notifyField.className = "rules-editor-fieldset";
@@ -694,7 +711,7 @@ class RulesHubController {
           ...whoField.querySelectorAll<HTMLInputElement>("input:checked"),
         ].map((el) => el.value);
         if (participantIds.length === 0) {
-          window.alert("Select at least one participant.");
+          showErrorToast("Select at least one participant.");
           return;
         }
         const conditions: RuleOut["conditions"]["all"] = [
@@ -725,12 +742,12 @@ class RulesHubController {
             end_hhmm: clockEnd.value,
           });
         } else if (clockStart.value !== "" || clockEnd.value !== "") {
-          window.alert("Clock window requires both start and end times.");
+          showErrorToast("Clock window requires both start and end times.");
           return;
         }
         const selectedDays = dayPicker.getSelectedDays();
         if (selectedDays.length === 0) {
-          window.alert("Select at least one day of the week.");
+          showErrorToast("Select at least one day of the week.");
           return;
         }
         conditions.push({ type: "days_of_week", days: selectedDays });
@@ -753,16 +770,16 @@ class RulesHubController {
             action: row.actionSelect.value as RuleActionType,
           }));
         if (device_actions.length === 0) {
-          window.alert("Select at least one device action.");
+          showErrorToast("Select at least one device action.");
           return;
         }
         if (notifyCb.checked && notifyEmail.value.trim() === "") {
-          window.alert("Enter a notification email or disable email notification.");
+          showErrorToast("Enter a notification email or disable email notification.");
           return;
         }
         const ruleId = slugifyId(idInput.value.trim());
         if (ruleId === "") {
-          window.alert("Rule id is required.");
+          showErrorToast("Rule id is required.");
           return;
         }
         const allRules = await this.dataSource.listRules();
@@ -770,7 +787,7 @@ class RulesHubController {
           (candidate) => candidate.id === ruleId && candidate.id !== existing?.id,
         );
         if (duplicate !== undefined) {
-          window.alert(
+          showErrorToast(
             `Rule id "${ruleId}" is already used by "${duplicate.label}".`,
           );
           return;
@@ -778,7 +795,7 @@ class RulesHubController {
         const rule: RuleOut = {
           id: ruleId,
           label: labelInput.value.trim(),
-          enabled: existing?.enabled ?? false,
+          enabled: ruleEnabled,
           trigger: "edge_true",
           cooldown_s: Number(cooldownInput.value) || 300,
           min_fix_accuracy_m: Number(accuracyInput.value) || DEFAULT_MIN_FIX_ACCURACY_M,
@@ -895,11 +912,18 @@ class RulesHubController {
       delBtn.className = "btn btn-danger";
       delBtn.textContent = "Delete";
       delBtn.addEventListener("click", () => {
-        if (window.confirm(`Delete template "${template.label}"?`)) {
+        void confirmAction({
+          message: `Delete template "${template.label}"?`,
+          confirmLabel: "Delete",
+          variant: "danger",
+        }).then((confirmed) => {
+          if (!confirmed) {
+            return;
+          }
           void this.dataSource
             .deleteTimeConditionTemplate(template.template_id)
             .then(() => this.refresh());
-        }
+        });
       });
       row.append(title, delBtn);
       card.append(row);
@@ -1030,7 +1054,7 @@ class RulesHubController {
       for (const cond of rule.conditions) {
         const li = document.createElement("li");
         li.className = cond.met ? "rules-condition-met" : "rules-condition-unmet";
-        li.textContent = `${cond.met ? "✓" : "✗"} ${cond.label}: ${cond.detail}`;
+        li.textContent = `${cond.met ? "✓" : "✗"} ${cond.label} — ${cond.detail}`;
         condList.append(li);
       }
       card.append(condList);
@@ -1090,9 +1114,16 @@ class RulesHubController {
       delBtn.className = "btn btn-danger";
       delBtn.textContent = "Delete";
       delBtn.addEventListener("click", () => {
-        if (window.confirm(`Delete rule "${rule.label}"?`)) {
+        void confirmAction({
+          message: `Delete rule "${rule.label}"?`,
+          confirmLabel: "Delete",
+          variant: "danger",
+        }).then((confirmed) => {
+          if (!confirmed) {
+            return;
+          }
           void this.dataSource.deleteRule(rule.id).then(() => this.refresh());
-        }
+        });
       });
       actions.append(editBtn, delBtn);
       top.append(enableToggle, title, actions);

@@ -25,6 +25,7 @@
       --card: #ffffff;
       --card-elev: #fafbfc;
       --bg: #f6f7f9;
+      --input-fill: #ffffff;
       --border: #e1e4e8;
       --canvas-bg: #0a0a0a;
     }
@@ -41,6 +42,7 @@
         --card: #1f2226;
         --card-elev: #262a30;
         --bg: #15171a;
+        --input-fill: #1a1d21;
         --border: #2a2e34;
         --canvas-bg: #15171a;
       }
@@ -57,6 +59,7 @@
       --card: #ffffff;
       --card-elev: #fafbfc;
       --bg: #f6f7f9;
+      --input-fill: #ffffff;
       --border: #e1e4e8;
       --canvas-bg: #0a0a0a;
     }
@@ -72,6 +75,7 @@
       --card: #1f2226;
       --card-elev: #262a30;
       --bg: #15171a;
+      --input-fill: #1a1d21;
       --border: #2a2e34;
       --canvas-bg: #15171a;
     }
@@ -604,12 +608,14 @@
     .settings-dialog-field-row { display: flex; flex-wrap: wrap; gap: 12px;
       align-items: flex-end; margin-bottom: 12px; }
     .settings-dialog-field-row .settings-dialog-field { margin-bottom: 0; }
-      font-size: 14px; }
+    .mytracks-settings-fields-row,
+    .mytracks-sync-credentials-row,
+    .rules-editor-tuning-row { margin-bottom: 8px; gap: 10px; }
     .settings-dialog-field input,
     .settings-dialog-field select,
     .settings-dialog-field textarea { font: inherit; padding: 8px 10px;
-      border-radius: 6px; border: 1px solid var(--border); background: var(--bg);
-      color: var(--fg); }
+      border-radius: 6px; border: 1px solid var(--border);
+      background: var(--input-fill); color: var(--fg); }
     .settings-dialog-token-row { display: flex; gap: 8px; align-items: stretch; }
     .settings-dialog-token-row input { flex: 1 1 auto; min-width: 0; }
     .settings-dialog-reveal { display: inline-flex; flex: 0 0 auto;
@@ -627,6 +633,13 @@
     .mytracks-sync-dialog .settings-dialog-lead { font-size: 13px; line-height: 1.35; }
     .mytracks-sync-dialog .mytracks-sync-actions { margin-top: 2px; }
     .mytracks-sync-dialog .settings-dialog-field { margin-bottom: 0; gap: 4px; }
+    .mytracks-sync-credentials-row .settings-dialog-field { flex: 1 1 9rem; }
+    .ui-confirm-dialog { max-width: min(24rem, calc(100vw - 2rem)); }
+    .ui-confirm-title { margin: 0; font-size: 1.05rem; }
+    .ui-confirm-body { gap: 10px; }
+    .ui-confirm-actions { margin-top: 4px; }
+    .rules-rule-editor-top { display: flex; justify-content: flex-end;
+      margin-bottom: 4px; }
 
     .settings-dialog.rules-dialog { position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%); margin: 0;
@@ -689,11 +702,13 @@
       text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
     .rules-device-action-row { margin: 6px 0; }
     .rules-editor-subfieldset { margin-top: 8px; }
-    .rules-enable-toggle { font: inherit; font-size: 12px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer;
-      border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px;
-      background: var(--card); color: var(--muted); touch-action: manipulation; }
-    .rules-enable-toggle-on { border-color: var(--accent); color: var(--accent); }
+    .rules-enable-toggle { flex-shrink: 0; font: inherit; font-size: 12px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+      cursor: pointer; border: 1px solid var(--border); border-radius: 999px;
+      padding: 4px 10px; background: var(--input-fill); color: var(--muted);
+      touch-action: manipulation; }
+    .rules-enable-toggle-on { border-color: var(--accent); color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, var(--input-fill)); }
     .rules-field-label-row { display: inline-flex; align-items: center; gap: 6px; }
     .rules-info-badge-wrap { position: relative; display: inline-flex; }
     .rules-info-badge { width: 1.1rem; height: 1.1rem; padding: 0; border-radius: 999px;
@@ -711,12 +726,12 @@
     .rules-mail-test-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .rules-mail-test-row input { flex: 1 1 12rem; min-width: 0; font: inherit;
       padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
-      background: var(--bg); color: var(--fg); }
+      background: var(--input-fill); color: var(--fg); }
     .automations-dialog .rules-editor-form input:not([type="checkbox"]):not([type="radio"]),
     .automations-dialog .rules-geofence-form-panel input:not([type="checkbox"]):not([type="radio"]),
     .automations-dialog .rules-participant-form input:not([type="checkbox"]):not([type="radio"]) {
       font: inherit; padding: 8px 10px; border-radius: 6px;
-      border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+      border: 1px solid var(--border); background: var(--input-fill); color: var(--fg); }
     .automations-dialog .leaflet-bar a { background: var(--card-elev); color: var(--fg);
       border-bottom-color: var(--border); }
     .automations-dialog .leaflet-bar a:hover { background: var(--border); }

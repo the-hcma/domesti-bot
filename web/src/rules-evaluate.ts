@@ -5,6 +5,8 @@ import {
   isInBeforeSunriseWindow,
 } from "./astronomical-conditions.js";
 import { haversineM, mockSunRow, type MockStoreSeed } from "./rules-mock-fixtures.js";
+import { joinNames } from "./rule-summary.js";
+import { firstNameFromDisplayName } from "./rules-ui-helpers.js";
 import type {
   GeofenceOut,
   ParticipantFixOut,
@@ -86,10 +88,10 @@ function geofenceLabel(store: MockStoreSeed, geofenceId: string): string {
 }
 
 function participantDisplayName(store: MockStoreSeed, participantId: string): string {
-  return (
+  const displayName =
     store.participants.find((p) => p.participant_id === participantId)?.display_name
-    ?? participantId
-  );
+    ?? participantId;
+  return firstNameFromDisplayName(displayName);
 }
 
 function participantInsideGeofence(
@@ -249,20 +251,24 @@ function evaluateCondition(
 
   const met = unmetNames.length === 0;
   const wantInside = condition.type === "participants_inside_geofence";
+  const selectedNames = condition.participant_ids.map((participantId) =>
+    participantDisplayName(store, participantId),
+  );
+  const who = joinNames(selectedNames);
   const label = wantInside
-    ? `Inside ${fenceLabel}`
-    : `Outside ${fenceLabel}`;
+    ? `When ${who} enter ${fenceLabel}`
+    : `When ${who} leave ${fenceLabel}`;
   let detail: string;
   if (met) {
     detail = wantInside
-      ? `All selected participants inside ${fenceLabel}`
-      : `All selected participants outside ${fenceLabel}`;
+      ? `Everyone is inside ${fenceLabel}`
+      : `Everyone is outside ${fenceLabel}`;
   } else if (ignoredAccuracy.length > 0) {
     detail = `Ignored low-accuracy fix: ${ignoredAccuracy.join("; ")}`;
   } else {
     detail = wantInside
-      ? `Waiting for: ${unmetNames.join(", ")}`
-      : `Still inside ${fenceLabel}: ${unmetNames.join(", ")}`;
+      ? `Waiting for ${unmetNames.join(", ")} to enter ${fenceLabel}`
+      : `Waiting for ${unmetNames.join(", ")} to leave ${fenceLabel}`;
   }
   return { condition, label, met, detail };
 }

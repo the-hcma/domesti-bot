@@ -4,6 +4,7 @@ import { HttpError } from "./api.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
+import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 
 export interface MyTracksSyncCredentialDefaults {
   domain: string;
@@ -15,7 +16,7 @@ export interface MyTracksSyncCredentials {
   username: string;
 }
 
-function appendCompactField(
+function appendInlineField(
   parent: HTMLElement,
   labelText: string,
   control: HTMLElement,
@@ -68,20 +69,27 @@ export function promptMyTracksSyncCredentials(
 
     const form = document.createElement("form");
     form.className = "mytracks-sync-form";
+    form.setAttribute("autocomplete", "off");
+
+    const credentialsRow = document.createElement("div");
+    credentialsRow.className = "settings-dialog-field-row mytracks-sync-credentials-row";
 
     const usernameInput = document.createElement("input");
     usernameInput.type = "text";
-    usernameInput.autocomplete = "username";
+    usernameInput.name = "mytracks-sync-username";
+    usernameInput.setAttribute("autocomplete", "off");
     usernameInput.required = true;
     usernameInput.value = defaults.username;
-    appendCompactField(form, "Admin username", usernameInput);
+    appendInlineField(credentialsRow, "Admin username", usernameInput);
 
     const passwordRow = createSecretInputRow({
-      autocomplete: "current-password",
       required: true,
     });
+    passwordRow.input.name = "mytracks-sync-password";
+    passwordRow.input.setAttribute("autocomplete", "new-password");
     passwordRow.input.required = true;
-    appendCompactField(form, "Admin password", passwordRow.row);
+    appendInlineField(credentialsRow, "Admin password", passwordRow.row);
+    form.append(credentialsRow);
 
     const actions = document.createElement("div");
     actions.className = "settings-dialog-actions mytracks-sync-actions";
@@ -144,7 +152,7 @@ export async function runMyTracksSyncAction(
   try {
     settings = await dataSource.getMyTracksSettings();
   } catch (err) {
-    window.alert(err instanceof Error ? err.message : String(err));
+    showErrorToast(err instanceof Error ? err.message : String(err));
     return;
   }
   const credentials = await promptMyTracksSyncCredentials({
@@ -156,15 +164,21 @@ export async function runMyTracksSyncAction(
   }
   try {
     if (kind === "participants") {
-      await dataSource.syncParticipantsFromMyTracks({
+      const result = await dataSource.syncParticipantsFromMyTracks({
         username: credentials.username,
         password: credentials.password,
       });
+      showSuccessToast(
+        `Synced ${result.participant_count} participant${result.participant_count === 1 ? "" : "s"} from My Tracks.`,
+      );
     } else {
-      await dataSource.syncGeofencesFromMyTracks({
+      const result = await dataSource.syncGeofencesFromMyTracks({
         username: credentials.username,
         password: credentials.password,
       });
+      showSuccessToast(
+        `Synced ${result.geofence_count} geofence${result.geofence_count === 1 ? "" : "s"} from My Tracks.`,
+      );
     }
     await onComplete();
   } catch (err) {
@@ -174,6 +188,6 @@ export async function runMyTracksSyncAction(
         : err instanceof Error
           ? err.message
           : String(err);
-    window.alert(message);
+    showErrorToast(message);
   }
 }

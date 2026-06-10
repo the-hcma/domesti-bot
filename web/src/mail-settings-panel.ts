@@ -4,6 +4,7 @@ import { HttpError } from "./api.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
 import type { SmtpConfigIn, SmtpConfigOut } from "./types.js";
+import { confirmAction } from "./ui-toast.js";
 import { defaultMailDomainFromUi } from "./ui-instance.js";
 
 const DEFAULT_SMTP_HOST = "localhost";
@@ -305,22 +306,25 @@ export async function mountMailSettingsPanel(
   });
 
   resetBtn.addEventListener("click", () => {
-    if (
-      !window.confirm(
+    void confirmAction({
+      message:
         "This will permanently delete all SMTP settings, including the stored password. Continue?",
-      )
-    ) {
-      return;
-    }
-    void dataSource
-      .resetSmtpConfig()
-      .then(() => {
-        void mountMailSettingsPanel(container, dataSource);
-      })
-      .catch((err: unknown) => {
-        status.hidden = false;
-        status.textContent = formatMailError(err);
-      });
+      confirmLabel: "Delete",
+      variant: "danger",
+    }).then((confirmed) => {
+      if (!confirmed) {
+        return;
+      }
+      void dataSource
+        .resetSmtpConfig()
+        .then(() => {
+          void mountMailSettingsPanel(container, dataSource);
+        })
+        .catch((err: unknown) => {
+          status.hidden = false;
+          status.textContent = formatMailError(err);
+        });
+    });
   });
 
   form.append(actions);

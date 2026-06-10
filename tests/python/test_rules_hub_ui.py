@@ -161,7 +161,7 @@ def test_rules_hub_opens_with_mock_seed_rule(
         rules_card = page.locator(".rules-card").first
         rules_card.wait_for(state="visible", timeout=10_000)
         card_text = rules_card.inner_text()
-        assert "Henrique and Kristen are both inside House" in card_text
+        assert "When Henrique and Kristen enter House" in card_text
         assert "After sunset until midnight" in card_text
         assert "Turn on Kitchen lights" in card_text
         assert "Turn on Porch lights" in card_text

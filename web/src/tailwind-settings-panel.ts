@@ -1,15 +1,11 @@
 // GoTailwind token settings panel for the Settings hub.
 
 import { api, HttpError } from "./api.js";
-import type { TailwindTokenSettingsOut } from "./types.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
+import { showSuccessToast } from "./ui-toast.js";
+import type { TailwindTokenSettingsOut } from "./types.js";
 
 const TAILWIND_WEB_DASHBOARD_HREF = "https://web.gotailwind.com";
-
-const SETTINGS_TOAST_MS = 5000;
-
-let settingsToast: HTMLDivElement | null = null;
-let settingsToastTimer: number | null = null;
 
 function appendTailwindTokenIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
@@ -27,34 +23,6 @@ function appendTailwindTokenIntro(parent: HTMLElement): void {
     ),
   );
   parent.append(intro);
-}
-
-function showSettingsToast(message: string): void {
-  if (settingsToastTimer !== null) {
-    window.clearTimeout(settingsToastTimer);
-    settingsToastTimer = null;
-  }
-  if (settingsToast !== null) {
-    settingsToast.remove();
-    settingsToast = null;
-  }
-  const toast = document.createElement("div");
-  toast.className = "action-toast action-toast-success";
-  toast.setAttribute("role", "status");
-  toast.setAttribute("aria-live", "polite");
-  const text = document.createElement("p");
-  text.className = "action-toast-message";
-  text.textContent = message;
-  toast.append(text);
-  document.body.append(toast);
-  settingsToast = toast;
-  settingsToastTimer = window.setTimeout(() => {
-    toast.remove();
-    if (settingsToast === toast) {
-      settingsToast = null;
-    }
-    settingsToastTimer = null;
-  }, SETTINGS_TOAST_MS);
 }
 
 export async function mountTailwindSettingsPanel(
@@ -175,7 +143,7 @@ export async function mountTailwindSettingsPanel(
       saveBtn.disabled = true;
       try {
         const out = await api.putTailwindToken(token);
-        showSettingsToast("Token saved.");
+        showSuccessToast("Token saved.");
         setTokenRevealed(false);
         const s = await api.fetchTailwindTokenSettings();
         applyTokenFieldsFromSettings(s);
@@ -210,7 +178,7 @@ export async function mountTailwindSettingsPanel(
         input.value = "";
         input.required = true;
         setTokenRevealed(false);
-        showSettingsToast("Stored token cleared.");
+        showSuccessToast("Stored token cleared.");
         await refreshStatus();
         await options.onDevicesChanged?.();
       } catch (err) {
