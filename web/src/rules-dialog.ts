@@ -1056,12 +1056,6 @@ class RulesHubController {
     participantsHeading.textContent = "Participants";
     const participantsSection = document.createElement("section");
     participantsSection.className = "rules-participants-section";
-    this.mountParticipantPresenceMap(
-      participantsSection,
-      status.geofences,
-      status.participants,
-      { showParticipantFilters: true, showTextDetails: false },
-    );
 
     const rulesHeading = document.createElement("h3");
     rulesHeading.className = "rules-section-title";
@@ -1123,6 +1117,12 @@ class RulesHubController {
     }
 
     this.body.append(sunBtn, participantsHeading, participantsSection, rulesHeading, ruleList);
+    this.mountParticipantPresenceMap(
+      participantsSection,
+      status.geofences,
+      status.participants,
+      { showParticipantFilters: true, showTextDetails: false },
+    );
   }
 
   private async renderRulesTab(): Promise<void> {
@@ -1262,6 +1262,8 @@ class RulesHubController {
 
     const mapSection = document.createElement("section");
     mapSection.className = "rules-participants-section";
+
+    this.body.append(lead, syncRow, mapSection);
     this.mountParticipantPresenceMap(
       mapSection,
       geofences,
@@ -1272,8 +1274,6 @@ class RulesHubController {
         showTextDetails: false,
       },
     );
-
-    this.body.append(lead, syncRow, mapSection);
   }
 
   private async setTab(tab: RulesTabId): Promise<void> {
