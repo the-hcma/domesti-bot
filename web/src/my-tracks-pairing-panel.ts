@@ -263,7 +263,7 @@ export async function mountMyTracksPairingPanel(
 
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
-  status.hidden = false;
+  status.hidden = true;
 
   const form = document.createElement("form");
   form.className = "mytracks-pairing-form";
