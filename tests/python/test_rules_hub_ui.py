@@ -212,7 +212,7 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
         )
         marker = page.locator(".rules-presence-participant-marker").first
         marker.hover()
-        tooltip = page.locator(".rules-presence-map-tooltip")
+        tooltip = page.locator(".rules-presence-map-hover-tooltip")
         tooltip.wait_for(state="visible", timeout=5_000)
         box = tooltip.bounding_box()
         assert box is not None
@@ -299,7 +299,7 @@ def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
         )
         marker = page.locator(".rules-presence-participant-marker").first
         marker.hover()
-        tooltip = page.locator(".rules-presence-map-tooltip")
+        tooltip = page.locator(".rules-presence-map-hover-tooltip")
         tooltip.wait_for(state="visible", timeout=5_000)
         box = tooltip.bounding_box()
         assert box is not None
@@ -323,7 +323,7 @@ def test_participants_tab_tooltip_not_clipped_at_map_edge(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Sticky participant tooltips must paint outside the 280px map without clipping."""
+    """Shell-hosted tooltips must stay visible while the map keeps overflow hidden."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -343,7 +343,7 @@ def test_participants_tab_tooltip_not_clipped_at_map_edge(
         overflow = page.locator(".rules-presence-map").evaluate(
             "(el) => getComputedStyle(el).overflow",
         )
-        assert overflow == "visible"
+        assert overflow == "hidden"
 
         top_marker_y = float("inf")
         top_marker = None
@@ -356,27 +356,18 @@ def test_participants_tab_tooltip_not_clipped_at_map_edge(
                 top_marker = marker
         assert top_marker is not None
         top_marker.hover()
-        tooltip = page.locator(".rules-presence-map-tooltip")
+        tooltip = page.locator(".rules-presence-map-hover-tooltip")
         tooltip.wait_for(state="visible", timeout=5_000)
-        allows_overflow = page.evaluate(
+        hosted_on_shell = page.evaluate(
             """() => {
-              const tooltip = document.querySelector('.leaflet-tooltip.rules-presence-map-tooltip');
-              if (tooltip === null) return false;
-              let el = tooltip.parentElement;
-              while (el !== null) {
-                if (el.classList.contains('rules-presence-map-shell')) {
-                  return true;
-                }
-                const style = getComputedStyle(el);
-                if (style.overflow === 'hidden') {
-                  return false;
-                }
-                el = el.parentElement;
-              }
-              return false;
+              const tooltip = document.querySelector('.rules-presence-map-hover-tooltip');
+              const map = document.querySelector('.rules-presence-map.leaflet-container');
+              if (tooltip === null || map === null) return false;
+              if (map.contains(tooltip)) return false;
+              return tooltip.closest('.rules-presence-map-shell') !== null;
             }""",
         )
-        assert allows_overflow
+        assert hosted_on_shell
         box = tooltip.bounding_box()
         assert box is not None
         assert box["width"] >= 120

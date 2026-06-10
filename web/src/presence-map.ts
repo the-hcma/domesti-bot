@@ -43,6 +43,128 @@ interface ParticipantLayers {
   marker: L.CircleMarker;
 }
 
+interface ShellTooltipController {
+  attach(marker: L.CircleMarker, getTooltipHtml: () => string): void;
+  detach(marker: L.CircleMarker): void;
+  destroy(): void;
+}
+
+interface MarkerTooltipHandlers {
+  getTooltipHtml: () => string;
+  onMouseOut: () => void;
+  onMouseOver: (event: L.LeafletMouseEvent) => void;
+  onMouseMove: (event: L.LeafletMouseEvent) => void;
+}
+
+export function createShellTooltipController(shellEl: HTMLElement): ShellTooltipController {
+  const tooltipEl = document.createElement("div");
+  tooltipEl.className = "rules-presence-map-tooltip rules-presence-map-hover-tooltip";
+  tooltipEl.hidden = true;
+  shellEl.append(tooltipEl);
+
+  let activeMarker: L.CircleMarker | null = null;
+  const handlersByMarker = new Map<L.CircleMarker, MarkerTooltipHandlers>();
+
+  const positionAtPointer = (
+    clientX: number,
+    clientY: number,
+    getTooltipHtml: () => string,
+  ): void => {
+    tooltipEl.innerHTML = getTooltipHtml();
+    tooltipEl.hidden = false;
+
+    const shellRect = shellEl.getBoundingClientRect();
+    const margin = 8;
+    const pointerX = clientX - shellRect.left;
+    const pointerY = clientY - shellRect.top;
+    const placeAbove = (): void => {
+      tooltipEl.style.transform =
+        `translate(${pointerX}px, ${pointerY - 12}px) translate(-50%, -100%)`;
+    };
+    placeAbove();
+
+    let tRect = tooltipEl.getBoundingClientRect();
+    if (tRect.top < shellRect.top + margin) {
+      tooltipEl.style.transform =
+        `translate(${pointerX}px, ${pointerY + 16}px) translate(-50%, 0)`;
+      tRect = tooltipEl.getBoundingClientRect();
+    }
+
+    let shiftX = 0;
+    if (tRect.left < shellRect.left + margin) {
+      shiftX = shellRect.left + margin - tRect.left;
+    } else if (tRect.right > shellRect.right - margin) {
+      shiftX = shellRect.right - margin - tRect.right;
+    }
+    if (shiftX !== 0) {
+      const current = tooltipEl.style.transform;
+      tooltipEl.style.transform = `${current} translateX(${shiftX}px)`;
+    }
+  };
+
+  const hide = (): void => {
+    activeMarker = null;
+    tooltipEl.hidden = true;
+    tooltipEl.style.transform = "";
+  };
+
+  return {
+    attach(marker, getTooltipHtml) {
+      const onMouseOver = (event: L.LeafletMouseEvent): void => {
+        activeMarker = marker;
+        positionAtPointer(
+          event.originalEvent.clientX,
+          event.originalEvent.clientY,
+          getTooltipHtml,
+        );
+      };
+      const onMouseMove = (event: L.LeafletMouseEvent): void => {
+        if (activeMarker !== marker) {
+          return;
+        }
+        positionAtPointer(
+          event.originalEvent.clientX,
+          event.originalEvent.clientY,
+          getTooltipHtml,
+        );
+      };
+      const onMouseOut = (): void => {
+        if (activeMarker === marker) {
+          hide();
+        }
+      };
+      handlersByMarker.set(marker, {
+        getTooltipHtml,
+        onMouseOut,
+        onMouseOver,
+        onMouseMove,
+      });
+      marker.on("mouseover", onMouseOver);
+      marker.on("mousemove", onMouseMove);
+      marker.on("mouseout", onMouseOut);
+    },
+    detach(marker) {
+      const handlers = handlersByMarker.get(marker);
+      if (handlers === undefined) {
+        return;
+      }
+      marker.off("mouseover", handlers.onMouseOver);
+      marker.off("mousemove", handlers.onMouseMove);
+      marker.off("mouseout", handlers.onMouseOut);
+      handlersByMarker.delete(marker);
+      if (activeMarker === marker) {
+        hide();
+      }
+    },
+    destroy() {
+      for (const marker of handlersByMarker.keys()) {
+        this.detach(marker);
+      }
+      tooltipEl.remove();
+    },
+  };
+}
+
 export function formatAge(seconds: number | null): string {
   if (seconds === null) {
     return "never";
@@ -241,6 +363,9 @@ export function mountPresenceMap(
   shellEl.append(mapEl, legendEl);
   rootEl.append(filtersEl, shellEl);
 
+  const shellTooltip = createShellTooltipController(shellEl);
+  const tooltipHtmlByParticipantId = new Map<string, string>();
+
   const map = L.map(mapEl, {
     attributionControl: false,
     scrollWheelZoom: true,
@@ -344,6 +469,8 @@ export function mountPresenceMap(
     if (layers === undefined) {
       return;
     }
+    shellTooltip.detach(layers.marker);
+    tooltipHtmlByParticipantId.delete(participantId);
     map.removeLayer(layers.marker);
     if (layers.accuracy !== null) {
       map.removeLayer(layers.accuracy);
@@ -364,18 +491,11 @@ export function mountPresenceMap(
     const tooltipHtml = formatParticipantTooltipHtml(participant, {
       includeParticipantId: includeParticipantIdInTooltip,
     });
-    const tooltipOptions: L.TooltipOptions = {
-      className: "rules-presence-map-tooltip",
-      direction: "auto",
-      offset: [0, -12],
-      opacity: 1,
-      sticky: true,
-    };
+    tooltipHtmlByParticipantId.set(participant.participant_id, tooltipHtml);
     const existing = participantLayerById.get(participant.participant_id);
     if (existing !== undefined) {
       existing.marker.setLatLng([fix.lat, fix.lon]);
       existing.marker.setStyle(participantMarkerOptions(color));
-      existing.marker.setTooltipContent(tooltipHtml);
       if (fix.accuracy_m !== null && fix.accuracy_m > 0) {
         if (existing.accuracy === null) {
           existing.accuracy = L.circle([fix.lat, fix.lon], {
@@ -400,9 +520,9 @@ export function mountPresenceMap(
     const marker = L.circleMarker(
       [fix.lat, fix.lon],
       participantMarkerOptions(color),
-    )
-      .bindTooltip(tooltipHtml, tooltipOptions)
-      .addTo(map);
+    ).addTo(map);
+    const participantId = participant.participant_id;
+    shellTooltip.attach(marker, () => tooltipHtmlByParticipantId.get(participantId) ?? "");
     let accuracy: L.Circle | null = null;
     if (fix.accuracy_m !== null && fix.accuracy_m > 0) {
       accuracy = L.circle([fix.lat, fix.lon], {
@@ -448,6 +568,7 @@ export function mountPresenceMap(
 
   return {
     destroy(): void {
+      shellTooltip.destroy();
       map.remove();
       rootEl.replaceChildren();
     },

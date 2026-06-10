@@ -773,12 +773,9 @@
       font-size: 14px; cursor: pointer; user-select: none; }
     .rules-presence-map-filter-swatch { width: 12px; height: 12px; border-radius: 50%;
       border: 2px solid #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); flex-shrink: 0; }
-    .rules-presence-map-mount,
-    .rules-presence-map-shell { overflow: visible; }
-    .rules-presence-map-shell { position: relative; width: 100%; }
+    .rules-presence-map-shell { position: relative; width: 100%; overflow: visible; }
     .rules-presence-map.leaflet-container { position: relative; width: 100%; height: 280px;
-      border-radius: 8px; border: 1px solid var(--border); overflow: visible; }
-    .rules-presence-map .leaflet-tile-pane { border-radius: 8px; overflow: hidden; }
+      border-radius: 8px; border: 1px solid var(--border); overflow: hidden; }
     .rules-presence-map-legend { position: absolute; bottom: 30px; right: 10px; z-index: 1000;
       background: color-mix(in srgb, var(--card) 95%, transparent);
       border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
@@ -799,11 +796,15 @@
       text-overflow: ellipsis; }
     .rules-presence-map-legend-device { color: var(--muted); font-size: 11px; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis; }
+    .rules-presence-map-hover-tooltip,
     .leaflet-tooltip.rules-presence-map-tooltip { display: block; box-sizing: border-box;
       width: max-content; min-width: 12rem; max-width: min(20rem, calc(100vw - 3rem));
       padding: 8px 10px; font-size: 13px; line-height: 1.4; white-space: normal;
       overflow-wrap: break-word; word-break: normal; pointer-events: none;
       background: var(--card-elev); color: var(--fg); border-color: var(--border); }
+    .rules-presence-map-hover-tooltip { position: absolute; left: 0; top: 0; z-index: 1100;
+      border: 1px solid var(--border); border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
     .rules-presence-map-tooltip-line { display: block; }
     .rules-presence-map-tooltip-line + .rules-presence-map-tooltip-line { margin-top: 2px; }
     .rules-participants-section { margin-bottom: 12px; }
@@ -856,9 +857,9 @@
     .rules-geofence-form-panel input:not([type="checkbox"]):not([type="radio"]),
     .rules-participant-form input:not([type="checkbox"]):not([type="radio"]) {
       background: var(--input-fill); }
-    .rules-geofence-map { width: 100%; height: 240px; border-radius: 8px;
-      border: 1px solid var(--border); z-index: 0; }
-    .rules-geofence-map-wrap { margin-bottom: 10px; }
+    .rules-geofence-map.leaflet-container { width: 100%; height: 240px; border-radius: 8px;
+      border: 1px solid var(--border); z-index: 0; overflow: hidden; }
+    .rules-geofence-map-wrap { position: relative; margin-bottom: 10px; overflow: visible; }
     .rules-geofence-panel { display: flex; flex-direction: column; gap: 10px; }
     .rules-geofence-panel.rules-geofence-draw-active .rules-geofence-toolbar-import {
       opacity: 0.55; }
