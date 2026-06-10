@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.db.models import MyTracksSettings
-from app.db.secrets import mytracks_relay_api_key_stored_in_db
+from app.db.secrets import delete_app_secret, mytracks_relay_api_key_stored_in_db
 from app.db.session import discovery_session
 from app.location_history_retention import (
     DEFAULT_LOCATION_HISTORY_MAX_AGE_S,
@@ -67,8 +67,25 @@ class MyTracksPairingSave:
     username: str
 
 
+def clear_mytracks_pairing(path: Path) -> None:
+    """Clear pairing metadata and delete the stored relay API key."""
+    delete_app_secret(path, key="mytracks_relay_api_key")
+    now = time.time()
+    with discovery_session(path) as session:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None:
+            return
+        row.domesti_public_base_url = None
+        row.last_pair_error = None
+        row.paired_at = None
+        row.participant_location_test_url = None
+        row.participant_location_update_url = None
+        row.updated_at = now
+
+
 def delete_mytracks_settings(path: Path) -> None:
     """Remove My Tracks settings."""
+    clear_mytracks_pairing(path)
     with discovery_session(path) as session:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is not None:

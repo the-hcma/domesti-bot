@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import secrets
 from http import HTTPStatus
 from pathlib import Path
@@ -18,6 +17,7 @@ from app.api.schemas import (
     MyTracksPairIn,
     MyTracksPairStatusOut,
     MyTracksParticipantsSyncOut,
+    MyTracksRelayKeySettingsOut,
     MyTracksSettingsIn,
     MyTracksSettingsOut,
     MyTracksSyncIn,
@@ -25,9 +25,13 @@ from app.api.schemas import (
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.db.secrets import (
     SecretsConfigurationError,
+    SecretsDecryptError,
+    load_mytracks_relay_api_key_from_db,
+    mytracks_relay_api_key_stored_in_db,
     save_mytracks_relay_api_key_to_db,
     secrets_key_configured,
 )
+from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.mytracks_service import (
     ExportedParticipant,
     MyTracksSyncError,
@@ -46,6 +50,7 @@ from app.mytracks_store import (
     MyTracksConfigSave,
     MyTracksPairStatusRecord,
     MyTracksPairingSave,
+    clear_mytracks_pairing,
     delete_mytracks_settings,
     load_location_history_retention,
     load_mytracks_config,
@@ -76,7 +81,7 @@ from app.rules_store import (
 settings_router = APIRouter(prefix="/v1/settings", tags=["settings"])
 rules_router = APIRouter(prefix="/v1/rules", tags=["rules"])
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = mytracks_logger(__name__)
 
 
 @settings_router.delete("/my-tracks", status_code=HTTPStatus.NO_CONTENT)
@@ -98,6 +103,18 @@ async def get_mytracks_settings(request: Request) -> MyTracksSettingsOut | None:
     return _settings_to_schema(record)
 
 
+@settings_router.delete("/my-tracks/pair", response_model=MyTracksPairStatusOut | None)
+async def delete_mytracks_pair(request: Request) -> MyTracksPairStatusOut | None:
+    """Clear pairing metadata and revoke the stored relay API key."""
+    cache_path = _require_discovery_cache(request)
+    clear_mytracks_pairing(cache_path)
+    record = load_mytracks_pair_status(cache_path)
+    if record is None:
+        return None
+    _LOGGER.info("pairing reset")
+    return _pair_status_to_schema(record, cache_path=cache_path)
+
+
 @settings_router.get("/my-tracks/pair-status", response_model=MyTracksPairStatusOut | None)
 async def get_mytracks_pair_status(request: Request) -> MyTracksPairStatusOut | None:
     """Return pairing metadata for domesti-bot ↔ my-tracks integration."""
@@ -108,6 +125,22 @@ async def get_mytracks_pair_status(request: Request) -> MyTracksPairStatusOut | 
     if record is None:
         return None
     return _pair_status_to_schema(record, cache_path=cache_path)
+
+
+@settings_router.get("/my-tracks/relay-key", response_model=MyTracksRelayKeySettingsOut)
+async def get_mytracks_relay_key_settings(request: Request) -> MyTracksRelayKeySettingsOut:
+    """Return relay API key status (includes stored key when paired)."""
+    cache_path = discovery_cache_path_from_request(request)
+    if cache_path is None:
+        return MyTracksRelayKeySettingsOut(configured=False, stored_relay_key=None)
+    stored = mytracks_relay_api_key_stored_in_db(cache_path)
+    if not stored:
+        return MyTracksRelayKeySettingsOut(configured=False, stored_relay_key=None)
+    try:
+        relay_key = load_mytracks_relay_api_key_from_db(cache_path)
+    except SecretsDecryptError:
+        relay_key = None
+    return MyTracksRelayKeySettingsOut(configured=True, stored_relay_key=relay_key)
 
 
 @settings_router.patch(
@@ -130,10 +163,7 @@ async def patch_mytracks_location_history_retention_route(
     retention = load_location_history_retention(cache_path)
     pruned = prune_all_participant_location_history(cache_path, retention=retention)
     if pruned:
-        _LOGGER.info(
-            "[mytracks] location-history retention update pruned %d row(s)",
-            pruned,
-        )
+        _LOGGER.info("location-history retention update pruned %d row(s)", pruned)
     return _retention_record_to_schema(saved)
 
 
@@ -177,7 +207,7 @@ async def post_mytracks_pair(
     cache_path = _require_discovery_cache(request)
     _require_secrets_key_for_pairing()
     mytracks_base = _validated_mytracks_domain(body.domain)
-    domesti_public = _validated_domesti_public_url(body.domesti_public_base_url)
+    domesti_public = _resolve_domesti_public_base_url_from_request(request)
     username = body.username.strip()
     if username == "":
         raise HTTPException(
@@ -199,17 +229,17 @@ async def post_mytracks_pair(
     )
     relay_key = secrets.token_urlsafe(32)
     _LOGGER.info(
-        "[mytracks] pairing starting for %s as %s (domesti public %s)",
-        mytracks_base,
+        "pairing starting for %s as %s (domesti %s)",
+        mytracks_log_host(mytracks_base),
         username,
-        domesti_public,
+        mytracks_log_host(domesti_public),
     )
     try:
         save_mytracks_relay_api_key_to_db(cache_path, relay_key)
     except SecretsConfigurationError as exc:
         _LOGGER.warning(
-            "[mytracks] pairing failed for %s as %s before my-tracks call: %s",
-            mytracks_base,
+            "pairing failed for %s as %s before my-tracks call: %s",
+            mytracks_log_host(mytracks_base),
             username,
             exc,
         )
@@ -230,8 +260,8 @@ async def post_mytracks_pair(
     except MyTracksSyncError as exc:
         set_last_pair_error(cache_path, str(exc))
         _LOGGER.warning(
-            "[mytracks] pairing failed for %s as %s: %s",
-            mytracks_base,
+            "pairing failed for %s as %s: %s",
+            mytracks_log_host(mytracks_base),
             username,
             exc,
         )
@@ -254,8 +284,8 @@ async def post_mytracks_pair(
         ),
     )
     _LOGGER.info(
-        "[mytracks] pairing complete for %s as %s (HTTP %d)",
-        mytracks_base,
+        "pairing complete for %s as %s (HTTP %d)",
+        mytracks_log_host(mytracks_base),
         username,
         pair_status,
     )
@@ -330,8 +360,8 @@ async def post_mytracks_geofences_sync(
     record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
     _LOGGER.info(
-        "[mytracks] geofence sync starting for %s as %s",
-        base_url,
+        "geofence sync starting for %s as %s",
+        mytracks_log_host(base_url),
         username,
     )
     try:
@@ -342,8 +372,8 @@ async def post_mytracks_geofences_sync(
         )
     except MyTracksSyncError as exc:
         _LOGGER.warning(
-            "[mytracks] geofence sync failed for %s as %s: %s",
-            base_url,
+            "geofence sync failed for %s as %s: %s",
+            mytracks_log_host(base_url),
             username,
             exc,
         )
@@ -368,8 +398,8 @@ async def post_mytracks_geofences_sync(
     )
     updated = record_mytracks_geofences_sync(cache_path, count=count)
     _LOGGER.info(
-        "[mytracks] geofence sync complete for %s: %d geofence(s)",
-        base_url,
+        "geofence sync complete for %s: %d geofence(s)",
+        mytracks_log_host(base_url),
         count,
     )
     return MyTracksGeofencesSyncOut(
@@ -387,8 +417,8 @@ async def post_mytracks_participants_sync(
     record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
     _LOGGER.info(
-        "[mytracks] participant sync starting for %s as %s",
-        base_url,
+        "participant sync starting for %s as %s",
+        mytracks_log_host(base_url),
         username,
     )
     try:
@@ -399,8 +429,8 @@ async def post_mytracks_participants_sync(
         )
     except MyTracksSyncError as exc:
         _LOGGER.warning(
-            "[mytracks] participant sync failed for %s as %s: %s",
-            base_url,
+            "participant sync failed for %s as %s: %s",
+            mytracks_log_host(base_url),
             username,
             exc,
         )
@@ -427,8 +457,8 @@ async def post_mytracks_participants_sync(
     )
     updated = record_mytracks_participants_sync(cache_path, count=count)
     _LOGGER.info(
-        "[mytracks] participant sync complete for %s: %d participant(s), %d location fix(es)",
-        base_url,
+        "participant sync complete for %s: %d participant(s), %d location fix(es)",
+        mytracks_log_host(base_url),
         count,
         fix_count,
     )
@@ -501,6 +531,23 @@ def _participant_fix_from_export(row: ExportedParticipant) -> ParticipantFixReco
         received_at=parse_iso_timestamp_to_epoch(location.received_at),
         source="my-tracks",
     )
+
+
+def _resolve_domesti_public_base_url_from_request(request: Request) -> str:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    forwarded_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+    if forwarded_host != "":
+        scheme = forwarded_proto if forwarded_proto != "" else "https"
+        raw = f"{scheme}://{forwarded_host}"
+    else:
+        raw = str(request.base_url).rstrip("/")
+    try:
+        return normalize_public_base_url(raw)
+    except MyTracksSyncError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 def _require_discovery_cache(request: Request) -> Path:
@@ -580,16 +627,6 @@ def _resolve_sync_credentials(
             detail="Expected My Tracks admin password, got empty value",
         )
     return record, username
-
-
-def _validated_domesti_public_url(url: str) -> str:
-    try:
-        return normalize_public_base_url(url)
-    except MyTracksSyncError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
 
 
 def _validated_mytracks_domain(domain: str) -> str:

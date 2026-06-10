@@ -31,17 +31,17 @@ def apply_location_update_webhook(
             headers={"Retry-After": "60"},
         )
     participant_id = body.participant_id.strip()
+    if not persist_fix:
+        _LOGGER.info(
+            "[location] test webhook accepted for %s (discarded)",
+            participant_id,
+        )
+        return
     if not participant_exists(cache_path, participant_id):
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=f"Unknown participant_id {participant_id!r}",
         )
-    if not persist_fix:
-        _LOGGER.info(
-            "[location] test webhook validated for %s (not persisted)",
-            participant_id,
-        )
-        return
     try:
         received_at = parse_iso_timestamp_to_epoch(body.timestamp)
     except ValueError as exc:

@@ -216,10 +216,14 @@ export interface MyTracksParticipantsSyncOut {
 
 export interface MyTracksPairIn {
   domain: string;
-  domesti_public_base_url: string;
   location_history_retention: LocationHistoryRetentionIn;
   password: string;
   username: string;
+}
+
+export interface MyTracksRelayKeySettingsOut {
+  configured: boolean;
+  stored_relay_key: string | null;
 }
 
 export interface MyTracksPairStatusOut {

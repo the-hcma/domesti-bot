@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -10,7 +9,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-_LOGGER = logging.getLogger(__name__)
+from app.mytracks_logging import mytracks_log_host, mytracks_logger
+
+_LOGGER = mytracks_logger(__name__)
 
 _DOMESTI_BOT_CONFIG_PATH = "/api/admin/domesti-bot/config/"
 _DOMESTI_BOT_PAIR_PATH = "/api/admin/domesti-bot/pair/"
@@ -192,10 +193,10 @@ def pair_with_my_tracks(
     if api_key.strip() == "":
         raise MyTracksSyncError("Expected relay API key, got empty value")
     _LOGGER.info(
-        "[mytracks] pair request starting for %s as %s (domesti public %s)",
-        base_url,
+        "pair request starting for %s as %s (domesti %s)",
+        mytracks_log_host(base_url),
         username,
-        domesti_base_url,
+        mytracks_log_host(domesti_base_url),
     )
     client = _login_client(base_url, username=username, password=password)
     try:
@@ -222,8 +223,8 @@ def pair_with_my_tracks(
             "My Tracks rejected the admin session during pairing (staff account required)"
         )
         _LOGGER.warning(
-            "[mytracks] pair request failed for %s as %s: %s",
-            base_url,
+            "pair request failed for %s as %s: %s",
+            mytracks_log_host(base_url),
             username,
             message,
         )
@@ -234,8 +235,8 @@ def pair_with_my_tracks(
             "with /api/admin/domesti-bot/pair/"
         )
         _LOGGER.warning(
-            "[mytracks] pair request failed for %s as %s: %s",
-            base_url,
+            "pair request failed for %s as %s: %s",
+            mytracks_log_host(base_url),
             username,
             message,
         )
@@ -244,15 +245,15 @@ def pair_with_my_tracks(
         detail = _response_error_detail(response)
         message = f"My Tracks pair returned HTTP {response.status_code}: {detail}"
         _LOGGER.warning(
-            "[mytracks] pair request failed for %s as %s: %s",
-            base_url,
+            "pair request failed for %s as %s: %s",
+            mytracks_log_host(base_url),
             username,
             message,
         )
         raise MyTracksSyncError(message)
     _LOGGER.info(
-        "[mytracks] pair request accepted for %s as %s (HTTP %d)",
-        base_url,
+        "pair request accepted for %s as %s (HTTP %d)",
+        mytracks_log_host(base_url),
         username,
         response.status_code,
     )

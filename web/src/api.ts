@@ -18,6 +18,7 @@ import type {
   MyTracksGeofencesSyncOut,
   MyTracksPairIn,
   MyTracksPairStatusOut,
+  MyTracksRelayKeySettingsOut,
   MyTracksParticipantsSyncOut,
   MyTracksSettingsIn,
   MyTracksSettingsOut,
@@ -170,6 +171,9 @@ export const api = {
   clearSmtpConfig(): Promise<void> {
     return callNoContent("DELETE", "/v1/settings/smtp");
   },
+  clearMyTracksPairing(): Promise<MyTracksPairStatusOut | null> {
+    return call<MyTracksPairStatusOut | null>("DELETE", "/v1/settings/my-tracks/pair");
+  },
   clearMyTracksSettings(): Promise<void> {
     return callNoContent("DELETE", "/v1/settings/my-tracks");
   },
@@ -190,6 +194,9 @@ export const api = {
   },
   fetchMyTracksPairStatus(): Promise<MyTracksPairStatusOut | null> {
     return callNullableJson<MyTracksPairStatusOut>("GET", "/v1/settings/my-tracks/pair-status");
+  },
+  fetchMyTracksRelayKeySettings(): Promise<MyTracksRelayKeySettingsOut> {
+    return call<MyTracksRelayKeySettingsOut>("GET", "/v1/settings/my-tracks/relay-key");
   },
   fetchMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
     return call<MyTracksParticipantsSyncOut>("GET", "/v1/rules/participants/sync-status");
