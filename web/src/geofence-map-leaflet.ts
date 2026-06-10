@@ -3,6 +3,7 @@
 import L from "leaflet";
 import { participantMarkerColor } from "./map-device-colors.js";
 import {
+  createShellTooltipController,
   formatParticipantTooltipHtml,
   participantNearEnabledGeofence,
   participantStatusToMapParticipant,
@@ -53,6 +54,9 @@ export async function initGeofenceLeafletMap(
   }).addTo(map);
   map.setView(defaultCenter, defaultZoom);
 
+  const tooltipShell = mapEl.parentElement ?? mapEl;
+  const shellTooltip = createShellTooltipController(tooltipShell);
+
   if (settings.home_label !== null && settings.lat !== 0) {
     const homeIcon = L.divIcon({
       html: "\u{1f3e0}",
@@ -98,21 +102,17 @@ export async function initGeofenceLeafletMap(
       participant.tracking_device_label,
       participant.participant_id,
     );
+    const tooltipHtml = formatParticipantTooltipHtml(participant);
     const marker = L.circleMarker([fix.lat, fix.lon], {
+      className: "rules-presence-participant-marker",
       color: "#fff",
       fillColor: color,
       fillOpacity: 0.9,
       opacity: 1,
       radius: 10,
       weight: 2,
-    })
-      .bindTooltip(formatParticipantTooltipHtml(participant), {
-        className: "rules-presence-map-tooltip",
-        direction: "top",
-        offset: [0, -12],
-        sticky: true,
-      })
-      .addTo(map);
+    }).addTo(map);
+    shellTooltip.attach(marker, () => tooltipHtml);
     participantMarkers.push(marker);
   }
 
