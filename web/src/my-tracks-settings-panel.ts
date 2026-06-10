@@ -2,7 +2,7 @@
 
 import { HttpError } from "./api.js";
 import { mountMyTracksPairingPanel } from "./my-tracks-pairing-panel.js";
-import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
+import { appendMyTracksInstanceText, myTracksHostLabel } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
 import type { MyTracksSettingsIn } from "./types.js";
@@ -60,14 +60,19 @@ export async function mountMyTracksSettingsPanel(
   fieldsRow.className = "settings-dialog-field-row mytracks-settings-fields-row";
 
   const domainInput = document.createElement("input");
-  domainInput.type = "url";
-  domainInput.placeholder = "https://tracks.example.com";
+  domainInput.type = "text";
+  domainInput.inputMode = "url";
+  domainInput.placeholder = "tracks.example.com";
   domainInput.required = true;
-  domainInput.value = existing?.domain ?? "";
+  domainInput.value = existing?.domain ? myTracksHostLabel(existing.domain) : "";
+  domainInput.spellcheck = false;
   preventBrowserAutofill(domainInput);
   appendLabeledField(
     fieldsRow,
-    createFieldLabel("My Tracks domain"),
+    createFieldLabel("My Tracks domain", {
+      detail: "Only HTTPS is supported.",
+      example: "mytracks.example.com",
+    }),
     domainInput,
   );
 
@@ -90,10 +95,13 @@ export async function mountMyTracksSettingsPanel(
   pairingMount.className = "mytracks-pairing-mount";
   container.append(pairingMount);
 
-  const readConnectionSettings = (): MyTracksSettingsIn => ({
-    domain: domainInput.value.trim(),
-    username: usernameInput.value.trim(),
-  });
+  const readConnectionSettings = (): MyTracksSettingsIn => {
+    const host = domainInput.value.trim();
+    return {
+      domain: host === "" ? "" : host,
+      username: usernameInput.value.trim(),
+    };
+  };
 
   const clearConnectionFields = (): void => {
     domainInput.value = "";

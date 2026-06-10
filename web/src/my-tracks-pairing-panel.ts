@@ -1,7 +1,7 @@
 // My Tracks domesti-bot pairing and location-history retention settings.
 
 import { api, HttpError } from "./api.js";
-import { createFieldLabel } from "./rules-ui-helpers.js";
+import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
 import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type {
@@ -89,14 +89,17 @@ function applyRetentionToForm(
 
 function renderPairStatus(statusEl: HTMLElement, status: MyTracksPairStatusOut | null): void {
   if (status?.paired_at) {
+    statusEl.hidden = false;
     statusEl.textContent = `Paired at ${status.paired_at}`;
     return;
   }
   if (status?.last_pair_error) {
+    statusEl.hidden = false;
     statusEl.textContent = `Last pairing failed: ${status.last_pair_error}`;
     return;
   }
-  statusEl.textContent = "Not paired";
+  statusEl.hidden = true;
+  statusEl.textContent = "";
 }
 
 function updatePairButtonLabel(
@@ -104,6 +107,20 @@ function updatePairButtonLabel(
   status: MyTracksPairStatusOut | null,
 ): void {
   pairBtn.textContent = status?.paired_at ? "Re-pair" : "Pair";
+}
+
+function updateResetButton(
+  resetBtn: HTMLButtonElement,
+  options: {
+    pairStatus: MyTracksPairStatusOut | null;
+    storedSettings: MyTracksSettingsOut | null;
+  },
+): void {
+  const hasSettings = options.storedSettings !== null
+    || options.pairStatus?.paired_at !== null
+    || options.pairStatus?.relay_key_configured === true;
+  resetBtn.disabled = !hasSettings;
+  resetBtn.title = hasSettings ? "" : "No settings to reset";
 }
 
 function updateSaveRetentionButton(
@@ -154,16 +171,16 @@ async function promptPairPassword(
     lead.className = "settings-dialog-lead";
     lead.textContent = `Enter the My Tracks admin password for ${username}.`;
 
-    const form = document.createElement("form");
-    form.className = "mytracks-sync-form";
-    form.setAttribute("autocomplete", "on");
+    const panelForm = document.createElement("div");
+    panelForm.className = "mytracks-sync-form";
     const passwordRow = createSecretInputRow({
-      autocomplete: "current-password",
+      autocomplete: "off",
       required: true,
     });
-    passwordRow.input.name = "password";
+    passwordRow.input.name = `mytracks-pair-secret-${crypto.randomUUID()}`;
+    preventBrowserAutofill(passwordRow.input);
     appendLabeledField(
-      form,
+      panelForm,
       createFieldLabel("Admin password"),
       passwordRow.row,
     );
@@ -171,7 +188,7 @@ async function promptPairPassword(
     const actions = document.createElement("div");
     actions.className = "settings-dialog-actions";
     const submitBtn = document.createElement("button");
-    submitBtn.type = "submit";
+    submitBtn.type = "button";
     submitBtn.className = "btn";
     submitBtn.textContent = rePair ? "Re-pair" : "Pair";
     const cancelBtn = document.createElement("button");
@@ -179,9 +196,9 @@ async function promptPairPassword(
     cancelBtn.className = "btn btn-secondary";
     cancelBtn.textContent = "Cancel";
     actions.append(submitBtn, cancelBtn);
-    form.append(actions);
+    panelForm.append(actions);
 
-    body.append(lead, form);
+    body.append(lead, panelForm);
     panel.append(header, body);
     dialog.append(panel);
     document.body.append(dialog);
@@ -207,13 +224,19 @@ async function promptPairPassword(
         finish(null);
       }
     });
-    form.addEventListener("submit", (ev) => {
-      ev.preventDefault();
+    const submitPassword = (): void => {
       const password = passwordRow.input.value;
       if (password.trim() === "") {
         return;
       }
       finish(password);
+    };
+    submitBtn.addEventListener("click", submitPassword);
+    passwordRow.input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        submitPassword();
+      }
     });
 
     dialog.showModal();
@@ -247,14 +270,17 @@ export async function mountMyTracksPairingPanel(
   form.noValidate = true;
   form.setAttribute("autocomplete", "off");
 
-  const relayKeyField = document.createElement("label");
-  relayKeyField.className = "settings-dialog-field";
-  relayKeyField.hidden = true;
+  const relayKeyField = document.createElement("div");
+  relayKeyField.className = "settings-dialog-field mytracks-relay-key-field";
   const relayKeyLabel = createFieldLabel("Relay API key");
+  const relayKeyPending = document.createElement("p");
+  relayKeyPending.className = "settings-dialog-help mytracks-relay-key-pending";
+  relayKeyPending.textContent = "Will be populated when pairing is complete.";
   const relayKeyRow = createSecretInputRow({ autocomplete: "off" });
   relayKeyRow.input.readOnly = true;
   relayKeyRow.input.tabIndex = -1;
-  relayKeyField.append(relayKeyLabel, relayKeyRow.row);
+  relayKeyRow.row.hidden = true;
+  relayKeyField.append(relayKeyLabel, relayKeyPending, relayKeyRow.row);
   form.append(relayKeyField);
 
   const retentionGroup = document.createElement("fieldset");
@@ -330,6 +356,7 @@ export async function mountMyTracksPairingPanel(
 
   let pairStatus: MyTracksPairStatusOut | null = null;
   let savedRetention: LocationHistoryRetentionIn | null = null;
+  let storedConnection: MyTracksSettingsOut | null = null;
   let storedRelayKey: string | null = null;
   let relayKeyRevealed = false;
 
@@ -349,9 +376,10 @@ export async function mountMyTracksPairingPanel(
   setRelayKeyRevealed(false);
 
   const applyRelayKeyDisplay = (): void => {
-    const show = pairStatus?.paired_at !== null && pairStatus?.paired_at !== undefined
+    const showKey = pairStatus?.paired_at !== null && pairStatus?.paired_at !== undefined
       && storedRelayKey !== null;
-    relayKeyField.hidden = !show;
+    relayKeyPending.hidden = showKey;
+    relayKeyRow.row.hidden = !showKey;
     if (storedRelayKey) {
       relayKeyRow.input.value = storedRelayKey;
       if (!relayKeyRevealed) {
@@ -361,6 +389,13 @@ export async function mountMyTracksPairingPanel(
       relayKeyRow.input.value = "";
       setRelayKeyRevealed(false);
     }
+  };
+
+  const syncResetButtonState = (): void => {
+    updateResetButton(resetBtn, {
+      pairStatus,
+      storedSettings: storedConnection,
+    });
   };
 
   const syncRetentionSaveState = (): void => {
@@ -384,7 +419,12 @@ export async function mountMyTracksPairingPanel(
 
   async function refreshStatus(): Promise<void> {
     try {
-      pairStatus = await api.fetchMyTracksPairStatus();
+      const [nextPairStatus, nextConnection] = await Promise.all([
+        api.fetchMyTracksPairStatus(),
+        api.fetchMyTracksSettings(),
+      ]);
+      pairStatus = nextPairStatus;
+      storedConnection = nextConnection;
       if (pairStatus?.location_history_retention) {
         savedRetention = { ...pairStatus.location_history_retention };
         applyRetentionToForm(pairStatus.location_history_retention, retentionControls);
@@ -399,6 +439,7 @@ export async function mountMyTracksPairingPanel(
       }
       applyRelayKeyDisplay();
       syncRetentionSaveState();
+      syncResetButtonState();
     } catch (err) {
       status.textContent = `Could not load pairing status: ${formatError(err)}`;
     }
@@ -434,6 +475,7 @@ export async function mountMyTracksPairingPanel(
       };
       try {
         pairStatus = await api.postMyTracksPair(payload);
+        storedConnection = savedConnection;
         savedRetention = { ...pairStatus.location_history_retention };
         renderPairStatus(status, pairStatus);
         updatePairButtonLabel(pairBtn, pairStatus);
@@ -441,6 +483,7 @@ export async function mountMyTracksPairingPanel(
         storedRelayKey = relaySettings.stored_relay_key;
         applyRelayKeyDisplay();
         syncRetentionSaveState();
+        syncResetButtonState();
         showSuccessToast(rePair ? "My Tracks re-pairing complete." : "My Tracks pairing complete.");
       } catch (err) {
         const message = formatError(err);
@@ -484,6 +527,7 @@ export async function mountMyTracksPairingPanel(
         .then(() => {
           options.clearConnectionFields();
           pairStatus = null;
+          storedConnection = null;
           storedRelayKey = null;
           savedRetention = null;
           renderPairStatus(status, pairStatus);
@@ -494,6 +538,7 @@ export async function mountMyTracksPairingPanel(
             retentionControls,
           );
           syncRetentionSaveState();
+          syncResetButtonState();
           showSuccessToast("My Tracks settings reset.");
         })
         .catch((err: unknown) => {

@@ -603,6 +603,7 @@
       max-width: min(40rem, calc(100vw - 2rem));
       width: min(40rem, calc(100vw - 2rem)); }
     .settings-hub-body { min-height: min(40vh, 360px); }
+    .settings-hub-body:has(.mytracks-settings-tab) { min-height: 0; }
     .settings-hub-tab-mount { padding-top: 4px; }
     .settings-dialog-field { display: flex; flex-direction: column; gap: 6px;
       flex: 1 1 12rem; min-width: 0; }
@@ -627,14 +628,18 @@
     .settings-dialog-lead a { color: var(--accent); }
     .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
       justify-content: flex-end; }
-    .mytracks-settings-tab { display: flex; flex-direction: column; gap: 10px; }
+    .mytracks-settings-tab { display: flex; flex-direction: column; gap: 8px; }
     .mytracks-connection-section { margin: 0; }
     .mytracks-pairing-mount { margin: 0; }
-    .mytracks-pairing-section { margin: 0; padding-top: 12px;
-      border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+    .mytracks-pairing-section { margin: 0; padding-top: 10px;
+      border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
     .mytracks-pairing-section .settings-dialog-lead,
     .mytracks-settings-tab > .settings-dialog-lead { margin: 0; }
-    .mytracks-pairing-form { display: flex; flex-direction: column; gap: 10px; }
+    .settings-hub-dialog .mytracks-pairing-form { display: flex; flex-direction: column;
+      gap: 8px; padding: 0; margin: 0; }
+    .mytracks-settings-tab .settings-dialog-field-row { margin-bottom: 0; }
+    .mytracks-relay-key-pending { margin: 0; font-style: italic; }
+    .mytracks-relay-key-field .settings-dialog-token-row input { cursor: default; }
     .settings-dialog-subheading { margin: 0; font-size: 1rem; font-weight: 600; }
     .settings-dialog-fieldset { border: 1px solid var(--border); border-radius: 8px;
       padding: 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
