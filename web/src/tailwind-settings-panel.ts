@@ -2,14 +2,9 @@
 
 import { api, HttpError } from "./api.js";
 import type { TailwindTokenSettingsOut } from "./types.js";
+import { createSecretInputRow } from "./settings-secret-field.js";
 
 const TAILWIND_WEB_DASHBOARD_HREF = "https://web.gotailwind.com";
-
-const TOKEN_REVEAL_EYE_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-
-const TOKEN_REVEAL_EYE_OFF_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>';
 
 const SETTINGS_TOAST_MS = 5000;
 
@@ -84,20 +79,14 @@ export async function mountTailwindSettingsPanel(
   label.className = "settings-dialog-field";
   const labelText = document.createElement("span");
   labelText.textContent = "Token";
-  const tokenRow = document.createElement("div");
-  tokenRow.className = "settings-dialog-token-row";
-  const input = document.createElement("input");
-  input.type = "password";
+  const tokenRow = createSecretInputRow({
+    autocomplete: "off",
+    inputMode: "numeric",
+    maxLength: 64,
+    required: true,
+  });
+  const input = tokenRow.input;
   input.name = "token";
-  input.autocomplete = "off";
-  input.inputMode = "numeric";
-  input.maxLength = 64;
-  input.required = true;
-  const revealBtn = document.createElement("button");
-  revealBtn.type = "button";
-  revealBtn.className = "btn settings-dialog-reveal";
-  revealBtn.setAttribute("aria-label", "Show token");
-  revealBtn.setAttribute("aria-pressed", "false");
   let storedToken: string | null = null;
   let tokenRevealed = false;
   const setTokenRevealed = (revealed: boolean): void => {
@@ -105,17 +94,10 @@ export async function mountTailwindSettingsPanel(
     if (revealed && !input.value && storedToken) {
       input.value = storedToken;
     }
-    input.type = revealed ? "text" : "password";
-    revealBtn.innerHTML = revealed ? TOKEN_REVEAL_EYE_OFF_SVG : TOKEN_REVEAL_EYE_SVG;
-    revealBtn.setAttribute("aria-label", revealed ? "Hide token" : "Show token");
-    revealBtn.setAttribute("aria-pressed", revealed ? "true" : "false");
+    tokenRow.setRevealed(revealed);
   };
   setTokenRevealed(false);
-  revealBtn.addEventListener("click", () => {
-    setTokenRevealed(!tokenRevealed);
-  });
-  tokenRow.append(input, revealBtn);
-  label.append(labelText, tokenRow);
+  label.append(labelText, tokenRow.row);
 
   const actions = document.createElement("div");
   actions.className = "settings-dialog-actions";

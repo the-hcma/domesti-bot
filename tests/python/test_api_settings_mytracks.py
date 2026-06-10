@@ -12,8 +12,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
-from app.mytracks_service import ExportedGeofence, ExportedParticipant
+from app.mytracks_service import ExportedGeofence, ExportedParticipant, ExportedParticipantLocation
 from app.mytracks_store import load_mytracks_config
+from app.presence_store import list_participant_fixes
 from app.rules_store import list_geofences, list_participants
 
 
@@ -62,6 +63,12 @@ def test_put_mytracks_settings_persists_config(tmp_path: Path) -> None:
             display_name="Henrique",
             tracking_device_label="Pixel",
             enabled=True,
+            latest_location=ExportedParticipantLocation(
+                lat=41.194072,
+                lon=-73.888325,
+                accuracy_m=12,
+                received_at="2026-06-09T20:00:00+00:00",
+            ),
         ),
     ],
 )
@@ -91,6 +98,51 @@ def test_post_mytracks_participants_sync_records_timestamp(
     participants = list_participants(db)
     assert len(participants) == 1
     assert participants[0].participant_id == "henrique"
+    fixes = list_participant_fixes(db)
+    assert "henrique" in fixes
+    assert fixes["henrique"].lat == 41.194072
+
+
+def test_get_participants_status_returns_synced_fixes(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    client.put(
+        "/v1/settings/my-tracks",
+        json={
+            "domain": "https://tracks.example.com",
+            "username": "admin",
+        },
+    )
+    with patch(
+        "app.api.mytracks_routes.fetch_participants_from_my_tracks",
+        return_value=[
+            ExportedParticipant(
+                participant_id="henrique",
+                display_name="Henrique",
+                tracking_device_label="Pixel",
+                enabled=True,
+                latest_location=ExportedParticipantLocation(
+                    lat=41.194072,
+                    lon=-73.888325,
+                    accuracy_m=12,
+                    received_at="2026-06-09T20:00:00+00:00",
+                ),
+            ),
+        ],
+    ):
+        sync = client.post(
+            "/v1/rules/participants/sync",
+            json={"username": "admin", "password": "secret"},
+        )
+    assert sync.status_code == HTTPStatus.OK
+    response = client.get("/v1/rules/participants/status")
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["last_fix"]["lat"] == 41.194072
+    assert body[0]["age_seconds"] is not None
 
 
 @patch(

@@ -79,6 +79,18 @@ class RuleParticipant(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class RuleParticipantLastFix(Base):
+    __tablename__ = "rule_participant_last_fix"
+
+    participant_id: Mapped[str] = mapped_column(String, primary_key=True)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    received_at: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class SonosKnownZone(Base):
     __tablename__ = "sonos_known_zones"
 

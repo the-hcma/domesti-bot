@@ -7,6 +7,7 @@ import {
   BEFORE_SUNRISE_WINDOW_DESCRIPTION,
 } from "./astronomical-conditions.js";
 import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
+import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
@@ -1135,12 +1136,17 @@ class RulesHubController {
     const participants = await this.dataSource.listParticipants();
     const geofences = await this.dataSource.listGeofences();
     const sync = await this.dataSource.getMyTracksParticipantsSync();
+    const settings = await this.dataSource.getMyTracksSettings();
     const status = this.status;
 
     const lead = document.createElement("p");
     lead.className = "settings-dialog-lead";
-    lead.textContent =
-      "Participants are synced from My Tracks. Presence updates arrive via webhook; edit people in My Tracks, then sync here.";
+    appendMyTracksInstanceText(lead, {
+      before: "Participants sync from ",
+      domain: settings?.domain ?? "",
+      after:
+        ". Presence updates arrive via webhook; edit people there, then sync here.",
+    });
 
     const syncRow = document.createElement("div");
     syncRow.className = "rules-participants-sync";

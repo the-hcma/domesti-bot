@@ -1,7 +1,9 @@
 // Admin credential prompt for My Tracks roster / geofence sync.
 
 import { HttpError } from "./api.js";
+import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
+import { createSecretInputRow } from "./settings-secret-field.js";
 
 export interface MyTracksSyncCredentialDefaults {
   domain: string;
@@ -13,13 +15,13 @@ export interface MyTracksSyncCredentials {
   username: string;
 }
 
-function appendLabeledField(
+function appendCompactField(
   parent: HTMLElement,
   labelText: string,
   control: HTMLElement,
 ): void {
   const field = document.createElement("label");
-  field.className = "settings-dialog-field";
+  field.className = "settings-dialog-field mytracks-sync-field";
   const label = document.createElement("span");
   label.textContent = labelText;
   field.append(label, control);
@@ -37,7 +39,7 @@ export function promptMyTracksSyncCredentials(
     panel.className = "settings-dialog-panel";
 
     const header = document.createElement("header");
-    header.className = "settings-dialog-header";
+    header.className = "settings-dialog-header mytracks-sync-header";
     const title = document.createElement("h2");
     title.textContent = "Sync from My Tracks";
     const closeBtn = document.createElement("button");
@@ -48,15 +50,21 @@ export function promptMyTracksSyncCredentials(
     header.append(title, closeBtn);
 
     const body = document.createElement("div");
-    body.className = "settings-dialog-body";
+    body.className = "settings-dialog-body mytracks-sync-body";
 
     const lead = document.createElement("p");
-    lead.className = "settings-dialog-lead";
-    const domainHint =
-      defaults.domain.trim() === ""
-        ? "Configure the My Tracks domain in Settings first."
-        : `Connecting to ${defaults.domain.trim()}.`;
-    lead.textContent = `${domainHint} Enter an admin username and password to fetch users, devices, and geolocations.`;
+    lead.className = "settings-dialog-lead mytracks-sync-lead";
+    const domain = defaults.domain.trim();
+    if (domain === "") {
+      lead.textContent =
+        "Configure the My Tracks domain in Settings first, then enter admin credentials.";
+    } else {
+      appendMyTracksInstanceText(lead, {
+        before: "Sign in to ",
+        domain,
+        after: " to fetch users, devices, and latest locations.",
+      });
+    }
 
     const form = document.createElement("form");
     form.className = "mytracks-sync-form";
@@ -66,16 +74,17 @@ export function promptMyTracksSyncCredentials(
     usernameInput.autocomplete = "username";
     usernameInput.required = true;
     usernameInput.value = defaults.username;
-    appendLabeledField(form, "Admin username", usernameInput);
+    appendCompactField(form, "Admin username", usernameInput);
 
-    const passwordInput = document.createElement("input");
-    passwordInput.type = "password";
-    passwordInput.autocomplete = "current-password";
-    passwordInput.required = true;
-    appendLabeledField(form, "Admin password", passwordInput);
+    const passwordRow = createSecretInputRow({
+      autocomplete: "current-password",
+      required: true,
+    });
+    passwordRow.input.required = true;
+    appendCompactField(form, "Admin password", passwordRow.row);
 
     const actions = document.createElement("div");
-    actions.className = "settings-dialog-actions";
+    actions.className = "settings-dialog-actions mytracks-sync-actions";
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
     cancelBtn.className = "btn btn-secondary";
@@ -116,7 +125,7 @@ export function promptMyTracksSyncCredentials(
       ev.preventDefault();
       finish({
         username: usernameInput.value.trim(),
-        password: passwordInput.value,
+        password: passwordRow.input.value,
       });
     });
 

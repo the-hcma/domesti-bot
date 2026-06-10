@@ -1,6 +1,7 @@
 // My Tracks connection settings (domain + default admin username).
 
 import { HttpError } from "./api.js";
+import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
 import type { MyTracksSettingsIn } from "./types.js";
@@ -43,8 +44,12 @@ export async function mountMyTracksSettingsPanel(
 
   const lead = document.createElement("p");
   lead.className = "settings-dialog-lead";
-  lead.textContent =
-    "My Tracks domain and default admin username. Sync prompts for the admin password each time — it is not stored.";
+  appendMyTracksInstanceText(lead, {
+    before: "Connect to ",
+    domain: existing?.domain ?? "",
+    after:
+      " for participant and geofence sync. Save the domain and default admin username; sync prompts for the admin password each time — it is not stored.",
+  });
 
   const form = document.createElement("form");
   form.className = "mytracks-settings-form";

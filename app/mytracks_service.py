@@ -36,8 +36,17 @@ class ExportedGeofence:
 class ExportedParticipant:
     display_name: str
     enabled: bool
+    latest_location: ExportedParticipantLocation | None
     participant_id: str
     tracking_device_label: str
+
+
+@dataclass(frozen=True)
+class ExportedParticipantLocation:
+    accuracy_m: int | None
+    lat: float
+    lon: float
+    received_at: str
 
 
 def fetch_geofences_from_my_tracks(
@@ -232,6 +241,36 @@ def _parse_geofence(row: dict[str, Any]) -> ExportedGeofence:
     )
 
 
+def _parse_latest_location(row: dict[str, Any]) -> ExportedParticipantLocation | None:
+    raw = row.get("latest_location")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise MyTracksSyncError(
+            f"Expected latest_location object in users-with-devices row, got {raw!r}"
+        )
+    try:
+        lat = float(raw["lat"])
+        lon = float(raw["lon"])
+        received_at = str(raw["timestamp"]).strip()
+        accuracy_raw = raw.get("accuracy_m")
+        accuracy_m = int(accuracy_raw) if accuracy_raw is not None else None
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MyTracksSyncError(
+            f"Expected latest_location export object, got {raw!r}"
+        ) from exc
+    if received_at == "":
+        raise MyTracksSyncError(
+            f"Expected non-empty latest_location.timestamp, got {raw!r}"
+        )
+    return ExportedParticipantLocation(
+        lat=lat,
+        lon=lon,
+        accuracy_m=accuracy_m,
+        received_at=received_at,
+    )
+
+
 def _parse_user_with_device(row: dict[str, Any]) -> ExportedParticipant:
     try:
         participant_id = str(row["username"]).strip()
@@ -251,6 +290,7 @@ def _parse_user_with_device(row: dict[str, Any]) -> ExportedParticipant:
         display_name=display_name,
         tracking_device_label=tracking_device_label,
         enabled=enabled,
+        latest_location=_parse_latest_location(row),
     )
 
 
