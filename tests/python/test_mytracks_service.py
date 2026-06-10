@@ -95,8 +95,46 @@ def test_fetch_participants_from_my_tracks_parses_export_payload(
             display_name="Henrique",
             tracking_device_label="Pixel",
             enabled=True,
+            latest_location=None,
         ),
     ]
+
+
+def test_fetch_participants_parses_latest_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "source": "my-tracks",
+        "users_with_devices": [
+            {
+                "username": "henrique",
+                "display_name": "Henrique Custodio",
+                "device_name": "Pixel",
+                "enabled": True,
+                "latest_location": {
+                    "lat": 41.194072,
+                    "lon": -73.888325,
+                    "accuracy_m": 12,
+                    "timestamp": "2026-06-09T20:00:00+00:00",
+                },
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        "app.mytracks_service._login_client",
+        lambda *_args, **_kwargs: _FakeClient(export_payload=payload),
+    )
+    rows = fetch_participants_from_my_tracks(
+        base_url="https://tracks.example.com",
+        username="admin",
+        password="secret",
+    )
+    assert len(rows) == 1
+    location = rows[0].latest_location
+    assert location is not None
+    assert location.lat == 41.194072
+    assert location.accuracy_m == 12
+    assert location.received_at == "2026-06-09T20:00:00+00:00"
 
 
 def test_fetch_geofences_from_my_tracks_parses_export_payload(

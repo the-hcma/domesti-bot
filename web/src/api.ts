@@ -19,6 +19,7 @@ import type {
   MyTracksSettingsOut,
   MyTracksSyncIn,
   ParticipantOut,
+  ParticipantStatusOut,
   SmtpConfigIn,
   SmtpConfigOut,
   SmtpTestEmailIn,
@@ -194,6 +195,9 @@ export const api = {
   },
   fetchRulesParticipants(): Promise<ParticipantOut[]> {
     return call<ParticipantOut[]>("GET", "/v1/rules/participants");
+  },
+  fetchRulesParticipantStatus(): Promise<ParticipantStatusOut[]> {
+    return call<ParticipantStatusOut[]>("GET", "/v1/rules/participants/status");
   },
   fetchSmtpConfig(): Promise<SmtpConfigOut | null> {
     return callNullableJson<SmtpConfigOut>("GET", "/v1/settings/smtp");

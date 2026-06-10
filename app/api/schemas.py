@@ -386,3 +386,21 @@ class ParticipantOut(BaseModel):
     enabled: bool
     participant_id: str
     tracking_device_label: str
+
+
+class ParticipantFixOut(BaseModel):
+    """Latest known GPS fix for a participant."""
+
+    accuracy_m: int | None
+    lat: float
+    lon: float
+    received_at: str
+    source: str | None = None
+
+
+class ParticipantStatusOut(ParticipantOut):
+    """Participant roster row plus live presence fields."""
+
+    age_seconds: int | None = None
+    inside_geofence_ids: list[str] = Field(default_factory=list)
+    last_fix: ParticipantFixOut | None = None

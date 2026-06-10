@@ -500,28 +500,14 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     }
     const [geofences, participants] = await Promise.all([
       api.fetchRulesGeofences(),
-      api.fetchRulesParticipants(),
+      api.fetchRulesParticipantStatus(),
     ]);
-    const participantRows: ParticipantStatusOut[] = participants.map((p) => {
-      const existing = status.participants.find(
-        (row) => row.participant_id === p.participant_id,
-      );
-      if (existing !== undefined) {
-        return { ...existing, ...p };
-      }
-      return {
-        ...p,
-        age_seconds: null,
-        inside_geofence_ids: [],
-        last_fix: null,
-      };
-    });
     return {
       ...status,
       geofences: geofences.length > 0 ? geofences : status.geofences,
       participants:
-        participantRows.length > 0 ? participantRows : status.participants,
-      using_mock: true,
+        participants.length > 0 ? participants : status.participants,
+      using_mock: participants.length === 0 && status.participants.length > 0,
     };
   }
 

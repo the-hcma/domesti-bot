@@ -34,6 +34,36 @@ function deviceKey(familyId: string, deviceId: string): string {
   return `${familyId}\0${deviceId}`;
 }
 
+const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+
+function firstNameFromDisplayName(displayName: string): string {
+  const trimmed = displayName.trim();
+  if (trimmed === "") {
+    return trimmed;
+  }
+  return trimmed.split(/\s+/)[0] ?? trimmed;
+}
+
+function looksLikeIpv4(value: string): boolean {
+  return IPV4_RE.test(value.trim());
+}
+
+function resolveDeviceLabel(
+  familyId: string,
+  deviceId: string,
+  context: RuleSummaryContext,
+): string {
+  const key = deviceKey(familyId, deviceId);
+  const direct = context.deviceLabelByKey.get(key);
+  if (direct !== undefined && direct !== "" && !looksLikeIpv4(direct)) {
+    return direct;
+  }
+  if (direct !== undefined && direct !== "") {
+    return direct;
+  }
+  return deviceId;
+}
+
 export function buildRuleSummaryContext(
   participants: readonly ParticipantOut[],
   geofences: readonly GeofenceOut[],
@@ -41,7 +71,10 @@ export function buildRuleSummaryContext(
 ): RuleSummaryContext {
   const participantNameById = new Map<string, string>();
   for (const participant of participants) {
-    participantNameById.set(participant.participant_id, participant.display_name);
+    participantNameById.set(
+      participant.participant_id,
+      firstNameFromDisplayName(participant.display_name),
+    );
   }
   const geofenceLabelById = new Map<string, string>();
   for (const geofence of geofences) {
@@ -211,9 +244,7 @@ export function summarizeRule(
     }
   }
   const actions = rule.device_actions.map((entry) => {
-    const label =
-      context.deviceLabelByKey.get(deviceKey(entry.family_id, entry.device_id))
-      ?? entry.device_id;
+    const label = resolveDeviceLabel(entry.family_id, entry.device_id, context);
     return formatDeviceActionPhrase(entry.action, label);
   });
   return { presence, timing, actions };

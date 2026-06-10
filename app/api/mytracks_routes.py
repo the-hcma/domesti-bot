@@ -17,6 +17,7 @@ from app.api.schemas import (
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.mytracks_service import (
+    ExportedParticipant,
     MyTracksSyncError,
     fetch_geofences_from_my_tracks,
     fetch_participants_from_my_tracks,
@@ -30,6 +31,11 @@ from app.mytracks_store import (
     record_mytracks_geofences_sync,
     record_mytracks_participants_sync,
     save_mytracks_config,
+)
+from app.presence_store import (
+    ParticipantFixRecord,
+    parse_iso_timestamp_to_epoch,
+    replace_participant_fixes,
 )
 from app.rules_store import (
     GeofenceRecord,
@@ -223,15 +229,34 @@ async def post_mytracks_participants_sync(
             for row in exported
         ],
     )
+    fix_count = replace_participant_fixes(
+        cache_path,
+        [_participant_fix_from_export(row) for row in exported if row.latest_location is not None],
+    )
     updated = record_mytracks_participants_sync(cache_path, count=count)
     _LOGGER.info(
-        "[mytracks] participant sync complete for %s: %d participant(s)",
+        "[mytracks] participant sync complete for %s: %d participant(s), %d location fix(es)",
         base_url,
         count,
+        fix_count,
     )
     return MyTracksParticipantsSyncOut(
         last_synced_at=updated.last_participants_sync_at,
         participant_count=count,
+    )
+
+
+def _participant_fix_from_export(row: ExportedParticipant) -> ParticipantFixRecord:
+    location = row.latest_location
+    if location is None:
+        raise ValueError("Expected latest_location, got None")
+    return ParticipantFixRecord(
+        participant_id=row.participant_id,
+        lat=location.lat,
+        lon=location.lon,
+        accuracy_m=location.accuracy_m,
+        received_at=parse_iso_timestamp_to_epoch(location.received_at),
+        source="my-tracks",
     )
 
 

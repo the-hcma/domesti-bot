@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+import time
+from datetime import UTC, datetime
 from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.api.schemas import GeofenceOut, ParticipantOut
+from app.api.schemas import (
+    GeofenceOut,
+    ParticipantFixOut,
+    ParticipantOut,
+    ParticipantStatusOut,
+)
 from app.api.settings_routes import discovery_cache_path_from_request
+from app.presence_store import (
+    ParticipantFixRecord,
+    geofence_ids_containing_fix,
+    list_participant_fixes,
+)
 from app.rules_store import (
     GeofenceRecord,
     ParticipantRecord,
@@ -44,6 +56,15 @@ async def get_participants(request: Request) -> list[ParticipantOut]:
     if cache_path is None:
         return []
     return [_participant_to_schema(row) for row in list_participants(cache_path)]
+
+
+@router.get("/participants/status", response_model=list[ParticipantStatusOut])
+async def get_participants_status(request: Request) -> list[ParticipantStatusOut]:
+    """Return participant roster rows enriched with stored location fixes."""
+    cache_path = discovery_cache_path_from_request(request)
+    if cache_path is None:
+        return []
+    return _participants_status(cache_path)
 
 
 @router.put("/geofences/{geofence_id}", response_model=GeofenceOut)
@@ -95,6 +116,48 @@ def _participant_to_schema(record: ParticipantRecord) -> ParticipantOut:
         display_name=record.display_name,
         tracking_device_label=record.tracking_device_label,
         enabled=record.enabled,
+    )
+
+
+def _participants_status(cache_path: Path) -> list[ParticipantStatusOut]:
+    participants = list_participants(cache_path)
+    fixes = list_participant_fixes(cache_path)
+    geofences = list_geofences(cache_path)
+    now = time.time()
+    rows: list[ParticipantStatusOut] = []
+    for participant in participants:
+        fix = fixes.get(participant.participant_id)
+        last_fix: ParticipantFixOut | None = None
+        age_seconds: int | None = None
+        inside_geofence_ids: list[str] = []
+        if fix is not None:
+            received_at = _fix_received_at_iso(fix)
+            last_fix = ParticipantFixOut(
+                lat=fix.lat,
+                lon=fix.lon,
+                accuracy_m=fix.accuracy_m,
+                received_at=received_at,
+                source=fix.source,
+            )
+            age_seconds = max(0, int(now - fix.received_at))
+            inside_geofence_ids = geofence_ids_containing_fix(fix, geofences)
+        rows.append(
+            ParticipantStatusOut(
+                participant_id=participant.participant_id,
+                display_name=participant.display_name,
+                tracking_device_label=participant.tracking_device_label,
+                enabled=participant.enabled,
+                last_fix=last_fix,
+                age_seconds=age_seconds,
+                inside_geofence_ids=inside_geofence_ids,
+            )
+        )
+    return rows
+
+
+def _fix_received_at_iso(fix: ParticipantFixRecord) -> str:
+    return datetime.fromtimestamp(fix.received_at, tz=UTC).isoformat().replace(
+        "+00:00", "Z"
     )
 
 
