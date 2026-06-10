@@ -23,15 +23,17 @@ export async function mountGeofenceMapPanel(
   const status = await dataSource.getStatus();
   const sync = await dataSource.getMyTracksGeofencesSync();
 
-  const syncRow = document.createElement("div");
-  syncRow.className = "rules-geofences-sync";
-  const syncMeta = document.createElement("p");
-  syncMeta.className = "rules-card-meta";
-  const syncedAt =
-    sync.last_synced_at === null
-      ? "never"
-      : new Date(sync.last_synced_at).toLocaleString();
-  syncMeta.textContent = `${sync.geofence_count} geofences · last synced ${syncedAt}`;
+  const panel = document.createElement("div");
+  panel.className = "rules-geofence-panel";
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "rules-geofence-toolbar";
+
+  const importGroup = document.createElement("div");
+  importGroup.className = "rules-geofence-toolbar-group rules-geofence-toolbar-import";
+  const importLabel = document.createElement("span");
+  importLabel.className = "rules-geofence-toolbar-group-label";
+  importLabel.textContent = "Import";
   const syncBtn = document.createElement("button");
   syncBtn.type = "button";
   syncBtn.className = "btn btn-secondary";
@@ -42,21 +44,59 @@ export async function mountGeofenceMapPanel(
       mountGeofenceMapPanel(container, dataSource, onChanged),
     );
   });
-  syncRow.append(syncMeta, syncBtn);
-  container.append(syncRow);
+  const syncMeta = document.createElement("span");
+  syncMeta.className = "rules-geofence-sync-meta";
+  const syncedAt =
+    sync.last_synced_at === null
+      ? "never"
+      : new Date(sync.last_synced_at).toLocaleString();
+  syncMeta.textContent = `${sync.geofence_count} geofences · last synced ${syncedAt}`;
+  importGroup.append(importLabel, syncBtn, syncMeta);
 
+  const drawGroup = document.createElement("div");
+  drawGroup.className = "rules-geofence-toolbar-group rules-geofence-toolbar-draw";
+  const drawLabel = document.createElement("span");
+  drawLabel.className = "rules-geofence-toolbar-group-label";
+  drawLabel.textContent = "Draw";
+  const drawActions = document.createElement("div");
+  drawActions.className = "rules-geofence-toolbar-draw-actions";
+  const drawHint = document.createElement("span");
+  drawHint.className = "rules-geofence-draw-hint";
+  drawGroup.append(drawLabel, drawActions, drawHint);
+
+  toolbar.append(importGroup, drawGroup);
+  panel.append(toolbar);
+
+  const mapWrap = document.createElement("div");
+  mapWrap.className = "rules-geofence-map-wrap";
   const mapSlot = document.createElement("div");
   mapSlot.id = "rules-geofence-map";
   mapSlot.className = "rules-geofence-map";
   mapSlot.dataset.testid = "rules-geofence-map";
-  container.append(mapSlot);
+  mapWrap.append(mapSlot);
+  panel.append(mapWrap);
+  container.append(panel);
+
   await attachGeofenceLeafletMap(
     mapSlot,
+    panel,
+    drawGroup,
+    {
+      drawActions,
+      drawHint,
+    },
     dataSource,
     onChanged,
     geofences,
     status.participants,
   );
+
+  const listSection = document.createElement("section");
+  listSection.className = "rules-geofence-list-section";
+  const listHeading = document.createElement("h3");
+  listHeading.className = "rules-geofence-list-heading";
+  listHeading.textContent = "Saved geofences";
+  listSection.append(listHeading);
 
   const table = document.createElement("table");
   table.className = "rules-geofence-table";
@@ -97,17 +137,26 @@ export async function mountGeofenceMapPanel(
 
   const addBtn = document.createElement("button");
   addBtn.type = "button";
-  addBtn.className = "btn";
-  addBtn.textContent = "Add geofence";
+  addBtn.className = "btn btn-secondary rules-geofence-add-btn";
+  addBtn.textContent = "Add manually";
   addBtn.addEventListener("click", () => {
     void showGeofenceForm(container, dataSource, onChanged, null, mapSlot);
   });
 
-  container.append(table, addBtn);
+  listSection.append(table, addBtn);
+  container.append(listSection);
+}
+
+export interface GeofenceDrawToolbar {
+  drawActions: HTMLElement;
+  drawHint: HTMLElement;
 }
 
 async function attachGeofenceLeafletMap(
   mapSlot: HTMLElement,
+  panel: HTMLElement,
+  drawGroup: HTMLElement,
+  toolbar: GeofenceDrawToolbar,
   dataSource: RulesDataSource,
   onChanged: () => void | Promise<void>,
   geofences: GeofenceOut[],
@@ -116,6 +165,9 @@ async function attachGeofenceLeafletMap(
   const { initGeofenceLeafletMap } = await import("./geofence-map-leaflet.js");
   await initGeofenceLeafletMap(
     mapSlot,
+    panel,
+    drawGroup,
+    toolbar,
     dataSource,
     onChanged,
     geofences,

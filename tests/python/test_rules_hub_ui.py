@@ -49,6 +49,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-tab-bar",
         "rules-geofence-map",
         "rules-geofence-draw-mode",
+        "rules-geofence-toolbar",
+        "rules-geofence-toolbar-draw-active",
         "rules-dynamic-badge",
         "rules-condition-list",
         "rules-device-action-group",
