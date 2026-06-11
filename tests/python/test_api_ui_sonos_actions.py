@@ -36,6 +36,7 @@ from app.api.ui_state import (
     find_sonos_by_identifier,
 )
 from app.domesti_bot_cli import DeviceManagersState
+from app.server_runtime import runtime
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import (
     SonosDeviceManager,
@@ -275,8 +276,8 @@ def test_post_sonos_pause_all_only_pauses_playing_zones() -> None:
     a = _FakeSonosZone("RINCON_A", "A", is_playing=True)
     b = _FakeSonosZone("RINCON_B", "B", is_playing=False)
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[a, b])
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[a, b])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/sonos/pause-all")
     assert r.status_code == HTTPStatus.OK
     assert r.json() == {"affected": ["RINCON_A"], "skipped": []}
@@ -288,8 +289,8 @@ def test_post_sonos_pause_all_only_pauses_playing_zones() -> None:
 
 def test_post_sonos_pause_all_returns_empty_when_no_sonos_manager() -> None:
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=None)
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=None)
+    runtime.discovery_error = None
     r = client.post("/v1/ui/sonos/pause-all")
     assert r.status_code == HTTPStatus.OK
     assert r.json() == {"affected": [], "skipped": []}
@@ -304,8 +305,8 @@ def test_post_sonos_toggle_pauses_zone_and_returns_refreshed_view(
     )
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[zone], cache_path=db)
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[zone], cache_path=db)
+    runtime.discovery_error = None
     r = client.post(
         "/v1/ui/sonos/zones/RINCON_A/toggle",
         json={"playing": False},
@@ -324,8 +325,8 @@ def test_post_sonos_toggle_pauses_zone_and_returns_refreshed_view(
 def test_post_sonos_toggle_resumes_zone() -> None:
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=False)
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[zone])
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[zone])
+    runtime.discovery_error = None
     r = client.post(
         "/v1/ui/sonos/zones/RINCON_A/toggle",
         json={"playing": True},
@@ -351,8 +352,8 @@ def test_post_sonos_toggle_returns_409_when_resume_hits_upnp_transition_error() 
         raise_transition_unavailable_on="resume",
     )
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[zone])
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[zone])
+    runtime.discovery_error = None
     r = client.post(
         "/v1/ui/sonos/zones/RINCON_A/toggle",
         json={"playing": True},
@@ -376,8 +377,8 @@ def test_post_sonos_toggle_returns_409_when_pause_hits_upnp_transition_error() -
         raise_transition_unavailable_on="pause",
     )
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[zone])
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[zone])
+    runtime.discovery_error = None
     r = client.post(
         "/v1/ui/sonos/zones/RINCON_A/toggle",
         json={"playing": False},
@@ -392,8 +393,8 @@ def test_post_sonos_toggle_returns_409_when_pause_hits_upnp_transition_error() -
 def test_post_sonos_toggle_returns_404_for_unknown_zone() -> None:
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[zone])
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[zone])
+    runtime.discovery_error = None
     r = client.post(
         "/v1/ui/sonos/zones/RINCON_ZZZZ/toggle",
         json={"playing": False},
@@ -404,8 +405,8 @@ def test_post_sonos_toggle_returns_404_for_unknown_zone() -> None:
 
 def test_post_sonos_toggle_returns_404_when_no_sonos_manager() -> None:
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=None)
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=None)
+    runtime.discovery_error = None
     r = client.post(
         "/v1/ui/sonos/zones/RINCON_A/toggle",
         json={"playing": False},
@@ -417,8 +418,8 @@ def test_post_sonos_toggle_returns_404_when_no_sonos_manager() -> None:
 def test_post_sonos_toggle_with_invalid_body_returns_422() -> None:
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[zone])
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[zone])
+    runtime.discovery_error = None
     r = client.post(
         "/v1/ui/sonos/zones/RINCON_A/toggle",
         json={"on": False},
@@ -430,8 +431,8 @@ def test_put_ui_preference_persists_sonos_exclusion(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[zone], cache_path=db)
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[zone], cache_path=db)
+    runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/sonos/RINCON_A",
         json={"exclude_from_global": True},
@@ -451,8 +452,8 @@ def test_put_ui_preference_returns_404_for_unknown_sonos_zone(tmp_path: Path) ->
     db = tmp_path / "ui.sqlite"
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
     client, app = _client()
-    app.state.device_state = _state(sonos_zones=[zone], cache_path=db)
-    app.state.discovery_error = None
+    runtime.device_state = _state(sonos_zones=[zone], cache_path=db)
+    runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/sonos/RINCON_ZZZZ",
         json={"exclude_from_global": True},

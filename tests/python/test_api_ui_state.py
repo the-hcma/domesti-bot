@@ -7,7 +7,7 @@ The endpoint is the read-only join of three sources:
 * ``ui_preferences`` SQLite rows at ``state.cache_path`` → ``exclude_from_global``
 
 These tests exercise the helper directly with fake managers (no network) and
-the HTTP route through ``TestClient`` with ``app.state.device_state``
+the HTTP route through ``TestClient`` with ``runtime.device_state``
 populated manually so we never trigger the discovery lifespan (mirrors the
 pattern in ``test_api_landing.py``).
 """
@@ -29,6 +29,7 @@ from app.api.app import create_app
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
 from app.api.ui_state import build_ui_state
 from app.domesti_bot_cli import DeviceManagersState
+from app.server_runtime import runtime
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
@@ -371,8 +372,8 @@ def test_get_v1_ui_state_returns_payload_when_state_is_set(tmp_path: Path) -> No
         ),
         cache_path=db,
     )
-    app.state.device_state = state
-    app.state.discovery_error = None
+    runtime.device_state = state
+    runtime.discovery_error = None
 
     response = client.get("/v1/ui/state")
     assert response.status_code == HTTPStatus.OK
@@ -400,8 +401,8 @@ def test_get_v1_ui_state_rejects_request_without_api_key_when_env_set(
         kasa_mgr=_fake_kasa_mgr([("10.0.0.1", "Lamp", True)]),
         cache_path=tmp_path / "ui.sqlite",
     )
-    app.state.device_state = state
-    app.state.discovery_error = None
+    runtime.device_state = state
+    runtime.discovery_error = None
     with patch.dict(os.environ, {"DOMESTI_API_KEY": "shh"}, clear=False):
         bad = client.get("/v1/ui/state")
         assert bad.status_code == HTTPStatus.UNAUTHORIZED

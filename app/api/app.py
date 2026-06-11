@@ -73,6 +73,7 @@ from app.domesti_bot_cli import (
     execute_line_for_api,
     shutdown_device_managers,
 )
+from app.server_runtime import runtime
 from app.sonos_device_manager import SonosTransitionUnavailableError
 
 
@@ -170,10 +171,11 @@ async def _verify_api_key(
 
 
 def _device_state(request: Request) -> DeviceManagersState:
-    st: Any = getattr(request.app.state, "device_state", None)
+    del request
+    st: Any = runtime.device_state
     if st is not None:
         return st
-    err: str | None = getattr(request.app.state, "discovery_error", None)
+    err: str | None = runtime.discovery_error
     if err is not None:
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
@@ -193,6 +195,8 @@ Auth = Annotated[None, Depends(_verify_api_key)]
 
 def create_app(args: Any) -> FastAPI:
     """Build the app; ``args`` is the same :class:`argparse.Namespace` as the REPL CLI."""
+    runtime.reset()
+    runtime.bind_cli_args(args)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -203,19 +207,12 @@ def create_app(args: Any) -> FastAPI:
         # while it's in flight. Static routes (``/``, ``/health``,
         # ``/favicon.ico``) remain responsive throughout.
         theme = _Theme(enabled=False)
-        app.state.device_state = None
-        app.state.discovery_error = None
-        app.state.discovery_started_at = time.monotonic()
-        app.state.discovery_completed_at = None
-        # Continuous state watcher (kicked off after discovery succeeds —
-        # see ``app.device_state_watcher``). The lifespan owns the stop
-        # event so it can shut watchers down cleanly before tearing down
-        # the underlying managers.
-        watcher_stop = asyncio.Event()
-        app.state.watcher_stop = watcher_stop
-        app.state.watcher_task = None
+        runtime.begin_lifespan()
+        watcher_stop = runtime.watcher_stop
+        assert watcher_stop is not None
 
         async def _run_discovery() -> None:
+            generation = runtime.lifespan_generation
             started = time.monotonic()
             _LOGGER.info("[startup] device discovery beginning in background")
             try:
@@ -226,14 +223,18 @@ def create_app(args: Any) -> FastAPI:
                 _LOGGER.info("[startup] device discovery cancelled before completing")
                 raise
             except Exception as exc:
-                app.state.discovery_error = repr(exc)
+                if generation != runtime.lifespan_generation:
+                    return
+                runtime.discovery_error = repr(exc)
                 _LOGGER.exception("[startup] device discovery failed: %s", exc)
                 return
-            app.state.device_state = state
-            app.state.discovery_completed_at = time.monotonic()
+            if generation != runtime.lifespan_generation:
+                return
+            runtime.device_state = state
+            runtime.discovery_completed_at = time.monotonic()
             _LOGGER.info(
                 "[startup] device discovery complete in %.1fs",
-                app.state.discovery_completed_at - started,
+                (runtime.discovery_completed_at or started) - started,
             )
             try:
                 poll_interval_s = poll_interval_from_env()
@@ -243,8 +244,10 @@ def create_app(args: Any) -> FastAPI:
                     exc,
                 )
                 return
+            if generation != runtime.lifespan_generation:
+                return
             watchers = build_default_watchers(state, interval_s=poll_interval_s)
-            app.state.watcher_task = asyncio.create_task(
+            runtime.watcher_task = asyncio.create_task(
                 run_device_state_watchers(watchers, stop=watcher_stop),
                 name="device-state-watcher",
             )
@@ -254,25 +257,27 @@ def create_app(args: Any) -> FastAPI:
                 len(watchers),
             )
 
-        discovery_task = asyncio.create_task(_run_discovery(), name="device-discovery")
-        app.state.discovery_task = discovery_task
+        runtime.discovery_task = asyncio.create_task(
+            _run_discovery(),
+            name="device-discovery",
+        )
+        discovery_task = runtime.discovery_task
         try:
             yield
         finally:
-            if not discovery_task.done():
+            if discovery_task is not None and not discovery_task.done():
                 discovery_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await discovery_task
             # Stop the state watcher *before* tearing down managers so we
             # don't poll a half-disconnected backend during shutdown.
             watcher_stop.set()
-            watcher_task: asyncio.Task[None] | None = getattr(
-                app.state, "watcher_task", None
-            )
+            watcher_task = runtime.watcher_task
             if watcher_task is not None and not watcher_task.done():
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await watcher_task
-            state = app.state.device_state
+            await runtime.close_rule_evaluator()
+            state = runtime.device_state
             if state is not None:
                 await shutdown_device_managers(state)
 
@@ -281,7 +286,6 @@ def create_app(args: Any) -> FastAPI:
         version=get_build_info()[0],
         lifespan=lifespan,
     )
-    app.state.cli_args = args
     app.include_router(settings_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(smtp_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(mytracks_settings_router, dependencies=[Depends(_verify_api_key)])
@@ -330,8 +334,9 @@ def create_app(args: Any) -> FastAPI:
 
     @app.get("/health")
     async def health(request: Request) -> dict[str, Any]:
-        st: Any = getattr(request.app.state, "device_state", None)
-        err: str | None = getattr(request.app.state, "discovery_error", None)
+        del request
+        st: Any = runtime.device_state
+        err: str | None = runtime.discovery_error
         if st is not None:
             discovery = "ready"
         elif err is not None:
