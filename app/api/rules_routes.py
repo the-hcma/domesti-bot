@@ -14,6 +14,13 @@ from app.api.schemas import (
     ParticipantFixOut,
     ParticipantOut,
     ParticipantStatusOut,
+    RuleOut,
+    SettingsLocationOut,
+)
+from app.automation_rules_loader import (
+    AutomationRulesLoadError,
+    list_automation_rules,
+    load_settings_location,
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.presence_store import (
@@ -38,6 +45,12 @@ async def delete_geofence_route(geofence_id: str, request: Request) -> None:
     """Remove one geofence row."""
     cache_path = _require_discovery_cache(request)
     delete_geofence(cache_path, geofence_id)
+
+
+@router.get("", response_model=list[RuleOut])
+async def get_rules() -> list[RuleOut]:
+    """Return automation rules from ``automation-rules.json`` (or the example template)."""
+    return _load_rules_or_http_error()
 
 
 @router.get("/geofences", response_model=list[GeofenceOut])
@@ -65,6 +78,24 @@ async def get_participants_status(request: Request) -> list[ParticipantStatusOut
     if cache_path is None:
         return []
     return _participants_status(cache_path)
+
+
+@router.get("/settings/location", response_model=SettingsLocationOut)
+async def get_rules_settings_location() -> SettingsLocationOut:
+    """Return home coordinates from the automation rule bundle."""
+    return _load_settings_location_or_http_error()
+
+
+@router.get("/{rule_id}", response_model=RuleOut)
+async def get_rule(rule_id: str) -> RuleOut:
+    """Return one automation rule from the file-backed bundle."""
+    for rule in _load_rules_or_http_error():
+        if rule.id == rule_id:
+            return rule
+    raise HTTPException(
+        status_code=HTTPStatus.NOT_FOUND,
+        detail=f"Expected rule id, got unknown {rule_id!r}",
+    )
 
 
 @router.put("/geofences/{geofence_id}", response_model=GeofenceOut)
@@ -96,6 +127,13 @@ async def put_geofence(
         ),
     )
     return _geofence_to_schema(saved)
+
+
+def _automation_rules_http_error(exc: AutomationRulesLoadError) -> HTTPException:
+    return HTTPException(
+        status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        detail=str(exc),
+    )
 
 
 def _geofence_to_schema(record: GeofenceRecord) -> GeofenceOut:
@@ -159,6 +197,20 @@ def _fix_received_at_iso(fix: ParticipantFixRecord) -> str:
     return datetime.fromtimestamp(fix.received_at, tz=UTC).isoformat().replace(
         "+00:00", "Z"
     )
+
+
+def _load_rules_or_http_error() -> list[RuleOut]:
+    try:
+        return list_automation_rules()
+    except AutomationRulesLoadError as exc:
+        raise _automation_rules_http_error(exc) from exc
+
+
+def _load_settings_location_or_http_error() -> SettingsLocationOut:
+    try:
+        return load_settings_location()
+    except AutomationRulesLoadError as exc:
+        raise _automation_rules_http_error(exc) from exc
 
 
 def _require_discovery_cache(request: Request) -> Path:

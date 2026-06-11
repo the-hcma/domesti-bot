@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -489,3 +489,113 @@ class ParticipantStatusOut(ParticipantOut):
     age_seconds: int | None = None
     inside_geofence_ids: list[str] = Field(default_factory=list)
     last_fix: ParticipantFixOut | None = None
+
+
+class AfterLocalTimeCondition(BaseModel):
+    type: Literal["after_local_time"]
+    time_hhmm: str
+
+
+class AfterSunsetCondition(BaseModel):
+    type: Literal["after_sunset"]
+    offset_minutes: int
+    window_end: Literal["midnight"] | None = None
+
+
+class AllConditionsCondition(BaseModel):
+    type: Literal["all"]
+    conditions: list["RuleConditionOut"]
+
+
+class AnyConditionsCondition(BaseModel):
+    type: Literal["any"]
+    conditions: list["RuleConditionOut"]
+
+
+class BeforeLocalTimeCondition(BaseModel):
+    type: Literal["before_local_time"]
+    time_hhmm: str
+
+
+class BeforeSunriseCondition(BaseModel):
+    type: Literal["before_sunrise"]
+    offset_minutes: int
+    window_start: Literal["midnight"] | None = None
+
+
+class DaysOfWeekCondition(BaseModel):
+    type: Literal["days_of_week"]
+    days: list[int]
+
+
+class LocalTimeWindowCondition(BaseModel):
+    type: Literal["local_time_window"]
+    end_hhmm: str
+    start_hhmm: str
+
+
+class ParticipantsInsideGeofenceCondition(BaseModel):
+    type: Literal["participants_inside_geofence"]
+    geofence_id: str
+    participant_ids: list[str]
+
+
+class ParticipantsOutsideGeofenceCondition(BaseModel):
+    type: Literal["participants_outside_geofence"]
+    geofence_id: str
+    participant_ids: list[str]
+
+
+RuleConditionOut = Annotated[
+    AfterLocalTimeCondition
+    | AfterSunsetCondition
+    | AllConditionsCondition
+    | AnyConditionsCondition
+    | BeforeLocalTimeCondition
+    | BeforeSunriseCondition
+    | DaysOfWeekCondition
+    | LocalTimeWindowCondition
+    | ParticipantsInsideGeofenceCondition
+    | ParticipantsOutsideGeofenceCondition,
+    Field(discriminator="type"),
+]
+
+
+class RuleConditionsOut(BaseModel):
+    all: list[RuleConditionOut]
+
+
+class RuleDeviceActionOut(BaseModel):
+    action: Literal["turn_on", "turn_off", "open", "close", "pause", "resume"]
+    device_id: str
+    family_id: str
+
+
+class RuleOut(BaseModel):
+    """One automation rule from ``automation-rules.json``."""
+
+    conditions: RuleConditionsOut
+    cooldown_s: int
+    device_actions: list[RuleDeviceActionOut]
+    enabled: bool
+    id: str
+    label: str
+    min_fix_accuracy_m: int
+    notification_email: str | None = None
+    notify_on_fire: bool
+    trigger: Literal["edge_true", "while_true"]
+
+
+class SettingsLocationOut(BaseModel):
+    """Home coordinates for astronomical conditions."""
+
+    home_label: str | None = None
+    lat: float
+    lon: float
+    timezone: str
+
+
+AllConditionsCondition.model_rebuild()
+AnyConditionsCondition.model_rebuild()
+RuleConditionsOut.model_rebuild()
+RuleOut.model_rebuild()

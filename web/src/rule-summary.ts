@@ -215,25 +215,37 @@ export function formatDeviceActionPhrase(
   }
 }
 
+function walkRuleConditions(
+  conditions: readonly RuleConditionOut[],
+  visit: (condition: RuleConditionOut) => void,
+): void {
+  for (const condition of conditions) {
+    visit(condition);
+    if (condition.type === "all" || condition.type === "any") {
+      walkRuleConditions(condition.conditions, visit);
+    }
+  }
+}
+
 export function summarizeRule(
   rule: RuleOut,
   context: RuleSummaryContext,
 ): RuleSummarySections {
   const presence: string[] = [];
   const timing: string[] = [];
-  for (const condition of rule.conditions.all) {
+  walkRuleConditions(rule.conditions.all, (condition) => {
     if (
       condition.type === "participants_inside_geofence"
       || condition.type === "participants_outside_geofence"
     ) {
       presence.push(formatPresenceEventLabel(condition, context));
-      continue;
+      return;
     }
     const timingLine = formatTimingCondition(condition);
     if (timingLine !== null) {
       timing.push(timingLine);
     }
-  }
+  });
   const actions = rule.device_actions.map((entry) => {
     const label = resolveDeviceLabel(entry.family_id, entry.device_id, context);
     return formatDeviceActionPhrase(entry.action, label);
