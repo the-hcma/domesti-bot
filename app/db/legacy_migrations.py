@@ -109,7 +109,7 @@ def _apply_mytracks_user_nomenclature_migration(conn: Connection) -> None:
 
 
 def _apply_rule_user_tables_migration(conn: Connection) -> None:
-    """Copy legacy participant/fix tables into rule_users / rule_user_* when empty."""
+    """Copy pre-nomenclature SQLite roster/location tables when ``rule_users`` is empty."""
     inspector = inspect(conn)
     tables = set(inspector.get_table_names())
     if "rule_users" not in tables:
@@ -120,16 +120,17 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
     if "rule_participants" not in tables:
         return
     now = time.time()
-    participant_rows = conn.execute(
+    legacy_user_rows = conn.execute(
         text(
-            "SELECT participant_id, display_name, tracking_device_label, enabled "
+            "SELECT participant_id AS legacy_user_id, display_name, "
+            "tracking_device_label, enabled "
             "FROM rule_participants"
         )
     ).all()
-    for row in participant_rows:
+    for row in legacy_user_rows:
         first_name, last_name = parse_person_name(str(row.display_name))
         if first_name == "":
-            first_name = str(row.participant_id)
+            first_name = str(row.legacy_user_id)
         conn.execute(
             text(
                 "INSERT INTO rule_users "
@@ -139,7 +140,7 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
                 ":tracking_device_label, :enabled, :updated_at)"
             ),
             {
-                "user_id": row.participant_id,
+                "user_id": row.legacy_user_id,
                 "first_name": first_name,
                 "last_name": last_name,
                 "display_name": default_display_name(first_name),
@@ -149,13 +150,14 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
             },
         )
     if "rule_participant_last_fix" in tables and "rule_user_last_location" in tables:
-        fix_rows = conn.execute(
+        location_rows = conn.execute(
             text(
-                "SELECT participant_id, lat, lon, accuracy_m, received_at, source "
+                "SELECT participant_id AS legacy_user_id, lat, lon, accuracy_m, "
+                "received_at, source "
                 "FROM rule_participant_last_fix"
             )
         ).all()
-        for row in fix_rows:
+        for row in location_rows:
             conn.execute(
                 text(
                     "INSERT INTO rule_user_last_location "
@@ -164,7 +166,7 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
                     ":updated_at)"
                 ),
                 {
-                    "user_id": row.participant_id,
+                    "user_id": row.legacy_user_id,
                     "lat": row.lat,
                     "lon": row.lon,
                     "accuracy_m": row.accuracy_m,
@@ -179,7 +181,8 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
     ):
         history_rows = conn.execute(
             text(
-                "SELECT participant_id, lat, lon, accuracy_m, received_at, source "
+                "SELECT participant_id AS legacy_user_id, lat, lon, accuracy_m, "
+                "received_at, source "
                 "FROM rule_participant_location_history"
             )
         ).all()
@@ -192,7 +195,7 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
                     ":updated_at)"
                 ),
                 {
-                    "user_id": row.participant_id,
+                    "user_id": row.legacy_user_id,
                     "lat": row.lat,
                     "lon": row.lon,
                     "accuracy_m": row.accuracy_m,

@@ -51,7 +51,7 @@ def test_geofence_ids_containing_location(tmp_path: Path) -> None:
             ),
         ],
     )
-    fix = UserLocationRecord(
+    location = UserLocationRecord(
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
@@ -59,5 +59,5 @@ def test_geofence_ids_containing_location(tmp_path: Path) -> None:
         received_at=1_700_000_000.0,
         source="my-tracks",
     )
-    inside = geofence_ids_containing_location(fix, list_geofences(db))
+    inside = geofence_ids_containing_location(location, list_geofences(db))
     assert inside == ["house"]

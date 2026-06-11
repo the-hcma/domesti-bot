@@ -93,7 +93,7 @@ def test_after_sunset_not_met_midday() -> None:
     assert "Outside sunset" in result.conditions[0].detail
 
 
-def test_users_inside_geofence_met_with_fix() -> None:
+def test_users_inside_geofence_met_with_location() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     geofence = GeofenceOut(
         center_lat=41.194072,
@@ -104,7 +104,7 @@ def test_users_inside_geofence_met_with_fix() -> None:
         owntracks_rid=None,
         radius_m=250,
     )
-    fix = UserLocationOut(
+    location = UserLocationOut(
         accuracy_m=20,
         lat=41.1941,
         lon=-73.8883,
@@ -113,7 +113,7 @@ def test_users_inside_geofence_met_with_fix() -> None:
     )
     result = evaluate_rule(
         _evening_rule(),
-        _ctx(now=now, geofences=(geofence,), user_locations={"henrique": fix}),
+        _ctx(now=now, geofences=(geofence,), user_locations={"henrique": location}),
     )
     assert result.conditions[1].met is True
     assert result.all_met is True
@@ -130,7 +130,7 @@ def test_users_inside_geofence_ignores_low_accuracy() -> None:
         owntracks_rid=None,
         radius_m=250,
     )
-    fix = UserLocationOut(
+    location = UserLocationOut(
         accuracy_m=120,
         lat=41.1941,
         lon=-73.8883,
@@ -139,7 +139,7 @@ def test_users_inside_geofence_ignores_low_accuracy() -> None:
     )
     result = evaluate_rule(
         _evening_rule(),
-        _ctx(now=now, geofences=(geofence,), user_locations={"henrique": fix}),
+        _ctx(now=now, geofences=(geofence,), user_locations={"henrique": location}),
     )
     assert result.conditions[1].met is False
     assert "Ignored low-accuracy location" in result.conditions[1].detail

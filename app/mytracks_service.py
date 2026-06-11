@@ -122,14 +122,8 @@ def fetch_mytracks_domesti_config(
     location_updates_enabled = (
         bool(enabled_raw) if enabled_raw is not None else None
     )
-    update_url = _optional_str(
-        payload.get("user_location_update_url")
-        or payload.get("participant_location_update_url")
-    )
-    test_url = _optional_str(
-        payload.get("user_location_test_url")
-        or payload.get("participant_location_test_url")
-    )
+    update_url = _optional_str(payload.get("user_location_update_url"))
+    test_url = _optional_str(payload.get("user_location_test_url"))
     return DomestiBotConfigFromMyTracks(
         domesti_base_url=_optional_str(payload.get("domesti_base_url")),
         location_updates_enabled=location_updates_enabled,
