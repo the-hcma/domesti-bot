@@ -2,7 +2,7 @@
 
 This document describes how to evolve domesti-bot from its **partially implemented** rule-engine scaffolding into a production-ready automation layer. The **first production automations** (file-backed, no rule SQLite yet):
 
-> When **Henrique or Kristen** **arrives home** after sunset, turn on **Front door lights**, **Garage (Lights & Plugs)**, and **Garage outside lights**, and email **github@hcma.info**.
+> When **Henrique or Kristen** **arrives home** after sunset, turn on **Front door lights**, **Garage**, and **Garage outside lights**, and email **github@hcma.info**.
 >
 > When **Kristen arrives at** or **leaves** the **west-point** geofence, email **github@hcma.info** (no device actions).
 

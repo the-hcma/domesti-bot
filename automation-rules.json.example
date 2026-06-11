@@ -56,7 +56,7 @@
         },
         {
           "family_id": "kasa",
-          "device_id": "Garage (Lights & Plugs)",
+          "device_id": "Garage",
           "action": "turn_on"
         },
         {
