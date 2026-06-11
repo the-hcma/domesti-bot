@@ -13,7 +13,7 @@ from app.presence_store import (
 from app.rules_store import UserRecord, replace_users
 
 
-def _fix(user_id: str, received_at: float) -> UserLocationRecord:
+def _location_record(user_id: str, received_at: float) -> UserLocationRecord:
     return UserLocationRecord(
         user_id=user_id,
         lat=41.194085,
@@ -44,7 +44,7 @@ def test_upsert_appends_history_and_prunes_to_retention_policy(tmp_path: Path) -
     for index in reversed(range(25)):
         upsert_user_location(
             db,
-            _fix("henrique", now - (index * 10_000.0)),
+            _location_record("henrique", now - (index * 10_000.0)),
             retention=retention,
         )
     assert count_user_location_history(db, "henrique") == 20

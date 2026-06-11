@@ -102,7 +102,7 @@ def test_location_update_webhook_rejects_env_api_key_instead_of_relay_key(
     assert response.status_code == HTTPStatus.UNAUTHORIZED
 
 
-def test_location_update_webhook_rejects_legacy_participant_id_field(
+def test_location_update_webhook_requires_user_id_field(
     tmp_path: Path,
     fernet_key: str,
 ) -> None:
@@ -111,15 +111,14 @@ def test_location_update_webhook_rejects_legacy_participant_id_field(
     _seed_user(db)
     relay_key = "relay-secret-value"
     _store_relay_key(db, relay_key, fernet_key)
-    legacy_payload = {
+    payload_without_user_id = {
         key: value
         for key, value in _LOCATION_UPDATE_PAYLOAD.items()
         if key != "user_id"
     }
-    legacy_payload["participant_id"] = "henrique"
     response = client.post(
         "/v1/webhooks/location_update",
-        json=legacy_payload,
+        json=payload_without_user_id,
         headers={"X-Domesti-Api-Key": relay_key},
     )
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY

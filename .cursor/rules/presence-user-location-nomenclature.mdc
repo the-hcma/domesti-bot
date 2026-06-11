@@ -1,11 +1,11 @@
 ---
-description: Presence tracking uses user + location vocabulary (not participant + fix)
+description: Presence tracking uses user + location vocabulary only
 alwaysApply: true
 ---
 
 # Presence users and locations
 
-Home-automation **presence** (My Tracks / OwnTracks people on the map) is modeled as **users** with **locations**, not participants with fixes.
+Home-automation **presence** (My Tracks / OwnTracks people on the map) is modeled as **users** with **locations**.
 
 ## Use
 
@@ -35,12 +35,11 @@ Home-automation **presence** (My Tracks / OwnTracks people on the map) is modele
 
 ## No aliases
 
-- Domesti-bot **schemas, routes, stores, UI, tests, and operator scripts** accept only `user` / `location` terms. Do not add `validation_alias`, duplicate JSON keys, or parallel API fields for legacy `participant` / `fix` names.
-- **One-time SQLite legacy migrations** may read old table/column names when copying into `rule_users` — that is data migration, not a runtime API alias.
+- Domesti-bot **schemas, routes, stores, UI, tests, and operator scripts** accept only `user` / `location` terms. Do not add `validation_alias`, duplicate JSON keys, or parallel API fields for retired presence nomenclature.
+- **One-time SQLite legacy migrations** may reference pre-nomenclature on-disk table/column names when copying into `rule_users` — that is data migration, not a runtime API alias.
 
 ## Exceptions
 
-- **Third-party wire formats** (my-tracks admin API JSON keys when calling their HTTP API) may still use upstream field names — translate at the integration boundary into domesti-bot `user` / `location` types before they cross our API surface.
 - **Device discovery** (`device_state_watcher`, Kasa, etc.) is unrelated — do not rename device polling to “location”.
 
 ## Sync semantics

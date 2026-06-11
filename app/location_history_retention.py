@@ -61,8 +61,9 @@ def retained_history_row_ids(
     """Return history row ids to keep for one user.
 
     ``rows`` must be ``(id, received_at)`` tuples sorted by ``received_at`` descending.
-    A fix is kept when it falls inside the age window **or** ranks among the
-    ``min_keep_count`` most recent fixes — whichever policy retains more rows.
+    A location reading is kept when it falls inside the age window **or** ranks
+    among the ``min_keep_count`` most recent readings — whichever policy retains
+    more rows.
     """
     if retention.unlimited:
         return {row_id for row_id, _received_at in rows}

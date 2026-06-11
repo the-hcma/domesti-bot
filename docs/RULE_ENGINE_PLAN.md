@@ -12,7 +12,7 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 
 **Strategic shift:** server-side **global automation evaluation** currently lives in [my-tracks](../my-tracks) (`GlobalAutomationRule`, `_evaluate_global_automations_for_user`). That logic — geofence conditions, multi-user AND semantics, edge-triggered firing — **moves entirely into domesti-bot**. my-tracks becomes a **location ingest + map/tracking** service: MQTT → SQLite → presence webhook relay. Geofence **definitions** also move to domesti-bot (with a Leaflet + OpenStreetMap editor modeled on my-tracks’ `/geofences/` page).
 
-**Nomenclature:** presence automation uses **user** + **location** terms (`user_id`, `user_ids`, `users_inside_geofence`, …) — see `.cursor/rules/presence-user-location-nomenclature.mdc`. Legacy “participant/fix” wording below was updated to match shipped APIs.
+**Nomenclature:** presence automation uses **user** + **location** terms (`user_id`, `user_ids`, `users_inside_geofence`, …) — see `.cursor/rules/presence-user-location-nomenclature.mdc`.
 
 **my-tracks pairing and relay (canonical):** see [`docs/MY_TRACKS_INTEGRATION_PLAN.md`](MY_TRACKS_INTEGRATION_PLAN.md) for HTTPS public URLs, domesti-bot-initiated pairing, live vs test webhook paths (`/v1/webhooks/location_update` and `/v1/webhooks/location_update/test`), manual roster/geofence sync, verify roundtrip, and the emergency location-update switch. Sections below that describe a roster **push** webhook are superseded by manual **pull** sync in that plan unless noted otherwise.
 
@@ -35,7 +35,7 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 
 ### Evaluation model (location-driven edges)
 
-Rules fire on **geofence enter/leave transitions** when a live fix arrives on `POST /v1/webhooks/location_update`, not on a naive “composite became true at sunset” poll.
+Rules fire on **geofence enter/leave transitions** when a live location update arrives on `POST /v1/webhooks/location_update`, not on a naive “composite became true at sunset” poll.
 
 1. On ingest for user `P`, compute `now_inside` per enabled geofence (haversine; same math as `presence_store.geofence_ids_containing_location`).
 2. Compare to in-memory `was_inside[P, geofence_id]`; detect **enter** and **leave**.
@@ -43,10 +43,10 @@ Rules fire on **geofence enter/leave transitions** when a live fix arrives on `P
 4. **Enter** rules: `users_inside_geofence` + `trigger: edge_true`.
 5. **Leave** rules: `users_outside_geofence` + `trigger: edge_true` (single user listed).
 6. Evaluate remaining conditions at event time (`after_sunset`, nested `any`/`all`).
-7. Respect `cooldown_s` and `min_fix_accuracy_m`.
+7. Respect `cooldown_s` and `min_location_accuracy_m`.
 8. Run `device_actions` (Kasa `turn_on`, …) via `DeviceManagersState`; send email when `notify_on_fire` using persisted SMTP settings.
 
-**Important:** Rule 1 uses `conditions.all: [after_sunset, { type: any, conditions: [henrique inside house, kristen inside house] }]`. The evaluator must treat the geofence half as an **arrival edge for the user whose fix just arrived**, so someone already home before sunset does not trigger lights when sunset passes.
+**Important:** Rule 1 uses `conditions.all: [after_sunset, { type: any, conditions: [henrique inside house, kristen inside house] }]`. The evaluator must treat the geofence half as an **arrival edge for the user whose location update just arrived**, so someone already home before sunset does not trigger lights when sunset passes.
 
 ### In-memory evaluator state (acceptable until rule persistence)
 
@@ -69,7 +69,7 @@ Rule evaluation runs on the **asyncio event loop** shared with FastAPI — no th
 | Piece | asyncio shape |
 | --- | --- |
 | **Lifecycle** | `RuleEvaluator` registered in the FastAPI lifespan (`app/api/app.py`): construct on startup, `await evaluator.close()` on shutdown. |
-| **Location ingest** | After `upsert_user_location`, schedule `asyncio.create_task(evaluator.handle_location_update(...), name="rule-eval-fix")` so webhook handlers return quickly. |
+| **Location ingest** | After `upsert_user_location`, schedule `asyncio.create_task(evaluator.handle_location_update(...), name="rule-eval-location")` so webhook handlers return quickly. |
 | **Device actions** | `await` existing async manager methods (`KasaDeviceManager.turn_on`, …) via the same paths as `/v1/ui/*`. |
 | **Email** | `await` async SMTP send helper (or `asyncio.to_thread` around the stdlib client if the helper stays sync). |
 | **Sunset boundary** | Optional `asyncio` background task with `await asyncio.sleep(interval)` for status/logging only — **not** for firing rule 1 at sunset (location edges only). |
@@ -225,10 +225,10 @@ flowchart TB
 
 | Component | Role |
 | --- | --- |
-| **UserLocationRegistry** | In-memory map `user_id → {lat, lon, accuracy?, received_at}`. Validates staleness; exposes read API for evaluator and status endpoint. Optionally mirrors last fix to SQLite for restart survival. |
+| **UserLocationRegistry** | In-memory map `user_id → {lat, lon, accuracy?, received_at}`. Validates staleness; exposes read API for evaluator and status endpoint. Optionally mirrors the latest location to SQLite for restart survival. |
 | **SunTimesService** | Given home coordinates (from settings or first geofence), computes today’s sunset (and optionally civil/nautical twilight). Cached per calendar day; recomputed shortly after local midnight. |
 | **RuleEngine** | Loads enabled rules from SQLite, binds conditions to registry + sun service + geofences, resolves action targets to concrete manager calls. |
-| **RuleEvaluator** | **asyncio** service: `create_task` on each location fix, optional slow `asyncio.sleep` tick for status only, reload on bundle file mtime change (future). Implements **edge detection** and **cooldown**. |
+| **RuleEvaluator** | **asyncio** service: `create_task` on each location update, optional slow `asyncio.sleep` tick for status only, reload on bundle file mtime change (future). Implements **edge detection** and **cooldown**. |
 | **Device action dispatcher** | Thin adapter: `turn_on_switch(backend, canonical_key)`, `open_door(...)`, etc., reusing the same code paths as `/v1/ui/*` handlers. |
 
 ---
@@ -267,7 +267,7 @@ center_lon: float
 radius_m: float              # meters
 ```
 
-**UTM zone fix (required before general use):** replace the module-level `EPSG:32618` constant with zone selection from center longitude (`utm_zone = int((lon + 180) / 6) + 1`, northern hemisphere → `32600 + zone`). Keep a small helper `utm_transformer_for_lat_lon(lat, lon)` used by both `Device` and `Geofence`.
+**UTM zone selection (required before general use):** replace the module-level `EPSG:32618` constant with zone selection from center longitude (`utm_zone = int((lon + 180) / 6) + 1`, northern hemisphere → `32600 + zone`). Keep a small helper `utm_transformer_for_lat_lon(lat, lon)` used by both `Device` and `Geofence`.
 
 ### Rules
 
@@ -317,7 +317,7 @@ Serializable, versioned documents. Start with a **structured JSON schema** store
 
 | `type` | Parameters | True when |
 | --- | --- | --- |
-| `users_inside_geofence` | `geofence_id`, `user_ids[]` | Every listed user has a **fresh** fix and is inside the geofence (AND). Replaces my-tracks `CONDITION_ALL_INSIDE`. |
+| `users_inside_geofence` | `geofence_id`, `user_ids[]` | Every listed user has a **fresh** location reading and is inside the geofence (AND). Replaces my-tracks `CONDITION_ALL_INSIDE`. |
 | `users_outside_geofence` | `geofence_id`, `user_ids[]` | Every listed user is outside or stale/unknown (AND). Replaces my-tracks `CONDITION_ALL_OUTSIDE`. |
 | `after_sunset` | `offset_minutes` (default 0) | Local time ≥ sunset + offset for home coordinates. |
 | `before_sunrise` | `offset_minutes` | For future “leave home” / morning rules. |
@@ -369,13 +369,13 @@ my-tracks today can POST a webhook when a **geofence condition transitions** (se
 
 That pattern is insufficient for domesti-bot’s rule engine because:
 
-1. **No per-fix coordinates** — domesti-bot cannot run its own geofence math or share one geofence definition with sunset rules.
+1. **No per-update coordinates** — domesti-bot cannot run its own geofence math or share one geofence definition with sunset rules.
 2. **No sunset dimension** — my-tracks does not evaluate astronomical conditions; domesti-bot must combine “both inside” with `after_sunset` locally.
 3. **Fires only on geofence edges** — a webhook arrives when my-tracks decides the rule met, not on every GPS update; domesti-bot would inherit my-tracks’ edge semantics and duplicate geofence config.
 
-**Conclusion:** my-tracks needs a **presence relay** (new feature in that repo) that POSTs each accepted location fix to domesti-bot. domesti-bot owns geofence definitions, rule evaluation (replacing `GlobalAutomationRule`), sunset checks, and device actions. The global-automation webhook path is **not** extended — it is **sunset** once domesti-bot is live.
+**Conclusion:** my-tracks needs a **presence relay** (new feature in that repo) that POSTs each accepted location update to domesti-bot. domesti-bot owns geofence definitions, rule evaluation (replacing `GlobalAutomationRule`), sunset checks, and device actions. The global-automation webhook path is **not** extended — it is **sunset** once domesti-bot is live.
 
-### Participant identity mapping
+### User identity mapping
 
 | my-tracks | domesti-bot |
 | --- | --- |
@@ -387,7 +387,7 @@ That pattern is insufficient for domesti-bot’s rule engine because:
 
 ### User roster sync (my-tracks → domesti-bot)
 
-Distinct from the **presence** webhook (GPS fixes). This endpoint owns **who exists** and how they are labeled.
+Distinct from the **presence** webhook (GPS location updates). This endpoint owns **who exists** and how they are labeled.
 
 ```
 POST /v1/rules/users/sync
@@ -469,7 +469,7 @@ Implementation mirrors `fire_global_automation_webhook` (`urllib` POST, 5s timeo
 
 ### Relay payload (my-tracks → domesti-bot)
 
-my-tracks should POST JSON on **every** saved location fix for watched owners:
+my-tracks should POST JSON on **every** saved location update for watched owners:
 
 ```json
 {
@@ -512,7 +512,7 @@ Geofence circles are configured **once** in domesti-bot (operator UI with map). 
 
 ### Principle
 
-**One evaluator, one geofence catalog, one rule store** — domesti-bot. my-tracks stops deciding when “both users are home”; it only forwards GPS fixes.
+**One evaluator, one geofence catalog, one rule store** — domesti-bot. my-tracks stops deciding when “both users are home”; it only forwards GPS location updates.
 
 ### my-tracks code to remove (after domesti-bot is live)
 
@@ -528,7 +528,7 @@ Geofence circles are configured **once** in domesti-bot (operator UI with map). 
 
 | Item | Action |
 | --- | --- |
-| `relay_presence_to_domesti_bot(owner, location)` | POST every saved fix to `/v1/webhooks/presence` |
+| `relay_presence_to_domesti_bot(owner, location)` | POST every saved location update to `/v1/webhooks/location_update` |
 | `relay_users_roster_to_domesti_bot()` | POST catalog snapshot to `/v1/rules/users/sync` on user/device changes + startup |
 | `DOMESTI_BOT_PRESENCE_WEBHOOK_URL`, `DOMESTI_BOT_USERS_SYNC_URL`, `DOMESTI_BOT_API_KEY` | Settings |
 | Deprecation notice on `/geofences/` automations that pointed at global rules | Banner: “Home automations moved to domesti-bot” |
@@ -543,7 +543,7 @@ Geofence circles are configured **once** in domesti-bot (operator UI with map). 
 | `ACTION_EMAIL` | Future domesti-bot notification action, or keep email alerts in my-tracks for tracking-only |
 | `last_condition_met` edge guard | `automation_rule_state.last_condition_bool` |
 | Re-evaluate on each location save | `RuleEvaluator` on presence webhook + 60s tick |
-| Unknown location = outside | Stale / missing fix = not inside (same effective behavior for arrival rules) |
+| Unknown location = outside | Stale / missing location = not inside (same effective behavior for arrival rules) |
 
 ### Cutover checklist
 
@@ -639,7 +639,7 @@ X-Domesti-Api-Key: <shared secret>
 POST /v1/rules/users/sync
 ```
 
-Pulls the same roster snapshot from my-tracks (server-side HTTP to my-tracks export API). Returns `MyTracksParticipantsSyncOut`:
+Pulls the same roster snapshot from my-tracks (server-side HTTP to my-tracks export API). Returns `MyTracksUsersSyncOut`:
 
 ```json
 {
@@ -717,7 +717,7 @@ Body: `{ "updates": [ { "user_id", "lat", "lon", ... }, ... ] }` → `204`.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/v1/rules/users` | List with last known location (no history) |
-| `GET` | `/v1/rules/users/sync-status` | Last roster sync metadata (`MyTracksParticipantsSyncOut`) |
+| `GET` | `/v1/rules/users/sync-status` | Last roster sync metadata (`MyTracksUsersSyncOut`) |
 | `POST` | `/v1/rules/users/sync` | Pull roster from my-tracks export API (operator / UI button) |
 
 Manual `POST` / `PUT` / `DELETE` on users are **not** exposed in v1 — use my-tracks as the editor and the roster webhook (or sync fallback) as transport.
@@ -769,7 +769,7 @@ Add tables via `app/db/models.py` + `bootstrap_schema` (additive only).
 | Table | Purpose |
 | --- | --- |
 | `rule_users` | user_id PK, display_name, tracking_device_label, enabled, updated_at |
-| `presence_last_fix` | user_id PK, lat, lon, accuracy_m, received_at, source |
+| `rule_user_last_location` | user_id PK, lat, lon, accuracy_m, received_at, source |
 | `users_sync` | singleton: last_synced_at, source (`my-tracks`) |
 | `rule_geofences` | geofence_id PK, label, center_lat, center_lon, radius_m, enabled, owntracks_rid (nullable), updated_at |
 | `automation_rules` | rule_id PK, label, enabled, trigger, cooldown_s, conditions_json, actions_json, updated_at |
@@ -850,7 +850,7 @@ Before any `/v1/rules/*` routes exist, the web bundle implements the full operat
 
 **`MockRulesDataSource`** — seeded from `web/src/rules-mock-fixtures.ts` with the motivating scenario:
 
-- Participants: `henrique`, `kristen` (Henrique at home coords, Kristen 5 min ago outside).
+- Users: `henrique`, `kristen` (Henrique at home coords, Kristen 5 min ago outside).
 - Geofence: `house` — 250 m circle at test coordinates from `test_rule_engine.py`.
 - Rule: `arrive-home-lights` — both inside + after sunset → two Kasa hosts + one Tailwind door (disabled by default in mock so clicks are safe).
 - Status: `is_dark: true`, `condition_currently_true: false`, sample `last_fired_at`.
@@ -892,7 +892,7 @@ Use the existing `settings-dialog` visual system (`app/api/static/index.html` CS
 **Tabs or sections:**
 
 1. **Status** (default tab)
-   - Participant cards: name, last seen (“3 min ago”), map pin or lat/lon text, badges for which geofences they’re inside.
+   - User cards: name, last seen (“3 min ago”), map pin or lat/lon text, badges for which geofences they’re inside.
    - Sun row: “Sunset 7:42 PM — dark now” / “Light until 7:42 PM”.
    - Rule cards: name, enabled toggle, “conditions met” indicator, “last fired 2h ago”.
 
@@ -903,7 +903,7 @@ Use the existing `settings-dialog` visual system (`app/api/static/index.html` CS
 3. **Geofences** — Leaflet + OpenStreetMap editor (desktop; port UX from my-tracks `/geofences/`)
 4. **Users** (read-only)
    - Sync status row: user count, last synced time, **Sync from my-tracks** button (`POST /v1/rules/users/sync`).
-   - List: display name, `user_id`, tracking device label; mini OSM map per person (last fix + geofences).
+   - List: display name, `user_id`, tracking device label; mini OSM map per person (latest location + geofences).
    - No add/edit forms — roster arrives via `POST /v1/rules/users/sync` from my-tracks.
 
 ### Rule editor (desktop)
@@ -944,7 +944,7 @@ Port the interaction model from `my-tracks/web_ui/templates/web_ui/geofences.htm
 | --- | --- |
 | Initial center / zoom | `getSettingsLocation()` home lat/lon, else first geofence, else world |
 | Home pin (🏠) | `automation_settings` — same as my-tracks `user_profile.home_*` |
-| Participant markers | Status tab / geofence tab: last fix per user as small dots (distinct color from geofence circles) |
+| User markers | Status tab / geofence tab: latest location per user as small dots (distinct color from geofence circles) |
 | Fit bounds | All enabled geofence circles (+ home) on load |
 
 **Not ported from my-tracks** (different product surface):
@@ -983,7 +983,7 @@ Split when `main.ts` grows:
 | `app/rules_conditions.py` | Deserialize JSON conditions → evaluators |
 | `app/rules_actions.py` | Deserialize actions → async dispatcher |
 | `app/rules_store.py` | SQLite CRUD facade |
-| `app/presence_registry.py` | In-memory + persist last fix |
+| `app/presence_store.py` | In-memory + persist latest location |
 | `app/sun_times.py` | Astral wrapper |
 | `app/rule_evaluator.py` | Background loop, edge detection, cooldown |
 | `app/api/rules_routes.py` | FastAPI router (`/v1/rules`, `/v1/presence`) |
@@ -1101,7 +1101,7 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 
 #### PR4 — `feat/rules-persistence-and-geofence-utm`
 
-- UTM zone auto-selection (fix hardcoded 18N).
+- UTM zone auto-selection (replace hardcoded 18N).
 - SQLite tables + `rules_store` for geofences (`owntracks_rid`, `enabled`) and `rule_users` + `users_sync` metadata.
 - Geofence CRUD API; optional `POST /v1/rules/geofences/import`.
 - `GET /v1/rules/users` + sync-status (read-only roster).
@@ -1198,7 +1198,7 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 3. Operator creates rule “Welcome home — lights + garage” with conditions (both inside `house`, after sunset) and actions (two Kasa hosts, one Tailwind door).
 4. Kristen’s phone reports GPS → OwnTracks → MQTT → my-tracks saves `Location` → POST webhook:
    `{"user_id":"kristen","lat":41.1941,"lon":-73.8884,"timestamp":"2026-06-09T00:15:00Z","source":"my-tracks"}`
-5. At 8 PM (after sunset), Henrique’s fix also lands inside the fence → domesti-bot evaluator sees both inside → edge false→true → Kasa `turn_on` ×2, Tailwind `open` ×1 → log `[rules] fired arrive-home-lights`.
+5. At 8 PM (after sunset), Henrique’s location update also lands inside the fence → domesti-bot evaluator sees both inside → edge false→true → Kasa `turn_on` ×2, Tailwind `open` ×1 → log `[rules] fired arrive-home-lights`.
 6. Both remain home for hours — my-tracks keeps relaying fixes, but domesti-bot **does not re-fire** (edge semantics + cooldown).
 7. Desktop Status tab shows last fire time and current user positions.
 
@@ -1226,7 +1226,7 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 | my-tracks `Waypoint` table after cutover? | **Deprecated for automation**; optional mirror via export API for device sync. |
 | Canonical geofence editor? | **domesti-bot** desktop map UI (Leaflet/OSM). |
 | Auto-register unknown user IDs on ingest? | **No** by default; opt-in env flag. |
-| Store presence history? | **No** in v1 (last fix only). |
+| Store presence history? | **No** in v1 (latest location only). |
 | Duplicate `setLocation` naming? | Add `set_location` alias; deprecate camelCase in a follow-up. |
 | One rule engine per process? | **Yes** — singleton on `app.state.rule_evaluator`. |
 | Timezone source? | Explicit `automation_settings.timezone` (IANA string); default from geofence locale or `America/New_York` for migration. |
@@ -1237,13 +1237,13 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 
 ### Phase 1 (UI mock) — complete after PR3
 
-1. Desktop ☰ → Rules opens the full hub (Status, Rules, Geofences, Participants) with seeded Henrique/Kristen scenario.
+1. Desktop ☰ → Rules opens the full hub (Status, Rules, Geofences, Users) with seeded Henrique/Kristen scenario.
 2. Operator can draw/edit geofences on the OSM map and build a rule in the form builder; changes persist for the browser session.
 3. Playwright layout tests pass; no new Python rule code required.
 
 ### Full mainline — complete after PR9 + my-tracks M1/M3
 
-1. my-tracks relays locations via `POST /v1/webhooks/location_update` on each GPS fix.
+1. my-tracks relays locations via `POST /v1/webhooks/location_update` on each GPS location update.
 2. Henrique + Kristen + house + after-sunset fires once on arrival and actuates real Kasa + Tailwind devices.
 3. Rules, geofences, and users survive server restart (SQLite); UI uses `HttpRulesDataSource`.
 4. my-tracks `GlobalAutomationRule` path is disabled.
