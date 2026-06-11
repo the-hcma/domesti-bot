@@ -12,8 +12,10 @@ from app.mytracks_service import (
     ExportedUser,
     MyTracksSyncError,
     fetch_geofences_from_my_tracks,
+    fetch_mytracks_domesti_config,
     fetch_users_from_my_tracks,
     normalize_mytracks_base_url,
+    pair_with_my_tracks,
 )
 
 
@@ -217,6 +219,119 @@ def test_fetch_geofences_uses_login_client_without_context_manager_reentry(
         password="secret",
     )
     assert rows == []
+
+
+def test_fetch_mytracks_domesti_config_prefers_user_location_url_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ConfigClient(_FakeClient):
+        def get(self, path: str) -> httpx.Response:
+            if path == "/api/admin/domesti-bot/config/":
+                return httpx.Response(
+                    200,
+                    json={
+                        "user_location_test_url": "https://domesti.example.com/test",
+                        "user_location_update_url": "https://domesti.example.com/live",
+                    },
+                    headers={"content-type": "application/json"},
+                    request=MagicMock(),
+                )
+            return super().get(path)
+
+    monkeypatch.setattr(
+        "app.mytracks_service._login_client",
+        lambda *_args, **_kwargs: _ConfigClient(export_payload={}),
+    )
+    config = fetch_mytracks_domesti_config(
+        base_url="https://tracks.example.com",
+        username="admin",
+        password="secret",
+    )
+    assert config.user_location_update_url == "https://domesti.example.com/live"
+    assert config.user_location_test_url == "https://domesti.example.com/test"
+
+
+def test_fetch_mytracks_domesti_config_falls_back_to_legacy_pairing_url_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ConfigClient(_FakeClient):
+        def get(self, path: str) -> httpx.Response:
+            if path == "/api/admin/domesti-bot/config/":
+                return httpx.Response(
+                    200,
+                    json={
+                        "participant_location_test_url": "https://domesti.example.com/test",
+                        "participant_location_update_url": "https://domesti.example.com/live",
+                    },
+                    headers={"content-type": "application/json"},
+                    request=MagicMock(),
+                )
+            return super().get(path)
+
+    monkeypatch.setattr(
+        "app.mytracks_service._login_client",
+        lambda *_args, **_kwargs: _ConfigClient(export_payload={}),
+    )
+    config = fetch_mytracks_domesti_config(
+        base_url="https://tracks.example.com",
+        username="admin",
+        password="secret",
+    )
+    assert config.user_location_update_url == "https://domesti.example.com/live"
+    assert config.user_location_test_url == "https://domesti.example.com/test"
+
+
+def test_pair_with_my_tracks_sends_user_location_url_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    posted_json: dict[str, object] = {}
+
+    class _PairClient:
+        cookies = httpx.Cookies()
+
+        def __init__(self) -> None:
+            self.cookies.set("csrftoken", "csrf-token")
+
+        def close(self) -> None:
+            return None
+
+        def post(
+            self,
+            path: str,
+            *,
+            json: dict[str, object] | None = None,
+            headers: dict[str, str] | None = None,
+        ) -> httpx.Response:
+            del headers
+            if path == "/api/admin/domesti-bot/pair/":
+                posted_json.update(json or {})
+            return httpx.Response(200, request=MagicMock())
+
+    monkeypatch.setattr(
+        "app.mytracks_service._login_client",
+        lambda *_args, **_kwargs: _PairClient(),
+    )
+    monkeypatch.setattr(
+        "app.mytracks_service._session_csrf_token",
+        lambda _client: "csrf-token",
+    )
+    status = pair_with_my_tracks(
+        api_key="relay-key",
+        base_url="https://tracks.example.com",
+        domesti_base_url="https://domesti.example.com",
+        user_location_test_url="https://domesti.example.com/v1/webhooks/location_update/test",
+        user_location_update_url="https://domesti.example.com/v1/webhooks/location_update",
+        password="secret",
+        username="admin",
+    )
+    assert status == 200
+    assert posted_json["user_location_update_url"] == (
+        "https://domesti.example.com/v1/webhooks/location_update"
+    )
+    assert posted_json["user_location_test_url"] == (
+        "https://domesti.example.com/v1/webhooks/location_update/test"
+    )
+    assert "participant_location_update_url" not in posted_json
 
 
 def test_fetch_users_rejects_html_export_response(

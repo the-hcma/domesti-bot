@@ -13,7 +13,7 @@ This document is the **domesti-bot** side of integrating with [my-tracks](https:
 | Concern | Owner | Mechanism |
 | --- | --- | --- |
 | OwnTracks ingest, map, friends | my-tracks | Existing MQTT/HTTP → SQLite |
-| Participant roster (automation) | my-tracks (source of truth) | **Manual pull** by domesti-bot (`POST /v1/rules/participants/sync`) |
+| User roster (automation) | my-tracks (source of truth) | **Manual pull** by domesti-bot (`POST /v1/rules/users/sync`) |
 | Geofence definitions (automation) | domesti-bot | **Manual pull** (`POST /v1/rules/geofences/sync`) from my-tracks export APIs |
 | Live GPS fixes for rules | my-tracks → domesti-bot | **Automatic push** after pairing (`POST` to domesti-bot webhook URLs) |
 | Rule evaluation & device actions | domesti-bot | `RuleEvaluator` (future PRs; see `docs/RULE_ENGINE_PLAN.md`) |
@@ -102,7 +102,7 @@ sequenceDiagram
   Bot->>Bot: Generate relay_api_key; encrypt → app_secrets
   Bot->>Bot: Build location-update + test webhook URLs from public URL
   Bot->>MT: POST /api/admin/domesti-bot/pair/ (admin session)
-  Note over Bot,MT: api_key, participant_location_update_url,<br/>participant_location_test_url, domesti_base_url
+  Note over Bot,MT: api_key, user_location_update_url,<br/>user_location_test_url, domesti_base_url
   MT->>MT: Store DomestiBotConfig, location_updates_enabled=true
   MT-->>Bot: 200 paired
   Bot->>Bot: Persist paired_at + URLs in mytracks_settings
@@ -154,8 +154,8 @@ X-Domesti-Api-Key: <UI session key, same as other settings routes>
 {
   "api_key": "<newly generated relay key>",
   "domesti_base_url": "https://domesti.example.com",
-  "participant_location_update_url": "https://domesti.example.com/v1/webhooks/location_update",
-  "participant_location_test_url": "https://domesti.example.com/v1/webhooks/location_update/test"
+  "user_location_update_url": "https://domesti.example.com/v1/webhooks/location_update",
+  "user_location_test_url": "https://domesti.example.com/v1/webhooks/location_update/test"
 }
 ```
 
@@ -163,8 +163,8 @@ X-Domesti-Api-Key: <UI session key, same as other settings routes>
 | --- | --- | --- |
 | `api_key` | yes | Fresh relay secret; domesti-bot persists encrypted before send; my-tracks stores encrypted; never returned in API responses |
 | `domesti_base_url` | yes | From pairing form |
-| `participant_location_update_url` | yes | Live GPS relay target |
-| `participant_location_test_url` | yes | Synthetic / verify traffic only (see below) |
+| `user_location_update_url` | yes | Live GPS relay target |
+| `user_location_test_url` | yes | Synthetic / verify traffic only (see below) |
 
 **Responses:**
 
@@ -176,7 +176,7 @@ X-Domesti-Api-Key: <UI session key, same as other settings routes>
 
 ### my-tracks companion change
 
-PR [the-hcma/my-tracks#1087](https://github.com/the-hcma/my-tracks/pull/1087) adds `participant_location_update_url` only. Before cutover, my-tracks must also accept and persist **`participant_location_test_url`** (same validation: absolute HTTPS URL). my-tracks **Test location update** (P4) and domesti-bot **Verify pairing** must POST to the **test** URL, never the live relay URL.
+PR [the-hcma/my-tracks#1087](https://github.com/the-hcma/my-tracks/pull/1087) adds `user_location_update_url` only. Before cutover, my-tracks must also accept and persist **`user_location_test_url`** (same validation: absolute HTTPS URL). my-tracks **Test location update** (P4) and domesti-bot **Verify pairing** must POST to the **test** URL, never the live relay URL.
 
 ---
 
@@ -280,8 +280,8 @@ GET /v1/settings/my-tracks/pair-status
   "domain": "https://tracks.example.com",
   "username": "admin",
   "domesti_public_base_url": "https://domesti.example.com",
-  "participant_location_update_url": "https://domesti.example.com/v1/webhooks/location_update",
-  "participant_location_test_url": "https://domesti.example.com/v1/webhooks/location_update/test",
+  "user_location_update_url": "https://domesti.example.com/v1/webhooks/location_update",
+  "user_location_test_url": "https://domesti.example.com/v1/webhooks/location_update/test",
   "relay_key_configured": true,
   "location_history_retention": {
     "max_age_hours": 24,
@@ -309,7 +309,7 @@ GET /v1/settings/my-tracks/pair-status
 
 1. Authenticate to my-tracks (admin session, saved domain + username + password prompt).
 2. Call my-tracks `POST /api/admin/domesti-bot/test-location-update/` with optional `participant_id` (defaults to first roster member after sync).
-3. my-tracks POSTs a **synthetic** payload to the stored **`participant_location_test_url`** (`…/location_update/test`), not the live URL.
+3. my-tracks POSTs a **synthetic** payload to the stored **`user_location_test_url`** (`…/location_update/test`), not the live URL.
 4. domesti-bot test handler validates and returns `204`.
 5. my-tracks returns success/failure to domesti-bot; domesti-bot surfaces result in UI (toast + `last_verify_at` / `last_verify_ok`).
 
@@ -400,8 +400,8 @@ Participant sync must run **before** live webhooks succeed (`404` until `partici
 | `paired_at` | Last successful pair (epoch) |
 | `last_pair_error` | Optional operator-visible failure |
 | `domesti_public_base_url` | Public HTTPS origin from pairing form |
-| `participant_location_update_url` | Live webhook URL sent at pair |
-| `participant_location_test_url` | Test webhook URL sent at pair |
+| `user_location_update_url` | Live webhook URL sent at pair |
+| `user_location_test_url` | Test webhook URL sent at pair |
 | `location_updates_accepted` | Emergency switch (default `true`) |
 | `location_history_unlimited` | Never prune location history when `1` |
 | `location_history_max_age_s` | Retention age window (default `86400`) |
@@ -439,7 +439,7 @@ Helpers in `app/db/secrets.py`: `save_mytracks_relay_api_key_to_db`, `load_mytra
 | **D3b** (optional) | Verify-roundtrip + emergency-toggle buttons in Settings | Deferred (APIs + verify script exist) |
 | **D4** (later) | File-backed `RuleEvaluator` on live `POST /v1/webhooks/location_update` (rules in `automation-rules.json`, no rule SQLite yet) | In progress — bundle in `automation-rules.json.example`; see **Phase 2a** in `docs/RULE_ENGINE_PLAN.md` |
 
-**my-tracks companions:** [#1087](https://github.com/the-hcma/my-tracks/pull/1087) (pair + config); add `participant_location_test_url` to pair payload; P3 live relay; P4 test button → **test URL only**.
+**my-tracks companions:** [#1087](https://github.com/the-hcma/my-tracks/pull/1087) (pair + config); add `user_location_test_url` to pair payload; P3 live relay; P4 test button → **test URL only**.
 
 ---
 

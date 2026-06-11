@@ -107,6 +107,7 @@ markers = [
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.4.0",
     "icecream>=2.2.0",
     "playwright>=1.60.0",
     "pyright>=1.1.410",
