@@ -4,7 +4,7 @@ import L from "leaflet";
 import { formatLocalTimestamp, formatUtcTimestampTitle } from "./format-timestamp.js";
 import { participantMarkerColor } from "./map-device-colors.js";
 import { haversineM } from "./rules-mock-fixtures.js";
-import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
+import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-constants.js";
 import { resolveParticipantDisplayName } from "./rules-ui-helpers.js";
 import type { GeofenceOut, ParticipantFixOut, ParticipantStatusOut } from "./types.js";
 

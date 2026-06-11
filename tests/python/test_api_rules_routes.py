@@ -80,6 +80,26 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     assert location.status_code == HTTPStatus.OK
     assert location.json()["timezone"] == "America/New_York"
 
+    status = client.get("/v1/rules/status")
+    assert status.status_code == HTTPStatus.OK
+    body = status.json()
+    assert body["using_mock"] is False
+    assert len(body["rules"]) == 3
+    assert body["sun"]["sunset_at"].endswith("Z")
+
+
+def test_get_rules_status_route_before_rule_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(_EXAMPLE_BUNDLE))
+    client = _client(Path("/tmp/unused-rules-status.sqlite"))
+
+    status = client.get("/v1/rules/status")
+    assert status.status_code == HTTPStatus.OK
+
+    missing = client.get("/v1/rules/not-a-real-rule-id")
+    assert missing.status_code == HTTPStatus.NOT_FOUND
+
 
 def test_put_and_delete_geofence(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"

@@ -26,6 +26,7 @@ import type {
   ParticipantOut,
   ParticipantStatusOut,
   RuleOut,
+  RulesStatusOut,
   SettingsLocationOut,
   SmtpConfigIn,
   SmtpConfigOut,
@@ -235,6 +236,9 @@ export const api = {
   },
   fetchRulesSettingsLocation(): Promise<SettingsLocationOut> {
     return call<SettingsLocationOut>("GET", "/v1/rules/settings/location");
+  },
+  fetchRulesStatus(): Promise<RulesStatusOut> {
+    return call<RulesStatusOut>("GET", "/v1/rules/status");
   },
   fetchSmtpConfig(): Promise<SmtpConfigOut | null> {
     return callNullableJson<SmtpConfigOut>("GET", "/v1/settings/smtp");

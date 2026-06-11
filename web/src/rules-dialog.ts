@@ -10,7 +10,7 @@ import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
-import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
+import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-constants.js";
 import {
   mountPresenceMap,
   participantStatusToMapParticipant,
