@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
+from app.user_names import default_display_name, parse_person_name
 
 _LOGGER = mytracks_logger(__name__)
 
@@ -31,8 +32,8 @@ class MyTracksSyncError(ValueError):
 class DomestiBotConfigFromMyTracks:
     domesti_base_url: str | None = None
     location_updates_enabled: bool | None = None
-    participant_location_test_url: str | None = None
-    participant_location_update_url: str | None = None
+    user_location_test_url: str | None = None
+    user_location_update_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -47,16 +48,18 @@ class ExportedGeofence:
 
 
 @dataclass(frozen=True)
-class ExportedParticipant:
+class ExportedUser:
     display_name: str
     enabled: bool
-    latest_location: ExportedParticipantLocation | None
-    participant_id: str
+    first_name: str
+    last_name: str
+    latest_location: ExportedUserLocation | None
     tracking_device_label: str
+    user_id: str
 
 
 @dataclass(frozen=True)
-class ExportedParticipantLocation:
+class ExportedUserLocation:
     accuracy_m: int | None
     lat: float
     lon: float
@@ -122,22 +125,22 @@ def fetch_mytracks_domesti_config(
     return DomestiBotConfigFromMyTracks(
         domesti_base_url=_optional_str(payload.get("domesti_base_url")),
         location_updates_enabled=location_updates_enabled,
-        participant_location_test_url=_optional_str(
+        user_location_test_url=_optional_str(
             payload.get("participant_location_test_url")
         ),
-        participant_location_update_url=_optional_str(
+        user_location_update_url=_optional_str(
             payload.get("participant_location_update_url")
         ),
     )
 
 
-def fetch_participants_from_my_tracks(
+def fetch_users_from_my_tracks(
     *,
     base_url: str,
     password: str,
     username: str,
-) -> list[ExportedParticipant]:
-    """Fetch participant export JSON from My Tracks."""
+) -> list[ExportedUser]:
+    """Fetch user roster export JSON from My Tracks."""
     payload = _fetch_export_json(
         base_url=base_url,
         export_path=_USERS_WITH_DEVICES_PATH,
@@ -181,8 +184,8 @@ def pair_with_my_tracks(
     api_key: str,
     base_url: str,
     domesti_base_url: str,
-    participant_location_test_url: str,
-    participant_location_update_url: str,
+    user_location_test_url: str,
+    user_location_update_url: str,
     password: str,
     username: str,
 ) -> int:
@@ -207,8 +210,8 @@ def pair_with_my_tracks(
                 json={
                     "api_key": api_key,
                     "domesti_base_url": domesti_base_url,
-                    "participant_location_update_url": participant_location_update_url,
-                    "participant_location_test_url": participant_location_test_url,
+                    "participant_location_update_url": user_location_update_url,
+                    "participant_location_test_url": user_location_test_url,
                 },
                 headers={"X-CSRFToken": csrf, "Referer": f"{base_url.rstrip('/')}/"},
             )
@@ -451,7 +454,7 @@ def _parse_geofence(row: dict[str, Any]) -> ExportedGeofence:
     )
 
 
-def _parse_latest_location(row: dict[str, Any]) -> ExportedParticipantLocation | None:
+def _parse_latest_location(row: dict[str, Any]) -> ExportedUserLocation | None:
     raw = row.get("latest_location")
     if raw is None:
         return None
@@ -473,7 +476,7 @@ def _parse_latest_location(row: dict[str, Any]) -> ExportedParticipantLocation |
         raise MyTracksSyncError(
             f"Expected non-empty latest_location.timestamp, got {raw!r}"
         )
-    return ExportedParticipantLocation(
+    return ExportedUserLocation(
         lat=lat,
         lon=lon,
         accuracy_m=accuracy_m,
@@ -481,23 +484,28 @@ def _parse_latest_location(row: dict[str, Any]) -> ExportedParticipantLocation |
     )
 
 
-def _parse_user_with_device(row: dict[str, Any]) -> ExportedParticipant:
+def _parse_user_with_device(row: dict[str, Any]) -> ExportedUser:
     try:
-        participant_id = str(row["username"]).strip()
-        display_name = str(row["display_name"]).strip()
+        user_id = str(row["username"]).strip()
+        export_display_name = str(row["display_name"]).strip()
         device_name = row.get("device_name", row.get("tracking_device_label"))
         tracking_device_label = str(device_name).strip()
     except (KeyError, TypeError, ValueError) as exc:
         raise MyTracksSyncError(f"Expected users-with-devices export row, got {row!r}") from exc
-    if participant_id == "" or display_name == "" or tracking_device_label == "":
+    if user_id == "" or export_display_name == "" or tracking_device_label == "":
         raise MyTracksSyncError(
             f"Expected non-empty users-with-devices export row, got {row!r}"
         )
     enabled_raw = row.get("enabled", True)
     enabled = bool(enabled_raw)
-    return ExportedParticipant(
-        participant_id=participant_id,
-        display_name=display_name,
+    first_name, last_name = parse_person_name(export_display_name)
+    if first_name == "":
+        first_name = user_id
+    return ExportedUser(
+        user_id=user_id,
+        first_name=first_name,
+        last_name=last_name,
+        display_name=default_display_name(first_name),
         tracking_device_label=tracking_device_label,
         enabled=enabled,
         latest_location=_parse_latest_location(row),

@@ -13,9 +13,9 @@ from app.api.settings_routes import discovery_cache_path_from_request
 router = APIRouter(prefix="/v1/location_update", tags=["location_update"])
 
 
-@router.put("/{participant_id}", status_code=HTTPStatus.NO_CONTENT)
-async def put_location_update_participant(
-    participant_id: str,
+@router.put("/{user_id}", status_code=HTTPStatus.NO_CONTENT)
+async def put_location_update_user(
+    user_id: str,
     body: LocationUpdateWebhookIn,
     request: Request,
 ) -> Response:
@@ -23,11 +23,11 @@ async def put_location_update_participant(
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
         return Response(status_code=HTTPStatus.CONFLICT)
-    payload = body.model_copy(update={"participant_id": participant_id.strip()})
+    payload = body.model_copy(update={"user_id": user_id.strip()})
     apply_location_update_webhook(
         cache_path,
         payload,
         check_emergency_switch=True,
-        persist_fix=True,
+        persist_location=True,
     )
     return Response(status_code=HTTPStatus.NO_CONTENT)

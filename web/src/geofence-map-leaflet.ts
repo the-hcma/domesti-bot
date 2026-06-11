@@ -1,7 +1,7 @@
 // Leaflet + OpenStreetMap geofence editor (ported from my-tracks ``geofences.html``).
 
 import L from "leaflet";
-import { participantMarkerColor } from "./map-device-colors.js";
+import { userMarkerColor } from "./map-device-colors.js";
 import {
   createShellTooltipController,
   formatParticipantTooltipHtml,
@@ -11,7 +11,7 @@ import {
 } from "./presence-map.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import type { GeofenceDrawToolbar } from "./geofence-map.js";
-import type { GeofenceOut, ParticipantStatusOut, SettingsLocationOut } from "./types.js";
+import type { GeofenceOut, UserStatusOut, SettingsLocationOut } from "./types.js";
 
 type DrawState = "idle" | "placing-center" | "placing-radius";
 
@@ -32,7 +32,7 @@ export async function initGeofenceLeafletMap(
   dataSource: RulesDataSource,
   onChanged: () => void | Promise<void>,
   geofences: GeofenceOut[],
-  participants: ParticipantStatusOut[] = [],
+  participants: UserStatusOut[] = [],
 ): Promise<void> {
   if (mapEl.dataset.leafletInit === "1") {
     return;
@@ -90,17 +90,17 @@ export async function initGeofenceLeafletMap(
     .map(participantStatusToMapParticipant)
     .filter(
       (participant): participant is PresenceMapParticipant & {
-        last_fix: NonNullable<PresenceMapParticipant["last_fix"]>;
+        last_location: NonNullable<PresenceMapParticipant["last_location"]>;
       } =>
-        participant.last_fix !== null
-        && participantNearEnabledGeofence(participant.last_fix, geofences),
+        participant.last_location !== null
+        && participantNearEnabledGeofence(participant.last_location, geofences),
     );
   const participantMarkers: L.CircleMarker[] = [];
   for (const participant of nearbyParticipants) {
-    const fix = participant.last_fix;
-    const color = participantMarkerColor(
+    const fix = participant.last_location;
+    const color = userMarkerColor(
       participant.tracking_device_label,
-      participant.participant_id,
+      participant.user_id,
     );
     const tooltipHtml = formatParticipantTooltipHtml(participant);
     const marker = L.circleMarker([fix.lat, fix.lon], {

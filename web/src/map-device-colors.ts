@@ -1,4 +1,4 @@
-// Stable map marker colors for participants and tracking devices.
+// Stable map marker colors for users and tracking devices.
 
 /** Ordered for maximum visual difference between adjacent colors. */
 export const MAP_DEVICE_MARKER_COLORS = [
@@ -38,21 +38,21 @@ export function selectStablePaletteColor(
   return picked;
 }
 
-/** Device label when set; otherwise participant id. */
-export function participantMarkerColorKey(
+/** Device label when set; otherwise user id. */
+export function userMarkerColorKey(
   trackingDeviceLabel: string,
-  participantId: string,
+  userId: string,
 ): string {
   const device = trackingDeviceLabel.trim();
-  return device !== "" ? device : participantId;
+  return device !== "" ? device : userId;
 }
 
-export function participantMarkerColor(
+export function userMarkerColor(
   trackingDeviceLabel: string,
-  participantId: string,
+  userId: string,
 ): string {
   return selectStablePaletteColor(
-    participantMarkerColorKey(trackingDeviceLabel, participantId),
+    userMarkerColorKey(trackingDeviceLabel, userId),
     MAP_DEVICE_MARKER_COLORS,
   );
 }

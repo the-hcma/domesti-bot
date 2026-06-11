@@ -1,7 +1,7 @@
 // Geofence list + map editor (Leaflet/OSM). Map draw lands in PR3; form list in PR2.
 
 import type { RulesDataSource } from "./rules-data-source.js";
-import type { GeofenceOut, ParticipantStatusOut } from "./types.js";
+import type { GeofenceOut, UserStatusOut } from "./types.js";
 import { createAuditedTimeElement } from "./format-timestamp.js";
 import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
@@ -94,7 +94,7 @@ export async function mountGeofenceMapPanel(
     dataSource,
     onChanged,
     geofences,
-    status.participants,
+    status.users,
   );
 
   const listSection = document.createElement("section");
@@ -172,7 +172,7 @@ async function attachGeofenceLeafletMap(
   dataSource: RulesDataSource,
   onChanged: () => void | Promise<void>,
   geofences: GeofenceOut[],
-  participants: ParticipantStatusOut[],
+  participants: UserStatusOut[],
 ): Promise<void> {
   const { initGeofenceLeafletMap } = await import("./geofence-map-leaflet.js");
   await initGeofenceLeafletMap(

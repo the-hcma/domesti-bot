@@ -9,10 +9,10 @@ import pytest
 
 from app.mytracks_service import (
     ExportedGeofence,
-    ExportedParticipant,
+    ExportedUser,
     MyTracksSyncError,
     fetch_geofences_from_my_tracks,
-    fetch_participants_from_my_tracks,
+    fetch_users_from_my_tracks,
     normalize_mytracks_base_url,
 )
 
@@ -66,7 +66,7 @@ class _FakeClient:
         return httpx.Response(302, request=MagicMock())
 
 
-def test_fetch_participants_from_my_tracks_parses_export_payload(
+def test_fetch_users_from_my_tracks_parses_export_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = {
@@ -84,14 +84,16 @@ def test_fetch_participants_from_my_tracks_parses_export_payload(
         "app.mytracks_service._login_client",
         lambda *_args, **_kwargs: _FakeClient(export_payload=payload),
     )
-    rows = fetch_participants_from_my_tracks(
+    rows = fetch_users_from_my_tracks(
         base_url="https://tracks.example.com",
         username="admin",
         password="secret",
     )
     assert rows == [
-        ExportedParticipant(
-            participant_id="henrique",
+        ExportedUser(
+            user_id="henrique",
+            first_name="Henrique",
+            last_name="",
             display_name="Henrique",
             tracking_device_label="Pixel",
             enabled=True,
@@ -124,7 +126,7 @@ def test_fetch_participants_parses_latest_location(
         "app.mytracks_service._login_client",
         lambda *_args, **_kwargs: _FakeClient(export_payload=payload),
     )
-    rows = fetch_participants_from_my_tracks(
+    rows = fetch_users_from_my_tracks(
         base_url="https://tracks.example.com",
         username="admin",
         password="secret",
@@ -236,7 +238,7 @@ def test_fetch_participants_rejects_html_export_response(
         lambda *_args, **_kwargs: _HtmlExportClient(export_payload={}),
     )
     with pytest.raises(MyTracksSyncError, match="non-JSON"):
-        fetch_participants_from_my_tracks(
+        fetch_users_from_my_tracks(
             base_url="https://tracks.example.com",
             username="admin",
             password="secret",

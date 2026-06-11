@@ -112,14 +112,14 @@ export interface RuleDeviceActionOut {
 
 export type RuleConditionOut =
   | {
-      type: "participants_inside_geofence";
+      type: "users_inside_geofence";
       geofence_id: string;
-      participant_ids: string[];
+      user_ids: string[];
     }
   | {
-      type: "participants_outside_geofence";
+      type: "users_outside_geofence";
       geofence_id: string;
-      participant_ids: string[];
+      user_ids: string[];
     }
   | {
       type: "after_sunset";
@@ -167,8 +167,8 @@ export interface RuleOut {
   enabled: boolean;
   trigger: RuleTrigger;
   cooldown_s: number;
-  /** Fixes with horizontal accuracy worse than this (meters) are ignored. */
-  min_fix_accuracy_m: number;
+  /** Locations with horizontal accuracy worse than this (meters) are ignored. */
+  min_location_accuracy_m: number;
   /** Send email when this automation fires (requires SMTP in Mail tab). */
   notify_on_fire: boolean;
   notification_email: string | null;
@@ -215,9 +215,9 @@ export interface MyTracksGeofencesSyncOut {
   source: "my-tracks";
 }
 
-export interface MyTracksParticipantsSyncOut {
+export interface MyTracksUsersSyncOut {
   last_synced_at: string | null;
-  participant_count: number;
+  user_count: number;
   source: "my-tracks";
   webhook_ready: boolean;
 }
@@ -244,8 +244,8 @@ export interface MyTracksPairStatusOut {
   location_updates_accepted: boolean;
   mytracks_location_updates_enabled: boolean | null;
   paired_at: string | null;
-  participant_location_test_url: string | null;
-  participant_location_update_url: string | null;
+  user_location_test_url: string | null;
+  user_location_update_url: string | null;
   relay_key_configured: boolean;
   username: string;
 }
@@ -284,15 +284,16 @@ export interface GeofenceOut {
   owntracks_rid?: string | null;
 }
 
-export interface ParticipantOut {
-  participant_id: string;
+export interface UserOut {
   display_name: string;
-  /** Phone or tracker that reports this participant's location (my-tracks device). */
-  tracking_device_label: string;
   enabled: boolean;
+  first_name: string;
+  last_name: string;
+  tracking_device_label: string;
+  user_id: string;
 }
 
-export interface ParticipantFixOut {
+export interface UserLocationOut {
   lat: number;
   lon: number;
   accuracy_m: number | null;
@@ -300,10 +301,10 @@ export interface ParticipantFixOut {
   source: string | null;
 }
 
-export interface ParticipantStatusOut extends ParticipantOut {
-  last_fix: ParticipantFixOut | null;
-  inside_geofence_ids: string[];
+export interface UserStatusOut extends UserOut {
   age_seconds: number | null;
+  inside_geofence_ids: string[];
+  last_location: UserLocationOut | null;
 }
 
 export interface RulesSunOut {
@@ -335,7 +336,7 @@ export interface RulesEvaluatorOut {
 }
 
 export interface RulesStatusOut {
-  participants: ParticipantStatusOut[];
+  users: UserStatusOut[];
   geofences: GeofenceOut[];
   rules: RuleStatusSummaryOut[];
   sun: RulesSunOut;

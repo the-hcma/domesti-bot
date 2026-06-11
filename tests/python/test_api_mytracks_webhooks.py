@@ -19,11 +19,11 @@ from app.db.secrets import (
     save_mytracks_relay_api_key_to_db,
 )
 from app.mytracks_store import load_mytracks_pair_status
-from app.presence_store import list_participant_fixes
-from app.rules_store import ParticipantRecord, replace_participants
+from app.presence_store import list_user_locations
+from app.rules_store import UserRecord, replace_users
 
 _LOCATION_UPDATE_PAYLOAD = {
-    "participant_id": "henrique",
+    "user_id": "henrique",
     "lat": 41.194085,
     "lon": -73.888365,
     "accuracy_m": 12,
@@ -49,11 +49,13 @@ def _client(*, cache_path: Path | None) -> tuple[TestClient, FastAPI]:
 
 
 def _seed_participant(db: Path) -> None:
-    replace_participants(
+    replace_users(
         db,
         [
-            ParticipantRecord(
-                participant_id="henrique",
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
                 display_name="Henrique",
                 tracking_device_label="Pixel",
                 enabled=True,
@@ -115,7 +117,7 @@ def test_location_update_webhook_stores_fix_for_known_participant(
         headers={"X-Domesti-Api-Key": relay_key},
     )
     assert response.status_code == HTTPStatus.NO_CONTENT
-    fixes = list_participant_fixes(db)
+    fixes = list_user_locations(db)
     assert fixes["henrique"].lat == 41.194085
 
 
@@ -176,7 +178,7 @@ def test_location_update_test_webhook_logs_without_location_prefix(
     assert "[location]" not in messages[0]
 
 
-def test_location_update_test_webhook_does_not_persist_fix(
+def test_location_update_test_webhook_does_not_persist_location(
     tmp_path: Path,
     fernet_key: str,
 ) -> None:
@@ -191,7 +193,7 @@ def test_location_update_test_webhook_does_not_persist_fix(
         headers={"X-Domesti-Api-Key": relay_key},
     )
     assert response.status_code == HTTPStatus.NO_CONTENT
-    assert list_participant_fixes(db) == {}
+    assert list_user_locations(db) == {}
 
 
 def test_location_update_test_webhook_accepts_unknown_participant(
@@ -204,11 +206,11 @@ def test_location_update_test_webhook_accepts_unknown_participant(
     _store_relay_key(db, relay_key, fernet_key)
     response = client.post(
         "/v1/webhooks/location_update/test",
-        json={**_LOCATION_UPDATE_PAYLOAD, "participant_id": "house_meister"},
+        json={**_LOCATION_UPDATE_PAYLOAD, "user_id": "house_meister"},
         headers={"X-Domesti-Api-Key": relay_key},
     )
     assert response.status_code == HTTPStatus.NO_CONTENT
-    assert list_participant_fixes(db) == {}
+    assert list_user_locations(db) == {}
 
 
 @patch("app.api.mytracks_routes.pair_with_my_tracks")
@@ -236,10 +238,10 @@ def test_post_mytracks_pair_persists_relay_key_and_status(
         "min_keep_count": 20,
         "unlimited": False,
     }
-    assert body["participant_location_update_url"] == (
+    assert body["user_location_update_url"] == (
         "http://testserver/v1/webhooks/location_update"
     )
-    assert body["participant_location_test_url"] == (
+    assert body["user_location_test_url"] == (
         "http://testserver/v1/webhooks/location_update/test"
     )
     stored_key = load_mytracks_relay_api_key_from_db(db)
@@ -338,7 +340,7 @@ def test_location_update_webhook_appends_history_rows(
     tmp_path: Path,
     fernet_key: str,
 ) -> None:
-    from app.presence_store import count_participant_location_history
+    from app.presence_store import count_user_location_history
 
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
@@ -353,7 +355,7 @@ def test_location_update_webhook_appends_history_rows(
             headers={"X-Domesti-Api-Key": relay_key},
         )
         assert response.status_code == HTTPStatus.NO_CONTENT
-    assert count_participant_location_history(db, "henrique") == 2
+    assert count_user_location_history(db, "henrique") == 2
 
 
 def test_location_update_test_webhook_works_when_emergency_switch_off(
@@ -406,7 +408,7 @@ def test_post_mytracks_pair_uses_forwarded_public_url(
     assert response.status_code == HTTPStatus.OK
     body = response.json()
     assert body["domesti_public_base_url"] == "https://domesti.example.com"
-    assert body["participant_location_update_url"] == (
+    assert body["user_location_update_url"] == (
         "https://domesti.example.com/v1/webhooks/location_update"
     )
 

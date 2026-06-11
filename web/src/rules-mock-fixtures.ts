@@ -3,12 +3,12 @@
 
 import type {
   GeofenceOut,
-  ParticipantFixOut,
-  ParticipantOut,
   RuleActionDeviceOut,
   RuleOut,
   SettingsLocationOut,
   TimeConditionTemplateOut,
+  UserLocationOut,
+  UserOut,
 } from "./types.js";
 
 export interface MockSmtpConfig {
@@ -20,7 +20,7 @@ export interface MockSmtpConfig {
   from_address: string;
 }
 
-export interface MockParticipantsSync {
+export interface MockUsersSync {
   last_synced_at: string | null;
 }
 
@@ -46,8 +46,8 @@ export const MOCK_KRISTEN_OUTSIDE_LON = -72.023842;
 
 export interface MockStoreSeed {
   geofences: GeofenceOut[];
-  participants: ParticipantOut[];
-  participant_fixes: Record<string, ParticipantFixOut>;
+  users: UserOut[];
+  user_locations: Record<string, UserLocationOut>;
   rules: RuleOut[];
   rule_last_fired_at: Record<string, string | null>;
   settings_location: SettingsLocationOut;
@@ -55,10 +55,10 @@ export interface MockStoreSeed {
   time_condition_templates: TimeConditionTemplateOut[];
   smtp_config: MockSmtpConfig | null;
   smtp_last_test_recipient: string | null;
-  my_tracks_participant_catalog: ParticipantOut[];
+  my_tracks_user_catalog: UserOut[];
   my_tracks_geofence_catalog: GeofenceOut[];
   my_tracks_settings: MockMyTracksSettings | null;
-  participants_sync: MockParticipantsSync;
+  users_sync: MockUsersSync;
   geofences_sync: MockGeofencesSync;
 }
 
@@ -80,15 +80,19 @@ function todaySunTimes(): { sunset_at: string; sunrise_at: string; is_dark: bool
   };
 }
 
-const MOCK_MY_TRACKS_PARTICIPANTS: ParticipantOut[] = [
+const MOCK_MY_TRACKS_USERS: UserOut[] = [
   {
-    participant_id: "henrique",
+    user_id: "henrique",
+    first_name: "Henrique",
+    last_name: "",
     display_name: "Henrique",
     tracking_device_label: "Henrique's iPhone",
     enabled: true,
   },
   {
-    participant_id: "kristen",
+    user_id: "kristen",
+    first_name: "Kristen",
+    last_name: "",
     display_name: "Kristen",
     tracking_device_label: "Kristen's iPhone",
     enabled: true,
@@ -108,8 +112,8 @@ export function createMockStoreSeed(): MockStoreSeed {
         owntracks_rid: null,
       },
     ],
-    my_tracks_participant_catalog: structuredClone(MOCK_MY_TRACKS_PARTICIPANTS),
-    participants: structuredClone(MOCK_MY_TRACKS_PARTICIPANTS),
+    my_tracks_user_catalog: structuredClone(MOCK_MY_TRACKS_USERS),
+    users: structuredClone(MOCK_MY_TRACKS_USERS),
     my_tracks_geofence_catalog: [
       {
         geofence_id: "house",
@@ -122,13 +126,13 @@ export function createMockStoreSeed(): MockStoreSeed {
       },
     ],
     my_tracks_settings: null,
-    participants_sync: {
+    users_sync: {
       last_synced_at: isoMinutesAgo(30),
     },
     geofences_sync: {
       last_synced_at: null,
     },
-    participant_fixes: {
+    user_locations: {
       henrique: {
         lat: MOCK_HENRIQUE_AT_HOME_LAT,
         lon: MOCK_HENRIQUE_AT_HOME_LON,
@@ -151,15 +155,15 @@ export function createMockStoreSeed(): MockStoreSeed {
         enabled: false,
         trigger: "edge_true",
         cooldown_s: 300,
-        min_fix_accuracy_m: 50,
+        min_location_accuracy_m: 50,
         notify_on_fire: false,
         notification_email: null,
         conditions: {
           all: [
             {
-              type: "participants_inside_geofence",
+              type: "users_inside_geofence",
               geofence_id: "house",
-              participant_ids: ["henrique", "kristen"],
+              user_ids: ["henrique", "kristen"],
             },
             { type: "after_sunset", offset_minutes: 0, window_end: "midnight" },
           ],

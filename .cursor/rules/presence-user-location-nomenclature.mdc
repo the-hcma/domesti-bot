@@ -1,0 +1,43 @@
+---
+description: Presence tracking uses user + location vocabulary (not participant + fix)
+alwaysApply: true
+---
+
+# Presence users and locations
+
+Home-automation **presence** (My Tracks / OwnTracks people on the map) is modeled as **users** with **locations**, not participants with fixes.
+
+## Use
+
+| Concept | Name | Example |
+| --- | --- | --- |
+| Stable id from My Tracks | `user_id` | `henrique`, `kristen` |
+| Roster row | `User` / `UserRecord` / `UserOut` | SQLite `rule_users` |
+| Name fields | `first_name`, `last_name`, `display_name` | `display_name` defaults to `first_name` on sync |
+| Latest GPS reading | `location` / `UserLocation` | SQLite `rule_user_last_location` |
+| Location history | `UserLocationHistory` | SQLite `rule_user_location_history` |
+| Rule conditions | `users_inside_geofence`, `users_outside_geofence` | `user_ids: string[]` |
+| HTTP routes | `/v1/rules/users`, `/v1/rules/users/status` | |
+| Webhook body field | `user_id` | |
+
+## Do not use (presence domain)
+
+- `participant`, `participant_id`, `participant_ids`
+- `fix`, `last_fix`, `upsert_*_fix`, `*_fixes`
+- `participants_inside_geofence`, `participants_outside_geofence`
+- `min_fix_accuracy_m` → use `min_location_accuracy_m`
+
+## UI display
+
+- Rules and APIs store **`user_id`** only.
+- UI labels use **`display_name`** from the user roster (synced from My Tracks; defaults to `first_name`).
+- Do not show raw `user_id` when a roster row exists.
+
+## Exceptions
+
+- **Third-party wire formats** (my-tracks admin API JSON keys, MQTT topic segments) may still say `participant` until upstream renames — map at the integration boundary only; domesti-bot schemas, stores, and UI use `user` / `location`.
+- **Device discovery** (`device_state_watcher`, Kasa, etc.) is unrelated — do not rename device polling to “location”.
+
+## Sync semantics
+
+My Tracks sync **replaces** the full user roster each run (`replace_users`), preserving `user_id` from My Tracks `username`. Parse `first_name` / `last_name` from the export `display_name`; set `display_name = first_name` unless a future UI overrides it.

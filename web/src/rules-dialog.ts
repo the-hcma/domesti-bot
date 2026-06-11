@@ -10,7 +10,7 @@ import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
-import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-constants.js";
+import { DEFAULT_MIN_LOCATION_ACCURACY_M } from "./rules-constants.js";
 import {
   formatInsideGeofencesLine,
   mountPresenceMap,
@@ -27,7 +27,7 @@ import { haversineM } from "./rules-mock-fixtures.js";
 import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
-  collectParticipantIdsFromRule,
+  collectUserIdsFromRule,
   joinNames,
   summarizeRule,
 } from "./rule-summary.js";
@@ -37,15 +37,14 @@ import {
   createEnableToggle,
   createFieldLabel,
   FAMILY_ACTION_GROUP_LABELS,
-  firstNameFromDisplayName,
+  userDisplayLabel,
   preventBrowserAutofill,
-  resolveParticipantDisplayName,
 } from "./rules-ui-helpers.js";
 import { createAuditedTimeElement } from "./format-timestamp.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
 import type {
   GeofenceOut,
-  ParticipantStatusOut,
+  UserStatusOut,
   RuleActionDeviceOut,
   RuleActionType,
   RuleConditionOut,
@@ -65,7 +64,7 @@ type RulesTabId =
   | "conditions"
   | "geofences"
   | "mail"
-  | "participants"
+  | "users"
   | "rules"
   | "status";
 
@@ -293,7 +292,7 @@ class RulesHubController {
       ["conditions", "Conditions"],
       ["rules", "Rules"],
       ["geofences", "Geofences"],
-      ["participants", "Participants"],
+      ["users", "Participants"],
       ["mail", "Mail"],
     ] as const) {
       const btn = document.createElement("button");
@@ -399,7 +398,7 @@ class RulesHubController {
   private mountParticipantPresenceMap(
     parent: HTMLElement,
     geofences: GeofenceOut[],
-    participants: ParticipantStatusOut[],
+    participants: UserStatusOut[],
     options: {
       includeParticipantIdInTooltip?: boolean;
       showParticipantFilters: boolean;
@@ -445,7 +444,7 @@ class RulesHubController {
 
   private async openRuleEditor(existing: RuleOut | null): Promise<void> {
     const geofences = await this.dataSource.listGeofences();
-    const participants = await this.dataSource.listParticipants();
+    const participants = await this.dataSource.listUsers();
     const actionDevices = await this.dataSource.listActionDevices();
     const timeTemplates = await this.dataSource.listTimeConditionTemplates();
 
@@ -512,13 +511,15 @@ class RulesHubController {
     const whoLegend = document.createElement("legend");
     whoField.append(whoLegend);
     const selectedParticipants = new Set<string>(
-      existing?.conditions.all.find((c) => c.type === "participants_inside_geofence")
-        ?.participant_ids ?? ["henrique", "kristen"],
+      existing?.conditions.all.find((c) => c.type === "users_inside_geofence")
+        ?.user_ids ?? ["henrique", "kristen"],
     );
     const syncWhoLegend = (): void => {
       const names = participants
-        .filter((p) => selectedParticipants.has(p.participant_id))
-        .map((p) => firstNameFromDisplayName(p.display_name));
+        .filter((p) => selectedParticipants.has(p.user_id))
+        .map((p) =>
+          userDisplayLabel(p.user_id, p.display_name),
+        );
       const fenceLabel =
         geofences.find((g) => g.geofence_id === whereSelect.value)?.label
         ?? whereSelect.value;
@@ -533,19 +534,21 @@ class RulesHubController {
       row.className = "rules-check-row";
       const cb = document.createElement("input");
       cb.type = "checkbox";
-      cb.value = p.participant_id;
-      cb.checked = selectedParticipants.has(p.participant_id);
+      cb.value = p.user_id;
+      cb.checked = selectedParticipants.has(p.user_id);
       cb.addEventListener("change", () => {
         if (cb.checked) {
-          selectedParticipants.add(p.participant_id);
+          selectedParticipants.add(p.user_id);
         } else {
-          selectedParticipants.delete(p.participant_id);
+          selectedParticipants.delete(p.user_id);
         }
         syncWhoLegend();
       });
       row.append(
         cb,
-        document.createTextNode(` ${p.display_name} (${p.tracking_device_label})`),
+        document.createTextNode(
+          ` ${userDisplayLabel(p.user_id, p.display_name)} (${p.tracking_device_label})`,
+        ),
       );
       whoField.append(row);
     }
@@ -558,7 +561,7 @@ class RulesHubController {
       whereSelect.append(opt);
     }
     const existingGeofence =
-      existing?.conditions.all.find((c) => c.type === "participants_inside_geofence")
+      existing?.conditions.all.find((c) => c.type === "users_inside_geofence")
         ?.geofence_id ?? "house";
     whereSelect.value = existingGeofence;
     whereSelect.addEventListener("change", () => {
@@ -689,7 +692,7 @@ class RulesHubController {
     accuracyInput.type = "number";
     accuracyInput.min = "1";
     accuracyInput.step = "1";
-    accuracyInput.value = String(existing?.min_fix_accuracy_m ?? DEFAULT_MIN_FIX_ACCURACY_M);
+    accuracyInput.value = String(existing?.min_location_accuracy_m ?? DEFAULT_MIN_LOCATION_ACCURACY_M);
     appendLabeledField(
       tuningRow,
       createFieldLabel("Min location accuracy (meters)", {
@@ -786,9 +789,9 @@ class RulesHubController {
         }
         const conditions: RuleOut["conditions"]["all"] = [
           {
-            type: "participants_inside_geofence",
+            type: "users_inside_geofence",
             geofence_id: whereSelect.value,
-            participant_ids: participantIds,
+            user_ids: participantIds,
           },
         ];
         if (sunsetCb.checked) {
@@ -868,7 +871,7 @@ class RulesHubController {
           enabled: ruleEnabled,
           trigger: "edge_true",
           cooldown_s: Number(cooldownInput.value) || 300,
-          min_fix_accuracy_m: Number(accuracyInput.value) || DEFAULT_MIN_FIX_ACCURACY_M,
+          min_location_accuracy_m: Number(accuracyInput.value) || DEFAULT_MIN_LOCATION_ACCURACY_M,
           notify_on_fire: notifyCb.checked,
           notification_email: notifyCb.checked ? notifyEmail.value.trim() : null,
           conditions: { all: conditions },
@@ -890,7 +893,7 @@ class RulesHubController {
     liveStatus?: RuleStatusSummaryOut,
   ): Promise<void> {
     const [participants, geofences, actionDevices] = await Promise.all([
-      this.dataSource.listParticipants(),
+      this.dataSource.listUsers(),
       this.dataSource.listGeofences(),
       this.dataSource.listActionDevices(),
     ]);
@@ -930,7 +933,7 @@ class RulesHubController {
       return;
     }
     try {
-      const participants = await this.dataSource.listParticipantStatus();
+      const participants = await this.dataSource.listUserStatus();
       this.presenceMap.updateParticipants(
         participants.map(participantStatusToMapParticipant),
       );
@@ -963,7 +966,7 @@ class RulesHubController {
       case "mail":
         await this.renderMailTab();
         break;
-      case "participants":
+      case "users":
         await this.renderParticipantsTab();
         break;
     }
@@ -1156,29 +1159,34 @@ class RulesHubController {
         fired.append(createAuditedTimeElement(rule.last_fired_at));
         card.append(fired);
       }
-      void this.dataSource.getRule(rule.id).then((definition) => {
+      void Promise.all([
+        this.dataSource.getRule(rule.id),
+        this.dataSource.listUsers(),
+      ]).then(([definition, roster]) => {
         if (definition === null) {
           return;
         }
-        const participantIds = collectParticipantIdsFromRule(definition);
+        const participantIds = collectUserIdsFromRule(definition);
         if (participantIds.length === 0) {
           return;
         }
+        const rosterDisplayNameById = new Map(
+          roster.map((row) => [row.user_id, row.display_name]),
+        );
         const presence = document.createElement("div");
         presence.className = "rules-rule-presence-summary";
         for (const participantId of participantIds) {
-          const participant = status.participants.find(
-            (row) => row.participant_id === participantId,
+          const participant = status.users.find(
+            (row) => row.user_id === participantId,
           );
           const line = document.createElement("p");
           line.className = "rules-card-meta";
-          const name = participant === undefined
-            ? participantId
-            : resolveParticipantDisplayName(
-              participant.participant_id,
-              participant.display_name,
-            );
-          const where = participant === undefined
+          const name = userDisplayLabel(
+            participantId,
+            participant?.display_name
+              ?? rosterDisplayNameById.get(participantId),
+          );
+          const where = participant?.last_location === null || participant === undefined
             ? "No location fix"
             : formatInsideGeofencesLine(
               participant.inside_geofence_ids,
@@ -1196,7 +1204,7 @@ class RulesHubController {
     this.mountParticipantPresenceMap(
       participantsSection,
       status.geofences,
-      status.participants,
+      status.users,
       { showParticipantFilters: true, showTextDetails: false },
     );
   }
@@ -1205,7 +1213,7 @@ class RulesHubController {
     const rulesReadOnly = this.dataSource.isRulesFileBacked();
     const [rules, participants, geofences, actionDevices] = await Promise.all([
       this.dataSource.listRules(),
-      this.dataSource.listParticipants(),
+      this.dataSource.listUsers(),
       this.dataSource.listGeofences(),
       this.dataSource.listActionDevices(),
     ]);
@@ -1333,7 +1341,7 @@ class RulesHubController {
     const geofences = await this.dataSource.listGeofences();
     const sync = await this.dataSource.getMyTracksParticipantsSync();
     const settings = await this.dataSource.getMyTracksSettings();
-    const mapParticipants = await this.dataSource.listParticipantStatus();
+    const mapParticipants = await this.dataSource.listUserStatus();
 
     const lead = document.createElement("p");
     lead.className = "settings-dialog-lead";
@@ -1349,7 +1357,7 @@ class RulesHubController {
     const syncMeta = document.createElement("p");
     syncMeta.className = "rules-card-meta";
     syncMeta.replaceChildren(
-      document.createTextNode(`${sync.participant_count} participants · last synced `),
+      document.createTextNode(`${sync.user_count} participants · last synced `),
     );
     if (sync.last_synced_at === null) {
       syncMeta.append(document.createTextNode("never"));
@@ -1361,7 +1369,7 @@ class RulesHubController {
     syncBtn.className = "btn btn-secondary";
     syncBtn.textContent = "Sync from My Tracks";
     syncBtn.addEventListener("click", () => {
-      void runMyTracksSyncAction(this.dataSource, "participants", () => this.refresh());
+      void runMyTracksSyncAction(this.dataSource, "users", () => this.refresh());
     });
     syncRow.append(syncMeta, syncBtn);
 

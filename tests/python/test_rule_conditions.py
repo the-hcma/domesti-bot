@@ -11,8 +11,8 @@ import pytest
 from app.api.schemas import (
     AfterSunsetCondition,
     GeofenceOut,
-    ParticipantFixOut,
-    ParticipantsInsideGeofenceCondition,
+    UserLocationOut,
+    UsersInsideGeofenceCondition,
     RuleConditionsOut,
     RuleOut,
     SettingsLocationOut,
@@ -42,10 +42,10 @@ def _evening_rule() -> RuleOut:
                     offset_minutes=0,
                     window_end="midnight",
                 ),
-                ParticipantsInsideGeofenceCondition(
-                    type="participants_inside_geofence",
+                UsersInsideGeofenceCondition(
+                    type="users_inside_geofence",
                     geofence_id="house",
-                    participant_ids=["henrique"],
+                    user_ids=["henrique"],
                 ),
             ],
         ),
@@ -54,7 +54,7 @@ def _evening_rule() -> RuleOut:
         enabled=True,
         id="evening-arrival-home-lights",
         label="Evening arrival",
-        min_fix_accuracy_m=50,
+        min_location_accuracy_m=50,
         notification_email=None,
         notify_on_fire=False,
         trigger="edge_true",
@@ -65,14 +65,14 @@ def _ctx(
     *,
     now: datetime,
     geofences: tuple[GeofenceOut, ...] = (),
-    participant_fixes: dict[str, ParticipantFixOut] | None = None,
+    user_locations: dict[str, UserLocationOut] | None = None,
 ) -> RuleEvaluationContext:
     sun = compute_rules_sun_out(_SETTINGS, now=now)
     return RuleEvaluationContext(
         geofences=geofences,
         now=now,
-        participant_display_names={"henrique": "Henrique"},
-        participant_fixes=participant_fixes or {},
+        user_display_names={"henrique": "Henrique"},
+        user_locations=user_locations or {},
         sun=sun,
         timezone=_TZ,
     )
@@ -93,7 +93,7 @@ def test_after_sunset_not_met_midday() -> None:
     assert "Outside sunset" in result.conditions[0].detail
 
 
-def test_participants_inside_geofence_met_with_fix() -> None:
+def test_users_inside_geofence_met_with_fix() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     geofence = GeofenceOut(
         center_lat=41.194072,
@@ -104,7 +104,7 @@ def test_participants_inside_geofence_met_with_fix() -> None:
         owntracks_rid=None,
         radius_m=250,
     )
-    fix = ParticipantFixOut(
+    fix = UserLocationOut(
         accuracy_m=20,
         lat=41.1941,
         lon=-73.8883,
@@ -113,13 +113,13 @@ def test_participants_inside_geofence_met_with_fix() -> None:
     )
     result = evaluate_rule(
         _evening_rule(),
-        _ctx(now=now, geofences=(geofence,), participant_fixes={"henrique": fix}),
+        _ctx(now=now, geofences=(geofence,), user_locations={"henrique": fix}),
     )
     assert result.conditions[1].met is True
     assert result.all_met is True
 
 
-def test_participants_inside_geofence_ignores_low_accuracy() -> None:
+def test_users_inside_geofence_ignores_low_accuracy() -> None:
     now = datetime(2026, 6, 9, 20, 0, tzinfo=_TZ)
     geofence = GeofenceOut(
         center_lat=41.194072,
@@ -130,7 +130,7 @@ def test_participants_inside_geofence_ignores_low_accuracy() -> None:
         owntracks_rid=None,
         radius_m=250,
     )
-    fix = ParticipantFixOut(
+    fix = UserLocationOut(
         accuracy_m=120,
         lat=41.1941,
         lon=-73.8883,
@@ -139,10 +139,10 @@ def test_participants_inside_geofence_ignores_low_accuracy() -> None:
     )
     result = evaluate_rule(
         _evening_rule(),
-        _ctx(now=now, geofences=(geofence,), participant_fixes={"henrique": fix}),
+        _ctx(now=now, geofences=(geofence,), user_locations={"henrique": fix}),
     )
     assert result.conditions[1].met is False
-    assert "Ignored low-accuracy fix" in result.conditions[1].detail
+    assert "Ignored low-accuracy location" in result.conditions[1].detail
 
 
 def test_build_rules_status_from_example_bundle(

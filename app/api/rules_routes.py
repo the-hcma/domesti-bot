@@ -1,4 +1,4 @@
-"""HTTP routes for persisted Automations participants and geofences."""
+"""HTTP routes for persisted Automations users and geofences."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.api.schemas import (
     GeofenceOut,
-    ParticipantFixOut,
-    ParticipantOut,
-    ParticipantStatusOut,
     RuleOut,
     RulesStatusOut,
     SettingsLocationOut,
+    UserLocationOut,
+    UserOut,
+    UserStatusOut,
 )
 from app.automation_rules_loader import (
     AutomationRulesLoadError,
@@ -25,17 +25,17 @@ from app.automation_rules_loader import (
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.presence_store import (
-    ParticipantFixRecord,
-    geofence_ids_containing_fix,
-    list_participant_fixes,
+    UserLocationRecord,
+    geofence_ids_containing_location,
+    list_user_locations,
 )
 from app.rules_status import build_rules_status
 from app.rules_store import (
     GeofenceRecord,
-    ParticipantRecord,
+    UserRecord,
     delete_geofence,
     list_geofences,
-    list_participants,
+    list_users,
     save_geofence,
 )
 
@@ -64,22 +64,22 @@ async def get_geofences(request: Request) -> list[GeofenceOut]:
     return [_geofence_to_schema(row) for row in list_geofences(cache_path)]
 
 
-@router.get("/participants", response_model=list[ParticipantOut])
-async def get_participants(request: Request) -> list[ParticipantOut]:
-    """Return persisted participant roster rows."""
+@router.get("/users", response_model=list[UserOut])
+async def get_users(request: Request) -> list[UserOut]:
+    """Return persisted user roster rows."""
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
         return []
-    return [_participant_to_schema(row) for row in list_participants(cache_path)]
+    return [_user_to_schema(row) for row in list_users(cache_path)]
 
 
-@router.get("/participants/status", response_model=list[ParticipantStatusOut])
-async def get_participants_status(request: Request) -> list[ParticipantStatusOut]:
-    """Return participant roster rows enriched with stored location fixes."""
+@router.get("/users/status", response_model=list[UserStatusOut])
+async def get_users_status(request: Request) -> list[UserStatusOut]:
+    """Return user roster rows enriched with stored locations."""
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
         return []
-    return _participants_status(cache_path)
+    return _users_status(cache_path)
 
 
 @router.get("/settings/location", response_model=SettingsLocationOut)
@@ -160,55 +160,59 @@ def _geofence_to_schema(record: GeofenceRecord) -> GeofenceOut:
     )
 
 
-def _participant_to_schema(record: ParticipantRecord) -> ParticipantOut:
-    return ParticipantOut(
-        participant_id=record.participant_id,
-        display_name=record.display_name,
-        tracking_device_label=record.tracking_device_label,
-        enabled=record.enabled,
+def _location_received_at_iso(location: UserLocationRecord) -> str:
+    return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
+        "+00:00", "Z"
     )
 
 
-def _participants_status(cache_path: Path) -> list[ParticipantStatusOut]:
-    participants = list_participants(cache_path)
-    fixes = list_participant_fixes(cache_path)
+def _user_to_schema(record: UserRecord) -> UserOut:
+    return UserOut(
+        display_name=record.display_name,
+        enabled=record.enabled,
+        first_name=record.first_name,
+        last_name=record.last_name,
+        tracking_device_label=record.tracking_device_label,
+        user_id=record.user_id,
+    )
+
+
+def _users_status(cache_path: Path) -> list[UserStatusOut]:
+    users = list_users(cache_path)
+    locations = list_user_locations(cache_path)
     geofences = list_geofences(cache_path)
     now = time.time()
-    rows: list[ParticipantStatusOut] = []
-    for participant in participants:
-        fix = fixes.get(participant.participant_id)
-        last_fix: ParticipantFixOut | None = None
+    rows: list[UserStatusOut] = []
+    for user in users:
+        location = locations.get(user.user_id)
+        last_location: UserLocationOut | None = None
         age_seconds: int | None = None
         inside_geofence_ids: list[str] = []
-        if fix is not None:
-            received_at = _fix_received_at_iso(fix)
-            last_fix = ParticipantFixOut(
-                lat=fix.lat,
-                lon=fix.lon,
-                accuracy_m=fix.accuracy_m,
+        if location is not None:
+            received_at = _location_received_at_iso(location)
+            last_location = UserLocationOut(
+                accuracy_m=location.accuracy_m,
+                lat=location.lat,
+                lon=location.lon,
                 received_at=received_at,
-                source=fix.source,
+                source=location.source,
             )
-            age_seconds = max(0, int(now - fix.received_at))
-            inside_geofence_ids = geofence_ids_containing_fix(fix, geofences)
+            age_seconds = max(0, int(now - location.received_at))
+            inside_geofence_ids = geofence_ids_containing_location(location, geofences)
         rows.append(
-            ParticipantStatusOut(
-                participant_id=participant.participant_id,
-                display_name=participant.display_name,
-                tracking_device_label=participant.tracking_device_label,
-                enabled=participant.enabled,
-                last_fix=last_fix,
+            UserStatusOut(
                 age_seconds=age_seconds,
+                display_name=user.display_name,
+                enabled=user.enabled,
+                first_name=user.first_name,
                 inside_geofence_ids=inside_geofence_ids,
+                last_location=last_location,
+                last_name=user.last_name,
+                tracking_device_label=user.tracking_device_label,
+                user_id=user.user_id,
             )
         )
     return rows
-
-
-def _fix_received_at_iso(fix: ParticipantFixRecord) -> str:
-    return datetime.fromtimestamp(fix.received_at, tz=UTC).isoformat().replace(
-        "+00:00", "Z"
-    )
 
 
 def _load_rules_or_http_error() -> list[RuleOut]:

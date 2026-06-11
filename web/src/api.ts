@@ -19,12 +19,12 @@ import type {
   MyTracksPairIn,
   MyTracksPairStatusOut,
   MyTracksRelayKeySettingsOut,
-  MyTracksParticipantsSyncOut,
+  MyTracksUsersSyncOut,
   MyTracksSettingsIn,
   MyTracksSettingsOut,
   MyTracksSyncIn,
-  ParticipantOut,
-  ParticipantStatusOut,
+  UserOut,
+  UserStatusOut,
   RuleOut,
   RulesStatusOut,
   SettingsLocationOut,
@@ -201,8 +201,8 @@ export const api = {
   fetchMyTracksRelayKeySettings(): Promise<MyTracksRelayKeySettingsOut> {
     return call<MyTracksRelayKeySettingsOut>("GET", "/v1/settings/my-tracks/relay-key");
   },
-  fetchMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
-    return call<MyTracksParticipantsSyncOut>("GET", "/v1/rules/participants/sync-status");
+  fetchMyTracksUsersSync(): Promise<MyTracksUsersSyncOut> {
+    return call<MyTracksUsersSyncOut>("GET", "/v1/rules/users/sync-status");
   },
   fetchMyTracksSettings(): Promise<MyTracksSettingsOut | null> {
     return callNullableJson<MyTracksSettingsOut>("GET", "/v1/settings/my-tracks");
@@ -228,11 +228,11 @@ export const api = {
   fetchRulesGeofences(): Promise<GeofenceOut[]> {
     return call<GeofenceOut[]>("GET", "/v1/rules/geofences");
   },
-  fetchRulesParticipants(): Promise<ParticipantOut[]> {
-    return call<ParticipantOut[]>("GET", "/v1/rules/participants");
+  fetchRulesUsers(): Promise<UserOut[]> {
+    return call<UserOut[]>("GET", "/v1/rules/users");
   },
-  fetchRulesParticipantStatus(): Promise<ParticipantStatusOut[]> {
-    return call<ParticipantStatusOut[]>("GET", "/v1/rules/participants/status");
+  fetchRulesUserStatus(): Promise<UserStatusOut[]> {
+    return call<UserStatusOut[]>("GET", "/v1/rules/users/status");
   },
   fetchRulesSettingsLocation(): Promise<SettingsLocationOut> {
     return call<SettingsLocationOut>("GET", "/v1/rules/settings/location");
@@ -285,12 +285,12 @@ export const api = {
       credentials,
     );
   },
-  syncMyTracksParticipants(
+  syncMyTracksUsers(
     credentials: MyTracksSyncIn,
-  ): Promise<MyTracksParticipantsSyncOut> {
-    return call<MyTracksParticipantsSyncOut>(
+  ): Promise<MyTracksUsersSyncOut> {
+    return call<MyTracksUsersSyncOut>(
       "POST",
-      "/v1/rules/participants/sync",
+      "/v1/rules/users/sync",
       credentials,
     );
   },

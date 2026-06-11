@@ -11,13 +11,13 @@ import {
 import type {
   GeofenceOut,
   MyTracksGeofencesSyncOut,
-  MyTracksParticipantsSyncOut,
+  MyTracksUsersSyncOut,
   MyTracksSettingsIn,
   MyTracksSettingsOut,
   MyTracksSyncIn,
-  ParticipantFixOut,
-  ParticipantOut,
-  ParticipantStatusOut,
+  UserLocationOut,
+  UserOut,
+  UserStatusOut,
   RuleActionDeviceOut,
   RuleOut,
   RulesStatusOut,
@@ -42,19 +42,19 @@ export interface RulesDataSource {
   deleteGeofence(geofenceId: string): Promise<void>;
   deleteParticipant(participantId: string): Promise<void>;
   getMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut>;
-  getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut>;
+  getMyTracksParticipantsSync(): Promise<MyTracksUsersSyncOut>;
   getMyTracksSettings(): Promise<MyTracksSettingsOut | null>;
-  listParticipantStatus(): Promise<ParticipantStatusOut[]>;
-  listParticipants(): Promise<ParticipantOut[]>;
+  listUserStatus(): Promise<UserStatusOut[]>;
+  listUsers(): Promise<UserOut[]>;
   resetMyTracksSettings(): Promise<void>;
   saveMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut>;
-  saveParticipant(participant: ParticipantOut): Promise<ParticipantOut>;
+  saveParticipant(participant: UserOut): Promise<UserOut>;
   syncGeofencesFromMyTracks(
     credentials: MyTracksSyncIn,
   ): Promise<MyTracksGeofencesSyncOut>;
   syncParticipantsFromMyTracks(
     credentials: MyTracksSyncIn,
-  ): Promise<MyTracksParticipantsSyncOut>;
+  ): Promise<MyTracksUsersSyncOut>;
   listRules(): Promise<RuleOut[]>;
   listTimeConditionTemplates(): Promise<TimeConditionTemplateOut[]>;
   getRule(ruleId: string): Promise<RuleOut | null>;
@@ -136,9 +136,9 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 
   async getStatus(): Promise<RulesStatusOut> {
-    const participants = await this.listParticipantStatus();
+    const users = await this.listUserStatus();
     return {
-      participants,
+      users,
       geofences: structuredClone(this.store.geofences),
       rules: this.store.rules.map((rule) => ({
         id: rule.id,
@@ -178,8 +178,8 @@ export class MockRulesDataSource implements RulesDataSource {
     const inUse = this.store.rules.some((rule) =>
       rule.conditions.all.some(
         (c) =>
-          (c.type === "participants_inside_geofence" ||
-            c.type === "participants_outside_geofence") &&
+          (c.type === "users_inside_geofence" ||
+            c.type === "users_outside_geofence") &&
           c.geofence_id === geofenceId,
       ),
     );
@@ -194,10 +194,10 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 
   async deleteParticipant(participantId: string): Promise<void> {
-    this.store.participants = this.store.participants.filter(
-      (p) => p.participant_id !== participantId,
+    this.store.users = this.store.users.filter(
+      (p) => p.user_id !== participantId,
     );
-    delete this.store.participant_fixes[participantId];
+    delete this.store.user_locations[participantId];
   }
 
   async getMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut> {
@@ -208,19 +208,19 @@ export class MockRulesDataSource implements RulesDataSource {
     };
   }
 
-  async getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
+  async getMyTracksParticipantsSync(): Promise<MyTracksUsersSyncOut> {
     return {
       source: "my-tracks",
-      last_synced_at: this.store.participants_sync.last_synced_at,
-      participant_count: this.store.participants.length,
+      last_synced_at: this.store.users_sync.last_synced_at,
+      user_count: this.store.users.length,
       webhook_ready: true,
     };
   }
 
-  async listParticipantStatus(): Promise<ParticipantStatusOut[]> {
+  async listUserStatus(): Promise<UserStatusOut[]> {
     const now = Date.now();
-    return this.store.participants.map((participant) => {
-      const fix = this.store.participant_fixes[participant.participant_id] ?? null;
+    return this.store.users.map((participant) => {
+      const fix = this.store.user_locations[participant.user_id] ?? null;
       const age_seconds =
         fix === null
           ? null
@@ -232,23 +232,23 @@ export class MockRulesDataSource implements RulesDataSource {
         ...participant,
         age_seconds,
         inside_geofence_ids,
-        last_fix: fix,
+        last_location: fix,
       };
     });
   }
 
-  async listParticipants(): Promise<ParticipantOut[]> {
-    return structuredClone(this.store.participants);
+  async listUsers(): Promise<UserOut[]> {
+    return structuredClone(this.store.users);
   }
 
-  async saveParticipant(participant: ParticipantOut): Promise<ParticipantOut> {
-    const idx = this.store.participants.findIndex(
-      (p) => p.participant_id === participant.participant_id,
+  async saveParticipant(participant: UserOut): Promise<UserOut> {
+    const idx = this.store.users.findIndex(
+      (p) => p.user_id === participant.user_id,
     );
     if (idx >= 0) {
-      this.store.participants[idx] = structuredClone(participant);
+      this.store.users[idx] = structuredClone(participant);
     } else {
-      this.store.participants.push(structuredClone(participant));
+      this.store.users.push(structuredClone(participant));
     }
     return structuredClone(participant);
   }
@@ -294,11 +294,11 @@ export class MockRulesDataSource implements RulesDataSource {
 
   async syncParticipantsFromMyTracks(
     credentials: MyTracksSyncIn,
-  ): Promise<MyTracksParticipantsSyncOut> {
+  ): Promise<MyTracksUsersSyncOut> {
     requireMyTracksDomain(this.store.my_tracks_settings);
     requireSyncPassword(credentials);
-    this.store.participants = structuredClone(this.store.my_tracks_participant_catalog);
-    this.store.participants_sync.last_synced_at = new Date().toISOString();
+    this.store.users = structuredClone(this.store.my_tracks_user_catalog);
+    this.store.users_sync.last_synced_at = new Date().toISOString();
     return this.getMyTracksParticipantsSync();
   }
 
@@ -514,8 +514,8 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return api.fetchMyTracksGeofencesSync();
   }
 
-  getMyTracksParticipantsSync(): Promise<MyTracksParticipantsSyncOut> {
-    return api.fetchMyTracksParticipantsSync();
+  getMyTracksParticipantsSync(): Promise<MyTracksUsersSyncOut> {
+    return api.fetchMyTracksUsersSync();
   }
 
   getMyTracksSettings(): Promise<MyTracksSettingsOut | null> {
@@ -587,24 +587,24 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return this.inner.listGeofences();
   }
 
-  async listParticipantStatus(): Promise<ParticipantStatusOut[]> {
+  async listUserStatus(): Promise<UserStatusOut[]> {
     if (this.rulesLive) {
-      const live = await api.fetchRulesParticipantStatus();
+      const live = await api.fetchRulesUserStatus();
       if (live.length > 0) {
         return live;
       }
     }
-    return this.inner.listParticipantStatus();
+    return this.inner.listUserStatus();
   }
 
-  async listParticipants(): Promise<ParticipantOut[]> {
+  async listUsers(): Promise<UserOut[]> {
     if (this.rulesLive) {
-      const live = await api.fetchRulesParticipants();
+      const live = await api.fetchRulesUsers();
       if (live.length > 0) {
         return live;
       }
     }
-    return this.inner.listParticipants();
+    return this.inner.listUsers();
   }
 
   async listRules(): Promise<RuleOut[]> {
@@ -638,7 +638,7 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return api.putMyTracksSettings(config);
   }
 
-  saveParticipant(participant: ParticipantOut): Promise<ParticipantOut> {
+  saveParticipant(participant: UserOut): Promise<UserOut> {
     return this.inner.saveParticipant(participant);
   }
 
@@ -678,8 +678,8 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
 
   syncParticipantsFromMyTracks(
     credentials: MyTracksSyncIn,
-  ): Promise<MyTracksParticipantsSyncOut> {
-    return api.syncMyTracksParticipants(credentials);
+  ): Promise<MyTracksUsersSyncOut> {
+    return api.syncMyTracksUsers(credentials);
   }
 }
 

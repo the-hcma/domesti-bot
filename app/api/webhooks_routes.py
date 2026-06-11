@@ -31,7 +31,7 @@ async def post_location_update_test_webhook(
         cache_path,
         body,
         check_emergency_switch=False,
-        persist_fix=False,
+        persist_location=False,
     )
     return Response(status_code=HTTPStatus.NO_CONTENT)
 
@@ -42,7 +42,7 @@ async def post_location_update_webhook(
     request: Request,
     _auth: RelayAuth,
 ) -> Response:
-    """Accept a live GPS fix relayed from my-tracks."""
+    """Accept a live GPS location relayed from my-tracks."""
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
         return Response(status_code=HTTPStatus.UNAUTHORIZED)
@@ -50,6 +50,6 @@ async def post_location_update_webhook(
         cache_path,
         body,
         check_emergency_switch=True,
-        persist_fix=True,
+        persist_location=True,
     )
     return Response(status_code=HTTPStatus.NO_CONTENT)
