@@ -550,7 +550,7 @@ Geofence circles are configured **once** in domesti-bot (operator UI with map). 
 1. Export / recreate geofences in domesti-bot (import API or manual draw on map).
 2. Enable my-tracks **user roster** webhook (or run one-time sync); verify `GET /v1/rules/users` lists `henrique` / `kristen`.
 3. Recreate rules in domesti-bot UI (lights + garage + sunset).
-4. Enable my-tracks **presence** relay; verify `/v1/rules/status` shows live fixes.
+4. Enable my-tracks **presence** relay; verify `/v1/rules/status` shows live locations.
 5. Disable / delete `GlobalAutomationRule` rows in my-tracks.
 6. Deploy my-tracks PR that removes `_evaluate_global_automations_for_user`.
 7. (Optional) Point my-tracks `setWaypoints` sync at domesti-bot geofence export.

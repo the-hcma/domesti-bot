@@ -107,7 +107,7 @@ sequenceDiagram
   MT-->>Bot: 200 paired
   Bot->>Bot: Persist paired_at + URLs in mytracks_settings
   Op->>Bot: Optional: Sync users + geofences
-  Note over MT,Bot: Later: live fixes → POST …/location_update<br/>Tests → POST …/location_update/test
+  Note over MT,Bot: Later: location updates → POST …/location_update<br/>Tests → POST …/location_update/test
 ```
 
 ### domesti-bot pairing endpoint (implemented)
