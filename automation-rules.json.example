@@ -23,7 +23,7 @@
       "cooldown_s": 300,
       "min_fix_accuracy_m": 50,
       "notify_on_fire": true,
-      "notification_email": "hcma@hcma.info",
+      "notification_email": "github@hcma.info",
       "conditions": {
         "all": [
           {
@@ -74,7 +74,7 @@
       "cooldown_s": 120,
       "min_fix_accuracy_m": 50,
       "notify_on_fire": true,
-      "notification_email": "hcma@hcma.info",
+      "notification_email": "github@hcma.info",
       "conditions": {
         "all": [
           {
@@ -94,7 +94,7 @@
       "cooldown_s": 120,
       "min_fix_accuracy_m": 50,
       "notify_on_fire": true,
-      "notification_email": "hcma@hcma.info",
+      "notification_email": "github@hcma.info",
       "conditions": {
         "all": [
           {
