@@ -1,4 +1,4 @@
-"""Tests for persisted Automations participants and geofences."""
+"""Tests for persisted Automations users and geofences."""
 
 from __future__ import annotations
 

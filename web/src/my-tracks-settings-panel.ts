@@ -50,7 +50,7 @@ export async function mountMyTracksSettingsPanel(
     before: "Connect to ",
     domain: existing?.domain ?? "",
     after:
-      " for participant and geofence sync. Pairing saves the domain and admin username; sync prompts for the admin password each time — it is not stored.",
+      " for user and geofence sync. Pairing saves the domain and admin username; sync prompts for the admin password each time — it is not stored.",
   });
 
   const connectionSection = document.createElement("div");

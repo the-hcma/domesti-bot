@@ -140,11 +140,11 @@ def test_rules_menu_hidden_on_compact_viewport(
 
 
 @pytest.mark.browser
-def test_status_rule_card_title_cases_participant_names(
+def test_status_rule_card_title_cases_user_display_names(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Status rule presence lines use title-cased participant labels, not raw ids."""
+    """Status rule presence lines use title-cased user display names, not raw ids."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -236,11 +236,11 @@ def test_rules_hub_opens_with_mock_seed_rule(
 
 
 @pytest.mark.browser
-def test_participant_presence_map_renders_osm_tiles_with_filters(
+def test_user_presence_map_renders_osm_tiles_with_filters(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Status and Participants tabs share one filtered presence map with zoom controls."""
+    """Status and Users tabs share one filtered presence map with zoom controls."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -270,7 +270,7 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
             }""",
             timeout=15_000,
         )
-        marker = page.locator(".rules-presence-participant-marker").first
+        marker = page.locator(".rules-presence-user-marker").first
         marker.hover()
         tooltip = page.locator(".rules-presence-map-hover-tooltip")
         tooltip.wait_for(state="visible", timeout=5_000)
@@ -284,11 +284,11 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
 
 
 @pytest.mark.browser
-def test_participants_tab_osm_tiles_are_visible(
+def test_users_tab_osm_tiles_are_visible(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Participants tab must paint OSM tiles after async mount (not only markers)."""
+    """Users tab must paint OSM tiles after async mount (not only markers)."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -312,11 +312,11 @@ def test_participants_tab_osm_tiles_are_visible(
 
 
 @pytest.mark.browser
-def test_participant_presence_map_shows_color_legend(
+def test_user_presence_map_shows_color_legend(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Status map shows a participant/device legend when multiple fixes are visible."""
+    """Status map shows a user/device legend when multiple locations are visible."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -339,7 +339,7 @@ def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Participant map tooltips must not widen/tall the Automations dialog body."""
+    """User map tooltips must not widen/tall the Automations dialog body."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -357,7 +357,7 @@ def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
               clientHeight: el.clientHeight,
             })""",
         )
-        marker = page.locator(".rules-presence-participant-marker").first
+        marker = page.locator(".rules-presence-user-marker").first
         marker.hover()
         tooltip = page.locator(".rules-presence-map-hover-tooltip")
         tooltip.wait_for(state="visible", timeout=5_000)
@@ -379,7 +379,7 @@ def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
 
 
 @pytest.mark.browser
-def test_participants_tab_tooltip_not_clipped_at_map_edge(
+def test_users_tab_tooltip_not_clipped_at_map_edge(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
@@ -407,7 +407,7 @@ def test_participants_tab_tooltip_not_clipped_at_map_edge(
 
         top_marker_y = float("inf")
         top_marker = None
-        for marker in page.locator(".rules-presence-participant-marker").all():
+        for marker in page.locator(".rules-presence-user-marker").all():
             box = marker.bounding_box()
             if box is None:
                 continue
@@ -447,7 +447,7 @@ def test_participants_tab_tooltip_not_clipped_at_map_edge(
 
 
 @pytest.mark.browser
-def test_participant_tooltip_hides_when_pointer_leaves_marker(
+def test_user_tooltip_hides_when_pointer_leaves_marker(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
@@ -468,7 +468,7 @@ def test_participant_tooltip_hides_when_pointer_leaves_marker(
             }""",
             timeout=10_000,
         )
-        marker = page.locator(".rules-presence-participant-marker").first
+        marker = page.locator(".rules-presence-user-marker").first
         marker.hover()
         tooltip = page.locator(".rules-presence-map-hover-tooltip.is-visible")
         tooltip.wait_for(state="visible", timeout=5_000)

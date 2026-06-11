@@ -74,7 +74,7 @@ def test_put_mytracks_settings_persists_config(tmp_path: Path) -> None:
         ),
     ],
 )
-def test_post_mytracks_participants_sync_records_timestamp(
+def test_post_mytracks_users_sync_records_timestamp(
     _sync_mock: object,
     tmp_path: Path,
 ) -> None:
@@ -97,15 +97,15 @@ def test_post_mytracks_participants_sync_records_timestamp(
     assert body["last_synced_at"] is not None
     assert body["source"] == "my-tracks"
 
-    participants = list_users(db)
-    assert len(participants) == 1
-    assert participants[0].user_id == "henrique"
-    fixes = list_user_locations(db)
-    assert "henrique" in fixes
-    assert fixes["henrique"].lat == 41.194072
+    users = list_users(db)
+    assert len(users) == 1
+    assert users[0].user_id == "henrique"
+    locations = list_user_locations(db)
+    assert "henrique" in locations
+    assert locations["henrique"].lat == 41.194072
 
 
-def test_get_participants_status_returns_synced_fixes(
+def test_get_users_status_returns_synced_locations(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "ui.sqlite"

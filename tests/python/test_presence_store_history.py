@@ -1,4 +1,4 @@
-"""Tests for participant location history retention."""
+"""Tests for user location history retention."""
 
 from __future__ import annotations
 

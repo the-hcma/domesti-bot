@@ -13,7 +13,7 @@ from typing import Any
 
 _DEFAULT_DOMESTI_BASE_URL = "https://db.hcma.info"
 _DEFAULT_MYTRACKS_DOMAIN = "https://mytracks.hcma.info"
-_DEFAULT_SYNTHETIC_PARTICIPANT_ID = "domesti-bot-verify"
+_DEFAULT_SYNTHETIC_USER_ID = "domesti-bot-verify"
 _MYTRACKS_CONFIG_PATH = "/api/admin/domesti-bot/config/"
 _MYTRACKS_PAIR_PATH = "/api/admin/domesti-bot/pair/"
 _VERIFY_STEPS = 4
@@ -70,9 +70,9 @@ def _explain_webhook_failure(
     body: str,
     domesti_base: str,
     label: str,
-    participant_id: str,
     status_code: int,
     url: str,
+    user_id: str,
 ) -> None:
     print(f"  FAILED: {label} webhook check at {url}", file=sys.stderr)
     detail = body.strip()
@@ -92,14 +92,14 @@ def _explain_webhook_failure(
         )
         return
     if status_code == 404:
-        if "Unknown participant_id" in detail:
+        if "Unknown user_id" in detail:
             print(
-                f"  Likely cause: participant {participant_id!r} is not in the domesti-bot "
+                f"  Likely cause: user {user_id!r} is not in the domesti-bot "
                 "roster on that host.",
                 file=sys.stderr,
             )
             print(
-                "  Sync participants from my-tracks, or pass --participant-id for someone "
+                "  Sync users from my-tracks, or pass --user-id for someone "
                 "already on the roster.",
                 file=sys.stderr,
             )
@@ -170,12 +170,12 @@ def _parse_args() -> argparse.Namespace:
             },
         ),
         (
-            ("--participant-id",),
+            ("--user-id",),
             {
                 "default": None,
                 "help": (
-                    f"Synthetic participant id for webhook smoke test "
-                    f"(default: {_DEFAULT_SYNTHETIC_PARTICIPANT_ID})"
+                    f"Synthetic user id for webhook smoke test "
+                    f"(default: {_DEFAULT_SYNTHETIC_USER_ID})"
                 ),
             },
         ),
@@ -199,13 +199,13 @@ def _post_webhook_smoke(
     *,
     domesti_base: str,
     label: str,
-    participant_id: str,
     payload: dict[str, Any],
     relay_key: str,
     url: str,
+    user_id: str,
 ) -> bool:
     _log_detail(f"POST {url}")
-    _log_detail(f"participant_id: {participant_id}")
+    _log_detail(f"user_id: {user_id}")
     _log_detail("auth: X-Domesti-Api-Key (relay secret generated for this run)")
     _log_detail(f"body: {json.dumps(payload, sort_keys=True)}")
     try:
@@ -224,9 +224,9 @@ def _post_webhook_smoke(
             body=response.text,
             domesti_base=domesti_base,
             label=label,
-            participant_id=participant_id,
             status_code=response.status_code,
             url=url,
+            user_id=user_id,
         )
         return False
     _log_success(f"{label} webhook accepted (HTTP {response.status_code})")
@@ -279,14 +279,14 @@ def _resolve_mytracks_domain(args: argparse.Namespace) -> str:
         raise SystemExit(2) from exc
 
 
-def _resolve_participant_id(args: argparse.Namespace) -> str:
-    initial = (args.participant_id or _DEFAULT_SYNTHETIC_PARTICIPANT_ID).strip()
+def _resolve_user_id(args: argparse.Namespace) -> str:
+    initial = (args.user_id or _DEFAULT_SYNTHETIC_USER_ID).strip()
     if initial == "":
-        print("Expected synthetic participant id, got empty value", file=sys.stderr)
+        print("Expected synthetic user id, got empty value", file=sys.stderr)
         raise SystemExit(2)
     if args.no_interactive or not sys.stdin.isatty():
         return initial
-    return _prompt_editable("Synthetic participant id", initial)
+    return _prompt_editable("Synthetic user id", initial)
 
 
 def _verify_mytracks_config(
@@ -309,14 +309,14 @@ def _verify_mytracks_config(
         label="domesti_base_url",
     )
     _config_matches_expected(
-        actual=config.participant_location_update_url,
+        actual=config.user_location_update_url,
         expected=update_url,
-        label="participant_location_update_url",
+        label="user_location_update_url",
     )
     _config_matches_expected(
-        actual=config.participant_location_test_url,
+        actual=config.user_location_test_url,
         expected=test_url,
-        label="participant_location_test_url",
+        label="user_location_test_url",
     )
     _log_success("my-tracks reports domesti-bot integration config")
 
@@ -326,7 +326,7 @@ def main() -> int:
     args = _parse_args()
     domesti_base = _resolve_domesti_base_url(args)
     mytracks_base = _resolve_mytracks_domain(args)
-    participant_id = _resolve_participant_id(args)
+    user_id = _resolve_user_id(args)
     password = getpass.getpass(f"My Tracks admin password ({args.username}): ").strip()
     if password == "":
         print("Expected My Tracks admin password, got empty value", file=sys.stderr)
@@ -340,16 +340,16 @@ def main() -> int:
     _log_detail(f"Logging in to {mytracks_base} as {args.username}")
     _log_detail(f"POST {pair_url}")
     _log_detail(f"domesti_base_url: {domesti_base}")
-    _log_detail(f"participant_location_update_url: {update_url}")
-    _log_detail(f"participant_location_test_url: {test_url}")
+    _log_detail(f"user_location_update_url: {update_url}")
+    _log_detail(f"user_location_test_url: {test_url}")
     _log_detail("relay API key: (generated for this run; not printed)")
     try:
         pair_status = pair_with_my_tracks(
             api_key=relay_key,
             base_url=mytracks_base,
             domesti_base_url=domesti_base,
-            participant_location_update_url=update_url,
-            participant_location_test_url=test_url,
+            user_location_test_url=test_url,
+            user_location_update_url=update_url,
             password=password,
             username=args.username,
         )
@@ -380,7 +380,7 @@ def main() -> int:
     )
 
     payload = {
-        "participant_id": participant_id,
+        "user_id": user_id,
         "lat": 41.194085,
         "lon": -73.888365,
         "accuracy_m": 12,
@@ -392,10 +392,10 @@ def main() -> int:
     if not _post_webhook_smoke(
         domesti_base=domesti_base,
         label="test",
-        participant_id=participant_id,
         payload=payload,
         relay_key=relay_key,
         url=test_url,
+        user_id=user_id,
     ):
         return 1
 
@@ -403,10 +403,10 @@ def main() -> int:
     if not _post_webhook_smoke(
         domesti_base=domesti_base,
         label="live",
-        participant_id=participant_id,
         payload=payload,
         relay_key=relay_key,
         url=update_url,
+        user_id=user_id,
     ):
         return 1
 

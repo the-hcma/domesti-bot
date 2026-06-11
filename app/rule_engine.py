@@ -27,7 +27,7 @@ class SwitchPowerState(StrEnum):
 
 
 class Device:
-    """Location-aware participant (phones, tags, etc.). Has no switch or door commands."""
+    """Location-aware user (phones, tags, etc.). Has no switch or door commands."""
 
     __slots__ = ("_identifier", "_display_name", "_lat", "_lon", "_x", "_y")
 

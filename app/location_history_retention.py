@@ -1,4 +1,4 @@
-"""Retention policy for per-participant location history."""
+"""Retention policy for per-user location history."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def retained_history_row_ids(
     now: float,
     retention: LocationHistoryRetention,
 ) -> set[int]:
-    """Return history row ids to keep for one participant.
+    """Return history row ids to keep for one user.
 
     ``rows`` must be ``(id, received_at)`` tuples sorted by ``received_at`` descending.
     A fix is kept when it falls inside the age window **or** ranks among the
