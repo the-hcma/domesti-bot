@@ -416,6 +416,7 @@ class RulesHubController {
           renderParticipantDetailText(
             participantStatusToMapParticipant(participant),
             true,
+            geofences,
           ),
         );
       }

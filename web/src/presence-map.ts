@@ -5,6 +5,7 @@ import { formatLocalTimestamp, formatUtcTimestampTitle } from "./format-timestam
 import { participantMarkerColor } from "./map-device-colors.js";
 import { haversineM } from "./rules-mock-fixtures.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-evaluate.js";
+import { resolveParticipantDisplayName } from "./rules-ui-helpers.js";
 import type { GeofenceOut, ParticipantFixOut, ParticipantStatusOut } from "./types.js";
 
 /** Extra meters beyond a geofence radius to still show a participant on the geofence map. */
@@ -239,19 +240,40 @@ export function formatAge(seconds: number | null): string {
   return `${Math.floor(seconds / 3600)} h ago`;
 }
 
+export function geofenceLabelsForIds(
+  geofenceIds: readonly string[],
+  geofences: readonly GeofenceOut[],
+): string[] {
+  const labelById = new Map(geofences.map((geofence) => [geofence.geofence_id, geofence.label]));
+  return geofenceIds.map((geofenceId) => labelById.get(geofenceId) ?? geofenceId);
+}
+
+export function formatInsideGeofencesLine(
+  geofenceIds: readonly string[],
+  geofences: readonly GeofenceOut[],
+): string {
+  if (geofenceIds.length === 0) {
+    return "Outside all geofences";
+  }
+  return `Inside ${geofenceLabelsForIds(geofenceIds, geofences).join(", ")}`;
+}
+
 export function formatParticipantTooltipHtml(
   participant: PresenceMapParticipant,
-  options?: { includeParticipantId?: boolean },
+  options?: {
+    geofences?: readonly GeofenceOut[];
+    includeParticipantId?: boolean;
+  },
 ): string {
   const title = options?.includeParticipantId === true
     ? `${participant.display_name} (${participant.participant_id})`
     : participant.display_name;
   const lines: string[] = [`<strong>${escapeHtml(title)}</strong>`];
   lines.push(`Tracking device: ${escapeHtml(participant.tracking_device_label)}`);
-  const inside =
-    participant.inside_geofence_ids.length > 0
-      ? `Inside ${participant.inside_geofence_ids.join(", ")}`
-      : "Outside all geofences";
+  const inside = formatInsideGeofencesLine(
+    participant.inside_geofence_ids,
+    options?.geofences ?? [],
+  );
   lines.push(`${formatAge(participant.age_seconds)} · ${escapeHtml(inside)}`);
   const fix = participant.last_fix;
   if (fix !== null) {
@@ -552,6 +574,7 @@ export function mountPresenceMap(
       participant.participant_id,
     );
     const tooltipHtml = formatParticipantTooltipHtml(participant, {
+      geofences: options.geofences,
       includeParticipantId: includeParticipantIdInTooltip,
     });
     tooltipHtmlByParticipantId.set(participant.participant_id, tooltipHtml);
@@ -647,7 +670,10 @@ export function participantStatusToMapParticipant(
 ): PresenceMapParticipant {
   return {
     age_seconds: participant.age_seconds,
-    display_name: participant.display_name,
+    display_name: resolveParticipantDisplayName(
+      participant.participant_id,
+      participant.display_name,
+    ),
     inside_geofence_ids: participant.inside_geofence_ids,
     last_fix: participant.last_fix,
     participant_id: participant.participant_id,
@@ -658,6 +684,7 @@ export function participantStatusToMapParticipant(
 export function renderParticipantDetailText(
   participant: PresenceMapParticipant,
   includeParticipantId: boolean,
+  geofences: readonly GeofenceOut[] = [],
 ): HTMLElement {
   const card = document.createElement("article");
   card.className = "rules-card rules-participant-detail-card";
@@ -670,11 +697,10 @@ export function renderParticipantDetailText(
   deviceMeta.textContent = `Tracking device: ${participant.tracking_device_label}`;
   const meta = document.createElement("p");
   meta.className = "rules-card-meta";
-  const inside =
-    participant.inside_geofence_ids.length > 0
-      ? `Inside ${participant.inside_geofence_ids.join(", ")}`
-      : "Outside all geofences";
-  meta.textContent = `${formatAge(participant.age_seconds)} · ${inside}`;
+  meta.textContent = `${formatAge(participant.age_seconds)} · ${formatInsideGeofencesLine(
+    participant.inside_geofence_ids,
+    geofences,
+  )}`;
   card.append(name, deviceMeta, meta);
   const fix = participant.last_fix;
   if (fix !== null) {

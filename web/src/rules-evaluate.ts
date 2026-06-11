@@ -6,7 +6,7 @@ import {
 } from "./astronomical-conditions.js";
 import { haversineM, mockSunRow, type MockStoreSeed } from "./rules-mock-fixtures.js";
 import { joinNames } from "./rule-summary.js";
-import { firstNameFromDisplayName } from "./rules-ui-helpers.js";
+import { participantLabelFromId } from "./rules-ui-helpers.js";
 import type {
   GeofenceOut,
   ParticipantFixOut,
@@ -88,10 +88,10 @@ function geofenceLabel(store: MockStoreSeed, geofenceId: string): string {
 }
 
 function participantDisplayName(store: MockStoreSeed, participantId: string): string {
-  const displayName =
-    store.participants.find((p) => p.participant_id === participantId)?.display_name
-    ?? participantId;
-  return firstNameFromDisplayName(displayName);
+  const displayName = store.participants.find(
+    (p) => p.participant_id === participantId,
+  )?.display_name;
+  return participantLabelFromId(participantId, displayName);
 }
 
 function participantInsideGeofence(

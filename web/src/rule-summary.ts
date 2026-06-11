@@ -4,6 +4,7 @@ import {
   ALL_DAYS_OF_WEEK,
   DAY_OF_WEEK_LABELS,
   firstNameFromDisplayName,
+  participantLabelFromId,
   WEEKDAY_DAYS,
   WEEKEND_DAYS,
 } from "./rules-ui-helpers.js";
@@ -112,9 +113,13 @@ function participantNames(
   participantIds: readonly string[],
   context: RuleSummaryContext,
 ): string[] {
-  return participantIds.map(
-    (id) => context.participantNameById.get(id) ?? id,
-  );
+  return participantIds.map((id) => {
+    const fromContext = context.participantNameById.get(id);
+    if (fromContext !== undefined && fromContext !== "") {
+      return fromContext;
+    }
+    return participantLabelFromId(id);
+  });
 }
 
 function geofenceLabel(geofenceId: string, context: RuleSummaryContext): string {

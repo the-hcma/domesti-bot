@@ -30,6 +30,36 @@ export function firstNameFromDisplayName(displayName: string): string {
   return trimmed.split(/\s+/)[0] ?? trimmed;
 }
 
+export function titleCaseParticipantId(participantId: string): string {
+  return participantId
+    .split(/[-_]/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+export function participantLabelFromId(
+  participantId: string,
+  displayName?: string | null,
+): string {
+  const trimmed = displayName?.trim() ?? "";
+  if (trimmed !== "" && trimmed.toLowerCase() !== participantId.toLowerCase()) {
+    return firstNameFromDisplayName(trimmed);
+  }
+  return titleCaseParticipantId(participantId);
+}
+
+export function resolveParticipantDisplayName(
+  participantId: string,
+  displayName: string,
+): string {
+  const trimmed = displayName.trim();
+  if (trimmed === "" || trimmed.toLowerCase() === participantId.toLowerCase()) {
+    return titleCaseParticipantId(participantId);
+  }
+  return trimmed;
+}
+
 export interface DayOfWeekPicker {
   fieldset: HTMLFieldSetElement;
   getSelectedDays: () => number[];
