@@ -1,0 +1,53 @@
+"""Shared device family and rule-action identifiers."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class DeviceFamilyId(StrEnum):
+    """Stable slug for a device manager family (UI tiles and rule actions)."""
+
+    ANDROIDTV = "androidtv"
+    KASA = "kasa"
+    SONOS = "sonos"
+    TAILWIND = "tailwind"
+
+    def display_name(self) -> str:
+        """Proper-name label for user-visible errors and log messages."""
+        match self:
+            case DeviceFamilyId.ANDROIDTV:
+                return "Google Cast"
+            case DeviceFamilyId.KASA:
+                return "Kasa"
+            case DeviceFamilyId.SONOS:
+                return "Sonos"
+            case DeviceFamilyId.TAILWIND:
+                return "Tailwind"
+
+
+class RuleDeviceActionType(StrEnum):
+    """Per-device command dispatched when an automation rule fires."""
+
+    CLOSE = "close"
+    OPEN = "open"
+    PAUSE = "pause"
+    RESUME = "resume"
+    TURN_OFF = "turn_off"
+    TURN_ON = "turn_on"
+
+    def display_label(self) -> str:
+        """Human-readable verb for user-visible errors and log messages."""
+        match self:
+            case RuleDeviceActionType.CLOSE:
+                return "close"
+            case RuleDeviceActionType.OPEN:
+                return "open"
+            case RuleDeviceActionType.PAUSE:
+                return "pause"
+            case RuleDeviceActionType.RESUME:
+                return "resume"
+            case RuleDeviceActionType.TURN_OFF:
+                return "turn off"
+            case RuleDeviceActionType.TURN_ON:
+                return "turn on"

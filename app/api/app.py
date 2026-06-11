@@ -19,6 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, HTMLResponse, Response
 
 from app import kasa_discovery_store
+from app.device_enums import DeviceFamilyId
 from app.logging_config import TRACE_LEVEL
 from app.api.schemas import (
     CompletionAliasesOut,
@@ -438,7 +439,9 @@ def create_app(args: Any) -> FastAPI:
         if kd is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=f"Unknown kasa device: {device_id}",
+                detail=(
+                    f"Unknown {DeviceFamilyId.KASA.display_name()} device: {device_id}"
+                ),
             )
         if body.on:
             await kd.turn_on()
@@ -478,21 +481,29 @@ def create_app(args: Any) -> FastAPI:
         if family_id == "kasa" and find_kasa_by_host(state.kasa_mgr, device_id) is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=f"Unknown kasa device: {device_id}",
+                detail=(
+                    f"Unknown {DeviceFamilyId.KASA.display_name()} device: {device_id}"
+                ),
             )
         if family_id == "sonos":
             son = state.sonos_mgr
             if son is None or find_sonos_by_identifier(son, device_id) is None:
                 raise HTTPException(
                     status_code=HTTPStatus.NOT_FOUND,
-                    detail=f"Unknown sonos device: {device_id}",
+                    detail=(
+                        f"Unknown {DeviceFamilyId.SONOS.display_name()} device: "
+                        f"{device_id}"
+                    ),
                 )
         if family_id == "tailwind":
             tw = state.tailwind_mgr
             if tw is None or all(d.identifier != device_id for d in tw.doors):
                 raise HTTPException(
                     status_code=HTTPStatus.NOT_FOUND,
-                    detail=f"Unknown tailwind device: {device_id}",
+                    detail=(
+                        f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: "
+                        f"{device_id}"
+                    ),
                 )
         kasa_discovery_store.upsert_ui_preference(
             state.cache_path,
@@ -531,13 +542,19 @@ def create_app(args: Any) -> FastAPI:
         if state.sonos_mgr is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail="Sonos manager is not configured on this server",
+                detail=(
+                    f"{DeviceFamilyId.SONOS.display_name()} manager is not configured "
+                    "on this server"
+                ),
             )
         sp = find_sonos_by_identifier(state.sonos_mgr, device_id)
         if sp is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=f"Unknown sonos device: {device_id}",
+                detail=(
+                    f"Unknown {DeviceFamilyId.SONOS.display_name()} device: "
+                    f"{device_id}"
+                ),
             )
         try:
             if body.playing:
@@ -591,13 +608,19 @@ def create_app(args: Any) -> FastAPI:
         if state.tailwind_mgr is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail="Tailwind manager is not configured on this server",
+                detail=(
+                    f"{DeviceFamilyId.TAILWIND.display_name()} manager is not "
+                    "configured on this server"
+                ),
             )
         gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
         if gd is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=f"Unknown tailwind device: {device_id}",
+                detail=(
+                    f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: "
+                    f"{device_id}"
+                ),
             )
         await gd.close()
         return UIDeviceActionOut(
@@ -619,13 +642,19 @@ def create_app(args: Any) -> FastAPI:
         if state.tailwind_mgr is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail="Tailwind manager is not configured on this server",
+                detail=(
+                    f"{DeviceFamilyId.TAILWIND.display_name()} manager is not "
+                    "configured on this server"
+                ),
             )
         gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
         if gd is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=f"Unknown tailwind device: {device_id}",
+                detail=(
+                    f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: "
+                    f"{device_id}"
+                ),
             )
         await gd.open()
         return UIDeviceActionOut(

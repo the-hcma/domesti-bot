@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
 
@@ -577,9 +579,9 @@ class RuleConditionStatusOut(BaseModel):
 
 
 class RuleDeviceActionOut(BaseModel):
-    action: Literal["turn_on", "turn_off", "open", "close", "pause", "resume"]
+    action: RuleDeviceActionType
     device_id: str
-    family_id: str
+    family_id: DeviceFamilyId
 
 
 class RuleOut(BaseModel):

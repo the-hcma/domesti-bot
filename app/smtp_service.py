@@ -134,6 +134,11 @@ def smtp_friendly_error(exc: Exception, *, host: str = "") -> str:
     return msg
 
 
+def deliver_email_message(params: SmtpConnectionParams, message: EmailMessage) -> None:
+    """Send a prepared email message using the given SMTP connection parameters."""
+    _send_message(params, message)
+
+
 def _send_message(params: SmtpConnectionParams, message: EmailMessage) -> None:
     use_ssl = params.port == 465
     if use_ssl:
