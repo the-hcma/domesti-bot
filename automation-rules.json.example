@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "device_id_resolution": "preferred_label",
+  "_notes": [
+    "Copy this file to automation-rules.json in the repo/server root (same directory as domesti-bot.config.json).",
+    "device_id values are tile/REPL display names; the rule evaluator resolves them to Kasa hosts or Tailwind door ids.",
+    "Geofence ids must match Automations → Geofences (house is typical for home; west-point for West Point).",
+    "SMTP must be configured under Automations → Mail for notification emails to send.",
+    "Rule 1 fires when Henrique OR Kristen enters house after sunset (arrival edge, not merely present at sunset)."
+  ],
+  "settings_location": {
+    "lat": 41.194072,
+    "lon": -73.8883254,
+    "timezone": "America/New_York",
+    "home_label": "Home"
+  },
+  "rules": [
+    {
+      "id": "evening-arrival-home-lights",
+      "label": "Evening arrival — front + garage lights",
+      "enabled": true,
+      "trigger": "edge_true",
+      "cooldown_s": 300,
+      "min_fix_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_email": "hcma@hcma.info",
+      "conditions": {
+        "all": [
+          {
+            "type": "after_sunset",
+            "offset_minutes": 0,
+            "window_end": "midnight"
+          },
+          {
+            "type": "any",
+            "conditions": [
+              {
+                "type": "participants_inside_geofence",
+                "geofence_id": "house",
+                "participant_ids": ["henrique"]
+              },
+              {
+                "type": "participants_inside_geofence",
+                "geofence_id": "house",
+                "participant_ids": ["kristen"]
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "kasa",
+          "device_id": "Front door lights",
+          "action": "turn_on"
+        },
+        {
+          "family_id": "kasa",
+          "device_id": "Garage (Lights & Plugs)",
+          "action": "turn_on"
+        },
+        {
+          "family_id": "kasa",
+          "device_id": "Garage outside lights",
+          "action": "turn_on"
+        }
+      ]
+    },
+    {
+      "id": "kristen-west-point-arrive",
+      "label": "Kristen arrived at West Point",
+      "enabled": true,
+      "trigger": "edge_true",
+      "cooldown_s": 120,
+      "min_fix_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_email": "hcma@hcma.info",
+      "conditions": {
+        "all": [
+          {
+            "type": "participants_inside_geofence",
+            "geofence_id": "west-point",
+            "participant_ids": ["kristen"]
+          }
+        ]
+      },
+      "device_actions": []
+    },
+    {
+      "id": "kristen-west-point-leave",
+      "label": "Kristen left West Point",
+      "enabled": true,
+      "trigger": "edge_true",
+      "cooldown_s": 120,
+      "min_fix_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_email": "hcma@hcma.info",
+      "conditions": {
+        "all": [
+          {
+            "type": "participants_outside_geofence",
+            "geofence_id": "west-point",
+            "participant_ids": ["kristen"]
+          }
+        ]
+      },
+      "device_actions": []
+    }
+  ]
+}

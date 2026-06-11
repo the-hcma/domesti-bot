@@ -21,6 +21,9 @@ logs/
 # Fernet master key for encrypted SQLite secrets (see domesti-bot.config.json.example).
 domesti-bot.config.json
 
+# Operator automation rules (see automation-rules.json.example).
+automation-rules.json
+
 # Web bundle: source lives under web/, built output under app/api/static/dist/.
 # The dist/ directory is rebuilt by `pnpm run build` (locally, in CI, and via
 # scripts/on-deploy in production); it must not be committed.

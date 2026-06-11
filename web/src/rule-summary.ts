@@ -165,6 +165,9 @@ function formatTimingCondition(condition: RuleConditionOut): string | null {
     case "participants_inside_geofence":
     case "participants_outside_geofence":
       return null;
+    case "all":
+    case "any":
+      return null;
     case "after_sunset": {
       const offset = condition.offset_minutes;
       const start =
