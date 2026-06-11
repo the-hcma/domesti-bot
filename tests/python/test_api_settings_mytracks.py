@@ -12,10 +12,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
-from app.mytracks_service import ExportedGeofence, ExportedParticipant, ExportedParticipantLocation
+from app.mytracks_service import ExportedGeofence, ExportedUser, ExportedUserLocation
 from app.mytracks_store import load_mytracks_config
-from app.presence_store import list_participant_fixes
-from app.rules_store import list_geofences, list_participants
+from app.presence_store import list_user_locations
+from app.rules_store import list_geofences, list_users
 
 
 def _client(*, cache_path: Path | None) -> tuple[TestClient, FastAPI]:
@@ -56,14 +56,16 @@ def test_put_mytracks_settings_persists_config(tmp_path: Path) -> None:
 
 
 @patch(
-    "app.api.mytracks_routes.fetch_participants_from_my_tracks",
+    "app.api.mytracks_routes.fetch_users_from_my_tracks",
     return_value=[
-        ExportedParticipant(
-            participant_id="henrique",
+        ExportedUser(
+            user_id="henrique",
+            first_name="Henrique",
+            last_name="",
             display_name="Henrique",
             tracking_device_label="Pixel",
             enabled=True,
-            latest_location=ExportedParticipantLocation(
+            latest_location=ExportedUserLocation(
                 lat=41.194072,
                 lon=-73.888325,
                 accuracy_m=12,
@@ -86,19 +88,19 @@ def test_post_mytracks_participants_sync_records_timestamp(
         },
     )
     response = client.post(
-        "/v1/rules/participants/sync",
+        "/v1/rules/users/sync",
         json={"username": "admin", "password": "secret"},
     )
     assert response.status_code == HTTPStatus.OK
     body = response.json()
-    assert body["participant_count"] == 1
+    assert body["user_count"] == 1
     assert body["last_synced_at"] is not None
     assert body["source"] == "my-tracks"
 
-    participants = list_participants(db)
+    participants = list_users(db)
     assert len(participants) == 1
-    assert participants[0].participant_id == "henrique"
-    fixes = list_participant_fixes(db)
+    assert participants[0].user_id == "henrique"
+    fixes = list_user_locations(db)
     assert "henrique" in fixes
     assert fixes["henrique"].lat == 41.194072
 
@@ -116,14 +118,16 @@ def test_get_participants_status_returns_synced_fixes(
         },
     )
     with patch(
-        "app.api.mytracks_routes.fetch_participants_from_my_tracks",
+        "app.api.mytracks_routes.fetch_users_from_my_tracks",
         return_value=[
-            ExportedParticipant(
-                participant_id="henrique",
+            ExportedUser(
+                user_id="henrique",
+                first_name="Henrique",
+                last_name="",
                 display_name="Henrique",
                 tracking_device_label="Pixel",
                 enabled=True,
-                latest_location=ExportedParticipantLocation(
+                latest_location=ExportedUserLocation(
                     lat=41.194072,
                     lon=-73.888325,
                     accuracy_m=12,
@@ -133,15 +137,15 @@ def test_get_participants_status_returns_synced_fixes(
         ],
     ):
         sync = client.post(
-            "/v1/rules/participants/sync",
+            "/v1/rules/users/sync",
             json={"username": "admin", "password": "secret"},
         )
     assert sync.status_code == HTTPStatus.OK
-    response = client.get("/v1/rules/participants/status")
+    response = client.get("/v1/rules/users/status")
     assert response.status_code == HTTPStatus.OK
     body = response.json()
     assert len(body) == 1
-    assert body[0]["last_fix"]["lat"] == 41.194072
+    assert body[0]["last_location"]["lat"] == 41.194072
     assert body[0]["age_seconds"] is not None
 
 
@@ -198,7 +202,7 @@ def test_post_mytracks_sync_rejects_empty_password(tmp_path: Path) -> None:
         },
     )
     response = client.post(
-        "/v1/rules/participants/sync",
+        "/v1/rules/users/sync",
         json={"username": "admin", "password": ""},
     )
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY

@@ -146,7 +146,7 @@ export function promptMyTracksSyncCredentials(
 
 export async function runMyTracksSyncAction(
   dataSource: RulesDataSource,
-  kind: "geofences" | "participants",
+  kind: "geofences" | "users",
   onComplete: () => void | Promise<void>,
 ): Promise<void> {
   let settings = null as Awaited<ReturnType<RulesDataSource["getMyTracksSettings"]>>;
@@ -164,13 +164,13 @@ export async function runMyTracksSyncAction(
     return;
   }
   try {
-    if (kind === "participants") {
+    if (kind === "users") {
       const result = await dataSource.syncParticipantsFromMyTracks({
         username: credentials.username,
         password: credentials.password,
       });
       showSuccessToast(
-        `Synced ${result.participant_count} participant${result.participant_count === 1 ? "" : "s"} from My Tracks.`,
+        `Synced ${result.user_count} participant${result.user_count === 1 ? "" : "s"} from My Tracks.`,
       );
     } else {
       const result = await dataSource.syncGeofencesFromMyTracks({

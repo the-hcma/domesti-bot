@@ -1,4 +1,4 @@
-"""Persist Automations participants and geofences in the discovery SQLite database."""
+"""Persist Automations users and geofences in the discovery SQLite database."""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ from pathlib import Path
 
 from sqlalchemy import delete, select
 
-from app.db.models import RuleGeofence, RuleParticipant
+from app.db.models import RuleGeofence, RuleUser
 from app.db.session import discovery_session
+from app.user_names import default_display_name, parse_person_name
 
 
 @dataclass(frozen=True)
@@ -24,11 +25,13 @@ class GeofenceRecord:
 
 
 @dataclass(frozen=True)
-class ParticipantRecord:
+class UserRecord:
     display_name: str
     enabled: bool
-    participant_id: str
+    first_name: str
+    last_name: str
     tracking_device_label: str
+    user_id: str
 
 
 def count_geofences(path: Path) -> int:
@@ -36,16 +39,9 @@ def count_geofences(path: Path) -> int:
         return len(session.scalars(select(RuleGeofence.geofence_id)).all())
 
 
-def count_participants(path: Path) -> int:
+def count_users(path: Path) -> int:
     with discovery_session(path) as session:
-        return len(session.scalars(select(RuleParticipant.participant_id)).all())
-
-
-def participant_exists(path: Path, participant_id: str) -> bool:
-    """True when ``participant_id`` is present in the automation roster."""
-    with discovery_session(path) as session:
-        row = session.get(RuleParticipant, participant_id.strip())
-        return row is not None
+        return len(session.scalars(select(RuleUser.user_id)).all())
 
 
 def delete_geofence(path: Path, geofence_id: str) -> None:
@@ -61,12 +57,10 @@ def list_geofences(path: Path) -> list[GeofenceRecord]:
         return [_geofence_to_record(row) for row in rows]
 
 
-def list_participants(path: Path) -> list[ParticipantRecord]:
+def list_users(path: Path) -> list[UserRecord]:
     with discovery_session(path) as session:
-        rows = session.scalars(
-            select(RuleParticipant).order_by(RuleParticipant.display_name)
-        ).all()
-        return [_participant_to_record(row) for row in rows]
+        rows = session.scalars(select(RuleUser).order_by(RuleUser.display_name)).all()
+        return [_user_to_record(row) for row in rows]
 
 
 def replace_geofences(path: Path, geofences: list[GeofenceRecord]) -> int:
@@ -89,21 +83,24 @@ def replace_geofences(path: Path, geofences: list[GeofenceRecord]) -> int:
     return len(geofences)
 
 
-def replace_participants(path: Path, participants: list[ParticipantRecord]) -> int:
+def replace_users(path: Path, users: list[UserRecord]) -> int:
+    """Replace the full user roster, preserving ``user_id`` values from the export."""
     now = time.time()
     with discovery_session(path) as session:
-        session.execute(delete(RuleParticipant))
-        for participant in participants:
+        session.execute(delete(RuleUser))
+        for user in users:
             session.add(
-                RuleParticipant(
-                    participant_id=participant.participant_id,
-                    display_name=participant.display_name,
-                    tracking_device_label=participant.tracking_device_label,
-                    enabled=1 if participant.enabled else 0,
+                RuleUser(
+                    user_id=user.user_id,
+                    first_name=user.first_name,
+                    last_name=user.last_name,
+                    display_name=user.display_name,
+                    tracking_device_label=user.tracking_device_label,
+                    enabled=1 if user.enabled else 0,
                     updated_at=now,
                 )
             )
-    return len(participants)
+    return len(users)
 
 
 def save_geofence(path: Path, geofence: GeofenceRecord) -> GeofenceRecord:
@@ -133,6 +130,34 @@ def save_geofence(path: Path, geofence: GeofenceRecord) -> GeofenceRecord:
     return geofence
 
 
+def user_exists(path: Path, user_id: str) -> bool:
+    """True when ``user_id`` is present in the automation roster."""
+    with discovery_session(path) as session:
+        row = session.get(RuleUser, user_id.strip())
+        return row is not None
+
+
+def user_record_from_export(
+    *,
+    user_id: str,
+    export_display_name: str,
+    tracking_device_label: str,
+    enabled: bool,
+) -> UserRecord:
+    """Build a roster row from a My Tracks users-with-devices export."""
+    first_name, last_name = parse_person_name(export_display_name)
+    if first_name == "":
+        first_name = user_id
+    return UserRecord(
+        user_id=user_id,
+        first_name=first_name,
+        last_name=last_name,
+        display_name=default_display_name(first_name),
+        tracking_device_label=tracking_device_label,
+        enabled=enabled,
+    )
+
+
 def _geofence_to_record(row: RuleGeofence) -> GeofenceRecord:
     return GeofenceRecord(
         geofence_id=row.geofence_id,
@@ -145,9 +170,11 @@ def _geofence_to_record(row: RuleGeofence) -> GeofenceRecord:
     )
 
 
-def _participant_to_record(row: RuleParticipant) -> ParticipantRecord:
-    return ParticipantRecord(
-        participant_id=row.participant_id,
+def _user_to_record(row: RuleUser) -> UserRecord:
+    return UserRecord(
+        user_id=row.user_id,
+        first_name=row.first_name,
+        last_name=row.last_name,
         display_name=row.display_name,
         tracking_device_label=row.tracking_device_label,
         enabled=bool(row.enabled),

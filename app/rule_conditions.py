@@ -21,9 +21,9 @@ from app.api.schemas import (
     DaysOfWeekCondition,
     GeofenceOut,
     LocalTimeWindowCondition,
-    ParticipantFixOut,
-    ParticipantsInsideGeofenceCondition,
-    ParticipantsOutsideGeofenceCondition,
+    UserLocationOut,
+    UsersInsideGeofenceCondition,
+    UsersOutsideGeofenceCondition,
     RuleConditionOut,
     RuleConditionStatusOut,
     RuleOut,
@@ -42,8 +42,8 @@ class RuleEvaluationContext:
 
     geofences: tuple[GeofenceOut, ...]
     now: datetime
-    participant_display_names: dict[str, str]
-    participant_fixes: dict[str, ParticipantFixOut]
+    user_display_names: dict[str, str]
+    user_locations: dict[str, UserLocationOut]
     sun: RulesSunOut
     timezone: ZoneInfo
 
@@ -268,10 +268,10 @@ def _evaluate_condition(
         return _evaluate_days_of_week(condition, rule, ctx)
     if isinstance(condition, LocalTimeWindowCondition):
         return _evaluate_local_time_window(condition, rule, ctx)
-    if isinstance(condition, ParticipantsInsideGeofenceCondition):
-        return _evaluate_participants_geofence(condition, rule, ctx, want_inside=True)
-    if isinstance(condition, ParticipantsOutsideGeofenceCondition):
-        return _evaluate_participants_geofence(condition, rule, ctx, want_inside=False)
+    if isinstance(condition, UsersInsideGeofenceCondition):
+        return _evaluate_users_geofence(condition, rule, ctx, want_inside=True)
+    if isinstance(condition, UsersOutsideGeofenceCondition):
+        return _evaluate_users_geofence(condition, rule, ctx, want_inside=False)
     return RuleConditionStatusOut(
         condition=condition,
         detail="Unsupported condition type for status display",
@@ -337,8 +337,8 @@ def _evaluate_local_time_window(
     )
 
 
-def _evaluate_participants_geofence(
-    condition: ParticipantsInsideGeofenceCondition | ParticipantsOutsideGeofenceCondition,
+def _evaluate_users_geofence(
+    condition: UsersInsideGeofenceCondition | UsersOutsideGeofenceCondition,
     rule: RuleOut,
     ctx: RuleEvaluationContext,
     *,
@@ -361,20 +361,20 @@ def _evaluate_participants_geofence(
             met=False,
         )
 
-    min_accuracy_m = rule.min_fix_accuracy_m
+    min_accuracy_m = rule.min_location_accuracy_m
     unmet_names: list[str] = []
     ignored_accuracy: list[str] = []
-    for participant_id in condition.participant_ids:
-        fix = ctx.participant_fixes.get(participant_id)
-        name = _participant_display_name(ctx, participant_id)
-        if fix is not None and not _fix_usable_for_rule(fix, min_accuracy_m):
+    for user_id in condition.user_ids:
+        location = ctx.user_locations.get(user_id)
+        name = _user_display_name(ctx, user_id)
+        if location is not None and not _location_usable_for_rule(location, min_accuracy_m):
             ignored_accuracy.append(
-                f"{name} (±{fix.accuracy_m if fix.accuracy_m is not None else '?'} m "
+                f"{name} (±{location.accuracy_m if location.accuracy_m is not None else '?'} m "
                 f"> {min_accuracy_m} m threshold)",
             )
             unmet_names.append(name)
             continue
-        inside = _participant_inside_geofence(fix, geofence, min_accuracy_m)
+        inside = _user_inside_geofence(location, geofence, min_accuracy_m)
         if want_inside and not inside:
             unmet_names.append(name)
         if not want_inside and inside:
@@ -382,8 +382,8 @@ def _evaluate_participants_geofence(
 
     met = len(unmet_names) == 0
     selected_names = [
-        _participant_display_name(ctx, participant_id)
-        for participant_id in condition.participant_ids
+        _user_display_name(ctx, user_id)
+        for user_id in condition.user_ids
     ]
     who = _join_names(selected_names)
     label = (
@@ -398,7 +398,7 @@ def _evaluate_participants_geofence(
             else f"Everyone is outside {fence_label}"
         )
     elif ignored_accuracy:
-        detail = f"Ignored low-accuracy fix: {'; '.join(ignored_accuracy)}"
+        detail = f"Ignored low-accuracy location: {'; '.join(ignored_accuracy)}"
     elif want_inside:
         detail = f"Waiting for {', '.join(unmet_names)} to enter {fence_label}"
     else:
@@ -411,20 +411,13 @@ def _evaluate_participants_geofence(
     )
 
 
-def _first_name_from_display_name(display_name: str) -> str:
-    trimmed = display_name.strip()
-    if not trimmed:
-        return trimmed
-    return trimmed.split()[0]
-
-
-def _fix_usable_for_rule(
-    fix: ParticipantFixOut | None,
+def _location_usable_for_rule(
+    location: UserLocationOut | None,
     min_accuracy_m: int,
 ) -> bool:
-    if fix is None:
+    if location is None:
         return False
-    if fix.accuracy_m is not None and fix.accuracy_m > min_accuracy_m:
+    if location.accuracy_m is not None and location.accuracy_m > min_accuracy_m:
         return False
     return True
 
@@ -531,30 +524,29 @@ def _parse_hhmm(hhmm: str) -> int | None:
     return hour * 60 + minute
 
 
-def _participant_display_name(
+def _user_display_name(
     ctx: RuleEvaluationContext,
-    participant_id: str,
+    user_id: str,
 ) -> str:
-    display_name = ctx.participant_display_names.get(participant_id)
+    display_name = ctx.user_display_names.get(user_id)
     trimmed = (display_name or "").strip()
-    if trimmed and trimmed.lower() != participant_id.lower():
-        return _first_name_from_display_name(trimmed)
-    parts = [part for part in participant_id.replace("_", "-").split("-") if part]
-    return " ".join(part.capitalize() for part in parts)
+    if trimmed:
+        return trimmed
+    return user_id
 
 
-def _participant_inside_geofence(
-    fix: ParticipantFixOut | None,
+def _user_inside_geofence(
+    location: UserLocationOut | None,
     geofence: GeofenceOut,
     min_accuracy_m: int,
 ) -> bool:
-    if not _fix_usable_for_rule(fix, min_accuracy_m):
+    if not _location_usable_for_rule(location, min_accuracy_m):
         return False
-    if not geofence.enabled or fix is None:
+    if not geofence.enabled or location is None:
         return False
     distance_m = _haversine_m(
-        fix.lat,
-        fix.lon,
+        location.lat,
+        location.lon,
         geofence.center_lat,
         geofence.center_lon,
     )

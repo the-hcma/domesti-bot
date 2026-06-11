@@ -16,7 +16,7 @@ from app.api.schemas import (
     MyTracksLocationUpdatesOut,
     MyTracksPairIn,
     MyTracksPairStatusOut,
-    MyTracksParticipantsSyncOut,
+    MyTracksUsersSyncOut,
     MyTracksRelayKeySettingsOut,
     MyTracksSettingsIn,
     MyTracksSettingsOut,
@@ -33,12 +33,12 @@ from app.db.secrets import (
 )
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.mytracks_service import (
-    ExportedParticipant,
+    ExportedUser,
     MyTracksSyncError,
     build_location_update_webhook_urls,
     fetch_geofences_from_my_tracks,
     fetch_mytracks_domesti_config,
-    fetch_participants_from_my_tracks,
+    fetch_users_from_my_tracks,
     normalize_mytracks_base_url,
     normalize_public_base_url,
     pair_with_my_tracks,
@@ -56,7 +56,7 @@ from app.mytracks_store import (
     load_mytracks_config,
     load_mytracks_pair_status,
     record_mytracks_geofences_sync,
-    record_mytracks_participants_sync,
+    record_mytracks_users_sync,
     save_location_history_retention,
     save_mytracks_config,
     save_mytracks_pairing,
@@ -64,18 +64,18 @@ from app.mytracks_store import (
     set_location_updates_accepted,
 )
 from app.presence_store import (
-    ParticipantFixRecord,
+    UserLocationRecord,
     parse_iso_timestamp_to_epoch,
-    prune_all_participant_location_history,
-    replace_participant_fixes,
+    prune_all_user_location_history,
+    replace_user_locations,
 )
 from app.rules_store import (
     GeofenceRecord,
-    ParticipantRecord,
+    UserRecord,
     count_geofences,
-    count_participants,
+    count_users,
     replace_geofences,
-    replace_participants,
+    replace_users,
 )
 
 settings_router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -151,7 +151,7 @@ async def patch_mytracks_location_history_retention_route(
     body: LocationHistoryRetentionIn,
     request: Request,
 ) -> LocationHistoryRetentionOut:
-    """Update how many location fixes are kept per participant."""
+    """Update how many locations are kept per user in history."""
     cache_path = _require_discovery_cache(request)
     _require_mytracks_config(request)
     saved = save_location_history_retention(
@@ -161,7 +161,7 @@ async def patch_mytracks_location_history_retention_route(
         unlimited=body.unlimited,
     )
     retention = load_location_history_retention(cache_path)
-    pruned = prune_all_participant_location_history(cache_path, retention=retention)
+    pruned = prune_all_user_location_history(cache_path, retention=retention)
     if pruned:
         _LOGGER.info("location-history retention update pruned %d row(s)", pruned)
     return _retention_record_to_schema(saved)
@@ -252,8 +252,8 @@ async def post_mytracks_pair(
             api_key=relay_key,
             base_url=mytracks_base,
             domesti_base_url=domesti_public,
-            participant_location_update_url=update_url,
-            participant_location_test_url=test_url,
+            user_location_update_url=update_url,
+            user_location_test_url=test_url,
             password=body.password,
             username=username,
         )
@@ -279,8 +279,8 @@ async def post_mytracks_pair(
             domain=mytracks_base,
             username=username,
             domesti_public_base_url=domesti_public,
-            participant_location_update_url=update_url,
-            participant_location_test_url=test_url,
+            user_location_update_url=update_url,
+            user_location_test_url=test_url,
         ),
     )
     _LOGGER.info(
@@ -327,27 +327,27 @@ async def get_mytracks_geofences_sync_status(
     )
 
 
-@rules_router.get("/participants/sync-status", response_model=MyTracksParticipantsSyncOut)
-async def get_mytracks_participants_sync_status(
+@rules_router.get("/users/sync-status", response_model=MyTracksUsersSyncOut)
+async def get_mytracks_users_sync_status(
     request: Request,
-) -> MyTracksParticipantsSyncOut:
-    """Return last participant roster sync metadata from My Tracks settings."""
+) -> MyTracksUsersSyncOut:
+    """Return last user roster sync metadata from My Tracks settings."""
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
-        return MyTracksParticipantsSyncOut(
+        return MyTracksUsersSyncOut(
             last_synced_at=None,
-            participant_count=0,
+            user_count=0,
         )
     record = load_mytracks_config(cache_path)
-    participant_count = count_participants(cache_path)
+    user_count = count_users(cache_path)
     if record is None:
-        return MyTracksParticipantsSyncOut(
+        return MyTracksUsersSyncOut(
             last_synced_at=None,
-            participant_count=participant_count,
+            user_count=user_count,
         )
-    return MyTracksParticipantsSyncOut(
-        last_synced_at=record.last_participants_sync_at,
-        participant_count=participant_count,
+    return MyTracksUsersSyncOut(
+        last_synced_at=record.last_users_sync_at,
+        user_count=user_count,
     )
 
 
@@ -408,28 +408,28 @@ async def post_mytracks_geofences_sync(
     )
 
 
-@rules_router.post("/participants/sync", response_model=MyTracksParticipantsSyncOut)
-async def post_mytracks_participants_sync(
+@rules_router.post("/users/sync", response_model=MyTracksUsersSyncOut)
+async def post_mytracks_users_sync(
     body: MyTracksSyncIn, request: Request
-) -> MyTracksParticipantsSyncOut:
-    """Pull the participant roster from My Tracks using admin credentials."""
+) -> MyTracksUsersSyncOut:
+    """Pull the user roster from My Tracks using admin credentials."""
     cache_path = _require_discovery_cache(request)
     record, username = _resolve_sync_credentials(request, body)
     base_url = normalize_mytracks_base_url(record.domain)
     _LOGGER.info(
-        "participant sync starting for %s as %s",
+        "user sync starting for %s as %s",
         mytracks_log_host(base_url),
         username,
     )
     try:
-        exported = fetch_participants_from_my_tracks(
+        exported = fetch_users_from_my_tracks(
             base_url=base_url,
             password=body.password,
             username=username,
         )
     except MyTracksSyncError as exc:
         _LOGGER.warning(
-            "participant sync failed for %s as %s: %s",
+            "user sync failed for %s as %s: %s",
             mytracks_log_host(base_url),
             username,
             exc,
@@ -438,11 +438,13 @@ async def post_mytracks_participants_sync(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=str(exc),
         ) from exc
-    count = replace_participants(
+    count = replace_users(
         cache_path,
         [
-            ParticipantRecord(
-                participant_id=row.participant_id,
+            UserRecord(
+                user_id=row.user_id,
+                first_name=row.first_name,
+                last_name=row.last_name,
                 display_name=row.display_name,
                 tracking_device_label=row.tracking_device_label,
                 enabled=row.enabled,
@@ -450,21 +452,21 @@ async def post_mytracks_participants_sync(
             for row in exported
         ],
     )
-    fix_count = replace_participant_fixes(
+    location_count = replace_user_locations(
         cache_path,
-        [_participant_fix_from_export(row) for row in exported if row.latest_location is not None],
+        [_user_location_from_export(row) for row in exported if row.latest_location is not None],
         retention=load_location_history_retention(cache_path),
     )
-    updated = record_mytracks_participants_sync(cache_path, count=count)
+    updated = record_mytracks_users_sync(cache_path, count=count)
     _LOGGER.info(
-        "participant sync complete for %s: %d participant(s), %d location fix(es)",
+        "user sync complete for %s: %d user(s), %d location(s)",
         mytracks_log_host(base_url),
         count,
-        fix_count,
+        location_count,
     )
-    return MyTracksParticipantsSyncOut(
-        last_synced_at=updated.last_participants_sync_at,
-        participant_count=count,
+    return MyTracksUsersSyncOut(
+        last_synced_at=updated.last_users_sync_at,
+        user_count=count,
     )
 
 
@@ -501,8 +503,8 @@ def _pair_status_to_schema(
         domain=record.domain,
         username=record.username,
         domesti_public_base_url=record.domesti_public_base_url,
-        participant_location_update_url=record.participant_location_update_url,
-        participant_location_test_url=record.participant_location_test_url,
+        user_location_update_url=record.user_location_update_url,
+        user_location_test_url=record.user_location_test_url,
         relay_key_configured=record.relay_key_configured,
         location_history_retention=_retention_record_to_schema(
             record.location_history_retention
@@ -519,12 +521,12 @@ def _pair_status_to_schema(
     )
 
 
-def _participant_fix_from_export(row: ExportedParticipant) -> ParticipantFixRecord:
+def _user_location_from_export(row: ExportedUser) -> UserLocationRecord:
     location = row.latest_location
     if location is None:
         raise ValueError("Expected latest_location, got None")
-    return ParticipantFixRecord(
-        participant_id=row.participant_id,
+    return UserLocationRecord(
+        user_id=row.user_id,
         lat=location.lat,
         lon=location.lon,
         accuracy_m=location.accuracy_m,

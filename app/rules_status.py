@@ -9,24 +9,25 @@ from zoneinfo import ZoneInfo
 
 from app.api.schemas import (
     GeofenceOut,
-    ParticipantFixOut,
-    ParticipantStatusOut,
     RulesEvaluatorOut,
     RulesStatusOut,
     RuleStatusSummaryOut,
+    UserLocationOut,
+    UserStatusOut,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
 from app.presence_store import (
-    ParticipantFixRecord,
-    geofence_ids_containing_fix,
-    list_participant_fixes,
+    UserLocationRecord,
+    geofence_ids_containing_location,
+    list_user_locations,
 )
 from app.rule_conditions import (
     RuleEvaluationContext,
     compute_rules_sun_out,
     evaluate_rule,
 )
-from app.rules_store import GeofenceRecord, list_geofences, list_participants
+from app.rules_store import GeofenceRecord, list_geofences, list_users
+
 
 def build_rules_status(
     *,
@@ -45,18 +46,16 @@ def build_rules_status(
 
     sun = compute_rules_sun_out(settings, now=effective_now)
     geofences = _load_geofences(cache_path)
-    participants = _load_participants_status(cache_path)
-    participant_fixes = _participant_fixes_from_status(participants)
-    participant_display_names = {
-        row.participant_id: row.display_name for row in participants
-    }
+    users = _load_users_status(cache_path)
+    user_locations = _user_locations_from_status(users)
+    user_display_names = {row.user_id: row.display_name for row in users}
     ctx = RuleEvaluationContext(
         geofences=tuple(geofences),
         now=effective_now,
-        participant_display_names=participant_display_names,
-        participant_fixes=participant_fixes,
         sun=sun,
         timezone=tz,
+        user_display_names=user_display_names,
+        user_locations=user_locations,
     )
 
     rules = list_automation_rules()
@@ -82,16 +81,10 @@ def build_rules_status(
             next_sun_check_at=_to_iso_z(now_utc + timedelta(minutes=1)),
         ),
         geofences=geofences,
-        participants=participants,
         rules=rule_rows,
         sun=sun,
+        users=users,
         using_mock=False,
-    )
-
-
-def _fix_received_at_iso(fix: ParticipantFixRecord) -> str:
-    return datetime.fromtimestamp(fix.received_at, tz=UTC).isoformat().replace(
-        "+00:00", "Z"
     )
 
 
@@ -113,55 +106,61 @@ def _load_geofences(cache_path: Path | None) -> list[GeofenceOut]:
     return [_geofence_to_schema(row) for row in list_geofences(cache_path)]
 
 
-def _load_participants_status(
-    cache_path: Path | None,
-) -> list[ParticipantStatusOut]:
+def _load_users_status(cache_path: Path | None) -> list[UserStatusOut]:
     if cache_path is None:
         return []
-    participants = list_participants(cache_path)
-    fixes = list_participant_fixes(cache_path)
+    users = list_users(cache_path)
+    locations = list_user_locations(cache_path)
     geofences = list_geofences(cache_path)
     now = time.time()
-    rows: list[ParticipantStatusOut] = []
-    for participant in participants:
-        fix = fixes.get(participant.participant_id)
-        last_fix: ParticipantFixOut | None = None
+    rows: list[UserStatusOut] = []
+    for user in users:
+        location = locations.get(user.user_id)
+        last_location: UserLocationOut | None = None
         age_seconds: int | None = None
         inside_geofence_ids: list[str] = []
-        if fix is not None:
-            received_at = _fix_received_at_iso(fix)
-            last_fix = ParticipantFixOut(
-                accuracy_m=fix.accuracy_m,
-                lat=fix.lat,
-                lon=fix.lon,
+        if location is not None:
+            received_at = _location_received_at_iso(location)
+            last_location = UserLocationOut(
+                accuracy_m=location.accuracy_m,
+                lat=location.lat,
+                lon=location.lon,
                 received_at=received_at,
-                source=fix.source,
+                source=location.source,
             )
-            age_seconds = max(0, int(now - fix.received_at))
-            inside_geofence_ids = geofence_ids_containing_fix(fix, geofences)
+            age_seconds = max(0, int(now - location.received_at))
+            inside_geofence_ids = geofence_ids_containing_location(location, geofences)
         rows.append(
-            ParticipantStatusOut(
+            UserStatusOut(
                 age_seconds=age_seconds,
-                display_name=participant.display_name,
-                enabled=participant.enabled,
+                display_name=user.display_name,
+                enabled=user.enabled,
+                first_name=user.first_name,
                 inside_geofence_ids=inside_geofence_ids,
-                last_fix=last_fix,
-                participant_id=participant.participant_id,
-                tracking_device_label=participant.tracking_device_label,
+                last_location=last_location,
+                last_name=user.last_name,
+                tracking_device_label=user.tracking_device_label,
+                user_id=user.user_id,
             )
         )
     return rows
 
 
-def _participant_fixes_from_status(
-    participants: list[ParticipantStatusOut],
-) -> dict[str, ParticipantFixOut]:
-    fixes: dict[str, ParticipantFixOut] = {}
-    for participant in participants:
-        if participant.last_fix is not None:
-            fixes[participant.participant_id] = participant.last_fix
-    return fixes
+def _location_received_at_iso(location: UserLocationRecord) -> str:
+    return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
+        "+00:00", "Z"
+    )
 
 
 def _to_iso_z(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _user_locations_from_status(
+    users: list[UserStatusOut],
+) -> dict[str, UserLocationOut]:
+    locations: dict[str, UserLocationOut] = {}
+    for user in users:
+        if user.last_location is not None:
+            locations[user.user_id] = user.last_location
+    return locations

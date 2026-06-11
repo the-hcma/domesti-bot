@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
@@ -415,17 +415,17 @@ class MyTracksPairStatusOut(BaseModel):
     location_updates_accepted: bool = True
     mytracks_location_updates_enabled: bool | None = None
     paired_at: str | None = None
-    participant_location_test_url: str | None = None
-    participant_location_update_url: str | None = None
+    user_location_test_url: str | None = None
+    user_location_update_url: str | None = None
     relay_key_configured: bool = False
     username: str
 
 
-class MyTracksParticipantsSyncOut(BaseModel):
-    """Result of a participant roster sync pull from My Tracks."""
+class MyTracksUsersSyncOut(BaseModel):
+    """Result of a user roster sync pull from My Tracks."""
 
     last_synced_at: str | None
-    participant_count: int
+    user_count: int
     source: Literal["my-tracks"] = "my-tracks"
     webhook_ready: bool = True
 
@@ -451,17 +451,19 @@ class MyTracksSyncIn(BaseModel):
     username: str | None = None
 
 
-class ParticipantOut(BaseModel):
-    """Automation participant roster row."""
+class UserOut(BaseModel):
+    """Automation user roster row."""
 
     display_name: str
     enabled: bool
-    participant_id: str
+    first_name: str
+    last_name: str
     tracking_device_label: str
+    user_id: str
 
 
-class ParticipantFixOut(BaseModel):
-    """Latest known GPS fix for a participant."""
+class UserLocationOut(BaseModel):
+    """Latest known GPS location for a user."""
 
     accuracy_m: int | None
     lat: float
@@ -478,17 +480,21 @@ class LocationUpdateWebhookIn(BaseModel):
     lat: float = Field(..., ge=-90.0, le=90.0)
     lon: float = Field(..., ge=-180.0, le=180.0)
     mqtt_user: str | None = None
-    participant_id: str = Field(..., min_length=1)
     source: str | None = None
     timestamp: str = Field(..., min_length=1)
+    user_id: str = Field(
+        ...,
+        min_length=1,
+        validation_alias=AliasChoices("user_id", "participant_id"),
+    )
 
 
-class ParticipantStatusOut(ParticipantOut):
-    """Participant roster row plus live presence fields."""
+class UserStatusOut(UserOut):
+    """User roster row plus live presence fields."""
 
     age_seconds: int | None = None
     inside_geofence_ids: list[str] = Field(default_factory=list)
-    last_fix: ParticipantFixOut | None = None
+    last_location: UserLocationOut | None = None
 
 
 class AfterLocalTimeCondition(BaseModel):
@@ -534,16 +540,16 @@ class LocalTimeWindowCondition(BaseModel):
     start_hhmm: str
 
 
-class ParticipantsInsideGeofenceCondition(BaseModel):
-    type: Literal["participants_inside_geofence"]
+class UsersInsideGeofenceCondition(BaseModel):
+    type: Literal["users_inside_geofence"]
     geofence_id: str
-    participant_ids: list[str]
+    user_ids: list[str]
 
 
-class ParticipantsOutsideGeofenceCondition(BaseModel):
-    type: Literal["participants_outside_geofence"]
+class UsersOutsideGeofenceCondition(BaseModel):
+    type: Literal["users_outside_geofence"]
     geofence_id: str
-    participant_ids: list[str]
+    user_ids: list[str]
 
 
 RuleConditionOut = Annotated[
@@ -555,8 +561,8 @@ RuleConditionOut = Annotated[
     | BeforeSunriseCondition
     | DaysOfWeekCondition
     | LocalTimeWindowCondition
-    | ParticipantsInsideGeofenceCondition
-    | ParticipantsOutsideGeofenceCondition,
+    | UsersInsideGeofenceCondition
+    | UsersOutsideGeofenceCondition,
     Field(discriminator="type"),
 ]
 
@@ -589,7 +595,7 @@ class RuleOut(BaseModel):
     enabled: bool
     id: str
     label: str
-    min_fix_accuracy_m: int
+    min_location_accuracy_m: int
     notification_email: str | None = None
     notify_on_fire: bool
     trigger: Literal["edge_true", "while_true"]
@@ -619,7 +625,7 @@ class RulesStatusOut(BaseModel):
 
     evaluator: RulesEvaluatorOut
     geofences: list[GeofenceOut]
-    participants: list[ParticipantStatusOut]
+    users: list[UserStatusOut]
     rules: list[RuleStatusSummaryOut]
     sun: "RulesSunOut"
     using_mock: bool

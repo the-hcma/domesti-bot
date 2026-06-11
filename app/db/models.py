@@ -53,7 +53,7 @@ class MyTracksSettings(Base):
     domain: Mapped[str] = mapped_column(String, nullable=False)
     last_geofences_sync_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_pair_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    last_participants_sync_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_users_sync_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_verify_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_verify_ok: Mapped[int | None] = mapped_column(Integer, nullable=True)
     location_history_max_age_s: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -61,23 +61,10 @@ class MyTracksSettings(Base):
     location_history_unlimited: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     location_updates_accepted: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     paired_at: Mapped[float | None] = mapped_column(Float, nullable=True)
-    participant_location_test_url: Mapped[str | None] = mapped_column(String, nullable=True)
-    participant_location_update_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    user_location_test_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    user_location_update_url: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
     username: Mapped[str] = mapped_column(String, nullable=False, default="")
-
-
-class RuleParticipantLocationHistory(Base):
-    __tablename__ = "rule_participant_location_history"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    lat: Mapped[float] = mapped_column(Float, nullable=False)
-    lon: Mapped[float] = mapped_column(Float, nullable=False)
-    participant_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    received_at: Mapped[float] = mapped_column(Float, nullable=False)
-    source: Mapped[str | None] = mapped_column(String, nullable=True)
-    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
 class RuleGeofence(Base):
@@ -93,26 +80,41 @@ class RuleGeofence(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
-class RuleParticipant(Base):
-    __tablename__ = "rule_participants"
+class RuleUser(Base):
+    __tablename__ = "rule_users"
 
-    participant_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
-    tracking_device_label: Mapped[str] = mapped_column(String, nullable=False)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_name: Mapped[str] = mapped_column(String, nullable=False)
+    last_name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    tracking_device_label: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
-class RuleParticipantLastFix(Base):
-    __tablename__ = "rule_participant_last_fix"
+class RuleUserLastLocation(Base):
+    __tablename__ = "rule_user_last_location"
 
-    participant_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lon: Mapped[float] = mapped_column(Float, nullable=False)
-    accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
     received_at: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class RuleUserLocationHistory(Base):
+    __tablename__ = "rule_user_location_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    received_at: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
 
 class SonosKnownZone(Base):

@@ -13,7 +13,7 @@ import {
 } from "./rule-summary.js";
 import type {
   GeofenceOut,
-  ParticipantOut,
+  UserOut,
   RuleActionDeviceOut,
   RuleConditionOut,
   RuleOut,
@@ -38,8 +38,8 @@ function appendConditionTree(
       item.textContent = condition.type === "all" ? "All of" : "Any of";
       appendConditionTree(item, condition.conditions, context);
     } else if (
-      condition.type === "participants_inside_geofence"
-      || condition.type === "participants_outside_geofence"
+      condition.type === "users_inside_geofence"
+      || condition.type === "users_outside_geofence"
     ) {
       item.textContent = formatPresenceEventLabel(condition, context);
     } else {
@@ -105,7 +105,7 @@ function appendLiveStatusSection(
 }
 
 export function buildInspectorContext(
-  participants: readonly ParticipantOut[],
+  participants: readonly UserOut[],
   geofences: readonly GeofenceOut[],
   actionDevices: readonly RuleActionDeviceOut[],
 ): RuleSummaryContext {
@@ -139,7 +139,7 @@ export function mountRuleInspectorPanel(
   appendDefinitionRow(
     meta,
     "Min fix accuracy",
-    `${rule.min_fix_accuracy_m} m`,
+    `${rule.min_location_accuracy_m} m`,
   );
   if (rule.notify_on_fire && rule.notification_email !== null) {
     appendDefinitionRow(meta, "Email on fire", rule.notification_email);

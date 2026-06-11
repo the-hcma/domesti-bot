@@ -22,44 +22,6 @@ export const WEEKDAY_DAYS = [1, 2, 3, 4, 5] as const;
 
 export const WEEKEND_DAYS = [0, 6] as const;
 
-export function firstNameFromDisplayName(displayName: string): string {
-  const trimmed = displayName.trim();
-  if (trimmed === "") {
-    return trimmed;
-  }
-  return trimmed.split(/\s+/)[0] ?? trimmed;
-}
-
-export function titleCaseParticipantId(participantId: string): string {
-  return participantId
-    .split(/[-_]/)
-    .filter((part) => part.length > 0)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
-export function participantLabelFromId(
-  participantId: string,
-  displayName?: string | null,
-): string {
-  const trimmed = displayName?.trim() ?? "";
-  if (trimmed !== "" && trimmed.toLowerCase() !== participantId.toLowerCase()) {
-    return firstNameFromDisplayName(trimmed);
-  }
-  return titleCaseParticipantId(participantId);
-}
-
-export function resolveParticipantDisplayName(
-  participantId: string,
-  displayName: string,
-): string {
-  const trimmed = displayName.trim();
-  if (trimmed === "" || trimmed.toLowerCase() === participantId.toLowerCase()) {
-    return titleCaseParticipantId(participantId);
-  }
-  return trimmed;
-}
-
 export interface DayOfWeekPicker {
   fieldset: HTMLFieldSetElement;
   getSelectedDays: () => number[];
@@ -244,6 +206,12 @@ export function createEnableToggle(
 }
 
 /** Reduce Chrome / password-manager autofill on non-login admin fields. */
+/** UI label for a user: roster ``display_name`` when set, else ``user_id``. */
+export function userDisplayLabel(userId: string, displayName?: string): string {
+  const trimmed = (displayName ?? "").trim();
+  return trimmed !== "" ? trimmed : userId;
+}
+
 export function preventBrowserAutofill(input: HTMLInputElement): void {
   input.setAttribute("autocomplete", "off");
   input.setAttribute("data-1p-ignore", "true");

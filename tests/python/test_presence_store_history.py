@@ -6,16 +6,16 @@ from pathlib import Path
 
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import (
-    ParticipantFixRecord,
-    count_participant_location_history,
-    upsert_participant_fix,
+    UserLocationRecord,
+    count_user_location_history,
+    upsert_user_location,
 )
-from app.rules_store import ParticipantRecord, replace_participants
+from app.rules_store import UserRecord, replace_users
 
 
-def _fix(participant_id: str, received_at: float) -> ParticipantFixRecord:
-    return ParticipantFixRecord(
-        participant_id=participant_id,
+def _fix(user_id: str, received_at: float) -> UserLocationRecord:
+    return UserLocationRecord(
+        user_id=user_id,
         lat=41.194085,
         lon=-73.888365,
         accuracy_m=12,
@@ -26,11 +26,13 @@ def _fix(participant_id: str, received_at: float) -> ParticipantFixRecord:
 
 def test_upsert_appends_history_and_prunes_to_retention_policy(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
-    replace_participants(
+    replace_users(
         db,
         [
-            ParticipantRecord(
-                participant_id="henrique",
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
                 display_name="Henrique",
                 tracking_device_label="Pixel",
                 enabled=True,
@@ -40,9 +42,9 @@ def test_upsert_appends_history_and_prunes_to_retention_policy(tmp_path: Path) -
     retention = default_location_history_retention()
     now = 1_700_000_000.0
     for index in reversed(range(25)):
-        upsert_participant_fix(
+        upsert_user_location(
             db,
             _fix("henrique", now - (index * 10_000.0)),
             retention=retention,
         )
-    assert count_participant_location_history(db, "henrique") == 20
+    assert count_user_location_history(db, "henrique") == 20

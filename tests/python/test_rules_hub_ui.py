@@ -140,6 +140,33 @@ def test_rules_menu_hidden_on_compact_viewport(
 
 
 @pytest.mark.browser
+def test_status_rule_card_title_cases_participant_names(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Status rule presence lines use title-cased participant labels, not raw ids."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        dialog = page.locator("dialog.rules-dialog")
+        dialog.wait_for(state="visible", timeout=10_000)
+        dialog.locator(".rules-rule-presence-summary").first.wait_for(
+            state="visible",
+            timeout=10_000,
+        )
+        text = dialog.inner_text()
+        assert "Henrique:" in text
+        assert "henrique:" not in text
+        assert "Kristen:" in text
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
 def test_status_rule_click_opens_rules_tab_inspector(
     chromium_browser: Any,
     landing_base_url: str,
@@ -234,7 +261,7 @@ def test_participant_presence_map_renders_osm_tiles_with_filters(
         assert page.locator(".rules-presence-map-filter").count() >= 2
         assert page.locator(".leaflet-control-zoom").count() >= 1
 
-        page.locator('.rules-tab[data-tab="participants"]').click()
+        page.locator('.rules-tab[data-tab="users"]').click()
         page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
         page.wait_for_function(
             """() => {
@@ -269,7 +296,7 @@ def test_participants_tab_osm_tiles_are_visible(
         page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator('.rules-tab[data-tab="participants"]').click()
+        page.locator('.rules-tab[data-tab="users"]').click()
         page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
         page.wait_for_function(
             """() => {
@@ -364,7 +391,7 @@ def test_participants_tab_tooltip_not_clipped_at_map_edge(
         page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator('.rules-tab[data-tab="participants"]').click()
+        page.locator('.rules-tab[data-tab="users"]').click()
         page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
         page.wait_for_function(
             """() => {
@@ -432,7 +459,7 @@ def test_participant_tooltip_hides_when_pointer_leaves_marker(
         page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator('.rules-tab[data-tab="participants"]').click()
+        page.locator('.rules-tab[data-tab="users"]').click()
         page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
         page.wait_for_function(
             """() => {

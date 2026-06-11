@@ -3,24 +3,22 @@
 import {
   ALL_DAYS_OF_WEEK,
   DAY_OF_WEEK_LABELS,
-  firstNameFromDisplayName,
-  participantLabelFromId,
   WEEKDAY_DAYS,
   WEEKEND_DAYS,
 } from "./rules-ui-helpers.js";
 import type {
   GeofenceOut,
-  ParticipantOut,
   RuleActionDeviceOut,
   RuleActionType,
   RuleConditionOut,
   RuleOut,
+  UserOut,
 } from "./types.js";
 
 export interface RuleSummaryContext {
   deviceLabelByKey: ReadonlyMap<string, string>;
   geofenceLabelById: ReadonlyMap<string, string>;
-  participantNameById: ReadonlyMap<string, string>;
+  userDisplayNameById: ReadonlyMap<string, string>;
 }
 
 export interface RuleSummarySections {
@@ -59,16 +57,13 @@ export function resolveDeviceLabel(
 }
 
 export function buildRuleSummaryContext(
-  participants: readonly ParticipantOut[],
+  users: readonly UserOut[],
   geofences: readonly GeofenceOut[],
   actionDevices: readonly RuleActionDeviceOut[],
 ): RuleSummaryContext {
-  const participantNameById = new Map<string, string>();
-  for (const participant of participants) {
-    participantNameById.set(
-      participant.participant_id,
-      firstNameFromDisplayName(participant.display_name),
-    );
+  const userDisplayNameById = new Map<string, string>();
+  for (const user of users) {
+    userDisplayNameById.set(user.user_id, user.display_name);
   }
   const geofenceLabelById = new Map<string, string>();
   for (const geofence of geofences) {
@@ -78,20 +73,20 @@ export function buildRuleSummaryContext(
   for (const device of actionDevices) {
     deviceLabelByKey.set(deviceKey(device.family_id, device.device_id), device.label);
   }
-  return { deviceLabelByKey, geofenceLabelById, participantNameById };
+  return { deviceLabelByKey, geofenceLabelById, userDisplayNameById };
 }
 
-export function collectParticipantIdsFromConditions(
+export function collectUserIdsFromConditions(
   conditions: readonly RuleConditionOut[],
 ): string[] {
   const ids = new Set<string>();
   const walk = (condition: RuleConditionOut): void => {
     if (
-      condition.type === "participants_inside_geofence"
-      || condition.type === "participants_outside_geofence"
+      condition.type === "users_inside_geofence"
+      || condition.type === "users_outside_geofence"
     ) {
-      for (const participantId of condition.participant_ids) {
-        ids.add(participantId);
+      for (const userId of condition.user_ids) {
+        ids.add(userId);
       }
       return;
     }
@@ -107,8 +102,8 @@ export function collectParticipantIdsFromConditions(
   return [...ids].sort();
 }
 
-export function collectParticipantIdsFromRule(rule: RuleOut): string[] {
-  return collectParticipantIdsFromConditions(rule.conditions.all);
+export function collectUserIdsFromRule(rule: RuleOut): string[] {
+  return collectUserIdsFromConditions(rule.conditions.all);
 }
 
 export function joinNames(names: readonly string[]): string {
@@ -139,17 +134,11 @@ function formatLocalTime(hhmm: string): string {
   return `${hour}:${minute} ${period}`;
 }
 
-function participantNames(
-  participantIds: readonly string[],
+function userDisplayNames(
+  userIds: readonly string[],
   context: RuleSummaryContext,
 ): string[] {
-  return participantIds.map((id) => {
-    const fromContext = context.participantNameById.get(id);
-    if (fromContext !== undefined && fromContext !== "") {
-      return fromContext;
-    }
-    return participantLabelFromId(id);
-  });
+  return userIds.map((id) => context.userDisplayNameById.get(id) ?? id);
 }
 
 function geofenceLabel(geofenceId: string, context: RuleSummaryContext): string {
@@ -182,14 +171,14 @@ function formatDaysOfWeek(days: readonly number[]): string {
 export function formatPresenceEventLabel(
   condition: Extract<
     RuleConditionOut,
-    { type: "participants_inside_geofence" | "participants_outside_geofence" }
+    { type: "users_inside_geofence" | "users_outside_geofence" }
   >,
   context: RuleSummaryContext,
 ): string {
-  const names = participantNames(condition.participant_ids, context);
+  const names = userDisplayNames(condition.user_ids, context);
   const where = geofenceLabel(condition.geofence_id, context);
   const who = joinNames(names);
-  if (condition.type === "participants_inside_geofence") {
+  if (condition.type === "users_inside_geofence") {
     return `When ${who} enter ${where}`;
   }
   return `When ${who} leave ${where}`;
@@ -197,8 +186,8 @@ export function formatPresenceEventLabel(
 
 export function formatTimingCondition(condition: RuleConditionOut): string | null {
   switch (condition.type) {
-    case "participants_inside_geofence":
-    case "participants_outside_geofence":
+    case "users_inside_geofence":
+    case "users_outside_geofence":
       return null;
     case "all":
     case "any":
@@ -270,8 +259,8 @@ export function summarizeRule(
   const timing: string[] = [];
   walkRuleConditions(rule.conditions.all, (condition) => {
     if (
-      condition.type === "participants_inside_geofence"
-      || condition.type === "participants_outside_geofence"
+      condition.type === "users_inside_geofence"
+      || condition.type === "users_outside_geofence"
     ) {
       presence.push(formatPresenceEventLabel(condition, context));
       return;

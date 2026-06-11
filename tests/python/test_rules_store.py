@@ -6,25 +6,27 @@ from pathlib import Path
 
 from app.rules_store import (
     GeofenceRecord,
-    ParticipantRecord,
+    UserRecord,
     count_geofences,
-    count_participants,
+    count_users,
     delete_geofence,
     list_geofences,
-    list_participants,
+    list_users,
     replace_geofences,
-    replace_participants,
+    replace_users,
     save_geofence,
 )
 
 
-def test_replace_and_list_participants(tmp_path: Path) -> None:
+def test_replace_and_list_users(tmp_path: Path) -> None:
     db = tmp_path / "rules.sqlite"
-    count = replace_participants(
+    count = replace_users(
         db,
         [
-            ParticipantRecord(
-                participant_id="henrique",
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
                 display_name="Henrique",
                 tracking_device_label="Pixel",
                 enabled=True,
@@ -32,9 +34,9 @@ def test_replace_and_list_participants(tmp_path: Path) -> None:
         ],
     )
     assert count == 1
-    assert count_participants(db) == 1
-    rows = list_participants(db)
-    assert rows[0].participant_id == "henrique"
+    assert count_users(db) == 1
+    rows = list_users(db)
+    assert rows[0].user_id == "henrique"
 
 
 def test_replace_and_list_geofences(tmp_path: Path) -> None:

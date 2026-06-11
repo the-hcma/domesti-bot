@@ -6,21 +6,21 @@ from pathlib import Path
 
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import (
-    ParticipantFixRecord,
-    geofence_ids_containing_fix,
-    list_participant_fixes,
-    replace_participant_fixes,
+    UserLocationRecord,
+    geofence_ids_containing_location,
+    list_user_locations,
+    replace_user_locations,
 )
 from app.rules_store import GeofenceRecord, list_geofences, replace_geofences
 
 
-def test_replace_and_list_participant_fixes(tmp_path: Path) -> None:
+def test_replace_and_list_user_locations(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
-    replace_participant_fixes(
+    replace_user_locations(
         db,
         [
-            ParticipantFixRecord(
-                participant_id="henrique",
+            UserLocationRecord(
+                user_id="henrique",
                 lat=41.194072,
                 lon=-73.888325,
                 accuracy_m=12,
@@ -30,12 +30,12 @@ def test_replace_and_list_participant_fixes(tmp_path: Path) -> None:
         ],
         retention=default_location_history_retention(),
     )
-    fixes = list_participant_fixes(db)
+    fixes = list_user_locations(db)
     assert fixes["henrique"].lat == 41.194072
     assert fixes["henrique"].source == "my-tracks"
 
 
-def test_geofence_ids_containing_fix(tmp_path: Path) -> None:
+def test_geofence_ids_containing_location(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     replace_geofences(
         db,
@@ -51,13 +51,13 @@ def test_geofence_ids_containing_fix(tmp_path: Path) -> None:
             ),
         ],
     )
-    fix = ParticipantFixRecord(
-        participant_id="henrique",
+    fix = UserLocationRecord(
+        user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
         accuracy_m=12,
         received_at=1_700_000_000.0,
         source="my-tracks",
     )
-    inside = geofence_ids_containing_fix(fix, list_geofences(db))
+    inside = geofence_ids_containing_location(fix, list_geofences(db))
     assert inside == ["house"]

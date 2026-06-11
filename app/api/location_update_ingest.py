@@ -10,8 +10,8 @@ from fastapi import HTTPException
 
 from app.api.schemas import LocationUpdateWebhookIn
 from app.mytracks_store import load_location_history_retention, load_mytracks_pair_status
-from app.presence_store import ParticipantFixRecord, parse_iso_timestamp_to_epoch, upsert_participant_fix
-from app.rules_store import participant_exists
+from app.presence_store import UserLocationRecord, parse_iso_timestamp_to_epoch, upsert_user_location
+from app.rules_store import user_exists
 
 _LOGGER = logging.getLogger("location")
 
@@ -21,7 +21,7 @@ def apply_location_update_webhook(
     body: LocationUpdateWebhookIn,
     *,
     check_emergency_switch: bool,
-    persist_fix: bool,
+    persist_location: bool,
 ) -> None:
     """Validate and optionally persist a location-update payload."""
     if check_emergency_switch and not _location_updates_accepted(cache_path):
@@ -30,14 +30,14 @@ def apply_location_update_webhook(
             detail="Location updates paused by operator",
             headers={"Retry-After": "60"},
         )
-    participant_id = body.participant_id.strip()
-    if not persist_fix:
-        _LOGGER.info("test webhook accepted for %s (discarded)", participant_id)
+    user_id = body.user_id.strip()
+    if not persist_location:
+        _LOGGER.info("test webhook accepted for %s (discarded)", user_id)
         return
-    if not participant_exists(cache_path, participant_id):
+    if not user_exists(cache_path, user_id):
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
-            detail=f"Unknown participant_id {participant_id!r}",
+            detail=f"Unknown user_id {user_id!r}",
         )
     try:
         received_at = parse_iso_timestamp_to_epoch(body.timestamp)
@@ -47,10 +47,10 @@ def apply_location_update_webhook(
             detail=str(exc),
         ) from exc
     retention = load_location_history_retention(cache_path)
-    upsert_participant_fix(
+    upsert_user_location(
         cache_path,
-        ParticipantFixRecord(
-            participant_id=participant_id,
+        UserLocationRecord(
+            user_id=user_id,
             lat=body.lat,
             lon=body.lon,
             accuracy_m=body.accuracy_m,
