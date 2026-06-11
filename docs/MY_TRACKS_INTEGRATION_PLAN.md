@@ -437,7 +437,7 @@ Helpers in `app/db/secrets.py`: `save_mytracks_relay_api_key_to_db`, `load_mytra
 | **D2** | `app_secrets` relay key; `pair_with_my_tracks()`; pairing APIs; `PATCH …/location-updates`; `PATCH …/location-history-retention`; pairing attempt logging | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)) |
 | **D3** | Settings UI: pair/re-pair, retention, relay-key reveal, reset; Automations participant map legend + live polling | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216)) |
 | **D3b** (optional) | Verify-roundtrip + emergency-toggle buttons in Settings | Deferred (APIs + verify script exist) |
-| **D4** (later) | `RuleEvaluator` on live location-update ingest only | Deferred — `docs/RULE_ENGINE_PLAN.md` |
+| **D4** (later) | File-backed `RuleEvaluator` on live `POST /v1/webhooks/location_update` (rules in `automation-rules.json`, no rule SQLite yet) | In progress — bundle in `automation-rules.json.example`; see **Phase 2a** in `docs/RULE_ENGINE_PLAN.md` |
 
 **my-tracks companions:** [#1087](https://github.com/the-hcma/my-tracks/pull/1087) (pair + config); add `participant_location_test_url` to pair payload; P3 live relay; P4 test button → **test URL only**.
 

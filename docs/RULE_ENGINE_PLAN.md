@@ -1,8 +1,12 @@
 # Plan: mainline the rule engine
 
-This document describes how to evolve domesti-bot from its **partially implemented** rule-engine scaffolding into a production-ready automation layer. The motivating scenario:
+This document describes how to evolve domesti-bot from its **partially implemented** rule-engine scaffolding into a production-ready automation layer. The **first production automations** (file-backed, no rule SQLite yet):
 
-> When **Henrique** and **Kristen** both arrive within the **house geofence**, and it is **dark outside** (after sunset), turn on certain Kasa light switches and open a particular GoTailwind garage door.
+> When **Henrique or Kristen** **arrives home** after sunset, turn on **Front door lights**, **Garage**, and **Garage outside lights**, and email **github@hcma.info**.
+>
+> When **Kristen arrives at** or **leaves** the **west-point** geofence, email **github@hcma.info** (no device actions).
+
+See **`automation-rules.json.example`** at the repo root (copy to gitignored **`automation-rules.json`** on the server).
 
 The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport wider than the compact/mobile breakpoint). Mobile/PWA users keep the tile dashboard; they do not get rule editing in v1.
 
@@ -10,7 +14,64 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 
 **my-tracks pairing and relay (canonical):** see [`docs/MY_TRACKS_INTEGRATION_PLAN.md`](MY_TRACKS_INTEGRATION_PLAN.md) for HTTPS public URLs, domesti-bot-initiated pairing, live vs test webhook paths (`/v1/webhooks/location_update` and `/v1/webhooks/location_update/test`), manual roster/geofence sync, verify roundtrip, and the emergency location-update switch. Sections below that describe a participants **push** webhook are superseded by that plan unless noted otherwise.
 
-**Delivery order:** ship the **desktop web UI first**, backed by **in-browser mock data**, so layout, copy, and flows can be reviewed before any Python persistence or evaluator work. Backend PRs then implement the API shapes the UI already consumes and swap the mock data source for real HTTP.
+**Delivery order:** Phase 1 (desktop Automations UI + mocks) is **largely shipped**. Phase 2 now starts with a **file-backed evaluator** that runs the production rule bundle without SQLite rule CRUD; rule persistence and full UI wire-up follow later.
+
+---
+
+## Agreed design: file-backed evaluator (no rule persistence yet)
+
+### Rule bundle file
+
+| Item | Choice |
+| --- | --- |
+| **Path** | `automation-rules.json` at the **repo/server root** (beside `domesti-bot.config.json`). Committed template: `automation-rules.json.example`. |
+| **Schema** | Same JSON shape as `RuleOut` / `RuleConditionOut` in `web/src/types.ts` (mirrors future Pydantic models). |
+| **Device targets** | Top-level `"device_id_resolution": "preferred_label"` — `device_id` is the tile/REPL display name (e.g. `Front door lights`); the evaluator resolves to Kasa host or Tailwind id via `preferred_label`, like the REPL. |
+| **Geofences** | Loaded from existing SQLite (`rule_geofences`) by `geofence_id` (`house`, `west-point`, …). Operators define fences in Automations → Geofences; the bundle only references ids. |
+| **Sunset** | `settings_location` block in the bundle (lat/lon/timezone) until `GET/PUT /v1/rules/settings/location` exists; evaluated with **`astral`**. |
+| **Edit workflow** | Edit JSON → restart server (no Automations rule editor persistence in this track). |
+
+### Evaluation model (location-driven edges)
+
+Rules fire on **geofence enter/leave transitions** when a live fix arrives on `POST /v1/webhooks/location_update`, not on a naive “composite became true at sunset” poll.
+
+1. On ingest for participant `P`, compute `now_inside` per enabled geofence (haversine; same math as `presence_store.geofence_ids_containing_fix`).
+2. Compare to in-memory `was_inside[P, geofence_id]`; detect **enter** and **leave**.
+3. For each enabled rule, consider only rows where `P` appears in the relevant geofence condition.
+4. **Enter** rules: `participants_inside_geofence` + `trigger: edge_true`.
+5. **Leave** rules: `participants_outside_geofence` + `trigger: edge_true` (single participant listed).
+6. Evaluate remaining conditions at event time (`after_sunset`, nested `any`/`all`).
+7. Respect `cooldown_s` and `min_fix_accuracy_m`.
+8. Run `device_actions` (Kasa `turn_on`, …) via `DeviceManagersState`; send email when `notify_on_fire` using persisted SMTP settings.
+
+**Important:** Rule 1 uses `conditions.all: [after_sunset, { type: any, conditions: [henrique inside house, kristen inside house] }]`. The evaluator must treat the geofence half as an **arrival edge for the participant whose fix just arrived**, so someone already home before sunset does not trigger lights when sunset passes.
+
+### In-memory evaluator state (acceptable until rule persistence)
+
+- Per `(participant_id, geofence_id)`: previous inside flag.
+- Per rule: `last_fired_at` for cooldown.
+- Lost on restart (re-entering a geofence after restart may re-fire if cooldown expired).
+
+### Production rule ids (in `automation-rules.json.example`)
+
+| `id` | Summary |
+| --- | --- |
+| `evening-arrival-home-lights` | Henrique **or** Kristen enters `house` after sunset → three Kasa `turn_on` + email |
+| `kristen-west-point-arrive` | Kristen enters `west-point` → email only |
+| `kristen-west-point-leave` | Kristen leaves `west-point` → email only |
+
+### Module layout (next implementation PRs)
+
+```
+automation-rules.json          # operator copy (gitignored)
+automation-rules.json.example
+app/automation_rules_loader.py # parse + validate bundle
+app/rule_conditions.py         # port from web/src/rules-evaluate.ts + astral
+app/rule_actions.py            # Kasa/Tailwind dispatch + SMTP notify
+app/rule_evaluator.py          # edge state, cooldown, dispatch
+```
+
+Hook: end of `apply_location_update_webhook()` after `upsert_participant_fix`, with `app.state.device_state` for actuators. Optional slow tick for logging only — **not** for firing rule 1 at sunset.
 
 ---
 
@@ -25,11 +86,14 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 | `Geofence` (circle, UTM distance, **all** devices must be inside) | Implemented | `app/rule_engine.py` |
 | `Condition`, `Action` / `CallableAction` / `AsyncCallableAction` | Implemented (predicate + device effect bindings) | `app/rule_engine.py` |
 | `Rule`, `RuleEngine` | **Empty stubs** (`class Rule: pass`) | `app/rule_engine.py` |
-| HTTP presence / location ingest | **Not started** | — |
-| Rule persistence | **Not started** | — |
-| Rule evaluation loop | **Not started** | — |
-| Sunset / astronomical conditions | **Not started** | — |
-| Web UI for rules / geofences | **Not started** | — |
+| Live location ingest (my-tracks relay) | **Done** | `POST /v1/webhooks/location_update` |
+| Geofence + participant roster (SQLite) | **Done** | `app/rules_store.py`, `app/api/rules_routes.py` |
+| SMTP settings + test send | **Done** | `app/smtp_service.py`, `app/api/smtp_routes.py` |
+| Automations UI (rules editor, geofences map, status) | **Done** (rules still **mock-backed** in browser) | `web/src/rules-dialog.ts`, `web/src/rules-data-source.ts` |
+| Rule bundle template | **Done** | `automation-rules.json.example` |
+| File-backed rule evaluator | **Not started** | — |
+| Rule SQLite persistence + rule CRUD API | **Deferred** (after file-backed evaluator works) | — |
+| Sunset via `astral` on server | **Not started** (mock sun in TS only) | `web/src/rules-evaluate.ts` |
 | Hermetic tests beyond geofence distance | Minimal (`test_rule_engine.py`; `RuleEngine` test is a placeholder) | `tests/python/test_rule_engine.py` |
 
 ### What my-tracks has today (to migrate or sunset)
@@ -49,13 +113,14 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 3. **Distance math uses pyproj UTM** — WGS84 lat/lon → meters via `EPSG:4326` → `EPSG:32618` (UTM zone 18N). This is correct for the current home coordinates in tests but must become **zone-aware** before rules ship for arbitrary locations.
 4. **SQLite is the persistence home** — discovery cache, UI preferences, and encrypted secrets already live in one file (`kasa_discovery_store` / `app/db/`). Rules, geofences, and presence participants should extend that database, not introduce a second store.
 
-### Gaps to close
+### Gaps to close (file-backed track)
 
-- No way for **[my-tracks](https://github.com/the-hcma/my-tracks)** (sibling repo — OwnTracks MQTT ingest) to **webhook** participant locations into domesti-bot on each GPS fix.
-- No persisted rule definitions, no evaluator, no edge-triggered “arrival” semantics (conditions flipping false → true).
-- No astronomical “after sunset” condition.
-- No mapping from rule actions → live `DeviceManagersState` (Kasa hosts, Tailwind door IDs).
-- `setLocation` is camelCase (legacy); new code should prefer `set_location` with a backward-compatible alias until a dedicated cleanup PR lands.
+- Load and validate `automation-rules.json` at startup; fail loudly if missing when evaluator is enabled.
+- Python condition evaluator + **enter/leave edge** semantics on location ingest.
+- `astral` sunset checks using bundle `settings_location`.
+- Action dispatcher: resolve `preferred_label` → device manager; Kasa `turn_on`; rule notification email via SMTP.
+- Hermetic tests: simulated fixes for Henrique/Kristen at house and Kristen at `west-point`.
+- Later: SQLite rule CRUD, `GET /v1/rules/status`, wire Automations UI off mock.
 
 ---
 
@@ -945,7 +1010,32 @@ No new Python rule modules in this phase (existing tile server unchanged except 
 
 ---
 
-### Phase 2 — Backend (wire UI to reality)
+### Phase 2a — File-backed evaluator (current track)
+
+Ship production automations from `automation-rules.json` **before** SQLite rule tables or Automations rule CRUD.
+
+#### PR-A1 — `feat/automation-rules-bundle` (this PR)
+
+- `automation-rules.json.example` + gitignore `automation-rules.json`.
+- `conditions.any` / `conditions.all` nested types in `web/src/types.ts`.
+- Update this plan + `MY_TRACKS_INTEGRATION_PLAN.md` D4 pointer.
+
+#### PR-A2 — `feat/rule-conditions-and-astral`
+
+- `uv add astral`; `app/rule_conditions.py` (geofence, sunset, `any`/`all`).
+- Hermetic tests with bundle coordinates.
+
+#### PR-A3 — `feat/rule-actions-dispatch`
+
+- `app/rule_actions.py`: label → device resolution, Kasa `turn_on`, SMTP rule notifications.
+
+#### PR-A4 — `feat/rule-evaluator-location-ingest`
+
+- `app/automation_rules_loader.py`, `app/rule_evaluator.py`.
+- Hook after `upsert_participant_fix`; in-memory edge + cooldown state.
+- Integration test with the three production rules.
+
+### Phase 2b — Backend persistence (deferred)
 
 Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1. The wire-up PR is the contract gate.
 

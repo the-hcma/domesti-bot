@@ -128,6 +128,14 @@ export type RuleConditionOut =
       window_end?: "midnight";
     }
   | {
+      type: "all";
+      conditions: RuleConditionOut[];
+    }
+  | {
+      type: "any";
+      conditions: RuleConditionOut[];
+    }
+  | {
       type: "before_sunrise";
       offset_minutes: number;
       /** Default ``midnight`` — morning window starts at local midnight. */

@@ -136,6 +136,32 @@ function evaluateCondition(
         : `Outside sunset–midnight window (sunset ${sunsetLabel})`,
     };
   }
+  if (condition.type === "all") {
+    const children = condition.conditions.map((child) =>
+      evaluateCondition(child, rule, store),
+    );
+    const met = children.every((child) => child.met);
+    return {
+      condition,
+      label: "All of",
+      met,
+      detail: met ? "All nested conditions met" : "Waiting on nested conditions",
+    };
+  }
+  if (condition.type === "any") {
+    const children = condition.conditions.map((child) =>
+      evaluateCondition(child, rule, store),
+    );
+    const met = children.some((child) => child.met);
+    return {
+      condition,
+      label: "Any of",
+      met,
+      detail: met
+        ? "At least one nested condition met"
+        : "No nested conditions met yet",
+    };
+  }
   if (condition.type === "before_sunrise") {
     const sun = mockSunRow();
     const met = isInBeforeSunriseWindow(sun.sunrise_at, condition.offset_minutes);
@@ -214,6 +240,18 @@ function evaluateCondition(
       detail: met
         ? `Today (${dayNames[today] ?? "?"}) is in ${selected}`
         : `Today (${dayNames[today] ?? "?"}) not in ${selected}`,
+    };
+  }
+
+  if (
+    condition.type !== "participants_inside_geofence"
+    && condition.type !== "participants_outside_geofence"
+  ) {
+    return {
+      condition,
+      label: "Condition",
+      met: false,
+      detail: "Unsupported condition type for status display",
     };
   }
 
