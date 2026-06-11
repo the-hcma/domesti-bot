@@ -14,8 +14,8 @@ import { DEFAULT_MIN_LOCATION_ACCURACY_M } from "./rules-constants.js";
 import {
   formatInsideGeofencesLine,
   mountPresenceMap,
-  participantStatusToMapParticipant,
-  renderParticipantDetailText,
+  userStatusToMapUser,
+  renderUserDetailText,
   type PresenceMapController,
 } from "./presence-map.js";
 import {
@@ -292,7 +292,7 @@ class RulesHubController {
       ["conditions", "Conditions"],
       ["rules", "Rules"],
       ["geofences", "Geofences"],
-      ["users", "Participants"],
+      ["users", "Users"],
       ["mail", "Mail"],
     ] as const) {
       const btn = document.createElement("button");
@@ -395,13 +395,13 @@ class RulesHubController {
     return deviceRows;
   }
 
-  private mountParticipantPresenceMap(
+  private mountUserPresenceMap(
     parent: HTMLElement,
     geofences: GeofenceOut[],
-    participants: UserStatusOut[],
+    users: UserStatusOut[],
     options: {
-      includeParticipantIdInTooltip?: boolean;
-      showParticipantFilters: boolean;
+      includeUserIdInTooltip?: boolean;
+      showUserFilters: boolean;
       showTextDetails: boolean;
     },
   ): void {
@@ -410,20 +410,20 @@ class RulesHubController {
     parent.append(mount);
     this.presenceMap = mountPresenceMap(mount, {
       geofences,
-      participants: participants.map(participantStatusToMapParticipant),
-      showParticipantFilters: options.showParticipantFilters,
-      ...(options.includeParticipantIdInTooltip === true
-        ? { includeParticipantIdInTooltip: true as const }
+      users: users.map(userStatusToMapUser),
+      showUserFilters: options.showUserFilters,
+      ...(options.includeUserIdInTooltip === true
+        ? { includeUserIdInTooltip: true as const }
         : {}),
     });
     this.startPresencePoll();
     if (options.showTextDetails) {
       const details = document.createElement("div");
-      details.className = "rules-participant-details-list";
-      for (const participant of participants) {
+      details.className = "rules-user-details-list";
+      for (const user of users) {
         details.append(
-          renderParticipantDetailText(
-            participantStatusToMapParticipant(participant),
+          renderUserDetailText(
+            userStatusToMapUser(user),
             true,
             geofences,
           ),
@@ -444,7 +444,7 @@ class RulesHubController {
 
   private async openRuleEditor(existing: RuleOut | null): Promise<void> {
     const geofences = await this.dataSource.listGeofences();
-    const participants = await this.dataSource.listUsers();
+    const users = await this.dataSource.listUsers();
     const actionDevices = await this.dataSource.listActionDevices();
     const timeTemplates = await this.dataSource.listTimeConditionTemplates();
 
@@ -510,13 +510,13 @@ class RulesHubController {
     whoField.className = "rules-editor-fieldset rules-editor-subfieldset";
     const whoLegend = document.createElement("legend");
     whoField.append(whoLegend);
-    const selectedParticipants = new Set<string>(
+    const selectedUsers = new Set<string>(
       existing?.conditions.all.find((c) => c.type === "users_inside_geofence")
         ?.user_ids ?? ["henrique", "kristen"],
     );
     const syncWhoLegend = (): void => {
-      const names = participants
-        .filter((p) => selectedParticipants.has(p.user_id))
+      const names = users
+        .filter((p) => selectedUsers.has(p.user_id))
         .map((p) =>
           userDisplayLabel(p.user_id, p.display_name),
         );
@@ -529,18 +529,18 @@ class RulesHubController {
           ? "When someone enters a geofence"
           : `When ${who} enter ${fenceLabel}`;
     };
-    for (const p of participants) {
+    for (const p of users) {
       const row = document.createElement("label");
       row.className = "rules-check-row";
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.value = p.user_id;
-      cb.checked = selectedParticipants.has(p.user_id);
+      cb.checked = selectedUsers.has(p.user_id);
       cb.addEventListener("change", () => {
         if (cb.checked) {
-          selectedParticipants.add(p.user_id);
+          selectedUsers.add(p.user_id);
         } else {
-          selectedParticipants.delete(p.user_id);
+          selectedUsers.delete(p.user_id);
         }
         syncWhoLegend();
       });
@@ -697,9 +697,9 @@ class RulesHubController {
       tuningRow,
       createFieldLabel("Min location accuracy (meters)", {
         detail:
-          "Ignore GPS fixes whose horizontal accuracy is worse than this threshold. Prevents a fuzzy phone fix from falsely placing someone inside a geofence.",
+          "Ignore GPS readings whose horizontal accuracy is worse than this threshold. Prevents a fuzzy phone reading from falsely placing someone inside a geofence.",
         example:
-          "50 m drops a ±120 m fix in a parking lot while still accepting a ±12 m fix in the driveway.",
+          "50 m drops a ±120 m reading in a parking lot while still accepting a ±12 m reading in the driveway.",
       }),
       accuracyInput,
     );
@@ -780,18 +780,18 @@ class RulesHubController {
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
       void (async () => {
-        const participantIds = [
+        const userIds = [
           ...whoField.querySelectorAll<HTMLInputElement>("input:checked"),
         ].map((el) => el.value);
-        if (participantIds.length === 0) {
-          showErrorToast("Select at least one participant.");
+        if (userIds.length === 0) {
+          showErrorToast("Select at least one user.");
           return;
         }
         const conditions: RuleOut["conditions"]["all"] = [
           {
             type: "users_inside_geofence",
             geofence_id: whereSelect.value,
-            user_ids: participantIds,
+            user_ids: userIds,
           },
         ];
         if (sunsetCb.checked) {
@@ -892,7 +892,7 @@ class RulesHubController {
     rule: RuleOut,
     liveStatus?: RuleStatusSummaryOut,
   ): Promise<void> {
-    const [participants, geofences, actionDevices] = await Promise.all([
+    const [users, geofences, actionDevices] = await Promise.all([
       this.dataSource.listUsers(),
       this.dataSource.listGeofences(),
       this.dataSource.listActionDevices(),
@@ -915,7 +915,7 @@ class RulesHubController {
     mountRuleInspectorPanel(
       panel,
       rule,
-      buildInspectorContext(participants, geofences, actionDevices),
+      buildInspectorContext(users, geofences, actionDevices),
       inspectorOptions,
     );
     this.body.append(panel);
@@ -933,12 +933,12 @@ class RulesHubController {
       return;
     }
     try {
-      const participants = await this.dataSource.listUserStatus();
-      this.presenceMap.updateParticipants(
-        participants.map(participantStatusToMapParticipant),
+      const users = await this.dataSource.listUserStatus();
+      this.presenceMap.updateUsers(
+        users.map(userStatusToMapUser),
       );
     } catch (err) {
-      console.warn("Participant presence map refresh failed", err);
+      console.warn("User presence map refresh failed", err);
     }
   }
 
@@ -967,7 +967,7 @@ class RulesHubController {
         await this.renderMailTab();
         break;
       case "users":
-        await this.renderParticipantsTab();
+        await this.renderUsersTab();
         break;
     }
   }
@@ -1055,7 +1055,7 @@ class RulesHubController {
     }
 
     const form = document.createElement("form");
-    form.className = "rules-participant-form";
+    form.className = "rules-user-form";
     const labelInput = document.createElement("input");
     labelInput.required = true;
     labelInput.placeholder = "Weekend late night";
@@ -1113,11 +1113,11 @@ class RulesHubController {
       void this.setTab("conditions");
     });
 
-    const participantsHeading = document.createElement("h3");
-    participantsHeading.className = "rules-section-title";
-    participantsHeading.textContent = "Participants";
-    const participantsSection = document.createElement("section");
-    participantsSection.className = "rules-participants-section";
+    const usersHeading = document.createElement("h3");
+    usersHeading.className = "rules-section-title";
+    usersHeading.textContent = "Users";
+    const usersSection = document.createElement("section");
+    usersSection.className = "rules-users-section";
 
     const rulesHeading = document.createElement("h3");
     rulesHeading.className = "rules-section-title";
@@ -1166,8 +1166,8 @@ class RulesHubController {
         if (definition === null) {
           return;
         }
-        const participantIds = collectUserIdsFromRule(definition);
-        if (participantIds.length === 0) {
+        const userIds = collectUserIdsFromRule(definition);
+        if (userIds.length === 0) {
           return;
         }
         const rosterDisplayNameById = new Map(
@@ -1175,21 +1175,21 @@ class RulesHubController {
         );
         const presence = document.createElement("div");
         presence.className = "rules-rule-presence-summary";
-        for (const participantId of participantIds) {
-          const participant = status.users.find(
-            (row) => row.user_id === participantId,
+        for (const userId of userIds) {
+          const userRow = status.users.find(
+            (row) => row.user_id === userId,
           );
           const line = document.createElement("p");
           line.className = "rules-card-meta";
           const name = userDisplayLabel(
-            participantId,
-            participant?.display_name
-              ?? rosterDisplayNameById.get(participantId),
+            userId,
+            userRow?.display_name
+              ?? rosterDisplayNameById.get(userId),
           );
-          const where = participant?.last_location === null || participant === undefined
-            ? "No location fix"
+          const where = userRow?.last_location === null || userRow === undefined
+            ? "No location yet"
             : formatInsideGeofencesLine(
-              participant.inside_geofence_ids,
+              userRow.inside_geofence_ids,
               status.geofences,
             );
           line.textContent = `${name}: ${where}`;
@@ -1200,25 +1200,25 @@ class RulesHubController {
       ruleList.append(card);
     }
 
-    this.body.append(sunBtn, participantsHeading, participantsSection, rulesHeading, ruleList);
-    this.mountParticipantPresenceMap(
-      participantsSection,
+    this.body.append(sunBtn, usersHeading, usersSection, rulesHeading, ruleList);
+    this.mountUserPresenceMap(
+      usersSection,
       status.geofences,
       status.users,
-      { showParticipantFilters: true, showTextDetails: false },
+      { showUserFilters: true, showTextDetails: false },
     );
   }
 
   private async renderRulesTab(): Promise<void> {
     const rulesReadOnly = this.dataSource.isRulesFileBacked();
-    const [rules, participants, geofences, actionDevices] = await Promise.all([
+    const [rules, users, geofences, actionDevices] = await Promise.all([
       this.dataSource.listRules(),
       this.dataSource.listUsers(),
       this.dataSource.listGeofences(),
       this.dataSource.listActionDevices(),
     ]);
     const summaryContext = buildRuleSummaryContext(
-      participants,
+      users,
       geofences,
       actionDevices,
     );
@@ -1337,27 +1337,27 @@ class RulesHubController {
     }
   }
 
-  private async renderParticipantsTab(): Promise<void> {
+  private async renderUsersTab(): Promise<void> {
     const geofences = await this.dataSource.listGeofences();
-    const sync = await this.dataSource.getMyTracksParticipantsSync();
+    const sync = await this.dataSource.getMyTracksUsersSync();
     const settings = await this.dataSource.getMyTracksSettings();
-    const mapParticipants = await this.dataSource.listUserStatus();
+    const mapUsers = await this.dataSource.listUserStatus();
 
     const lead = document.createElement("p");
     lead.className = "settings-dialog-lead";
     appendMyTracksInstanceText(lead, {
-      before: "Participants sync from ",
+      before: "Users sync from ",
       domain: settings?.domain ?? "",
       after:
         ". Presence updates arrive via webhook; edit people there, then sync here.",
     });
 
     const syncRow = document.createElement("div");
-    syncRow.className = "rules-participants-sync";
+    syncRow.className = "rules-users-sync";
     const syncMeta = document.createElement("p");
     syncMeta.className = "rules-card-meta";
     syncMeta.replaceChildren(
-      document.createTextNode(`${sync.user_count} participants · last synced `),
+      document.createTextNode(`${sync.user_count} users · last synced `),
     );
     if (sync.last_synced_at === null) {
       syncMeta.append(document.createTextNode("never"));
@@ -1374,16 +1374,16 @@ class RulesHubController {
     syncRow.append(syncMeta, syncBtn);
 
     const mapSection = document.createElement("section");
-    mapSection.className = "rules-participants-section";
+    mapSection.className = "rules-users-section";
 
     this.body.append(lead, syncRow, mapSection);
-    this.mountParticipantPresenceMap(
+    this.mountUserPresenceMap(
       mapSection,
       geofences,
-      mapParticipants,
+      mapUsers,
       {
-        includeParticipantIdInTooltip: true,
-        showParticipantFilters: true,
+        includeUserIdInTooltip: true,
+        showUserFilters: true,
         showTextDetails: false,
       },
     );

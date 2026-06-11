@@ -4,10 +4,10 @@ import L from "leaflet";
 import { userMarkerColor } from "./map-device-colors.js";
 import {
   createShellTooltipController,
-  formatParticipantTooltipHtml,
-  participantNearEnabledGeofence,
-  participantStatusToMapParticipant,
-  type PresenceMapParticipant,
+  formatUserTooltipHtml,
+  userNearEnabledGeofence,
+  userStatusToMapUser,
+  type PresenceMapUser,
 } from "./presence-map.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import type { GeofenceDrawToolbar } from "./geofence-map.js";
@@ -32,7 +32,7 @@ export async function initGeofenceLeafletMap(
   dataSource: RulesDataSource,
   onChanged: () => void | Promise<void>,
   geofences: GeofenceOut[],
-  participants: UserStatusOut[] = [],
+  users: UserStatusOut[] = [],
 ): Promise<void> {
   if (mapEl.dataset.leafletInit === "1") {
     return;
@@ -86,25 +86,25 @@ export async function initGeofenceLeafletMap(
     circleLayer[g.geofence_id] = circle;
   }
 
-  const nearbyParticipants = participants
-    .map(participantStatusToMapParticipant)
+  const nearbyUsers = users
+    .map(userStatusToMapUser)
     .filter(
-      (participant): participant is PresenceMapParticipant & {
-        last_location: NonNullable<PresenceMapParticipant["last_location"]>;
+      (user): user is PresenceMapUser & {
+        last_location: NonNullable<PresenceMapUser["last_location"]>;
       } =>
-        participant.last_location !== null
-        && participantNearEnabledGeofence(participant.last_location, geofences),
+        user.last_location !== null
+        && userNearEnabledGeofence(user.last_location, geofences),
     );
-  const participantMarkers: L.CircleMarker[] = [];
-  for (const participant of nearbyParticipants) {
-    const fix = participant.last_location;
+  const userMarkers: L.CircleMarker[] = [];
+  for (const user of nearbyUsers) {
+    const location = user.last_location;
     const color = userMarkerColor(
-      participant.tracking_device_label,
-      participant.user_id,
+      user.tracking_device_label,
+      user.user_id,
     );
-    const tooltipHtml = formatParticipantTooltipHtml(participant);
-    const marker = L.circleMarker([fix.lat, fix.lon], {
-      className: "rules-presence-participant-marker",
+    const tooltipHtml = formatUserTooltipHtml(user);
+    const marker = L.circleMarker([location.lat, location.lon], {
+      className: "rules-presence-user-marker",
       color: "#fff",
       fillColor: color,
       fillOpacity: 0.9,
@@ -113,10 +113,10 @@ export async function initGeofenceLeafletMap(
       weight: 2,
     }).addTo(map);
     shellTooltip.attach(marker, () => tooltipHtml);
-    participantMarkers.push(marker);
+    userMarkers.push(marker);
   }
 
-  const boundsLayers: L.Layer[] = [...Object.values(circleLayer), ...participantMarkers];
+  const boundsLayers: L.Layer[] = [...Object.values(circleLayer), ...userMarkers];
   const firstBoundsLayer = boundsLayers[0];
   if (firstBoundsLayer !== undefined) {
     const boundsForLayer = (layer: L.Layer): L.LatLngBounds => {

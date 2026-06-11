@@ -102,7 +102,7 @@ def test_fetch_users_from_my_tracks_parses_export_payload(
     ]
 
 
-def test_fetch_participants_parses_latest_location(
+def test_fetch_users_parses_latest_location(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     payload = {
@@ -219,7 +219,7 @@ def test_fetch_geofences_uses_login_client_without_context_manager_reentry(
     assert rows == []
 
 
-def test_fetch_participants_rejects_html_export_response(
+def test_fetch_users_rejects_html_export_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _HtmlExportClient(_FakeClient):

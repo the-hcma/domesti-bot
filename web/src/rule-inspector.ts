@@ -105,11 +105,11 @@ function appendLiveStatusSection(
 }
 
 export function buildInspectorContext(
-  participants: readonly UserOut[],
+  users: readonly UserOut[],
   geofences: readonly GeofenceOut[],
   actionDevices: readonly RuleActionDeviceOut[],
 ): RuleSummaryContext {
-  return buildRuleSummaryContext(participants, geofences, actionDevices);
+  return buildRuleSummaryContext(users, geofences, actionDevices);
 }
 
 export function mountRuleInspectorPanel(
@@ -138,7 +138,7 @@ export function mountRuleInspectorPanel(
   appendDefinitionRow(meta, "Cooldown", `${rule.cooldown_s} s`);
   appendDefinitionRow(
     meta,
-    "Min fix accuracy",
+    "Min location accuracy",
     `${rule.min_location_accuracy_m} m`,
   );
   if (rule.notify_on_fire && rule.notification_email !== null) {

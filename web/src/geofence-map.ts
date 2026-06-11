@@ -172,7 +172,7 @@ async function attachGeofenceLeafletMap(
   dataSource: RulesDataSource,
   onChanged: () => void | Promise<void>,
   geofences: GeofenceOut[],
-  participants: UserStatusOut[],
+  users: UserStatusOut[],
 ): Promise<void> {
   const { initGeofenceLeafletMap } = await import("./geofence-map-leaflet.js");
   await initGeofenceLeafletMap(
@@ -183,7 +183,7 @@ async function attachGeofenceLeafletMap(
     dataSource,
     onChanged,
     geofences,
-    participants,
+    users,
   );
 }
 

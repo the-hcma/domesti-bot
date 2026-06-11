@@ -48,7 +48,7 @@ def _client(*, cache_path: Path | None) -> tuple[TestClient, FastAPI]:
     return TestClient(app), app
 
 
-def _seed_participant(db: Path) -> None:
+def _seed_user(db: Path) -> None:
     replace_users(
         db,
         [
@@ -75,7 +75,7 @@ def test_location_update_webhook_rejects_missing_relay_key(
     _ = fernet_key
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    _seed_participant(db)
+    _seed_user(db)
     response = client.post(
         "/v1/webhooks/location_update",
         json=_LOCATION_UPDATE_PAYLOAD,
@@ -92,7 +92,7 @@ def test_location_update_webhook_rejects_env_api_key_instead_of_relay_key(
     db = tmp_path / "ui.sqlite"
     monkeypatch.setenv("DOMESTI_API_KEY", "operator-key")
     client, _app = _client(cache_path=db)
-    _seed_participant(db)
+    _seed_user(db)
     _store_relay_key(db, "relay-secret", fernet_key)
     response = client.post(
         "/v1/webhooks/location_update",
@@ -102,13 +102,36 @@ def test_location_update_webhook_rejects_env_api_key_instead_of_relay_key(
     assert response.status_code == HTTPStatus.UNAUTHORIZED
 
 
-def test_location_update_webhook_stores_fix_for_known_participant(
+def test_location_update_webhook_rejects_legacy_participant_id_field(
     tmp_path: Path,
     fernet_key: str,
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    _seed_participant(db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    legacy_payload = {
+        key: value
+        for key, value in _LOCATION_UPDATE_PAYLOAD.items()
+        if key != "user_id"
+    }
+    legacy_payload["participant_id"] = "henrique"
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=legacy_payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_location_update_webhook_stores_location_for_known_user(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
     relay_key = "relay-secret-value"
     _store_relay_key(db, relay_key, fernet_key)
     response = client.post(
@@ -117,11 +140,11 @@ def test_location_update_webhook_stores_fix_for_known_participant(
         headers={"X-Domesti-Api-Key": relay_key},
     )
     assert response.status_code == HTTPStatus.NO_CONTENT
-    fixes = list_user_locations(db)
-    assert fixes["henrique"].lat == 41.194085
+    locations = list_user_locations(db)
+    assert locations["henrique"].lat == 41.194085
 
 
-def test_location_update_webhook_returns_404_for_unknown_participant(
+def test_location_update_webhook_returns_404_for_unknown_user(
     tmp_path: Path,
     fernet_key: str,
 ) -> None:
@@ -143,7 +166,7 @@ def test_location_update_test_webhook_logs_without_location_prefix(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    _seed_participant(db)
+    _seed_user(db)
     relay_key = "relay-secret-value"
     _store_relay_key(db, relay_key, fernet_key)
     records: list[logging.LogRecord] = []
@@ -184,7 +207,7 @@ def test_location_update_test_webhook_does_not_persist_location(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    _seed_participant(db)
+    _seed_user(db)
     relay_key = "relay-secret-value"
     _store_relay_key(db, relay_key, fernet_key)
     response = client.post(
@@ -196,7 +219,7 @@ def test_location_update_test_webhook_does_not_persist_location(
     assert list_user_locations(db) == {}
 
 
-def test_location_update_test_webhook_accepts_unknown_participant(
+def test_location_update_test_webhook_accepts_unknown_user(
     tmp_path: Path,
     fernet_key: str,
 ) -> None:
@@ -284,7 +307,7 @@ def test_location_update_webhook_returns_503_when_emergency_switch_off(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    _seed_participant(db)
+    _seed_user(db)
     with patch("app.api.mytracks_routes.pair_with_my_tracks"):
         client.post(
             "/v1/settings/my-tracks/pair",
@@ -344,7 +367,7 @@ def test_location_update_webhook_appends_history_rows(
 
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    _seed_participant(db)
+    _seed_user(db)
     relay_key = "relay-secret-value"
     _store_relay_key(db, relay_key, fernet_key)
     for lat in (41.1, 41.2):
@@ -364,7 +387,7 @@ def test_location_update_test_webhook_works_when_emergency_switch_off(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    _seed_participant(db)
+    _seed_user(db)
     with patch("app.api.mytracks_routes.pair_with_my_tracks"):
         client.post(
             "/v1/settings/my-tracks/pair",

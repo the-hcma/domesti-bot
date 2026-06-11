@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import BaseModel, Field
 
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
@@ -482,11 +482,7 @@ class LocationUpdateWebhookIn(BaseModel):
     mqtt_user: str | None = None
     source: str | None = None
     timestamp: str = Field(..., min_length=1)
-    user_id: str = Field(
-        ...,
-        min_length=1,
-        validation_alias=AliasChoices("user_id", "participant_id"),
-    )
+    user_id: str = Field(..., min_length=1)
 
 
 class UserStatusOut(UserOut):

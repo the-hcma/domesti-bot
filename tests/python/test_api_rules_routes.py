@@ -1,4 +1,4 @@
-"""Tests for persisted Automations participant and geofence HTTP routes."""
+"""Tests for persisted Automations user and geofence HTTP routes."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _client(cache_path: Path) -> TestClient:
     return TestClient(create_app(args))
 
 
-def test_get_geofences_and_participants(tmp_path: Path) -> None:
+def test_get_geofences_and_users(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     replace_geofences(
         db,
@@ -59,9 +59,9 @@ def test_get_geofences_and_participants(tmp_path: Path) -> None:
     assert geofences.status_code == HTTPStatus.OK
     assert geofences.json()[0]["geofence_id"] == "henrique-house"
 
-    participants = client.get("/v1/rules/users")
-    assert participants.status_code == HTTPStatus.OK
-    assert participants.json()[0]["user_id"] == "henrique"
+    users = client.get("/v1/rules/users")
+    assert users.status_code == HTTPStatus.OK
+    assert users.json()[0]["user_id"] == "henrique"
 
 
 def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:

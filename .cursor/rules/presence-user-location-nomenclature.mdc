@@ -33,9 +33,14 @@ Home-automation **presence** (My Tracks / OwnTracks people on the map) is modele
 - UI labels use **`display_name`** from the user roster (synced from My Tracks; defaults to `first_name`).
 - Do not show raw `user_id` when a roster row exists.
 
+## No aliases
+
+- Domesti-bot **schemas, routes, stores, UI, tests, and operator scripts** accept only `user` / `location` terms. Do not add `validation_alias`, duplicate JSON keys, or parallel API fields for legacy `participant` / `fix` names.
+- **One-time SQLite legacy migrations** may read old table/column names when copying into `rule_users` — that is data migration, not a runtime API alias.
+
 ## Exceptions
 
-- **Third-party wire formats** (my-tracks admin API JSON keys, MQTT topic segments) may still say `participant` until upstream renames — map at the integration boundary only; domesti-bot schemas, stores, and UI use `user` / `location`.
+- **Third-party wire formats** (my-tracks admin API JSON keys when calling their HTTP API) may still use upstream field names — translate at the integration boundary into domesti-bot `user` / `location` types before they cross our API surface.
 - **Device discovery** (`device_state_watcher`, Kasa, etc.) is unrelated — do not rename device polling to “location”.
 
 ## Sync semantics

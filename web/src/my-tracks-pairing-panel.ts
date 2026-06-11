@@ -290,14 +290,14 @@ export async function mountMyTracksPairingPanel(
   const retentionGroup = document.createElement("fieldset");
   retentionGroup.className = "settings-dialog-fieldset";
   const retentionLegend = document.createElement("legend");
-  retentionLegend.textContent = "Location history per participant";
+  retentionLegend.textContent = "Location history per user";
   retentionGroup.append(retentionLegend);
 
   const retentionHelp = document.createElement("p");
   retentionHelp.className = "settings-dialog-help";
   retentionHelp.textContent =
-    "Default keeps per-participant locations from the last 24 hours and always keeps " +
-    "at least the 20 most recent per-participant locations.";
+    "Default keeps per-user locations from the last 24 hours and always keeps " +
+    "at least the 20 most recent per-user locations.";
   retentionGroup.append(retentionHelp);
 
   const unlimitedInput = document.createElement("input");
@@ -320,7 +320,7 @@ export async function mountMyTracksPairingPanel(
   maxAgeHoursInput.value = "24";
   appendLabeledField(
     retentionRow,
-    createFieldLabel("Keep per-participant locations from the last (hours)"),
+    createFieldLabel("Keep per-user locations from the last (hours)"),
     maxAgeHoursInput,
   );
 
@@ -332,7 +332,7 @@ export async function mountMyTracksPairingPanel(
   minKeepCountInput.value = "20";
   appendLabeledField(
     retentionRow,
-    createFieldLabel("Minimum recent per-participant locations to keep"),
+    createFieldLabel("Minimum recent per-user locations to keep"),
     minKeepCountInput,
   );
   retentionGroup.append(retentionRow);

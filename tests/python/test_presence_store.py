@@ -1,4 +1,4 @@
-"""Tests for persisted participant location fixes."""
+"""Tests for persisted user locations."""
 
 from __future__ import annotations
 
@@ -30,9 +30,9 @@ def test_replace_and_list_user_locations(tmp_path: Path) -> None:
         ],
         retention=default_location_history_retention(),
     )
-    fixes = list_user_locations(db)
-    assert fixes["henrique"].lat == 41.194072
-    assert fixes["henrique"].source == "my-tracks"
+    locations = list_user_locations(db)
+    assert locations["henrique"].lat == 41.194072
+    assert locations["henrique"].source == "my-tracks"
 
 
 def test_geofence_ids_containing_location(tmp_path: Path) -> None:

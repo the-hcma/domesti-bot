@@ -165,12 +165,12 @@ export async function runMyTracksSyncAction(
   }
   try {
     if (kind === "users") {
-      const result = await dataSource.syncParticipantsFromMyTracks({
+      const result = await dataSource.syncUsersFromMyTracks({
         username: credentials.username,
         password: credentials.password,
       });
       showSuccessToast(
-        `Synced ${result.user_count} participant${result.user_count === 1 ? "" : "s"} from My Tracks.`,
+        `Synced ${result.user_count} user${result.user_count === 1 ? "" : "s"} from My Tracks.`,
       );
     } else {
       const result = await dataSource.syncGeofencesFromMyTracks({

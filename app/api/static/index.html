@@ -758,7 +758,7 @@
       background: var(--input-fill); color: var(--fg); }
     .automations-dialog .rules-editor-form input:not([type="checkbox"]):not([type="radio"]),
     .automations-dialog .rules-geofence-form-panel input:not([type="checkbox"]):not([type="radio"]),
-    .automations-dialog .rules-participant-form input:not([type="checkbox"]):not([type="radio"]) {
+    .automations-dialog .rules-user-form input:not([type="checkbox"]):not([type="radio"]) {
       font: inherit; padding: 8px 10px; border-radius: 6px;
       border: 1px solid var(--border); background: var(--input-fill); color: var(--fg); }
     .automations-dialog .leaflet-bar a { background: var(--card-elev); color: var(--fg);
@@ -808,11 +808,11 @@
     .rules-presence-map-hover-tooltip.is-visible { visibility: visible; opacity: 1; }
     .rules-presence-map-tooltip-line { display: block; }
     .rules-presence-map-tooltip-line + .rules-presence-map-tooltip-line { margin-top: 2px; }
-    .rules-participants-section { margin-bottom: 12px; }
-    .rules-participant-details-list { display: flex; flex-direction: column; gap: 8px;
+    .rules-users-section { margin-bottom: 12px; }
+    .rules-user-details-list { display: flex; flex-direction: column; gap: 8px;
       margin-top: 12px; }
-    .rules-participant-detail-card { display: flex; flex-direction: column; gap: 4px; }
-    .rules-participants-sync { display: flex; flex-wrap: wrap; align-items: center;
+    .rules-user-detail-card { display: flex; flex-direction: column; gap: 4px; }
+    .rules-users-sync { display: flex; flex-wrap: wrap; align-items: center;
       justify-content: space-between; gap: 8px; margin-bottom: 12px; }
     .rules-day-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
     .rules-day-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
@@ -863,7 +863,7 @@
     .rules-editor-form select,
     .rules-editor-form textarea,
     .rules-geofence-form-panel input:not([type="checkbox"]):not([type="radio"]),
-    .rules-participant-form input:not([type="checkbox"]):not([type="radio"]) {
+    .rules-user-form input:not([type="checkbox"]):not([type="radio"]) {
       background: var(--input-fill); }
     .rules-geofence-map.leaflet-container { width: 100%; height: 240px; border-radius: 8px;
       border: 1px solid var(--border); z-index: 0; overflow: hidden; }
@@ -899,7 +899,7 @@
     .rules-geofence-add-btn { margin-top: 2px; }
     .rules-geofence-form-panel { margin: 8px 0 0; padding: 12px;
       border: 1px solid var(--border); border-radius: 8px; background: var(--card-elev); }
-    .rules-participant-form { display: flex; flex-direction: column; gap: 10px;
+    .rules-user-form { display: flex; flex-direction: column; gap: 10px;
       margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 
     /* Disabled state — fires whenever the backend is unreachable
