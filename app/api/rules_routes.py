@@ -15,6 +15,7 @@ from app.api.schemas import (
     ParticipantOut,
     ParticipantStatusOut,
     RuleOut,
+    RulesStatusOut,
     SettingsLocationOut,
 )
 from app.automation_rules_loader import (
@@ -28,6 +29,7 @@ from app.presence_store import (
     geofence_ids_containing_fix,
     list_participant_fixes,
 )
+from app.rules_status import build_rules_status
 from app.rules_store import (
     GeofenceRecord,
     ParticipantRecord,
@@ -84,6 +86,16 @@ async def get_participants_status(request: Request) -> list[ParticipantStatusOut
 async def get_rules_settings_location() -> SettingsLocationOut:
     """Return home coordinates from the automation rule bundle."""
     return _load_settings_location_or_http_error()
+
+
+@router.get("/status", response_model=RulesStatusOut)
+async def get_rules_status(request: Request) -> RulesStatusOut:
+    """Return evaluated rule conditions for the Automations Status tab."""
+    cache_path = discovery_cache_path_from_request(request)
+    try:
+        return build_rules_status(cache_path=cache_path)
+    except AutomationRulesLoadError as exc:
+        raise _automation_rules_http_error(exc) from exc
 
 
 @router.get("/{rule_id}", response_model=RuleOut)

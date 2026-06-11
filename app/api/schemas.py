@@ -565,6 +565,15 @@ class RuleConditionsOut(BaseModel):
     all: list[RuleConditionOut]
 
 
+class RuleConditionStatusOut(BaseModel):
+    """One evaluated condition row for the Automations Status tab."""
+
+    condition: RuleConditionOut
+    detail: str
+    label: str
+    met: bool
+
+
 class RuleDeviceActionOut(BaseModel):
     action: Literal["turn_on", "turn_off", "open", "close", "pause", "resume"]
     device_id: str
@@ -586,6 +595,44 @@ class RuleOut(BaseModel):
     trigger: Literal["edge_true", "while_true"]
 
 
+class RuleStatusSummaryOut(BaseModel):
+    """Per-rule status row for ``GET /v1/rules/status``."""
+
+    condition_currently_true: bool
+    conditions: list[RuleConditionStatusOut]
+    enabled: bool
+    id: str
+    label: str
+    last_error: str | None = None
+    last_fired_at: str | None = None
+
+
+class RulesEvaluatorOut(BaseModel):
+    """Evaluator heartbeat timestamps."""
+
+    last_run_at: str | None = None
+    next_sun_check_at: str | None = None
+
+
+class RulesStatusOut(BaseModel):
+    """Full Automations Status tab payload."""
+
+    evaluator: RulesEvaluatorOut
+    geofences: list[GeofenceOut]
+    participants: list[ParticipantStatusOut]
+    rules: list[RuleStatusSummaryOut]
+    sun: "RulesSunOut"
+    using_mock: bool
+
+
+class RulesSunOut(BaseModel):
+    """Sunrise/sunset row for astronomical conditions."""
+
+    is_dark: bool
+    sunrise_at: str
+    sunset_at: str
+
+
 class SettingsLocationOut(BaseModel):
     """Home coordinates for astronomical conditions."""
 
@@ -598,4 +645,6 @@ class SettingsLocationOut(BaseModel):
 AllConditionsCondition.model_rebuild()
 AnyConditionsCondition.model_rebuild()
 RuleConditionsOut.model_rebuild()
+RuleConditionStatusOut.model_rebuild()
 RuleOut.model_rebuild()
+RulesStatusOut.model_rebuild()

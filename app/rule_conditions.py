@@ -1,0 +1,565 @@
+"""Server-side automation rule condition evaluation for the Status tab."""
+
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
+
+from astral import LocationInfo
+from astral.sun import sun
+
+from app.api.schemas import (
+    AfterLocalTimeCondition,
+    AfterSunsetCondition,
+    AllConditionsCondition,
+    AnyConditionsCondition,
+    BeforeLocalTimeCondition,
+    BeforeSunriseCondition,
+    DaysOfWeekCondition,
+    GeofenceOut,
+    LocalTimeWindowCondition,
+    ParticipantFixOut,
+    ParticipantsInsideGeofenceCondition,
+    ParticipantsOutsideGeofenceCondition,
+    RuleConditionOut,
+    RuleConditionStatusOut,
+    RuleOut,
+    RulesSunOut,
+    SettingsLocationOut,
+)
+
+MINUTES_PER_DAY = 24 * 60
+_HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+_DAY_NAMES = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+
+@dataclass(frozen=True)
+class RuleEvaluationContext:
+    """Inputs required to evaluate one rule's conditions."""
+
+    geofences: tuple[GeofenceOut, ...]
+    now: datetime
+    participant_display_names: dict[str, str]
+    participant_fixes: dict[str, ParticipantFixOut]
+    sun: RulesSunOut
+    timezone: ZoneInfo
+
+
+@dataclass(frozen=True)
+class RuleEvaluationResult:
+    """Per-rule condition evaluation for the Status tab."""
+
+    all_met: bool
+    conditions: list[RuleConditionStatusOut]
+
+
+def compute_rules_sun_out(
+    settings: SettingsLocationOut,
+    *,
+    now: datetime | None = None,
+) -> RulesSunOut:
+    """Return today's sunrise/sunset at the configured home location."""
+    tz = ZoneInfo(settings.timezone)
+    effective_now = _coerce_now(now, tz)
+    location = LocationInfo(
+        "",
+        "",
+        settings.timezone,
+        settings.lat,
+        settings.lon,
+    )
+    solar = sun(location.observer, date=effective_now.date(), tzinfo=tz)
+    sunrise_at = solar["sunrise"]
+    sunset_at = solar["sunset"]
+    is_dark = effective_now < sunrise_at or effective_now >= sunset_at
+    return RulesSunOut(
+        is_dark=is_dark,
+        sunrise_at=_to_iso_z(sunrise_at),
+        sunset_at=_to_iso_z(sunset_at),
+    )
+
+
+def evaluate_rule(
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleEvaluationResult:
+    """Evaluate top-level ``conditions.all`` rows for one rule."""
+    conditions = [
+        _evaluate_condition(condition, rule, ctx)
+        for condition in rule.conditions.all
+    ]
+    return RuleEvaluationResult(
+        all_met=rule.enabled and all(row.met for row in conditions),
+        conditions=conditions,
+    )
+
+
+def evaluate_rule_conditions_met(
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> bool:
+    """Return whether every top-level condition is currently met."""
+    return evaluate_rule(rule, ctx).all_met
+
+
+def _coerce_now(now: datetime | None, tz: ZoneInfo) -> datetime:
+    if now is None:
+        return datetime.now(tz)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=tz)
+    return now.astimezone(tz)
+
+
+def _evaluate_after_local_time(
+    condition: AfterLocalTimeCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    target = _parse_hhmm(condition.time_hhmm)
+    now_minutes = _local_minutes_from_dt(ctx.now)
+    met = target is not None and now_minutes >= target
+    display = _format_hhmm_display(condition.time_hhmm)
+    if target is None:
+        detail = f"Invalid time {condition.time_hhmm}"
+    elif met:
+        detail = f"Local time is past {display}"
+    else:
+        detail = f"Waiting until {display}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=f"After {display}",
+        met=met,
+    )
+
+
+def _evaluate_after_sunset(
+    condition: AfterSunsetCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
+    now_minutes = _local_minutes_from_dt(ctx.now)
+    met = _is_in_after_sunset_window(
+        now_minutes,
+        sunset_minutes,
+        condition.offset_minutes,
+    )
+    sunset_label = _format_iso_local_time(ctx.sun.sunset_at, ctx.timezone)
+    if met:
+        detail = f"Evening window active (sunset {sunset_label} to midnight)"
+    else:
+        detail = f"Outside sunset–midnight window (sunset {sunset_label})"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="After sunset",
+        met=met,
+    )
+
+
+def _evaluate_all(
+    condition: AllConditionsCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    children = [
+        _evaluate_condition(child, rule, ctx) for child in condition.conditions
+    ]
+    met = all(child.met for child in children)
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail="All nested conditions met" if met else "Waiting on nested conditions",
+        label="All of",
+        met=met,
+    )
+
+
+def _evaluate_any(
+    condition: AnyConditionsCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    children = [
+        _evaluate_condition(child, rule, ctx) for child in condition.conditions
+    ]
+    met = any(child.met for child in children)
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=(
+            "At least one nested condition met"
+            if met
+            else "No nested conditions met yet"
+        ),
+        label="Any of",
+        met=met,
+    )
+
+
+def _evaluate_before_local_time(
+    condition: BeforeLocalTimeCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    target = _parse_hhmm(condition.time_hhmm)
+    now_minutes = _local_minutes_from_dt(ctx.now)
+    met = target is not None and now_minutes < target
+    display = _format_hhmm_display(condition.time_hhmm)
+    if target is None:
+        detail = f"Invalid time {condition.time_hhmm}"
+    elif met:
+        detail = f"Local time is before {display}"
+    else:
+        detail = f"Past {display} for today"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=f"Before {display}",
+        met=met,
+    )
+
+
+def _evaluate_before_sunrise(
+    condition: BeforeSunriseCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    sunrise_minutes = _local_minutes_from_iso(ctx.sun.sunrise_at, ctx.timezone)
+    now_minutes = _local_minutes_from_dt(ctx.now)
+    met = _is_in_before_sunrise_window(
+        now_minutes,
+        sunrise_minutes,
+        condition.offset_minutes,
+    )
+    sunrise_label = _format_iso_local_time(ctx.sun.sunrise_at, ctx.timezone)
+    if met:
+        detail = f"Morning window active (midnight to sunrise {sunrise_label})"
+    else:
+        detail = f"Outside midnight–sunrise window (sunrise {sunrise_label})"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="Before sunrise",
+        met=met,
+    )
+
+
+def _evaluate_condition(
+    condition: RuleConditionOut,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    if isinstance(condition, AfterLocalTimeCondition):
+        return _evaluate_after_local_time(condition, rule, ctx)
+    if isinstance(condition, AfterSunsetCondition):
+        return _evaluate_after_sunset(condition, rule, ctx)
+    if isinstance(condition, AllConditionsCondition):
+        return _evaluate_all(condition, rule, ctx)
+    if isinstance(condition, AnyConditionsCondition):
+        return _evaluate_any(condition, rule, ctx)
+    if isinstance(condition, BeforeLocalTimeCondition):
+        return _evaluate_before_local_time(condition, rule, ctx)
+    if isinstance(condition, BeforeSunriseCondition):
+        return _evaluate_before_sunrise(condition, rule, ctx)
+    if isinstance(condition, DaysOfWeekCondition):
+        return _evaluate_days_of_week(condition, rule, ctx)
+    if isinstance(condition, LocalTimeWindowCondition):
+        return _evaluate_local_time_window(condition, rule, ctx)
+    if isinstance(condition, ParticipantsInsideGeofenceCondition):
+        return _evaluate_participants_geofence(condition, rule, ctx, want_inside=True)
+    if isinstance(condition, ParticipantsOutsideGeofenceCondition):
+        return _evaluate_participants_geofence(condition, rule, ctx, want_inside=False)
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail="Unsupported condition type for status display",
+        label="Condition",
+        met=False,
+    )
+
+
+def _evaluate_days_of_week(
+    condition: DaysOfWeekCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    today = ctx.now.weekday()
+    # Python weekday(): Mon=0 … Sun=6; rule JSON uses JS getDay(): Sun=0 … Sat=6.
+    today_js = (today + 1) % 7
+    met = today_js in condition.days
+    selected = ", ".join(
+        _DAY_NAMES[day] if 0 <= day < len(_DAY_NAMES) else str(day)
+        for day in sorted(condition.days)
+    )
+    today_name = _DAY_NAMES[today_js] if 0 <= today_js < len(_DAY_NAMES) else "?"
+    if met:
+        detail = f"Today ({today_name}) is in {selected}"
+    else:
+        detail = f"Today ({today_name}) not in {selected}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="Days of week",
+        met=met,
+    )
+
+
+def _evaluate_local_time_window(
+    condition: LocalTimeWindowCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    met = _is_in_local_time_window(
+        condition.start_hhmm,
+        condition.end_hhmm,
+        ctx.now,
+    )
+    window_label = _format_window_display(
+        condition.start_hhmm,
+        condition.end_hhmm,
+    )
+    if met is None:
+        detail = f"Invalid window {condition.start_hhmm}–{condition.end_hhmm}"
+        met_value = False
+    elif met:
+        detail = f"Local time is within {window_label}"
+        met_value = True
+    else:
+        detail = f"Waiting for clock window {window_label}"
+        met_value = False
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=f"Clock window {window_label}",
+        met=met_value,
+    )
+
+
+def _evaluate_participants_geofence(
+    condition: ParticipantsInsideGeofenceCondition | ParticipantsOutsideGeofenceCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+    *,
+    want_inside: bool,
+) -> RuleConditionStatusOut:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    fence_label = (
+        geofence.label
+        if geofence is not None
+        else condition.geofence_id
+    )
+    if geofence is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=f'Unknown geofence "{condition.geofence_id}"',
+            label="Geofence",
+            met=False,
+        )
+
+    min_accuracy_m = rule.min_fix_accuracy_m
+    unmet_names: list[str] = []
+    ignored_accuracy: list[str] = []
+    for participant_id in condition.participant_ids:
+        fix = ctx.participant_fixes.get(participant_id)
+        name = _participant_display_name(ctx, participant_id)
+        if fix is not None and not _fix_usable_for_rule(fix, min_accuracy_m):
+            ignored_accuracy.append(
+                f"{name} (±{fix.accuracy_m if fix.accuracy_m is not None else '?'} m "
+                f"> {min_accuracy_m} m threshold)",
+            )
+            unmet_names.append(name)
+            continue
+        inside = _participant_inside_geofence(fix, geofence, min_accuracy_m)
+        if want_inside and not inside:
+            unmet_names.append(name)
+        if not want_inside and inside:
+            unmet_names.append(name)
+
+    met = len(unmet_names) == 0
+    selected_names = [
+        _participant_display_name(ctx, participant_id)
+        for participant_id in condition.participant_ids
+    ]
+    who = _join_names(selected_names)
+    label = (
+        f"When {who} enter {fence_label}"
+        if want_inside
+        else f"When {who} leave {fence_label}"
+    )
+    if met:
+        detail = (
+            f"Everyone is inside {fence_label}"
+            if want_inside
+            else f"Everyone is outside {fence_label}"
+        )
+    elif ignored_accuracy:
+        detail = f"Ignored low-accuracy fix: {'; '.join(ignored_accuracy)}"
+    elif want_inside:
+        detail = f"Waiting for {', '.join(unmet_names)} to enter {fence_label}"
+    else:
+        detail = f"Waiting for {', '.join(unmet_names)} to leave {fence_label}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=label,
+        met=met,
+    )
+
+
+def _first_name_from_display_name(display_name: str) -> str:
+    trimmed = display_name.strip()
+    if not trimmed:
+        return trimmed
+    return trimmed.split()[0]
+
+
+def _fix_usable_for_rule(
+    fix: ParticipantFixOut | None,
+    min_accuracy_m: int,
+) -> bool:
+    if fix is None:
+        return False
+    if fix.accuracy_m is not None and fix.accuracy_m > min_accuracy_m:
+        return False
+    return True
+
+
+def _format_hhmm_display(hhmm: str) -> str:
+    parsed = _parse_hhmm(hhmm)
+    if parsed is None:
+        return hhmm
+    hour = parsed // 60
+    minute = parsed % 60
+    display_hour = hour % 12 or 12
+    suffix = "AM" if hour < 12 else "PM"
+    return f"{display_hour}:{minute:02d} {suffix}"
+
+
+def _format_iso_local_time(iso: str, tz: ZoneInfo) -> str:
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(tz)
+    display_hour = dt.hour % 12 or 12
+    suffix = "AM" if dt.hour < 12 else "PM"
+    return f"{display_hour}:{dt.minute:02d} {suffix}"
+
+
+def _format_window_display(start_hhmm: str, end_hhmm: str) -> str:
+    return (
+        f"{_format_hhmm_display(start_hhmm)} – {_format_hhmm_display(end_hhmm)}"
+    )
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    earth_radius_m = 6_371_000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(d_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    )
+    return 2 * earth_radius_m * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _is_in_after_sunset_window(
+    now_minutes: int,
+    sunset_minutes: int,
+    offset_minutes: int,
+) -> bool:
+    start = sunset_minutes + offset_minutes
+    if start >= MINUTES_PER_DAY:
+        return False
+    return now_minutes >= start and now_minutes < MINUTES_PER_DAY
+
+
+def _is_in_before_sunrise_window(
+    now_minutes: int,
+    sunrise_minutes: int,
+    offset_minutes: int,
+) -> bool:
+    end = sunrise_minutes + offset_minutes
+    return now_minutes >= 0 and now_minutes < end
+
+
+def _is_in_local_time_window(
+    start_hhmm: str,
+    end_hhmm: str,
+    now: datetime,
+) -> bool | None:
+    start = _parse_hhmm(start_hhmm)
+    end = _parse_hhmm(end_hhmm)
+    if start is None or end is None:
+        return None
+    now_minutes = _local_minutes_from_dt(now)
+    if start <= end:
+        return start <= now_minutes < end
+    return now_minutes >= start or now_minutes < end
+
+
+def _join_names(names: list[str]) -> str:
+    if not names:
+        return "nobody"
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return f"{', '.join(names[:-1])}, and {names[-1]}"
+
+
+def _local_minutes_from_dt(dt: datetime) -> int:
+    return dt.hour * 60 + dt.minute
+
+
+def _local_minutes_from_iso(iso: str, tz: ZoneInfo) -> int:
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(tz)
+    return _local_minutes_from_dt(dt)
+
+
+def _parse_hhmm(hhmm: str) -> int | None:
+    match = _HHMM_RE.match(hhmm.strip())
+    if match is None:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def _participant_display_name(
+    ctx: RuleEvaluationContext,
+    participant_id: str,
+) -> str:
+    display_name = ctx.participant_display_names.get(participant_id)
+    trimmed = (display_name or "").strip()
+    if trimmed and trimmed.lower() != participant_id.lower():
+        return _first_name_from_display_name(trimmed)
+    parts = [part for part in participant_id.replace("_", "-").split("-") if part]
+    return " ".join(part.capitalize() for part in parts)
+
+
+def _participant_inside_geofence(
+    fix: ParticipantFixOut | None,
+    geofence: GeofenceOut,
+    min_accuracy_m: int,
+) -> bool:
+    if not _fix_usable_for_rule(fix, min_accuracy_m):
+        return False
+    if not geofence.enabled or fix is None:
+        return False
+    distance_m = _haversine_m(
+        fix.lat,
+        fix.lon,
+        geofence.center_lat,
+        geofence.center_lon,
+    )
+    return distance_m <= geofence.radius_m
+
+
+def _to_iso_z(dt: datetime) -> str:
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
