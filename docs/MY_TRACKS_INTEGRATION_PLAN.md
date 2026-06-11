@@ -4,7 +4,7 @@ This document is the **domesti-bot** side of integrating with [my-tracks](https:
 
 **Rule evaluation, geofence definitions, and device actions stay in domesti-bot.** my-tracks remains the location ingest and map service. After pairing, my-tracks **pushes** live GPS fixes to domesti-bot; roster and geofence **definitions** are still pulled manually by domesti-bot (no my-tracks push webhooks for those).
 
-**Status:** **domesti-bot integration is complete** for the operator workflow shipped in PRs [#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216): relay-key webhooks, pairing APIs + Settings UI (pair/re-pair, retention, relay-key reveal, reset), manual roster/geofence sync, live participant map with legend + polling, and `scripts/internal/verify-mytracks-pairing`. **Deferred (not integration blockers):** verify-roundtrip and emergency-toggle **buttons** in Settings (APIs exist; use the verify script today), `RuleEvaluator` on live ingest (see `docs/RULE_ENGINE_PLAN.md`), and my-tracks production cutover for live relay (my-tracks repo).
+**Status:** **domesti-bot integration is complete** for the operator workflow shipped in PRs [#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216): relay-key webhooks, pairing APIs + Settings UI (pair/re-pair, retention, relay-key reveal, reset), manual roster/geofence sync, live user map with legend + polling, and `scripts/internal/verify-mytracks-pairing`. **Deferred (not integration blockers):** verify-roundtrip and emergency-toggle **buttons** in Settings (APIs exist; use the verify script today), `RuleEvaluator` on live ingest (see `docs/RULE_ENGINE_PLAN.md`), and my-tracks production cutover for live relay (my-tracks repo).
 
 ---
 
@@ -68,14 +68,14 @@ Optional override: `DOMESTI_PUBLIC_BASE_URL` env may pre-fill the pairing form w
 | Feature | API / module |
 | --- | --- |
 | My Tracks connection settings | `GET/PUT/DELETE /v1/settings/my-tracks` — domain + default admin username |
-| Participant roster sync | `POST /v1/rules/participants/sync` + `GET …/sync-status` |
+| User roster sync | `POST /v1/rules/users/sync` + `GET …/sync-status` |
 | Geofence sync | `POST /v1/rules/geofences/sync` + `GET …/sync-status` |
-| Latest fix per participant (status UI) | `rule_participant_last_fix` — upserted on live webhook + participant sync |
-| Location fix history (per participant) | `rule_participant_location_history` — append on live ingest; pruned by retention policy |
-| Participant status for UI | `GET /v1/rules/participants/status` |
+| Latest location per user (status UI) | `rule_user_last_location` — upserted on live webhook + user sync |
+| Location history (per user) | `rule_user_location_history` — append on live ingest; pruned by retention policy |
+| User status for UI | `GET /v1/rules/users/status` |
 | Admin session client to my-tracks | `app/mytracks_service.py` (login + export JSON) |
 | Live + test location webhooks | `POST /v1/webhooks/location_update`, `POST /v1/webhooks/location_update/test` |
-| Debug location ingest | `PUT /v1/location_update/{participant_id}` |
+| Debug location ingest | `PUT /v1/location_update/{user_id}` |
 | Pairing APIs | `POST /v1/settings/my-tracks/pair`, `GET /v1/settings/my-tracks/pair-status` |
 | Emergency switch (API) | `PATCH /v1/settings/my-tracks/location-updates` |
 | Location-history retention (API) | `PATCH /v1/settings/my-tracks/location-history-retention` |
@@ -106,7 +106,7 @@ sequenceDiagram
   MT->>MT: Store DomestiBotConfig, location_updates_enabled=true
   MT-->>Bot: 200 paired
   Bot->>Bot: Persist paired_at + URLs in mytracks_settings
-  Op->>Bot: Optional: Sync participants + geofences
+  Op->>Bot: Optional: Sync users + geofences
   Note over MT,Bot: Later: live fixes → POST …/location_update<br/>Tests → POST …/location_update/test
 ```
 
@@ -138,7 +138,7 @@ X-Domesti-Api-Key: <UI session key, same as other settings routes>
 | --- | --- | --- |
 | `domain` | yes | Operator-supplied **HTTPS** my-tracks public URL |
 | `domesti_public_base_url` | no | Omitted from pairing body — domesti-bot derives the public HTTPS origin from the pairing HTTP request |
-| `location_history_retention` | no | Defaults: 24h window ∪ 20 most recent fixes per participant; see [Location history retention](#location-history-retention) |
+| `location_history_retention` | no | Defaults: 24h window ∪ 20 most recent fixes per user; see [Location history retention](#location-history-retention) |
 | `username` | yes | Staff admin username for my-tracks session login |
 | `password` | yes | One-shot; used only for the pair request (not stored unless operator opts into “remember admin password” later — out of scope for v1) |
 
@@ -194,7 +194,7 @@ POST /v1/webhooks/location_update
 
 ```json
 {
-  "participant_id": "kristen",
+  "user_id": "kristen",
   "lat": 41.194085,
   "lon": -73.888365,
   "accuracy_m": 12,
@@ -209,14 +209,14 @@ POST /v1/webhooks/location_update
 | --- | --- |
 | `204` | Fix accepted and stored |
 | `401` | Not paired, missing header, or relay key mismatch |
-| `404` | Unknown `participant_id` (roster not synced) |
+| `404` | Unknown `user_id` (roster not synced) |
 | `422` | Bad coordinates or timestamp |
 | `503` | **Emergency switch** — domesti-bot is dropping location updates (see below) |
 
 **Side effects:**
 
-- Upsert `rule_participant_last_fix` (latest snapshot for status UI / geofence checks).
-- Append one row to `rule_participant_location_history`, then prune per [retention policy](#location-history-retention).
+- Upsert `rule_user_last_location` (latest snapshot for status UI / geofence checks).
+- Append one row to `rule_user_location_history`, then prune per [retention policy](#location-history-retention).
 - Log `[location] stored fix for …` at INFO; prune logs `[location] pruned N history row(s) for …`.
 - Future: `RuleEvaluator.request_evaluation(reason="location_update")`.
 
@@ -234,7 +234,7 @@ Same request body and auth as live relay. Differences:
 | --- | --- | --- |
 | Trigger | my-tracks on each saved GPS fix | my-tracks P4 test button; domesti-bot verify roundtrip |
 | Respects emergency switch | yes (`503`) | **no** — verify must still work when live ingest is paused |
-| Persists fix | yes (latest + history) | **no** — validate auth + schema; return `204` without writing (accepts any `participant_id` for connectivity checks); logs `test webhook accepted for … (discarded)` |
+| Persists fix | yes (latest + history) | **no** — validate auth + schema; return `204` without writing (accepts any `user_id` for connectivity checks); logs `test webhook accepted for … (discarded)` |
 | Evaluator | future: schedule | never |
 
 This keeps production rule state clean while operators confirm connectivity.
@@ -242,7 +242,7 @@ This keeps production rule state clean while operators confirm connectivity.
 ### Debug ingest (optional, same PR as live relay)
 
 ```
-PUT /v1/location_update/{participant_id}
+PUT /v1/location_update/{user_id}
 ```
 
 Same fields as webhook body for curl/manual debugging; same responses as live relay.
@@ -308,7 +308,7 @@ GET /v1/settings/my-tracks/pair-status
 **Flow (domesti-bot orchestrates):**
 
 1. Authenticate to my-tracks (admin session, saved domain + username + password prompt).
-2. Call my-tracks `POST /api/admin/domesti-bot/test-location-update/` with optional `participant_id` (defaults to first roster member after sync).
+2. Call my-tracks `POST /api/admin/domesti-bot/test-location-update/` with optional `user_id` (defaults to first roster member after sync).
 3. my-tracks POSTs a **synthetic** payload to the stored **`user_location_test_url`** (`…/location_update/test`), not the live URL.
 4. domesti-bot test handler validates and returns `204`.
 5. my-tracks returns success/failure to domesti-bot; domesti-bot surfaces result in UI (toast + `last_verify_at` / `last_verify_ok`).
@@ -341,14 +341,14 @@ Requires paired state; returns updated `pair-status` shape.
 
 ## Location history retention
 
-Live webhook ingest **persists history**, not just the latest fix. Each accepted `POST /v1/webhooks/location_update` appends to `rule_participant_location_history` and updates `rule_participant_last_fix` (denormalized latest for `/v1/rules/participants/status` and geofence containment).
+Live webhook ingest **persists history**, not just the latest fix. Each accepted `POST /v1/webhooks/location_update` appends to `rule_user_location_history` and updates `rule_user_last_location` (denormalized latest for `/v1/rules/users/status` and geofence containment).
 
 ### Default policy
 
 Keep a fix when **either**:
 
 1. `received_at` is within the last **24 hours**, or
-2. the fix is among the **20 most recent** for that participant.
+2. the location is among the **20 most recent** for that user.
 
 This union keeps *more* data than either rule alone (the operator-facing help text: “last day **or** last 20, whichever is larger”).
 
@@ -373,9 +373,9 @@ PATCH /v1/settings/my-tracks/location-history-retention
 }
 ```
 
-Changing retention runs an immediate prune across all participants. `unlimited: true` skips pruning entirely.
+Changing retention runs an immediate prune across all users. `unlimited: true` skips pruning entirely.
 
-**UI:** Settings → My Tracks → Pairing → “Location history per participant” fieldset (checkbox **Keep all location history**, hours, min count).
+**UI:** Settings → My Tracks → Pairing → “Location history per user” fieldset (checkbox **Keep all location history**, hours, min count).
 
 **Module:** `app/location_history_retention.py` (`retained_history_row_ids`, defaults); prune in `app/presence_store.py`.
 
@@ -385,9 +385,9 @@ Test webhook (`…/location_update/test`) and emergency-off live path do **not**
 
 ## Manual sync (unchanged)
 
-After pairing, operators still run **Sync from my-tracks** in the Automations hub (participants + geofences). my-tracks does not push roster or geofence changes.
+After pairing, operators still run **Sync from my-tracks** in the Automations hub (users + geofences). my-tracks does not push roster or geofence changes.
 
-Participant sync must run **before** live webhooks succeed (`404` until `participant_id` exists in domesti-bot).
+User sync must run **before** live webhooks succeed (`404` until `user_id` exists in domesti-bot).
 
 ---
 
@@ -408,16 +408,16 @@ Participant sync must run **before** live webhooks succeed (`404` until `partici
 | `location_history_min_keep_count` | Minimum recent fixes to keep (default `20`) |
 | `last_verify_at` / `last_verify_ok` | Last verify roundtrip result |
 
-### `rule_participant_location_history`
+### `rule_user_location_history`
 
 | Column | Purpose |
 | --- | --- |
 | `id` | Autoincrement primary key |
-| `participant_id` | Roster member |
+| `user_id` | Roster member |
 | `lat`, `lon`, `accuracy_m`, `received_at`, `source` | Fix payload |
 | `updated_at` | Insert time (epoch) |
 
-Pruned after each append (and when retention settings change) per [Location history retention](#location-history-retention). `rule_participant_last_fix` remains the fast “latest only” read path.
+Pruned after each append (and when retention settings change) per [Location history retention](#location-history-retention). `rule_user_last_location` remains the fast “latest only” read path.
 
 ### `app_secrets` (encrypted)
 
@@ -433,9 +433,9 @@ Helpers in `app/db/secrets.py`: `save_mytracks_relay_api_key_to_db`, `load_mytra
 
 | PR | Scope | Status |
 | --- | --- | --- |
-| **D1** | Relay-key verifier; `LocationUpdateWebhookIn`; live + test webhooks; `PUT /v1/location_update/{id}`; `rule_participant_location_history` + retention prune; hermetic tests | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)) |
+| **D1** | Relay-key verifier; `LocationUpdateWebhookIn`; live + test webhooks; `PUT /v1/location_update/{id}`; `rule_user_location_history` + retention prune; hermetic tests | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)) |
 | **D2** | `app_secrets` relay key; `pair_with_my_tracks()`; pairing APIs; `PATCH …/location-updates`; `PATCH …/location-history-retention`; pairing attempt logging | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)) |
-| **D3** | Settings UI: pair/re-pair, retention, relay-key reveal, reset; Automations participant map legend + live polling | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216)) |
+| **D3** | Settings UI: pair/re-pair, retention, relay-key reveal, reset; Automations user map legend + live polling | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216)) |
 | **D3b** (optional) | Verify-roundtrip + emergency-toggle buttons in Settings | Deferred (APIs + verify script exist) |
 | **D4** (later) | File-backed `RuleEvaluator` on live `POST /v1/webhooks/location_update` (rules in `automation-rules.json`, no rule SQLite yet) | In progress — bundle in `automation-rules.json.example`; see **Phase 2a** in `docs/RULE_ENGINE_PLAN.md` |
 
@@ -447,7 +447,7 @@ Helpers in `app/db/secrets.py`: `save_mytracks_relay_api_key_to_db`, `load_mytra
 
 | Layer | Coverage |
 | --- | --- |
-| Live webhook | Auth; known vs unknown participant; latest + history append; retention prune; `503` when emergency off |
+| Live webhook | Auth; known vs unknown user; latest + history append; retention prune; `503` when emergency off |
 | Test webhook | Same validation; no persistence; works when emergency off live path |
 | Location history | Default 24h ∪ 20 fixes; unlimited mode; `PATCH …/location-history-retention` |
 | Pair | HTTPS URL validation; relay key generated + stored; my-tracks 200/4xx mapping; pairing logs |
@@ -462,7 +462,7 @@ Helpers in `app/db/secrets.py`: `save_mytracks_relay_api_key_to_db`, `load_mytra
 
 1. Operator pairs from domesti-bot using **HTTPS** URLs for both services; domesti-bot generates a relay secret, persists it encrypted, and registers **live + test** webhook URLs and that secret on my-tracks.
 2. **Verify pairing** succeeds end-to-end via `…/location_update/test` without mutating live rule state (today: `scripts/internal/verify-mytracks-pairing`; Settings button deferred).
-3. Live GPS fixes update `/v1/rules/participants/status` when emergency switch is on; history rows accumulate subject to retention.
+3. Live GPS fixes update `/v1/rules/users/status` when emergency switch is on; history rows accumulate subject to retention.
 4. Emergency switch stops live ingest (`503`) and pauses my-tracks relay.
 5. Participant and geofence data still flow only via **manual** sync pulls.
 6. Operators can tune or disable location-history pruning from the pairing UI (default: 24h ∪ 20 fixes).
