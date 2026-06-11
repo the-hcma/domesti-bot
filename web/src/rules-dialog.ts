@@ -12,16 +12,22 @@ import type { RulesDataSource } from "./rules-data-source.js";
 import { createRulesDataSource } from "./rules-data-source.js";
 import { DEFAULT_MIN_FIX_ACCURACY_M } from "./rules-constants.js";
 import {
+  formatInsideGeofencesLine,
   mountPresenceMap,
   participantStatusToMapParticipant,
   renderParticipantDetailText,
   type PresenceMapController,
 } from "./presence-map.js";
-import { buildInspectorContext, mountRuleInspectorPanel } from "./rule-inspector.js";
+import {
+  buildInspectorContext,
+  mountRuleInspectorPanel,
+  type RuleInspectorMountOptions,
+} from "./rule-inspector.js";
 import { haversineM } from "./rules-mock-fixtures.js";
 import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
+  collectParticipantIdsFromRule,
   joinNames,
   summarizeRule,
 } from "./rule-summary.js";
@@ -33,6 +39,7 @@ import {
   FAMILY_ACTION_GROUP_LABELS,
   firstNameFromDisplayName,
   preventBrowserAutofill,
+  resolveParticipantDisplayName,
 } from "./rules-ui-helpers.js";
 import { createAuditedTimeElement } from "./format-timestamp.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
@@ -44,6 +51,7 @@ import type {
   RuleConditionOut,
   RuleDeviceActionOut,
   RuleOut,
+  RuleStatusSummaryOut,
   RulesStatusOut,
   SettingsLocationOut,
   TimeConditionTemplateOut,
@@ -246,6 +254,7 @@ class RulesHubController {
   private activeTab: RulesTabId = "status";
   private dataSource: RulesDataSource;
   private pendingGeofenceFocusId: string | null = null;
+  private pendingRuleInspectorId: string | null = null;
   private presenceMap: PresenceMapController | null = null;
   private presencePollTimer: ReturnType<typeof window.setInterval> | null = null;
   private status: RulesStatusOut | null = null;
@@ -425,24 +434,13 @@ class RulesHubController {
     }
   }
 
-  private async openRuleInspector(rule: RuleOut): Promise<void> {
-    const [participants, geofences, actionDevices] = await Promise.all([
-      this.dataSource.listParticipants(),
-      this.dataSource.listGeofences(),
-      this.dataSource.listActionDevices(),
-    ]);
-    const panel = document.createElement("div");
-    panel.className = "rules-editor-panel rules-inspector-panel";
-    mountRuleInspectorPanel(
-      panel,
-      rule,
-      buildInspectorContext(participants, geofences, actionDevices),
-      () => {
-        panel.remove();
-      },
-    );
-    this.body.append(panel);
-    panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  private liveStatusForRule(ruleId: string): RuleStatusSummaryOut | undefined {
+    return this.status?.rules.find((row) => row.id === ruleId);
+  }
+
+  private async navigateToRule(ruleId: string): Promise<void> {
+    this.pendingRuleInspectorId = ruleId;
+    await this.setTab("rules");
   }
 
   private async openRuleEditor(existing: RuleOut | null): Promise<void> {
@@ -887,9 +885,43 @@ class RulesHubController {
     labelInput.focus();
   }
 
+  private async openRuleInspector(
+    rule: RuleOut,
+    liveStatus?: RuleStatusSummaryOut,
+  ): Promise<void> {
+    const [participants, geofences, actionDevices] = await Promise.all([
+      this.dataSource.listParticipants(),
+      this.dataSource.listGeofences(),
+      this.dataSource.listActionDevices(),
+    ]);
+    for (const panel of this.body.querySelectorAll(".rules-inspector-panel")) {
+      panel.remove();
+    }
+    const panel = document.createElement("div");
+    panel.className = "rules-editor-panel rules-inspector-panel";
+    panel.dataset.ruleId = rule.id;
+    const resolvedLiveStatus = liveStatus ?? this.liveStatusForRule(rule.id);
+    const inspectorOptions: RuleInspectorMountOptions = {
+      onClose: () => {
+        panel.remove();
+      },
+    };
+    if (resolvedLiveStatus !== undefined) {
+      inspectorOptions.liveStatus = resolvedLiveStatus;
+    }
+    mountRuleInspectorPanel(
+      panel,
+      rule,
+      buildInspectorContext(participants, geofences, actionDevices),
+      inspectorOptions,
+    );
+    this.body.append(panel);
+    panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
   private async refresh(): Promise<void> {
     this.status = await this.dataSource.getStatus();
-    this.renderBody();
+    await this.renderBody();
     this.syncTabUi();
   }
 
@@ -907,7 +939,7 @@ class RulesHubController {
     }
   }
 
-  private renderBody(): void {
+  private async renderBody(): Promise<void> {
     this.stopPresencePoll();
     this.presenceMap?.destroy();
     this.presenceMap = null;
@@ -920,19 +952,19 @@ class RulesHubController {
         this.renderStatusTab(this.status);
         break;
       case "conditions":
-        void this.renderConditionsTab(this.status);
+        await this.renderConditionsTab(this.status);
         break;
       case "rules":
-        void this.renderRulesTab();
+        await this.renderRulesTab();
         break;
       case "geofences":
-        void this.renderGeofencesTab();
+        await this.renderGeofencesTab();
         break;
       case "mail":
-        void this.renderMailTab();
+        await this.renderMailTab();
         break;
       case "participants":
-        void this.renderParticipantsTab();
+        await this.renderParticipantsTab();
         break;
     }
   }
@@ -1092,7 +1124,7 @@ class RulesHubController {
     ruleList.className = "rules-card-list";
     for (const rule of status.rules) {
       const card = document.createElement("article");
-      card.className = "rules-card";
+      card.className = "rules-card rules-status-rule-card";
       const row = document.createElement("div");
       row.className = "rules-card-row";
       const nameBtn = document.createElement("button");
@@ -1100,18 +1132,7 @@ class RulesHubController {
       nameBtn.className = "rules-card-title-btn";
       nameBtn.textContent = rule.label;
       nameBtn.addEventListener("click", () => {
-        void this.dataSource.getRule(rule.id).then((full) => {
-          if (full === null) {
-            return;
-          }
-          if (rulesReadOnly) {
-            void this.openRuleInspector(full);
-            return;
-          }
-          void this.setTab("rules").then(() => {
-            void this.openRuleEditor(full);
-          });
-        });
+        void this.navigateToRule(rule.id);
       });
       row.append(nameBtn);
       if (!rulesReadOnly) {
@@ -1124,31 +1145,50 @@ class RulesHubController {
       }
       const meta = document.createElement("p");
       meta.className = "rules-card-meta";
-      const met = rule.condition_currently_true ? "conditions met" : "conditions not met";
-      meta.replaceChildren(document.createTextNode(met));
-      if (rule.last_fired_at !== null) {
-        meta.append(document.createTextNode(" · last fired "));
-        meta.append(createAuditedTimeElement(rule.last_fired_at));
-      }
+      meta.textContent = rule.condition_currently_true
+        ? "Ready — all conditions met"
+        : "Waiting — conditions not met yet";
       card.append(row, meta);
-      void this.dataSource.getRule(rule.id).then((full) => {
-        if (full?.notify_on_fire && full.notification_email !== null) {
-          const notifyMeta = document.createElement("p");
-          notifyMeta.className = "rules-card-meta";
-          notifyMeta.textContent = `Email on fire → ${full.notification_email}`;
-          card.append(notifyMeta);
-        }
-      });
-
-      const condList = document.createElement("ul");
-      condList.className = "rules-condition-list";
-      for (const cond of rule.conditions) {
-        const li = document.createElement("li");
-        li.className = cond.met ? "rules-condition-met" : "rules-condition-unmet";
-        li.textContent = `${cond.met ? "✓" : "✗"} ${cond.label} — ${cond.detail}`;
-        condList.append(li);
+      if (rule.last_fired_at !== null) {
+        const fired = document.createElement("p");
+        fired.className = "rules-card-meta";
+        fired.append(document.createTextNode("Last fired "));
+        fired.append(createAuditedTimeElement(rule.last_fired_at));
+        card.append(fired);
       }
-      card.append(condList);
+      void this.dataSource.getRule(rule.id).then((definition) => {
+        if (definition === null) {
+          return;
+        }
+        const participantIds = collectParticipantIdsFromRule(definition);
+        if (participantIds.length === 0) {
+          return;
+        }
+        const presence = document.createElement("div");
+        presence.className = "rules-rule-presence-summary";
+        for (const participantId of participantIds) {
+          const participant = status.participants.find(
+            (row) => row.participant_id === participantId,
+          );
+          const line = document.createElement("p");
+          line.className = "rules-card-meta";
+          const name = participant === undefined
+            ? participantId
+            : resolveParticipantDisplayName(
+              participant.participant_id,
+              participant.display_name,
+            );
+          const where = participant === undefined
+            ? "No location fix"
+            : formatInsideGeofencesLine(
+              participant.inside_geofence_ids,
+              status.geofences,
+            );
+          line.textContent = `${name}: ${where}`;
+          presence.append(line);
+        }
+        card.append(presence);
+      });
       ruleList.append(card);
     }
 
@@ -1205,7 +1245,7 @@ class RulesHubController {
         nameBtn.className = "rules-card-title-btn rules-rule-card-title";
         nameBtn.textContent = rule.label;
         nameBtn.addEventListener("click", () => {
-          void this.openRuleInspector(rule);
+          void this.openRuleInspector(rule, this.liveStatusForRule(rule.id));
         });
         top.append(nameBtn);
       } else {
@@ -1259,6 +1299,14 @@ class RulesHubController {
       list.append(card);
     }
     this.body.append(list);
+    const focusRuleId = this.pendingRuleInspectorId;
+    if (focusRuleId !== null) {
+      this.pendingRuleInspectorId = null;
+      const rule = rules.find((row) => row.id === focusRuleId);
+      if (rule !== undefined) {
+        await this.openRuleInspector(rule, this.liveStatusForRule(rule.id));
+      }
+    }
   }
 
   private async renderGeofencesTab(): Promise<void> {

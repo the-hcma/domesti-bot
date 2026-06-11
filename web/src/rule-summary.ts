@@ -81,6 +81,36 @@ export function buildRuleSummaryContext(
   return { deviceLabelByKey, geofenceLabelById, participantNameById };
 }
 
+export function collectParticipantIdsFromConditions(
+  conditions: readonly RuleConditionOut[],
+): string[] {
+  const ids = new Set<string>();
+  const walk = (condition: RuleConditionOut): void => {
+    if (
+      condition.type === "participants_inside_geofence"
+      || condition.type === "participants_outside_geofence"
+    ) {
+      for (const participantId of condition.participant_ids) {
+        ids.add(participantId);
+      }
+      return;
+    }
+    if (condition.type === "all" || condition.type === "any") {
+      for (const child of condition.conditions) {
+        walk(child);
+      }
+    }
+  };
+  for (const condition of conditions) {
+    walk(condition);
+  }
+  return [...ids].sort();
+}
+
+export function collectParticipantIdsFromRule(rule: RuleOut): string[] {
+  return collectParticipantIdsFromConditions(rule.conditions.all);
+}
+
 export function joinNames(names: readonly string[]): string {
   if (names.length === 0) {
     return "nobody";
