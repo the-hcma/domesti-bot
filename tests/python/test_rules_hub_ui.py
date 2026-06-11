@@ -140,6 +140,37 @@ def test_rules_menu_hidden_on_compact_viewport(
 
 
 @pytest.mark.browser
+def test_status_rule_click_opens_rules_tab_inspector(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Status tab rule cards drill into Rules tab detail with live condition rows."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator("dialog.rules-dialog").wait_for(state="visible", timeout=10_000)
+        status_rule = page.locator(
+            ".rules-status-rule-card .rules-card-title-btn",
+        ).first
+        status_rule.wait_for(state="visible", timeout=10_000)
+        status_rule.click()
+        page.locator('.rules-tab[data-tab="rules"].rules-tab-active').wait_for(
+            state="visible",
+            timeout=10_000,
+        )
+        inspector = page.locator(".rules-inspector-panel")
+        inspector.wait_for(state="visible", timeout=10_000)
+        assert inspector.locator(".rules-condition-list").count() >= 1
+        assert page.locator(".rules-status-rule-card .rules-condition-list").count() == 0
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
 def test_rules_hub_opens_with_mock_seed_rule(
     chromium_browser: Any,
     landing_base_url: str,

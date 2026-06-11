@@ -1,5 +1,6 @@
 // Read-only automation rule wiring panel (file-backed bundle).
 
+import { createAuditedTimeElement } from "./format-timestamp.js";
 import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
@@ -16,7 +17,13 @@ import type {
   RuleActionDeviceOut,
   RuleConditionOut,
   RuleOut,
+  RuleStatusSummaryOut,
 } from "./types.js";
+
+export interface RuleInspectorMountOptions {
+  liveStatus?: RuleStatusSummaryOut;
+  onClose: () => void;
+}
 
 function appendConditionTree(
   parent: HTMLElement,
@@ -52,11 +59,64 @@ function appendDefinitionRow(dl: HTMLDListElement, term: string, value: string):
   dl.append(dt, dd);
 }
 
+function appendLiveStatusSection(
+  parent: HTMLElement,
+  liveStatus: RuleStatusSummaryOut,
+): void {
+  const section = document.createElement("section");
+  section.className = "rules-inspector-section";
+  const title = document.createElement("h4");
+  title.className = "rules-rule-summary-heading";
+  title.textContent = "Live status";
+  section.append(title);
+
+  const headline = document.createElement("p");
+  headline.className = "rules-card-meta";
+  headline.textContent = liveStatus.condition_currently_true
+    ? "All conditions are currently met."
+    : "Waiting — not all conditions are met yet.";
+  section.append(headline);
+
+  if (liveStatus.last_fired_at !== null) {
+    const fired = document.createElement("p");
+    fired.className = "rules-card-meta";
+    fired.append(document.createTextNode("Last fired "));
+    fired.append(createAuditedTimeElement(liveStatus.last_fired_at));
+    section.append(fired);
+  }
+
+  if (liveStatus.last_error !== null) {
+    const error = document.createElement("p");
+    error.className = "rules-card-warn";
+    error.textContent = liveStatus.last_error;
+    section.append(error);
+  }
+
+  const condList = document.createElement("ul");
+  condList.className = "rules-condition-list";
+  for (const cond of liveStatus.conditions) {
+    const li = document.createElement("li");
+    li.className = cond.met ? "rules-condition-met" : "rules-condition-unmet";
+    li.textContent = `${cond.met ? "✓" : "✗"} ${cond.label} — ${cond.detail}`;
+    condList.append(li);
+  }
+  section.append(condList);
+  parent.append(section);
+}
+
+export function buildInspectorContext(
+  participants: readonly ParticipantOut[],
+  geofences: readonly GeofenceOut[],
+  actionDevices: readonly RuleActionDeviceOut[],
+): RuleSummaryContext {
+  return buildRuleSummaryContext(participants, geofences, actionDevices);
+}
+
 export function mountRuleInspectorPanel(
   parent: HTMLElement,
   rule: RuleOut,
   context: RuleSummaryContext,
-  onClose: () => void,
+  options: RuleInspectorMountOptions,
 ): void {
   const header = document.createElement("div");
   header.className = "rules-rule-editor-header";
@@ -124,25 +184,13 @@ export function mountRuleInspectorPanel(
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "btn";
-  closeBtn.textContent = "Close";
-  closeBtn.addEventListener("click", onClose);
+  closeBtn.textContent = "Back to rules";
+  closeBtn.addEventListener("click", options.onClose);
   actions.append(closeBtn);
 
-  parent.append(
-    header,
-    lead,
-    meta,
-    summaryHost,
-    conditionsSection,
-    actionsSection,
-    actions,
-  );
-}
-
-export function buildInspectorContext(
-  participants: readonly ParticipantOut[],
-  geofences: readonly GeofenceOut[],
-  actionDevices: readonly RuleActionDeviceOut[],
-): RuleSummaryContext {
-  return buildRuleSummaryContext(participants, geofences, actionDevices);
+  parent.append(header, lead, meta, summaryHost, conditionsSection, actionsSection);
+  if (options.liveStatus !== undefined) {
+    appendLiveStatusSection(parent, options.liveStatus);
+  }
+  parent.append(actions);
 }
