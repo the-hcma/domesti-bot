@@ -122,15 +122,19 @@ def fetch_mytracks_domesti_config(
     location_updates_enabled = (
         bool(enabled_raw) if enabled_raw is not None else None
     )
+    update_url = _optional_str(
+        payload.get("user_location_update_url")
+        or payload.get("participant_location_update_url")
+    )
+    test_url = _optional_str(
+        payload.get("user_location_test_url")
+        or payload.get("participant_location_test_url")
+    )
     return DomestiBotConfigFromMyTracks(
         domesti_base_url=_optional_str(payload.get("domesti_base_url")),
         location_updates_enabled=location_updates_enabled,
-        user_location_test_url=_optional_str(
-            payload.get("participant_location_test_url")
-        ),
-        user_location_update_url=_optional_str(
-            payload.get("participant_location_update_url")
-        ),
+        user_location_test_url=test_url,
+        user_location_update_url=update_url,
     )
 
 
@@ -210,8 +214,8 @@ def pair_with_my_tracks(
                 json={
                     "api_key": api_key,
                     "domesti_base_url": domesti_base_url,
-                    "participant_location_update_url": user_location_update_url,
-                    "participant_location_test_url": user_location_test_url,
+                    "user_location_test_url": user_location_test_url,
+                    "user_location_update_url": user_location_update_url,
                 },
                 headers={"X-CSRFToken": csrf, "Referer": f"{base_url.rstrip('/')}/"},
             )
