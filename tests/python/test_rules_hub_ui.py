@@ -53,6 +53,8 @@ def test_index_html_includes_rules_hub_css() -> None:
         "rules-geofence-toolbar-draw-active",
         "rules-dynamic-badge",
         "rules-condition-list",
+        "rules-condition-tree",
+        "rules-inspector-meta",
         "rules-device-action-group",
         "rules-enable-toggle",
         "rules-info-badge",

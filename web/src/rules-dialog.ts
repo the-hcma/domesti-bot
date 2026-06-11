@@ -17,6 +17,7 @@ import {
   renderParticipantDetailText,
   type PresenceMapController,
 } from "./presence-map.js";
+import { buildInspectorContext, mountRuleInspectorPanel } from "./rule-inspector.js";
 import { haversineM } from "./rules-mock-fixtures.js";
 import {
   appendRuleSummaryBody,
@@ -422,6 +423,26 @@ class RulesHubController {
       }
       parent.append(details);
     }
+  }
+
+  private async openRuleInspector(rule: RuleOut): Promise<void> {
+    const [participants, geofences, actionDevices] = await Promise.all([
+      this.dataSource.listParticipants(),
+      this.dataSource.listGeofences(),
+      this.dataSource.listActionDevices(),
+    ]);
+    const panel = document.createElement("div");
+    panel.className = "rules-editor-panel rules-inspector-panel";
+    mountRuleInspectorPanel(
+      panel,
+      rule,
+      buildInspectorContext(participants, geofences, actionDevices),
+      () => {
+        panel.remove();
+      },
+    );
+    this.body.append(panel);
+    panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 
   private async openRuleEditor(existing: RuleOut | null): Promise<void> {
@@ -1066,6 +1087,7 @@ class RulesHubController {
     const rulesHeading = document.createElement("h3");
     rulesHeading.className = "rules-section-title";
     rulesHeading.textContent = "Rules";
+    const rulesReadOnly = this.dataSource.isRulesFileBacked();
     const ruleList = document.createElement("div");
     ruleList.className = "rules-card-list";
     for (const rule of status.rules) {
@@ -1079,19 +1101,27 @@ class RulesHubController {
       nameBtn.textContent = rule.label;
       nameBtn.addEventListener("click", () => {
         void this.dataSource.getRule(rule.id).then((full) => {
-          if (full !== null) {
-            void this.setTab("rules").then(() => {
-              void this.openRuleEditor(full);
-            });
+          if (full === null) {
+            return;
           }
+          if (rulesReadOnly) {
+            void this.openRuleInspector(full);
+            return;
+          }
+          void this.setTab("rules").then(() => {
+            void this.openRuleEditor(full);
+          });
         });
       });
-      const enableToggle = createEnableToggle(rule.enabled, (next) => {
-        void this.dataSource
-          .setRuleEnabled(rule.id, next)
-          .then(() => this.refresh());
-      });
-      row.append(nameBtn, enableToggle);
+      row.append(nameBtn);
+      if (!rulesReadOnly) {
+        const enableToggle = createEnableToggle(rule.enabled, (next) => {
+          void this.dataSource
+            .setRuleEnabled(rule.id, next)
+            .then(() => this.refresh());
+        });
+        row.append(enableToggle);
+      }
       const meta = document.createElement("p");
       meta.className = "rules-card-meta";
       const met = rule.condition_currently_true ? "conditions met" : "conditions not met";
@@ -1169,12 +1199,19 @@ class RulesHubController {
 
       const top = document.createElement("div");
       top.className = "rules-rule-card-top";
-      const title = document.createElement("h3");
-      title.className = "rules-rule-card-title";
-      title.textContent = rule.label;
       if (rulesReadOnly) {
-        top.append(title);
+        const nameBtn = document.createElement("button");
+        nameBtn.type = "button";
+        nameBtn.className = "rules-card-title-btn rules-rule-card-title";
+        nameBtn.textContent = rule.label;
+        nameBtn.addEventListener("click", () => {
+          void this.openRuleInspector(rule);
+        });
+        top.append(nameBtn);
       } else {
+        const title = document.createElement("h3");
+        title.className = "rules-rule-card-title";
+        title.textContent = rule.label;
         const enableToggle = createEnableToggle(rule.enabled, (next) => {
           void this.dataSource
             .setRuleEnabled(rule.id, next)

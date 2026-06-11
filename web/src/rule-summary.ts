@@ -42,7 +42,7 @@ function looksLikeIpv4(value: string): boolean {
   return IPV4_RE.test(value.trim());
 }
 
-function resolveDeviceLabel(
+export function resolveDeviceLabel(
   familyId: string,
   deviceId: string,
   context: RuleSummaryContext,
@@ -165,7 +165,7 @@ export function formatPresenceEventLabel(
   return `When ${who} leave ${where}`;
 }
 
-function formatTimingCondition(condition: RuleConditionOut): string | null {
+export function formatTimingCondition(condition: RuleConditionOut): string | null {
   switch (condition.type) {
     case "participants_inside_geofence":
     case "participants_outside_geofence":
