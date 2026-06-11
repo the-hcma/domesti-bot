@@ -29,7 +29,7 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 | **Device targets** | Top-level `"device_id_resolution": "preferred_label"` — `device_id` is the tile/REPL display name (e.g. `Front door lights`); the evaluator resolves to Kasa host or Tailwind id via `preferred_label`, like the REPL. |
 | **Geofences** | Loaded from existing SQLite (`rule_geofences`) by `geofence_id` (`house`, `west-point`, …). Operators define fences in Automations → Geofences; the bundle only references ids. |
 | **Sunset** | `settings_location` block in the bundle (lat/lon/timezone) until `GET/PUT /v1/rules/settings/location` exists; evaluated with **`astral`**. |
-| **Edit workflow** | Edit JSON → restart server (no Automations rule editor persistence in this track). |
+| **UI workflow** | **Inspect** rule wiring in Automations (read-only detail panel). **Persist** by editing `automation-rules.json` + restart — no in-UI save until Phase 2b SQLite CRUD. |
 
 ### Evaluation model (location-driven edges)
 
@@ -73,15 +73,40 @@ Rule evaluation runs on the **asyncio event loop** shared with FastAPI — no th
 | **Sunset boundary** | Optional `asyncio` background task with `await asyncio.sleep(interval)` for status/logging only — **not** for firing rule 1 at sunset (location edges only). |
 | **Concurrency** | One `asyncio.Lock` (or per-participant lock) inside the evaluator so overlapping fixes for the same participant serialize edge detection. |
 
+### Relationship to `app/rule_engine.py`
+
+The production path **extends** the object model you already started — it does not throw it away.
+
+| Existing (`app/rule_engine.py`) | Production use |
+| --- | --- |
+| `Device`, `setLocation` | Tests, simulations, future REPL helpers |
+| `Geofence` + UTM distance | Hermetic unit tests (`test_rule_engine.py`); **not** the live ingest path |
+| `Condition` | Pattern for predicates; JSON rules compile into callables in `rule_conditions.py` |
+| `AsyncCallableAction` + `SwitchDevice` | How PR-A3 fires Kasa `turn_on` / Tailwind `open` |
+| `Rule`, `RuleEngine` (stubs today) | Filled in by `RuleEvaluator` (PR-A4) — edge detection, cooldown, dispatch |
+
+Live evaluation uses **SQLite geofences** + **`presence_store` haversine** (same math as participant status), not the in-memory UTM `Geofence` class. Sunset uses **`astral`** + `settings_location` from the bundle.
+
+### Automations UI: inspect vs edit
+
+| Phase | Rules tab / Status tab behavior |
+| --- | --- |
+| **A1b (done #222)** | Rules list from `GET /v1/rules`; read-only cards (no Add/Edit/Delete). |
+| **A1c (next)** | **Click a rule** → read-only **inspector** (same internal wiring as the Phase 1 mock editor: conditions, device actions, cooldown, notify email, trigger) — view only, no Save. |
+| **A2** | Status tab per-condition ✓/✗ comes from **`GET /v1/rules/status`** (Python). **Delete** `web/src/rules-evaluate.ts` — no client-side rule evaluation. |
+| **Phase 2b (later)** | In-UI rule **edit** + SQLite persistence (replaces file-only workflow). |
+
+Until Phase 2b, operators change rules by editing `automation-rules.json` and restarting the server.
+
 ### Module layout (next implementation PRs)
 
 ```
 automation-rules.json          # operator copy (gitignored)
 automation-rules.json.example
 app/automation_rules_loader.py # parse + validate bundle (done — also serves GET /v1/rules)
-app/rule_conditions.py         # port from web/src/rules-evaluate.ts + astral
+app/rule_conditions.py         # replaces web/src/rules-evaluate.ts; astral; feeds GET /v1/rules/status
 app/rule_actions.py            # Kasa/Tailwind dispatch + SMTP notify
-app/rule_evaluator.py          # asyncio edge state, cooldown, dispatch
+app/rule_evaluator.py          # asyncio edge state, cooldown, dispatch; grows Rule/RuleEngine stubs
 ```
 
 Hook: end of `apply_location_update_webhook()` after `upsert_participant_fix`, with `app.state.device_state` for actuators. Optional slow asyncio tick for logging only — **not** for firing rule 1 at sunset.
@@ -102,11 +127,13 @@ Hook: end of `apply_location_update_webhook()` after `upsert_participant_fix`, w
 | Live location ingest (my-tracks relay) | **Done** | `POST /v1/webhooks/location_update` |
 | Geofence + participant roster (SQLite) | **Done** | `app/rules_store.py`, `app/api/rules_routes.py` |
 | SMTP settings + test send | **Done** | `app/smtp_service.py`, `app/api/smtp_routes.py` |
-| Automations UI (rules editor, geofences map, status) | **Done** (rules list reads **file bundle** when server serves `GET /v1/rules`) | `web/src/rules-dialog.ts`, `web/src/rules-data-source.ts` |
-| Rule bundle template + loader | **Done** | `automation-rules.json.example`, `app/automation_rules_loader.py` |
-| File-backed rule evaluator (asyncio) | **Not started** | — |
-| Rule SQLite persistence + rule CRUD API | **Deferred** (after file-backed evaluator works) | — |
-| Sunset via `astral` on server | **Not started** (mock sun in TS only) | `web/src/rules-evaluate.ts` |
+| Automations UI — rules list from bundle | **Done** (#222) | `web/src/rules-dialog.ts`, `web/src/rules-data-source.ts` |
+| Automations UI — read-only rule inspector (click → wiring) | **Not started** (PR-A1c) | refactor `openRuleEditor` → view-only panel |
+| Rule bundle template + loader | **Done** (#222) | `automation-rules.json.example`, `app/automation_rules_loader.py` |
+| Server condition evaluation + `GET /v1/rules/status` | **Not started** (PR-A2) | `app/rule_conditions.py` |
+| Client TS rule evaluation | **Temporary** — removed in PR-A2 | `web/src/rules-evaluate.ts` |
+| File-backed rule evaluator (asyncio) | **Not started** (PR-A4) | `app/rule_evaluator.py` |
+| Rule SQLite persistence + in-UI edit | **Deferred** (Phase 2b) | — |
 | Hermetic tests beyond geofence distance | Minimal (`test_rule_engine.py`; `RuleEngine` test is a placeholder) | `tests/python/test_rule_engine.py` |
 
 ### What my-tracks has today (to migrate or sunset)
@@ -128,13 +155,14 @@ Hook: end of `apply_location_update_webhook()` after `upsert_participant_fix`, w
 
 ### Gaps to close (file-backed track)
 
-- Load and validate `automation-rules.json` at startup; fail loudly if missing when evaluator is enabled.
-- Python condition evaluator + **enter/leave edge** semantics on location ingest.
+- Read-only **rule inspector** in Automations (PR-A1c): click rule → see conditions, actions, cooldown, email — no Save.
+- Python condition evaluator + `GET /v1/rules/status` (PR-A2); **delete** `web/src/rules-evaluate.ts`.
 - `astral` sunset checks using bundle `settings_location`.
-- Action dispatcher: resolve `preferred_label` → device manager; Kasa `turn_on`; rule notification email via SMTP.
+- Python condition evaluator + **enter/leave edge** semantics on location ingest (PR-A4).
+- Action dispatcher: resolve `preferred_label` → device manager; Kasa `turn_on`; rule notification email via SMTP (PR-A3).
 - Hermetic tests: simulated fixes for Henrique/Kristen at house and Kristen at `west-point`.
-- `GET /v1/rules/status` with real `last_fired_at` / evaluator heartbeat (status tab still uses client-side condition preview).
-- Later: SQLite rule CRUD and in-UI rule editing (file bundle stays read-only in Automations until then).
+- `last_fired_at` / evaluator heartbeat on status API (PR-A4, once evaluator runs).
+- Later (Phase 2b): SQLite rule CRUD and **in-UI rule editing** (replaces file-only persist workflow).
 
 ---
 
@@ -1034,17 +1062,26 @@ Ship production automations from `automation-rules.json` **before** SQLite rule 
 - `conditions.any` / `conditions.all` nested types in `web/src/types.ts`.
 - Update this plan + `MY_TRACKS_INTEGRATION_PLAN.md` D4 pointer.
 
-#### PR-A1b — `feat/rules-ui-json-bundle` (current)
+#### PR-A1b — `feat/rules-ui-json-bundle` (merged #222)
 
 - `app/automation_rules_loader.py` + Pydantic `RuleOut` schemas.
 - `GET /v1/rules`, `GET /v1/rules/{id}`, `GET /v1/rules/settings/location`.
 - Automations UI reads the bundle (read-only Rules tab; pill shows `automation-rules.json`).
 - Nested `all`/`any` rule summaries in `web/src/rule-summary.ts`.
 
+#### PR-A1c — `feat/rules-ui-read-only-inspector` (next)
+
+- Refactor the Phase 1 rule **editor** form into a read-only **inspector** (`openRuleInspector`): same wiring view (conditions — including nested `all`/`any` — device actions, cooldown, accuracy threshold, notify email, trigger, rule id).
+- **Rules** tab: click a rule card → inspector. **Status** tab: click rule name → inspector (replace today's call to editable `openRuleEditor`).
+- No Save, no enable toggle, no Add/Delete — file bundle remains the source of truth until Phase 2b.
+- Keep `web/src/rules-evaluate.ts` temporarily so Status ✓/✗ still works until PR-A2 lands.
+
 #### PR-A2 — `feat/rule-conditions-and-astral`
 
-- `uv add astral`; `app/rule_conditions.py` (geofence, sunset, `any`/`all`).
-- Hermetic tests with bundle coordinates.
+- `uv add astral`; `app/rule_conditions.py` — geofence (haversine + SQLite), sunset, nested `any`/`all`; builds on `app/rule_engine.py` predicate/action patterns.
+- `GET /v1/rules/status` — `RulesStatusOut` wire shape (participants, geofences, per-rule condition rows with `met`/`label`/`detail`, sun row).
+- **Remove** `web/src/rules-evaluate.ts` and client `evaluateRule` usage in `rules-data-source.ts`; Status tab polls server status only.
+- Hermetic tests with bundle coordinates + frozen clock for sunset.
 
 #### PR-A3 — `feat/rule-actions-dispatch`
 
