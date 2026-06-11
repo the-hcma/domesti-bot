@@ -16,6 +16,7 @@ import type {
   MyTracksSettingsIn,
   MyTracksSettingsOut,
   MyTracksSyncIn,
+  ParticipantFixOut,
   ParticipantOut,
   ParticipantStatusOut,
   RuleActionDeviceOut,
@@ -29,9 +30,13 @@ import type {
   TimeConditionTemplateOut,
 } from "./types.js";
 
+const FILE_BACKED_RULES_ERROR =
+  "Rules are read from automation-rules.json on the server; edit that file and restart to change them.";
+
 export interface RulesDataSource {
   isMailLive(): boolean;
   isMock(): boolean;
+  isRulesFileBacked(): boolean;
   getStatus(): Promise<RulesStatusOut>;
   listGeofences(): Promise<GeofenceOut[]>;
   saveGeofence(geofence: GeofenceOut): Promise<GeofenceOut>;
@@ -88,8 +93,98 @@ function requireMyTracksDomain(settings: MockMyTracksSettings | null): string {
   return domain;
 }
 
+function buildEvaluationStore(
+  base: MockStoreSeed,
+  overrides: {
+    geofences?: GeofenceOut[];
+    participant_fixes?: Record<string, ParticipantFixOut>;
+    participants?: ParticipantOut[];
+    rules?: RuleOut[];
+    settings_location?: SettingsLocationOut;
+  },
+): MockStoreSeed {
+  return {
+    ...base,
+    ...overrides,
+    participant_fixes: overrides.participant_fixes ?? base.participant_fixes,
+  };
+}
+
+export function buildRulesStatusOut(
+  store: MockStoreSeed,
+  options?: {
+    geofences?: GeofenceOut[];
+    participants?: ParticipantStatusOut[];
+    using_mock?: boolean;
+  },
+): RulesStatusOut {
+  const now = Date.now();
+  const participants =
+    options?.participants
+    ?? store.participants.map((participant) => {
+      const fix = store.participant_fixes[participant.participant_id] ?? null;
+      const age_seconds =
+        fix === null
+          ? null
+          : Math.max(0, Math.floor((now - Date.parse(fix.received_at)) / 1000));
+      const inside_geofence_ids = store.geofences
+        .filter((geofence) => participantInsideGeofence(fix, geofence))
+        .map((geofence) => geofence.geofence_id);
+      return {
+        ...participant,
+        age_seconds,
+        inside_geofence_ids,
+        last_fix: fix,
+      };
+    });
+  const sun = mockSunRow();
+  return {
+    participants,
+    geofences: structuredClone(options?.geofences ?? store.geofences),
+    rules: store.rules.map((rule) => {
+      const evaluation = evaluateRule(rule, store);
+      return {
+        id: rule.id,
+        label: rule.label,
+        enabled: rule.enabled,
+        condition_currently_true: evaluation.all_met,
+        conditions: evaluation.conditions,
+        last_fired_at: store.rule_last_fired_at[rule.id] ?? null,
+        last_error: null,
+      };
+    }),
+    sun,
+    evaluator: {
+      last_run_at: new Date(now - 15_000).toISOString(),
+      next_sun_check_at: new Date(now + 45_000).toISOString(),
+    },
+    using_mock: options?.using_mock ?? true,
+  };
+}
+
 function cloneSeed(seed: MockStoreSeed): MockStoreSeed {
   return structuredClone(seed);
+}
+
+function participantStatusToFixes(
+  participants: ParticipantStatusOut[],
+): Record<string, ParticipantFixOut> {
+  const fixes: Record<string, ParticipantFixOut> = {};
+  for (const participant of participants) {
+    if (participant.last_fix !== null) {
+      fixes[participant.participant_id] = participant.last_fix;
+    }
+  }
+  return fixes;
+}
+
+function participantStatusToRoster(
+  participants: ParticipantStatusOut[],
+): ParticipantOut[] {
+  return participants.map(
+    ({ age_seconds: _age, inside_geofence_ids: _inside, last_fix: _fix, ...participant }) =>
+      participant,
+  );
 }
 
 function participantInsideGeofence(
@@ -123,32 +218,20 @@ export class MockRulesDataSource implements RulesDataSource {
     return true;
   }
 
+  isRulesFileBacked(): boolean {
+    return false;
+  }
+
+  getStoreSeed(): MockStoreSeed {
+    return cloneSeed(this.store);
+  }
+
   async getStatus(): Promise<RulesStatusOut> {
-    const now = Date.now();
     const participants = await this.listParticipantStatus();
-    const sun = mockSunRow();
-    return {
+    return buildRulesStatusOut(this.store, {
       participants,
-      geofences: structuredClone(this.store.geofences),
-      rules: this.store.rules.map((rule) => {
-        const evaluation = evaluateRule(rule, this.store);
-        return {
-          id: rule.id,
-          label: rule.label,
-          enabled: rule.enabled,
-          condition_currently_true: evaluation.all_met,
-          conditions: evaluation.conditions,
-          last_fired_at: this.store.rule_last_fired_at[rule.id] ?? null,
-          last_error: null,
-        };
-      }),
-      sun,
-      evaluator: {
-        last_run_at: new Date(now - 15_000).toISOString(),
-        next_sun_check_at: new Date(now + 45_000).toISOString(),
-      },
       using_mock: true,
-    };
+    });
   }
 
   async listGeofences(): Promise<GeofenceOut[]> {
@@ -447,12 +530,41 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 }
 
-/** Rules evaluation stays mock-backed; settings and roster/geofences use live HTTP when available. */
+/** Rules list reads ``automation-rules.json``; roster/geofences/mail use live HTTP when available. */
 class RulesDataSourceWithHttpSettings implements RulesDataSource {
+  private cachedRules: RuleOut[] | null = null;
+
+  private cachedSettingsLocation: SettingsLocationOut | null = null;
+
+  private rulesFileBacked = false;
+
   constructor(
     private readonly inner: MockRulesDataSource,
     private readonly rulesLive: boolean,
   ) {}
+
+  private assertRulesMutable(): void {
+    if (this.rulesFileBacked) {
+      throw new Error(FILE_BACKED_RULES_ERROR);
+    }
+  }
+
+  private async loadFileBackedRules(): Promise<RuleOut[] | null> {
+    if (this.cachedRules !== null) {
+      return this.cachedRules;
+    }
+    try {
+      const live = await api.fetchRules();
+      if (live.length > 0) {
+        this.cachedRules = live;
+        this.rulesFileBacked = true;
+        return live;
+      }
+    } catch (err) {
+      console.warn("Automation rules bundle fetch failed", err);
+    }
+    return null;
+  }
 
   deleteGeofence(geofenceId: string): Promise<void> {
     if (this.rulesLive) {
@@ -466,6 +578,7 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   deleteRule(ruleId: string): Promise<void> {
+    this.assertRulesMutable();
     return this.inner.deleteRule(ruleId);
   }
 
@@ -485,11 +598,29 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return api.fetchMyTracksSettings();
   }
 
-  getRule(ruleId: string): Promise<RuleOut | null> {
+  async getRule(ruleId: string): Promise<RuleOut | null> {
+    const rules = await this.loadFileBackedRules();
+    if (rules !== null) {
+      const rule = rules.find((row) => row.id === ruleId);
+      return rule === undefined ? null : structuredClone(rule);
+    }
     return this.inner.getRule(ruleId);
   }
 
-  getSettingsLocation(): Promise<SettingsLocationOut> {
+  async getSettingsLocation(): Promise<SettingsLocationOut> {
+    if (this.cachedSettingsLocation !== null) {
+      return structuredClone(this.cachedSettingsLocation);
+    }
+    const rules = await this.loadFileBackedRules();
+    if (rules !== null) {
+      try {
+        const live = await api.fetchRulesSettingsLocation();
+        this.cachedSettingsLocation = live;
+        return structuredClone(live);
+      } catch (err) {
+        console.warn("Automation rules settings location fetch failed", err);
+      }
+    }
     return this.inner.getSettingsLocation();
   }
 
@@ -498,21 +629,27 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   async getStatus(): Promise<RulesStatusOut> {
-    const status = await this.inner.getStatus();
-    if (!this.rulesLive) {
-      return status;
-    }
-    const [geofences, participants] = await Promise.all([
-      api.fetchRulesGeofences(),
-      api.fetchRulesParticipantStatus(),
+    const [rules, geofences, participants, settings] = await Promise.all([
+      this.listRules(),
+      this.listGeofences(),
+      this.listParticipantStatus(),
+      this.getSettingsLocation(),
     ]);
-    return {
-      ...status,
-      geofences: geofences.length > 0 ? geofences : status.geofences,
-      participants:
-        participants.length > 0 ? participants : status.participants,
-      using_mock: participants.length === 0 && status.participants.length > 0,
-    };
+    const store = buildEvaluationStore(this.inner.getStoreSeed(), {
+      rules,
+      geofences,
+      participants: participantStatusToRoster(participants),
+      participant_fixes: participantStatusToFixes(participants),
+      settings_location: settings,
+    });
+    const using_mock =
+      !this.rulesFileBacked
+      && (!this.rulesLive || participants.length === 0);
+    return buildRulesStatusOut(store, {
+      geofences,
+      participants,
+      using_mock,
+    });
   }
 
   isMailLive(): boolean {
@@ -520,7 +657,11 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   isMock(): boolean {
-    return this.inner.isMock();
+    return this.inner.isMock() && !this.rulesFileBacked;
+  }
+
+  isRulesFileBacked(): boolean {
+    return this.rulesFileBacked;
   }
 
   listActionDevices(): Promise<RuleActionDeviceOut[]> {
@@ -557,7 +698,11 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return this.inner.listParticipants();
   }
 
-  listRules(): Promise<RuleOut[]> {
+  async listRules(): Promise<RuleOut[]> {
+    const rules = await this.loadFileBackedRules();
+    if (rules !== null) {
+      return structuredClone(rules);
+    }
     return this.inner.listRules();
   }
 
@@ -589,6 +734,7 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   saveRule(rule: RuleOut): Promise<RuleOut> {
+    this.assertRulesMutable();
     return this.inner.saveRule(rule);
   }
 
@@ -611,6 +757,7 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 
   setRuleEnabled(ruleId: string, enabled: boolean): Promise<RuleOut> {
+    this.assertRulesMutable();
     return this.inner.setRuleEnabled(ruleId, enabled);
   }
 

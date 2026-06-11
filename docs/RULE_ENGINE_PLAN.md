@@ -60,18 +60,31 @@ Rules fire on **geofence enter/leave transitions** when a live fix arrives on `P
 | `kristen-west-point-arrive` | Kristen enters `west-point` → email only |
 | `kristen-west-point-leave` | Kristen leaves `west-point` → email only |
 
+### Asyncio runtime (evaluator)
+
+Rule evaluation runs on the **asyncio event loop** shared with FastAPI — no threads, no blocking `time.sleep` in the hot path.
+
+| Piece | asyncio shape |
+| --- | --- |
+| **Lifecycle** | `RuleEvaluator` registered in the FastAPI lifespan (`app/api/app.py`): construct on startup, `await evaluator.close()` on shutdown. |
+| **Location ingest** | After `upsert_participant_fix`, schedule `asyncio.create_task(evaluator.handle_location_fix(...), name="rule-eval-fix")` so webhook handlers return quickly. |
+| **Device actions** | `await` existing async manager methods (`KasaDeviceManager.turn_on`, …) via the same paths as `/v1/ui/*`. |
+| **Email** | `await` async SMTP send helper (or `asyncio.to_thread` around the stdlib client if the helper stays sync). |
+| **Sunset boundary** | Optional `asyncio` background task with `await asyncio.sleep(interval)` for status/logging only — **not** for firing rule 1 at sunset (location edges only). |
+| **Concurrency** | One `asyncio.Lock` (or per-participant lock) inside the evaluator so overlapping fixes for the same participant serialize edge detection. |
+
 ### Module layout (next implementation PRs)
 
 ```
 automation-rules.json          # operator copy (gitignored)
 automation-rules.json.example
-app/automation_rules_loader.py # parse + validate bundle
+app/automation_rules_loader.py # parse + validate bundle (done — also serves GET /v1/rules)
 app/rule_conditions.py         # port from web/src/rules-evaluate.ts + astral
 app/rule_actions.py            # Kasa/Tailwind dispatch + SMTP notify
-app/rule_evaluator.py          # edge state, cooldown, dispatch
+app/rule_evaluator.py          # asyncio edge state, cooldown, dispatch
 ```
 
-Hook: end of `apply_location_update_webhook()` after `upsert_participant_fix`, with `app.state.device_state` for actuators. Optional slow tick for logging only — **not** for firing rule 1 at sunset.
+Hook: end of `apply_location_update_webhook()` after `upsert_participant_fix`, with `app.state.device_state` for actuators. Optional slow asyncio tick for logging only — **not** for firing rule 1 at sunset.
 
 ---
 
@@ -89,9 +102,9 @@ Hook: end of `apply_location_update_webhook()` after `upsert_participant_fix`, w
 | Live location ingest (my-tracks relay) | **Done** | `POST /v1/webhooks/location_update` |
 | Geofence + participant roster (SQLite) | **Done** | `app/rules_store.py`, `app/api/rules_routes.py` |
 | SMTP settings + test send | **Done** | `app/smtp_service.py`, `app/api/smtp_routes.py` |
-| Automations UI (rules editor, geofences map, status) | **Done** (rules still **mock-backed** in browser) | `web/src/rules-dialog.ts`, `web/src/rules-data-source.ts` |
-| Rule bundle template | **Done** | `automation-rules.json.example` |
-| File-backed rule evaluator | **Not started** | — |
+| Automations UI (rules editor, geofences map, status) | **Done** (rules list reads **file bundle** when server serves `GET /v1/rules`) | `web/src/rules-dialog.ts`, `web/src/rules-data-source.ts` |
+| Rule bundle template + loader | **Done** | `automation-rules.json.example`, `app/automation_rules_loader.py` |
+| File-backed rule evaluator (asyncio) | **Not started** | — |
 | Rule SQLite persistence + rule CRUD API | **Deferred** (after file-backed evaluator works) | — |
 | Sunset via `astral` on server | **Not started** (mock sun in TS only) | `web/src/rules-evaluate.ts` |
 | Hermetic tests beyond geofence distance | Minimal (`test_rule_engine.py`; `RuleEngine` test is a placeholder) | `tests/python/test_rule_engine.py` |
@@ -120,7 +133,8 @@ Hook: end of `apply_location_update_webhook()` after `upsert_participant_fix`, w
 - `astral` sunset checks using bundle `settings_location`.
 - Action dispatcher: resolve `preferred_label` → device manager; Kasa `turn_on`; rule notification email via SMTP.
 - Hermetic tests: simulated fixes for Henrique/Kristen at house and Kristen at `west-point`.
-- Later: SQLite rule CRUD, `GET /v1/rules/status`, wire Automations UI off mock.
+- `GET /v1/rules/status` with real `last_fired_at` / evaluator heartbeat (status tab still uses client-side condition preview).
+- Later: SQLite rule CRUD and in-UI rule editing (file bundle stays read-only in Automations until then).
 
 ---
 
@@ -184,7 +198,7 @@ flowchart TB
 | **PresenceRegistry** | In-memory map `participant_id → {lat, lon, accuracy?, received_at}`. Validates staleness; exposes read API for evaluator and status endpoint. Optionally mirrors last fix to SQLite for restart survival. |
 | **SunTimesService** | Given home coordinates (from settings or first geofence), computes today’s sunset (and optionally civil/nautical twilight). Cached per calendar day; recomputed shortly after local midnight. |
 | **RuleEngine** | Loads enabled rules from SQLite, binds conditions to registry + sun service + geofences, resolves action targets to concrete manager calls. |
-| **RuleEvaluator** | Async background task: runs on presence updates, a slow periodic tick (e.g. 60s for sunset boundary), and rule CRUD reload. Implements **edge detection** and **cooldown**. |
+| **RuleEvaluator** | **asyncio** service: `create_task` on each location fix, optional slow `asyncio.sleep` tick for status only, reload on bundle file mtime change (future). Implements **edge detection** and **cooldown**. |
 | **Device action dispatcher** | Thin adapter: `turn_on_switch(backend, canonical_key)`, `open_door(...)`, etc., reusing the same code paths as `/v1/ui/*` handlers. |
 
 ---
@@ -1014,11 +1028,18 @@ No new Python rule modules in this phase (existing tile server unchanged except 
 
 Ship production automations from `automation-rules.json` **before** SQLite rule tables or Automations rule CRUD.
 
-#### PR-A1 — `feat/automation-rules-bundle` (this PR)
+#### PR-A1 — `feat/automation-rules-bundle` (merged #221)
 
 - `automation-rules.json.example` + gitignore `automation-rules.json`.
 - `conditions.any` / `conditions.all` nested types in `web/src/types.ts`.
 - Update this plan + `MY_TRACKS_INTEGRATION_PLAN.md` D4 pointer.
+
+#### PR-A1b — `feat/rules-ui-json-bundle` (current)
+
+- `app/automation_rules_loader.py` + Pydantic `RuleOut` schemas.
+- `GET /v1/rules`, `GET /v1/rules/{id}`, `GET /v1/rules/settings/location`.
+- Automations UI reads the bundle (read-only Rules tab; pill shows `automation-rules.json`).
+- Nested `all`/`any` rule summaries in `web/src/rule-summary.ts`.
 
 #### PR-A2 — `feat/rule-conditions-and-astral`
 
@@ -1031,7 +1052,7 @@ Ship production automations from `automation-rules.json` **before** SQLite rule 
 
 #### PR-A4 — `feat/rule-evaluator-location-ingest`
 
-- `app/automation_rules_loader.py`, `app/rule_evaluator.py`.
+- `app/rule_evaluator.py` — **asyncio** `RuleEvaluator` (lifespan + `create_task` on ingest).
 - Hook after `upsert_participant_fix`; in-memory edge + cooldown state.
 - Integration test with the three production rules.
 

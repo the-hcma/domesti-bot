@@ -25,6 +25,8 @@ import type {
   MyTracksSyncIn,
   ParticipantOut,
   ParticipantStatusOut,
+  RuleOut,
+  SettingsLocationOut,
   SmtpConfigIn,
   SmtpConfigOut,
   SmtpTestEmailIn,
@@ -216,6 +218,12 @@ export const api = {
   postMyTracksPair(body: MyTracksPairIn): Promise<MyTracksPairStatusOut> {
     return call<MyTracksPairStatusOut>("POST", "/v1/settings/my-tracks/pair", body);
   },
+  fetchRule(ruleId: string): Promise<RuleOut> {
+    return call<RuleOut>("GET", `/v1/rules/${encodeURIComponent(ruleId)}`);
+  },
+  fetchRules(): Promise<RuleOut[]> {
+    return call<RuleOut[]>("GET", "/v1/rules");
+  },
   fetchRulesGeofences(): Promise<GeofenceOut[]> {
     return call<GeofenceOut[]>("GET", "/v1/rules/geofences");
   },
@@ -224,6 +232,9 @@ export const api = {
   },
   fetchRulesParticipantStatus(): Promise<ParticipantStatusOut[]> {
     return call<ParticipantStatusOut[]>("GET", "/v1/rules/participants/status");
+  },
+  fetchRulesSettingsLocation(): Promise<SettingsLocationOut> {
+    return call<SettingsLocationOut>("GET", "/v1/rules/settings/location");
   },
   fetchSmtpConfig(): Promise<SmtpConfigOut | null> {
     return callNullableJson<SmtpConfigOut>("GET", "/v1/settings/smtp");

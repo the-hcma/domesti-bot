@@ -264,10 +264,15 @@ class RulesHubController {
     title.textContent = "Automations";
     this.mockPill = document.createElement("span");
     this.mockPill.className = "rules-mock-pill";
-    this.mockPill.textContent = dataSource.isMailLive()
-      ? "Mock rules"
-      : "Mock data";
-    this.mockPill.hidden = !dataSource.isMock();
+    if (dataSource.isRulesFileBacked()) {
+      this.mockPill.textContent = "Rules: automation-rules.json";
+      this.mockPill.hidden = false;
+    } else {
+      this.mockPill.textContent = dataSource.isMailLive()
+        ? "Mock rules"
+        : "Mock data";
+      this.mockPill.hidden = !dataSource.isMock();
+    }
     titleWrap.append(title, this.mockPill);
     header.append(titleWrap, createDialogCloseButton(this.dialog));
     const tabBar = document.createElement("div");
@@ -1126,6 +1131,7 @@ class RulesHubController {
   }
 
   private async renderRulesTab(): Promise<void> {
+    const rulesReadOnly = this.dataSource.isRulesFileBacked();
     const [rules, participants, geofences, actionDevices] = await Promise.all([
       this.dataSource.listRules(),
       this.dataSource.listParticipants(),
@@ -1137,13 +1143,22 @@ class RulesHubController {
       geofences,
       actionDevices,
     );
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "btn";
-    addBtn.textContent = "Add rule";
-    addBtn.addEventListener("click", () => {
-      void this.openRuleEditor(null);
-    });
+    if (rulesReadOnly) {
+      const hint = document.createElement("p");
+      hint.className = "rules-card-meta";
+      hint.textContent =
+        "Rules are loaded from automation-rules.json on the server. Edit that file and restart to change them.";
+      this.body.append(hint);
+    } else {
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "btn";
+      addBtn.textContent = "Add rule";
+      addBtn.addEventListener("click", () => {
+        void this.openRuleEditor(null);
+      });
+      this.body.append(addBtn);
+    }
     const list = document.createElement("div");
     list.className = "rules-card-list";
     for (const rule of rules) {
@@ -1153,41 +1168,45 @@ class RulesHubController {
 
       const top = document.createElement("div");
       top.className = "rules-rule-card-top";
-      const enableToggle = createEnableToggle(rule.enabled, (next) => {
-        void this.dataSource
-          .setRuleEnabled(rule.id, next)
-          .then(() => this.refresh());
-      });
       const title = document.createElement("h3");
       title.className = "rules-rule-card-title";
       title.textContent = rule.label;
-      const actions = document.createElement("div");
-      actions.className = "rules-inline-actions";
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "btn btn-secondary";
-      editBtn.textContent = "Edit";
-      editBtn.addEventListener("click", () => {
-        void this.openRuleEditor(rule);
-      });
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "btn btn-danger";
-      delBtn.textContent = "Delete";
-      delBtn.addEventListener("click", () => {
-        void confirmAction({
-          message: `Delete rule "${rule.label}"?`,
-          confirmLabel: "Delete",
-          variant: "danger",
-        }).then((confirmed) => {
-          if (!confirmed) {
-            return;
-          }
-          void this.dataSource.deleteRule(rule.id).then(() => this.refresh());
+      if (rulesReadOnly) {
+        top.append(title);
+      } else {
+        const enableToggle = createEnableToggle(rule.enabled, (next) => {
+          void this.dataSource
+            .setRuleEnabled(rule.id, next)
+            .then(() => this.refresh());
         });
-      });
-      actions.append(editBtn, delBtn);
-      top.append(enableToggle, title, actions);
+        const actions = document.createElement("div");
+        actions.className = "rules-inline-actions";
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "btn btn-secondary";
+        editBtn.textContent = "Edit";
+        editBtn.addEventListener("click", () => {
+          void this.openRuleEditor(rule);
+        });
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn btn-danger";
+        delBtn.textContent = "Delete";
+        delBtn.addEventListener("click", () => {
+          void confirmAction({
+            message: `Delete rule "${rule.label}"?`,
+            confirmLabel: "Delete",
+            variant: "danger",
+          }).then((confirmed) => {
+            if (!confirmed) {
+              return;
+            }
+            void this.dataSource.deleteRule(rule.id).then(() => this.refresh());
+          });
+        });
+        actions.append(editBtn, delBtn);
+        top.append(enableToggle, title, actions);
+      }
       card.append(top);
 
       appendRuleSummaryBody(card, summarizeRule(rule, summaryContext));
@@ -1201,7 +1220,7 @@ class RulesHubController {
 
       list.append(card);
     }
-    this.body.append(addBtn, list);
+    this.body.append(list);
   }
 
   private async renderGeofencesTab(): Promise<void> {

@@ -6,10 +6,14 @@ import argparse
 from http import HTTPStatus
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.rules_store import GeofenceRecord, ParticipantRecord, replace_geofences, replace_participants
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXAMPLE_BUNDLE = _REPO_ROOT / "automation-rules.json.example"
 
 
 def _client(cache_path: Path) -> TestClient:
@@ -56,6 +60,25 @@ def test_get_geofences_and_participants(tmp_path: Path) -> None:
     participants = client.get("/v1/rules/participants")
     assert participants.status_code == HTTPStatus.OK
     assert participants.json()[0]["participant_id"] == "henrique"
+
+
+def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(_EXAMPLE_BUNDLE))
+    client = _client(Path("/tmp/unused-rules-bundle.sqlite"))
+
+    listed = client.get("/v1/rules")
+    assert listed.status_code == HTTPStatus.OK
+    ids = {row["id"] for row in listed.json()}
+    assert "evening-arrival-home-lights" in ids
+    assert len(ids) == 3
+
+    one = client.get("/v1/rules/evening-arrival-home-lights")
+    assert one.status_code == HTTPStatus.OK
+    assert one.json()["label"] == "Evening arrival — front + garage lights"
+
+    location = client.get("/v1/rules/settings/location")
+    assert location.status_code == HTTPStatus.OK
+    assert location.json()["timezone"] == "America/New_York"
 
 
 def test_put_and_delete_geofence(tmp_path: Path) -> None:
