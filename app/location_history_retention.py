@@ -16,7 +16,7 @@ class LocationHistoryRetention:
 
 
 def default_location_history_retention() -> LocationHistoryRetention:
-    """Return the default keep-more policy (24h window ∪ 20 most recent fixes)."""
+    """Return the default keep-more policy (24h window ∪ 20 most recent readings)."""
     return LocationHistoryRetention(
         max_age_s=DEFAULT_LOCATION_HISTORY_MAX_AGE_S,
         min_keep_count=DEFAULT_LOCATION_HISTORY_MIN_KEEP_COUNT,
