@@ -708,9 +708,24 @@
     .rules-card-row { display: flex; align-items: center; justify-content: space-between;
       gap: 8px; }
     .rules-card-meta { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
-    .rules-broken-badge { flex-shrink: 0; font-size: 11px; font-weight: 600; line-height: 1;
-      padding: 3px 7px; border-radius: 4px; background: var(--danger); color: #fff;
-      cursor: help; text-transform: uppercase; letter-spacing: 0.04em; }
+    .rules-broken-badge-wrap { position: relative; display: inline-flex; align-items: center;
+      gap: 6px; flex-shrink: 0; }
+    .rules-broken-badge { font-size: 11px; font-weight: 600; line-height: 1; padding: 3px 7px;
+      border-radius: 4px; background: var(--danger); color: #fff; cursor: help;
+      text-transform: uppercase; letter-spacing: 0.04em; }
+    .rules-broken-badge:focus { outline: 2px solid var(--danger);
+      outline-offset: 2px; }
+    .rules-broken-hover-hint { font-size: 11px; color: var(--muted); white-space: nowrap;
+      cursor: help; }
+    .rules-broken-popover[hidden] { display: none !important; }
+    .rules-broken-popover:not([hidden]) { position: absolute; right: 0; top: calc(100% + 6px);
+      z-index: 60; display: block; min-width: 14rem; max-width: min(22rem, calc(100vw - 2rem));
+      padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--card-elev); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+      font-size: 13px; font-weight: normal; color: var(--fg); text-transform: none;
+      letter-spacing: normal; line-height: 1.45; }
+    .rules-broken-popover-list { margin: 0; padding-left: 1.15rem; }
+    .rules-broken-popover-list li + li { margin-top: 4px; }
     .rules-card-warn { margin: 4px 0 0; font-size: 13px; color: var(--pending); }
     .rules-card-title-btn { font: inherit; font-weight: 600; cursor: pointer;
       border: none; background: transparent; color: var(--fg); text-align: left;

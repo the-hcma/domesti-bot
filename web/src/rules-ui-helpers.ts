@@ -212,19 +212,70 @@ export function userDisplayLabel(userId: string, displayName?: string): string {
   return trimmed !== "" ? trimmed : userId;
 }
 
+let brokenRulePopoverIdSeq = 0;
+
 export function createBrokenRuleBadge(
   issues: readonly { detail: string }[],
 ): HTMLSpanElement {
+  const wrap = document.createElement("span");
+  wrap.className = "rules-broken-badge-wrap";
+
   const badge = document.createElement("span");
   badge.className = "rules-broken-badge";
-  badge.textContent = "Broken";
-  const summary = issues.map((issue) => issue.detail).join("\n");
-  badge.title = summary;
+  badge.tabIndex = 0;
+  const label = document.createElement("span");
+  label.className = "rules-broken-badge-label";
+  label.textContent = "Broken";
+  badge.append(label);
+
+  const hint = document.createElement("span");
+  hint.className = "rules-broken-hover-hint";
+  hint.textContent = "Hover for details";
+  hint.setAttribute("aria-hidden", "true");
+
+  const popoverId = `rules-broken-popover-${++brokenRulePopoverIdSeq}`;
+  const popover = document.createElement("span");
+  popover.className = "rules-broken-popover";
+  popover.id = popoverId;
+  popover.hidden = true;
+  popover.setAttribute("role", "tooltip");
+  const list = document.createElement("ul");
+  list.className = "rules-broken-popover-list";
+  for (const issue of issues) {
+    const item = document.createElement("li");
+    item.textContent = issue.detail;
+    list.append(item);
+  }
+  popover.append(list);
+
+  const summary = issues.map((issue) => issue.detail).join("; ");
   badge.setAttribute(
     "aria-label",
-    `Broken rule: ${issues.map((issue) => issue.detail).join("; ")}`,
+    `Broken rule: ${summary}. Hover for details.`,
   );
-  return badge;
+
+  const showPopover = (): void => {
+    popover.hidden = false;
+    badge.setAttribute("aria-describedby", popoverId);
+  };
+  const hidePopover = (): void => {
+    popover.hidden = true;
+    badge.removeAttribute("aria-describedby");
+  };
+
+  wrap.addEventListener("mouseenter", showPopover);
+  wrap.addEventListener("mouseleave", hidePopover);
+  wrap.addEventListener("focusin", showPopover);
+  wrap.addEventListener("focusout", (ev) => {
+    const next = ev.relatedTarget;
+    if (next instanceof Node && wrap.contains(next)) {
+      return;
+    }
+    hidePopover();
+  });
+
+  wrap.append(badge, hint, popover);
+  return wrap;
 }
 
 export function resolveRosterUser<T extends { user_id: string }>(
