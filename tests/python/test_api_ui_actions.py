@@ -29,7 +29,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.api.app import create_app
 from app.api.ui_state import (
     build_kasa_device_view,
@@ -118,7 +118,7 @@ def test_build_kasa_device_view_reflects_current_is_on_and_exclusion(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True
     )
     fake = _FakeKasa("10.0.0.1", "Lamp", is_on=False)
@@ -133,7 +133,7 @@ def test_build_kasa_device_view_reflects_current_is_on_and_exclusion(
 @pytest.mark.asyncio
 async def test_bulk_off_global_apply_skips_excluded_devices(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True
     )
     a = _FakeKasa("10.0.0.1", "Keep", is_on=True)
@@ -170,7 +170,7 @@ async def test_bulk_off_kasa_apply_ignores_exclude_from_global(tmp_path: Path) -
     family-wide button."""
 
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True
     )
     a = _FakeKasa("10.0.0.1", "Excluded", is_on=True)
@@ -219,7 +219,7 @@ def test_find_kasa_by_host_returns_match_or_none() -> None:
 
 def test_post_global_bulk_off_returns_affected_and_skipped(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True
     )
     a = _FakeKasa("10.0.0.1", "Keep", is_on=True)
@@ -289,7 +289,7 @@ def test_post_kasa_toggle_turns_device_off_and_returns_refreshed_view(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=False
     )
     fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
@@ -348,7 +348,7 @@ def test_put_ui_preference_persists_kasa_exclusion(tmp_path: Path) -> None:
         "device_id": "10.0.0.1",
         "exclude_from_global": True,
     }
-    assert kasa_discovery_store.load_ui_preferences(db) == [
+    assert device_discovery_store.load_ui_preferences(db) == [
         ("kasa", "10.0.0.1", True),
     ]
 
@@ -357,7 +357,7 @@ def test_put_ui_preference_persists_kasa_exclusion(tmp_path: Path) -> None:
         json={"exclude_from_global": False},
     )
     assert r.status_code == HTTPStatus.OK
-    assert kasa_discovery_store.load_ui_preferences(db) == [
+    assert device_discovery_store.load_ui_preferences(db) == [
         ("kasa", "10.0.0.1", False),
     ]
 
@@ -440,7 +440,7 @@ def test_put_ui_preference_persists_tailwind_exclusion(tmp_path: Path) -> None:
         json={"exclude_from_global": True},
     )
     assert r.status_code == HTTPStatus.OK
-    assert kasa_discovery_store.load_ui_preferences(db) == [
+    assert device_discovery_store.load_ui_preferences(db) == [
         ("tailwind", "door-1", True),
     ]
 

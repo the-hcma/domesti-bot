@@ -8,7 +8,7 @@ from uuid import UUID
 
 import pytest
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.androidtv_device_manager import (
     _discover_cast_infos_sync,
     AndroidTvDeviceManager,
@@ -157,7 +157,7 @@ async def test_fetch_connects_discovered_casts() -> None:
 @pytest.mark.asyncio
 async def test_fetch_skips_mdns_when_sqlite_cache_fully_named(tmp_path) -> None:
     db = tmp_path / "disc.sqlite"
-    kasa_discovery_store.save_androidtv_hosts(db, [("10.0.0.77", 8009, "Master Cached")])
+    device_discovery_store.save_androidtv_hosts(db, [("10.0.0.77", 8009, "Master Cached")])
 
     uid = UUID("11111111-2222-3333-4444-555555555555")
     info = MagicMock()
@@ -195,7 +195,7 @@ async def test_fetch_skips_mdns_when_sqlite_cache_fully_named(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_rediscover_invokes_full_browse_with_cache(tmp_path) -> None:
     db = tmp_path / "disc.sqlite"
-    kasa_discovery_store.save_androidtv_hosts(db, [("10.0.0.77", 8009, "TV")])
+    device_discovery_store.save_androidtv_hosts(db, [("10.0.0.77", 8009, "TV")])
 
     uid = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     info = MagicMock()
@@ -234,7 +234,7 @@ async def test_rediscover_invokes_full_browse_with_cache(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_fetch_runs_mdns_when_cache_missing_friendly_names(tmp_path) -> None:
     db = tmp_path / "disc.sqlite"
-    kasa_discovery_store.save_androidtv_hosts(db, [("10.0.0.5", 8009)])
+    device_discovery_store.save_androidtv_hosts(db, [("10.0.0.5", 8009)])
 
     uid = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
     info = MagicMock()
@@ -275,7 +275,7 @@ async def test_fetch_uses_no_mdns_fast_path_when_cache_has_uuids(tmp_path) -> No
     db = tmp_path / "atv.sqlite"
     uid_a = "11111111-2222-3333-4444-555555555555"
     uid_b = "66666666-7777-8888-9999-aaaaaaaaaaaa"
-    kasa_discovery_store.save_androidtv_hosts(
+    device_discovery_store.save_androidtv_hosts(
         db,
         [
             ("10.0.0.10", 8009, "Living Room", uid_a, "Chromecast"),
@@ -320,7 +320,7 @@ async def test_fetch_fast_path_drops_unreachable_cached_device(tmp_path) -> None
     db = tmp_path / "atv.sqlite"
     uid_live = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     uid_dead = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    kasa_discovery_store.save_androidtv_hosts(
+    device_discovery_store.save_androidtv_hosts(
         db,
         [
             ("10.0.0.10", 8009, "Live", uid_live, None),
@@ -362,7 +362,7 @@ async def test_fetch_falls_back_to_mdns_when_any_cache_row_missing_uuid(tmp_path
 
     db = tmp_path / "atv.sqlite"
     uid_full = "cccccccc-cccc-cccc-cccc-cccccccccccc"
-    kasa_discovery_store.save_androidtv_hosts(
+    device_discovery_store.save_androidtv_hosts(
         db,
         [
             ("10.0.0.10", 8009, "Has UUID", uid_full, "Chromecast"),
@@ -438,7 +438,7 @@ async def test_fetch_mdns_path_persists_uuids_for_next_fast_path(tmp_path) -> No
         await mgr.fetch()
 
     assert mgr.last_discovery_source == "discovery"
-    rows = kasa_discovery_store.load_androidtv_known_devices(db)
+    rows = device_discovery_store.load_androidtv_known_devices(db)
     assert rows == [("10.0.0.50", 8009, "Den", str(uid), "Nest Audio")]
 
 

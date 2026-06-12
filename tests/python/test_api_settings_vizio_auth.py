@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
+from app import device_discovery_store
 from app.db.secrets import SecretsDecryptError
 from app.domesti_bot_cli import DeviceManagersState
 from app.server_runtime import runtime as server_runtime
@@ -56,10 +57,17 @@ def test_put_vizio_auth_persists_token_and_tv_row(
         cast_name="Kitchen TV",
         diid="abc",
     )
-    with patch(
-        "app.api.vizio_settings_routes.VizioSmartCastClient.fetch_deviceinfo",
-        new_callable=AsyncMock,
-        return_value=info,
+    with (
+        patch(
+            "app.api.vizio_settings_routes.VizioSmartCastClient.fetch_deviceinfo",
+            new_callable=AsyncMock,
+            return_value=info,
+        ),
+        patch(
+            "app.api.vizio_settings_routes.resolve_vizio_tv_mac",
+            new_callable=AsyncMock,
+            return_value="00:bd:3e:d5:f0:11",
+        ),
     ):
         response = client.put(
             "/v1/settings/vizio/tvs/192.168.86.201/auth",
@@ -69,6 +77,9 @@ def test_put_vizio_auth_persists_token_and_tv_row(
     body = response.json()
     assert body["configured"] is True
     assert body["device_id"] == "192.168.86.201"
+
+    rows = device_discovery_store.load_vizio_tvs(db)
+    assert rows[0][4] == "00:bd:3e:d5:f0:11"
 
     listed = client.get("/v1/settings/vizio/tvs").json()
     assert len(listed["tvs"]) == 1

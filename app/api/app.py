@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, HTMLResponse, Response
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.device_enums import DeviceFamilyId
 from app.logging_config import TRACE_LEVEL
 from app.api.schemas import (
@@ -526,7 +526,7 @@ def create_app(args: Any) -> FastAPI:
                         f"{device_id}"
                     ),
                 )
-        kasa_discovery_store.upsert_ui_preference(
+        device_discovery_store.upsert_ui_preference(
             state.cache_path,
             backend=family_id,
             canonical_key=device_id,

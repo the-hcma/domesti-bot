@@ -27,7 +27,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.api.app import create_app
 from app.api.ui_state import (
     build_sonos_device_view,
@@ -159,7 +159,7 @@ def test_build_sonos_device_view_reflects_is_playing_and_exclusion(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="sonos", canonical_key="RINCON_AAAA", exclude_from_global=True
     )
     zone = _FakeSonosZone("RINCON_AAAA", "Kitchen", is_playing=False)
@@ -239,7 +239,7 @@ async def test_bulk_off_global_apply_pauses_sonos_alongside_kasa(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="sonos", canonical_key="RINCON_B", exclude_from_global=True
     )
     kasa = _FakeKasa("10.0.0.1", "Lamp", is_on=True)
@@ -301,7 +301,7 @@ def test_post_sonos_toggle_pauses_zone_and_returns_refreshed_view(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="sonos", canonical_key="RINCON_A", exclude_from_global=False
     )
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
@@ -444,7 +444,7 @@ def test_put_ui_preference_persists_sonos_exclusion(tmp_path: Path) -> None:
         "device_id": "RINCON_A",
         "exclude_from_global": True,
     }
-    assert kasa_discovery_store.load_ui_preferences(db) == [
+    assert device_discovery_store.load_ui_preferences(db) == [
         ("sonos", "RINCON_A", True),
     ]
 

@@ -66,7 +66,7 @@ from prompt_toolkit import HTML, PromptSession
 from prompt_toolkit.completion import Completion, Completer
 from prompt_toolkit.enums import EditingMode
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.androidtv_device_manager import (
     ANDROIDTV_TEMPORARILY_DISABLED,
     ANDROIDTV_TEMPORARILY_DISABLED_REASON,
@@ -641,7 +641,7 @@ def _vizio_has_any_auth(
 
     if load_vizio_auth_hosts_from_db(cache_path):
         return True
-    for host, *_rest in kasa_discovery_store.load_vizio_tvs(cache_path):
+    for host, *_rest in device_discovery_store.load_vizio_tvs(cache_path):
         if load_vizio_auth_token_from_db(cache_path, host=host):
             return True
     return False
@@ -659,7 +659,7 @@ def _vizio_targets_available(
 
     if load_vizio_auth_hosts_from_db(cache_path):
         return True
-    return bool(kasa_discovery_store.load_vizio_tvs(cache_path))
+    return bool(device_discovery_store.load_vizio_tvs(cache_path))
 
 
 def _vizio_tv_count(mgr: VizioDeviceManager | None) -> int:
@@ -994,7 +994,7 @@ async def _repl_cmd_discover_androidtv(
         else:
             print(f"  {theme.ok(uid)}")
     if cache_path is not None:
-        kasa_discovery_store.save_androidtv_hosts(cache_path, list(rows3))
+        device_discovery_store.save_androidtv_hosts(cache_path, list(rows3))
         print(
             theme.dim(f"Saved {len(rows3)} endpoint(s) to discovery cache."),
             flush=True,
@@ -1317,7 +1317,7 @@ async def dispatch_repl_action(
         except ValueError:
             print(theme.err("Device not found after resolve."), file=sys.stderr)
             return
-        kasa_discovery_store.upsert_display_name(
+        device_discovery_store.upsert_display_name(
             cache_path,
             backend=backend,
             canonical_key=ck,
@@ -1356,7 +1356,7 @@ async def dispatch_repl_action(
         if ck is None:
             print(theme.err("Could not resolve device."), file=sys.stderr)
             return
-        kasa_discovery_store.delete_display_name(
+        device_discovery_store.delete_display_name(
             cache_path, backend=backend, canonical_key=ck
         )
         try:
@@ -1504,7 +1504,7 @@ async def dispatch_repl_action(
             try:
                 await tailwind_mgr.fetch()
                 if cache_path is not None and tailwind_mgr.host:
-                    kasa_discovery_store.save_tailwind_host(
+                    device_discovery_store.save_tailwind_host(
                         cache_path, tailwind_mgr.host
                     )
                 return {
@@ -1667,7 +1667,7 @@ async def dispatch_repl_action(
             try:
                 await tailwind_mgr.rediscover()
                 if cache_path is not None and tailwind_mgr.host:
-                    kasa_discovery_store.save_tailwind_host(
+                    device_discovery_store.save_tailwind_host(
                         cache_path, tailwind_mgr.host
                     )
                 return {
@@ -2084,7 +2084,7 @@ async def _bootstrap_tailwind(
     elif env_host:
         add(env_host)
     elif cache_path is not None:
-        cached = kasa_discovery_store.load_tailwind_host(cache_path)
+        cached = device_discovery_store.load_tailwind_host(cache_path)
         if cached:
             add(cached)
     add(None)
@@ -2101,7 +2101,7 @@ async def _bootstrap_tailwind(
         try:
             await mgr.fetch()
             if cache_path is not None and mgr.host:
-                kasa_discovery_store.save_tailwind_host(cache_path, mgr.host)
+                device_discovery_store.save_tailwind_host(cache_path, mgr.host)
             return mgr, None
         except BaseException as ex:
             last_exc = ex
@@ -2177,7 +2177,7 @@ async def bootstrap_device_managers(
         host_specs = _merge_androidtv_host_specs(list(args.androidtv_host or []))
         cached_tv: list[tuple[str, int]] = []
         if cache_path is not None:
-            cached_tv = kasa_discovery_store.load_androidtv_hosts(cache_path)
+            cached_tv = device_discovery_store.load_androidtv_hosts(cache_path)
         want_zeroconf = AndroidTvDeviceManager.zeroconf_discovery_wanted(
             cli_opt_out=bool(args.no_androidtv_zeroconf),
         )

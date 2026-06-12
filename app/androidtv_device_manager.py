@@ -39,7 +39,7 @@ from pychromecast import Chromecast
 from pychromecast.discovery import CastBrowser, SimpleCastListener
 from pychromecast.models import CastInfo
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
 
@@ -156,7 +156,7 @@ async def discover_cast_adb_specs_via_zeroconf(
     """Discover Cast devices.
 
     Returns ``(uuid_strings, uuid -> friendly label, sqlite_rows)`` where each SQLite row is
-    ``(cast_host, cast_port, friendly_name)`` for :func:`kasa_discovery_store.save_androidtv_hosts`.
+    ``(cast_host, cast_port, friendly_name)`` for :func:`device_discovery_store.save_androidtv_hosts`.
 
     The ``adb_port`` parameter is **ignored** (kept for call-site compatibility with the old
     ADB stack).
@@ -372,7 +372,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
 
     def _finalize_devices(self, uniq: list[AndroidTvSwitchDevice]) -> None:
         if self._discovery_store_path is not None:
-            for backend, key, disp in kasa_discovery_store.load_display_names(
+            for backend, key, disp in device_discovery_store.load_display_names(
                 self._discovery_store_path
             ):
                 if backend != "androidtv":
@@ -401,7 +401,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
     def _load_cached_androidtv_rows(self) -> list[tuple[str, int, str | None]]:
         if self._discovery_store_path is None:
             return []
-        return kasa_discovery_store.load_androidtv_endpoint_rows(self._discovery_store_path)
+        return device_discovery_store.load_androidtv_endpoint_rows(self._discovery_store_path)
 
     async def disconnect(self) -> None:
         if self._alias_to_device is None:
@@ -521,7 +521,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         # caller can opt out with ``full_zeroconf=True`` (used by
         # :meth:`rediscover`) which forces the LAN-wide browse below.
         if not full_zeroconf and self._discovery_store_path is not None:
-            known = kasa_discovery_store.load_androidtv_known_devices(
+            known = device_discovery_store.load_androidtv_known_devices(
                 self._discovery_store_path
             )
             if known and all(uid for _, _, _, uid, _ in known):
@@ -629,7 +629,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
             model = (model_by_uid or {}).get(uid)
             rows.append((host, port, friendly, uid, model))
         rows.sort(key=lambda t: (t[0], t[1]))
-        kasa_discovery_store.save_androidtv_hosts(self._discovery_store_path, rows)
+        device_discovery_store.save_androidtv_hosts(self._discovery_store_path, rows)
 
     def get_device_by_alias(self, identifier: str) -> AndroidTvSwitchDevice | None:
         if self._alias_to_device is None:

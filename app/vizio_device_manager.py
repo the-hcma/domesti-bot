@@ -11,11 +11,12 @@ from pathlib import Path
 
 import aiohttp
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
 from app.vizio_credentials import resolve_vizio_auth_token
 from app.vizio_discovery import VizioDiscoveredHost, discover_vizio_hosts_ssdp
+from app.vizio_mac import resolve_vizio_tv_mac
 from app.vizio_smartcast_client import (
     DEFAULT_VIZIO_PORT,
     VizioSmartCastAuthError,
@@ -114,7 +115,8 @@ class VizioTvDevice(SwitchDevice):
         try:
             powered = await self._client.get_power_on()
         except VizioSmartCastConnectionError:
-            self._power_unknown = True
+            self._power_unknown = False
+            self.set_power(False)
             return
         except VizioSmartCastAuthError:
             self._power_unknown = True
@@ -242,9 +244,17 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 continue
             try:
                 connected.append(await self._connect_endpoint(endpoint, token))
-            except (VizioSmartCastAuthError, VizioSmartCastConnectionError) as exc:
+            except VizioSmartCastConnectionError as exc:
                 _LOGGER.warning(
                     "Cached/configured Vizio TV %s unreachable: %s",
+                    endpoint.device_id,
+                    exc,
+                )
+                failed.append(endpoint)
+                connected.append(self._offline_tv(endpoint, token))
+            except VizioSmartCastAuthError as exc:
+                _LOGGER.warning(
+                    "Cached/configured Vizio TV %s auth rejected: %s",
                     endpoint.device_id,
                     exc,
                 )
@@ -267,9 +277,16 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     continue
                 try:
                     connected.append(await self._connect_endpoint(endpoint, token))
-                except (VizioSmartCastAuthError, VizioSmartCastConnectionError) as exc:
+                except VizioSmartCastConnectionError as exc:
                     _LOGGER.warning(
                         "Discovered Vizio TV %s unreachable: %s",
+                        endpoint.device_id,
+                        exc,
+                    )
+                    connected.append(self._offline_tv(endpoint, token))
+                except VizioSmartCastAuthError as exc:
+                    _LOGGER.warning(
+                        "Discovered Vizio TV %s auth rejected: %s",
                         endpoint.device_id,
                         exc,
                     )
@@ -290,7 +307,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         if self._discovery_cache_path is not None:
             for tv in connected:
                 ep = tv.endpoint
-                kasa_discovery_store.upsert_vizio_tv(
+                device_discovery_store.upsert_vizio_tv(
                     self._discovery_cache_path,
                     host=ep.host,
                     port=ep.port,
@@ -336,13 +353,16 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             session=self._session,
         )
         info = await client.fetch_deviceinfo()
+        mac = endpoint.mac or info.mac
+        if mac is None:
+            mac = await resolve_vizio_tv_mac(client, host=endpoint.host)
         label = (endpoint.display_name or info.cast_name or info.model_name or "").strip()
         merged = VizioTvEndpoint(
             host=endpoint.host,
             port=endpoint.port,
             display_name=label or None,
             model=(endpoint.model or info.model_name or "").strip() or None,
-            mac=endpoint.mac,
+            mac=mac,
             diid=(endpoint.diid or info.diid or "").strip() or None,
         )
         tv = VizioTvDevice(
@@ -358,7 +378,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         out: list[VizioTvEndpoint] = []
         seen: set[str] = set()
         if self._discovery_cache_path is not None and not self._force_discovery:
-            for host, port, display, model, mac, diid in kasa_discovery_store.load_vizio_tvs(
+            for host, port, display, model, mac, diid in device_discovery_store.load_vizio_tvs(
                 self._discovery_cache_path
             ):
                 device_id = device_id_for(host, port)
@@ -382,6 +402,24 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             seen.add(device_id)
             out.append(VizioTvEndpoint(host=host, port=port))
         return out
+
+    def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice:
+        """Return a cached TV tile when SmartCast is unreachable at bootstrap."""
+        client = VizioSmartCastClient(
+            endpoint.host,
+            port=endpoint.port,
+            auth_token=token,
+            session=self._session,
+        )
+        label = (endpoint.display_name or endpoint.model or endpoint.host).strip()
+        tv = VizioTvDevice(
+            endpoint,
+            client,
+            display_name=label or None,
+            mac=endpoint.mac,
+        )
+        tv.set_power(False)
+        return tv
 
     def _resolve_token(self, host: str) -> tuple[str, str]:
         token, source = resolve_vizio_auth_token(

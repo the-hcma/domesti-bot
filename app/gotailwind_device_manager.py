@@ -34,7 +34,7 @@ from gotailwind.models import TailwindDoor
 from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, DoorDeviceManager, NotInitializedError
 from app.rule_engine import DoorDevice
 
@@ -296,7 +296,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
 
     def _finalize_tailwind_devices(self, uniq: list[GotailwindDevice]) -> None:
         if self._display_names_store_path is not None:
-            for backend, key, disp in kasa_discovery_store.load_display_names(
+            for backend, key, disp in device_discovery_store.load_display_names(
                 self._display_names_store_path
             ):
                 if backend != "tailwind":

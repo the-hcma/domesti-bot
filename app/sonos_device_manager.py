@@ -24,7 +24,7 @@ from typing import Any
 from soco import SoCo, discover as soco_discover
 from soco.exceptions import SoCoUPnPException
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SpeakerDeviceManager
 from app.rule_engine import SpeakerDevice
 from app.sonos_stream_favorites import SonosStreamFavorite, load_sonos_stream_favorites
@@ -273,14 +273,14 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             display = getattr(zone, "player_name", None)
             label = (str(display).strip() if display else "") or None
             rows.append((uid, host, label))
-        kasa_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
+        device_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
 
     async def _reconnect_from_cache(self) -> list[SonosSpeakerDevice] | None:
         """Return cached zones if every row reconnects with a matching UID; ``None`` otherwise."""
 
         if self._discovery_cache_path is None:
             return None
-        cached = kasa_discovery_store.load_sonos_zones(self._discovery_cache_path)
+        cached = device_discovery_store.load_sonos_zones(self._discovery_cache_path)
         if not cached:
             return None
 
@@ -403,7 +403,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         if self._force_discovery or self._discovery_cache_path is None:
             return False
         try:
-            return bool(kasa_discovery_store.load_sonos_zones(self._discovery_cache_path))
+            return bool(device_discovery_store.load_sonos_zones(self._discovery_cache_path))
         except Exception:
             return False
 

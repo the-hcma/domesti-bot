@@ -153,7 +153,7 @@ Hook: end of `apply_location_update_webhook()` after `upsert_user_location`, wit
 1. **People vs actuators share a type hierarchy** — plain `Device` is for location users (phones, tags); subclasses add `turn_on`, `open`, etc. Tracked users are *not* discovered on the LAN; their coordinates arrive via API.
 2. **Geofence `is_inside(devices)` uses AND semantics** — every member of the set must be inside the circle. That matches the “both Henrique and Kristen” requirement without extra composition logic.
 3. **Distance math uses pyproj UTM** — WGS84 lat/lon → meters via `EPSG:4326` → `EPSG:32618` (UTM zone 18N). This is correct for the current home coordinates in tests but must become **zone-aware** before rules ship for arbitrary locations.
-4. **SQLite is the persistence home** — discovery cache, UI preferences, and encrypted secrets already live in one file (`kasa_discovery_store` / `app/db/`). Rules, geofences, and tracked users should extend that database, not introduce a second store.
+4. **SQLite is the persistence home** — discovery cache, UI preferences, and encrypted secrets already live in one file (`device_discovery_store` / `app/db/`). Rules, geofences, and tracked users should extend that database, not introduce a second store.
 
 ### Gaps to close (file-backed track)
 
@@ -776,7 +776,7 @@ Add tables via `app/db/models.py` + `bootstrap_schema` (additive only).
 | `automation_rule_state` | rule_id PK, last_condition_bool, last_fired_at |
 | `automation_settings` | singleton: home_lat, home_lon, timezone |
 
-Access through a facade module `app/rules_store.py` (mirrors `kasa_discovery_store` pattern).
+Access through a facade module `app/rules_store.py` (mirrors `device_discovery_store` pattern).
 
 ---
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.api.schemas import (
     VizioAuthTokenSetIn,
     VizioAuthTokenSetOut,
@@ -36,6 +36,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.server_runtime import runtime
 from app.vizio_credentials import resolve_vizio_auth_token, vizio_auth_secret_key
 from app.vizio_device_manager import VizioDeviceManager, configured_vizio_host_specs
+from app.vizio_mac import resolve_vizio_tv_mac
 from app.vizio_smartcast_client import (
     VizioDeviceInfoSnapshot,
     VizioPairChallenge,
@@ -157,6 +158,7 @@ async def complete_vizio_pairing(
     try:
         token = await client.pair_complete(challenge=challenge, pin=body.pin)
         info = await client.fetch_deviceinfo()
+        mac = info.mac or await resolve_vizio_tv_mac(client, host=host)
     except VizioSmartCastConnectionError as exc:
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
@@ -172,13 +174,13 @@ async def complete_vizio_pairing(
             detail=str(exc),
         ) from exc
     label = (info.cast_name or info.model_name or host).strip() or host
-    kasa_discovery_store.upsert_vizio_tv(
+    device_discovery_store.upsert_vizio_tv(
         cache_path,
         host=host,
         port=port,
         display_name=label,
         model=info.model_name or None,
-        mac=None,
+        mac=mac,
         diid=info.diid or None,
     )
     _pending_pairing.pop(body.device_id, None)
@@ -223,13 +225,22 @@ async def put_vizio_auth_token(
         ) from exc
     info = await _fetch_deviceinfo_optional(host, port, token=token)
     label = (info.cast_name or info.model_name or host).strip() if info else host
-    kasa_discovery_store.upsert_vizio_tv(
+    mac: str | None = None
+    if info is not None and info.mac is not None:
+        mac = info.mac
+    else:
+        client = VizioSmartCastClient(host, port=port, auth_token=token)
+        try:
+            mac = await resolve_vizio_tv_mac(client, host=host)
+        finally:
+            await client.aclose()
+    device_discovery_store.upsert_vizio_tv(
         cache_path,
         host=host,
         port=port,
         display_name=label or None,
         model=info.model_name if info else None,
-        mac=None,
+        mac=mac,
         diid=info.diid if info else None,
     )
     reload_ok = await _reload_vizio_manager()
@@ -290,7 +301,7 @@ async def _fetch_deviceinfo_optional(
 
 
 def _display_name_for(cache_path: Path, host: str, port: int) -> str | None:
-    for row_host, row_port, display, *_rest in kasa_discovery_store.load_vizio_tvs(
+    for row_host, row_port, display, *_rest in device_discovery_store.load_vizio_tvs(
         cache_path
     ):
         if row_host == host and row_port == port:
@@ -301,7 +312,7 @@ def _display_name_for(cache_path: Path, host: str, port: int) -> str | None:
 def _host_port_for_device_id(device_id: str, cache_path: Path | None) -> tuple[str, int]:
     needle = device_id.strip()
     if cache_path is not None:
-        for host, port, *_rest in kasa_discovery_store.load_vizio_tvs(cache_path):
+        for host, port, *_rest in device_discovery_store.load_vizio_tvs(cache_path):
             if device_id_for(host, port) == needle:
                 return host, port
     try:
@@ -358,7 +369,7 @@ def _vizio_tv_settings_out(
 def _vizio_tv_settings_rows(cache_path: Path) -> list[VizioTvSettingsOut]:
     seen: set[str] = set()
     rows: list[VizioTvSettingsOut] = []
-    for host, port, *_rest in kasa_discovery_store.load_vizio_tvs(cache_path):
+    for host, port, *_rest in device_discovery_store.load_vizio_tvs(cache_path):
         device_id = device_id_for(host, port)
         if device_id in seen:
             continue

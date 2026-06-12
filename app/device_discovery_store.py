@@ -1,4 +1,4 @@
-"""SQLite persistence for LAN device discovery (Kasa configs, Tailwind host, Google Cast endpoints).
+"""SQLite persistence for LAN device discovery (all backends share one cache file).
 
 Schema changes are **additive** only: tables are created via SQLAlchemy
 :func:`app.db.schema.ensure_schema` (no Alembic-style data migrations).
@@ -384,8 +384,10 @@ def upsert_vizio_tv(
             row.port = port
             row.display_name = label
             row.model = model_s
-            row.mac = mac_s
-            row.diid = diid_s
+            if mac_s is not None:
+                row.mac = mac_s
+            if diid_s is not None:
+                row.diid = diid_s
             row.updated_at = now
 
 

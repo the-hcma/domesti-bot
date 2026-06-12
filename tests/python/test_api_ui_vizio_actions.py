@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.api.app import create_app
 from app.api.ui_state import (
     build_ui_state,
@@ -142,13 +142,13 @@ def test_vizio_preference_route_accepts_vizio_family(tmp_path: Path) -> None:
         json={"exclude_from_global": True},
     )
     assert response.status_code == HTTPStatus.OK
-    rows = kasa_discovery_store.load_ui_preferences(db)
+    rows = device_discovery_store.load_ui_preferences(db)
     assert ("vizio", "192.168.1.10", True) in rows
 
 
 def test_build_vizio_device_view_reflects_exclusion(tmp_path: Path) -> None:
     db = tmp_path / "cache.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db,
         backend="vizio",
         canonical_key="192.168.1.10",

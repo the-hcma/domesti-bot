@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/the-hcma/domesti-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/the-hcma/domesti-bot/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/domesti-bot)](https://pypi.org/project/domesti-bot/)
-[![Python ≥ 3.11](https://img.shields.io/badge/python-%E2%89%A53.11-brightgreen)](https://www.python.org/)
+[![Python ≥ 3.12](https://img.shields.io/badge/python-%E2%89%A53.12-brightgreen)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A self-hosted home-automation control surface for the devices on your home
@@ -46,7 +46,7 @@ hosts other always-on services.
 
 ## Quick start
 
-Requires **Python ≥ 3.11** (3.14 is the targeted runtime).
+Requires **Python ≥ 3.12** (3.14 is the targeted runtime).
 
 ### Install from PyPI (recommended)
 
@@ -214,7 +214,7 @@ domesti-bot/
 ├── app/                          Domain code (device managers, rule engine)
 │   ├── *_device_manager.py       One per family (kasa, sonos, gotailwind, …)
 │   ├── db/                       SQLAlchemy models + encrypted secrets
-│   ├── kasa_discovery_store.py   SQLite cache facade (shared by all managers)
+│   ├── device_discovery_store.py   SQLite cache facade (shared by all managers)
 │   └── api/                      FastAPI HTTP surface (subpackage)
 ├── config/serve.py               uvicorn entrypoint
 ├── tests/python/                 pytest suite (hermetic + LAN-integration)
