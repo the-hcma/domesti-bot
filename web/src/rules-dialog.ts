@@ -253,6 +253,8 @@ class RulesHubController {
   private readonly body: HTMLDivElement;
   private readonly dialog: HTMLDialogElement;
   private readonly panel: HTMLDivElement;
+  private readonly titleWrap: HTMLDivElement;
+  private sourcePill: HTMLSpanElement | null = null;
   private activeTab: RulesTabId = "status";
   private dataSource: RulesDataSource;
   private pendingGeofenceFocusId: string | null = null;
@@ -270,18 +272,12 @@ class RulesHubController {
     this.panel.className = "settings-dialog-panel";
     const header = document.createElement("header");
     header.className = "settings-dialog-header rules-dialog-header";
-    const titleWrap = document.createElement("div");
-    titleWrap.className = "rules-dialog-title-wrap";
+    this.titleWrap = document.createElement("div");
+    this.titleWrap.className = "rules-dialog-title-wrap";
     const title = document.createElement("h2");
     title.textContent = "Automations";
-    titleWrap.append(title);
-    if (dataSource.isRulesFileBacked()) {
-      const sourcePill = document.createElement("span");
-      sourcePill.className = "rules-source-pill";
-      sourcePill.textContent = "Rules: automation-rules.json";
-      titleWrap.append(sourcePill);
-    }
-    header.append(titleWrap, createDialogCloseButton(this.dialog));
+    this.titleWrap.append(title);
+    header.append(this.titleWrap, createDialogCloseButton(this.dialog));
     const tabBar = document.createElement("div");
     tabBar.className = "rules-tab-bar";
     tabBar.setAttribute("role", "tablist");
@@ -922,8 +918,25 @@ class RulesHubController {
 
   private async refresh(): Promise<void> {
     this.status = await this.dataSource.getStatus();
+    this.syncSourcePill();
     await this.renderBody();
     this.syncTabUi();
+  }
+
+  private syncSourcePill(): void {
+    if (this.dataSource.isRulesFileBacked()) {
+      if (this.sourcePill === null) {
+        this.sourcePill = document.createElement("span");
+        this.sourcePill.className = "rules-source-pill";
+        this.sourcePill.textContent = "Rules: automation-rules.json";
+        this.titleWrap.append(this.sourcePill);
+      }
+      return;
+    }
+    if (this.sourcePill !== null) {
+      this.sourcePill.remove();
+      this.sourcePill = null;
+    }
   }
 
   private async refreshPresenceMap(): Promise<void> {

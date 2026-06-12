@@ -79,18 +79,8 @@ from app.device_manager import NotInitializedError
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
-from app.db.secrets import (
-    delete_app_secret,
-    load_vizio_auth_token_from_db,
-    save_vizio_auth_token_to_db,
-    vizio_auth_token_stored_in_db,
-)
 from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
 from app.tailwind_credentials import resolve_tailwind_token
-from app.vizio_credentials import (
-    parse_vizio_setup_host,
-    vizio_auth_secret_key_for_host,
-)
 from app.vizio_device_manager import (
     VizioDeviceManager,
     configured_vizio_host_specs,
@@ -117,7 +107,6 @@ COMMANDS = (
     "show-devices",
     "turn-off",
     "turn-on",
-    "vizio-set-mac",
 )
 
 DEFAULT_DISCOVERY_DB = Path.home() / ".cache" / "rule-engine" / "device_discovery.sqlite"
@@ -142,7 +131,7 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("pause", "Pause playback on a Sonos zone."),
     ("quit", "Leave the REPL (same as exit)."),
     ("refresh", "Reconnect all backends; Kasa may reuse cached discovery."),
-    ("refresh-discovery", "Full LAN discovery: Google Cast, Kasa, Sonos, Tailwind."),
+    ("refresh-discovery", "Full LAN discovery: Google Cast, Kasa, Sonos, Tailwind, Vizio."),
     ("resume", "Resume playback on a Sonos zone."),
     ("set-display-name", "Save a friendly label for a device (SQLite cache required)."),
     (
@@ -152,10 +141,6 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("show-devices", "List Google Cast, Kasa, Sonos, Tailwind, and Vizio devices."),
     ("turn-off", "Turn a Kasa switch off, or stop media on a Cast target."),
     ("turn-on", "Turn a Kasa switch on, or resume paused Cast media if applicable."),
-    (
-        "vizio-set-mac",
-        "Set the stable MAC for a cached Vizio TV (SQLite cache required; re-keys auth token).",
-    ),
 )
 
 _EDIT_MODE_SUBARGS: tuple[str, ...] = ("emacs", "vim")
@@ -1272,70 +1257,6 @@ async def _repl_cmd_sonos_pause_resume(
         print(f"{theme.device(repr(disp))} {theme.dim('->')} {theme.ok('resumed')}")
 
 
-async def _repl_cmd_vizio_set_mac(
-    arg: str,
-    *,
-    cache_path: Path | None,
-    theme: _Theme,
-    vizio_mgr: VizioDeviceManager | None,
-) -> None:
-    if cache_path is None:
-        print(
-            theme.err("Persistence disabled; omit --no-discovery-cache."),
-            file=sys.stderr,
-        )
-        return
-    tokens = arg.split()
-    if len(tokens) != 2:
-        print(
-            theme.err("Usage: vizio-set-mac <host> <mac>"),
-            file=sys.stderr,
-        )
-        return
-    host_raw, mac_raw = tokens
-    try:
-        device_id = device_discovery_store.set_vizio_tv_mac(
-            cache_path,
-            host=host_raw,
-            mac=mac_raw,
-        )
-    except ValueError as exc:
-        print(theme.err(str(exc)), file=sys.stderr)
-        return
-    host_s = parse_vizio_setup_host(host_raw)
-    existing_mac_token = load_vizio_auth_token_from_db(
-        cache_path,
-        mac=device_id,
-        host=None,
-    )
-    if existing_mac_token:
-        if vizio_auth_token_stored_in_db(cache_path, mac=None, host=host_s):
-            delete_app_secret(
-                cache_path,
-                key=vizio_auth_secret_key_for_host(host_s),
-            )
-    else:
-        host_token = load_vizio_auth_token_from_db(cache_path, mac=None, host=host_s)
-        if host_token:
-            save_vizio_auth_token_to_db(
-                cache_path,
-                mac=device_id,
-                host=host_s,
-                token=host_token,
-            )
-    if vizio_mgr is not None:
-        print(theme.dim("vizio-set-mac: refreshing Vizio TVs…"))
-        try:
-            await vizio_mgr.fetch()
-        except Exception as exc:
-            print(theme.err(f"vizio-set-mac: refresh failed: {exc}"), file=sys.stderr)
-            return
-    print(
-        f"{theme.ok('Vizio MAC updated')} {theme.dim('->')} "
-        f"{theme.device(repr(device_id))}"
-    )
-
-
 async def dispatch_repl_action(
     kasa_mgr: KasaDeviceManager,
     sonos_mgr: SonosDeviceManager | None,
@@ -1482,6 +1403,8 @@ async def dispatch_repl_action(
             discos.append(sonos_mgr.disconnect())
         if tailwind_mgr is not None:
             discos.append(tailwind_mgr.disconnect())
+        if vizio_mgr is not None:
+            discos.append(vizio_mgr.disconnect())
         if discos:
             await asyncio.gather(*discos)
 
@@ -1604,11 +1527,45 @@ async def dispatch_repl_action(
                     "mgr": None,
                 }
 
+        async def ref_vizio() -> dict[str, Any]:
+            slug = "vizio"
+            if vizio_mgr is None:
+                return {
+                    "slug": slug,
+                    "skipped": True,
+                    "detail": "not loaded",
+                    "exc": None,
+                    "ok": False,
+                    "mgr": None,
+                }
+            try:
+                await vizio_mgr.fetch()
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "",
+                    "exc": None,
+                    "ok": True,
+                    "mgr": None,
+                    "source": vizio_mgr.last_discovery_source,
+                    "count": _vizio_tv_count(vizio_mgr),
+                }
+            except Exception as ex:
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "",
+                    "exc": ex,
+                    "ok": False,
+                    "mgr": None,
+                }
+
         ref_bundles = await asyncio.gather(
             ref_androidtv(),
             ref_tailwind(),
             ref_kasa(),
             ref_sonos(),
+            ref_vizio(),
         )
         ref_by = {b["slug"]: b for b in ref_bundles}
         for slug in _FAMILY_BOOT_SLUGS:
@@ -1619,9 +1576,10 @@ async def dispatch_repl_action(
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
         nd = _tailwind_door_count(tailwind_mgr)
+        nv = _vizio_tv_count(vizio_mgr)
         tail = (
             f"({na} Google Cast device(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
-            f"{nd} Tailwind door(s))."
+            f"{nd} Tailwind door(s), {nv} Vizio TV(s))."
         )
         print(f"{theme.ok('Refreshed')} {theme.dim(tail)}")
         return
@@ -1645,15 +1603,6 @@ async def dispatch_repl_action(
             return await session.prompt_async(message, is_password=is_password)
 
         await _repl_cmd_setup_secrets(prompt_fn=_secrets_prompt, theme=theme)
-        return
-
-    if cmd == "vizio-set-mac":
-        await _repl_cmd_vizio_set_mac(
-            arg,
-            cache_path=cache_path,
-            theme=theme,
-            vizio_mgr=vizio_mgr,
-        )
         return
 
     if cmd == "refresh-discovery":
@@ -1776,11 +1725,45 @@ async def dispatch_repl_action(
                     "mgr": None,
                 }
 
+        async def rd_vizio() -> dict[str, Any]:
+            slug = "vizio"
+            if vizio_mgr is None:
+                return {
+                    "slug": slug,
+                    "skipped": True,
+                    "detail": "not loaded",
+                    "exc": None,
+                    "ok": False,
+                    "mgr": None,
+                }
+            try:
+                await vizio_mgr.rediscover()
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "",
+                    "exc": None,
+                    "ok": True,
+                    "mgr": None,
+                    "source": vizio_mgr.last_discovery_source,
+                    "count": _vizio_tv_count(vizio_mgr),
+                }
+            except Exception as ex:
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "",
+                    "exc": ex,
+                    "ok": False,
+                    "mgr": None,
+                }
+
         rd_bundles = await asyncio.gather(
             rd_androidtv(),
             rd_tailwind(),
             rd_kasa(),
             rd_sonos(),
+            rd_vizio(),
         )
         rd_by = {b["slug"]: b for b in rd_bundles}
         for slug in _FAMILY_BOOT_SLUGS:
@@ -1791,9 +1774,10 @@ async def dispatch_repl_action(
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
         nd = _tailwind_door_count(tailwind_mgr)
+        nv = _vizio_tv_count(vizio_mgr)
         tail = (
             f"({na} Google Cast device(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
-            f"{nd} Tailwind door(s))."
+            f"{nd} Tailwind door(s), {nv} Vizio TV(s))."
         )
         print(f"{theme.ok('Discovery refreshed')} {theme.dim(tail)}")
         return

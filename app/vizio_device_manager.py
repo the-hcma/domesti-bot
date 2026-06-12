@@ -14,9 +14,13 @@ import aiohttp
 from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
-from app.vizio_credentials import resolve_vizio_auth_token, vizio_device_id_from_parts
+from app.vizio_credentials import (
+    migrate_vizio_auth_token_host_to_mac,
+    resolve_vizio_auth_token,
+    vizio_device_id_from_parts,
+)
 from app.vizio_discovery import VizioDiscoveredHost, discover_vizio_hosts_ssdp
-from app.vizio_mac import resolve_vizio_tv_ip, resolve_vizio_tv_mac
+from app.vizio_mac import lookup_mac_via_arp, resolve_vizio_tv_ip, resolve_vizio_tv_mac
 from app.vizio_smartcast_client import (
     DEFAULT_VIZIO_PORT,
     VizioSmartCastAuthError,
@@ -261,7 +265,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     exc,
                 )
                 failed.append(endpoint)
-                connected.append(self._offline_tv(endpoint, token))
+                connected.append(await self._offline_tv(endpoint, token))
             except VizioSmartCastAuthError as exc:
                 _LOGGER.warning(
                     "Cached/configured Vizio TV %s auth rejected: %s",
@@ -293,7 +297,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                         endpoint.device_id,
                         exc,
                     )
-                    connected.append(self._offline_tv(endpoint, token))
+                    connected.append(await self._offline_tv(endpoint, token))
                 except VizioSmartCastAuthError as exc:
                     _LOGGER.warning(
                         "Discovered Vizio TV %s auth rejected: %s",
@@ -307,9 +311,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         self._initialized = True
         if not connected:
             self._last_discovery_source = None
-        elif used_discovery and not targets:
-            self._last_discovery_source = "discovery"
-        elif used_discovery and failed:
+        elif used_discovery and (self._force_discovery or not targets or failed):
             self._last_discovery_source = "discovery"
         else:
             self._last_discovery_source = "cache"
@@ -326,6 +328,12 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     mac=tv.mac,
                     diid=ep.diid,
                 )
+                if tv.mac:
+                    migrate_vizio_auth_token_host_to_mac(
+                        self._discovery_cache_path,
+                        host=ep.host,
+                        mac=tv.mac,
+                    )
 
     async def is_off(self, identifier: str) -> bool:
         tv = self.get_device_by_id(identifier)
@@ -338,6 +346,16 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         if tv is None:
             raise KeyError(identifier)
         return tv.is_on
+
+    async def rediscover(self) -> None:
+        """Force SSDP discovery, ignoring the cache; subsequent ``fetch`` calls keep using the cache."""
+        await self.disconnect()
+        previous = self._force_discovery
+        self._force_discovery = True
+        try:
+            await self.fetch()
+        finally:
+            self._force_discovery = previous
 
     async def turn_off(self, identifier: str) -> None:
         tv = self.get_device_by_id(identifier)
@@ -414,8 +432,20 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             out.append(VizioTvEndpoint(host=host, port=port))
         return out
 
-    def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice:
+    async def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice:
         """Return a cached TV tile when SmartCast is unreachable at bootstrap."""
+        mac = endpoint.mac
+        if mac is None:
+            mac = await asyncio.to_thread(lookup_mac_via_arp, endpoint.host)
+        if mac is not None:
+            endpoint = VizioTvEndpoint(
+                host=endpoint.host,
+                port=endpoint.port,
+                display_name=endpoint.display_name,
+                model=endpoint.model,
+                mac=mac,
+                diid=endpoint.diid,
+            )
         client = VizioSmartCastClient(
             endpoint.host,
             port=endpoint.port,

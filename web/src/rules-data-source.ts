@@ -545,7 +545,9 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
 
   async getStatus(): Promise<RulesStatusOut> {
     try {
-      return await api.fetchRulesStatus();
+      const status = await api.fetchRulesStatus();
+      await this.loadFileBackedRules();
+      return status;
     } catch (err) {
       console.warn("Rules status fetch failed", err);
       return this.inner.getStatus();

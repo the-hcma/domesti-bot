@@ -1,4 +1,4 @@
-"""Rules hub UI — CSS contract and desktop browser smoke (mock data)."""
+"""Rules hub UI — CSS contract and desktop browser smoke (live API + seeded presence)."""
 
 from __future__ import annotations
 
@@ -17,28 +17,82 @@ import uvicorn
 from app.api.app import create_app
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
+from app.location_history_retention import default_location_history_retention
+from app.presence_store import UserLocationRecord, upsert_user_location
+from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXAMPLE_BUNDLE = _REPO_ROOT / "automation-rules.json.example"
 _INDEX_HTML_PATH = _REPO_ROOT / "app" / "api" / "static" / "index.html"
 _MAIN_JS_PATH = _REPO_ROOT / "app" / "api" / "static" / "dist" / "main.js"
 
+_HENRIQUE_AT_HOME_LAT = 41.194085
+_HENRIQUE_AT_HOME_LON = -73.888365
+_KRISTEN_OUTSIDE_LAT = 44.417597
+_KRISTEN_OUTSIDE_LON = -72.023842
 
-async def _bootstrap_empty_device_state(
-    *_args: Any,
-    **_kwargs: Any,
-) -> DeviceManagersState:
-    """Skip LAN discovery so browser tests can render the desktop shell."""
 
-    kasa_mgr = MagicMock(spec=KasaDeviceManager)
-    kasa_mgr.switches = ()
-    return DeviceManagersState(
-        kasa_mgr=kasa_mgr,
-        sonos_mgr=None,
-        tailwind_mgr=None,
-        androidtv_mgr=None,
-        vizio_mgr=None,
-        cache_path=None,
-        args=argparse.Namespace(),
+def _seed_rules_hub_browser_db(cache_path: Path) -> None:
+    """Presence rows aligned with ``web/src/rules-mock-fixtures.ts`` coordinates."""
+    replace_users(
+        cache_path,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Henrique",
+                last_name="",
+                display_name="Henrique",
+                tracking_device_label="Henrique's iPhone",
+                enabled=True,
+            ),
+            UserRecord(
+                user_id="kristen",
+                first_name="Kristen",
+                last_name="",
+                display_name="Kristen",
+                tracking_device_label="Kristen's iPhone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        cache_path,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.8883254,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    now = time.time()
+    upsert_user_location(
+        cache_path,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=_HENRIQUE_AT_HOME_LAT,
+            lon=_HENRIQUE_AT_HOME_LON,
+            accuracy_m=12,
+            received_at=now - 60,
+            source="my-tracks",
+        ),
+        retention=default_location_history_retention(),
+    )
+    upsert_user_location(
+        cache_path,
+        UserLocationRecord(
+            user_id="kristen",
+            lat=_KRISTEN_OUTSIDE_LAT,
+            lon=_KRISTEN_OUTSIDE_LON,
+            accuracy_m=18,
+            received_at=now - 300,
+            source="my-tracks",
+        ),
+        retention=default_location_history_retention(),
     )
 
 
@@ -92,23 +146,46 @@ def chromium_browser() -> Iterator[Any]:
 
 
 @pytest.fixture(scope="module")
-def landing_base_url() -> Iterator[str]:
+def rules_hub_browser_cache(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    db = tmp_path_factory.mktemp("rules-hub-browser") / "discovery.sqlite"
+    _seed_rules_hub_browser_db(db)
+    return db
+
+
+@pytest.fixture(scope="module")
+def landing_base_url(rules_hub_browser_cache: Path) -> Iterator[str]:
     """Serve the FastAPI app on an OS-allocated loopback port (bundle must exist)."""
 
     if not _MAIN_JS_PATH.is_file():
         pytest.skip("app/api/static/dist/main.js missing — run pnpm run build in web/")
 
     args = argparse.Namespace(
-        discovery_cache=None,
+        discovery_cache=str(rules_hub_browser_cache),
         tailwind_token=None,
     )
-    missing_rules = Path("/tmp/domesti-bot-browser-tests-no-rules.json")
+
+    async def bootstrap_device_state(
+        *_bootstrap_args: Any,
+        **_bootstrap_kwargs: Any,
+    ) -> DeviceManagersState:
+        kasa_mgr = MagicMock(spec=KasaDeviceManager)
+        kasa_mgr.switches = ()
+        return DeviceManagersState(
+            kasa_mgr=kasa_mgr,
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=rules_hub_browser_cache,
+            args=argparse.Namespace(),
+        )
+
     with patch(
         "app.api.app.bootstrap_device_managers",
-        _bootstrap_empty_device_state,
+        bootstrap_device_state,
     ), patch.dict(
         os.environ,
-        {"DOMESTI_AUTOMATION_RULES_FILE": str(missing_rules)},
+        {"DOMESTI_AUTOMATION_RULES_FILE": str(_EXAMPLE_BUNDLE)},
         clear=False,
     ):
         app = create_app(args)
@@ -205,11 +282,11 @@ def test_status_rule_click_opens_rules_tab_inspector(
 
 
 @pytest.mark.browser
-def test_rules_hub_opens_with_seed_rule(
+def test_rules_hub_opens_with_file_backed_rules(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
-    """Desktop ☰ → Automations opens the hub and shows the seeded arrive-home rule."""
+    """Desktop ☰ → Automations shows the example bundle and the source pill."""
 
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
@@ -220,22 +297,22 @@ def test_rules_hub_opens_with_seed_rule(
         page.get_by_role("menuitem", name="Automations").click()
         dialog = page.locator("dialog.rules-dialog")
         dialog.wait_for(state="visible", timeout=10_000)
-        assert page.locator(".rules-source-pill").count() == 0
+        source_pill = page.locator(".rules-source-pill")
+        source_pill.wait_for(state="visible", timeout=10_000)
+        assert "automation-rules.json" in source_pill.inner_text().lower()
         assert "Automations" in dialog.inner_text()
-        assert "Rules" in dialog.inner_text()
-        assert "Welcome home" in dialog.inner_text()
+        assert "Evening arrival" in dialog.inner_text()
         page.locator('.rules-tab[data-tab="rules"]').click()
-        page.get_by_role("button", name="Add rule").wait_for(state="visible", timeout=10_000)
+        page.get_by_text("Rules are loaded from automation-rules.json").wait_for(
+            state="visible",
+            timeout=10_000,
+        )
+        assert page.get_by_role("button", name="Add rule").count() == 0
         rules_card = page.locator(".rules-card").first
         rules_card.wait_for(state="visible", timeout=10_000)
         card_text = rules_card.inner_text()
-        assert "When henrique and kristen enter house" in card_text
-        assert "After sunset until midnight" in card_text
-        assert "Turn on Kitchen lights" in card_text
-        assert "Turn on Porch lights" in card_text
-        assert "Open Main garage" in card_text
+        assert "Front door lights" in card_text
         assert "192.168.1.42" not in card_text
-        assert rules_card.locator(".rules-enable-toggle").count() == 1
     finally:
         context.close()
 

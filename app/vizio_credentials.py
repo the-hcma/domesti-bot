@@ -6,7 +6,13 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from app.db.secrets import SecretsDecryptError, load_vizio_auth_token_from_db
+from app.db.secrets import (
+    SecretsDecryptError,
+    delete_app_secret,
+    load_vizio_auth_token_from_db,
+    save_vizio_auth_token_to_db,
+    vizio_auth_token_stored_in_db,
+)
 from app.vizio_wol import normalize_mac
 
 VizioAuthSource = Literal["cli", "env", "database", "none"]
@@ -45,6 +51,34 @@ def resolve_vizio_auth_token(
     if env:
         return env, "env"
     return "", "none"
+
+
+def migrate_vizio_auth_token_host_to_mac(
+    cache_path: Path,
+    *,
+    host: str,
+    mac: str,
+) -> None:
+    """Prefer an existing MAC-scoped token; else re-key legacy host storage."""
+    try:
+        mac_token = load_vizio_auth_token_from_db(cache_path, mac=mac, host=None)
+    except SecretsDecryptError:
+        mac_token = None
+    if mac_token:
+        if vizio_auth_token_stored_in_db(cache_path, mac=None, host=host):
+            delete_app_secret(cache_path, key=vizio_auth_secret_key_for_host(host))
+        return
+    try:
+        host_token = load_vizio_auth_token_from_db(cache_path, mac=None, host=host)
+    except SecretsDecryptError:
+        host_token = None
+    if host_token:
+        save_vizio_auth_token_to_db(
+            cache_path,
+            mac=mac,
+            host=host,
+            token=host_token,
+        )
 
 
 def vizio_device_id_from_parts(*, mac: str | None, host: str, port: int) -> str:
