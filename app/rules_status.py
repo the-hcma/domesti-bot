@@ -5,13 +5,19 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:
+    from app.domesti_bot_cli import DeviceManagersState
 
 from app.api.schemas import (
     GeofenceOut,
     RulesEvaluatorOut,
     RulesStatusOut,
     RuleStatusSummaryOut,
+    RuleValidationOut,
+    RulesValidationOut,
     UserLocationOut,
     UserStatusOut,
 )
@@ -27,10 +33,46 @@ from app.rule_conditions import (
     evaluate_rule,
 )
 from app.rule_evaluator import RuleEvaluator, RuleEvaluatorFireState
+from app.rule_validation import (
+    RosterUserRow,
+    RuleValidationContext,
+    build_roster_name_hint_lookup,
+    build_roster_user_id_lookup,
+    validate_rule,
+    validate_rules,
+)
 from app.rules_store import GeofenceRecord, list_geofences, list_users
+from app.smtp_store import load_smtp_config
+
+
+def build_rules_validation(
+    *,
+    cache_path: Path | None,
+    device_state: DeviceManagersState | None = None,
+) -> RulesValidationOut:
+    """Cross-check file-backed rules against persisted roster, geofences, and devices."""
+    geofences = _load_geofences(cache_path)
+    users = _load_users_status(cache_path)
+    validation_ctx = _build_validation_context(
+        cache_path=cache_path,
+        device_state=device_state,
+        geofences=geofences,
+        users=users,
+    )
+    issues_by_rule = validate_rules(list_automation_rules(), validation_ctx)
+    return RulesValidationOut(
+        rules=[
+            RuleValidationOut(id=rule_id, issues=issues)
+            for rule_id, issues in issues_by_rule.items()
+            if issues
+        ],
+    )
+
+
 def build_rules_status(
     *,
     cache_path: Path | None,
+    device_state: DeviceManagersState | None = None,
     evaluator: RuleEvaluator | None = None,
     now: datetime | None = None,
 ) -> RulesStatusOut:
@@ -49,19 +91,29 @@ def build_rules_status(
     users = _load_users_status(cache_path)
     user_locations = _user_locations_from_status(users)
     user_display_names = {row.user_id: row.display_name for row in users}
-    ctx = RuleEvaluationContext(
+    roster_user_id_lookup = build_roster_user_id_lookup(
+        [row.user_id for row in users],
+    )
+    eval_ctx = RuleEvaluationContext(
         geofences=tuple(geofences),
         now=effective_now,
+        roster_user_id_lookup=roster_user_id_lookup,
         sun=sun,
         timezone=tz,
         user_display_names=user_display_names,
         user_locations=user_locations,
     )
+    validation_ctx = _build_validation_context(
+        cache_path=cache_path,
+        device_state=device_state,
+        geofences=geofences,
+        users=users,
+    )
 
     rules = list_automation_rules()
     rule_rows: list[RuleStatusSummaryOut] = []
     for rule in rules:
-        evaluation = evaluate_rule(rule, ctx)
+        evaluation = evaluate_rule(rule, eval_ctx)
         fire_state = _fire_state_for_rule(evaluator, rule.id)
         rule_rows.append(
             RuleStatusSummaryOut(
@@ -76,6 +128,7 @@ def build_rules_status(
                     if fire_state.last_fired_at is not None
                     else None
                 ),
+                reference_issues=validate_rule(rule, validation_ctx),
                 trigger=rule.trigger,
             )
         )
@@ -101,6 +154,38 @@ def build_rules_status(
         sun=sun,
         users=users,
         using_mock=False,
+    )
+
+
+def _build_validation_context(
+    *,
+    cache_path: Path | None,
+    device_state: DeviceManagersState | None,
+    geofences: list[GeofenceOut],
+    users: list[UserStatusOut],
+) -> RuleValidationContext:
+    roster_users = [
+        RosterUserRow(
+            display_name=row.display_name,
+            first_name=row.first_name,
+            user_id=row.user_id,
+        )
+        for row in users
+    ]
+    smtp_configured = False
+    if cache_path is not None:
+        smtp_record = load_smtp_config(cache_path)
+        smtp_configured = (
+            smtp_record is not None and smtp_record.password_configured
+        )
+    return RuleValidationContext(
+        device_state=device_state,
+        geofence_ids=frozenset(row.geofence_id for row in geofences),
+        roster_name_hint_lookup=build_roster_name_hint_lookup(roster_users),
+        roster_user_id_lookup=build_roster_user_id_lookup(
+            [row.user_id for row in users],
+        ),
+        smtp_configured=smtp_configured,
     )
 
 

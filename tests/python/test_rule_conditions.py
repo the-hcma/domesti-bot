@@ -23,6 +23,7 @@ from app.rule_conditions import (
     compute_rules_sun_out,
     evaluate_rule,
 )
+from app.rule_validation import build_roster_user_id_lookup
 from app.rules_status import build_rules_status
 
 _SETTINGS = SettingsLocationOut(
@@ -107,10 +108,14 @@ def _ctx(
     user_locations: dict[str, UserLocationOut] | None = None,
 ) -> RuleEvaluationContext:
     sun = compute_rules_sun_out(_SETTINGS, now=now)
+    user_display_names = {"henrique": "Henrique", "kristen": "Kristen"}
     return RuleEvaluationContext(
         geofences=geofences,
         now=now,
-        user_display_names={"henrique": "Henrique", "kristen": "Kristen"},
+        roster_user_id_lookup=build_roster_user_id_lookup(
+            list(user_display_names.keys()),
+        ),
+        user_display_names=user_display_names,
         user_locations=user_locations or {},
         sun=sun,
         timezone=_TZ,
@@ -244,6 +249,9 @@ def test_user_display_name_uses_roster_display_name() -> None:
         RuleEvaluationContext(
             geofences=(geofence,),
             now=now,
+            roster_user_id_lookup=build_roster_user_id_lookup(
+                ["henrique", "kristen"],
+            ),
             user_display_names={"henrique": "Henrique", "kristen": "Kristen"},
             user_locations={},
             sun=base_ctx.sun,
@@ -252,6 +260,32 @@ def test_user_display_name_uses_roster_display_name() -> None:
     )
     assert "Henrique" in result.conditions[1].detail
     assert "Kristen" in result.conditions[1].detail
+
+
+def test_users_geofence_unknown_user_reports_roster_miss() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    geofence = GeofenceOut(
+        center_lat=41.194072,
+        center_lon=-73.888325,
+        enabled=True,
+        geofence_id="house",
+        label="House",
+        owntracks_rid=None,
+        radius_m=250,
+    )
+    result = evaluate_rule(
+        _evening_rule(),
+        RuleEvaluationContext(
+            geofences=(geofence,),
+            now=now,
+            roster_user_id_lookup=build_roster_user_id_lookup(["kristen"]),
+            user_display_names={"kristen": "Kristen"},
+            user_locations={},
+            sun=compute_rules_sun_out(_SETTINGS, now=now),
+            timezone=_TZ,
+        ),
+    )
+    assert '"henrique": not in user roster' in result.conditions[1].detail
 
 
 def test_build_rules_status_from_example_bundle(

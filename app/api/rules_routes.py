@@ -13,6 +13,7 @@ from app.api.schemas import (
     GeofenceOut,
     RuleOut,
     RulesStatusOut,
+    RulesValidationOut,
     SettingsLocationOut,
     UserLocationOut,
     UserOut,
@@ -30,7 +31,7 @@ from app.presence_store import (
     geofence_ids_containing_location,
     list_user_locations,
 )
-from app.rules_status import build_rules_status
+from app.rules_status import build_rules_status, build_rules_validation
 from app.rules_store import (
     GeofenceRecord,
     UserRecord,
@@ -95,7 +96,24 @@ async def get_rules_status(request: Request) -> RulesStatusOut:
     cache_path = discovery_cache_path_from_request(request)
     evaluator = runtime.rule_evaluator
     try:
-        return build_rules_status(cache_path=cache_path, evaluator=evaluator)
+        return build_rules_status(
+            cache_path=cache_path,
+            device_state=runtime.device_state,
+            evaluator=evaluator,
+        )
+    except AutomationRulesLoadError as exc:
+        raise _automation_rules_http_error(exc) from exc
+
+
+@router.get("/validation", response_model=RulesValidationOut)
+async def get_rules_validation(request: Request) -> RulesValidationOut:
+    """Return broken user/geofence references in file-backed automation rules."""
+    cache_path = discovery_cache_path_from_request(request)
+    try:
+        return build_rules_validation(
+            cache_path=cache_path,
+            device_state=runtime.device_state,
+        )
     except AutomationRulesLoadError as exc:
         raise _automation_rules_http_error(exc) from exc
 

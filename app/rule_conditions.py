@@ -30,6 +30,7 @@ from app.api.schemas import (
     RulesSunOut,
     SettingsLocationOut,
 )
+from app.rule_validation import resolve_roster_user_id
 
 MINUTES_PER_DAY = 24 * 60
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
@@ -42,10 +43,14 @@ class RuleEvaluationContext:
 
     geofences: tuple[GeofenceOut, ...]
     now: datetime
+    roster_user_id_lookup: dict[str, str]
     user_display_names: dict[str, str]
     user_locations: dict[str, UserLocationOut]
     sun: RulesSunOut
     timezone: ZoneInfo
+
+    def resolve_user_id(self, reference: str) -> str | None:
+        return resolve_roster_user_id(reference, self.roster_user_id_lookup)
 
 
 @dataclass(frozen=True)
@@ -420,9 +425,16 @@ def _evaluate_users_geofence(
     presence_lines: list[str] = []
     unmet_names: list[str] = []
     ignored_accuracy: list[str] = []
-    for user_id in condition.user_ids:
-        location = ctx.user_locations.get(user_id)
-        name = _user_display_name(ctx, user_id)
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            presence_lines.append(
+                f'"{rule_user_id}": not in user roster (sync users from My Tracks)',
+            )
+            unmet_names.append(rule_user_id)
+            continue
+        location = ctx.user_locations.get(roster_user_id)
+        name = _user_display_name(ctx, roster_user_id)
         if location is None:
             presence_lines.append(f"{name}: no location yet")
             unmet_names.append(name)
@@ -445,10 +457,13 @@ def _evaluate_users_geofence(
         if not want_inside and inside:
             unmet_names.append(name)
 
-    selected_names = [
-        _user_display_name(ctx, user_id)
-        for user_id in condition.user_ids
-    ]
+    selected_names: list[str] = []
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            selected_names.append(rule_user_id)
+            continue
+        selected_names.append(_user_display_name(ctx, roster_user_id))
     who = _join_names(selected_names)
     if rule.trigger == "edge_true":
         label = (

@@ -37,6 +37,8 @@ import {
   createEnableToggle,
   createFieldLabel,
   FAMILY_ACTION_GROUP_LABELS,
+  createBrokenRuleBadge,
+  resolveRosterUser,
   ruleLastMetLabel,
   ruleStatusHeadline,
   userDisplayLabel,
@@ -1140,6 +1142,9 @@ class RulesHubController {
         void this.navigateToRule(rule.id);
       });
       row.append(nameBtn);
+      if (rule.reference_issues.length > 0) {
+        row.append(createBrokenRuleBadge(rule.reference_issues));
+      }
       if (!rulesReadOnly) {
         const enableToggle = createEnableToggle(rule.enabled, (next) => {
           void this.dataSource
@@ -1159,10 +1164,7 @@ class RulesHubController {
         fired.append(createAuditedTimeElement(rule.last_fired_at));
         card.append(fired);
       }
-      void Promise.all([
-        this.dataSource.getRule(rule.id),
-        this.dataSource.listUsers(),
-      ]).then(([definition, roster]) => {
+      void this.dataSource.getRule(rule.id).then((definition) => {
         if (definition === null) {
           return;
         }
@@ -1170,23 +1172,20 @@ class RulesHubController {
         if (userIds.length === 0) {
           return;
         }
-        const rosterDisplayNameById = new Map(
-          roster.map((row) => [row.user_id, row.display_name]),
-        );
         const presence = document.createElement("div");
         presence.className = "rules-rule-presence-summary";
         for (const userId of userIds) {
-          const userRow = status.users.find(
-            (row) => row.user_id === userId,
-          );
+          const userRow = resolveRosterUser(userId, status.users);
           const line = document.createElement("p");
           line.className = "rules-card-meta";
-          const name = userDisplayLabel(
-            userId,
-            userRow?.display_name
-              ?? rosterDisplayNameById.get(userId),
-          );
-          const where = userRow?.last_location === null || userRow === undefined
+          if (userRow === undefined) {
+            line.textContent =
+              `"${userId}": not in user roster (sync users from My Tracks)`;
+            presence.append(line);
+            continue;
+          }
+          const name = userDisplayLabel(userRow.user_id, userRow.display_name);
+          const where = userRow.last_location === null
             ? "No location yet"
             : formatInsideGeofencesLine(
               userRow.inside_geofence_ids,
