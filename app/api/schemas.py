@@ -133,9 +133,9 @@ class UIFamilyOut(BaseModel):
 class UIStateOut(BaseModel):
     """Top-level payload for ``GET /v1/ui/state``.
 
-    ``families`` is ordered for deterministic UI rendering: alphabetical by
-    family ``id`` (currently ``kasa``, ``sonos``, ``tailwind``). Future
-    families slot into the same order without front-end changes.
+    ``families`` is ordered for deterministic UI rendering: ``kasa``, then
+    ``sonos``, ``vizio``, and ``tailwind`` (garage doors last). Empty
+    families are omitted.
     """
 
     families: list[UIFamilyOut] = Field(default_factory=list)

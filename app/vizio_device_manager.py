@@ -76,7 +76,7 @@ class VizioTvEndpoint:
 
 
 class VizioTvDevice(SwitchDevice):
-    __slots__ = ("_client", "_endpoint", "_mac")
+    __slots__ = ("_client", "_endpoint", "_mac", "_power_unknown")
 
     def __init__(
         self,
@@ -90,6 +90,7 @@ class VizioTvDevice(SwitchDevice):
         self._endpoint = endpoint
         self._client = client
         self._mac = (mac or endpoint.mac or "").strip() or None
+        self._power_unknown = False
 
     @property
     def endpoint(self) -> VizioTvEndpoint:
@@ -113,13 +114,23 @@ class VizioTvDevice(SwitchDevice):
         try:
             powered = await self._client.get_power_on()
         except VizioSmartCastConnectionError:
+            self._power_unknown = True
             return
         except VizioSmartCastAuthError:
+            self._power_unknown = True
             return
+        self._power_unknown = False
         self.set_power(powered)
 
     async def turn_off(self) -> None:
-        await self._client.power_off()
+        try:
+            await self._client.power_off()
+        except VizioSmartCastConnectionError:
+            _LOGGER.info(
+                "SmartCast unreachable for %s during power_off; treating as off",
+                self.identifier,
+            )
+        self._power_unknown = False
         self.set_power(False)
 
     async def turn_on(self) -> None:
@@ -131,7 +142,14 @@ class VizioTvDevice(SwitchDevice):
             await asyncio.to_thread(send_wake_on_lan, self._mac)
             await self._wait_for_api()
             await self._client.power_on()
+        self._power_unknown = False
         self.set_power(True)
+
+    def ui_power_state(self) -> str:
+        """Cached on/off/unknown for the web UI and REPL listings."""
+        if self._power_unknown:
+            return "unknown"
+        return "on" if self._on else "off"
 
     async def _wait_for_api(self) -> None:
         deadline = time.monotonic() + _WOL_WAIT_DEADLINE_S

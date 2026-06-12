@@ -44,13 +44,12 @@ from app.vizio_device_manager import VizioDeviceManager, VizioTvDevice
 _LOGGER = logging.getLogger(__name__)
 
 # Server-owned UI metadata per family. Order in this list is the rendering
-# order on the page (top → bottom rows of tiles); matches the alphabetical
-# ``family_id`` order documented on ``UIStateOut``.
+# order on the page (top → bottom rows of tiles); documented on ``UIStateOut``.
 _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("kasa", "Lights & plugs", "#3B82F6"),
     ("sonos", "Sonos zones", "#8B5CF6"),
-    ("tailwind", "Garage doors", "#10B981"),
     ("vizio", "Vizio TVs", "#F97316"),
+    ("tailwind", "Garage doors", "#10B981"),
 )
 
 # Speaker-kind state strings emitted on ``UIDeviceOut.state`` for Sonos.
@@ -322,6 +321,10 @@ def _switch_state(is_on: bool) -> str:
     return SwitchPowerState.ON.value if is_on else SwitchPowerState.OFF.value
 
 
+def _vizio_switch_state(tv: VizioTvDevice) -> str:
+    return tv.ui_power_state()
+
+
 def _tailwind_devices(
     mgr: GotailwindDeviceManager,
     excluded: set[str],
@@ -372,7 +375,7 @@ def _vizio_devices(
                 family_id="vizio",
                 label=tv.preferred_label,
                 kind="switch",
-                state=_switch_state(tv.is_on),
+                state=_vizio_switch_state(tv),
                 compact_icon=_compact_icon_for_device(
                     family_id="vizio",
                     label=tv.preferred_label,
@@ -528,7 +531,7 @@ def build_vizio_device_view(
         family_id="vizio",
         label=tv.preferred_label,
         kind="switch",
-        state=_switch_state(tv.is_on),
+        state=_vizio_switch_state(tv),
         compact_icon=_compact_icon_for_device(
             family_id="vizio",
             label=tv.preferred_label,
