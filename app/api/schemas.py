@@ -744,7 +744,7 @@ class VizioPairCompleteOut(BaseModel):
 
 
 class VizioTvSettingsOut(BaseModel):
-    """One known Vizio TV row (no auth token material)."""
+    """One known Vizio TV row for the settings UI."""
 
     device_id: str
     host: str
@@ -752,6 +752,13 @@ class VizioTvSettingsOut(BaseModel):
     display_name: str | None = None
     auth_configured: bool
     auth_source: VizioAuthSourceOut
+    stored_token: str | None = Field(
+        default=None,
+        description=(
+            "Decrypted per-TV token from the database when auth_source is "
+            "database; null when auth comes from CLI/env or no DB row exists."
+        ),
+    )
 
 
 class VizioTvsSettingsOut(BaseModel):

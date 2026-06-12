@@ -23,7 +23,10 @@ from app.api.schemas import (
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.db.secrets import (
     SecretsConfigurationError,
+    SecretsDecryptError,
     delete_app_secret,
+    load_vizio_auth_hosts_from_db,
+    load_vizio_auth_token_from_db,
     save_vizio_auth_token_to_db,
     secrets_key_configured,
     secrets_key_source,
@@ -58,34 +61,10 @@ async def list_vizio_tvs(request: Request) -> VizioTvsSettingsOut:
             secrets_key_source=secrets_key_source(),
             tvs=[],
         )
-    args = runtime.cli_args
-    cli_token = getattr(args, "vizio_auth_token", None) if args is not None else None
-    env_token = os.environ.get("VIZIO_AUTH_TOKEN")
-    rows: list[VizioTvSettingsOut] = []
-    for host, port, display, _model, _mac, _diid in kasa_discovery_store.load_vizio_tvs(
-        cache_path
-    ):
-        device_id = device_id_for(host, port)
-        token, source = resolve_vizio_auth_token(
-            host=host,
-            cli_token=cli_token,
-            env_token=env_token,
-            cache_path=cache_path,
-        )
-        rows.append(
-            VizioTvSettingsOut(
-                device_id=device_id,
-                host=host,
-                port=port,
-                display_name=display,
-                auth_configured=bool(token),
-                auth_source=source,
-            )
-        )
     return VizioTvsSettingsOut(
         secrets_key_configured=secrets_key_configured(),
         secrets_key_source=secrets_key_source(),
-        tvs=rows,
+        tvs=_vizio_tv_settings_rows(cache_path),
     )
 
 
@@ -106,21 +85,7 @@ async def clear_vizio_auth(device_id: str, request: Request) -> VizioTvSettingsO
     delete_app_secret(cache_path, key=vizio_auth_secret_key(host))
     _pending_pairing.pop(canonical_id, None)
     await _reload_vizio_manager()
-    token, source = resolve_vizio_auth_token(
-        host=host,
-        cli_token=_cli_vizio_token(),
-        env_token=os.environ.get("VIZIO_AUTH_TOKEN"),
-        cache_path=cache_path,
-    )
-    display = _display_name_for(cache_path, host, port)
-    return VizioTvSettingsOut(
-        device_id=canonical_id,
-        host=host,
-        port=port,
-        display_name=display,
-        auth_configured=bool(token),
-        auth_source=source,
-    )
+    return _vizio_tv_settings_out(cache_path, host=host, port=port)
 
 
 @router.post("/pair/begin", response_model=VizioPairBeginOut)
@@ -352,6 +317,69 @@ def _optional_cache_path() -> Path | None:
     return runtime.discovery_cache_path()
 
 
+def _stored_token_for_tv(cache_path: Path, *, host: str) -> str | None:
+    if not vizio_auth_token_stored_in_db(cache_path, host=host):
+        return None
+    try:
+        return load_vizio_auth_token_from_db(cache_path, host=host)
+    except SecretsDecryptError:
+        return None
+
+
+def _vizio_tv_settings_out(
+    cache_path: Path,
+    *,
+    host: str,
+    port: int,
+) -> VizioTvSettingsOut:
+    device_id = device_id_for(host, port)
+    token, source = resolve_vizio_auth_token(
+        host=host,
+        cli_token=_cli_vizio_token(),
+        env_token=os.environ.get("VIZIO_AUTH_TOKEN"),
+        cache_path=cache_path,
+    )
+    stored = (
+        _stored_token_for_tv(cache_path, host=host)
+        if source == "database"
+        else None
+    )
+    return VizioTvSettingsOut(
+        device_id=device_id,
+        host=host,
+        port=port,
+        display_name=_display_name_for(cache_path, host, port),
+        auth_configured=bool(token),
+        auth_source=source,
+        stored_token=stored,
+    )
+
+
+def _vizio_tv_settings_rows(cache_path: Path) -> list[VizioTvSettingsOut]:
+    seen: set[str] = set()
+    rows: list[VizioTvSettingsOut] = []
+    for host, port, *_rest in kasa_discovery_store.load_vizio_tvs(cache_path):
+        device_id = device_id_for(host, port)
+        if device_id in seen:
+            continue
+        seen.add(device_id)
+        rows.append(_vizio_tv_settings_out(cache_path, host=host, port=port))
+    for host in load_vizio_auth_hosts_from_db(cache_path):
+        try:
+            parsed_host, port = parse_host_spec(host)
+        except ValueError:
+            continue
+        device_id = device_id_for(parsed_host, port)
+        if device_id in seen:
+            continue
+        seen.add(device_id)
+        rows.append(
+            _vizio_tv_settings_out(cache_path, host=parsed_host, port=port)
+        )
+    rows.sort(key=lambda row: (row.display_name or row.device_id).lower())
+    return rows
+
+
 async def _reload_vizio_manager() -> bool:
     """Re-bootstrap Vizio on the live server after credential changes."""
     state: DeviceManagersState | None = runtime.device_state
@@ -376,7 +404,7 @@ async def _reload_vizio_manager() -> bool:
         discovery_cache_path=cache_path,
         cli_auth_token=getattr(args, "vizio_auth_token", None),
         env_auth_token=env_token,
-        force_discovery=True,
+        force_discovery=False,
     )
     try:
         await mgr.fetch()
@@ -389,4 +417,5 @@ async def _reload_vizio_manager() -> bool:
         runtime.device_state = state._replace(vizio_mgr=None)
         return False
     runtime.device_state = state._replace(vizio_mgr=mgr)
+    await runtime.restart_device_state_watchers()
     return True

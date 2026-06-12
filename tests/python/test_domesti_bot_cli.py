@@ -251,3 +251,43 @@ async def test_repl_setup_secrets_writes_json_file(
     assert secrets_file.is_file()
     payload = json.loads(secrets_file.read_text(encoding="utf-8"))
     assert payload["domesti_secrets_key"]
+
+
+@pytest.mark.asyncio
+async def test_show_devices_lists_vizio_tvs() -> None:
+    from contextlib import redirect_stdout
+    from io import StringIO
+    from unittest.mock import MagicMock
+
+    from app.domesti_bot_cli import _repl_cmd_show_devices
+    from app.vizio_device_manager import VizioTvDevice, VizioTvEndpoint
+
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+    )
+    tv = VizioTvDevice(endpoint, MagicMock(), display_name="Kitchen TV")
+    tv.set_power(True)
+
+    vizio_mgr = MagicMock()
+    vizio_mgr.tvs = (tv,)
+
+    kasa_mgr = MagicMock()
+    kasa_mgr.switches = []
+
+    out = StringIO()
+    with redirect_stdout(out):
+        await _repl_cmd_show_devices(
+            kasa_mgr=kasa_mgr,
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=vizio_mgr,
+            theme=_Theme(enabled=False),
+        )
+    text = out.getvalue()
+    assert "Vizio TVs:" in text
+    assert "Kitchen TV" in text
+    assert "192.168.86.201" in text
+    assert "(on)" in text

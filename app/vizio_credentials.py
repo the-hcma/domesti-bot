@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from app.db.secrets import load_vizio_auth_token_from_db
+from app.db.secrets import SecretsDecryptError, load_vizio_auth_token_from_db
 
 VizioAuthSource = Literal["cli", "env", "database", "none"]
 
@@ -23,15 +23,18 @@ def resolve_vizio_auth_token(
     env_token: str | None,
     cache_path: Path | None,
 ) -> tuple[str, VizioAuthSource]:
-    """Return ``(token, source)`` for one TV using CLI → env → per-host DB."""
+    """Return ``(token, source)`` for one TV using CLI → per-host DB → env."""
     cli = (cli_token or "").strip()
     if cli:
         return cli, "cli"
+    if cache_path is not None:
+        try:
+            stored = load_vizio_auth_token_from_db(cache_path, host=host)
+        except SecretsDecryptError:
+            stored = None
+        if stored:
+            return stored, "database"
     env = (env_token or "").strip()
     if env:
         return env, "env"
-    if cache_path is not None:
-        stored = load_vizio_auth_token_from_db(cache_path, host=host)
-        if stored:
-            return stored, "database"
     return "", "none"

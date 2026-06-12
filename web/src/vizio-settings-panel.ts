@@ -80,15 +80,24 @@ export async function mountVizioSettingsPanel(
     autocomplete: "off",
     maxLength: 256,
     placeholder: "Paste token from pairing",
-    required: true,
+    required: false,
   });
   const tokenInput = tokenRow.input;
   tokenInput.name = "token";
-  tokenRow.setRevealed(false);
+  let storedToken: string | null = null;
+  let tokenRevealed = false;
+  const setTokenRevealed = (revealed: boolean): void => {
+    tokenRevealed = revealed;
+    if (revealed && !tokenInput.value && storedToken) {
+      tokenInput.value = storedToken;
+    }
+    tokenRow.setRevealed(revealed);
+  };
+  setTokenRevealed(false);
   tokenLabel.append(tokenLabelText, tokenRow.row);
 
   const pairSection = document.createElement("fieldset");
-  pairSection.className = "settings-dialog-fieldset";
+  pairSection.className = "settings-dialog-fieldset vizio-pairing-section";
   const pairLegend = document.createElement("legend");
   pairLegend.textContent = "Pair with PIN";
   pairSection.append(pairLegend);
@@ -149,6 +158,7 @@ export async function mountVizioSettingsPanel(
   container.append(form);
 
   let pendingPair: VizioPairBeginOut | null = null;
+  let paired = false;
 
   const showStatusMessage = (message: string): void => {
     status.textContent = message;
@@ -170,6 +180,28 @@ export async function mountVizioSettingsPanel(
     pairStatus.hidden = true;
   };
 
+  const applyTokenFieldsFromTv = (tv: VizioTvSettingsOut | undefined): void => {
+    storedToken = tv?.stored_token ?? null;
+    paired = tv?.auth_configured === true;
+    if (storedToken) {
+      tokenInput.value = storedToken;
+      tokenInput.placeholder = "";
+      if (!tokenRevealed) {
+        tokenInput.type = "password";
+      }
+    } else {
+      tokenInput.value = "";
+      tokenInput.placeholder = paired ? "" : "Paste token from pairing";
+      if (!tokenRevealed) {
+        tokenInput.type = "password";
+      }
+    }
+    tokenInput.required = !paired;
+    saveBtn.hidden = paired;
+    beginPairBtn.textContent = paired ? "Re-pair" : "Start pairing";
+    clearBtn.disabled = !paired || tv?.auth_source !== "database";
+  };
+
   const setPairingUiActive = (active: boolean): void => {
     beginPairBtn.hidden = active;
     completePairBtn.hidden = !active;
@@ -179,16 +211,27 @@ export async function mountVizioSettingsPanel(
       pinInput.value = "";
       pendingPair = null;
       hidePairStatus();
+      beginPairBtn.textContent = paired ? "Re-pair" : "Start pairing";
     }
   };
 
   const applyTvStatus = (tv: VizioTvSettingsOut | undefined): void => {
-    clearBtn.disabled = tv?.auth_configured !== true;
+    applyTokenFieldsFromTv(tv);
     if (tv?.auth_configured) {
       const label = tv.display_name ?? tv.device_id;
-      showStatusMessage(
-        `${label} is paired (${tv.auth_source === "database" ? "stored in database" : tv.auth_source}).`,
-      );
+      if (tv.auth_source === "cli") {
+        showStatusMessage(
+          `${label} uses --vizio-auth-token; per-TV database tokens are ignored until you remove the CLI flag.`,
+        );
+        return;
+      }
+      if (tv.auth_source === "env") {
+        showStatusMessage(
+          `${label} uses VIZIO_AUTH_TOKEN; no per-TV database token is configured for this host.`,
+        );
+        return;
+      }
+      showStatusMessage(`${label} is paired (stored in database).`);
       return;
     }
     hideStatus();
@@ -202,6 +245,7 @@ export async function mountVizioSettingsPanel(
           "Add domesti_secrets_key to domesti-bot.config.json at the repo root (see domesti-bot.config.json.example) or set DOMESTI_BOT_SECRETS_KEY before saving to the database.",
         );
         clearBtn.disabled = true;
+        saveBtn.hidden = false;
         return;
       }
       const tv = findTvRow(settings.tvs, hostInput.value);
@@ -233,11 +277,10 @@ export async function mountVizioSettingsPanel(
       try {
         const out = await api.putVizioAuthToken(host, token);
         showSuccessToast("Vizio TV token saved.");
-        tokenInput.value = "";
-        tokenRow.setRevealed(false);
+        setTokenRevealed(false);
         if (out.restart_required) {
           showStatusMessage(
-            "Token saved. Restart domesti-bot (or remove VIZIO_AUTH_TOKEN) so the TV tile appears.",
+            "Token saved. Restart domesti-bot so the TV tile appears.",
           );
         } else {
           await refreshStatus();
@@ -255,7 +298,9 @@ export async function mountVizioSettingsPanel(
   saveBtn.addEventListener("click", saveToken);
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    saveToken();
+    if (!saveBtn.hidden) {
+      saveToken();
+    }
   });
 
   beginPairBtn.addEventListener("click", () => {
@@ -303,7 +348,7 @@ export async function mountVizioSettingsPanel(
         });
         showSuccessToast("Vizio TV paired.");
         setPairingUiActive(false);
-        tokenInput.value = "";
+        setTokenRevealed(false);
         if (out.restart_required) {
           showStatusMessage(
             "Pairing complete. Restart domesti-bot so the TV tile appears.",
@@ -354,10 +399,13 @@ export async function mountVizioSettingsPanel(
         showStatusMessage("Enter the TV host before clearing.");
         return;
       }
+      const deviceId = vizioDeviceIdFromHostInput(host);
       clearBtn.disabled = true;
       try {
-        await api.clearVizioAuth(host);
+        await api.clearVizioAuth(deviceId);
+        storedToken = null;
         tokenInput.value = "";
+        setTokenRevealed(false);
         showSuccessToast("Stored token cleared.");
         await refreshStatus();
         await options.onDevicesChanged?.();
