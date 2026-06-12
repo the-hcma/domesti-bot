@@ -346,6 +346,43 @@ def load_vizio_tvs(
         return out
 
 
+def set_vizio_tv_mac(path: Path, *, host: str, mac: str) -> str:
+    """Update ``mac`` for a cached TV at ``host``; return the canonical device id."""
+    try:
+        host_s, port = parse_host_spec(host.strip())
+    except ValueError as exc:
+        raise ValueError(f"Expected host or HOST:PORT, got {host!r}") from exc
+    try:
+        mac_s = normalize_mac(mac.strip())
+    except ValueError as exc:
+        raise ValueError(f"Expected a valid MAC address, got {mac!r}") from exc
+    display: str | None = None
+    model: str | None = None
+    diid: str | None = None
+    found = False
+    for row_host, row_port, row_display, row_model, _row_mac, row_diid in load_vizio_tvs(
+        path
+    ):
+        if row_host == host_s and row_port == port:
+            found = True
+            display = row_display
+            model = row_model
+            diid = row_diid
+            break
+    if not found:
+        raise ValueError(f"No Vizio TV cached at {host_s}:{port}")
+    upsert_vizio_tv(
+        path,
+        host=host_s,
+        port=port,
+        display_name=display,
+        model=model,
+        mac=mac_s,
+        diid=diid,
+    )
+    return vizio_device_id_from_parts(mac=mac_s, host=host_s, port=port)
+
+
 def load_ui_preferences(path: Path) -> list[tuple[str, str, bool]]:
     """Return ``(backend, canonical_key, exclude_from_global)`` rows.
 
