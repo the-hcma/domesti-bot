@@ -91,8 +91,20 @@ def evaluate_rule(
         _evaluate_condition(condition, rule, ctx)
         for condition in rule.conditions.all
     ]
+    if rule.trigger == "edge_true":
+        steady_rows = [
+            row
+            for row, condition in zip(conditions, rule.conditions.all, strict=True)
+            if _counts_for_steady_armed_state(condition)
+        ]
+        if steady_rows:
+            all_met = rule.enabled and all(row.met for row in steady_rows)
+        else:
+            all_met = rule.enabled
+    else:
+        all_met = rule.enabled and all(row.met for row in conditions)
     return RuleEvaluationResult(
-        all_met=rule.enabled and all(row.met for row in conditions),
+        all_met=all_met,
         conditions=conditions,
     )
 
@@ -111,6 +123,37 @@ def _coerce_now(now: datetime | None, tz: ZoneInfo) -> datetime:
     if now.tzinfo is None:
         return now.replace(tzinfo=tz)
     return now.astimezone(tz)
+
+
+def _conditions_are_presence_only(
+    conditions: list[RuleConditionOut],
+) -> bool:
+    if not conditions:
+        return False
+    return all(
+        isinstance(
+            condition,
+            (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+        )
+        for condition in conditions
+    )
+
+
+def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
+    if isinstance(
+        condition,
+        (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+    ):
+        return False
+    if isinstance(condition, AllConditionsCondition):
+        return any(
+            _counts_for_steady_armed_state(child) for child in condition.conditions
+        )
+    if isinstance(condition, AnyConditionsCondition):
+        return any(
+            _counts_for_steady_armed_state(child) for child in condition.conditions
+        )
+    return True
 
 
 def _evaluate_after_local_time(
@@ -186,14 +229,26 @@ def _evaluate_any(
     children = [
         _evaluate_condition(child, rule, ctx) for child in condition.conditions
     ]
-    met = any(child.met for child in children)
-    return RuleConditionStatusOut(
-        condition=condition,
-        detail=(
+    if rule.trigger == "edge_true" and _conditions_are_presence_only(
+        condition.conditions
+    ):
+        met = False
+        presence_details = [child.detail for child in children if child.detail]
+        detail = (
+            "; ".join(presence_details)
+            if presence_details
+            else "Fires on geofence enter/leave — see presence per user below"
+        )
+    else:
+        met = any(child.met for child in children)
+        detail = (
             "At least one nested condition met"
             if met
             else "No nested conditions met yet"
-        ),
+        )
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
         label="Any of",
         met=met,
     )
@@ -362,47 +417,69 @@ def _evaluate_users_geofence(
         )
 
     min_accuracy_m = rule.min_location_accuracy_m
+    presence_lines: list[str] = []
     unmet_names: list[str] = []
     ignored_accuracy: list[str] = []
     for user_id in condition.user_ids:
         location = ctx.user_locations.get(user_id)
         name = _user_display_name(ctx, user_id)
-        if location is not None and not _location_usable_for_rule(location, min_accuracy_m):
+        if location is None:
+            presence_lines.append(f"{name}: no location yet")
+            unmet_names.append(name)
+            continue
+        if not _location_usable_for_rule(location, min_accuracy_m):
             ignored_accuracy.append(
                 f"{name} (±{location.accuracy_m if location.accuracy_m is not None else '?'} m "
                 f"> {min_accuracy_m} m threshold)",
             )
+            presence_lines.append(f"{name}: location ignored (low accuracy)")
             unmet_names.append(name)
             continue
         inside = _user_inside_geofence(location, geofence, min_accuracy_m)
+        if inside:
+            presence_lines.append(f"{name} is inside {fence_label}")
+        else:
+            presence_lines.append(f"{name} is outside {fence_label}")
         if want_inside and not inside:
             unmet_names.append(name)
         if not want_inside and inside:
             unmet_names.append(name)
 
-    met = len(unmet_names) == 0
     selected_names = [
         _user_display_name(ctx, user_id)
         for user_id in condition.user_ids
     ]
     who = _join_names(selected_names)
-    label = (
-        f"When {who} enter {fence_label}"
-        if want_inside
-        else f"When {who} leave {fence_label}"
-    )
-    if met:
-        detail = (
-            f"Everyone is inside {fence_label}"
+    if rule.trigger == "edge_true":
+        label = (
+            f"Presence at {fence_label} ({who})"
             if want_inside
-            else f"Everyone is outside {fence_label}"
+            else f"Outside {fence_label} ({who})"
         )
-    elif ignored_accuracy:
-        detail = f"Ignored low-accuracy location: {'; '.join(ignored_accuracy)}"
-    elif want_inside:
-        detail = f"Waiting for {', '.join(unmet_names)} to enter {fence_label}"
+        met = False
+        if ignored_accuracy:
+            detail = f"Ignored low-accuracy location: {'; '.join(ignored_accuracy)}"
+        else:
+            detail = "; ".join(presence_lines)
     else:
-        detail = f"Waiting for {', '.join(unmet_names)} to leave {fence_label}"
+        met = len(unmet_names) == 0
+        label = (
+            f"When {who} enter {fence_label}"
+            if want_inside
+            else f"When {who} leave {fence_label}"
+        )
+        if met:
+            detail = (
+                f"Everyone is inside {fence_label}"
+                if want_inside
+                else f"Everyone is outside {fence_label}"
+            )
+        elif ignored_accuracy:
+            detail = f"Ignored low-accuracy location: {'; '.join(ignored_accuracy)}"
+        elif want_inside:
+            detail = f"Waiting for {', '.join(unmet_names)} to enter {fence_label}"
+        else:
+            detail = f"Waiting for {', '.join(unmet_names)} to leave {fence_label}"
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,

@@ -11,11 +11,13 @@ import {
   summarizeRule,
   type RuleSummaryContext,
 } from "./rule-summary.js";
+import { ruleLastMetLabel, ruleStatusHeadline } from "./rules-ui-helpers.js";
 import type {
   GeofenceOut,
   UserOut,
   RuleActionDeviceOut,
   RuleConditionOut,
+  RuleConditionStatusOut,
   RuleOut,
   RuleStatusSummaryOut,
 } from "./types.js";
@@ -51,6 +53,28 @@ function appendConditionTree(
   parent.append(list);
 }
 
+function isEdgePresenceStatusRow(
+  trigger: RuleStatusSummaryOut["trigger"],
+  cond: RuleConditionStatusOut,
+): boolean {
+  if (trigger !== "edge_true") {
+    return false;
+  }
+  if (
+    cond.condition.type === "users_inside_geofence"
+    || cond.condition.type === "users_outside_geofence"
+  ) {
+    return true;
+  }
+  if (cond.condition.type === "any") {
+    return cond.condition.conditions.every(
+      (child) => child.type === "users_inside_geofence"
+        || child.type === "users_outside_geofence",
+    );
+  }
+  return false;
+}
+
 function appendDefinitionRow(dl: HTMLDListElement, term: string, value: string): void {
   const dt = document.createElement("dt");
   dt.textContent = term;
@@ -72,15 +96,13 @@ function appendLiveStatusSection(
 
   const headline = document.createElement("p");
   headline.className = "rules-card-meta";
-  headline.textContent = liveStatus.condition_currently_true
-    ? "All conditions are currently met."
-    : "Waiting — not all conditions are met yet.";
+  headline.textContent = ruleStatusHeadline(liveStatus);
   section.append(headline);
 
   if (liveStatus.last_fired_at !== null) {
     const fired = document.createElement("p");
     fired.className = "rules-card-meta";
-    fired.append(document.createTextNode("Last fired "));
+    fired.append(document.createTextNode(ruleLastMetLabel(liveStatus.trigger)));
     fired.append(createAuditedTimeElement(liveStatus.last_fired_at));
     section.append(fired);
   }
@@ -96,8 +118,14 @@ function appendLiveStatusSection(
   condList.className = "rules-condition-list";
   for (const cond of liveStatus.conditions) {
     const li = document.createElement("li");
-    li.className = cond.met ? "rules-condition-met" : "rules-condition-unmet";
-    li.textContent = `${cond.met ? "✓" : "✗"} ${cond.label} — ${cond.detail}`;
+    const presenceOnly = isEdgePresenceStatusRow(liveStatus.trigger, cond);
+    if (presenceOnly) {
+      li.className = "rules-condition-presence";
+      li.textContent = `${cond.label} — ${cond.detail}`;
+    } else {
+      li.className = cond.met ? "rules-condition-met" : "rules-condition-unmet";
+      li.textContent = `${cond.met ? "✓" : "✗"} ${cond.label} — ${cond.detail}`;
+    }
     condList.append(li);
   }
   section.append(condList);

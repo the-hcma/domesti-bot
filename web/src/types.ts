@@ -328,6 +328,7 @@ export interface RuleStatusSummaryOut {
   conditions: RuleConditionStatusOut[];
   last_fired_at: string | null;
   last_error: string | null;
+  trigger: "edge_true" | "while_true";
 }
 
 export interface RulesEvaluatorOut {

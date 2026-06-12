@@ -37,6 +37,8 @@ import {
   createEnableToggle,
   createFieldLabel,
   FAMILY_ACTION_GROUP_LABELS,
+  ruleLastMetLabel,
+  ruleStatusHeadline,
   userDisplayLabel,
   preventBrowserAutofill,
 } from "./rules-ui-helpers.js";
@@ -1148,14 +1150,12 @@ class RulesHubController {
       }
       const meta = document.createElement("p");
       meta.className = "rules-card-meta";
-      meta.textContent = rule.condition_currently_true
-        ? "Ready — all conditions met"
-        : "Waiting — conditions not met yet";
+      meta.textContent = ruleStatusHeadline(rule);
       card.append(row, meta);
       if (rule.last_fired_at !== null) {
         const fired = document.createElement("p");
         fired.className = "rules-card-meta";
-        fired.append(document.createTextNode("Last fired "));
+        fired.append(document.createTextNode(ruleLastMetLabel(rule.trigger)));
         fired.append(createAuditedTimeElement(rule.last_fired_at));
         card.append(fired);
       }

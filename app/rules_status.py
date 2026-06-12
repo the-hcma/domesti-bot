@@ -28,8 +28,6 @@ from app.rule_conditions import (
 )
 from app.rule_evaluator import RuleEvaluator, RuleEvaluatorFireState
 from app.rules_store import GeofenceRecord, list_geofences, list_users
-
-
 def build_rules_status(
     *,
     cache_path: Path | None,
@@ -78,6 +76,7 @@ def build_rules_status(
                     if fire_state.last_fired_at is not None
                     else None
                 ),
+                trigger=rule.trigger,
             )
         )
 

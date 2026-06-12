@@ -10,7 +10,7 @@ from sqlalchemy import delete, select
 
 from app.db.models import RuleGeofence, RuleUser
 from app.db.session import discovery_session
-from app.user_names import default_display_name, parse_person_name
+from app.user_names import default_display_name, format_person_display_name, parse_person_name
 
 
 @dataclass(frozen=True)
@@ -148,6 +148,9 @@ def user_record_from_export(
     first_name, last_name = parse_person_name(export_display_name)
     if first_name == "":
         first_name = user_id
+    first_name = format_person_display_name(first_name)
+    if last_name != "":
+        last_name = format_person_display_name(last_name)
     return UserRecord(
         user_id=user_id,
         first_name=first_name,

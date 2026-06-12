@@ -10,6 +10,7 @@ import pytest
 
 from app.api.schemas import (
     AfterSunsetCondition,
+    AnyConditionsCondition,
     GeofenceOut,
     UserLocationOut,
     UsersInsideGeofenceCondition,
@@ -61,6 +62,44 @@ def _evening_rule() -> RuleOut:
     )
 
 
+def _evening_arrival_any_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterSunsetCondition(
+                    type="after_sunset",
+                    offset_minutes=0,
+                    window_end="midnight",
+                ),
+                AnyConditionsCondition(
+                    type="any",
+                    conditions=[
+                        UsersInsideGeofenceCondition(
+                            type="users_inside_geofence",
+                            geofence_id="house",
+                            user_ids=["henrique"],
+                        ),
+                        UsersInsideGeofenceCondition(
+                            type="users_inside_geofence",
+                            geofence_id="house",
+                            user_ids=["kristen"],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="evening-arrival-home-lights",
+        label="Evening arrival",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="edge_true",
+    )
+
+
 def _ctx(
     *,
     now: datetime,
@@ -71,7 +110,7 @@ def _ctx(
     return RuleEvaluationContext(
         geofences=geofences,
         now=now,
-        user_display_names={"henrique": "Henrique"},
+        user_display_names={"henrique": "Henrique", "kristen": "Kristen"},
         user_locations=user_locations or {},
         sun=sun,
         timezone=_TZ,
@@ -115,7 +154,8 @@ def test_users_inside_geofence_met_with_location() -> None:
         _evening_rule(),
         _ctx(now=now, geofences=(geofence,), user_locations={"henrique": location}),
     )
-    assert result.conditions[1].met is True
+    assert result.conditions[1].met is False
+    assert "Henrique is inside House" in result.conditions[1].detail
     assert result.all_met is True
 
 
@@ -143,6 +183,75 @@ def test_users_inside_geofence_ignores_low_accuracy() -> None:
     )
     assert result.conditions[1].met is False
     assert "Ignored low-accuracy location" in result.conditions[1].detail
+
+
+def test_edge_true_any_presence_reports_inside_outside_not_met() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    geofence = GeofenceOut(
+        center_lat=41.194072,
+        center_lon=-73.888325,
+        enabled=True,
+        geofence_id="house",
+        label="House",
+        owntracks_rid=None,
+        radius_m=250,
+    )
+    henrique_inside = UserLocationOut(
+        accuracy_m=20,
+        lat=41.1941,
+        lon=-73.8883,
+        received_at="2026-06-09T23:00:00Z",
+        source="owntracks",
+    )
+    kristen_outside = UserLocationOut(
+        accuracy_m=20,
+        lat=44.417597,
+        lon=-72.023842,
+        received_at="2026-06-09T23:00:00Z",
+        source="owntracks",
+    )
+    result = evaluate_rule(
+        _evening_arrival_any_rule(),
+        _ctx(
+            now=now,
+            geofences=(geofence,),
+            user_locations={
+                "henrique": henrique_inside,
+                "kristen": kristen_outside,
+            },
+        ),
+    )
+    any_row = result.conditions[1]
+    assert any_row.met is False
+    assert "Henrique is inside House" in any_row.detail
+    assert "Kristen is outside House" in any_row.detail
+
+
+def test_user_display_name_uses_roster_display_name() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    base_ctx = _ctx(now=now)
+    geofence = GeofenceOut(
+        center_lat=41.194072,
+        center_lon=-73.888325,
+        enabled=True,
+        geofence_id="house",
+        label="House",
+        owntracks_rid=None,
+        radius_m=250,
+    )
+    result = evaluate_rule(
+        _evening_arrival_any_rule(),
+        RuleEvaluationContext(
+            geofences=(geofence,),
+            now=now,
+            user_display_names={"henrique": "Henrique", "kristen": "Kristen"},
+            user_locations={},
+            sun=base_ctx.sun,
+            timezone=_TZ,
+        ),
+    )
+    assert "Henrique" in result.conditions[1].detail
+    assert "Kristen" in result.conditions[1].detail
 
 
 def test_build_rules_status_from_example_bundle(

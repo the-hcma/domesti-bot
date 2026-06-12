@@ -212,6 +212,28 @@ export function userDisplayLabel(userId: string, displayName?: string): string {
   return trimmed !== "" ? trimmed : userId;
 }
 
+export function ruleStatusHeadline(rule: {
+  condition_currently_true: boolean;
+  last_fired_at: string | null;
+  trigger: "edge_true" | "while_true";
+}): string {
+  if (rule.trigger === "edge_true") {
+    if (rule.condition_currently_true) {
+      return "Armed — fires on enter/leave";
+    }
+    return "Waiting — outside active window";
+  }
+  return rule.condition_currently_true
+    ? "Ready — all conditions met"
+    : "Waiting — conditions not met yet";
+}
+
+export function ruleLastMetLabel(
+  trigger: "edge_true" | "while_true",
+): string {
+  return trigger === "edge_true" ? "Last met " : "Last fired ";
+}
+
 export function preventBrowserAutofill(input: HTMLInputElement): void {
   input.setAttribute("autocomplete", "off");
   input.setAttribute("data-1p-ignore", "true");
