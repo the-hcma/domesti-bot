@@ -609,6 +609,7 @@ class RuleStatusSummaryOut(BaseModel):
     label: str
     last_error: str | None = None
     last_fired_at: str | None = None
+    trigger: Literal["edge_true", "while_true"]
 
 
 class RulesEvaluatorOut(BaseModel):

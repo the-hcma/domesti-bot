@@ -148,6 +148,7 @@ export class MockRulesDataSource implements RulesDataSource {
         conditions: [],
         last_fired_at: this.store.rule_last_fired_at[rule.id] ?? null,
         last_error: null,
+        trigger: rule.trigger,
       })),
       sun: mockSunRow(),
       evaluator: {

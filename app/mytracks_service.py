@@ -10,7 +10,11 @@ from urllib.parse import urlparse
 import httpx
 
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
-from app.user_names import default_display_name, parse_person_name
+from app.user_names import (
+    default_display_name,
+    format_person_display_name,
+    parse_person_name,
+)
 
 _LOGGER = mytracks_logger(__name__)
 
@@ -499,6 +503,9 @@ def _parse_user_with_device(row: dict[str, Any]) -> ExportedUser:
     first_name, last_name = parse_person_name(export_display_name)
     if first_name == "":
         first_name = user_id
+    first_name = format_person_display_name(first_name)
+    if last_name != "":
+        last_name = format_person_display_name(last_name)
     return ExportedUser(
         user_id=user_id,
         first_name=first_name,
