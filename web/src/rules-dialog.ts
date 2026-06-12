@@ -1142,16 +1142,17 @@ class RulesHubController {
         void this.navigateToRule(rule.id);
       });
       row.append(nameBtn);
-      if (rule.reference_issues.length > 0) {
-        row.append(createBrokenRuleBadge(rule.reference_issues));
-      }
       if (!rulesReadOnly) {
-        const enableToggle = createEnableToggle(rule.enabled, (next) => {
-          void this.dataSource
-            .setRuleEnabled(rule.id, next)
-            .then(() => this.refresh());
-        });
-        row.append(enableToggle);
+        if (rule.reference_issues.length > 0) {
+          row.append(createBrokenRuleBadge(rule.reference_issues));
+        } else {
+          const enableToggle = createEnableToggle(rule.enabled, (next) => {
+            void this.dataSource
+              .setRuleEnabled(rule.id, next)
+              .then(() => this.refresh());
+          });
+          row.append(enableToggle);
+        }
       }
       const meta = document.createElement("p");
       meta.className = "rules-card-meta";

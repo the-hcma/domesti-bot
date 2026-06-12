@@ -82,6 +82,21 @@ def record_smtp_test_recipient(path: Path, recipient: str) -> None:
         row.updated_at = time.time()
 
 
+def smtp_send_ready(record: SmtpConfigRecord | None) -> bool:
+    """True when stored SMTP settings are sufficient to send mail."""
+    if record is None:
+        return False
+    if (
+        record.host.strip() == ""
+        or record.from_address.strip() == ""
+        or record.mail_domain.strip() == ""
+    ):
+        return False
+    if record.username.strip() == "":
+        return True
+    return record.password_configured
+
+
 def save_smtp_config(path: Path, config: SmtpConfigSave) -> SmtpConfigRecord:
     """Upsert SMTP settings and optionally replace the stored password."""
     now = time.time()
