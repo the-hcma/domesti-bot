@@ -21,9 +21,29 @@ jobs:
         run: |
           is_graphite_mq_branch() {
             case "${1}" in
-              gtmq_batch_*|gtmq_merge_*) return 0 ;;
+              gtmq_batch_*|gtmq_merge_*|gtmq_base_no_ci_batch_*) return 0 ;;
               *) return 1 ;;
             esac
+          }
+
+          is_graphite_base_branch() {
+            case "${1}" in
+              graphite-base/*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          is_repo_practices_branch() {
+            case "${1}" in
+              repo-practices/*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          delete_branch_ref() {
+            local branch="$1"
+            local encoded="${branch//\//%2F}"
+            gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/${encoded}" >/dev/null 2>&1
           }
 
           branches="$(gh api "repos/${REPOSITORY}/branches" --paginate --jq '.[].name' | grep -v '^main$' || true)"
@@ -32,36 +52,51 @@ jobs:
             exit 0
           fi
 
-          cutoff="$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          stale_cutoff="$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          repo_practices_cutoff="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
           deleted=0
           kept=0
 
           for branch in ${branches}; do
-            pr_number="$(
-              gh api "repos/${REPOSITORY}/pulls?state=closed&head=${REPOSITORY_OWNER}:${branch}" \
+            open_pr_number="$(
+              gh api "repos/${REPOSITORY}/pulls?state=open&head=${REPOSITORY_OWNER}:${branch}" \
                 --jq '.[0].number // empty' 2>/dev/null || true
             )"
-            if [[ -z "${pr_number}" ]]; then
+            if [[ -n "${open_pr_number}" ]]; then
               kept=$(( kept + 1 ))
               continue
             fi
 
-            pr_data="$(gh api "repos/${REPOSITORY}/pulls/${pr_number}" --jq '{merged, closed_at}')"
-            pr_merged="$(jq -r '.merged' <<<"${pr_data}")"
-            pr_closed_at="$(jq -r '.closed_at' <<<"${pr_data}")"
+            closed_pr_number="$(
+              gh api "repos/${REPOSITORY}/pulls?state=closed&head=${REPOSITORY_OWNER}:${branch}" \
+                --jq '.[0].number // empty' 2>/dev/null || true
+            )"
 
             delete_branch=0
-            if [[ "${pr_merged}" == "true" ]]; then
-              delete_branch=1
-            elif is_graphite_mq_branch "${branch}"; then
-              # Graphite MQ staging branches are ephemeral once their PR closes.
-              delete_branch=1
-            elif [[ "${pr_closed_at}" < "${cutoff}" ]]; then
+            if [[ -n "${closed_pr_number}" ]]; then
+              pr_data="$(gh api "repos/${REPOSITORY}/pulls/${closed_pr_number}" --jq '{merged, closed_at}')"
+              pr_merged="$(jq -r '.merged' <<<"${pr_data}")"
+              pr_closed_at="$(jq -r '.closed_at' <<<"${pr_data}")"
+
+              if [[ "${pr_merged}" == "true" ]]; then
+                delete_branch=1
+              elif is_graphite_mq_branch "${branch}"; then
+                # Graphite MQ staging branches are ephemeral once their PR closes.
+                delete_branch=1
+              elif is_repo_practices_branch "${branch}" \
+                && [[ "${pr_closed_at}" < "${repo_practices_cutoff}" ]]; then
+                # github-repo-lint candidate branches superseded by newer apply-fix PRs.
+                delete_branch=1
+              elif [[ "${pr_closed_at}" < "${stale_cutoff}" ]]; then
+                delete_branch=1
+              fi
+            elif is_graphite_base_branch "${branch}" || is_graphite_mq_branch "${branch}"; then
+              # Graphite restack / MQ branches with no open PR are safe to remove.
               delete_branch=1
             fi
 
             if [[ "${delete_branch}" -eq 1 ]]; then
-              if gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/${branch}" >/dev/null 2>&1; then
+              if delete_branch_ref "${branch}"; then
                 deleted=$(( deleted + 1 ))
               else
                 kept=$(( kept + 1 ))
