@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.kasa_device_manager import KasaDeviceManager
 
 
@@ -22,7 +22,7 @@ async def test_rediscover_uses_udp_not_sqlite_cache(tmp_path) -> None:
             "https": False,
         },
     }
-    kasa_discovery_store.save_configs(
+    device_discovery_store.save_configs(
         db,
         [("192.168.1.50", "Desk lamp", cfg)],
     )
@@ -51,7 +51,7 @@ async def test_fetch_cache_hit_refreshes_alias_from_device_update(tmp_path) -> N
             "https": False,
         },
     }
-    kasa_discovery_store.save_configs(
+    device_discovery_store.save_configs(
         db,
         [("192.168.1.50", "Old plug name", cfg)],
     )

@@ -10,7 +10,7 @@ import pytest
 
 from soco.exceptions import SoCoUPnPException
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.sonos_device_manager import (
     SonosDeviceManager,
     SonosSpeakerDevice,
@@ -121,7 +121,7 @@ async def test_fetch_skips_udp_when_cache_warm(tmp_path: Path) -> None:
     """A populated cache must short-circuit ``soco_discover``."""
 
     db = tmp_path / "sonos.sqlite"
-    kasa_discovery_store.save_sonos_zones(
+    device_discovery_store.save_sonos_zones(
         db,
         [
             ("RINCON_AAA", "192.168.1.10", "Living Room"),
@@ -166,7 +166,7 @@ async def test_fetch_cache_hit_uses_live_zone_name_over_stale_cache_label(
     """Renamed Sonos zones must show the current ``player_name``, not SQLite ``zone_name``."""
 
     db = tmp_path / "sonos.sqlite"
-    kasa_discovery_store.save_sonos_zones(
+    device_discovery_store.save_sonos_zones(
         db,
         [("RINCON_AAA", "192.168.1.10", "Old Kitchen Name")],
     )
@@ -185,7 +185,7 @@ async def test_fetch_cache_hit_uses_live_zone_name_over_stale_cache_label(
 
     discover.assert_not_called()
     assert mgr.players[0].preferred_label == "Kitchen"
-    assert kasa_discovery_store.load_sonos_zones(db) == [
+    assert device_discovery_store.load_sonos_zones(db) == [
         ("RINCON_AAA", "192.168.1.10", "Kitchen"),
     ]
 
@@ -195,7 +195,7 @@ async def test_fetch_falls_back_to_udp_when_cached_uid_changes(tmp_path: Path) -
     """If a cached host now reports a different UID, the manager must re-probe via UDP."""
 
     db = tmp_path / "sonos.sqlite"
-    kasa_discovery_store.save_sonos_zones(
+    device_discovery_store.save_sonos_zones(
         db,
         [("RINCON_OLD", "192.168.1.10", "Living Room")],
     )
@@ -221,7 +221,7 @@ async def test_fetch_falls_back_to_udp_when_cached_uid_changes(tmp_path: Path) -
     discover.assert_called_once()
     assert [p.identifier for p in mgr.players] == ["RINCON_NEW"]
     # And the cache must be refreshed to the new UID.
-    assert kasa_discovery_store.load_sonos_zones(db) == [
+    assert device_discovery_store.load_sonos_zones(db) == [
         ("RINCON_NEW", "192.168.1.10", "Living Room"),
     ]
     assert mgr.last_discovery_source == "discovery"
@@ -232,7 +232,7 @@ async def test_fetch_falls_back_when_cached_host_unreachable(tmp_path: Path) -> 
     """A SoCo probe that raises must trigger UDP fallback rather than crashing."""
 
     db = tmp_path / "sonos.sqlite"
-    kasa_discovery_store.save_sonos_zones(
+    device_discovery_store.save_sonos_zones(
         db,
         [("RINCON_AAA", "10.0.0.99", "Office")],
     )
@@ -258,7 +258,7 @@ async def test_fetch_falls_back_when_cached_host_unreachable(tmp_path: Path) -> 
     discover.assert_called_once()
     assert [p.identifier for p in mgr.players] == ["RINCON_AAA"]
     # Cache rewritten with the new host the zone is at.
-    assert kasa_discovery_store.load_sonos_zones(db) == [
+    assert device_discovery_store.load_sonos_zones(db) == [
         ("RINCON_AAA", "10.0.0.55", "Office"),
     ]
 
@@ -266,7 +266,7 @@ async def test_fetch_falls_back_when_cached_host_unreachable(tmp_path: Path) -> 
 @pytest.mark.asyncio
 async def test_force_discovery_always_runs_udp(tmp_path: Path) -> None:
     db = tmp_path / "sonos.sqlite"
-    kasa_discovery_store.save_sonos_zones(
+    device_discovery_store.save_sonos_zones(
         db,
         [("RINCON_AAA", "192.168.1.10", "Living Room")],
     )
@@ -310,7 +310,7 @@ async def test_fetch_persists_cache_after_udp_discovery(tmp_path: Path) -> None:
     with patch("app.sonos_device_manager.soco_discover", return_value={zone}):
         await mgr.fetch()
 
-    assert kasa_discovery_store.load_sonos_zones(db) == [
+    assert device_discovery_store.load_sonos_zones(db) == [
         ("RINCON_ZZZ", "192.168.1.42", "Den"),
     ]
     assert mgr.last_discovery_source == "discovery"

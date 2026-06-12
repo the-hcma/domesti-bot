@@ -36,7 +36,7 @@ The **primary clone** (repo root — first entry in `git worktree list`, usually
 
 ## Language & Runtime
 
-- **Python 3.14** is the target runtime (`.python-version`). `pyproject.toml` declares `requires-python = ">=3.11"` as the compatibility floor.
+- **Python 3.14** is the target runtime (`.python-version`). `pyproject.toml` declares `requires-python = ">=3.12"` as the compatibility floor.
 - Use **modern Python typing** — built-in generics, not the `typing` module equivalents:
   - `list[str]`, `dict[str, Any]`, `tuple[str, ...]`, `set[int]`, `str | None`
   - ❌ `List[str]`, `Dict[str, Any]`, `Optional[str]`
@@ -70,7 +70,7 @@ domesti-bot/
 │   ├── domesti_bot_cli.py                 prompt_toolkit REPL + argparse wiring
 │   ├── gotailwind_device_manager.py       GoTailwind garage doors
 │   ├── kasa_device_manager.py             TP-Link Kasa / Tapo (python-kasa)
-│   ├── kasa_discovery_store.py            SQLite discovery cache (shared by all)
+│   ├── device_discovery_store.py            SQLite discovery cache (shared by all)
 │   ├── rule_engine.py                     Device base types, geofences, actions
 │   ├── sonos_device_manager.py            Sonos zones (soco)
 │   └── api/                              FastAPI HTTP surface (subpackage)
@@ -464,7 +464,7 @@ Typical causes (check in order):
 
 Device discovery is **cache-first**: the LAN probe runs only when the SQLite discovery cache (`$HOME/.cache/rule-engine/device_discovery.sqlite` by default; override with `--discovery-cache`) is empty for that backend or the cached state fails to reconnect. Pass `--force-discovery` to bypass the cache for all backends.
 
-The cache schema lives in `app/kasa_discovery_store.py` (facade) and `app/db/` (SQLAlchemy ORM + `bootstrap_schema`). One SQLite file, one table per backend; the `kasa_discovery_store` module name is historical. All schema changes are **additive only** via `CREATE TABLE IF NOT EXISTS` — existing on-disk caches from pre-SQLAlchemy releases keep working; legacy `ALTER TABLE` steps still run for older Cast rows missing `uuid` / `friendly_name`. The `app_secrets` table is new (encrypted Tailwind token and future secrets).
+The cache schema lives in `app/device_discovery_store.py` (facade) and `app/db/` (SQLAlchemy ORM + `bootstrap_schema`). One SQLite file, one table per backend. All schema changes are **additive only** via `CREATE TABLE IF NOT EXISTS` — existing on-disk caches from pre-SQLAlchemy releases keep working; legacy `ALTER TABLE` steps still run for older Cast rows missing `uuid` / `friendly_name`. The `app_secrets` table is new (encrypted Tailwind token and future secrets).
 
 Per-backend behavior:
 
@@ -494,7 +494,7 @@ Discovering devices (parallel)…
 
 This is the canonical user-facing answer to "is this a fresh sweep or a cache hit?" — keep it accurate per-backend. Tailwind has no LAN broadcast (it uses an HTTP API), so its bundle leaves `source` as `None` and the renderer simply omits the source annotation (`GoTailwind: ready (2 doors)`). The renderer is also tolerant of older bundles missing `source`/`count` fields and falls back to bare `ready`; tests in `tests/python/test_domesti_bot_cli.py` lock both shapes.
 
-When adding a new backend, follow the same pattern: a dedicated table, a `load_<backend>()` and `save_<backend>()` pair in `kasa_discovery_store.py`, a `discovery_cache_path` + `force_discovery` pair on the manager constructor, a cache-first branch at the top of `fetch()`, **and** a `last_discovery_source` signal set in both branches of `fetch()` so the bootstrap line is accurate.
+When adding a new backend, follow the same pattern: a dedicated table, a `load_<backend>()` and `save_<backend>()` pair in `device_discovery_store.py`, a `discovery_cache_path` + `force_discovery` pair on the manager constructor, a cache-first branch at the top of `fetch()`, **and** a `last_discovery_source` signal set in both branches of `fetch()` so the bootstrap line is accurate.
 
 ### Deploy hook (`scripts/on-deploy`)
 
@@ -527,7 +527,7 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 
 ## Data Safety
 
-- **Never delete, modify, or purge user data without explicit user approval.** This includes the SQLite discovery cache (`kasa_discovery_store`), Kasa credentials in keystores, and any rule-engine persisted state.
+- **Never delete, modify, or purge user data without explicit user approval.** This includes the SQLite discovery cache (`device_discovery_store`), Kasa credentials in keystores, and any rule-engine persisted state.
 - **Always ask before** running destructive operations (cache wipes, schema migrations that drop columns, etc.).
 - If a fix requires deletion, present the impact first ("This will drop 14 cached AndroidTV hosts. Proceed?").
 

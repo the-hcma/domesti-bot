@@ -707,7 +707,7 @@ class VizioPairBeginIn(BaseModel):
 class VizioPairBeginOut(BaseModel):
     """Pairing challenge returned after ``pairing/start`` succeeds."""
 
-    device_id: str = Field(..., description="Stable id (host or host:port).")
+    device_id: str = Field(..., description="Stable id (normalized MAC when known).")
     challenge_type: int
     pairing_req_token: int
 

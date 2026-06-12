@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
+
+from app.vizio_wol import normalize_mac
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,6 +21,10 @@ _SOURCE_HEADER = "domesti-bot"
 
 _POWER_ON = (11, 1)
 _POWER_OFF = (11, 0)
+
+_MAC_KEY_RE = re.compile(r"mac", re.I)
+_MAC_COLON_RE = re.compile(r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
+_MAC_PLAIN_RE = re.compile(r"^[0-9a-fA-F]{12}$")
 
 
 class VizioSmartCastError(Exception):
@@ -41,12 +48,60 @@ class VizioDeviceInfoSnapshot:
     model_name: str
     cast_name: str
     diid: str
+    mac: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class VizioPairChallenge:
     challenge_type: int
     pairing_req_token: int
+
+
+def coerce_mac_value(value: Any) -> str | None:
+    """Normalize a SmartCast MAC field value, or return ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        value = f"{value:012x}"
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        if _MAC_COLON_RE.match(text) or _MAC_PLAIN_RE.match(text):
+            return normalize_mac(text)
+    except ValueError:
+        return None
+    return None
+
+
+def device_id_for(host: str, port: int) -> str:
+    """Stable UI / cache identifier for one TV endpoint."""
+    if port == DEFAULT_VIZIO_PORT:
+        return host
+    return f"{host}:{port}"
+
+
+def extract_mac_from_payload(obj: Any) -> str | None:
+    """Walk a SmartCast JSON payload and return the first plausible MAC."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(key, str) and _MAC_KEY_RE.search(key):
+                mac = coerce_mac_value(value)
+                if mac is not None:
+                    return mac
+            mac = extract_mac_from_payload(value)
+            if mac is not None:
+                return mac
+        return None
+    if isinstance(obj, list):
+        for item in obj:
+            mac = extract_mac_from_payload(item)
+            if mac is not None:
+                return mac
+        return None
+    return coerce_mac_value(obj)
 
 
 def parse_host_spec(raw: str, *, default_port: int = DEFAULT_VIZIO_PORT) -> tuple[str, int]:
@@ -67,13 +122,6 @@ def parse_host_spec(raw: str, *, default_port: int = DEFAULT_VIZIO_PORT) -> tupl
             raise ValueError(f"Expected port in 1..65535, got {port}")
         return host, port
     return text, default_port
-
-
-def device_id_for(host: str, port: int) -> str:
-    """Stable UI / cache identifier for one TV endpoint."""
-    if port == DEFAULT_VIZIO_PORT:
-        return host
-    return f"{host}:{port}"
 
 
 class VizioSmartCastClient:
@@ -123,11 +171,28 @@ class VizioSmartCastClient:
                 diid = raw_diid.strip()
         model = str(value.get("MODEL_NAME") or "").strip()
         cast_name = str(value.get("CAST_NAME") or "").strip()
+        mac = extract_mac_from_payload(value)
         return VizioDeviceInfoSnapshot(
             model_name=model,
             cast_name=cast_name,
             diid=diid,
+            mac=mac,
         )
+
+    async def fetch_network_mac(self) -> str | None:
+        """Read the TV MAC from authenticated network settings endpoints."""
+        for path in (
+            "/state/network/networkinfo",
+            "/menu_native/dynamic/tv_settings/network",
+        ):
+            try:
+                payload = await self._request("GET", path, auth=True)
+            except (VizioSmartCastAuthError, VizioSmartCastConnectionError):
+                continue
+            mac = extract_mac_from_payload(payload)
+            if mac is not None:
+                return mac
+        return None
 
     async def get_power_on(self) -> bool:
         payload = await self._request("GET", "/state/device/power_mode", auth=True)

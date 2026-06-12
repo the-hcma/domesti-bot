@@ -14,7 +14,7 @@ invoke ``fetch()`` separately.
 The write path (:func:`bulk_off_global_apply`, :func:`bulk_off_kasa_apply`)
 *does* fire ``await kd.turn_off()`` for every targeted device. It does
 **not** mutate ``ui_preferences`` — those are written through
-:mod:`kasa_discovery_store.upsert_ui_preference` from the route handlers.
+:func:`device_discovery_store.upsert_ui_preference` from the route handlers.
 
 Family colors and labels are owned by this module so the same palette
 renders identically across the web UI, future native clients, and any
@@ -27,7 +27,7 @@ import logging
 from collections.abc import Iterable
 from pathlib import Path
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UISonosStreamFavoriteOut, UIStateOut
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
@@ -407,7 +407,7 @@ def build_kasa_device_view(
         raise KeyError(host)
     excluded = (
         _excluded_keys(
-            kasa_discovery_store.load_ui_preferences(cache_path), "kasa"
+            device_discovery_store.load_ui_preferences(cache_path), "kasa"
         )
         if cache_path is not None
         else set()
@@ -449,7 +449,7 @@ def build_sonos_device_view(
         raise KeyError(device_id)
     excluded = (
         _excluded_keys(
-            kasa_discovery_store.load_ui_preferences(cache_path), "sonos"
+            device_discovery_store.load_ui_preferences(cache_path), "sonos"
         )
         if cache_path is not None
         else set()
@@ -488,7 +488,7 @@ def build_tailwind_device_view(
         raise KeyError(device_id)
     excluded = (
         _excluded_keys(
-            kasa_discovery_store.load_ui_preferences(cache_path), "tailwind"
+            device_discovery_store.load_ui_preferences(cache_path), "tailwind"
         )
         if cache_path is not None
         else set()
@@ -521,7 +521,7 @@ def build_vizio_device_view(
         raise KeyError(device_id)
     excluded = (
         _excluded_keys(
-            kasa_discovery_store.load_ui_preferences(cache_path), "vizio"
+            device_discovery_store.load_ui_preferences(cache_path), "vizio"
         )
         if cache_path is not None
         else set()
@@ -560,7 +560,7 @@ def build_ui_state(
     """
 
     pref_rows = (
-        kasa_discovery_store.load_ui_preferences(cache_path)
+        device_discovery_store.load_ui_preferences(cache_path)
         if cache_path is not None
         else []
     )
@@ -626,7 +626,7 @@ async def bulk_off_global_apply(
     """
 
     rows = (
-        kasa_discovery_store.load_ui_preferences(cache_path)
+        device_discovery_store.load_ui_preferences(cache_path)
         if cache_path is not None
         else []
     )
@@ -746,7 +746,7 @@ def find_sonos_by_identifier(
 def find_vizio_by_id(
     mgr: VizioDeviceManager, device_id: str
 ) -> VizioTvDevice | None:
-    """Look up a Vizio TV by its ``identifier`` (host or host:port)."""
+    """Look up a Vizio TV by its ``identifier`` (normalized MAC when known)."""
 
     needle = device_id.strip()
     if not needle:

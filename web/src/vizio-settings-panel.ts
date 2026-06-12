@@ -37,8 +37,14 @@ function findTvRow(
   tvs: readonly VizioTvSettingsOut[],
   host: string,
 ): VizioTvSettingsOut | undefined {
-  const deviceId = vizioDeviceIdFromHostInput(host);
-  return tvs.find((tv) => tv.device_id === deviceId);
+  const hostDeviceId = vizioDeviceIdFromHostInput(host);
+  const hostOnly = host.trim();
+  return tvs.find(
+    (tv) =>
+      tv.device_id === hostDeviceId ||
+      tv.host === hostOnly ||
+      tv.host === hostDeviceId,
+  );
 }
 
 export async function mountVizioSettingsPanel(
@@ -399,7 +405,16 @@ export async function mountVizioSettingsPanel(
         showStatusMessage("Enter the TV host before clearing.");
         return;
       }
-      const deviceId = vizioDeviceIdFromHostInput(host);
+      let deviceId = vizioDeviceIdFromHostInput(host);
+      try {
+        const settings = await api.fetchVizioTvsSettings();
+        const tv = findTvRow(settings.tvs, host);
+        if (tv !== undefined) {
+          deviceId = tv.device_id;
+        }
+      } catch {
+        // Fall back to host-based id when status cannot be loaded.
+      }
       clearBtn.disabled = true;
       try {
         await api.clearVizioAuth(deviceId);

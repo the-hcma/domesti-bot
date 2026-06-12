@@ -28,7 +28,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.api.app import create_app
 from app.api.ui_state import (
     build_tailwind_device_view,
@@ -133,7 +133,7 @@ def test_build_tailwind_device_view_reflects_position_and_exclusion(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="tailwind", canonical_key="door-1", exclude_from_global=True
     )
     door = _FakeDoor("door-1", "Left", is_open=True)
@@ -179,7 +179,7 @@ async def test_bulk_close_tailwind_apply_ignores_exclude_from_global(
     clicked the family-wide button explicitly."""
 
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="tailwind", canonical_key="door-1", exclude_from_global=True
     )
     a = _FakeDoor("door-1", "Excluded", is_open=True)
@@ -196,10 +196,10 @@ async def test_bulk_off_global_apply_mixes_kasa_and_tailwind(tmp_path: Path) -> 
     """Global bulk-off targets both families and labels each entry by family."""
 
     db = tmp_path / "ui.sqlite"
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="tailwind", canonical_key="door-2", exclude_from_global=True
     )
-    kasa_discovery_store.upsert_ui_preference(
+    device_discovery_store.upsert_ui_preference(
         db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True
     )
     state = _state(

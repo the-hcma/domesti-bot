@@ -28,7 +28,7 @@ exhausts (HTTP-only KLAP also auths; legacy XOR :9999 is closed on KLAP-only
 hardware); see :func:`_klap_auth_recovery_hint` for the user-facing message
 appended to the ``skipped device`` WARNING.
 
-Optional SQLite persistence (see :mod:`app.kasa_discovery_store`): pass
+Optional SQLite persistence (see :mod:`app.device_discovery_store`): pass
 ``discovery_cache_path`` to skip UDP discovery when every cached host reconnects.
 Configs are saved without plaintext credentials (merge ``credentials`` /
 ``KASA_USERNAME`` + ``KASA_PASSWORD`` on load). Use ``force_discovery=True`` to refresh
@@ -64,7 +64,7 @@ from kasa.deviceconfig import (
 )
 from kasa.exceptions import AuthenticationError, UnsupportedDeviceError, _ConnectionError
 
-from app import kasa_discovery_store
+from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
 
@@ -433,7 +433,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             cfg_dict = dev.config.to_dict_control_credentials(exclude_credentials=True)
             rows.append((dev.host, dev.alias, cfg_dict))
         rows.sort(key=lambda r: r[0])
-        kasa_discovery_store.save_configs(self._discovery_cache_path, rows)
+        device_discovery_store.save_configs(self._discovery_cache_path, rows)
 
     def _expand_kasa_lookup(self, devices: list[KasaDevice]) -> dict[str, KasaDevice]:
         """Build the multi-key lookup: host (always) + alias / display name (when unique).
@@ -493,7 +493,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         devices_by_host: dict[str, KasaDevice] = {}
 
         if self._discovery_cache_path is not None and not force_discovery:
-            cached = kasa_discovery_store.load_cached_configs(self._discovery_cache_path)
+            cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
             if cached:
                 cache_ok = True
                 for _host, cfg_dict in cached:
@@ -574,7 +574,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
         uniq = list({id(kd): kd for kd in alias_map.values()}.values())
         if self._discovery_cache_path is not None:
-            for backend, key, disp in kasa_discovery_store.load_display_names(
+            for backend, key, disp in device_discovery_store.load_display_names(
                 self._discovery_cache_path
             ):
                 if backend != "kasa":

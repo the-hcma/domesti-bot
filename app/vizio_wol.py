@@ -8,7 +8,16 @@ import socket
 
 def normalize_mac(mac: str) -> str:
     """Return lowercase colon-separated MAC or raise ``ValueError``."""
-    cleaned = re.sub(r"[^0-9a-fA-F]", "", mac.strip())
+    text = mac.strip()
+    if re.search(r"[:.\-]", text):
+        parts = re.split(r"[:.\-]", text)
+        if len(parts) != 6:
+            raise ValueError(f"Expected six MAC octets, got {mac!r}")
+        try:
+            return ":".join(f"{int(part, 16):02x}" for part in parts)
+        except ValueError as exc:
+            raise ValueError(f"Expected a valid MAC address, got {mac!r}") from exc
+    cleaned = re.sub(r"[^0-9a-fA-F]", "", text)
     if len(cleaned) != 12:
         raise ValueError(f"Expected a 12-hex-digit MAC, got {mac!r}")
     pairs = [cleaned[i : i + 2] for i in range(0, 12, 2)]

@@ -8,7 +8,7 @@ This document tracks **remaining** planned work. Shipped items are summarized be
 
 | Item | PR(s) | Notes |
 | --- | --- | --- |
-| **SQLAlchemy persistence** | [#56](https://github.com/the-hcma/domesti-bot/pull/56) | `app/db/`, `kasa_discovery_store` facade, `app_secrets`, legacy `ALTER TABLE` |
+| **SQLAlchemy persistence** | [#56](https://github.com/the-hcma/domesti-bot/pull/56) | `app/db/`, `device_discovery_store` facade, `app_secrets`, legacy `ALTER TABLE` |
 | **Encrypted Tailwind token + desktop settings** | [#56](https://github.com/the-hcma/domesti-bot/pull/56)–[#60](https://github.com/the-hcma/domesti-bot/pull/60) | Fernet, ☰ Settings, `setup-secrets` REPL, hot-reload, dialog UX |
 | **Compact mobile layout (viewport + saturated tiles)** | [#61](https://github.com/the-hcma/domesti-bot/pull/61)–[#65](https://github.com/the-hcma/domesti-bot/pull/65) | `COMPACT_LAYOUT_MQ`, 3-column grid, green/red/amber tiles; desktop saturated tiles with per-tile actions |
 | **Compact tile UX polish** | [#66](https://github.com/the-hcma/domesti-bot/pull/66)–[#68](https://github.com/the-hcma/domesti-bot/pull/68) | Tile-only tap actions; inset exclude checkbox; 50/50 icon/label grid; Kasa lamp/room icons |
