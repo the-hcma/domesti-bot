@@ -392,7 +392,6 @@ export interface RulesStatusOut {
   rules: RuleStatusSummaryOut[];
   sun: RulesSunOut;
   evaluator: RulesEvaluatorOut;
-  using_mock: boolean;
 }
 
 export interface SettingsLocationOut {

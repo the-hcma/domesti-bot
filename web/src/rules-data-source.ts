@@ -33,8 +33,6 @@ const FILE_BACKED_RULES_ERROR =
   "Rules are read from automation-rules.json on the server; edit that file and restart to change them.";
 
 export interface RulesDataSource {
-  isMailLive(): boolean;
-  isMock(): boolean;
   isRulesFileBacked(): boolean;
   getStatus(): Promise<RulesStatusOut>;
   listGeofences(): Promise<GeofenceOut[]>;
@@ -119,22 +117,6 @@ export class MockRulesDataSource implements RulesDataSource {
     this.store = cloneSeed(seed);
   }
 
-  isMailLive(): boolean {
-    return false;
-  }
-
-  isMock(): boolean {
-    return true;
-  }
-
-  isRulesFileBacked(): boolean {
-    return false;
-  }
-
-  getStoreSeed(): MockStoreSeed {
-    return cloneSeed(this.store);
-  }
-
   async getStatus(): Promise<RulesStatusOut> {
     const users = await this.listUserStatus();
     return {
@@ -156,8 +138,15 @@ export class MockRulesDataSource implements RulesDataSource {
         last_run_at: null,
         next_sun_check_at: null,
       },
-      using_mock: true,
     };
+  }
+
+  getStoreSeed(): MockStoreSeed {
+    return cloneSeed(this.store);
+  }
+
+  isRulesFileBacked(): boolean {
+    return false;
   }
 
   async listGeofences(): Promise<GeofenceOut[]> {
@@ -556,19 +545,13 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
 
   async getStatus(): Promise<RulesStatusOut> {
     try {
-      return await api.fetchRulesStatus();
+      const status = await api.fetchRulesStatus();
+      await this.loadFileBackedRules();
+      return status;
     } catch (err) {
       console.warn("Rules status fetch failed", err);
       return this.inner.getStatus();
     }
-  }
-
-  isMailLive(): boolean {
-    return true;
-  }
-
-  isMock(): boolean {
-    return this.inner.isMock() && !this.rulesFileBacked;
   }
 
   isRulesFileBacked(): boolean {

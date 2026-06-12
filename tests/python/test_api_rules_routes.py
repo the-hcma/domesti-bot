@@ -85,7 +85,6 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     status = client.get("/v1/rules/status")
     assert status.status_code == HTTPStatus.OK
     body = status.json()
-    assert body["using_mock"] is False
     assert len(body["rules"]) == 3
     assert body["sun"]["sunset_at"].endswith("Z")
 

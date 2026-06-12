@@ -153,7 +153,6 @@ def build_rules_status(
         rules=rule_rows,
         sun=sun,
         users=users,
-        using_mock=False,
     )
 
 

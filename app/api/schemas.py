@@ -657,7 +657,6 @@ class RulesStatusOut(BaseModel):
     users: list[UserStatusOut]
     rules: list[RuleStatusSummaryOut]
     sun: "RulesSunOut"
-    using_mock: bool
 
 
 class RulesSunOut(BaseModel):
