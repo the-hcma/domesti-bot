@@ -5,9 +5,7 @@ on:
   # integrated state itself; a second CI run after merge duplicates work
   # without adding signal. Until then, PR validation is sufficient.
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    branches-ignore:
-      - '**/graphite-base/**'
+    types: [opened, reopened, synchronize, ready_for_review, edited]
   schedule:
     # Weekly full suite — catches new CVEs and regressions between PRs.
     - cron: '0 7 * * 4'
