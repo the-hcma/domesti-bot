@@ -34,6 +34,9 @@ class _FakeVizioTv:
         self.is_on = is_on
         self.calls: list[str] = []
 
+    def ui_power_state(self) -> str:
+        return "on" if self.is_on else "off"
+
     async def turn_off(self) -> None:
         self.calls.append("off")
         self.is_on = False

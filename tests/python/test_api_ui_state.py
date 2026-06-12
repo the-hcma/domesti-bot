@@ -33,6 +33,7 @@ from app.server_runtime import runtime
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
+from app.vizio_device_manager import VizioDeviceManager
 
 
 def _client() -> tuple[TestClient, FastAPI]:
@@ -107,11 +108,30 @@ def _fake_tailwind_mgr(
     return cast(GotailwindDeviceManager, mgr)
 
 
+def _fake_vizio_mgr(
+    tvs: list[tuple[str, str, bool]],
+) -> VizioDeviceManager:
+    """Return a Mock manager whose ``.tvs`` is the supplied tuples."""
+
+    fakes: list[Any] = []
+    for ident, label, is_on in tvs:
+        tv = MagicMock()
+        tv.identifier = ident
+        tv.preferred_label = label
+        tv.is_on = is_on
+        tv.ui_power_state.return_value = "on" if is_on else "off"
+        fakes.append(tv)
+    mgr = MagicMock(spec=VizioDeviceManager)
+    mgr.tvs = tuple(fakes)
+    return cast(VizioDeviceManager, mgr)
+
+
 def _state(
     *,
     kasa_mgr: KasaDeviceManager,
     sonos_mgr: SonosDeviceManager | None = None,
     tailwind_mgr: GotailwindDeviceManager | None = None,
+    vizio_mgr: VizioDeviceManager | None = None,
     cache_path: Path | None = None,
 ) -> DeviceManagersState:
     return DeviceManagersState(
@@ -119,7 +139,7 @@ def _state(
         sonos_mgr=sonos_mgr,
         tailwind_mgr=tailwind_mgr,
         androidtv_mgr=None,
-        vizio_mgr=None,
+        vizio_mgr=vizio_mgr,
         cache_path=cache_path,
         args=argparse.Namespace(),
     )
@@ -163,9 +183,7 @@ def test_build_ui_state_emits_both_families_in_kasa_then_tailwind_order() -> Non
 
 
 def test_build_ui_state_emits_sonos_between_kasa_and_tailwind() -> None:
-    """The render order is alphabetical by ``family_id`` — Sonos
-    must slot between Kasa and Tailwind so the page layout stays
-    deterministic when a household has all three backends."""
+    """Render order is kasa → sonos → tailwind (vizio slots before tailwind)."""
 
     state = _state(
         kasa_mgr=_fake_kasa_mgr([("192.168.1.10", "Desk", True)]),
@@ -188,6 +206,17 @@ def test_build_ui_state_emits_sonos_between_kasa_and_tailwind() -> None:
             exclude_from_global=False,
         )
     ]
+
+
+def test_build_ui_state_orders_vizio_before_tailwind() -> None:
+    state = _state(
+        kasa_mgr=_fake_kasa_mgr([("192.168.1.10", "Desk", True)]),
+        sonos_mgr=_fake_sonos_mgr([("RINCON_A", "Kitchen", False)]),
+        vizio_mgr=_fake_vizio_mgr([("192.168.1.20", "Kitchen TV", True)]),
+        tailwind_mgr=_fake_tailwind_mgr([("door-1", "Left", False, True)]),
+    )
+    out = build_ui_state(state, cache_path=None)
+    assert [f.id for f in out.families] == ["kasa", "sonos", "vizio", "tailwind"]
 
 
 def test_build_ui_state_sonos_speaker_state_maps_playing_paused_and_unknown() -> None:

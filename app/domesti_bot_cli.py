@@ -1213,12 +1213,12 @@ async def _repl_cmd_show_devices(
                     print(
                         f"  {theme.device(repr(tv.preferred_label))}  "
                         f"{theme.meta('[host')} {theme.device(repr(host_meta))}"
-                        f"{theme.meta(']')} {theme.state('(' + tv.power_state + ')')}"
+                        f"{theme.meta(']')} {theme.state('(' + tv.ui_power_state() + ')')}"
                     )
                 else:
                     print(
                         f"  {theme.device(repr(tv.identifier))}  "
-                        f"{theme.state('(' + tv.power_state + ')')}"
+                        f"{theme.state('(' + tv.ui_power_state() + ')')}"
                     )
         except NotInitializedError:
             print(theme.dim("  (not available)"))

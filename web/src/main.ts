@@ -362,7 +362,7 @@ class DomestiBotController {
   }
 
   private async onToggleVizio(device: UIDeviceOut): Promise<void> {
-    const nextOn = device.state !== "on";
+    const nextOn = device.state === "off";
     this.predictDeviceState(device.family_id, device.id, nextOn ? "on" : "off");
     this.render();
     try {
@@ -1682,7 +1682,7 @@ function compactTileAriaLabel(device: UIDeviceOut): string {
   const statePhrase =
     device.state === "unknown" ? "state unknown" : `currently ${device.state}`;
   if (device.kind === "switch") {
-    const next = device.state === "on" ? "turn off" : "turn on";
+    const next = device.state === "off" ? "turn on" : "turn off";
     return `${device.label}, ${statePhrase}, tap to ${next}`;
   }
   if (device.kind === "speaker") {
@@ -1702,6 +1702,9 @@ function compactIconAssetKey(device: UIDeviceOut): string {
     device.compact_icon === "tv" ||
     device.family_id === "vizio"
   ) {
+    if (device.state === "unknown") {
+      return "tv_off";
+    }
     return device.state === "on" ? "tv_on" : "tv_off";
   }
   if (
