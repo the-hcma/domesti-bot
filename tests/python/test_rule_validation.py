@@ -143,3 +143,39 @@ def test_validate_rule_flags_unknown_geofence() -> None:
     )
     issues = validate_rule(_arrival_rule(), ctx)
     assert any(issue.kind == "unknown_geofence" for issue in issues)
+
+
+def test_validate_rule_accepts_notify_on_fire_when_smtp_relay_ready() -> None:
+    rule = _arrival_rule().model_copy(
+        update={
+            "notify_on_fire": True,
+            "notification_email": "ops@hcma.info",
+        },
+    )
+    ctx = RuleValidationContext(
+        device_state=None,
+        geofence_ids=frozenset({"house"}),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup=build_roster_user_id_lookup(["henrique"]),
+        smtp_configured=True,
+    )
+    issues = validate_rule(rule, ctx)
+    assert not any(issue.kind == "missing_smtp" for issue in issues)
+
+
+def test_validate_rule_flags_missing_smtp_when_auth_required() -> None:
+    rule = _arrival_rule().model_copy(
+        update={
+            "notify_on_fire": True,
+            "notification_email": "ops@hcma.info",
+        },
+    )
+    ctx = RuleValidationContext(
+        device_state=None,
+        geofence_ids=frozenset({"house"}),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup=build_roster_user_id_lookup(["henrique"]),
+        smtp_configured=False,
+    )
+    issues = validate_rule(rule, ctx)
+    assert any(issue.kind == "missing_smtp" for issue in issues)

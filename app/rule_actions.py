@@ -18,7 +18,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.smtp_service import SmtpConnectionParams, smtp_friendly_error
-from app.smtp_store import load_smtp_config, resolve_password_for_send
+from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
 from app.sonos_device_manager import SonosDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -167,7 +167,7 @@ def send_rule_notification_email(
             f"Rule {rule.id!r} has notify_on_fire but no notification_email"
         )
     config = load_smtp_config(cache_path)
-    if config is None or not config.password_configured:
+    if config is None or not smtp_send_ready(config):
         raise RuleActionDispatchError(
             "SMTP is not configured; cannot send rule notification email"
         )

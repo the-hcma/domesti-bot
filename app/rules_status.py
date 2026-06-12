@@ -42,7 +42,7 @@ from app.rule_validation import (
     validate_rules,
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
-from app.smtp_store import load_smtp_config
+from app.smtp_store import load_smtp_config, smtp_send_ready
 
 
 def build_rules_validation(
@@ -175,9 +175,7 @@ def _build_validation_context(
     smtp_configured = False
     if cache_path is not None:
         smtp_record = load_smtp_config(cache_path)
-        smtp_configured = (
-            smtp_record is not None and smtp_record.password_configured
-        )
+        smtp_configured = smtp_send_ready(smtp_record)
     return RuleValidationContext(
         device_state=device_state,
         geofence_ids=frozenset(row.geofence_id for row in geofences),
