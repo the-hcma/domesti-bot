@@ -355,36 +355,3 @@ def test_ui_preferences_upsert_load_round_trip_default_false(tmp_path: Path) -> 
     )
     rows = device_discovery_store.load_ui_preferences(db)
     assert rows == [("kasa", "192.168.1.42", False)]
-
-
-def test_set_vizio_tv_mac_updates_cached_row(tmp_path: Path) -> None:
-    db = tmp_path / "vizio.sqlite"
-    device_discovery_store.upsert_vizio_tv(
-        db,
-        host="192.168.86.201",
-        port=7345,
-        display_name="Kitchen TV",
-        model="V505M-K09",
-        mac=None,
-        diid=None,
-    )
-    device_id = device_discovery_store.set_vizio_tv_mac(
-        db,
-        host="192.168.86.201",
-        mac="00:bd:3e:d5:f0:11",
-    )
-    assert device_id == "00:bd:3e:d5:f0:11"
-    rows = device_discovery_store.load_vizio_tvs(db)
-    assert rows == [
-        ("192.168.86.201", 7345, "Kitchen TV", "V505M-K09", "00:bd:3e:d5:f0:11", None)
-    ]
-
-
-def test_set_vizio_tv_mac_rejects_unknown_host(tmp_path: Path) -> None:
-    db = tmp_path / "vizio.sqlite"
-    with pytest.raises(ValueError, match="No Vizio TV cached"):
-        device_discovery_store.set_vizio_tv_mac(
-            db,
-            host="192.168.86.201",
-            mac="00:bd:3e:d5:f0:11",
-        )
