@@ -146,5 +146,7 @@ def resolve_password_for_send(
         return ""
     existing = load_smtp_config(path)
     if existing is not None and existing.host == host.strip():
+        if existing.username.strip() == "":
+            return ""
         return stored
     return ""

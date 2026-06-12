@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.smtp_store import SmtpConfigRecord, smtp_send_ready
+import pytest
+from cryptography.fernet import Fernet
+
+from app.smtp_store import (
+    SmtpConfigRecord,
+    SmtpConfigSave,
+    resolve_password_for_send,
+    save_smtp_config,
+    smtp_send_ready,
+)
 
 
 def test_smtp_send_ready_accepts_unauthenticated_relay_without_password() -> None:
@@ -47,3 +56,25 @@ def test_smtp_send_ready_requires_password_when_username_set() -> None:
 def test_smtp_send_ready_rejects_missing_row(tmp_path: Path) -> None:
     del tmp_path
     assert smtp_send_ready(None) is False
+
+
+def test_resolve_password_for_send_ignores_stored_secret_on_relay(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_smtp_config(
+        db,
+        SmtpConfigSave(
+            from_address="domestibot-noreply@hcma.info",
+            host="localhost",
+            mail_domain="hcma.info",
+            password="stale-secret",
+            port=25,
+            username="",
+        ),
+    )
+    assert (
+        resolve_password_for_send(db, draft_password=None, host="localhost") == ""
+    )
