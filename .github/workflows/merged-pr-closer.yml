@@ -1,10 +1,9 @@
 name: Merged PR Closer
 
 # Open PRs can remain OPEN even after their commits land on main — either
-# because Graphite merged a stack (leaving child PRs open) or because GitHub
-# merged the PR but didn't update its state. This workflow closes them by
-# checking (1) the GitHub API merged flag, and (2) the Graphite merge queue
-# comment as a fallback.
+# because Graphite merged a stack (leaving child PRs open), because GitHub
+# merged the PR but didn't update its state, or because Graphite MQ left
+# behind an open draft group PR after the included PRs already landed.
 on:
   push:
     branches: [main]
@@ -39,28 +38,68 @@ jobs:
 
           for pr in ${open_prs}; do
             pr_data=$(gh api "repos/${REPO}/pulls/${pr}" \
-              --jq '{title: .title, merged: .merged, merged_at: .merged_at}')
+              --jq '{
+                title: .title,
+                merged: .merged,
+                merged_at: .merged_at,
+                draft: .draft,
+                head_ref: .head.ref,
+                body: .body
+              }')
             title=$(echo "${pr_data}" | jq -r '.title')
             is_merged=$(echo "${pr_data}" | jq -r '.merged')
-            merge_time=$(echo "${pr_data}" | jq -r '.merged_at // "unknown time"')
+            merge_time=$(echo "${pr_data}" | jq -r '.merged_at // empty')
+            close_reason=""
 
             if [ "${is_merged}" = "true" ]; then
-              : # merged via GitHub API — fall through to close
+              close_reason="merged at ${merge_time:-unknown time}"
+            elif [ "$(echo "${pr_data}" | jq -r '.draft')" = "true" ] \
+              && { [[ "$(echo "${pr_data}" | jq -r '.head_ref')" == gtmq_batch_* ]] \
+                || [[ "${title}" == *"[Graphite MQ] Draft PR GROUP:"* ]]; }; then
+              pr_body=$(echo "${pr_data}" | jq -r '.body // ""')
+              included_prs=$(
+                printf '%s\n%s\n' "${title}" "${pr_body}" \
+                  | grep -oE '#[0-9]+|\(PRs [0-9, ]+\)' \
+                  | grep -oE '[0-9]+' \
+                  | sort -u \
+                  | tr '\n' ' '
+              )
+              if [ -z "${included_prs// /}" ]; then
+                echo "PR #${pr}: Graphite MQ draft with no referenced PRs — skipping."
+                continue
+              fi
+              stale_draft=true
+              for included in ${included_prs}; do
+                included_state=$(gh pr view "${included}" --repo "${REPO}" --json state --jq .state)
+                if [ "${included_state}" = "OPEN" ]; then
+                  stale_draft=false
+                  break
+                fi
+              done
+              if [ "${stale_draft}" != "true" ]; then
+                echo "PR #${pr}: Graphite MQ draft still has open included PR(s) — skipping."
+                continue
+              fi
+              close_reason="Graphite MQ draft — included PR(s) already merged or closed"
             else
               merge_comment=$(gh api "repos/${REPO}/issues/${pr}/comments" \
                 --jq '[.[] | select(
                   .performed_via_github_app.slug == "graphite-app" and
                   (.body | test("Merged by the \\[Graphite merge queue\\]"))
                 )] | first // empty')
-              [ -n "${merge_comment}" ] || { echo "PR #${pr}: open and not yet merged — skipping."; continue; }
+              if [ -z "${merge_comment}" ]; then
+                echo "PR #${pr}: open and not yet merged — skipping."
+                continue
+              fi
               merge_time=$(echo "${merge_comment}" | jq -r '.body' \
                 | grep -oP '\*\*[^*]+\*\*(?=: Merged)' | tr -d '*' || echo "unknown time")
+              close_reason="merged at ${merge_time}"
             fi
 
-            echo "Closing PR #${pr}: \"${title}\" (merged at ${merge_time})"
+            echo "Closing PR #${pr}: \"${title}\" (${close_reason})"
             gh api "repos/${REPO}/issues/${pr}/comments" \
               --method POST \
-              --field body="This PR's changes have already landed on \`main\` (merged at ${merge_time}). Closing automatically." \
+              --field body="This PR's changes have already landed on \`main\` (${close_reason}). Closing automatically." \
               --silent
             gh api "repos/${REPO}/pulls/${pr}" \
               --method PATCH \
@@ -68,13 +107,12 @@ jobs:
               --silent
 
             closed_count=$((closed_count + 1))
-            summary_rows="${summary_rows}| #${pr} | ${title} | ${merge_time} |\n"
+            summary_rows="${summary_rows}| #${pr} | ${title} | ${close_reason} |\n"
           done
 
           echo ""
           echo "Done. Closed ${closed_count} PR(s)."
 
-          # Write job summary
           {
             echo "## Merged PR Closer"
             if [ "${closed_count}" -eq 0 ]; then
@@ -82,8 +120,8 @@ jobs:
             else
               echo "Closed **${closed_count}** PR(s) that were already merged:"
               echo ""
-              echo "| PR | Title | Merged at |"
-              echo "|----|-------|-----------|"
+              echo "| PR | Title | Reason |"
+              echo "|----|-------|--------|"
               printf '%b' "${summary_rows}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
