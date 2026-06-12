@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,6 +23,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
+from app.rule_actions import RuleActionDispatchError
 from app.rule_evaluator import (
     GeofenceTransition,
     RuleEvaluator,
@@ -241,6 +242,68 @@ async def test_rule_evaluator_does_not_stamp_fired_when_device_discovery_incompl
     assert fire_state.last_fired_at is None
     assert fire_state.last_error is not None
     assert "discovery still in progress" in fire_state.last_error.lower()
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_records_error_when_notification_email_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    notify_rule = _arrive_home_rule(cooldown_s=300).model_copy(
+        update={
+            "device_actions": [],
+            "notification_email": "ops@example.com",
+            "notify_on_fire": True,
+        },
+    )
+    _write_bundle(bundle, notify_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(
+        db,
+        user_id="henrique",
+        lat=44.0,
+        lon=-73.0,
+        received_at=clock["now"],
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: clock["now"],
+    )
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    with (
+        patch(
+            "app.rule_evaluator.send_rule_notification_email",
+            side_effect=RuleActionDispatchError("SMTP is not configured"),
+        ),
+        patch("app.rule_evaluator._LOGGER.warning") as warning_mock,
+    ):
+        await evaluator.on_location_update("henrique")
+
+    fire_state = evaluator.fire_state_for_rule("arrive-home")
+    assert fire_state.last_fired_at is None
+    assert fire_state.last_error == "SMTP is not configured"
+    warning_mock.assert_called_once_with(
+        "[rules] rule_id=%s edge matched but no side effect completed: %s",
+        "arrive-home",
+        "SMTP is not configured",
+    )
 
 
 @pytest.mark.asyncio

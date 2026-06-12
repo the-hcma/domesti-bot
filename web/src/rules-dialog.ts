@@ -1163,6 +1163,12 @@ class RulesHubController {
         fired.append(createAuditedTimeElement(rule.last_fired_at));
         card.append(fired);
       }
+      if (rule.last_error !== null) {
+        const error = document.createElement("p");
+        error.className = "rules-card-warn";
+        error.textContent = rule.last_error;
+        card.append(error);
+      }
       void this.dataSource.getRule(rule.id).then((definition) => {
         if (definition === null) {
           return;
