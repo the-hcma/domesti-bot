@@ -3,11 +3,13 @@
 import { createRulesDataSource } from "./rules-data-source.js";
 import { mountMyTracksSettingsPanel } from "./my-tracks-settings-panel.js";
 import { mountTailwindSettingsPanel } from "./tailwind-settings-panel.js";
+import { mountVizioSettingsPanel } from "./vizio-settings-panel.js";
 
-type SettingsTabId = "my-tracks" | "tailwind";
+type SettingsTabId = "my-tracks" | "tailwind" | "vizio";
 
 const SETTINGS_TABS: readonly [SettingsTabId, string][] = [
   ["tailwind", "GoTailwind"],
+  ["vizio", "Vizio TV"],
   ["my-tracks", "My Tracks"],
 ];
 
@@ -89,6 +91,12 @@ export async function openSettingsHubDialog(options: {
     if (tabId === "my-tracks") {
       const dataSource = await createRulesDataSource();
       await mountMyTracksSettingsPanel(mount, dataSource);
+      return;
+    }
+    if (tabId === "vizio") {
+      await mountVizioSettingsPanel(mount, {
+        onDevicesChanged: options.onReloadDevices,
+      });
       return;
     }
     await mountTailwindSettingsPanel(mount, {

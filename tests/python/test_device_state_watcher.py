@@ -232,6 +232,7 @@ def test_build_default_watchers_omits_optional_when_managers_are_none() -> None:
     state.kasa_mgr = kasa
     state.sonos_mgr = None
     state.tailwind_mgr = None
+    state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
     assert len(watchers) == 1
@@ -246,6 +247,7 @@ def test_build_default_watchers_includes_every_configured_backend() -> None:
     state.kasa_mgr = kasa
     state.sonos_mgr = sonos
     state.tailwind_mgr = tailwind
+    state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
     assert len(watchers) == 3
@@ -261,6 +263,7 @@ def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> N
     state.kasa_mgr = kasa
     state.sonos_mgr = sonos
     state.tailwind_mgr = None
+    state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
     assert len(watchers) == 2

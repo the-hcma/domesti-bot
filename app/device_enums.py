@@ -12,6 +12,7 @@ class DeviceFamilyId(StrEnum):
     KASA = "kasa"
     SONOS = "sonos"
     TAILWIND = "tailwind"
+    VIZIO = "vizio"
 
     def display_name(self) -> str:
         """Proper-name label for user-visible errors and log messages."""
@@ -24,6 +25,8 @@ class DeviceFamilyId(StrEnum):
                 return "Sonos"
             case DeviceFamilyId.TAILWIND:
                 return "Tailwind"
+            case DeviceFamilyId.VIZIO:
+                return "Vizio"
 
 
 class RuleDeviceActionType(StrEnum):

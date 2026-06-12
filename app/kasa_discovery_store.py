@@ -27,6 +27,7 @@ from app.db.models import (
     SonosKnownZone,
     TailwindLastHost,
     UiPreference,
+    VizioKnownTv,
 )
 from app.db.schema import bootstrap_schema, ensure_schema_if_exists
 from app.db.session import discovery_session
@@ -265,6 +266,28 @@ def load_tailwind_host(path: Path) -> str | None:
         return row.host.strip() if row else None
 
 
+def load_vizio_tvs(
+    path: Path,
+) -> list[tuple[str, int, str | None, str | None, str | None, str | None]]:
+    """Return ``(host, port, display_name, model, mac, diid)`` rows ordered by host."""
+    path = path.expanduser().resolve()
+    if not path.is_file():
+        return []
+    ensure_schema_if_exists(path)
+    with discovery_session(path) as session:
+        rows = session.scalars(
+            select(VizioKnownTv).order_by(VizioKnownTv.host)
+        ).all()
+        out: list[tuple[str, int, str | None, str | None, str | None, str | None]] = []
+        for row in rows:
+            display = (row.display_name or "").strip() or None
+            model = (row.model or "").strip() or None
+            mac = (row.mac or "").strip() or None
+            diid = (row.diid or "").strip() or None
+            out.append((row.host, int(row.port), display, model, mac, diid))
+        return out
+
+
 def load_ui_preferences(path: Path) -> list[tuple[str, str, bool]]:
     """Return ``(backend, canonical_key, exclude_from_global)`` rows.
 
@@ -323,6 +346,46 @@ def upsert_display_name(
             )
         else:
             row.display_name = display_name.strip()
+            row.updated_at = now
+
+
+def upsert_vizio_tv(
+    path: Path,
+    *,
+    host: str,
+    port: int,
+    display_name: str | None,
+    model: str | None,
+    mac: str | None,
+    diid: str | None,
+) -> None:
+    """Remember one Vizio TV endpoint (auth token lives in ``app_secrets``)."""
+    now = time.time()
+    h = host.strip()
+    with discovery_session(path) as session:
+        row = session.get(VizioKnownTv, h)
+        label = (display_name or "").strip() or None
+        model_s = (model or "").strip() or None
+        mac_s = (mac or "").strip() or None
+        diid_s = (diid or "").strip() or None
+        if row is None:
+            session.add(
+                VizioKnownTv(
+                    host=h,
+                    port=port,
+                    display_name=label,
+                    model=model_s,
+                    mac=mac_s,
+                    diid=diid_s,
+                    updated_at=now,
+                )
+            )
+        else:
+            row.port = port
+            row.display_name = label
+            row.model = model_s
+            row.mac = mac_s
+            row.diid = diid_s
             row.updated_at = now
 
 

@@ -46,6 +46,7 @@ def _device_state(kasa_mgr: KasaDeviceManager) -> DeviceManagersState:
         sonos_mgr=None,
         tailwind_mgr=None,
         androidtv_mgr=None,
+        vizio_mgr=None,
         cache_path=None,
         args=argparse.Namespace(),
     )

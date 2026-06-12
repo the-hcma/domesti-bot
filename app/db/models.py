@@ -147,6 +147,18 @@ class TailwindLastHost(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class VizioKnownTv(Base):
+    __tablename__ = "vizio_known_tvs"
+
+    host: Mapped[str] = mapped_column(String, primary_key=True)
+    port: Mapped[int] = mapped_column(Integer, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    mac: Mapped[str | None] = mapped_column(String, nullable=True)
+    diid: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class UiPreference(Base):
     __tablename__ = "ui_preferences"
 

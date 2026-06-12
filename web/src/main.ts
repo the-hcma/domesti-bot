@@ -194,7 +194,8 @@ class DomestiBotController {
     if (
       familyId !== "kasa" &&
       familyId !== "sonos" &&
-      familyId !== "tailwind"
+      familyId !== "tailwind" &&
+      familyId !== "vizio"
     ) {
       return;
     }
@@ -217,6 +218,8 @@ class DomestiBotController {
         result = await api.bulkOffKasa();
       } else if (familyId === "sonos") {
         result = await api.pauseAllSonos();
+      } else if (familyId === "vizio") {
+        result = await api.bulkOffVizio();
       } else {
         result = await api.closeAllTailwind();
       }
@@ -354,6 +357,19 @@ class DomestiBotController {
       } else {
         console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
       }
+      await this.refresh();
+    }
+  }
+
+  private async onToggleVizio(device: UIDeviceOut): Promise<void> {
+    const nextOn = device.state !== "on";
+    this.predictDeviceState(device.family_id, device.id, nextOn ? "on" : "off");
+    this.render();
+    try {
+      await api.toggleVizio(device.id, nextOn);
+    } catch (err) {
+      this.clearPendingPrediction(device.family_id, device.id);
+      console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
       await this.refresh();
     }
   }
@@ -786,6 +802,10 @@ class DomestiBotController {
     void this.onToggleKasa(device);
   }
 
+  toggleVizioTile(device: UIDeviceOut): void {
+    void this.onToggleVizio(device);
+  }
+
   toggleSonosTile(device: UIDeviceOut): void {
     void this.onToggleSonos(device);
   }
@@ -826,6 +846,11 @@ const FAMILY_ICON_PATHS: Record<string, readonly string[]> = {
     "M5 10v11h14V10",
     "M5 14h14",
     "M5 17.5h14",
+  ],
+  vizio: [
+    "M3 6h18v12H3z",
+    "M8 20h8",
+    "M12 18v2",
   ],
 };
 
@@ -882,7 +907,7 @@ function blurFocusedElementInApp(appRoot: HTMLElement): void {
   }
 }
 
-type BulkOffScope = "global" | "kasa" | "sonos" | "tailwind";
+type BulkOffScope = "global" | "kasa" | "sonos" | "tailwind" | "vizio";
 
 function bulkOffAlreadyDoneMessage(scope: BulkOffScope): string {
   switch (scope) {
@@ -894,6 +919,8 @@ function bulkOffAlreadyDoneMessage(scope: BulkOffScope): string {
       return "All Sonos zones are already paused.";
     case "tailwind":
       return "All garage doors are already closed.";
+    case "vizio":
+      return "All Vizio TVs are already off.";
   }
 }
 
@@ -945,30 +972,28 @@ function bulkOffSuccessMessage(
   skippedCount: number,
 ): string {
   const deviceWord = affectedCount === 1 ? "device" : "devices";
-  let base: string;
-  switch (scope) {
-    case "global":
-      base = `Updated ${String(affectedCount)} ${deviceWord}.`;
-      break;
-    case "kasa":
-      base =
-        affectedCount === 1
+  const base = ((): string => {
+    switch (scope) {
+      case "global":
+        return `Updated ${String(affectedCount)} ${deviceWord}.`;
+      case "kasa":
+        return affectedCount === 1
           ? "Turned off 1 light or plug."
           : `Turned off ${String(affectedCount)} lights and plugs.`;
-      break;
-    case "sonos":
-      base =
-        affectedCount === 1
+      case "sonos":
+        return affectedCount === 1
           ? "Paused 1 zone."
           : `Paused ${String(affectedCount)} zones.`;
-      break;
-    case "tailwind":
-      base =
-        affectedCount === 1
+      case "tailwind":
+        return affectedCount === 1
           ? "Closed 1 garage door."
           : `Closed ${String(affectedCount)} garage doors.`;
-      break;
-  }
+      case "vizio":
+        return affectedCount === 1
+          ? "Turned off 1 TV."
+          : `Turned off ${String(affectedCount)} TVs.`;
+    }
+  })();
   if (scope === "global" && skippedCount > 0) {
     const skipWord = skippedCount === 1 ? "device was" : "devices were";
     return `${base} ${String(skippedCount)} excluded ${skipWord} not changed.`;
@@ -1634,7 +1659,11 @@ function attachTileHitListeners(
   device: UIDeviceOut,
   controller: DomestiBotController,
 ): void {
-  if (device.kind === "switch") {
+  if (device.kind === "switch" && device.family_id === "vizio") {
+    hit.addEventListener("click", () => {
+      controller.toggleVizioTile(device);
+    });
+  } else if (device.kind === "switch") {
     hit.addEventListener("click", () => {
       controller.toggleKasaTile(device);
     });
@@ -1670,6 +1699,12 @@ function compactIconAssetKey(device: UIDeviceOut): string {
     return device.state === "open" ? "garage_open" : "garage_closed";
   }
   if (
+    device.compact_icon === "tv" ||
+    device.family_id === "vizio"
+  ) {
+    return device.state === "on" ? "tv_on" : "tv_off";
+  }
+  if (
     device.compact_icon === "speaker" ||
     device.kind === "speaker" ||
     device.family_id === "sonos"
@@ -1695,6 +1730,9 @@ function compactIconFallbackCandidates(key: string): string[] {
   }
   if (key.startsWith("garage_")) {
     return [key, "garage_closed", "bulb"];
+  }
+  if (key.startsWith("tv_")) {
+    return [key, "tv_off", "bulb"];
   }
   return [key, "bulb"];
 }
@@ -1989,7 +2027,8 @@ function renderFamily(
   if (
     family.id === "kasa" ||
     family.id === "sonos" ||
-    family.id === "tailwind"
+    family.id === "tailwind" ||
+    family.id === "vizio"
   ) {
     const bulkBtn = document.createElement("button");
     bulkBtn.type = "button";
@@ -1999,7 +2038,7 @@ function renderFamily(
     // ``--pending`` state badges.
     bulkBtn.className = "btn btn-bulk";
     bulkBtn.textContent =
-      family.id === "kasa"
+      family.id === "kasa" || family.id === "vizio"
         ? "Turn off all"
         : family.id === "sonos"
           ? "Pause all"
