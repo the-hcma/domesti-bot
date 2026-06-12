@@ -239,7 +239,6 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         failed: list[VizioTvEndpoint] = []
 
         for endpoint in targets:
-            endpoint = await self._relocate_endpoint(endpoint)
             token, _source = self._resolve_token(endpoint)
             if not token:
                 _LOGGER.info(
@@ -247,34 +246,13 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     endpoint.device_id,
                 )
                 continue
-            try:
-                connected.append(await self._connect_endpoint(endpoint, token))
-            except VizioSmartCastConnectionError as exc:
-                relocated = await self._relocate_endpoint(endpoint, force_arp=True)
-                if relocated.host != endpoint.host:
-                    try:
-                        connected.append(
-                            await self._connect_endpoint(relocated, token)
-                        )
-                        continue
-                    except (VizioSmartCastAuthError, VizioSmartCastConnectionError):
-                        endpoint = relocated
-                _LOGGER.warning(
-                    "Cached/configured Vizio TV %s unreachable: %s",
-                    endpoint.device_id,
-                    exc,
-                )
-                failed.append(endpoint)
-                connected.append(await self._offline_tv(endpoint, token))
-            except VizioSmartCastAuthError as exc:
-                _LOGGER.warning(
-                    "Cached/configured Vizio TV %s auth rejected: %s",
-                    endpoint.device_id,
-                    exc,
-                )
-                failed.append(endpoint)
+            tv, unreachable = await self._connect_target(endpoint, token)
+            if tv is not None:
+                connected.append(tv)
+            if unreachable is not None:
+                failed.append(unreachable)
 
-        if failed or self._force_discovery or not connected:
+        if self._should_run_ssdp(connected=connected, failed=failed):
             used_discovery = True
             discovered = await discover_vizio_hosts_ssdp(timeout=self._discovery_timeout)
             for item in discovered:
@@ -284,26 +262,14 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     display_name=item.name,
                     model=item.model or None,
                 )
-                if any(tv.identifier == endpoint.device_id for tv in connected):
+                if self._matches_known_tv(endpoint, connected):
                     continue
                 token, _source = self._resolve_token(endpoint)
                 if not token:
                     continue
-                try:
-                    connected.append(await self._connect_endpoint(endpoint, token))
-                except VizioSmartCastConnectionError as exc:
-                    _LOGGER.warning(
-                        "Discovered Vizio TV %s unreachable: %s",
-                        endpoint.device_id,
-                        exc,
-                    )
-                    connected.append(await self._offline_tv(endpoint, token))
-                except VizioSmartCastAuthError as exc:
-                    _LOGGER.warning(
-                        "Discovered Vizio TV %s auth rejected: %s",
-                        endpoint.device_id,
-                        exc,
-                    )
+                tv, _unreachable = await self._connect_target(endpoint, token)
+                if tv is not None:
+                    connected.append(tv)
 
         connected.sort(key=lambda tv: tv.preferred_label.lower())
         self._tvs = tuple(connected)
@@ -348,7 +314,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         return tv.is_on
 
     async def rediscover(self) -> None:
-        """Force SSDP discovery, ignoring the cache; subsequent ``fetch`` calls keep using the cache."""
+        """Rerun SSDP discovery while keeping cached TVs; ``fetch`` stays cache-first."""
         await self.disconnect()
         previous = self._force_discovery
         self._force_discovery = True
@@ -374,7 +340,6 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         endpoint: VizioTvEndpoint,
         token: str,
     ) -> VizioTvDevice:
-        endpoint = await self._relocate_endpoint(endpoint)
         client = VizioSmartCastClient(
             endpoint.host,
             port=endpoint.port,
@@ -403,17 +368,66 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         await tv.refresh_power_state()
         return tv
 
+    async def _connect_target(
+        self,
+        endpoint: VizioTvEndpoint,
+        token: str,
+    ) -> tuple[VizioTvDevice | None, VizioTvEndpoint | None]:
+        """Connect one TV target, or return an offline tile when unreachable."""
+        endpoint = await self._relocate_endpoint(endpoint)
+        if not await self._smartcast_port_open(endpoint):
+            relocated = await self._relocate_endpoint(endpoint, force_arp=True)
+            if relocated.host != endpoint.host and await self._smartcast_port_open(relocated):
+                endpoint = relocated
+            else:
+                if relocated.host != endpoint.host:
+                    endpoint = relocated
+                _LOGGER.warning(
+                    "Vizio TV %s unreachable: SmartCast port closed on %s:%s",
+                    endpoint.device_id,
+                    endpoint.host,
+                    endpoint.port,
+                )
+                return await self._offline_tv(endpoint, token), endpoint
+        try:
+            return await self._connect_endpoint(endpoint, token), None
+        except VizioSmartCastConnectionError as exc:
+            relocated = await self._relocate_endpoint(endpoint, force_arp=True)
+            if relocated.host != endpoint.host:
+                try:
+                    return await self._connect_endpoint(relocated, token), None
+                except (VizioSmartCastAuthError, VizioSmartCastConnectionError):
+                    endpoint = relocated
+            _LOGGER.warning(
+                "Vizio TV %s unreachable: %s",
+                endpoint.device_id,
+                exc,
+            )
+            return await self._offline_tv(endpoint, token), endpoint
+        except VizioSmartCastAuthError as exc:
+            _LOGGER.warning(
+                "Vizio TV %s auth rejected: %s",
+                endpoint.device_id,
+                exc,
+            )
+            return None, endpoint
+
     def _initial_targets(self) -> list[VizioTvEndpoint]:
         out: list[VizioTvEndpoint] = []
-        seen: set[str] = set()
-        if self._discovery_cache_path is not None and not self._force_discovery:
+        seen_ids: set[str] = set()
+        seen_hosts: set[tuple[str, int]] = set()
+        if self._discovery_cache_path is not None:
             for host, port, display, model, mac, diid in device_discovery_store.load_vizio_tvs(
                 self._discovery_cache_path
             ):
-                device_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
-                if device_id in seen:
+                host_key = (host, port)
+                if host_key in seen_hosts:
                     continue
-                seen.add(device_id)
+                device_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
+                if device_id in seen_ids:
+                    continue
+                seen_ids.add(device_id)
+                seen_hosts.add(host_key)
                 out.append(
                     VizioTvEndpoint(
                         host=host,
@@ -425,10 +439,14 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     )
                 )
         for host, port in self._configured_hosts:
-            device_id = device_id_for(host, port)
-            if device_id in seen:
+            host_key = (host, port)
+            if host_key in seen_hosts:
                 continue
-            seen.add(device_id)
+            device_id = device_id_for(host, port)
+            if device_id in seen_ids:
+                continue
+            seen_ids.add(device_id)
+            seen_hosts.add(host_key)
             out.append(VizioTvEndpoint(host=host, port=port))
         return out
 
@@ -462,6 +480,24 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         tv.set_power(False)
         return tv
 
+    def _matches_known_tv(
+        self,
+        endpoint: VizioTvEndpoint,
+        connected: list[VizioTvDevice],
+    ) -> bool:
+        """True when ``endpoint`` is already represented in ``connected``."""
+        for tv in connected:
+            if tv.identifier == endpoint.device_id:
+                return True
+            if endpoint.mac and tv.mac and endpoint.mac == tv.mac:
+                return True
+            if (
+                tv.endpoint.host == endpoint.host
+                and tv.endpoint.port == endpoint.port
+            ):
+                return True
+        return False
+
     async def _relocate_endpoint(
         self,
         endpoint: VizioTvEndpoint,
@@ -491,6 +527,34 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             mac=endpoint.mac,
             diid=endpoint.diid,
         )
+
+    def _should_run_ssdp(
+        self,
+        *,
+        connected: list[VizioTvDevice],
+        failed: list[VizioTvEndpoint],
+    ) -> bool:
+        """Run LAN discovery for new TVs, not on every cache miss with a known MAC."""
+        if self._force_discovery:
+            return True
+        if not connected:
+            return True
+        if not failed:
+            return False
+        return any(endpoint.mac is None for endpoint in failed)
+
+    async def _smartcast_port_open(self, endpoint: VizioTvEndpoint) -> bool:
+        """Return whether TCP ``host:port`` accepts a connection within the probe budget."""
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(endpoint.host, endpoint.port),
+                timeout=_API_PROBE_TIMEOUT_S,
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except (TimeoutError, OSError):
+            return False
 
     def _resolve_token(self, endpoint: VizioTvEndpoint) -> tuple[str, str]:
         token, source = resolve_vizio_auth_token(

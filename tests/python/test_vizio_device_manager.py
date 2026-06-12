@@ -52,6 +52,12 @@ async def test_fetch_relocates_cached_tv_when_dhcp_ip_changes(tmp_path: Path) ->
     fake_tv = VizioTvDevice(endpoint, fake_client, display_name="Kitchen TV")
     fake_tv.set_power(False)
     with (
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
         patch(
             "app.vizio_device_manager.resolve_vizio_tv_ip",
             new_callable=AsyncMock,
@@ -93,6 +99,12 @@ async def test_fetch_keeps_unreachable_cached_tv_as_off(tmp_path: Path) -> None:
         cli_auth_token="test-token",
     )
     with (
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
         patch.object(
             VizioDeviceManager,
             "_connect_endpoint",
@@ -165,6 +177,12 @@ async def test_fetch_resolves_mac_from_smartcast_and_migrates_host_token(
     with (
         patch.object(
             VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch.object(
+            VizioDeviceManager,
             "_connect_endpoint",
             new_callable=AsyncMock,
             return_value=fake_tv,
@@ -180,6 +198,129 @@ async def test_fetch_resolves_mac_from_smartcast_and_migrates_host_token(
     assert rows[0][4] == "00:bd:3e:d5:f0:11"
     assert vizio_auth_token_stored_in_db(db, mac="00:bd:3e:d5:f0:11", host=None)
     assert not vizio_auth_token_stored_in_db(db, mac=None, host="192.168.86.201")
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_rediscover_keeps_offline_cached_tv_when_ssdp_finds_nothing(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "cache.sqlite"
+    device_discovery_store.upsert_vizio_tv(
+        db,
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        model="V505M-K09",
+        mac="00:bd:3e:d5:f0:11",
+        diid=None,
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token="test-token",
+    )
+    ssdp = AsyncMock(return_value=[])
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            ssdp,
+        ),
+    ):
+        await mgr.fetch()
+        assert len(mgr.tvs) == 1
+        assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
+        assert mgr.tvs[0].ui_power_state() == "off"
+        await mgr.rediscover()
+        assert ssdp.await_count == 1
+    assert len(mgr.tvs) == 1
+    assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_fetch_skips_deviceinfo_when_smartcast_port_closed(tmp_path: Path) -> None:
+    db = tmp_path / "cache.sqlite"
+    device_discovery_store.upsert_vizio_tv(
+        db,
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        model="V505M-K09",
+        mac="00:bd:3e:d5:f0:11",
+        diid=None,
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token="test-token",
+    )
+    connect = AsyncMock()
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            connect,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        await mgr.fetch()
+    connect.assert_not_called()
+    assert len(mgr.tvs) == 1
+    assert mgr.tvs[0].ui_power_state() == "off"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_fetch_skips_ssdp_when_cached_mac_tv_is_offline(tmp_path: Path) -> None:
+    db = tmp_path / "cache.sqlite"
+    device_discovery_store.upsert_vizio_tv(
+        db,
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        model="V505M-K09",
+        mac="00:bd:3e:d5:f0:11",
+        diid=None,
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token="test-token",
+    )
+    ssdp = AsyncMock(return_value=[])
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            ssdp,
+        ),
+    ):
+        await mgr.fetch()
+    ssdp.assert_not_called()
+    assert len(mgr.tvs) == 1
+    assert mgr.last_discovery_source == "cache"
     await mgr.disconnect()
 
 
@@ -204,6 +345,12 @@ async def test_rediscover_runs_fetch_again(tmp_path: Path) -> None:
     fake_tv._client.aclose = AsyncMock()  # noqa: SLF001
     ssdp = AsyncMock(return_value=[])
     with (
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
         patch.object(
             VizioDeviceManager,
             "_connect_endpoint",

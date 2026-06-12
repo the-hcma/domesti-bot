@@ -1204,7 +1204,11 @@ async def _repl_cmd_show_devices(
                 key=lambda tv: _lex_show_devices_key(tv.preferred_label, tv.identifier),
             )
             if not tvs:
-                print(theme.dim("  (none connected — check hosts and auth tokens.)"))
+                print(
+                    theme.dim(
+                        "  (none — pair while the TV is on, or turn on a cached TV via the UI/REPL.)"
+                    )
+                )
             for tv in tvs:
                 host_meta = tv.endpoint.host
                 if tv.endpoint.port != 7345:
