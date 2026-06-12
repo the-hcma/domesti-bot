@@ -38,6 +38,7 @@ from app.api.ui_state import (
     find_kasa_by_host,
 )
 from app.domesti_bot_cli import DeviceManagersState
+from app.server_runtime import runtime
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 
@@ -223,8 +224,8 @@ def test_post_global_bulk_off_returns_affected_and_skipped(tmp_path: Path) -> No
     a = _FakeKasa("10.0.0.1", "Keep", is_on=True)
     b = _FakeKasa("10.0.0.2", "Excluded", is_on=True)
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[a, b], cache_path=db)
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[a, b], cache_path=db)
+    runtime.discovery_error = None
 
     response = client.post("/v1/ui/global/bulk-off")
     assert response.status_code == HTTPStatus.OK
@@ -243,8 +244,8 @@ def test_post_kasa_bulk_off_returns_empty_when_every_switch_already_off() -> Non
     a = _FakeKasa("10.0.0.1", "A", is_on=False)
     b = _FakeKasa("10.0.0.2", "B", is_on=False)
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[a, b])
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[a, b])
+    runtime.discovery_error = None
 
     response = client.post("/v1/ui/kasa/bulk-off")
     assert response.status_code == HTTPStatus.OK
@@ -257,8 +258,8 @@ def test_post_kasa_bulk_off_turns_off_every_kasa_device() -> None:
     a = _FakeKasa("10.0.0.1", "A", is_on=True)
     b = _FakeKasa("10.0.0.2", "B", is_on=True)
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[a, b])
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[a, b])
+    runtime.discovery_error = None
 
     response = client.post("/v1/ui/kasa/bulk-off")
     assert response.status_code == HTTPStatus.OK
@@ -270,10 +271,10 @@ def test_post_kasa_bulk_off_turns_off_every_kasa_device() -> None:
 
 def test_post_kasa_toggle_returns_404_for_unknown_device() -> None:
     client, app = _client()
-    app.state.device_state = _state(
+    runtime.device_state = _state(
         kasa_devices=[_FakeKasa("10.0.0.1", "Lamp", is_on=True)]
     )
-    app.state.discovery_error = None
+    runtime.discovery_error = None
     r = client.post(
         "/v1/ui/kasa/devices/10.0.0.99/toggle",
         json={"on": False},
@@ -292,8 +293,8 @@ def test_post_kasa_toggle_turns_device_off_and_returns_refreshed_view(
     )
     fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[fake], cache_path=db)
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[fake], cache_path=db)
+    runtime.discovery_error = None
 
     r = client.post(
         "/v1/ui/kasa/devices/10.0.0.1/toggle",
@@ -312,8 +313,8 @@ def test_post_kasa_toggle_turns_device_off_and_returns_refreshed_view(
 def test_post_kasa_toggle_turns_device_on() -> None:
     fake = _FakeKasa("10.0.0.1", "Desk", is_on=False)
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[fake])
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[fake])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/kasa/devices/10.0.0.1/toggle", json={"on": True})
     assert r.status_code == HTTPStatus.OK
     assert r.json()["device"]["state"] == "on"
@@ -323,8 +324,8 @@ def test_post_kasa_toggle_turns_device_on() -> None:
 def test_post_kasa_toggle_with_invalid_body_returns_422() -> None:
     fake = _FakeKasa("10.0.0.1", "Desk", is_on=False)
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[fake])
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[fake])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/kasa/devices/10.0.0.1/toggle", json={"power": True})
     assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
@@ -333,8 +334,8 @@ def test_put_ui_preference_persists_kasa_exclusion(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[fake], cache_path=db)
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[fake], cache_path=db)
+    runtime.discovery_error = None
 
     r = client.put(
         "/v1/ui/preferences/kasa/10.0.0.1",
@@ -363,11 +364,11 @@ def test_put_ui_preference_persists_kasa_exclusion(tmp_path: Path) -> None:
 def test_put_ui_preference_returns_404_for_unknown_kasa_device(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     client, app = _client()
-    app.state.device_state = _state(
+    runtime.device_state = _state(
         kasa_devices=[_FakeKasa("10.0.0.1", "Lamp", is_on=True)],
         cache_path=db,
     )
-    app.state.discovery_error = None
+    runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/kasa/10.0.0.99",
         json={"exclude_from_global": True},
@@ -380,12 +381,12 @@ def test_put_ui_preference_returns_404_for_unknown_tailwind_device(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, app = _client()
-    app.state.device_state = _state(
+    runtime.device_state = _state(
         kasa_devices=[],
         cache_path=db,
         tailwind_mgr=_tailwind_mgr_with("door-1"),
     )
-    app.state.discovery_error = None
+    runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/tailwind/door-99",
         json={"exclude_from_global": True},
@@ -396,11 +397,11 @@ def test_put_ui_preference_returns_404_for_unknown_tailwind_device(
 def test_put_ui_preference_returns_400_for_unknown_family(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     client, app = _client()
-    app.state.device_state = _state(
+    runtime.device_state = _state(
         kasa_devices=[_FakeKasa("10.0.0.1", "Lamp", is_on=True)],
         cache_path=db,
     )
-    app.state.discovery_error = None
+    runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/zigbee/whatever",
         json={"exclude_from_global": True},
@@ -411,11 +412,11 @@ def test_put_ui_preference_returns_400_for_unknown_family(tmp_path: Path) -> Non
 
 def test_put_ui_preference_returns_409_when_no_discovery_cache_configured() -> None:
     client, app = _client()
-    app.state.device_state = _state(
+    runtime.device_state = _state(
         kasa_devices=[_FakeKasa("10.0.0.1", "Lamp", is_on=True)],
         cache_path=None,
     )
-    app.state.discovery_error = None
+    runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/kasa/10.0.0.1",
         json={"exclude_from_global": True},
@@ -427,12 +428,12 @@ def test_put_ui_preference_returns_409_when_no_discovery_cache_configured() -> N
 def test_put_ui_preference_persists_tailwind_exclusion(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     client, app = _client()
-    app.state.device_state = _state(
+    runtime.device_state = _state(
         kasa_devices=[],
         cache_path=db,
         tailwind_mgr=_tailwind_mgr_with("door-1"),
     )
-    app.state.discovery_error = None
+    runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/tailwind/door-1",
         json={"exclude_from_global": True},

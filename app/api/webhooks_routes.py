@@ -11,6 +11,7 @@ from app.api.location_update_ingest import apply_location_update_webhook
 from app.api.mytracks_relay_auth import verify_mytracks_relay_api_key
 from app.api.schemas import LocationUpdateWebhookIn
 from app.api.settings_routes import discovery_cache_path_from_request
+from app.server_runtime import runtime
 
 router = APIRouter(prefix="/v1/webhooks", tags=["webhooks"])
 
@@ -49,6 +50,7 @@ async def post_location_update_webhook(
     apply_location_update_webhook(
         cache_path,
         body,
+        after_persist=runtime.schedule_rule_location_evaluation,
         check_emergency_switch=True,
         persist_location=True,
     )

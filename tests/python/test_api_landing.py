@@ -13,7 +13,7 @@ These tests cover:
 
 The discovery lifespan goes out to the LAN, so most tests intentionally do
 *not* use ``with TestClient(...)``. They build an app, talk to it directly,
-and mutate ``app.state`` to simulate the various discovery states. One
+and mutate ``runtime`` to simulate the various discovery states. One
 test (``test_lifespan_yields_immediately_even_when_discovery_blocks``) does
 exercise the real lifespan path with a stubbed ``bootstrap_device_managers``
 to prove the non-blocking behavior end-to-end.
@@ -26,13 +26,14 @@ import asyncio
 import json
 import time
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
+from app.server_runtime import runtime
 
 
 def _client() -> tuple[TestClient, FastAPI]:
@@ -40,7 +41,7 @@ def _client() -> tuple[TestClient, FastAPI]:
     app = create_app(args)
     # Do NOT use ``with TestClient(...)``: that would run the discovery
     # lifespan, which goes out to the LAN. The static routes under test
-    # don't depend on ``app.state.device_state``, so we can issue requests
+    # don't depend on ``runtime.device_state``, so we can issue requests
     # directly without lifespan startup.
     return TestClient(app), app
 
@@ -54,8 +55,8 @@ def test_favicon_returns_204_no_content() -> None:
 
 def test_health_reports_discovery_failed_when_error_set() -> None:
     client, app = _client()
-    app.state.device_state = None
-    app.state.discovery_error = "RuntimeError('no LAN')"
+    runtime.device_state = None
+    runtime.discovery_error = "RuntimeError('no LAN')"
     response = client.get("/health")
     assert response.status_code == HTTPStatus.OK
     payload = response.json()
@@ -80,8 +81,8 @@ def test_health_reports_discovery_in_progress_before_state_is_set() -> None:
 
 def test_health_reports_ready_when_state_is_set() -> None:
     client, app = _client()
-    app.state.device_state = object()  # marker, not a real state
-    app.state.discovery_error = None
+    runtime.device_state = cast(Any, object())  # marker, not a real state
+    runtime.discovery_error = None
     response = client.get("/health")
     assert response.status_code == HTTPStatus.OK
     payload = response.json()
@@ -127,8 +128,8 @@ def test_lifespan_yields_immediately_even_when_discovery_blocks() -> None:
 
 def test_protected_route_returns_503_with_failure_detail_when_discovery_failed() -> None:
     client, app = _client()
-    app.state.device_state = None
-    app.state.discovery_error = "OSError('no LAN')"
+    runtime.device_state = None
+    runtime.discovery_error = "OSError('no LAN')"
     response = client.get("/v1/completion-aliases")
     assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
     assert response.headers.get("Retry-After") == "30"

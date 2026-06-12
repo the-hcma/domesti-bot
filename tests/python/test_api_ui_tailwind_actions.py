@@ -37,6 +37,7 @@ from app.api.ui_state import (
     find_tailwind_by_identifier,
 )
 from app.domesti_bot_cli import DeviceManagersState
+from app.server_runtime import runtime
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 
@@ -230,8 +231,8 @@ def test_post_tailwind_close_all_closes_every_door() -> None:
     a = _FakeDoor("door-1", "A", is_open=True)
     b = _FakeDoor("door-2", "B", is_open=True)
     client, app = _client()
-    app.state.device_state = _state(tailwind_doors=[a, b])
-    app.state.discovery_error = None
+    runtime.device_state = _state(tailwind_doors=[a, b])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/close-all")
     assert r.status_code == HTTPStatus.OK
     assert r.json() == {"affected": ["door-1", "door-2"], "skipped": []}
@@ -242,8 +243,8 @@ def test_post_tailwind_close_all_closes_every_door() -> None:
 def test_post_tailwind_close_all_returns_empty_when_every_door_already_closed() -> None:
     closed = _FakeDoor("door-1", "A", is_open=False)
     client, app = _client()
-    app.state.device_state = _state(tailwind_doors=[closed])
-    app.state.discovery_error = None
+    runtime.device_state = _state(tailwind_doors=[closed])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/close-all")
     assert r.status_code == HTTPStatus.OK
     assert r.json() == {"affected": [], "skipped": []}
@@ -252,8 +253,8 @@ def test_post_tailwind_close_all_returns_empty_when_every_door_already_closed() 
 
 def test_post_tailwind_close_all_returns_empty_when_manager_absent() -> None:
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[])
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/close-all")
     assert r.status_code == HTTPStatus.OK
     assert r.json() == {"affected": [], "skipped": []}
@@ -261,10 +262,10 @@ def test_post_tailwind_close_all_returns_empty_when_manager_absent() -> None:
 
 def test_post_tailwind_close_door_returns_404_for_unknown_device() -> None:
     client, app = _client()
-    app.state.device_state = _state(
+    runtime.device_state = _state(
         tailwind_doors=[_FakeDoor("door-1", "Left", is_open=True)]
     )
-    app.state.discovery_error = None
+    runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-99/close")
     assert r.status_code == HTTPStatus.NOT_FOUND
     assert "door-99" in r.json()["detail"]
@@ -272,8 +273,8 @@ def test_post_tailwind_close_door_returns_404_for_unknown_device() -> None:
 
 def test_post_tailwind_close_door_returns_404_when_manager_absent() -> None:
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[])
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-1/close")
     assert r.status_code == HTTPStatus.NOT_FOUND
     assert "Tailwind manager" in r.json()["detail"]
@@ -282,8 +283,8 @@ def test_post_tailwind_close_door_returns_404_when_manager_absent() -> None:
 def test_post_tailwind_close_door_succeeds_and_returns_refreshed_view() -> None:
     door = _FakeDoor("door-1", "Left", is_open=True)
     client, app = _client()
-    app.state.device_state = _state(tailwind_doors=[door])
-    app.state.discovery_error = None
+    runtime.device_state = _state(tailwind_doors=[door])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-1/close")
     assert r.status_code == HTTPStatus.OK
     body = r.json()
@@ -297,8 +298,8 @@ def test_post_tailwind_close_door_succeeds_and_returns_refreshed_view() -> None:
 
 def test_post_tailwind_open_door_returns_404_when_manager_absent() -> None:
     client, app = _client()
-    app.state.device_state = _state(kasa_devices=[])
-    app.state.discovery_error = None
+    runtime.device_state = _state(kasa_devices=[])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-1/open")
     assert r.status_code == HTTPStatus.NOT_FOUND
 
@@ -306,8 +307,8 @@ def test_post_tailwind_open_door_returns_404_when_manager_absent() -> None:
 def test_post_tailwind_open_door_succeeds_and_returns_refreshed_view() -> None:
     door = _FakeDoor("door-1", "Left", is_open=False)
     client, app = _client()
-    app.state.device_state = _state(tailwind_doors=[door])
-    app.state.discovery_error = None
+    runtime.device_state = _state(tailwind_doors=[door])
+    runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-1/open")
     assert r.status_code == HTTPStatus.OK
     body = r.json()

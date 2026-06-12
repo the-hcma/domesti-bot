@@ -23,20 +23,16 @@ from app.db.secrets import (
     tailwind_token_stored_in_db,
 )
 from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _Theme
+from app.server_runtime import runtime
 from app.tailwind_credentials import resolve_tailwind_token
 
 router = APIRouter(prefix="/v1/settings", tags=["settings"])
 
 
 def discovery_cache_path_from_request(request: Request) -> Path | None:
-    """Resolve the discovery SQLite path from ``app.state.cli_args``."""
-    args = getattr(request.app.state, "cli_args", None)
-    if args is None:
-        return None
-    raw = getattr(args, "discovery_cache", None)
-    if raw is None:
-        return None
-    return Path(str(raw)).expanduser().resolve()
+    """Resolve the shared SQLite path for the running server process."""
+    del request
+    return runtime.discovery_cache_path()
 
 
 @router.delete("/tailwind-token", response_model=TailwindTokenSettingsOut)
@@ -52,7 +48,7 @@ async def clear_tailwind_token(request: Request) -> TailwindTokenSettingsOut:
             ),
         )
     delete_app_secret(cache_path, key="tailwind_token")
-    await _reload_tailwind_manager(request)
+    await _reload_tailwind_manager()
     return _tailwind_settings_response(request)
 
 
@@ -90,13 +86,13 @@ async def put_tailwind_token(
             detail=str(exc),
         ) from exc
     resolved, source = resolve_tailwind_token(
-        cli_token=_cli_tailwind_token(request),
+        cli_token=_cli_tailwind_token(),
         cache_path=cache_path,
     )
     env_active = source == "env" or source == "cli"
     reload_ok = False
     if not env_active:
-        reload_ok = await _reload_tailwind_manager(request)
+        reload_ok = await _reload_tailwind_manager()
     return TailwindTokenSetOut(
         configured=bool(resolved),
         source=source,
@@ -104,30 +100,28 @@ async def put_tailwind_token(
     )
 
 
-def _cli_tailwind_token(request: Request) -> str | None:
-    args = getattr(request.app.state, "cli_args", None)
+def _cli_tailwind_token() -> str | None:
+    args = runtime.cli_args
     if args is None:
         return None
     raw = getattr(args, "tailwind_token", None)
     return str(raw) if raw else None
 
 
-async def _reload_tailwind_manager(request: Request) -> bool:
+async def _reload_tailwind_manager() -> bool:
     """Re-bootstrap GoTailwind on the live server after token storage changes."""
-    state: DeviceManagersState | None = getattr(
-        request.app.state, "device_state", None
-    )
+    state: DeviceManagersState | None = runtime.device_state
     if state is None:
         return False
-    cache_path = discovery_cache_path_from_request(request)
+    cache_path = runtime.discovery_cache_path()
     token, _source = resolve_tailwind_token(
-        cli_token=_cli_tailwind_token(request),
+        cli_token=_cli_tailwind_token(),
         cache_path=cache_path,
     )
     if state.tailwind_mgr is not None:
         await state.tailwind_mgr.disconnect()
     if not token:
-        request.app.state.device_state = state._replace(tailwind_mgr=None)
+        runtime.device_state = state._replace(tailwind_mgr=None)
         return False
     mgr, _exc = await _bootstrap_tailwind(
         args=state.args,
@@ -136,7 +130,7 @@ async def _reload_tailwind_manager(request: Request) -> bool:
         token=token,
         log_failures=True,
     )
-    request.app.state.device_state = state._replace(tailwind_mgr=mgr)
+    runtime.device_state = state._replace(tailwind_mgr=mgr)
     return mgr is not None
 
 
@@ -152,7 +146,7 @@ def _stored_token_for_settings(cache_path: Path | None) -> str | None:
 def _tailwind_settings_response(request: Request) -> TailwindTokenSettingsOut:
     cache_path = discovery_cache_path_from_request(request)
     token, source = resolve_tailwind_token(
-        cli_token=_cli_tailwind_token(request),
+        cli_token=_cli_tailwind_token(),
         cache_path=cache_path,
     )
     stored = (

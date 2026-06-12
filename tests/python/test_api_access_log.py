@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.app import _QUIET_ACCESS_LOG_PATHS, create_app
+from app.server_runtime import runtime
 from app.logging_config import TRACE_LEVEL
 
 
@@ -87,13 +88,13 @@ def test_successful_ui_state_poll_is_logged_at_trace(
     client, app = _client()
     from unittest.mock import MagicMock
 
-    app.state.device_state = MagicMock(
+    runtime.device_state = MagicMock(
         kasa_mgr=MagicMock(switches=()),
         sonos_mgr=None,
         tailwind_mgr=None,
         cache_path=None,
     )
-    app.state.discovery_error = None
+    runtime.discovery_error = None
 
     r = client.get("/v1/ui/state")
     assert r.status_code == 200

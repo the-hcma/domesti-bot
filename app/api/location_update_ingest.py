@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from http import HTTPStatus
 from pathlib import Path
 
@@ -20,6 +21,7 @@ def apply_location_update_webhook(
     cache_path: Path,
     body: LocationUpdateWebhookIn,
     *,
+    after_persist: Callable[[str], None] | None = None,
     check_emergency_switch: bool,
     persist_location: bool,
 ) -> None:
@@ -47,7 +49,7 @@ def apply_location_update_webhook(
             detail=str(exc),
         ) from exc
     retention = load_location_history_retention(cache_path)
-    upsert_user_location(
+    stored = upsert_user_location(
         cache_path,
         UserLocationRecord(
             user_id=user_id,
@@ -59,6 +61,8 @@ def apply_location_update_webhook(
         ),
         retention=retention,
     )
+    if stored and after_persist is not None:
+        after_persist(user_id)
 
 
 def _location_updates_accepted(cache_path: Path) -> bool:

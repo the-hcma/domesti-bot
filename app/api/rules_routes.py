@@ -24,6 +24,7 @@ from app.automation_rules_loader import (
     load_settings_location,
 )
 from app.api.settings_routes import discovery_cache_path_from_request
+from app.server_runtime import runtime
 from app.presence_store import (
     UserLocationRecord,
     geofence_ids_containing_location,
@@ -92,8 +93,9 @@ async def get_rules_settings_location() -> SettingsLocationOut:
 async def get_rules_status(request: Request) -> RulesStatusOut:
     """Return evaluated rule conditions for the Automations Status tab."""
     cache_path = discovery_cache_path_from_request(request)
+    evaluator = runtime.rule_evaluator
     try:
-        return build_rules_status(cache_path=cache_path)
+        return build_rules_status(cache_path=cache_path, evaluator=evaluator)
     except AutomationRulesLoadError as exc:
         raise _automation_rules_http_error(exc) from exc
 
