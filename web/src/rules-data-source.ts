@@ -148,6 +148,7 @@ export class MockRulesDataSource implements RulesDataSource {
         conditions: [],
         last_fired_at: this.store.rule_last_fired_at[rule.id] ?? null,
         last_error: null,
+        reference_issues: [],
         trigger: rule.trigger,
       })),
       sun: mockSunRow(),
@@ -580,30 +581,21 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
 
   async listGeofences(): Promise<GeofenceOut[]> {
     if (this.rulesLive) {
-      const live = await api.fetchRulesGeofences();
-      if (live.length > 0) {
-        return live;
-      }
+      return await api.fetchRulesGeofences();
     }
     return this.inner.listGeofences();
   }
 
   async listUserStatus(): Promise<UserStatusOut[]> {
     if (this.rulesLive) {
-      const live = await api.fetchRulesUserStatus();
-      if (live.length > 0) {
-        return live;
-      }
+      return await api.fetchRulesUserStatus();
     }
     return this.inner.listUserStatus();
   }
 
   async listUsers(): Promise<UserOut[]> {
     if (this.rulesLive) {
-      const live = await api.fetchRulesUsers();
-      if (live.length > 0) {
-        return live;
-      }
+      return await api.fetchRulesUsers();
     }
     return this.inner.listUsers();
   }

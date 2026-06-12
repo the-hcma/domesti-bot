@@ -90,6 +90,20 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["sun"]["sunset_at"].endswith("Z")
 
 
+def test_get_rules_validation_route_before_rule_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(_EXAMPLE_BUNDLE))
+    client = _client(Path("/tmp/unused-rules-validation.sqlite"))
+
+    validation = client.get("/v1/rules/validation")
+    assert validation.status_code == HTTPStatus.OK
+    body = validation.json()
+    assert "rules" in body
+    # Example bundle references henrique/kristen but the empty cache has no roster rows.
+    assert len(body["rules"]) >= 1
+
+
 def test_get_rules_status_route_before_rule_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

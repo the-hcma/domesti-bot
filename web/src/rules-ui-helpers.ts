@@ -212,6 +212,37 @@ export function userDisplayLabel(userId: string, displayName?: string): string {
   return trimmed !== "" ? trimmed : userId;
 }
 
+export function createBrokenRuleBadge(
+  issues: readonly { detail: string }[],
+): HTMLSpanElement {
+  const badge = document.createElement("span");
+  badge.className = "rules-broken-badge";
+  badge.textContent = "Broken";
+  const summary = issues.map((issue) => issue.detail).join("\n");
+  badge.title = summary;
+  badge.setAttribute(
+    "aria-label",
+    `Broken rule: ${issues.map((issue) => issue.detail).join("; ")}`,
+  );
+  return badge;
+}
+
+export function resolveRosterUser<T extends { user_id: string }>(
+  reference: string,
+  users: readonly T[],
+): T | undefined {
+  const trimmed = reference.trim();
+  if (trimmed === "") {
+    return undefined;
+  }
+  const exact = users.find((row) => row.user_id === trimmed);
+  if (exact !== undefined) {
+    return exact;
+  }
+  const lower = trimmed.toLowerCase();
+  return users.find((row) => row.user_id.toLowerCase() === lower);
+}
+
 export function ruleStatusHeadline(rule: {
   condition_currently_true: boolean;
   last_fired_at: string | null;

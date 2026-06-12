@@ -320,6 +320,18 @@ export interface RuleConditionStatusOut {
   met: boolean;
 }
 
+export interface RuleReferenceIssueOut {
+  kind:
+    | "discovery_pending"
+    | "missing_notification_email"
+    | "missing_smtp"
+    | "unknown_device"
+    | "unknown_geofence"
+    | "unknown_user";
+  reference: string;
+  detail: string;
+}
+
 export interface RuleStatusSummaryOut {
   id: string;
   label: string;
@@ -328,6 +340,7 @@ export interface RuleStatusSummaryOut {
   conditions: RuleConditionStatusOut[];
   last_fired_at: string | null;
   last_error: string | null;
+  reference_issues: RuleReferenceIssueOut[];
   trigger: "edge_true" | "while_true";
 }
 

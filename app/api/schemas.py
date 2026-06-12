@@ -599,6 +599,21 @@ class RuleOut(BaseModel):
     trigger: Literal["edge_true", "while_true"]
 
 
+class RuleReferenceIssueOut(BaseModel):
+    """Broken reference from a rule definition to roster / geofence data."""
+
+    detail: str
+    kind: Literal[
+        "discovery_pending",
+        "missing_notification_email",
+        "missing_smtp",
+        "unknown_device",
+        "unknown_geofence",
+        "unknown_user",
+    ]
+    reference: str
+
+
 class RuleStatusSummaryOut(BaseModel):
     """Per-rule status row for ``GET /v1/rules/status``."""
 
@@ -609,7 +624,21 @@ class RuleStatusSummaryOut(BaseModel):
     label: str
     last_error: str | None = None
     last_fired_at: str | None = None
+    reference_issues: list[RuleReferenceIssueOut] = Field(default_factory=list)
     trigger: Literal["edge_true", "while_true"]
+
+
+class RulesValidationOut(BaseModel):
+    """Cross-reference check for file-backed rules against persisted data."""
+
+    rules: list["RuleValidationOut"]
+
+
+class RuleValidationOut(BaseModel):
+    """Reference issues for one automation rule."""
+
+    id: str
+    issues: list[RuleReferenceIssueOut]
 
 
 class RulesEvaluatorOut(BaseModel):

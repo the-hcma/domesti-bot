@@ -11,7 +11,11 @@ import {
   summarizeRule,
   type RuleSummaryContext,
 } from "./rule-summary.js";
-import { ruleLastMetLabel, ruleStatusHeadline } from "./rules-ui-helpers.js";
+import {
+  createBrokenRuleBadge,
+  ruleLastMetLabel,
+  ruleStatusHeadline,
+} from "./rules-ui-helpers.js";
 import type {
   GeofenceOut,
   UserOut,
@@ -152,6 +156,9 @@ export function mountRuleInspectorPanel(
   title.className = "rules-rule-editor-title";
   title.textContent = rule.label;
   header.append(title);
+  if (options.liveStatus !== undefined && options.liveStatus.reference_issues.length > 0) {
+    header.append(createBrokenRuleBadge(options.liveStatus.reference_issues));
+  }
 
   const lead = document.createElement("p");
   lead.className = "settings-dialog-lead";

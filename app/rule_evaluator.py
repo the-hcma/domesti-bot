@@ -38,6 +38,7 @@ from app.rule_conditions import (
     compute_rules_sun_out,
     evaluate_rule_conditions_met,
 )
+from app.rule_validation import build_roster_user_id_lookup, rule_references_user_id
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 
 _LOGGER = logging.getLogger(__name__)
@@ -169,9 +170,11 @@ class RuleEvaluator:
                     received_at=_location_received_at_iso(location),
                     source=location.source,
                 )
+        roster_user_id_lookup = build_roster_user_id_lookup(list(user_display_names))
         return RuleEvaluationContext(
             geofences=tuple(geofences),
             now=effective_now,
+            roster_user_id_lookup=roster_user_id_lookup,
             sun=sun,
             timezone=tz,
             user_display_names=user_display_names,
@@ -321,12 +324,12 @@ def _condition_triggered_geofence_edge(
     transitions: dict[str, GeofenceTransition],
 ) -> bool:
     if isinstance(condition, UsersInsideGeofenceCondition):
-        if user_id not in condition.user_ids:
+        if not rule_references_user_id(condition.user_ids, user_id):
             return False
         transition = transitions.get(condition.geofence_id)
         return transition is not None and transition.entered
     if isinstance(condition, UsersOutsideGeofenceCondition):
-        if user_id not in condition.user_ids:
+        if not rule_references_user_id(condition.user_ids, user_id):
             return False
         transition = transitions.get(condition.geofence_id)
         return transition is not None and transition.left
