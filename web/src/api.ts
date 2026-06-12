@@ -34,6 +34,11 @@ import type {
   SmtpTestEmailOut,
   TailwindTokenSetOut,
   TailwindTokenSettingsOut,
+  VizioAuthTokenSetOut,
+  VizioPairBeginOut,
+  VizioPairCompleteOut,
+  VizioTvsSettingsOut,
+  VizioTvSettingsOut,
   UIBulkActionOut,
   UIDeviceActionOut,
   UIGlobalBulkActionOut,
@@ -161,6 +166,9 @@ export const api = {
   bulkOffKasa(): Promise<UIBulkActionOut> {
     return call<UIBulkActionOut>("POST", "/v1/ui/kasa/bulk-off", {});
   },
+  bulkOffVizio(): Promise<UIBulkActionOut> {
+    return call<UIBulkActionOut>("POST", "/v1/ui/vizio/bulk-off", {});
+  },
   closeAllTailwind(): Promise<UIBulkActionOut> {
     return call<UIBulkActionOut>("POST", "/v1/ui/tailwind/close-all", {});
   },
@@ -182,6 +190,12 @@ export const api = {
   },
   clearTailwindToken(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("DELETE", "/v1/settings/tailwind-token");
+  },
+  clearVizioAuth(deviceId: string): Promise<VizioTvSettingsOut> {
+    return call<VizioTvSettingsOut>(
+      "DELETE",
+      `/v1/settings/vizio/auth/${encodeURIComponent(deviceId)}`,
+    );
   },
   deleteRulesGeofence(geofenceId: string): Promise<void> {
     return callNoContent(
@@ -249,6 +263,9 @@ export const api = {
   fetchTailwindTokenSettings(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("GET", "/v1/settings/tailwind-token");
   },
+  fetchVizioTvsSettings(): Promise<VizioTvsSettingsOut> {
+    return call<VizioTvsSettingsOut>("GET", "/v1/settings/vizio/tvs");
+  },
   openTailwindDoor(deviceId: string): Promise<UIDeviceActionOut> {
     return call<UIDeviceActionOut>(
       "POST",
@@ -274,6 +291,31 @@ export const api = {
   },
   putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
     return call<TailwindTokenSetOut>("PUT", "/v1/settings/tailwind-token", { token });
+  },
+  putVizioAuthToken(deviceId: string, token: string): Promise<VizioAuthTokenSetOut> {
+    return call<VizioAuthTokenSetOut>(
+      "PUT",
+      `/v1/settings/vizio/tvs/${encodeURIComponent(deviceId)}/auth`,
+      { token },
+    );
+  },
+  beginVizioPairing(host: string): Promise<VizioPairBeginOut> {
+    return call<VizioPairBeginOut>("POST", "/v1/settings/vizio/pair/begin", { host });
+  },
+  completeVizioPairing(body: {
+    device_id: string;
+    pin: string;
+    challenge_type: number;
+    pairing_req_token: number;
+  }): Promise<VizioPairCompleteOut> {
+    return call<VizioPairCompleteOut>("POST", "/v1/settings/vizio/pair/complete", body);
+  },
+  cancelVizioPairing(body: {
+    device_id: string;
+    challenge_type: number;
+    pairing_req_token: number;
+  }): Promise<{ ok: boolean }> {
+    return call<{ ok: boolean }>("POST", "/v1/settings/vizio/pair/cancel", body);
   },
   sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut> {
     return call<SmtpTestEmailOut>("POST", "/v1/settings/smtp/test", input);
@@ -323,6 +365,13 @@ export const api = {
       playing
         ? { playing: true, favorite_index: favoriteIndex }
         : { playing: false },
+    );
+  },
+  toggleVizio(deviceId: string, on: boolean): Promise<UIDeviceActionOut> {
+    return call<UIDeviceActionOut>(
+      "POST",
+      `/v1/ui/vizio/tvs/${encodeURIComponent(deviceId)}/toggle`,
+      { on },
     );
   },
 };

@@ -81,6 +81,10 @@ from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
 from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
 from app.tailwind_credentials import resolve_tailwind_token
+from app.vizio_device_manager import (
+    VizioDeviceManager,
+    configured_vizio_host_specs,
+)
 
 COMMANDS = (
     "clear-display-name",
@@ -190,12 +194,19 @@ class _Theme:
 
 
 # Lexicographic order by slug (matches lex order of display names: Google Cast, GoTailwind, Kasa, Sonos).
-_FAMILY_BOOT_SLUGS: tuple[str, ...] = ("androidtv", "gotailwind", "kasa", "sonos")
+_FAMILY_BOOT_SLUGS: tuple[str, ...] = (
+    "androidtv",
+    "gotailwind",
+    "kasa",
+    "sonos",
+    "vizio",
+)
 _FAMILY_BOOT_LABEL: dict[str, str] = {
     "androidtv": "Google Cast",
     "gotailwind": "GoTailwind",
     "kasa": "Kasa",
     "sonos": "Sonos",
+    "vizio": "Vizio",
 }
 # Plural unit name used in the per-backend "ready" line. Singular forms are not
 # needed because the count is shown as a bare integer (``"0 zones"``, ``"1 zones"``).
@@ -204,6 +215,7 @@ _FAMILY_UNIT_PLURAL: dict[str, str] = {
     "gotailwind": "doors",
     "kasa": "switches",
     "sonos": "zones",
+    "vizio": "TVs",
 }
 # Human-friendly label for the ``last_discovery_source`` signal each backend
 # attaches to its boot bundle. ``None`` (e.g. Tailwind, which has no LAN
@@ -608,6 +620,44 @@ def _sonos_zone_count(mgr: SonosDeviceManager | None) -> int:
         return 0
     try:
         return len(mgr.players)
+    except NotInitializedError:
+        return 0
+
+
+def _vizio_has_any_auth(
+    cache_path: Path | None,
+    *,
+    cli_token: str | None,
+    env_token: str | None,
+) -> bool:
+    if (cli_token or env_token or os.environ.get("VIZIO_AUTH_TOKEN") or "").strip():
+        return True
+    if cache_path is None:
+        return False
+    from app.db.secrets import load_vizio_auth_token_from_db
+
+    for host, *_rest in kasa_discovery_store.load_vizio_tvs(cache_path):
+        if load_vizio_auth_token_from_db(cache_path, host=host):
+            return True
+    return False
+
+
+def _vizio_targets_available(
+    cache_path: Path | None,
+    configured_hosts: list[tuple[str, int]],
+) -> bool:
+    if configured_hosts:
+        return True
+    if cache_path is None:
+        return False
+    return bool(kasa_discovery_store.load_vizio_tvs(cache_path))
+
+
+def _vizio_tv_count(mgr: VizioDeviceManager | None) -> int:
+    if mgr is None:
+        return 0
+    try:
+        return len(mgr.tvs)
     except NotInitializedError:
         return 0
 
@@ -2020,6 +2070,7 @@ class DeviceManagersState(NamedTuple):
     sonos_mgr: SonosDeviceManager | None
     tailwind_mgr: GotailwindDeviceManager | None
     androidtv_mgr: AndroidTvDeviceManager | None
+    vizio_mgr: VizioDeviceManager | None
     cache_path: Path | None
     args: argparse.Namespace
 
@@ -2190,6 +2241,86 @@ async def bootstrap_device_managers(
                 "mgr": None,
             }
 
+    vizio_hosts = configured_vizio_host_specs(
+        cli_hosts=list(args.vizio_host or []),
+        env_hosts=os.environ.get("VIZIO_HOSTS"),
+    )
+    vizio_env_token = (os.environ.get("VIZIO_AUTH_TOKEN") or "").strip() or None
+
+    async def boot_vizio() -> dict[str, Any]:
+        slug = "vizio"
+        if args.no_vizio:
+            return {
+                "slug": slug,
+                "skipped": True,
+                "detail": "--no-vizio",
+                "exc": None,
+                "ok": False,
+                "mgr": None,
+            }
+        if not _vizio_targets_available(cache_path, vizio_hosts):
+            return {
+                "slug": slug,
+                "skipped": True,
+                "detail": "no hosts — set VIZIO_HOSTS or --vizio-host",
+                "exc": None,
+                "ok": False,
+                "mgr": None,
+            }
+        if not _vizio_has_any_auth(
+            cache_path,
+            cli_token=args.vizio_auth_token,
+            env_token=vizio_env_token,
+        ):
+            return {
+                "slug": slug,
+                "skipped": True,
+                "detail": "no auth token — pair via settings or set VIZIO_AUTH_TOKEN",
+                "exc": None,
+                "ok": False,
+                "mgr": None,
+            }
+        mgr = VizioDeviceManager(
+            configured_hosts=vizio_hosts,
+            discovery_cache_path=cache_path,
+            cli_auth_token=args.vizio_auth_token,
+            env_auth_token=vizio_env_token,
+            force_discovery=bool(args.force_discovery),
+        )
+        try:
+            await mgr.fetch()
+            count = _vizio_tv_count(mgr)
+            if count == 0:
+                await mgr.disconnect()
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "no TVs connected — check hosts and auth tokens",
+                    "exc": None,
+                    "ok": False,
+                    "mgr": None,
+                }
+            return {
+                "slug": slug,
+                "skipped": False,
+                "detail": "",
+                "exc": None,
+                "ok": True,
+                "mgr": mgr,
+                "source": mgr.last_discovery_source,
+                "count": count,
+            }
+        except Exception as ex:
+            await mgr.disconnect()
+            return {
+                "slug": slug,
+                "skipped": False,
+                "detail": "",
+                "exc": ex,
+                "ok": False,
+                "mgr": None,
+            }
+
     async def boot_tailwind() -> dict[str, Any]:
         slug = "gotailwind"
         if not token:
@@ -2238,6 +2369,7 @@ async def bootstrap_device_managers(
         boot_tailwind(),
         boot_kasa(),
         boot_sonos(),
+        boot_vizio(),
     )
     by_slug = {b["slug"]: b for b in bundles}
     if log_progress:
@@ -2247,12 +2379,20 @@ async def bootstrap_device_managers(
     androidtv_mgr = by_slug["androidtv"].get("mgr")
     sonos_mgr = by_slug["sonos"].get("mgr")
     tailwind_mgr = by_slug["gotailwind"].get("mgr")
+    vizio_mgr = by_slug["vizio"].get("mgr")
     kasa_ok = bool(by_slug["kasa"].get("ok"))
     tw_ok = tailwind_mgr is not None
 
     sonos_ready = sonos_mgr is not None
     androidtv_ready = androidtv_mgr is not None
-    if not kasa_ok and not tw_ok and not sonos_ready and not androidtv_ready:
+    vizio_ready = vizio_mgr is not None
+    if (
+        not kasa_ok
+        and not tw_ok
+        and not sonos_ready
+        and not androidtv_ready
+        and not vizio_ready
+    ):
         print(theme.err("No backends initialized; exiting."), file=sys.stderr)
         raise SystemExit(1)
 
@@ -2261,9 +2401,10 @@ async def bootstrap_device_managers(
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
         nd = _tailwind_door_count(tailwind_mgr)
+        nv = _vizio_tv_count(vizio_mgr)
         tail = (
             f"({na} Google Cast device(s), {ns} Kasa switch(es), {nz} Sonos zone(s), "
-            f"{nd} Tailwind door(s)). Tab-complete commands and names."
+            f"{nd} Tailwind door(s), {nv} Vizio TV(s)). Tab-complete commands and names."
         )
         print(f"{theme.ok('Ready')} {theme.dim(tail)}", flush=True)
         _maybe_print_kasa_auth_notice(kasa_mgr, theme=theme)
@@ -2273,6 +2414,7 @@ async def bootstrap_device_managers(
         sonos_mgr=sonos_mgr,
         tailwind_mgr=tailwind_mgr,
         androidtv_mgr=androidtv_mgr,
+        vizio_mgr=vizio_mgr,
         cache_path=cache_path,
         args=args,
     )
@@ -2286,6 +2428,8 @@ async def shutdown_device_managers(state: DeviceManagersState) -> None:
         await state.sonos_mgr.disconnect()
     if state.tailwind_mgr is not None:
         await state.tailwind_mgr.disconnect()
+    if state.vizio_mgr is not None:
+        await state.vizio_mgr.disconnect()
 
 
 async def _async_main(args: argparse.Namespace) -> None:
@@ -2490,6 +2634,28 @@ def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argp
         default=8.0,
         metavar="SEC",
         help="Tailwind HTTP request timeout (default: 8)",
+    )
+    p.add_argument(
+        "--no-vizio",
+        action="store_true",
+        help="Do not discover or control Vizio SmartCast TVs",
+    )
+    p.add_argument(
+        "--vizio-auth-token",
+        type=str,
+        default=(os.environ.get("VIZIO_AUTH_TOKEN") or "").strip() or None,
+        metavar="TOKEN",
+        help="SmartCast auth token for all configured TVs (default: VIZIO_AUTH_TOKEN env)",
+    )
+    p.add_argument(
+        "--vizio-host",
+        action="append",
+        default=None,
+        metavar="HOST[:PORT]",
+        help=(
+            "Known Vizio TV host or IP (port optional, default 7345; repeatable). "
+            "Also VIZIO_HOSTS (comma-separated)."
+        ),
     )
     if add_version:
         p.add_argument(

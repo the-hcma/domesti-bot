@@ -158,6 +158,8 @@ def resolve_compact_icon(
         return "speaker"
     if family_id == "tailwind" or kind == "door":
         return "garage"
+    if family_id == "vizio":
+        return "tv"
     if family_id == "kasa" or kind == "switch":
         normalized = _normalize_label(label)
         from_object = _icon_from_object_tokens(normalized)

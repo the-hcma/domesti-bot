@@ -10,6 +10,7 @@ from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
+VizioAuthSourceOut = Literal["cli", "env", "database", "none"]
 
 
 class CompletionAliasesOut(BaseModel):
@@ -665,6 +666,106 @@ class RulesSunOut(BaseModel):
     is_dark: bool
     sunrise_at: str
     sunset_at: str
+
+
+class VizioAuthTokenSetIn(BaseModel):
+    """Body for ``PUT /v1/settings/vizio/tvs/{device_id}/auth``."""
+
+    token: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        description="SmartCast auth token from a completed pairing session.",
+    )
+
+
+class VizioAuthTokenSetOut(BaseModel):
+    """Confirmation after persisting an encrypted per-TV auth token."""
+
+    configured: bool
+    device_id: str
+    restart_required: bool = Field(
+        ...,
+        description=(
+            "True when the running server could not hot-reload the Vizio "
+            "manager after saving the token."
+        ),
+    )
+
+
+class VizioPairBeginIn(BaseModel):
+    """Body for ``POST /v1/settings/vizio/pair/begin``."""
+
+    host: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="TV host or ``HOST:PORT`` (default port 7345).",
+    )
+
+
+class VizioPairBeginOut(BaseModel):
+    """Pairing challenge returned after ``pairing/start`` succeeds."""
+
+    device_id: str = Field(..., description="Stable id (host or host:port).")
+    challenge_type: int
+    pairing_req_token: int
+
+
+class VizioPairCancelIn(BaseModel):
+    """Body for ``POST /v1/settings/vizio/pair/cancel``."""
+
+    device_id: str = Field(..., min_length=1, max_length=128)
+    challenge_type: int
+    pairing_req_token: int
+
+
+class VizioPairCompleteIn(BaseModel):
+    """Body for ``POST /v1/settings/vizio/pair/complete``."""
+
+    device_id: str = Field(..., min_length=1, max_length=128)
+    pin: str = Field(..., min_length=4, max_length=8)
+    challenge_type: int
+    pairing_req_token: int
+
+
+class VizioPairCompleteOut(BaseModel):
+    """Confirmation after persisting an encrypted per-TV auth token."""
+
+    configured: bool
+    device_id: str
+    restart_required: bool = Field(
+        ...,
+        description=(
+            "True when the running server could not hot-reload the Vizio "
+            "manager after pairing."
+        ),
+    )
+
+
+class VizioTvSettingsOut(BaseModel):
+    """One known Vizio TV row (no auth token material)."""
+
+    device_id: str
+    host: str
+    port: int
+    display_name: str | None = None
+    auth_configured: bool
+    auth_source: VizioAuthSourceOut
+
+
+class VizioTvsSettingsOut(BaseModel):
+    """Known Vizio TVs and Fernet key status for the settings UI."""
+
+    secrets_key_configured: bool = Field(
+        ...,
+        description="True when a valid Fernet key is available for encrypted storage.",
+    )
+    secrets_key_source: SecretsKeySourceOut = Field(
+        ...,
+        description="``env`` → ``DOMESTI_BOT_SECRETS_KEY``; ``file`` → ``domesti-bot.config.json``.",
+    )
+    tvs: list[VizioTvSettingsOut] = Field(default_factory=list)
 
 
 class SettingsLocationOut(BaseModel):

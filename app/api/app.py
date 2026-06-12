@@ -37,6 +37,7 @@ from app.api.schemas import (
     UIStateOut,
 )
 from app.api.settings_routes import router as settings_router
+from app.api.vizio_settings_routes import router as vizio_settings_router
 from app.api.mytracks_routes import rules_router as mytracks_rules_router
 from app.api.mytracks_routes import settings_router as mytracks_settings_router
 from app.api.location_update_routes import router as location_update_router
@@ -48,13 +49,16 @@ from app.api.ui_state import (
     build_sonos_device_view,
     build_tailwind_device_view,
     build_ui_state,
+    build_vizio_device_view,
     bulk_close_tailwind_apply,
     bulk_off_global_apply,
     bulk_off_kasa_apply,
+    bulk_off_vizio_apply,
     bulk_pause_sonos_apply,
     find_kasa_by_host,
     find_sonos_by_identifier,
     find_tailwind_by_identifier,
+    find_vizio_by_id,
 )
 from app.build_info import get_build_info
 from app.device_state_watcher import (
@@ -287,6 +291,7 @@ def create_app(args: Any) -> FastAPI:
         lifespan=lifespan,
     )
     app.include_router(settings_router, dependencies=[Depends(_verify_api_key)])
+    app.include_router(vizio_settings_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(smtp_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(mytracks_settings_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(mytracks_rules_router, dependencies=[Depends(_verify_api_key)])
@@ -468,7 +473,7 @@ def create_app(args: Any) -> FastAPI:
         body: UIPreferenceIn,
         state: DeviceState,
     ) -> UIPreferenceOut:
-        if family_id not in {"kasa", "sonos", "tailwind"}:
+        if family_id not in {"kasa", "sonos", "tailwind", "vizio"}:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail=f"Unknown family_id: {family_id}",
@@ -507,6 +512,16 @@ def create_app(args: Any) -> FastAPI:
                     status_code=HTTPStatus.NOT_FOUND,
                     detail=(
                         f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: "
+                        f"{device_id}"
+                    ),
+                )
+        if family_id == "vizio":
+            vz = state.vizio_mgr
+            if vz is None or find_vizio_by_id(vz, device_id) is None:
+                raise HTTPException(
+                    status_code=HTTPStatus.NOT_FOUND,
+                    detail=(
+                        f"Unknown {DeviceFamilyId.VIZIO.display_name()} device: "
                         f"{device_id}"
                     ),
                 )
@@ -665,6 +680,52 @@ def create_app(args: Any) -> FastAPI:
         return UIDeviceActionOut(
             device=build_tailwind_device_view(
                 state.tailwind_mgr,
+                device_id=device_id,
+                cache_path=state.cache_path,
+            )
+        )
+
+    @app.post(
+        "/v1/ui/vizio/bulk-off",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def vizio_bulk_off(state: DeviceState) -> UIBulkActionOut:
+        affected, skipped = await bulk_off_vizio_apply(state)
+        return UIBulkActionOut(affected=affected, skipped=skipped)
+
+    @app.post(
+        "/v1/ui/vizio/tvs/{device_id}/toggle",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def vizio_set_power(
+        device_id: str,
+        body: UIPowerSetIn,
+        state: DeviceState,
+    ) -> UIDeviceActionOut:
+        if state.vizio_mgr is None:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=(
+                    f"{DeviceFamilyId.VIZIO.display_name()} manager is not "
+                    "configured on this server"
+                ),
+            )
+        tv = find_vizio_by_id(state.vizio_mgr, device_id)
+        if tv is None:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=(
+                    f"Unknown {DeviceFamilyId.VIZIO.display_name()} device: "
+                    f"{device_id}"
+                ),
+            )
+        if body.on:
+            await tv.turn_on()
+        else:
+            await tv.turn_off()
+        return UIDeviceActionOut(
+            device=build_vizio_device_view(
+                state.vizio_mgr,
                 device_id=device_id,
                 cache_path=state.cache_path,
             )

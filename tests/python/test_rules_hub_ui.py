@@ -35,6 +35,7 @@ async def _bootstrap_empty_device_state(
         sonos_mgr=None,
         tailwind_mgr=None,
         androidtv_mgr=None,
+        vizio_mgr=None,
         cache_path=None,
         args=argparse.Namespace(),
     )

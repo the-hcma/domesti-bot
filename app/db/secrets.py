@@ -58,6 +58,15 @@ def load_tailwind_token_from_db(path: Path) -> str | None:
     return stripped if stripped else None
 
 
+def load_vizio_auth_token_from_db(path: Path, *, host: str) -> str | None:
+    """Return the decrypted SmartCast auth token for ``host``, or ``None``."""
+    token = _load_app_secret_plaintext(path, _vizio_auth_secret_key(host))
+    if token is None:
+        return None
+    stripped = token.strip()
+    return stripped if stripped else None
+
+
 def save_smtp_password_to_db(path: Path, password: str) -> None:
     """Encrypt and persist the SMTP password."""
     _save_app_secret_plaintext(path, _SMTP_PASSWORD_KEY, password)
@@ -76,6 +85,11 @@ def save_mytracks_relay_api_key_to_db(path: Path, api_key: str) -> None:
 def save_tailwind_token_to_db(path: Path, token: str) -> None:
     """Encrypt and persist the Tailwind Local Control Key."""
     _save_app_secret_plaintext(path, _TAILWIND_SECRET_KEY, token.strip())
+
+
+def save_vizio_auth_token_to_db(path: Path, *, host: str, token: str) -> None:
+    """Encrypt and persist a per-TV SmartCast auth token."""
+    _save_app_secret_plaintext(path, _vizio_auth_secret_key(host), token.strip())
 
 
 def smtp_password_stored_in_db(path: Path) -> bool:
@@ -113,6 +127,11 @@ def secrets_key_source() -> SecretsKeySource:
 def tailwind_token_stored_in_db(path: Path) -> bool:
     """True when an ``app_secrets`` row exists for the Tailwind token."""
     return _app_secret_stored_in_db(path, _TAILWIND_SECRET_KEY)
+
+
+def vizio_auth_token_stored_in_db(path: Path, *, host: str) -> bool:
+    """True when an ``app_secrets`` row exists for the given TV host."""
+    return _app_secret_stored_in_db(path, _vizio_auth_secret_key(host))
 
 
 def _app_secret_stored_in_db(path: Path, key: str) -> bool:
@@ -185,3 +204,7 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
         else:
             row.ciphertext = ciphertext
             row.updated_at = now
+
+
+def _vizio_auth_secret_key(host: str) -> str:
+    return f"vizio_auth:{host.strip()}"

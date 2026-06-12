@@ -92,6 +92,41 @@ export interface TailwindTokenSetOut {
   restart_required: boolean;
 }
 
+export type VizioAuthSource = "cli" | "env" | "database" | "none";
+
+export interface VizioTvSettingsOut {
+  device_id: string;
+  host: string;
+  port: number;
+  display_name: string | null;
+  auth_configured: boolean;
+  auth_source: VizioAuthSource;
+}
+
+export interface VizioTvsSettingsOut {
+  secrets_key_configured: boolean;
+  secrets_key_source: SecretsKeySource;
+  tvs: VizioTvSettingsOut[];
+}
+
+export interface VizioAuthTokenSetOut {
+  configured: boolean;
+  device_id: string;
+  restart_required: boolean;
+}
+
+export interface VizioPairBeginOut {
+  device_id: string;
+  challenge_type: number;
+  pairing_req_token: number;
+}
+
+export interface VizioPairCompleteOut {
+  configured: boolean;
+  device_id: string;
+  restart_required: boolean;
+}
+
 // --- Rule engine (mirror planned ``app/api/schemas.py`` rule models) ---
 
 export type RuleTrigger = "edge_true" | "while_true";

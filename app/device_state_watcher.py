@@ -41,6 +41,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
+from app.vizio_device_manager import VizioDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -186,6 +187,38 @@ class TailwindPollingWatcher(DeviceStateWatcher):
                 pass
 
 
+class VizioPollingWatcher(DeviceStateWatcher):
+    """Periodically re-read every Vizio TV's cached power state."""
+
+    def __init__(
+        self,
+        mgr: VizioDeviceManager,
+        *,
+        interval_s: float = DEFAULT_POLL_INTERVAL_S,
+    ) -> None:
+        self._mgr = mgr
+        self._interval_s = interval_s
+
+    async def _refresh_once(self) -> None:
+        for tv in self._mgr.tvs:
+            try:
+                await tv.refresh_power_state()
+            except Exception:
+                _LOGGER.warning(
+                    "[state-watcher vizio] %s update failed; keeping last known state",
+                    tv.identifier,
+                    exc_info=True,
+                )
+
+    async def run(self, *, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            await self._refresh_once()
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=self._interval_s)
+            except asyncio.TimeoutError:
+                pass
+
+
 def build_default_watchers(
     state: DeviceManagersState,
     *,
@@ -208,6 +241,10 @@ def build_default_watchers(
     if state.tailwind_mgr is not None:
         watchers.append(
             TailwindPollingWatcher(state.tailwind_mgr, interval_s=interval_s)
+        )
+    if state.vizio_mgr is not None:
+        watchers.append(
+            VizioPollingWatcher(state.vizio_mgr, interval_s=interval_s)
         )
     return watchers
 

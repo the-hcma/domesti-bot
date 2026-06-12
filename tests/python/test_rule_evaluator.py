@@ -177,6 +177,7 @@ def _setup_arrive_home_evaluator(
         sonos_mgr=None,
         tailwind_mgr=None,
         androidtv_mgr=None,
+        vizio_mgr=None,
         cache_path=db,
         args=argparse.Namespace(),
     )

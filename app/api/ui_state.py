@@ -39,6 +39,7 @@ from app.sonos_device_manager import (
     SonosTransitionUnavailableError,
 )
 from app.ui_compact_icon import resolve_compact_icon
+from app.vizio_device_manager import VizioDeviceManager, VizioTvDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("kasa", "Lights & plugs", "#3B82F6"),
     ("sonos", "Sonos zones", "#8B5CF6"),
     ("tailwind", "Garage doors", "#10B981"),
+    ("vizio", "Vizio TVs", "#F97316"),
 )
 
 # Speaker-kind state strings emitted on ``UIDeviceOut.state`` for Sonos.
@@ -132,6 +134,27 @@ async def _bulk_pause_sonos_apply_impl(
             )
             continue
         affected.append(key)
+    affected.sort()
+    skipped.sort()
+    return affected, skipped
+
+
+async def _bulk_off_vizio_apply_impl(
+    mgr: VizioDeviceManager,
+    *,
+    excluded: set[str],
+) -> tuple[list[str], list[str]]:
+    affected: list[str] = []
+    skipped: list[str] = []
+    for tv in mgr.tvs:
+        device_id = tv.identifier
+        if device_id in excluded:
+            skipped.append(device_id)
+            continue
+        if not tv.is_on:
+            continue
+        await tv.turn_off()
+        affected.append(device_id)
     affected.sort()
     skipped.sort()
     return affected, skipped
@@ -334,6 +357,34 @@ def _tailwind_devices(
     return out
 
 
+def _vizio_devices(
+    mgr: VizioDeviceManager,
+    excluded: set[str],
+) -> list[UIDeviceOut]:
+    """One :class:`UIDeviceOut` per Vizio TV."""
+
+    out: list[UIDeviceOut] = []
+    for tv in mgr.tvs:
+        key = tv.identifier
+        out.append(
+            UIDeviceOut(
+                id=key,
+                family_id="vizio",
+                label=tv.preferred_label,
+                kind="switch",
+                state=_switch_state(tv.is_on),
+                compact_icon=_compact_icon_for_device(
+                    family_id="vizio",
+                    label=tv.preferred_label,
+                    kind="switch",
+                ),
+                exclude_from_global=key in excluded,
+            )
+        )
+    out.sort(key=lambda d: (d.label.lower(), d.id))
+    return out
+
+
 def build_kasa_device_view(
     mgr: KasaDeviceManager,
     *,
@@ -454,6 +505,39 @@ def build_tailwind_device_view(
     )
 
 
+def build_vizio_device_view(
+    mgr: VizioDeviceManager,
+    *,
+    device_id: str,
+    cache_path: Path | None,
+) -> UIDeviceOut:
+    """Build a fresh :class:`UIDeviceOut` for one Vizio TV after an action."""
+
+    tv = find_vizio_by_id(mgr, device_id)
+    if tv is None:
+        raise KeyError(device_id)
+    excluded = (
+        _excluded_keys(
+            kasa_discovery_store.load_ui_preferences(cache_path), "vizio"
+        )
+        if cache_path is not None
+        else set()
+    )
+    return UIDeviceOut(
+        id=device_id,
+        family_id="vizio",
+        label=tv.preferred_label,
+        kind="switch",
+        state=_switch_state(tv.is_on),
+        compact_icon=_compact_icon_for_device(
+            family_id="vizio",
+            label=tv.preferred_label,
+            kind="switch",
+        ),
+        exclude_from_global=device_id in excluded,
+    )
+
+
 def build_ui_state(
     state: DeviceManagersState,
     *,
@@ -486,6 +570,8 @@ def build_ui_state(
             devices = _sonos_devices(state.sonos_mgr, excluded)
         elif family_id == "tailwind" and state.tailwind_mgr is not None:
             devices = _tailwind_devices(state.tailwind_mgr, excluded)
+        elif family_id == "vizio" and state.vizio_mgr is not None:
+            devices = _vizio_devices(state.vizio_mgr, excluded)
         else:
             devices = []
         if not devices:
@@ -529,6 +615,7 @@ async def bulk_off_global_apply(
     * ``sonos`` → ``pause`` for every non-excluded zone that's
       currently playing (paused / unknown zones are left alone).
     * ``tailwind`` → ``close`` for every non-excluded door.
+    * ``vizio`` → ``turn_off`` for every non-excluded TV.
 
     When ``cache_path`` is ``None`` (``--no-discovery-cache``) we treat
     every device as **not** excluded, which matches the read-side
@@ -543,6 +630,7 @@ async def bulk_off_global_apply(
     kasa_excluded = _excluded_keys(rows, "kasa")
     sonos_excluded = _excluded_keys(rows, "sonos")
     tailwind_excluded = _excluded_keys(rows, "tailwind")
+    vizio_excluded = _excluded_keys(rows, "vizio")
     affected: list[tuple[str, str]] = []
     skipped: list[tuple[str, str]] = []
     kasa_aff, kasa_skip = await _bulk_off_kasa_apply_impl(
@@ -562,6 +650,12 @@ async def bulk_off_global_apply(
         )
         affected.extend(("tailwind", k) for k in tw_aff)
         skipped.extend(("tailwind", k) for k in tw_skip)
+    if state.vizio_mgr is not None:
+        vz_aff, vz_skip = await _bulk_off_vizio_apply_impl(
+            state.vizio_mgr, excluded=vizio_excluded
+        )
+        affected.extend(("vizio", k) for k in vz_aff)
+        skipped.extend(("vizio", k) for k in vz_skip)
     affected.sort()
     skipped.sort()
     return affected, skipped
@@ -579,6 +673,16 @@ async def bulk_off_kasa_apply(
     """
 
     return await _bulk_off_kasa_apply_impl(state.kasa_mgr, excluded=set())
+
+
+async def bulk_off_vizio_apply(
+    state: DeviceManagersState,
+) -> tuple[list[str], list[str]]:
+    """Family-level "turn off all Vizio TVs" — ignores per-device exclusions."""
+
+    if state.vizio_mgr is None:
+        return [], []
+    return await _bulk_off_vizio_apply_impl(state.vizio_mgr, excluded=set())
 
 
 async def bulk_pause_sonos_apply(
@@ -633,6 +737,20 @@ def find_sonos_by_identifier(
     for sp in mgr.players:
         if sp.identifier == needle:
             return sp
+    return None
+
+
+def find_vizio_by_id(
+    mgr: VizioDeviceManager, device_id: str
+) -> VizioTvDevice | None:
+    """Look up a Vizio TV by its ``identifier`` (host or host:port)."""
+
+    needle = device_id.strip()
+    if not needle:
+        return None
+    for tv in mgr.tvs:
+        if tv.identifier == needle:
+            return tv
     return None
 
 
