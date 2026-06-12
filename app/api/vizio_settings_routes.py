@@ -416,6 +416,7 @@ def _vizio_tv_settings_out(
     )
     return VizioTvSettingsOut(
         device_id=canonical_id,
+        mac=mac,
         host=host,
         port=port,
         display_name=_display_name_for(cache_path, host=host, port=port, mac=mac),

@@ -96,6 +96,7 @@ export type VizioAuthSource = "cli" | "env" | "database" | "none";
 
 export interface VizioTvSettingsOut {
   device_id: string;
+  mac: string | null;
   host: string;
   port: number;
   display_name: string | null;

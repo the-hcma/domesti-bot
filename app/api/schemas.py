@@ -746,7 +746,14 @@ class VizioPairCompleteOut(BaseModel):
 class VizioTvSettingsOut(BaseModel):
     """One known Vizio TV row for the settings UI."""
 
-    device_id: str
+    device_id: str = Field(
+        ...,
+        description="Stable id (normalized MAC when known; legacy host or host:port otherwise).",
+    )
+    mac: str | None = Field(
+        default=None,
+        description="Normalized MAC address when resolved; used to locate the TV after DHCP changes.",
+    )
     host: str
     port: int
     display_name: str | None = None

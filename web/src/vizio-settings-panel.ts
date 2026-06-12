@@ -26,8 +26,9 @@ function appendVizioIntro(parent: HTMLElement): void {
   intro.className = "settings-dialog-lead";
   intro.textContent =
     "Pair with a PIN shown on the TV, or paste an auth token from a prior " +
-    "SmartCast pairing session. Tokens are stored encrypted per TV in the " +
-    "discovery database on this server.";
+    "SmartCast pairing session. Enter the TV's current IP to reach it; " +
+    "domesti-bot stores the MAC as the stable device id so DHCP changes do " +
+    "not break control.";
   parent.append(intro);
 }
 
@@ -77,6 +78,19 @@ export async function mountVizioSettingsPanel(
   hostInput.value = DEFAULT_TV_HOST;
   hostInput.autocomplete = "off";
   hostLabel.append(hostLabelText, hostInput);
+
+  const macLabel = document.createElement("label");
+  macLabel.className = "settings-dialog-field";
+  macLabel.hidden = true;
+  const macLabelText = document.createElement("span");
+  macLabelText.textContent = "MAC address";
+  const macInput = document.createElement("input");
+  macInput.type = "text";
+  macInput.name = "mac";
+  macInput.readOnly = true;
+  macInput.autocomplete = "off";
+  macInput.placeholder = "Resolved after pairing or saving a token";
+  macLabel.append(macLabelText, macInput);
 
   const tokenLabel = document.createElement("label");
   tokenLabel.className = "settings-dialog-field";
@@ -160,7 +174,7 @@ export async function mountVizioSettingsPanel(
   clearBtn.disabled = true;
   actions.append(saveBtn, clearBtn);
 
-  form.append(status, hostLabel, tokenLabel, pairSection, actions);
+  form.append(status, hostLabel, macLabel, tokenLabel, pairSection, actions);
   container.append(form);
 
   let pendingPair: VizioPairBeginOut | null = null;
@@ -221,10 +235,23 @@ export async function mountVizioSettingsPanel(
     }
   };
 
+  const applyMacField = (tv: VizioTvSettingsOut | undefined): void => {
+    const mac = tv?.mac ?? null;
+    if (mac) {
+      macInput.value = mac;
+      macLabel.hidden = false;
+      return;
+    }
+    macInput.value = "";
+    macLabel.hidden = true;
+  };
+
   const applyTvStatus = (tv: VizioTvSettingsOut | undefined): void => {
     applyTokenFieldsFromTv(tv);
+    applyMacField(tv);
     if (tv?.auth_configured) {
-      const label = tv.display_name ?? tv.device_id;
+      const name = tv.display_name ?? tv.host;
+      const label = tv.mac ? `${name} (${tv.mac})` : name;
       if (tv.auth_source === "cli") {
         showStatusMessage(
           `${label} uses --vizio-auth-token; per-TV database tokens are ignored until you remove the CLI flag.`,
