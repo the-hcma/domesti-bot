@@ -85,6 +85,7 @@ def test_put_vizio_auth_persists_token_and_tv_row(
     listed = client.get("/v1/settings/vizio/tvs").json()
     assert len(listed["tvs"]) == 1
     assert listed["tvs"][0]["device_id"] == "00:bd:3e:d5:f0:11"
+    assert listed["tvs"][0]["mac"] == "00:bd:3e:d5:f0:11"
     assert listed["tvs"][0]["display_name"] == "Kitchen TV"
     assert listed["tvs"][0]["auth_configured"] is True
     assert listed["tvs"][0]["auth_source"] == "database"
