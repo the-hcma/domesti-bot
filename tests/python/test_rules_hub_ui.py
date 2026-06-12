@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import threading
 import time
 from collections.abc import Iterator
@@ -42,11 +43,11 @@ async def _bootstrap_empty_device_state(
 
 
 def test_index_html_includes_rules_hub_css() -> None:
-    """Landing-page CSS defines Rules hub chrome (tabs, mock pill, geofence map)."""
+    """Landing-page CSS defines Rules hub chrome (tabs, source pill, geofence map)."""
 
     html = _INDEX_HTML_PATH.read_text(encoding="utf-8")
     for needle in (
-        "rules-mock-pill",
+        "rules-source-pill",
         "rules-tab-bar",
         "rules-geofence-map",
         "rules-geofence-draw-mode",
@@ -101,9 +102,14 @@ def landing_base_url() -> Iterator[str]:
         discovery_cache=None,
         tailwind_token=None,
     )
+    missing_rules = Path("/tmp/domesti-bot-browser-tests-no-rules.json")
     with patch(
         "app.api.app.bootstrap_device_managers",
         _bootstrap_empty_device_state,
+    ), patch.dict(
+        os.environ,
+        {"DOMESTI_AUTOMATION_RULES_FILE": str(missing_rules)},
+        clear=False,
     ):
         app = create_app(args)
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
@@ -199,7 +205,7 @@ def test_status_rule_click_opens_rules_tab_inspector(
 
 
 @pytest.mark.browser
-def test_rules_hub_opens_with_mock_seed_rule(
+def test_rules_hub_opens_with_seed_rule(
     chromium_browser: Any,
     landing_base_url: str,
 ) -> None:
@@ -214,9 +220,7 @@ def test_rules_hub_opens_with_mock_seed_rule(
         page.get_by_role("menuitem", name="Automations").click()
         dialog = page.locator("dialog.rules-dialog")
         dialog.wait_for(state="visible", timeout=10_000)
-        mock_pill = page.locator(".rules-mock-pill")
-        assert mock_pill.is_visible()
-        assert mock_pill.inner_text().lower() == "mock rules"
+        assert page.locator(".rules-source-pill").count() == 0
         assert "Automations" in dialog.inner_text()
         assert "Rules" in dialog.inner_text()
         assert "Welcome home" in dialog.inner_text()
@@ -225,7 +229,7 @@ def test_rules_hub_opens_with_mock_seed_rule(
         rules_card = page.locator(".rules-card").first
         rules_card.wait_for(state="visible", timeout=10_000)
         card_text = rules_card.inner_text()
-        assert "When Henrique and Kristen enter House" in card_text
+        assert "When henrique and kristen enter house" in card_text
         assert "After sunset until midnight" in card_text
         assert "Turn on Kitchen lights" in card_text
         assert "Turn on Porch lights" in card_text

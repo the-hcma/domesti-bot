@@ -1,4 +1,4 @@
-// Desktop Automations hub — Status, Conditions, automations, geofences, mail (mock-backed).
+// Desktop Automations hub — Status, Conditions, automations, geofences, mail.
 
 import {
   AFTER_SUNSET_WINDOW_DESCRIPTION,
@@ -252,7 +252,6 @@ class RulesHubController {
 
   private readonly body: HTMLDivElement;
   private readonly dialog: HTMLDialogElement;
-  private readonly mockPill: HTMLSpanElement;
   private readonly panel: HTMLDivElement;
   private activeTab: RulesTabId = "status";
   private dataSource: RulesDataSource;
@@ -275,18 +274,13 @@ class RulesHubController {
     titleWrap.className = "rules-dialog-title-wrap";
     const title = document.createElement("h2");
     title.textContent = "Automations";
-    this.mockPill = document.createElement("span");
-    this.mockPill.className = "rules-mock-pill";
+    titleWrap.append(title);
     if (dataSource.isRulesFileBacked()) {
-      this.mockPill.textContent = "Rules: automation-rules.json";
-      this.mockPill.hidden = false;
-    } else {
-      this.mockPill.textContent = dataSource.isMailLive()
-        ? "Mock rules"
-        : "Mock data";
-      this.mockPill.hidden = !dataSource.isMock();
+      const sourcePill = document.createElement("span");
+      sourcePill.className = "rules-source-pill";
+      sourcePill.textContent = "Rules: automation-rules.json";
+      titleWrap.append(sourcePill);
     }
-    titleWrap.append(title, this.mockPill);
     header.append(titleWrap, createDialogCloseButton(this.dialog));
     const tabBar = document.createElement("div");
     tabBar.className = "rules-tab-bar";
