@@ -138,7 +138,7 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
         "setup-secrets",
         "Create or update domesti-bot.config.json (Fernet key for encrypted DB secrets).",
     ),
-    ("show-devices", "List Google Cast targets, Kasa switches, Sonos zones, then Tailwind doors."),
+    ("show-devices", "List Google Cast, Kasa, Sonos, Tailwind, and Vizio devices."),
     ("turn-off", "Turn a Kasa switch off, or stop media on a Cast target."),
     ("turn-on", "Turn a Kasa switch on, or resume paused Cast media if applicable."),
 )
@@ -634,8 +634,13 @@ def _vizio_has_any_auth(
         return True
     if cache_path is None:
         return False
-    from app.db.secrets import load_vizio_auth_token_from_db
+    from app.db.secrets import (
+        load_vizio_auth_hosts_from_db,
+        load_vizio_auth_token_from_db,
+    )
 
+    if load_vizio_auth_hosts_from_db(cache_path):
+        return True
     for host, *_rest in kasa_discovery_store.load_vizio_tvs(cache_path):
         if load_vizio_auth_token_from_db(cache_path, host=host):
             return True
@@ -650,6 +655,10 @@ def _vizio_targets_available(
         return True
     if cache_path is None:
         return False
+    from app.db.secrets import load_vizio_auth_hosts_from_db
+
+    if load_vizio_auth_hosts_from_db(cache_path):
+        return True
     return bool(kasa_discovery_store.load_vizio_tvs(cache_path))
 
 
@@ -1060,6 +1069,7 @@ async def _repl_cmd_show_devices(
     sonos_mgr: SonosDeviceManager | None,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    vizio_mgr: VizioDeviceManager | None,
     theme: _Theme,
 ) -> None:
     print(theme.header("Google Cast (playback proxy: on = playing):"))
@@ -1179,6 +1189,39 @@ async def _repl_cmd_show_devices(
                     )
         except NotInitializedError:
             print(theme.dim("  (not available)"))
+    print(theme.header("Vizio TVs:"))
+    if vizio_mgr is None:
+        print(
+            theme.dim(
+                "  (skipped — pair via settings, set VIZIO_HOSTS / --vizio-host, "
+                "or configure VIZIO_AUTH_TOKEN.)"
+            )
+        )
+    else:
+        try:
+            tvs = sorted(
+                vizio_mgr.tvs,
+                key=lambda tv: _lex_show_devices_key(tv.preferred_label, tv.identifier),
+            )
+            if not tvs:
+                print(theme.dim("  (none connected — check hosts and auth tokens.)"))
+            for tv in tvs:
+                host_meta = tv.endpoint.host
+                if tv.endpoint.port != 7345:
+                    host_meta = f"{host_meta}:{tv.endpoint.port}"
+                if tv.preferred_label != tv.identifier:
+                    print(
+                        f"  {theme.device(repr(tv.preferred_label))}  "
+                        f"{theme.meta('[host')} {theme.device(repr(host_meta))}"
+                        f"{theme.meta(']')} {theme.state('(' + tv.power_state + ')')}"
+                    )
+                else:
+                    print(
+                        f"  {theme.device(repr(tv.identifier))}  "
+                        f"{theme.state('(' + tv.power_state + ')')}"
+                    )
+        except NotInitializedError:
+            print(theme.dim("  (not available)"))
 
 
 async def _repl_cmd_sonos_pause_resume(
@@ -1219,6 +1262,7 @@ async def dispatch_repl_action(
     sonos_mgr: SonosDeviceManager | None,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    vizio_mgr: VizioDeviceManager | None,
     *,
     cache_path: Path | None,
     androidtv_zeroconf_timeout: float,
@@ -1345,6 +1389,7 @@ async def dispatch_repl_action(
             sonos_mgr=sonos_mgr,
             tailwind_mgr=tailwind_mgr,
             androidtv_mgr=androidtv_mgr,
+            vizio_mgr=vizio_mgr,
             theme=theme,
         )
         return
@@ -1760,6 +1805,7 @@ async def execute_line_for_api(
     sonos_mgr: SonosDeviceManager | None,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    vizio_mgr: VizioDeviceManager | None,
     *,
     cache_path: Path | None,
     androidtv_zeroconf_timeout: float,
@@ -1793,6 +1839,7 @@ async def execute_line_for_api(
                 sonos_mgr,
                 tailwind_mgr,
                 androidtv_mgr,
+                vizio_mgr,
                 cache_path=cache_path,
                 androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
                 theme=plain,
@@ -1807,6 +1854,7 @@ async def _cmd_loop(
     sonos_mgr: SonosDeviceManager | None,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    vizio_mgr: VizioDeviceManager | None,
     *,
     cache_path: Path | None,
     androidtv_zeroconf_timeout: float,
@@ -1867,6 +1915,7 @@ async def _cmd_loop(
             sonos_mgr,
             tailwind_mgr,
             androidtv_mgr,
+            vizio_mgr,
             cache_path=cache_path,
             androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
             theme=theme,
@@ -2441,6 +2490,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             state.sonos_mgr,
             state.tailwind_mgr,
             state.androidtv_mgr,
+            state.vizio_mgr,
             cache_path=state.cache_path,
             androidtv_zeroconf_timeout=float(state.args.androidtv_zeroconf_timeout),
             editing_mode=_editing_mode_enum(args.edit_mode),

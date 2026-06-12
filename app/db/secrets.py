@@ -58,6 +58,20 @@ def load_tailwind_token_from_db(path: Path) -> str | None:
     return stripped if stripped else None
 
 
+def load_vizio_auth_hosts_from_db(path: Path) -> list[str]:
+    """Return TV host strings that have encrypted SmartCast auth rows."""
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        return []
+    prefix = "vizio_auth:"
+    with discovery_session(path) as session:
+        rows = session.scalars(
+            select(AppSecret.key).where(AppSecret.key.like(f"{prefix}%"))
+        )
+        hosts = [str(key)[len(prefix) :] for key in rows if str(key).startswith(prefix)]
+    return sorted(set(h.strip() for h in hosts if h.strip()))
+
+
 def load_vizio_auth_token_from_db(path: Path, *, host: str) -> str | None:
     """Return the decrypted SmartCast auth token for ``host``, or ``None``."""
     token = _load_app_secret_plaintext(path, _vizio_auth_secret_key(host))
