@@ -212,6 +212,12 @@ class RuleEvaluator:
                 errors.append(str(exc))
         if not performed_side_effect:
             runtime.last_error = "; ".join(errors) if errors else None
+            if runtime.last_error is not None:
+                _LOGGER.warning(
+                    "[rules] rule_id=%s edge matched but no side effect completed: %s",
+                    rule.id,
+                    runtime.last_error,
+                )
             return
         runtime.last_fired_at = self._now_fn()
         runtime.last_error = "; ".join(errors) if errors else None
