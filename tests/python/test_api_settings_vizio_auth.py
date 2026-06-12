@@ -76,13 +76,14 @@ def test_put_vizio_auth_persists_token_and_tv_row(
     assert response.status_code == HTTPStatus.OK
     body = response.json()
     assert body["configured"] is True
-    assert body["device_id"] == "192.168.86.201"
+    assert body["device_id"] == "00:bd:3e:d5:f0:11"
 
     rows = device_discovery_store.load_vizio_tvs(db)
     assert rows[0][4] == "00:bd:3e:d5:f0:11"
 
     listed = client.get("/v1/settings/vizio/tvs").json()
     assert len(listed["tvs"]) == 1
+    assert listed["tvs"][0]["device_id"] == "00:bd:3e:d5:f0:11"
     assert listed["tvs"][0]["display_name"] == "Kitchen TV"
     assert listed["tvs"][0]["auth_configured"] is True
     assert listed["tvs"][0]["auth_source"] == "database"
@@ -109,6 +110,10 @@ def test_delete_vizio_auth_clears_database_row(
         "app.api.vizio_settings_routes.VizioSmartCastClient.fetch_deviceinfo",
         new_callable=AsyncMock,
         return_value=None,
+    ), patch(
+        "app.api.vizio_settings_routes.resolve_vizio_tv_mac",
+        new_callable=AsyncMock,
+        return_value="00:bd:3e:d5:f0:11",
     ):
         put = client.put(
             "/v1/settings/vizio/tvs/192.168.86.201/auth",
@@ -116,9 +121,9 @@ def test_delete_vizio_auth_clears_database_row(
         )
     assert put.status_code == HTTPStatus.OK
 
-    deleted = client.delete("/v1/settings/vizio/auth/192.168.86.201")
+    deleted = client.delete("/v1/settings/vizio/auth/00:bd:3e:d5:f0:11")
     assert deleted.status_code == HTTPStatus.OK
-    assert deleted.json()["device_id"] == "192.168.86.201"
+    assert deleted.json()["device_id"] == "00:bd:3e:d5:f0:11"
     assert deleted.json()["auth_configured"] is False
     assert deleted.json()["stored_token"] is None
 
@@ -198,6 +203,7 @@ def test_resolve_vizio_auth_falls_back_to_env_when_db_decrypt_fails(
         side_effect=SecretsDecryptError("bad ciphertext"),
     ):
         token, source = resolve_vizio_auth_token(
+            mac=None,
             host="192.168.86.201",
             cli_token=None,
             env_token="env-token",

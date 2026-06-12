@@ -31,6 +31,10 @@ from app.db.models import (
 )
 from app.db.schema import bootstrap_schema, ensure_schema_if_exists
 from app.db.session import discovery_session
+from app.vizio_credentials import vizio_device_id_from_parts
+from app.vizio_mac import device_id_for_vizio, is_vizio_mac_device_id
+from app.vizio_smartcast_client import device_id_for, parse_host_spec
+from app.vizio_wol import normalize_mac
 
 
 def open_db(path: Path) -> sqlite3.Connection:
@@ -266,6 +270,60 @@ def load_tailwind_host(path: Path) -> str | None:
         return row.host.strip() if row else None
 
 
+def find_vizio_tv_row(
+    path: Path,
+    device_id: str,
+) -> tuple[str, int, str | None, str | None, str | None, str | None] | None:
+    """Return the cached TV row matching ``device_id`` (MAC or legacy host id)."""
+    needle = device_id.strip()
+    if not needle:
+        return None
+    for row in load_vizio_tvs(path):
+        host, port, display, model, mac, diid = row
+        canonical = vizio_device_id_from_parts(mac=mac, host=host, port=port)
+        if canonical == needle:
+            return row
+        if device_id_for(host, port) == needle:
+            return row
+        if mac and device_id_for_vizio(mac) == needle:
+            return row
+    if is_vizio_mac_device_id(needle):
+        return None
+    try:
+        host, port = parse_host_spec(needle)
+    except ValueError:
+        return None
+    if device_id_for(host, port) == needle:
+        return host, port, None, None, None, None
+    return None
+
+
+def migrate_vizio_ui_preference_key(
+    path: Path,
+    *,
+    old_key: str,
+    new_key: str,
+) -> None:
+    """Move one Vizio UI preference row when the canonical device id changes."""
+    old = old_key.strip()
+    new = new_key.strip()
+    if not old or not new or old == new:
+        return
+    exclude = False
+    with discovery_session(path) as session:
+        row = session.get(UiPreference, ("vizio", old))
+        if row is None:
+            return
+        exclude = bool(row.exclude_from_global)
+        session.delete(row)
+    upsert_ui_preference(
+        path,
+        backend="vizio",
+        canonical_key=new,
+        exclude_from_global=exclude,
+    )
+
+
 def load_vizio_tvs(
     path: Path,
 ) -> list[tuple[str, int, str | None, str | None, str | None, str | None]]:
@@ -362,11 +420,23 @@ def upsert_vizio_tv(
     """Remember one Vizio TV endpoint (auth token lives in ``app_secrets``)."""
     now = time.time()
     h = host.strip()
+    mac_s: str | None = None
+    if mac:
+        try:
+            mac_s = normalize_mac(mac.strip())
+        except ValueError:
+            mac_s = None
     with discovery_session(path) as session:
+        if mac_s is not None:
+            existing = session.scalar(
+                select(VizioKnownTv).where(VizioKnownTv.mac == mac_s)
+            )
+            if existing is not None and existing.host != h:
+                session.delete(existing)
+                session.flush()
         row = session.get(VizioKnownTv, h)
         label = (display_name or "").strip() or None
         model_s = (model or "").strip() or None
-        mac_s = (mac or "").strip() or None
         diid_s = (diid or "").strip() or None
         if row is None:
             session.add(
@@ -389,6 +459,11 @@ def upsert_vizio_tv(
             if diid_s is not None:
                 row.diid = diid_s
             row.updated_at = now
+    if mac_s is not None:
+        canonical = vizio_device_id_from_parts(mac=mac_s, host=h, port=port)
+        for old in {device_id_for(h, port), h}:
+            if old != canonical:
+                migrate_vizio_ui_preference_key(path, old_key=old, new_key=canonical)
 
 
 def upsert_ui_preference(

@@ -34,10 +34,20 @@ from app.db.secrets import (
 )
 from app.domesti_bot_cli import DeviceManagersState
 from app.server_runtime import runtime
-from app.vizio_credentials import resolve_vizio_auth_token, vizio_auth_secret_key
+from app.vizio_credentials import (
+    resolve_vizio_auth_token,
+    vizio_auth_secret_key_for_host,
+    vizio_auth_secret_key_for_mac,
+    vizio_device_id_from_parts,
+)
 from app.vizio_device_manager import VizioDeviceManager, configured_vizio_host_specs
-from app.vizio_mac import resolve_vizio_tv_mac
+from app.vizio_mac import (
+    is_vizio_mac_device_id,
+    lookup_ip_via_arp_for_mac,
+    resolve_vizio_tv_mac,
+)
 from app.vizio_smartcast_client import (
+    DEFAULT_VIZIO_PORT,
     VizioDeviceInfoSnapshot,
     VizioPairChallenge,
     VizioSmartCastBusyError,
@@ -81,12 +91,15 @@ async def clear_vizio_auth(device_id: str, request: Request) -> VizioTvSettingsO
                 "--no-discovery-cache. Restart with a discovery cache path."
             ),
         )
-    host, port = _host_port_for_device_id(device_id, cache_path)
-    canonical_id = device_id_for(host, port)
-    delete_app_secret(cache_path, key=vizio_auth_secret_key(host))
-    _pending_pairing.pop(canonical_id, None)
+    host, port, mac = _resolve_tv_endpoint(device_id, cache_path)
+    if mac:
+        delete_app_secret(cache_path, key=vizio_auth_secret_key_for_mac(mac))
+    delete_app_secret(cache_path, key=vizio_auth_secret_key_for_host(host))
+    _pending_pairing.pop(device_id_for(host, port), None)
+    if mac:
+        _pending_pairing.pop(vizio_device_id_from_parts(mac=mac, host=host, port=port), None)
     await _reload_vizio_manager()
-    return _vizio_tv_settings_out(cache_path, host=host, port=port)
+    return _vizio_tv_settings_out(cache_path, host=host, port=port, mac=mac)
 
 
 @router.post("/pair/begin", response_model=VizioPairBeginOut)
@@ -115,7 +128,7 @@ async def begin_vizio_pairing(body: VizioPairBeginIn) -> VizioPairBeginOut:
 @router.post("/pair/cancel")
 async def cancel_vizio_pairing(body: VizioPairCancelIn) -> dict[str, bool]:
     """Cancel an in-progress SmartCast pairing session."""
-    host, port = _host_port_for_device_id(body.device_id, _optional_cache_path())
+    host, port, _mac = _resolve_tv_endpoint(body.device_id, _optional_cache_path())
     client = VizioSmartCastClient(host, port=port)
     challenge = VizioPairChallenge(
         challenge_type=body.challenge_type,
@@ -149,7 +162,7 @@ async def complete_vizio_pairing(
                 "--no-discovery-cache. Restart with a discovery cache path."
             ),
         )
-    host, port = _host_port_for_device_id(body.device_id, cache_path)
+    host, port, _cached_mac = _resolve_tv_endpoint(body.device_id, cache_path)
     client = VizioSmartCastClient(host, port=port)
     challenge = VizioPairChallenge(
         challenge_type=body.challenge_type,
@@ -166,8 +179,9 @@ async def complete_vizio_pairing(
         ) from exc
     finally:
         await client.aclose()
+    mac = _require_mac(mac, host=host)
     try:
-        save_vizio_auth_token_to_db(cache_path, host=host, token=token)
+        save_vizio_auth_token_to_db(cache_path, mac=mac, host=host, token=token)
     except SecretsConfigurationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
@@ -183,11 +197,12 @@ async def complete_vizio_pairing(
         mac=mac,
         diid=info.diid or None,
     )
+    canonical_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
     _pending_pairing.pop(body.device_id, None)
     reload_ok = await _reload_vizio_manager()
     return VizioPairCompleteOut(
-        configured=vizio_auth_token_stored_in_db(cache_path, host=host),
-        device_id=body.device_id,
+        configured=vizio_auth_token_stored_in_db(cache_path, mac=mac, host=host),
+        device_id=canonical_id,
         restart_required=not reload_ok,
     )
 
@@ -214,26 +229,26 @@ async def put_vizio_auth_token(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail="Expected a non-empty token, got whitespace only",
         )
-    host, port = _host_port_for_device_id(device_id, cache_path)
-    canonical_id = device_id_for(host, port)
+    host, port, cached_mac = _resolve_tv_endpoint(device_id, cache_path)
     try:
-        save_vizio_auth_token_to_db(cache_path, host=host, token=token)
+        info = await _fetch_deviceinfo_optional(host, port, token=token)
+        label = (info.cast_name or info.model_name or host).strip() if info else host
+        mac: str | None = cached_mac
+        if info is not None and info.mac is not None:
+            mac = info.mac
+        elif mac is None:
+            client = VizioSmartCastClient(host, port=port, auth_token=token)
+            try:
+                mac = await resolve_vizio_tv_mac(client, host=host)
+            finally:
+                await client.aclose()
+        mac = _require_mac(mac, host=host)
+        save_vizio_auth_token_to_db(cache_path, mac=mac, host=host, token=token)
     except SecretsConfigurationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
-    info = await _fetch_deviceinfo_optional(host, port, token=token)
-    label = (info.cast_name or info.model_name or host).strip() if info else host
-    mac: str | None = None
-    if info is not None and info.mac is not None:
-        mac = info.mac
-    else:
-        client = VizioSmartCastClient(host, port=port, auth_token=token)
-        try:
-            mac = await resolve_vizio_tv_mac(client, host=host)
-        finally:
-            await client.aclose()
     device_discovery_store.upsert_vizio_tv(
         cache_path,
         host=host,
@@ -243,9 +258,10 @@ async def put_vizio_auth_token(
         mac=mac,
         diid=info.diid if info else None,
     )
+    canonical_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
     reload_ok = await _reload_vizio_manager()
     return VizioAuthTokenSetOut(
-        configured=vizio_auth_token_stored_in_db(cache_path, host=host),
+        configured=vizio_auth_token_stored_in_db(cache_path, mac=mac, host=host),
         device_id=canonical_id,
         restart_required=not reload_ok,
     )
@@ -300,23 +316,59 @@ async def _fetch_deviceinfo_optional(
         await client.aclose()
 
 
-def _display_name_for(cache_path: Path, host: str, port: int) -> str | None:
-    for row_host, row_port, display, *_rest in device_discovery_store.load_vizio_tvs(
-        cache_path
-    ):
-        if row_host == host and row_port == port:
-            return display
-    return None
+def _display_name_for(
+    cache_path: Path,
+    *,
+    host: str,
+    port: int,
+    mac: str | None,
+) -> str | None:
+    row = device_discovery_store.find_vizio_tv_row(
+        cache_path,
+        vizio_device_id_from_parts(mac=mac, host=host, port=port),
+    )
+    if row is None:
+        return None
+    return row[2]
 
 
-def _host_port_for_device_id(device_id: str, cache_path: Path | None) -> tuple[str, int]:
+def _require_mac(mac: str | None, *, host: str) -> str:
+    if mac is None:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Could not resolve MAC address for TV at {host}. "
+                "Ensure the TV is on the same LAN as this server and reachable."
+            ),
+        )
+    return mac
+
+
+def _resolve_tv_endpoint(
+    device_id: str,
+    cache_path: Path | None,
+) -> tuple[str, int, str | None]:
+    """Return ``(host, port, mac)`` for routes keyed by MAC or legacy host id."""
     needle = device_id.strip()
     if cache_path is not None:
-        for host, port, *_rest in device_discovery_store.load_vizio_tvs(cache_path):
-            if device_id_for(host, port) == needle:
-                return host, port
+        row = device_discovery_store.find_vizio_tv_row(cache_path, needle)
+        if row is not None:
+            host, port, _display, _model, mac, _diid = row
+            return host, port, mac
+    if is_vizio_mac_device_id(needle):
+        ip = lookup_ip_via_arp_for_mac(needle)
+        if ip is None:
+            raise HTTPException(
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                detail=(
+                    f"Vizio TV {needle} is not reachable on the LAN. "
+                    "Power on the TV or refresh the DHCP lease, then retry."
+                ),
+            )
+        return ip, DEFAULT_VIZIO_PORT, needle
     try:
-        return parse_host_spec(needle)
+        host, port = parse_host_spec(needle)
+        return host, port, None
     except ValueError as exc:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
@@ -328,11 +380,16 @@ def _optional_cache_path() -> Path | None:
     return runtime.discovery_cache_path()
 
 
-def _stored_token_for_tv(cache_path: Path, *, host: str) -> str | None:
-    if not vizio_auth_token_stored_in_db(cache_path, host=host):
+def _stored_token_for_tv(
+    cache_path: Path,
+    *,
+    host: str,
+    mac: str | None,
+) -> str | None:
+    if not vizio_auth_token_stored_in_db(cache_path, mac=mac, host=host):
         return None
     try:
-        return load_vizio_auth_token_from_db(cache_path, host=host)
+        return load_vizio_auth_token_from_db(cache_path, mac=mac, host=host)
     except SecretsDecryptError:
         return None
 
@@ -342,24 +399,26 @@ def _vizio_tv_settings_out(
     *,
     host: str,
     port: int,
+    mac: str | None = None,
 ) -> VizioTvSettingsOut:
-    device_id = device_id_for(host, port)
+    canonical_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
     token, source = resolve_vizio_auth_token(
+        mac=mac,
         host=host,
         cli_token=_cli_vizio_token(),
         env_token=os.environ.get("VIZIO_AUTH_TOKEN"),
         cache_path=cache_path,
     )
     stored = (
-        _stored_token_for_tv(cache_path, host=host)
+        _stored_token_for_tv(cache_path, host=host, mac=mac)
         if source == "database"
         else None
     )
     return VizioTvSettingsOut(
-        device_id=device_id,
+        device_id=canonical_id,
         host=host,
         port=port,
-        display_name=_display_name_for(cache_path, host, port),
+        display_name=_display_name_for(cache_path, host=host, port=port, mac=mac),
         auth_configured=bool(token),
         auth_source=source,
         stored_token=stored,
@@ -369,23 +428,37 @@ def _vizio_tv_settings_out(
 def _vizio_tv_settings_rows(cache_path: Path) -> list[VizioTvSettingsOut]:
     seen: set[str] = set()
     rows: list[VizioTvSettingsOut] = []
-    for host, port, *_rest in device_discovery_store.load_vizio_tvs(cache_path):
-        device_id = device_id_for(host, port)
-        if device_id in seen:
+    for host, port, _display, _model, mac, _diid in device_discovery_store.load_vizio_tvs(
+        cache_path
+    ):
+        canonical_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
+        if canonical_id in seen:
             continue
-        seen.add(device_id)
-        rows.append(_vizio_tv_settings_out(cache_path, host=host, port=port))
-    for host in load_vizio_auth_hosts_from_db(cache_path):
+        seen.add(canonical_id)
+        rows.append(_vizio_tv_settings_out(cache_path, host=host, port=port, mac=mac))
+    for auth_key in load_vizio_auth_hosts_from_db(cache_path):
+        if is_vizio_mac_device_id(auth_key):
+            row = device_discovery_store.find_vizio_tv_row(cache_path, auth_key)
+            if row is not None:
+                host, port, *_rest, mac, _diid = row
+                canonical_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
+                if canonical_id in seen:
+                    continue
+                seen.add(canonical_id)
+                rows.append(
+                    _vizio_tv_settings_out(cache_path, host=host, port=port, mac=mac)
+                )
+            continue
         try:
-            parsed_host, port = parse_host_spec(host)
+            parsed_host, port = parse_host_spec(auth_key)
         except ValueError:
             continue
-        device_id = device_id_for(parsed_host, port)
-        if device_id in seen:
+        canonical_id = vizio_device_id_from_parts(mac=None, host=parsed_host, port=port)
+        if canonical_id in seen:
             continue
-        seen.add(device_id)
+        seen.add(canonical_id)
         rows.append(
-            _vizio_tv_settings_out(cache_path, host=parsed_host, port=port)
+            _vizio_tv_settings_out(cache_path, host=parsed_host, port=port, mac=None)
         )
     rows.sort(key=lambda row: (row.display_name or row.device_id).lower())
     return rows

@@ -14,9 +14,9 @@ import aiohttp
 from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
-from app.vizio_credentials import resolve_vizio_auth_token
+from app.vizio_credentials import resolve_vizio_auth_token, vizio_device_id_from_parts
 from app.vizio_discovery import VizioDiscoveredHost, discover_vizio_hosts_ssdp
-from app.vizio_mac import resolve_vizio_tv_mac
+from app.vizio_mac import resolve_vizio_tv_ip, resolve_vizio_tv_mac
 from app.vizio_smartcast_client import (
     DEFAULT_VIZIO_PORT,
     VizioSmartCastAuthError,
@@ -73,7 +73,7 @@ class VizioTvEndpoint:
 
     @property
     def device_id(self) -> str:
-        return device_id_for(self.host, self.port)
+        return vizio_device_id_from_parts(mac=self.mac, host=self.host, port=self.port)
 
 
 class VizioTvDevice(SwitchDevice):
@@ -235,7 +235,8 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         failed: list[VizioTvEndpoint] = []
 
         for endpoint in targets:
-            token, _source = self._resolve_token(endpoint.host)
+            endpoint = await self._relocate_endpoint(endpoint)
+            token, _source = self._resolve_token(endpoint)
             if not token:
                 _LOGGER.info(
                     "Skipping Vizio TV %s — no auth token configured",
@@ -245,6 +246,15 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             try:
                 connected.append(await self._connect_endpoint(endpoint, token))
             except VizioSmartCastConnectionError as exc:
+                relocated = await self._relocate_endpoint(endpoint, force_arp=True)
+                if relocated.host != endpoint.host:
+                    try:
+                        connected.append(
+                            await self._connect_endpoint(relocated, token)
+                        )
+                        continue
+                    except (VizioSmartCastAuthError, VizioSmartCastConnectionError):
+                        endpoint = relocated
                 _LOGGER.warning(
                     "Cached/configured Vizio TV %s unreachable: %s",
                     endpoint.device_id,
@@ -272,7 +282,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 )
                 if any(tv.identifier == endpoint.device_id for tv in connected):
                     continue
-                token, _source = self._resolve_token(endpoint.host)
+                token, _source = self._resolve_token(endpoint)
                 if not token:
                     continue
                 try:
@@ -346,6 +356,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         endpoint: VizioTvEndpoint,
         token: str,
     ) -> VizioTvDevice:
+        endpoint = await self._relocate_endpoint(endpoint)
         client = VizioSmartCastClient(
             endpoint.host,
             port=endpoint.port,
@@ -381,7 +392,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             for host, port, display, model, mac, diid in device_discovery_store.load_vizio_tvs(
                 self._discovery_cache_path
             ):
-                device_id = device_id_for(host, port)
+                device_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
                 if device_id in seen:
                     continue
                 seen.add(device_id)
@@ -421,9 +432,40 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         tv.set_power(False)
         return tv
 
-    def _resolve_token(self, host: str) -> tuple[str, str]:
+    async def _relocate_endpoint(
+        self,
+        endpoint: VizioTvEndpoint,
+        *,
+        force_arp: bool = False,
+    ) -> VizioTvEndpoint:
+        """Refresh ``host`` from MAC via ARP when the TV's DHCP address changed."""
+        if not endpoint.mac:
+            return endpoint
+        if not force_arp and endpoint.host:
+            ip = await resolve_vizio_tv_ip(mac=endpoint.mac, fallback_host=endpoint.host)
+        else:
+            ip = await resolve_vizio_tv_ip(mac=endpoint.mac, fallback_host=None)
+        if ip is None or ip == endpoint.host:
+            return endpoint
+        _LOGGER.info(
+            "Relocated Vizio TV %s from %s to %s via MAC",
+            endpoint.device_id,
+            endpoint.host,
+            ip,
+        )
+        return VizioTvEndpoint(
+            host=ip,
+            port=endpoint.port,
+            display_name=endpoint.display_name,
+            model=endpoint.model,
+            mac=endpoint.mac,
+            diid=endpoint.diid,
+        )
+
+    def _resolve_token(self, endpoint: VizioTvEndpoint) -> tuple[str, str]:
         token, source = resolve_vizio_auth_token(
-            host=host,
+            mac=endpoint.mac,
+            host=endpoint.host,
             cli_token=self._cli_auth_token,
             env_token=self._env_auth_token,
             cache_path=self._discovery_cache_path,

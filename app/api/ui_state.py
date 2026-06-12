@@ -746,7 +746,7 @@ def find_sonos_by_identifier(
 def find_vizio_by_id(
     mgr: VizioDeviceManager, device_id: str
 ) -> VizioTvDevice | None:
-    """Look up a Vizio TV by its ``identifier`` (host or host:port)."""
+    """Look up a Vizio TV by its ``identifier`` (normalized MAC when known)."""
 
     needle = device_id.strip()
     if not needle:

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.db.models import AppSecret
 from app.db.secrets_key import SecretsKeySource, load_secrets_key_material
 from app.db.session import discovery_session
+from app.vizio_wol import normalize_mac
 
 _SMTP_PASSWORD_KEY = "smtp_password"
 _MYTRACKS_ADMIN_PASSWORD_KEY = "mytracks_admin_password"
@@ -72,13 +73,26 @@ def load_vizio_auth_hosts_from_db(path: Path) -> list[str]:
     return sorted(set(h.strip() for h in hosts if h.strip()))
 
 
-def load_vizio_auth_token_from_db(path: Path, *, host: str) -> str | None:
-    """Return the decrypted SmartCast auth token for ``host``, or ``None``."""
-    token = _load_app_secret_plaintext(path, _vizio_auth_secret_key(host))
-    if token is None:
-        return None
-    stripped = token.strip()
-    return stripped if stripped else None
+def load_vizio_auth_token_from_db(
+    path: Path,
+    *,
+    mac: str | None = None,
+    host: str | None = None,
+) -> str | None:
+    """Return the decrypted SmartCast auth token for ``mac`` or legacy ``host``."""
+    if mac:
+        token = _load_app_secret_plaintext(path, _vizio_auth_secret_key_mac(mac))
+        if token is not None:
+            stripped = token.strip()
+            if stripped:
+                return stripped
+    if host:
+        token = _load_app_secret_plaintext(path, _vizio_auth_secret_key_host(host))
+        if token is None:
+            return None
+        stripped = token.strip()
+        return stripped if stripped else None
+    return None
 
 
 def save_smtp_password_to_db(path: Path, password: str) -> None:
@@ -101,9 +115,24 @@ def save_tailwind_token_to_db(path: Path, token: str) -> None:
     _save_app_secret_plaintext(path, _TAILWIND_SECRET_KEY, token.strip())
 
 
-def save_vizio_auth_token_to_db(path: Path, *, host: str, token: str) -> None:
-    """Encrypt and persist a per-TV SmartCast auth token."""
-    _save_app_secret_plaintext(path, _vizio_auth_secret_key(host), token.strip())
+def save_vizio_auth_token_to_db(
+    path: Path,
+    *,
+    token: str,
+    mac: str | None = None,
+    host: str | None = None,
+) -> None:
+    """Encrypt and persist a per-TV SmartCast auth token (prefer ``mac`` key)."""
+    stripped = token.strip()
+    if mac:
+        _save_app_secret_plaintext(path, _vizio_auth_secret_key_mac(mac), stripped)
+        if host:
+            delete_app_secret(path, key=_vizio_auth_secret_key_host(host))
+        return
+    if host:
+        _save_app_secret_plaintext(path, _vizio_auth_secret_key_host(host), stripped)
+        return
+    raise ValueError("Expected mac or host for Vizio auth token storage, got neither")
 
 
 def smtp_password_stored_in_db(path: Path) -> bool:
@@ -143,9 +172,18 @@ def tailwind_token_stored_in_db(path: Path) -> bool:
     return _app_secret_stored_in_db(path, _TAILWIND_SECRET_KEY)
 
 
-def vizio_auth_token_stored_in_db(path: Path, *, host: str) -> bool:
-    """True when an ``app_secrets`` row exists for the given TV host."""
-    return _app_secret_stored_in_db(path, _vizio_auth_secret_key(host))
+def vizio_auth_token_stored_in_db(
+    path: Path,
+    *,
+    mac: str | None = None,
+    host: str | None = None,
+) -> bool:
+    """True when an ``app_secrets`` row exists for the given TV MAC or legacy host."""
+    if mac and _app_secret_stored_in_db(path, _vizio_auth_secret_key_mac(mac)):
+        return True
+    if host:
+        return _app_secret_stored_in_db(path, _vizio_auth_secret_key_host(host))
+    return False
 
 
 def _app_secret_stored_in_db(path: Path, key: str) -> bool:
@@ -220,5 +258,9 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
             row.updated_at = now
 
 
-def _vizio_auth_secret_key(host: str) -> str:
+def _vizio_auth_secret_key_host(host: str) -> str:
     return f"vizio_auth:{host.strip()}"
+
+
+def _vizio_auth_secret_key_mac(mac: str) -> str:
+    return f"vizio_auth:{normalize_mac(mac)}"

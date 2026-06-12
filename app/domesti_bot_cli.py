@@ -641,8 +641,8 @@ def _vizio_has_any_auth(
 
     if load_vizio_auth_hosts_from_db(cache_path):
         return True
-    for host, *_rest in device_discovery_store.load_vizio_tvs(cache_path):
-        if load_vizio_auth_token_from_db(cache_path, host=host):
+    for host, port, *_rest, mac, _diid in device_discovery_store.load_vizio_tvs(cache_path):
+        if load_vizio_auth_token_from_db(cache_path, mac=mac, host=host):
             return True
     return False
 
