@@ -56,6 +56,7 @@ def test_put_vizio_auth_persists_token_and_tv_row(
         model_name="V505M-K09",
         cast_name="Kitchen TV",
         diid="abc",
+        mac="00:bd:3e:d5:f0:11",
     )
     with (
         patch(
@@ -139,6 +140,7 @@ def test_put_vizio_auth_hot_reloads_manager(
         model_name="V505M-K09",
         cast_name="Kitchen TV",
         diid="abc",
+        mac="00:bd:3e:d5:f0:11",
     )
     mock_tv = object()
     mock_mgr = AsyncMock()
