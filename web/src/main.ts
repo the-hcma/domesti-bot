@@ -1727,6 +1727,19 @@ function compactIconAssetUrl(key: string): string {
   return `${COMPACT_ICON_BASE}/${key}.svg`;
 }
 
+function compactIconCacheCandidates(key: string): string[] {
+  if (key.startsWith("speaker_")) {
+    return [key, "speaker"];
+  }
+  if (key.startsWith("garage_")) {
+    return [key, "garage_closed"];
+  }
+  if (key.startsWith("tv_")) {
+    return key === "tv_on" ? [key, "tv_off"] : [key, "tv_on"];
+  }
+  return [key];
+}
+
 function compactIconFallbackCandidates(key: string): string[] {
   if (key.startsWith("speaker_")) {
     return [key, "speaker", "bulb"];
@@ -1736,6 +1749,9 @@ function compactIconFallbackCandidates(key: string): string[] {
   }
   if (key.startsWith("tv_")) {
     return [key, "tv_off", "bulb"];
+  }
+  if (key === "tv") {
+    return ["tv_off", "tv_on", "bulb"];
   }
   return [key, "bulb"];
 }
@@ -1796,7 +1812,7 @@ async function loadCompactTileIconInto(
   host: HTMLSpanElement,
   key: string,
 ): Promise<void> {
-  for (const candidate of compactIconFallbackCandidates(key)) {
+  for (const candidate of compactIconCacheCandidates(key)) {
     if (mountCompactIconFromCache(host, candidate)) {
       return;
     }
@@ -1854,8 +1870,14 @@ function warmCompactTileIcons(state: UIStateOut): void {
     "speaker_unknown",
     "garage_open",
     "garage_closed",
+    "tv_on",
+    "tv_off",
   ]);
   for (const family of state.families) {
+    if (family.id === "vizio") {
+      keys.add("tv_on");
+      keys.add("tv_off");
+    }
     for (const device of family.devices) {
       keys.add(compactIconAssetKey(device));
     }
