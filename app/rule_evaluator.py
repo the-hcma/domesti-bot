@@ -197,7 +197,7 @@ class RuleEvaluator:
         self,
         rule: RuleOut,
         *,
-        ctx: RuleEvaluationContext,
+        evaluation: RuleEvaluationResult,
         transitions: dict[str, GeofenceTransition],
         user_id: str,
     ) -> None:
@@ -238,14 +238,13 @@ class RuleEvaluator:
         runtime.last_error = "; ".join(errors) if errors else None
         self._persist_rule_state(rule.id)
         duration_ms = (time.monotonic() - started) * 1000.0
-        evaluation = evaluate_rule(rule, ctx)
         _LOGGER.info(
             "[rules] fired rule_id=%s user_id=%s transitions=%s conditions=%s "
             "actions=%d duration_ms=%.0f%s",
             rule.id,
             user_id,
             _format_geofence_transitions_for_log(transitions),
-            _format_rule_conditions_for_log(evaluation),
+            _format_rule_conditions_for_log(rule, evaluation),
             len(rule.device_actions),
             duration_ms,
             f" errors={runtime.last_error!r}" if runtime.last_error else "",
@@ -358,7 +357,7 @@ class RuleEvaluator:
                 continue
             await self._execute_rule(
                 rule,
-                ctx=ctx,
+                evaluation=evaluation,
                 transitions=transitions,
                 user_id=user_id,
             )
@@ -485,9 +484,18 @@ def _format_geofence_transitions_for_log(
     return ",".join(parts) if parts else "none"
 
 
-def _format_rule_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
+def _format_rule_conditions_for_log(
+    rule: RuleOut,
+    evaluation: RuleEvaluationResult,
+) -> str:
     parts: list[str] = []
     for row in evaluation.conditions:
+        if rule.trigger == "edge_true" and isinstance(
+            row.condition,
+            (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+        ):
+            parts.append(f"{row.label}: {row.detail}")
+            continue
         state = "met" if row.met else "unmet"
         parts.append(f"{row.label}={state}")
     return ",".join(parts) if parts else "none"

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -139,15 +138,30 @@ def _arrive_home_rule(*, cooldown_s: int) -> RuleOut:
     )
 
 
-def _rules_log_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [record for record in caplog.records if "[rules]" in record.getMessage()]
+def _formatted_logger_calls(info_mock: MagicMock) -> list[str]:
+    messages: list[str] = []
+    for call in info_mock.call_args_list:
+        args = call.args
+        if not args:
+            continue
+        fmt = str(args[0])
+        if len(args) > 1:
+            messages.append(fmt % args[1:])
+        else:
+            messages.append(fmt)
+    return messages
+
+
+def _info_messages_matching(info_mock: MagicMock, needle: str) -> list[str]:
+    return [
+        message for message in _formatted_logger_calls(info_mock) if needle in message
+    ]
 
 
 @pytest.mark.asyncio
 async def test_fired_log_includes_user_transitions_and_conditions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
@@ -191,26 +205,22 @@ async def test_fired_log_includes_user_transitions_and_conditions(
         retention=default_location_history_retention(),
     )
 
-    with caplog.at_level(logging.INFO, logger="app.rule_evaluator"):
+    with patch("app.rule_evaluator._LOGGER.info") as info_mock:
         await evaluator.on_location_update("henrique")
 
-    fired = [
-        record
-        for record in _rules_log_records(caplog)
-        if "fired rule_id=arrive-home" in record.getMessage()
-    ]
+    fired = _info_messages_matching(info_mock, "fired rule_id=arrive-home")
     assert fired
-    message = fired[0].getMessage()
+    message = fired[0]
     assert "user_id=henrique" in message
     assert "house:entered" in message
-    assert "conditions=" in message
+    assert "conditions=Presence at House (Test): Test is inside House" in message
+    assert "=unmet" not in message
 
 
 @pytest.mark.asyncio
 async def test_debounced_geofence_enter_logs_suppressed_at_info(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
@@ -269,24 +279,19 @@ async def test_debounced_geofence_enter_logs_suppressed_at_info(
         retention=default_location_history_retention(),
     )
 
-    with caplog.at_level(logging.INFO, logger="app.rule_evaluator"):
+    with patch("app.rule_evaluator._LOGGER.info") as info_mock:
         await evaluator.on_location_update("henrique")
 
-    suppressed = [
-        record
-        for record in _rules_log_records(caplog)
-        if "geofence enter suppressed" in record.getMessage()
-    ]
+    suppressed = _info_messages_matching(info_mock, "geofence enter suppressed")
     assert suppressed
-    assert "user_id=henrique" in suppressed[0].getMessage()
-    assert "geofence_id=house" in suppressed[0].getMessage()
+    assert "user_id=henrique" in suppressed[0]
+    assert "geofence_id=house" in suppressed[0]
 
 
 @pytest.mark.asyncio
 async def test_conditions_not_met_logs_skip_reason(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
@@ -356,14 +361,13 @@ async def test_conditions_not_met_logs_skip_reason(
         retention=default_location_history_retention(),
     )
 
-    with caplog.at_level(logging.INFO, logger="app.rule_evaluator"):
+    with patch("app.rule_evaluator._LOGGER.info") as info_mock:
         await evaluator.on_location_update("henrique")
 
     skipped = [
-        record
-        for record in _rules_log_records(caplog)
-        if "skipped rule_id=arrive-home" in record.getMessage()
-        and "reason=conditions_not_met" in record.getMessage()
+        message
+        for message in _info_messages_matching(info_mock, "skipped rule_id=arrive-home")
+        if "reason=conditions_not_met" in message
     ]
     assert skipped
     assert device.calls == []
