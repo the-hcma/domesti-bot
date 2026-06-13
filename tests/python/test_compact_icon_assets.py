@@ -31,6 +31,8 @@ _REQUIRED_KEYS = frozenset(
         "speaker_playing",
         "speaker_unknown",
         "strip",
+        "tv_off",
+        "tv_on",
         "table",
         "room_attic",
         "room_basement",
