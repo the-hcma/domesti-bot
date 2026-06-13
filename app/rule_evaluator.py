@@ -35,8 +35,9 @@ from app.rule_actions import (
 )
 from app.rule_conditions import (
     RuleEvaluationContext,
+    RuleEvaluationResult,
     compute_rules_sun_out,
-    evaluate_rule_conditions_met,
+    evaluate_rule,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
 from app.rule_validation import build_roster_user_id_lookup, rule_references_user_id
@@ -192,7 +193,14 @@ class RuleEvaluator:
             return True
         return self._now_fn() - state.last_fired_at >= rule.cooldown_s
 
-    async def _execute_rule(self, rule: RuleOut) -> None:
+    async def _execute_rule(
+        self,
+        rule: RuleOut,
+        *,
+        evaluation: RuleEvaluationResult,
+        transitions: dict[str, GeofenceTransition],
+        user_id: str,
+    ) -> None:
         runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
         started = time.monotonic()
         errors: list[str] = []
@@ -231,8 +239,12 @@ class RuleEvaluator:
         self._persist_rule_state(rule.id)
         duration_ms = (time.monotonic() - started) * 1000.0
         _LOGGER.info(
-            "[rules] fired rule_id=%s actions=%d duration_ms=%.0f%s",
+            "[rules] fired rule_id=%s user_id=%s transitions=%s conditions=%s "
+            "actions=%d duration_ms=%.0f%s",
             rule.id,
+            user_id,
+            _format_geofence_transitions_for_log(transitions),
+            _format_rule_conditions_for_log(rule, evaluation),
             len(rule.device_actions),
             duration_ms,
             f" errors={runtime.last_error!r}" if runtime.last_error else "",
@@ -288,11 +300,35 @@ class RuleEvaluator:
         if not transitions:
             self._last_run_at = self._now_fn()
             return
+        transitions_summary = _format_geofence_transitions_for_log(transitions)
+        _LOGGER.debug(
+            "[rules] evaluating location update user_id=%s lat=%.5f lon=%.5f "
+            "accuracy_m=%s transitions=%s",
+            user_id,
+            location.lat,
+            location.lon,
+            location.accuracy_m,
+            transitions_summary,
+        )
         ctx = await self._build_evaluation_context(now=datetime.now(UTC))
         for rule in list_automation_rules():
             if not rule.enabled or rule.trigger != "edge_true":
                 continue
             if not _accuracy_passes(rule, location):
+                if _user_triggered_geofence_edge(
+                    rule.conditions.all,
+                    user_id,
+                    transitions,
+                ):
+                    _log_rule_skipped(
+                        rule.id,
+                        user_id,
+                        reason="location_accuracy",
+                        detail=(
+                            f"accuracy_m={location.accuracy_m} "
+                            f"limit={rule.min_location_accuracy_m}"
+                        ),
+                    )
                 continue
             if not _user_triggered_geofence_edge(
                 rule.conditions.all,
@@ -300,12 +336,31 @@ class RuleEvaluator:
                 transitions,
             ):
                 continue
-            if not evaluate_rule_conditions_met(rule, ctx):
+            evaluation = evaluate_rule(rule, ctx)
+            if not evaluation.all_met:
+                _log_rule_skipped(
+                    rule.id,
+                    user_id,
+                    reason="conditions_not_met",
+                    detail=_format_unmet_conditions_for_log(evaluation),
+                )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
             if not self._cooldown_elapsed(rule, runtime):
+                remaining_s = rule.cooldown_s - (self._now_fn() - (runtime.last_fired_at or 0.0))
+                _log_rule_skipped(
+                    rule.id,
+                    user_id,
+                    reason="cooldown",
+                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                )
                 continue
-            await self._execute_rule(rule)
+            await self._execute_rule(
+                rule,
+                evaluation=evaluation,
+                transitions=transitions,
+                user_id=user_id,
+            )
         self._last_run_at = self._now_fn()
         self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
 
@@ -350,6 +405,14 @@ class RuleEvaluator:
                 self._geofence_outside_since.pop(key, None)
                 if dwell_elapsed:
                     transition = GeofenceTransition(entered=True)
+                elif outside_since is not None:
+                    _log_geofence_enter_debounced(
+                        user_id=user_id,
+                        geofence_id=geofence_id,
+                        outside_s=observed_at - outside_since,
+                        dwell_remaining_s=_MIN_GEOFENCE_OUTSIDE_DWELL_S
+                        - (observed_at - outside_since),
+                    )
             elif was_inside and not now_inside:
                 self._geofence_was_inside[key] = False
                 self._geofence_outside_since[key] = observed_at
@@ -362,6 +425,11 @@ class RuleEvaluator:
                 self._geofence_outside_since.setdefault(key, observed_at)
             if transition.entered or transition.left:
                 transitions[geofence_id] = transition
+                _log_geofence_transition(
+                    user_id=user_id,
+                    geofence_id=geofence_id,
+                    transition=transition,
+                )
         return transitions
 
 
@@ -401,6 +469,98 @@ def _condition_triggered_geofence_edge(
             for child in condition.conditions
         )
     return False
+
+
+def _format_geofence_transitions_for_log(
+    transitions: dict[str, GeofenceTransition],
+) -> str:
+    parts: list[str] = []
+    for geofence_id in sorted(transitions):
+        transition = transitions[geofence_id]
+        if transition.entered:
+            parts.append(f"{geofence_id}:entered")
+        elif transition.left:
+            parts.append(f"{geofence_id}:left")
+    return ",".join(parts) if parts else "none"
+
+
+def _format_rule_conditions_for_log(
+    rule: RuleOut,
+    evaluation: RuleEvaluationResult,
+) -> str:
+    parts: list[str] = []
+    for row in evaluation.conditions:
+        if rule.trigger == "edge_true" and isinstance(
+            row.condition,
+            (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+        ):
+            parts.append(f"{row.label}: {row.detail}")
+            continue
+        state = "met" if row.met else "unmet"
+        parts.append(f"{row.label}={state}")
+    return ",".join(parts) if parts else "none"
+
+
+def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
+    unmet = [
+        f"{row.label} ({row.detail})"
+        for row in evaluation.conditions
+        if not row.met
+    ]
+    return "; ".join(unmet) if unmet else "none"
+
+
+def _log_geofence_enter_debounced(
+    *,
+    user_id: str,
+    geofence_id: str,
+    outside_s: float,
+    dwell_remaining_s: float,
+) -> None:
+    _LOGGER.info(
+        "[rules] geofence enter suppressed user_id=%s geofence_id=%s "
+        "outside_s=%.0f dwell_remaining_s=%.0f",
+        user_id,
+        geofence_id,
+        outside_s,
+        max(0.0, dwell_remaining_s),
+    )
+
+
+def _log_geofence_transition(
+    *,
+    user_id: str,
+    geofence_id: str,
+    transition: GeofenceTransition,
+) -> None:
+    if transition.entered:
+        event = "entered"
+    elif transition.left:
+        event = "left"
+    else:
+        return
+    _LOGGER.debug(
+        "[rules] geofence transition user_id=%s geofence_id=%s event=%s",
+        user_id,
+        geofence_id,
+        event,
+    )
+
+
+def _log_rule_skipped(
+    rule_id: str,
+    user_id: str,
+    *,
+    reason: str,
+    detail: str,
+) -> None:
+    _LOGGER.info(
+        "[rules] skipped rule_id=%s user_id=%s reason=%s detail=%s",
+        rule_id,
+        user_id,
+        reason,
+        detail,
+    )
 
 
 def _geofence_record_to_out(record: GeofenceRecord):
