@@ -27,6 +27,15 @@ class AppSecret(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class AutomationRuleState(Base):
+    __tablename__ = "automation_rule_state"
+
+    rule_id: Mapped[str] = mapped_column(String, primary_key=True)
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_fired_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class DeviceDisplayName(Base):
     __tablename__ = "device_display_names"
 

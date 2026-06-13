@@ -1,5 +1,7 @@
 // Shared Automations hub UI helpers (info badges, family labels, toggles).
 
+import { createAuditedTimeElement } from "./format-timestamp.js";
+
 export const ALL_DAYS_OF_WEEK = [0, 1, 2, 3, 4, 5, 6] as const;
 
 export const DAY_OF_WEEK_LABELS = [
@@ -314,6 +316,24 @@ export function ruleLastMetLabel(
   trigger: "edge_true" | "while_true",
 ): string {
   return trigger === "edge_true" ? "Last met " : "Last fired ";
+}
+
+export function appendRuleLastMetLine(
+  parent: HTMLElement,
+  rule: {
+    last_fired_at: string | null;
+    trigger: "edge_true" | "while_true";
+  },
+): void {
+  const fired = document.createElement("p");
+  fired.className = "rules-card-meta";
+  fired.append(document.createTextNode(ruleLastMetLabel(rule.trigger)));
+  if (rule.last_fired_at !== null) {
+    fired.append(createAuditedTimeElement(rule.last_fired_at));
+  } else {
+    fired.append("Never");
+  }
+  parent.append(fired);
 }
 
 export function preventBrowserAutofill(input: HTMLInputElement): void {
