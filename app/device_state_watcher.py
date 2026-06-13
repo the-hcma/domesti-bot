@@ -32,10 +32,12 @@ Configuration: ``DOMESTI_STATE_POLL_INTERVAL_S`` overrides
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from typing import Final
 
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -55,6 +57,17 @@ DEFAULT_POLL_INTERVAL_S: float = 10.0
 # Minimum interval we'll accept from the env var. Below this we'd be
 # DOS-ing the LAN — 1 Hz is already plenty for a hobbyist setup.
 _MIN_POLL_INTERVAL_S: float = 1.0
+
+_TRANSIENT_CONNECT_ERRNOS: Final[frozenset[int]] = frozenset(
+    {
+        errno.ECONNREFUSED,
+        errno.ECONNRESET,
+        errno.EHOSTDOWN,
+        errno.EHOSTUNREACH,
+        errno.ENETUNREACH,
+        errno.ETIMEDOUT,
+    }
+)
 
 
 class DeviceStateWatcher(ABC):
@@ -89,12 +102,8 @@ class KasaPollingWatcher(DeviceStateWatcher):
             host = (kd._kDevice.host or "").strip() or "?"
             try:
                 await self._mgr.is_on(kd.identifier)
-            except Exception:
-                _LOGGER.warning(
-                    "[state-watcher kasa] %s update failed; keeping last known state",
-                    host,
-                    exc_info=True,
-                )
+            except Exception as exc:
+                _log_watcher_refresh_failure(backend="kasa", device_id=host, exc=exc)
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -132,11 +141,11 @@ class SonosPollingWatcher(DeviceStateWatcher):
         for sp in self._mgr.players:
             try:
                 await self._mgr.is_playing(sp.identifier)
-            except Exception:
-                _LOGGER.warning(
-                    "[state-watcher sonos] %s update failed; keeping last known state",
-                    sp.identifier,
-                    exc_info=True,
+            except Exception as exc:
+                _log_watcher_refresh_failure(
+                    backend="sonos",
+                    device_id=sp.identifier,
+                    exc=exc,
                 )
 
     async def run(self, *, stop: asyncio.Event) -> None:
@@ -171,11 +180,11 @@ class TailwindPollingWatcher(DeviceStateWatcher):
         for gd in self._mgr.doors:
             try:
                 await self._mgr.is_open(gd.identifier)
-            except Exception:
-                _LOGGER.warning(
-                    "[state-watcher tailwind] %s update failed; keeping last known state",
-                    gd.identifier,
-                    exc_info=True,
+            except Exception as exc:
+                _log_watcher_refresh_failure(
+                    backend="tailwind",
+                    device_id=gd.identifier,
+                    exc=exc,
                 )
 
     async def run(self, *, stop: asyncio.Event) -> None:
@@ -203,11 +212,11 @@ class VizioPollingWatcher(DeviceStateWatcher):
         for tv in self._mgr.tvs:
             try:
                 await tv.refresh_power_state()
-            except Exception:
-                _LOGGER.warning(
-                    "[state-watcher vizio] %s update failed; keeping last known state",
-                    tv.identifier,
-                    exc_info=True,
+            except Exception as exc:
+                _log_watcher_refresh_failure(
+                    backend="vizio",
+                    device_id=tv.identifier,
+                    exc=exc,
                 )
 
     async def run(self, *, stop: asyncio.Event) -> None:
@@ -217,6 +226,67 @@ class VizioPollingWatcher(DeviceStateWatcher):
                 await asyncio.wait_for(stop.wait(), timeout=self._interval_s)
             except asyncio.TimeoutError:
                 pass
+
+
+def _is_transient_connect_failure(exc: BaseException) -> bool:
+    os_error = _root_os_error(exc)
+    if os_error is None:
+        return False
+    if os_error.errno in _TRANSIENT_CONNECT_ERRNOS:
+        return True
+    return isinstance(os_error, ConnectionRefusedError | TimeoutError)
+
+
+def _log_watcher_refresh_failure(
+    *,
+    backend: str,
+    device_id: str,
+    exc: BaseException,
+) -> None:
+    if _is_transient_connect_failure(exc):
+        _LOGGER.warning(
+            "[state-watcher %s] %s update failed: %s; keeping last known state",
+            backend,
+            device_id,
+            exc,
+        )
+        return
+    _LOGGER.warning(
+        "[state-watcher %s] %s update failed; keeping last known state",
+        backend,
+        device_id,
+        exc_info=True,
+    )
+
+
+def _root_os_error(exc: BaseException) -> OSError | None:
+    """Return the first OSError with a non-None errno found anywhere in the chain.
+
+    Walks both ``__cause__`` (explicit chaining via ``raise X from Y``) and
+    ``__context__`` (implicit chaining) so that wrappers like
+    ``requests.exceptions.ConnectionError`` — which have ``errno=None`` but
+    carry a ``ConnectionRefusedError`` deep in the context chain — are
+    handled correctly. Falls back to the first OSError found when none has
+    errno set.
+    """
+    seen: set[int] = set()
+    work: list[BaseException] = [exc]
+    fallback: OSError | None = None
+    while work:
+        current = work.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, OSError):
+            if current.errno is not None:
+                return current
+            if fallback is None:
+                fallback = current
+        if current.__cause__ is not None:
+            work.append(current.__cause__)
+        if current.__context__ is not None:
+            work.append(current.__context__)
+    return fallback
 
 
 def build_default_watchers(

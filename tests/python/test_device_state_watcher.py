@@ -21,8 +21,9 @@ No real hardware is touched — every manager is a :class:`MagicMock`.
 from __future__ import annotations
 
 import asyncio
+import errno
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -142,6 +143,85 @@ async def test_kasa_watcher_keeps_going_when_one_device_raises() -> None:
     await _wait_for_await_count(is_on, 3)
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_kasa_watcher_logs_transient_connect_without_traceback() -> None:
+    mgr = _fake_kasa_mgr(["192.168.86.188"])
+    connect_error = OSError(113, "Connect call failed ('192.168.86.188', 9999)")
+    cast(AsyncMock, mgr.is_on).side_effect = [connect_error, True, True]
+    watcher = KasaPollingWatcher(mgr, interval_s=0.01)
+    stop = asyncio.Event()
+    with patch("app.device_state_watcher._LOGGER.warning") as warning_mock:
+        task = asyncio.create_task(watcher.run(stop=stop))
+        is_on = cast(AsyncMock, mgr.is_on)
+        await _wait_for_await_count(is_on, 2)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert warning_mock.call_count >= 1
+    _, kwargs = warning_mock.call_args_list[0]
+    assert kwargs.get("exc_info") is not True
+    _fmt, backend, device_id, exc = warning_mock.call_args_list[0].args
+    assert backend == "kasa"
+    assert device_id == "192.168.86.188"
+    assert "Connect call failed" in str(exc)
+
+
+@pytest.mark.asyncio
+async def test_kasa_watcher_logs_unexpected_error_with_traceback() -> None:
+    mgr = _fake_kasa_mgr(["192.168.86.188"])
+    unexpected_error = RuntimeError("unexpected internal failure")
+    cast(AsyncMock, mgr.is_on).side_effect = [unexpected_error, True, True]
+    watcher = KasaPollingWatcher(mgr, interval_s=0.01)
+    stop = asyncio.Event()
+    with patch("app.device_state_watcher._LOGGER.warning") as warning_mock:
+        task = asyncio.create_task(watcher.run(stop=stop))
+        is_on = cast(AsyncMock, mgr.is_on)
+        await _wait_for_await_count(is_on, 2)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert warning_mock.call_count >= 1
+    _, kwargs = warning_mock.call_args_list[0]
+    assert kwargs.get("exc_info") is True
+
+
+@pytest.mark.asyncio
+async def test_kasa_watcher_logs_requests_wrapped_connect_error_without_traceback() -> None:
+    """Simulate a requests.ConnectionError that buries ConnectionRefusedError via __context__.
+
+    SoCo (Sonos) and similar requests-based libraries raise their top-level
+    exception inside an except block, producing an implicit __context__ chain
+    rather than an explicit __cause__ chain. _root_os_error must walk __context__
+    to find the errno-carrying OSError several levels deep.
+    """
+    mgr = _fake_kasa_mgr(["192.168.86.188"])
+
+    # Recreate the chain requests/urllib3 produces:
+    #   OuterError (OSError, errno=None)  <-- __context__
+    #     NewConnectionError (not OSError) <-- __cause__
+    #       ConnectionRefusedError (OSError, errno=111) <- root cause
+    root_os_err = ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+    mid_err = Exception("Failed to establish a new connection")
+    mid_err.__cause__ = root_os_err
+    outer_err = OSError("Max retries exceeded")  # errno=None
+    # Implicit __context__ (no 'from'), like requests.adapters.send does
+    outer_err.__context__ = mid_err
+
+    cast(AsyncMock, mgr.is_on).side_effect = [outer_err, True, True]
+    watcher = KasaPollingWatcher(mgr, interval_s=0.01)
+    stop = asyncio.Event()
+    with patch("app.device_state_watcher._LOGGER.warning") as warning_mock:
+        task = asyncio.create_task(watcher.run(stop=stop))
+        is_on = cast(AsyncMock, mgr.is_on)
+        await _wait_for_await_count(is_on, 2)
+        stop.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    assert warning_mock.call_count >= 1
+    _, kwargs = warning_mock.call_args_list[0]
+    assert kwargs.get("exc_info") is not True
 
 
 @pytest.mark.asyncio
