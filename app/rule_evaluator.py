@@ -38,10 +38,12 @@ from app.rule_conditions import (
     compute_rules_sun_out,
     evaluate_rule_conditions_met,
 )
+from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
 from app.rule_validation import build_roster_user_id_lookup, rule_references_user_id
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 
 _LOGGER = logging.getLogger(__name__)
+_MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
 _RULE_EVALUATOR_TICK_S = 60.0
 
 
@@ -76,6 +78,9 @@ class RuleEvaluator:
         self._cache_path = cache_path
         self._device_state_getter = device_state_getter
         self._now_fn = now_fn or time.time
+        # Outside-since timestamps are in-memory only; a restart clears them so the
+        # first geofence enter after a bounce is never falsely debounced.
+        self._geofence_outside_since: dict[tuple[str, str], float] = {}
         self._geofence_was_inside: dict[tuple[str, str], bool] = {}
         self._last_run_at: float | None = None
         self._next_sun_check_at: float | None = None
@@ -83,6 +88,7 @@ class RuleEvaluator:
         self._rule_state: dict[str, _RuleRuntimeState] = {}
         self._stop = asyncio.Event()
         self._tick_task: asyncio.Task[None] | None = None
+        self._load_persisted_rule_state()
         self._seed_geofence_state()
 
     async def close(self) -> None:
@@ -218,9 +224,11 @@ class RuleEvaluator:
                     rule.id,
                     runtime.last_error,
                 )
+            self._persist_rule_state(rule.id)
             return
         runtime.last_fired_at = self._now_fn()
         runtime.last_error = "; ".join(errors) if errors else None
+        self._persist_rule_state(rule.id)
         duration_ms = (time.monotonic() - started) * 1000.0
         _LOGGER.info(
             "[rules] fired rule_id=%s actions=%d duration_ms=%.0f%s",
@@ -230,6 +238,16 @@ class RuleEvaluator:
             f" errors={runtime.last_error!r}" if runtime.last_error else "",
         )
 
+    def _load_persisted_rule_state(self) -> None:
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        for record in list_rule_fire_states(cache_path).values():
+            self._rule_state[record.rule_id] = _RuleRuntimeState(
+                last_error=record.last_error,
+                last_fired_at=record.last_fired_at,
+            )
+
     async def _periodic_loop(self) -> None:
         while not self._stop.is_set():
             self._last_run_at = self._now_fn()
@@ -238,6 +256,20 @@ class RuleEvaluator:
                 await asyncio.wait_for(self._stop.wait(), timeout=_RULE_EVALUATOR_TICK_S)
             except TimeoutError:
                 continue
+
+    def _persist_rule_state(self, rule_id: str) -> None:
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        state = self._rule_state.get(rule_id)
+        if state is None:
+            return
+        upsert_rule_fire_state(
+            cache_path,
+            last_error=state.last_error,
+            last_fired_at=state.last_fired_at,
+            rule_id=rule_id,
+        )
 
     async def _process_location_update(self, user_id: str) -> None:
         cache_path = self._cache_path
@@ -300,6 +332,7 @@ class RuleEvaluator:
     ) -> dict[str, GeofenceTransition]:
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         transitions: dict[str, GeofenceTransition] = {}
+        observed_at = location.received_at
         for geofence in geofences:
             if not geofence.enabled:
                 continue
@@ -307,12 +340,26 @@ class RuleEvaluator:
             key = (user_id, geofence_id)
             was_inside = self._geofence_was_inside.get(key, False)
             now_inside = geofence_id in inside_ids
-            self._geofence_was_inside[key] = now_inside
             transition = GeofenceTransition()
             if now_inside and not was_inside:
-                transition = GeofenceTransition(entered=True)
+                outside_since = self._geofence_outside_since.get(key)
+                dwell_elapsed = outside_since is None or (
+                    observed_at - outside_since >= _MIN_GEOFENCE_OUTSIDE_DWELL_S
+                )
+                self._geofence_was_inside[key] = True
+                self._geofence_outside_since.pop(key, None)
+                if dwell_elapsed:
+                    transition = GeofenceTransition(entered=True)
             elif was_inside and not now_inside:
+                self._geofence_was_inside[key] = False
+                self._geofence_outside_since[key] = observed_at
                 transition = GeofenceTransition(left=True)
+            elif now_inside:
+                self._geofence_was_inside[key] = True
+                self._geofence_outside_since.pop(key, None)
+            else:
+                self._geofence_was_inside[key] = False
+                self._geofence_outside_since.setdefault(key, observed_at)
             if transition.entered or transition.left:
                 transitions[geofence_id] = transition
         return transitions

@@ -336,3 +336,130 @@ def test_user_triggered_geofence_edge_requires_enter_for_inside_rule() -> None:
         "henrique",
         {"house": GeofenceTransition(left=True)},
     )
+
+
+def _seed_henrique_inside_house(fixture: _ArriveHomeFixture) -> None:
+    upsert_user_location(
+        fixture.db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=fixture.clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+
+
+def _move_henrique_outside_house(fixture: _ArriveHomeFixture) -> None:
+    fixture.clock["now"] += 30.0
+    upsert_user_location(
+        fixture.db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=44.0,
+            lon=-73.0,
+            accuracy_m=20,
+            received_at=fixture.clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_persists_fire_state_across_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_arrive_home_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=300,
+    )
+    _move_henrique_inside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+
+    restarted = RuleEvaluator(
+        cache_path=fixture.db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: fixture.clock["now"],
+    )
+    fire_state = restarted.fire_state_for_rule("arrive-home")
+    assert fire_state.last_fired_at == fixture.clock["now"]
+    assert fire_state.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_suppresses_geofence_reenter_within_dwell_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_arrive_home_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+    )
+    _seed_presence_db(
+        fixture.db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        received_at=fixture.clock["now"],
+    )
+    fixture.evaluator = RuleEvaluator(
+        cache_path=fixture.db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr([fixture.device]),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=fixture.db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: fixture.clock["now"],
+    )
+
+    _move_henrique_outside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+    _move_henrique_inside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+
+    assert fixture.device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_fires_geofence_reenter_after_dwell_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_arrive_home_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+    )
+    _seed_henrique_inside_house(fixture)
+    fixture.evaluator = RuleEvaluator(
+        cache_path=fixture.db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr([fixture.device]),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=fixture.db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: fixture.clock["now"],
+    )
+
+    _move_henrique_outside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+    fixture.clock["now"] += 310.0
+    _move_henrique_inside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+
+    assert fixture.device.calls == ["on"]

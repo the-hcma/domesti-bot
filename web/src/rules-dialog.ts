@@ -39,7 +39,7 @@ import {
   FAMILY_ACTION_GROUP_LABELS,
   createBrokenRuleBadge,
   resolveRosterUser,
-  ruleLastMetLabel,
+  appendRuleLastMetLine,
   ruleStatusHeadline,
   userDisplayLabel,
   preventBrowserAutofill,
@@ -1163,13 +1163,7 @@ class RulesHubController {
       meta.className = "rules-card-meta";
       meta.textContent = ruleStatusHeadline(rule);
       card.append(row, meta);
-      if (rule.last_fired_at !== null) {
-        const fired = document.createElement("p");
-        fired.className = "rules-card-meta";
-        fired.append(document.createTextNode(ruleLastMetLabel(rule.trigger)));
-        fired.append(createAuditedTimeElement(rule.last_fired_at));
-        card.append(fired);
-      }
+      appendRuleLastMetLine(card, rule);
       if (rule.last_error !== null) {
         const error = document.createElement("p");
         error.className = "rules-card-warn";

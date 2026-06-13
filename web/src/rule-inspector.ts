@@ -1,6 +1,5 @@
 // Read-only automation rule wiring panel (file-backed bundle).
 
-import { createAuditedTimeElement } from "./format-timestamp.js";
 import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
@@ -12,8 +11,8 @@ import {
   type RuleSummaryContext,
 } from "./rule-summary.js";
 import {
+  appendRuleLastMetLine,
   createBrokenRuleBadge,
-  ruleLastMetLabel,
   ruleStatusHeadline,
 } from "./rules-ui-helpers.js";
 import type {
@@ -103,13 +102,7 @@ function appendLiveStatusSection(
   headline.textContent = ruleStatusHeadline(liveStatus);
   section.append(headline);
 
-  if (liveStatus.last_fired_at !== null) {
-    const fired = document.createElement("p");
-    fired.className = "rules-card-meta";
-    fired.append(document.createTextNode(ruleLastMetLabel(liveStatus.trigger)));
-    fired.append(createAuditedTimeElement(liveStatus.last_fired_at));
-    section.append(fired);
-  }
+  appendRuleLastMetLine(section, liveStatus);
 
   if (liveStatus.last_error !== null) {
     const error = document.createElement("p");
