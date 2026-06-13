@@ -90,8 +90,29 @@ def format_log_timestamp(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
 
 
+_UVICORN_LIFECYCLE_MESSAGE_MARKERS: Final[tuple[str, ...]] = (
+    "Application shutdown complete",
+    "Application startup complete",
+    "Finished server process",
+    "Shutting down",
+    "Started server process",
+    "Uvicorn running on",
+    "Waiting for application shutdown",
+    "Waiting for application startup",
+)
+
+
+def _is_uvicorn_lifecycle_record(record: logging.LogRecord) -> bool:
+    if record.name not in ("uvicorn", "uvicorn.error"):
+        return False
+    msg = record.getMessage()
+    return any(marker in msg for marker in _UVICORN_LIFECYCLE_MESSAGE_MARKERS)
+
+
 def logtag_for_record(record: logging.LogRecord) -> str:
     """Return a fixed-width-friendly logger tag for ``%(logtag)s``."""
+    if _is_uvicorn_lifecycle_record(record):
+        return "lifecycle"
     leaf = record.name.rsplit(".", 1)[-1]
     if leaf in _LOGTAG_ALIASES:
         return _LOGTAG_ALIASES[leaf]

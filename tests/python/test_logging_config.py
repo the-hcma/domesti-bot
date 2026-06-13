@@ -87,6 +87,41 @@ def test_local_time_formatter_uses_my_tracks_format(monkeypatch: pytest.MonkeyPa
     assert re.match(pattern, formatted), f"unexpected formatted line: {formatted!r}"
 
 
+def test_logtag_for_record_tags_uvicorn_shutdown_as_lifecycle() -> None:
+    record = logging.LogRecord(
+        name="uvicorn.error",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="Shutting down",
+        args=None,
+        exc_info=None,
+    )
+    assert logtag_for_record(record) == "lifecycle"
+
+    startup_record = logging.LogRecord(
+        name="uvicorn",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="Uvicorn running on http://127.0.0.1:8003 (Press CTRL+C to quit)",
+        args=None,
+        exc_info=None,
+    )
+    assert logtag_for_record(startup_record) == "lifecycle"
+
+    error_record = logging.LogRecord(
+        name="uvicorn.error",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="Exception in ASGI application",
+        args=None,
+        exc_info=None,
+    )
+    assert logtag_for_record(error_record) == "error"
+
+
 def test_logtag_for_record_aliases_long_module_names() -> None:
     record = logging.LogRecord(
         name="app.api.mytracks_routes",
