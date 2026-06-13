@@ -6,8 +6,9 @@ picked at emit time based on path + status:
 * Successful responses to :data:`_QUIET_ACCESS_LOG_PATHS` → TRACE
   (poll heartbeats; ``/v1/ui/state`` is hit every 5s by the web UI);
 * Other successful responses → DEBUG (routine client traffic stays below INFO);
-* 4xx/5xx responses to any path (including the quiet paths) → INFO,
-  so genuine failures stay visible at the default log level.
+* 4xx/5xx responses on API paths (including the quiet paths) → INFO,
+  so genuine failures stay visible at the default log level;
+* ``/static/…`` responses (including 404 missing icons) → DEBUG.
 
 These tests use ``caplog`` against the ``app.api`` logger (the same
 logger ``_AccessLogMiddleware`` uses) and assert the exact level of
@@ -144,6 +145,24 @@ def test_non_quiet_path_is_logged_at_debug(
     for rec in matching:
         assert rec.levelno == logging.DEBUG, (
             f"expected DEBUG, got {rec.levelname}: {rec.getMessage()}"
+        )
+
+
+def test_static_asset_404_is_logged_at_debug(
+    api_http_log_records: list[logging.LogRecord],
+) -> None:
+    """Missing static icons are routine browser noise — stay below INFO."""
+
+    client, _app = _client()
+    r = client.get("/static/icons/compact/tv.svg")
+    assert r.status_code == 404
+
+    records = _http_records(api_http_log_records)
+    matching = [r for r in records if "/static/icons/compact/tv.svg" in r.getMessage()]
+    assert matching
+    for rec in matching:
+        assert rec.levelno == logging.DEBUG, (
+            f"expected DEBUG for static 404, got {rec.levelname}: {rec.getMessage()}"
         )
 
 

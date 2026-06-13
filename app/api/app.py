@@ -105,6 +105,23 @@ _QUIET_ACCESS_LOG_PATHS: frozenset[str] = frozenset({
     "/v1/ui/state",
 })
 
+# Static assets (``/static/…``) are pure transport traffic — missing
+# icons and other browser fetches should not surface at INFO.
+_STATIC_ACCESS_LOG_PREFIX: str = "/static/"
+
+
+def _access_log_level(path: str, status_code: int) -> int:
+    """Pick the log level for a completed ``[http]`` access record."""
+    if status_code >= 500:
+        return logging.INFO
+    if path.startswith(_STATIC_ACCESS_LOG_PREFIX):
+        return logging.DEBUG
+    if status_code >= 400:
+        return logging.INFO
+    if path in _QUIET_ACCESS_LOG_PATHS:
+        return TRACE_LEVEL
+    return logging.DEBUG
+
 
 class _AccessLogMiddleware(BaseHTTPMiddleware):
     """Emit a single ``[http]`` log line per request.
@@ -112,7 +129,9 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
     Level selection:
 
     * 5xx raised exceptions → ``logger.exception(...)`` (ERROR with traceback).
-    * 4xx/5xx responses     → INFO (errors should stay visible at the default level).
+    * 4xx/5xx responses on API paths → INFO (errors should stay visible at
+      the default level); static asset fetches under ``/static/`` log at
+      DEBUG even on 404 (missing icons are routine browser noise).
     * Successful responses to paths in :data:`_QUIET_ACCESS_LOG_PATHS` → TRACE
       (poll heartbeats; see the constant's docstring).
     * Other successful responses → DEBUG (routine client traffic stays below INFO).
@@ -139,12 +158,7 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             )
             raise
         elapsed_ms = (time.perf_counter() - started) * 1000.0
-        if response.status_code >= 400:
-            level = logging.INFO
-        elif request.url.path in _QUIET_ACCESS_LOG_PATHS:
-            level = TRACE_LEVEL
-        else:
-            level = logging.DEBUG
+        level = _access_log_level(request.url.path, response.status_code)
         _LOGGER.log(
             level,
             "[http] %s %s %s %d (%.1f ms)",
