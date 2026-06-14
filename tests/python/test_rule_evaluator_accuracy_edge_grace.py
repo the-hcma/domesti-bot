@@ -179,8 +179,9 @@ def _move_inside(
     clock: dict[str, float],
     *,
     accuracy_m: int | None,
+    delta_s: float = 60.0,
 ) -> None:
-    clock["now"] += 60.0
+    clock["now"] += delta_s
     upsert_user_location(
         db,
         UserLocationRecord(
@@ -279,6 +280,31 @@ async def test_accuracy_edge_grace_expires_without_firing(
         if call.args and "deferred edge expired" in str(call.args[0])
     ]
     assert expired
+    assert device.calls == []
+
+    _move_inside(db, clock, accuracy_m=20)
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_accuracy_edge_grace_keeps_original_expiration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock, db, device, evaluator = _setup_evaluator(
+        tmp_path,
+        monkeypatch,
+        accuracy_edge_grace_s=60,
+    )
+    _move_inside(db, clock, accuracy_m=120)
+    await evaluator.on_location_update("henrique")
+
+    _move_inside(db, clock, accuracy_m=120, delta_s=30.0)
+    await evaluator.on_location_update("henrique")
+
+    _move_inside(db, clock, accuracy_m=20, delta_s=31.0)
+    await evaluator.on_location_update("henrique")
     assert device.calls == []
 
 

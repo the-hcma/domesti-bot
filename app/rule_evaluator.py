@@ -358,20 +358,27 @@ class RuleEvaluator:
             f" errors={runtime.last_error!r}" if runtime.last_error else "",
         )
 
-    def _expire_deferred_accuracy_edges(self, user_id: str, now: float) -> None:
-        expired_keys = [
+    def _expire_deferred_accuracy_edges(
+        self,
+        user_id: str,
+        now: float,
+    ) -> set[tuple[str, str, str, str]]:
+        keys_to_expire = [
             key
             for key, deferred in self._deferred_accuracy_edges.items()
             if key[1] == user_id and now > deferred.expires_at
         ]
-        for key in expired_keys:
+        expired_keys: set[tuple[str, str, str, str]] = set()
+        for key in keys_to_expire:
             deferred = self._deferred_accuracy_edges.pop(key)
+            expired_keys.add(key)
             _log_deferred_edge_expired(
                 rule_id=deferred.rule_id,
                 user_id=deferred.user_id,
                 geofence_id=deferred.geofence_id,
                 event=deferred.event,
             )
+        return expired_keys
 
     def _load_persisted_rule_state(self) -> None:
         cache_path = self._cache_path
@@ -409,6 +416,7 @@ class RuleEvaluator:
     def _register_deferred_accuracy_edges(
         self,
         *,
+        expired_keys: set[tuple[str, str, str, str]],
         rule: RuleOut,
         user_id: str,
         intents: list[tuple[str, DeferredGeofenceEvent]],
@@ -418,7 +426,11 @@ class RuleEvaluator:
     ) -> None:
         for geofence_id, event in intents:
             key = (rule.id, user_id, geofence_id, event)
+            if key in expired_keys:
+                continue
             is_new = key not in self._deferred_accuracy_edges
+            if not is_new:
+                continue
             self._deferred_accuracy_edges[key] = _DeferredAccuracyEdge(
                 event=event,
                 expires_at=now + grace_s,
@@ -454,7 +466,7 @@ class RuleEvaluator:
         )
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         now = self._now_fn()
-        self._expire_deferred_accuracy_edges(user_id, now)
+        expired_deferred_keys = self._expire_deferred_accuracy_edges(user_id, now)
         if transitions:
             transitions_summary = _format_geofence_transitions_for_log(transitions)
             _LOGGER.debug(
@@ -502,6 +514,7 @@ class RuleEvaluator:
                     intents = _dedupe_geofence_intents(intents)
                     if intents:
                         self._register_deferred_accuracy_edges(
+                            expired_keys=expired_deferred_keys,
                             rule=rule,
                             user_id=user_id,
                             intents=intents,
