@@ -231,11 +231,17 @@ def upsert_user_location(
         )
         stored = True
     if stored:
+        accuracy_label = (
+            "unknown"
+            if location.accuracy_m is None
+            else f"{location.accuracy_m:g}"
+        )
         _LOCATION_LOGGER.info(
-            "stored location for %s (%.5f, %.5f) at %s",
+            "stored location for %s (%.5f, %.5f) accuracy_m=%s at %s",
             location.user_id,
             location.lat,
             location.lon,
+            accuracy_label,
             format_log_timestamp(location.received_at),
         )
         prune_user_location_history(
