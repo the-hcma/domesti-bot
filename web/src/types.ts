@@ -204,6 +204,8 @@ export interface RuleOut {
   enabled: boolean;
   trigger: RuleTrigger;
   cooldown_s: number;
+  /** Retry geofence edges for this many seconds after an accuracy skip (omit to disable). */
+  accuracy_edge_grace_s?: number | null;
   /** Locations with horizontal accuracy worse than this (meters) are ignored. */
   min_location_accuracy_m: number;
   /** Send email when this automation fires (requires SMTP in Mail tab). */

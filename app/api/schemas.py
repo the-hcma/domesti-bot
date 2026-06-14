@@ -588,6 +588,15 @@ class RuleDeviceActionOut(BaseModel):
 class RuleOut(BaseModel):
     """One automation rule from ``automation-rules.json``."""
 
+    accuracy_edge_grace_s: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "When a geofence edge matches but GPS accuracy fails "
+            "``min_location_accuracy_m``, retry firing for this many seconds "
+            "on subsequent location updates once accuracy improves."
+        ),
+    )
     conditions: RuleConditionsOut
     cooldown_s: int
     device_actions: list[RuleDeviceActionOut]

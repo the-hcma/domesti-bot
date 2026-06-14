@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from app.api.schemas import (
@@ -40,12 +41,28 @@ from app.rule_conditions import (
     evaluate_rule,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
-from app.rule_validation import build_roster_user_id_lookup, rule_references_user_id
+from app.rule_validation import (
+    build_roster_user_id_lookup,
+    collect_rule_user_ids,
+    rule_references_user_id,
+)
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 
 _LOGGER = logging.getLogger(__name__)
 _MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
 _RULE_EVALUATOR_TICK_S = 60.0
+DeferredGeofenceEvent = Literal["entered", "left"]
+RuleFireSource = Literal["deferred", "immediate"]
+
+
+@dataclass(frozen=True)
+class _DeferredAccuracyEdge:
+    event: DeferredGeofenceEvent
+    expires_at: float
+    geofence_id: str
+    observed_at: float
+    rule_id: str
+    user_id: str
 
 
 @dataclass(frozen=True)
@@ -81,6 +98,10 @@ class RuleEvaluator:
         self._now_fn = now_fn or time.time
         # Outside-since timestamps are in-memory only; a restart clears them so the
         # first geofence enter after a bounce is never falsely debounced.
+        self._deferred_accuracy_edges: dict[
+            tuple[str, str, str, str],
+            _DeferredAccuracyEdge,
+        ] = {}
         self._geofence_outside_since: dict[tuple[str, str], float] = {}
         self._geofence_was_inside: dict[tuple[str, str], bool] = {}
         self._last_run_at: float | None = None
@@ -188,6 +209,90 @@ class RuleEvaluator:
             user_locations=user_locations,
         )
 
+    async def _attempt_deferred_accuracy_edge_fires(
+        self,
+        *,
+        user_id: str,
+        location: UserLocationRecord,
+        inside_ids: set[str],
+        ctx: RuleEvaluationContext,
+        now: float,
+    ) -> None:
+        keys_for_user = [
+            key for key in self._deferred_accuracy_edges if key[1] == user_id
+        ]
+        for key in keys_for_user:
+            deferred = self._deferred_accuracy_edges.get(key)
+            if deferred is None or now > deferred.expires_at:
+                continue
+            rule = _automation_rule_by_id(deferred.rule_id)
+            if rule is None or not rule.enabled or rule.trigger != "edge_true":
+                self._deferred_accuracy_edges.pop(key, None)
+                continue
+            if not _accuracy_passes(rule, location):
+                continue
+            if not _deferred_state_matches(
+                deferred.event,
+                deferred.geofence_id,
+                inside_ids,
+            ):
+                self._deferred_accuracy_edges.pop(key, None)
+                _log_deferred_edge_cancelled(
+                    rule_id=deferred.rule_id,
+                    user_id=user_id,
+                    geofence_id=deferred.geofence_id,
+                    event=deferred.event,
+                )
+                continue
+            evaluation = evaluate_rule(rule, ctx)
+            if not evaluation.all_met:
+                _log_rule_skipped(
+                    rule.id,
+                    user_id,
+                    reason="conditions_not_met",
+                    detail=_format_unmet_conditions_for_log(evaluation),
+                )
+                continue
+            runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+            if not self._cooldown_elapsed(rule, runtime):
+                remaining_s = rule.cooldown_s - (
+                    now - (runtime.last_fired_at or 0.0)
+                )
+                _log_rule_skipped(
+                    rule.id,
+                    user_id,
+                    reason="cooldown",
+                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                )
+                continue
+            self._deferred_accuracy_edges.pop(key, None)
+            transitions = {
+                deferred.geofence_id: GeofenceTransition(
+                    entered=deferred.event == "entered",
+                    left=deferred.event == "left",
+                ),
+            }
+            await self._execute_rule(
+                rule,
+                evaluation=evaluation,
+                transitions=transitions,
+                user_id=user_id,
+                fire_source="deferred",
+            )
+
+    def _clear_deferred_accuracy_edges_for_rule(
+        self,
+        rule_id: str,
+        user_id: str,
+    ) -> None:
+        keys = [
+            key
+            for key in self._deferred_accuracy_edges
+            if key[0] == rule_id and key[1] == user_id
+        ]
+        for key in keys:
+            self._deferred_accuracy_edges.pop(key, None)
+
     def _cooldown_elapsed(self, rule: RuleOut, state: _RuleRuntimeState) -> bool:
         if state.last_fired_at is None:
             return True
@@ -198,6 +303,7 @@ class RuleEvaluator:
         rule: RuleOut,
         *,
         evaluation: RuleEvaluationResult,
+        fire_source: RuleFireSource = "immediate",
         transitions: dict[str, GeofenceTransition],
         user_id: str,
     ) -> None:
@@ -237,18 +343,35 @@ class RuleEvaluator:
         runtime.last_fired_at = self._now_fn()
         runtime.last_error = "; ".join(errors) if errors else None
         self._persist_rule_state(rule.id)
+        self._clear_deferred_accuracy_edges_for_rule(rule.id, user_id)
         duration_ms = (time.monotonic() - started) * 1000.0
         _LOGGER.info(
-            "[rules] fired rule_id=%s user_id=%s transitions=%s conditions=%s "
+            "[rules] fired rule_id=%s user_id=%s source=%s transitions=%s conditions=%s "
             "actions=%d duration_ms=%.0f%s",
             rule.id,
             user_id,
+            fire_source,
             _format_geofence_transitions_for_log(transitions),
             _format_rule_conditions_for_log(rule, evaluation),
             len(rule.device_actions),
             duration_ms,
             f" errors={runtime.last_error!r}" if runtime.last_error else "",
         )
+
+    def _expire_deferred_accuracy_edges(self, user_id: str, now: float) -> None:
+        expired_keys = [
+            key
+            for key, deferred in self._deferred_accuracy_edges.items()
+            if key[1] == user_id and now > deferred.expires_at
+        ]
+        for key in expired_keys:
+            deferred = self._deferred_accuracy_edges.pop(key)
+            _log_deferred_edge_expired(
+                rule_id=deferred.rule_id,
+                user_id=deferred.user_id,
+                geofence_id=deferred.geofence_id,
+                event=deferred.event,
+            )
 
     def _load_persisted_rule_state(self) -> None:
         cache_path = self._cache_path
@@ -283,6 +406,38 @@ class RuleEvaluator:
             rule_id=rule_id,
         )
 
+    def _register_deferred_accuracy_edges(
+        self,
+        *,
+        rule: RuleOut,
+        user_id: str,
+        intents: list[tuple[str, DeferredGeofenceEvent]],
+        grace_s: int,
+        now: float,
+        location: UserLocationRecord,
+    ) -> None:
+        for geofence_id, event in intents:
+            key = (rule.id, user_id, geofence_id, event)
+            is_new = key not in self._deferred_accuracy_edges
+            self._deferred_accuracy_edges[key] = _DeferredAccuracyEdge(
+                event=event,
+                expires_at=now + grace_s,
+                geofence_id=geofence_id,
+                observed_at=location.received_at,
+                rule_id=rule.id,
+                user_id=user_id,
+            )
+            if is_new:
+                _log_deferred_edge_registered(
+                    rule_id=rule.id,
+                    user_id=user_id,
+                    geofence_id=geofence_id,
+                    event=event,
+                    grace_s=grace_s,
+                    accuracy_m=location.accuracy_m,
+                    accuracy_limit_m=rule.min_location_accuracy_m,
+                )
+
     async def _process_location_update(self, user_id: str) -> None:
         cache_path = self._cache_path
         if cache_path is None:
@@ -297,24 +452,63 @@ class RuleEvaluator:
             location,
             geofences,
         )
-        if not transitions:
-            self._last_run_at = self._now_fn()
-            return
-        transitions_summary = _format_geofence_transitions_for_log(transitions)
-        _LOGGER.debug(
-            "[rules] evaluating location update user_id=%s lat=%.5f lon=%.5f "
-            "accuracy_m=%s transitions=%s",
-            user_id,
-            location.lat,
-            location.lon,
-            location.accuracy_m,
-            transitions_summary,
-        )
+        inside_ids = set(geofence_ids_containing_location(location, geofences))
+        now = self._now_fn()
+        self._expire_deferred_accuracy_edges(user_id, now)
+        if transitions:
+            transitions_summary = _format_geofence_transitions_for_log(transitions)
+            _LOGGER.debug(
+                "[rules] evaluating location update user_id=%s lat=%.5f lon=%.5f "
+                "accuracy_m=%s transitions=%s",
+                user_id,
+                location.lat,
+                location.lon,
+                location.accuracy_m,
+                transitions_summary,
+            )
         ctx = await self._build_evaluation_context(now=datetime.now(UTC))
+        await self._attempt_deferred_accuracy_edge_fires(
+            user_id=user_id,
+            location=location,
+            inside_ids=inside_ids,
+            ctx=ctx,
+            now=now,
+        )
         for rule in list_automation_rules():
             if not rule.enabled or rule.trigger != "edge_true":
                 continue
+            if user_id not in collect_rule_user_ids(rule):
+                continue
+            grace_s = _accuracy_edge_grace_s(rule)
             if not _accuracy_passes(rule, location):
+                if grace_s is not None:
+                    intents: list[tuple[str, DeferredGeofenceEvent]] = []
+                    if transitions and _user_triggered_geofence_edge(
+                        rule.conditions.all,
+                        user_id,
+                        transitions,
+                    ):
+                        intents = _collect_geofence_edge_intents(
+                            rule.conditions.all,
+                            user_id,
+                            transitions,
+                        )
+                    if not intents:
+                        intents = _collect_geofence_state_intents(
+                            rule.conditions.all,
+                            inside_ids,
+                            user_id,
+                        )
+                    intents = _dedupe_geofence_intents(intents)
+                    if intents:
+                        self._register_deferred_accuracy_edges(
+                            rule=rule,
+                            user_id=user_id,
+                            intents=intents,
+                            grace_s=grace_s,
+                            now=now,
+                            location=location,
+                        )
                 if _user_triggered_geofence_edge(
                     rule.conditions.all,
                     user_id,
@@ -329,6 +523,8 @@ class RuleEvaluator:
                             f"limit={rule.min_location_accuracy_m}"
                         ),
                     )
+                continue
+            if not transitions:
                 continue
             if not _user_triggered_geofence_edge(
                 rule.conditions.all,
@@ -347,7 +543,7 @@ class RuleEvaluator:
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
             if not self._cooldown_elapsed(rule, runtime):
-                remaining_s = rule.cooldown_s - (self._now_fn() - (runtime.last_fired_at or 0.0))
+                remaining_s = rule.cooldown_s - (now - (runtime.last_fired_at or 0.0))
                 _log_rule_skipped(
                     rule.id,
                     user_id,
@@ -361,7 +557,7 @@ class RuleEvaluator:
                 transitions=transitions,
                 user_id=user_id,
             )
-        self._last_run_at = self._now_fn()
+        self._last_run_at = now
         self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
 
     def _seed_geofence_state(self) -> None:
@@ -439,6 +635,116 @@ def _accuracy_passes(rule: RuleOut, location: UserLocationRecord) -> bool:
     return location.accuracy_m <= rule.min_location_accuracy_m
 
 
+def _accuracy_edge_grace_s(rule: RuleOut) -> int | None:
+    grace = rule.accuracy_edge_grace_s
+    if grace is None or grace <= 0:
+        return None
+    return grace
+
+
+def _automation_rule_by_id(rule_id: str) -> RuleOut | None:
+    for rule in list_automation_rules():
+        if rule.id == rule_id:
+            return rule
+    return None
+
+
+def _collect_geofence_edge_intents(
+    conditions: list[RuleConditionOut],
+    user_id: str,
+    transitions: dict[str, GeofenceTransition],
+) -> list[tuple[str, DeferredGeofenceEvent]]:
+    intents: list[tuple[str, DeferredGeofenceEvent]] = []
+    for condition in conditions:
+        intents.extend(
+            _condition_geofence_edge_intents(condition, user_id, transitions),
+        )
+    return intents
+
+
+def _collect_geofence_state_intents(
+    conditions: list[RuleConditionOut],
+    inside_ids: set[str],
+    user_id: str,
+) -> list[tuple[str, DeferredGeofenceEvent]]:
+    intents: list[tuple[str, DeferredGeofenceEvent]] = []
+    for condition in conditions:
+        intents.extend(
+            _condition_geofence_state_intents(condition, inside_ids, user_id),
+        )
+    return intents
+
+
+def _condition_geofence_edge_intents(
+    condition: RuleConditionOut,
+    user_id: str,
+    transitions: dict[str, GeofenceTransition],
+) -> list[tuple[str, DeferredGeofenceEvent]]:
+    if isinstance(condition, UsersInsideGeofenceCondition):
+        if not rule_references_user_id(condition.user_ids, user_id):
+            return []
+        transition = transitions.get(condition.geofence_id)
+        if transition is not None and transition.entered:
+            return [(condition.geofence_id, "entered")]
+        return []
+    if isinstance(condition, UsersOutsideGeofenceCondition):
+        if not rule_references_user_id(condition.user_ids, user_id):
+            return []
+        transition = transitions.get(condition.geofence_id)
+        if transition is not None and transition.left:
+            return [(condition.geofence_id, "left")]
+        return []
+    if isinstance(condition, AllConditionsCondition):
+        intents: list[tuple[str, DeferredGeofenceEvent]] = []
+        for child in condition.conditions:
+            intents.extend(
+                _condition_geofence_edge_intents(child, user_id, transitions),
+            )
+        return intents
+    if isinstance(condition, AnyConditionsCondition):
+        intents = []
+        for child in condition.conditions:
+            intents.extend(
+                _condition_geofence_edge_intents(child, user_id, transitions),
+            )
+        return intents
+    return []
+
+
+def _condition_geofence_state_intents(
+    condition: RuleConditionOut,
+    inside_ids: set[str],
+    user_id: str,
+) -> list[tuple[str, DeferredGeofenceEvent]]:
+    if isinstance(condition, UsersInsideGeofenceCondition):
+        if not rule_references_user_id(condition.user_ids, user_id):
+            return []
+        if condition.geofence_id in inside_ids:
+            return [(condition.geofence_id, "entered")]
+        return []
+    if isinstance(condition, UsersOutsideGeofenceCondition):
+        if not rule_references_user_id(condition.user_ids, user_id):
+            return []
+        if condition.geofence_id not in inside_ids:
+            return [(condition.geofence_id, "left")]
+        return []
+    if isinstance(condition, AllConditionsCondition):
+        intents: list[tuple[str, DeferredGeofenceEvent]] = []
+        for child in condition.conditions:
+            intents.extend(
+                _condition_geofence_state_intents(child, inside_ids, user_id),
+            )
+        return intents
+    if isinstance(condition, AnyConditionsCondition):
+        intents = []
+        for child in condition.conditions:
+            intents.extend(
+                _condition_geofence_state_intents(child, inside_ids, user_id),
+            )
+        return intents
+    return []
+
+
 def _condition_triggered_geofence_edge(
     condition: RuleConditionOut,
     user_id: str,
@@ -469,6 +775,29 @@ def _condition_triggered_geofence_edge(
             for child in condition.conditions
         )
     return False
+
+
+def _dedupe_geofence_intents(
+    intents: list[tuple[str, DeferredGeofenceEvent]],
+) -> list[tuple[str, DeferredGeofenceEvent]]:
+    seen: set[tuple[str, DeferredGeofenceEvent]] = set()
+    ordered: list[tuple[str, DeferredGeofenceEvent]] = []
+    for intent in intents:
+        if intent in seen:
+            continue
+        seen.add(intent)
+        ordered.append(intent)
+    return ordered
+
+
+def _deferred_state_matches(
+    event: DeferredGeofenceEvent,
+    geofence_id: str,
+    inside_ids: set[str],
+) -> bool:
+    if event == "entered":
+        return geofence_id in inside_ids
+    return geofence_id not in inside_ids
 
 
 def _format_geofence_transitions_for_log(
@@ -508,6 +837,61 @@ def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
         if not row.met
     ]
     return "; ".join(unmet) if unmet else "none"
+
+
+def _log_deferred_edge_cancelled(
+    *,
+    rule_id: str,
+    user_id: str,
+    geofence_id: str,
+    event: DeferredGeofenceEvent,
+) -> None:
+    _LOGGER.info(
+        "[rules] deferred edge cancelled rule_id=%s user_id=%s geofence_id=%s event=%s",
+        rule_id,
+        user_id,
+        geofence_id,
+        event,
+    )
+
+
+def _log_deferred_edge_expired(
+    *,
+    rule_id: str,
+    user_id: str,
+    geofence_id: str,
+    event: DeferredGeofenceEvent,
+) -> None:
+    _LOGGER.info(
+        "[rules] deferred edge expired rule_id=%s user_id=%s geofence_id=%s event=%s",
+        rule_id,
+        user_id,
+        geofence_id,
+        event,
+    )
+
+
+def _log_deferred_edge_registered(
+    *,
+    rule_id: str,
+    user_id: str,
+    geofence_id: str,
+    event: DeferredGeofenceEvent,
+    grace_s: int,
+    accuracy_m: int | None,
+    accuracy_limit_m: int,
+) -> None:
+    _LOGGER.info(
+        "[rules] deferred edge registered rule_id=%s user_id=%s geofence_id=%s "
+        "event=%s grace_s=%d accuracy_m=%s accuracy_limit_m=%d",
+        rule_id,
+        user_id,
+        geofence_id,
+        event,
+        grace_s,
+        accuracy_m,
+        accuracy_limit_m,
+    )
 
 
 def _log_geofence_enter_debounced(
