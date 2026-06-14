@@ -169,6 +169,13 @@ export function mountRuleInspectorPanel(
     "Min location accuracy",
     `${rule.min_location_accuracy_m} m`,
   );
+  if (rule.accuracy_edge_grace_s != null && rule.accuracy_edge_grace_s > 0) {
+    appendDefinitionRow(
+      meta,
+      "Accuracy edge grace",
+      `${rule.accuracy_edge_grace_s} s`,
+    );
+  }
   if (rule.notify_on_fire && rule.notification_email !== null) {
     appendDefinitionRow(meta, "Email on fire", rule.notification_email);
   }

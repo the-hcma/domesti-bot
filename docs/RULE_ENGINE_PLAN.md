@@ -43,7 +43,7 @@ Rules fire on **geofence enter/leave transitions** when a live location update a
 4. **Enter** rules: `users_inside_geofence` + `trigger: edge_true`.
 5. **Leave** rules: `users_outside_geofence` + `trigger: edge_true` (single user listed).
 6. Evaluate remaining conditions at event time (`after_sunset`, nested `any`/`all`).
-7. Respect `cooldown_s` and `min_location_accuracy_m`.
+7. Respect `cooldown_s`, `min_location_accuracy_m`, and optional `accuracy_edge_grace_s`.
 8. Run `device_actions` (Kasa `turn_on`, …) via `DeviceManagersState`; send email when `notify_on_fire` using persisted SMTP settings.
 
 **Important:** Rule 1 uses `conditions.all: [after_sunset, { type: any, conditions: [henrique inside house, kristen inside house] }]`. The evaluator must treat the geofence half as an **arrival edge for the user whose location update just arrived**, so someone already home before sunset does not trigger lights when sunset passes.
@@ -345,6 +345,8 @@ Actions run **sequentially** in list order; a failure logs and continues (one ba
 Store per-rule state: `last_condition_value: bool`, `last_fired_at: float | None`.
 
 **Cooldown** (`cooldown_s`): after a successful fire, suppress re-fire even if the edge re-occurs (e.g. GPS jitter briefly shows someone outside, then inside again).
+
+**Accuracy edge grace** (`accuracy_edge_grace_s`, optional integer seconds): when a location update would match a geofence edge (enter or leave) or the user already satisfies the geofence side of the rule, but `min_location_accuracy_m` rejects the fix, the evaluator registers an in-memory deferred edge for up to this many seconds (omit or null to disable). On **every** subsequent location update for that user — including updates with **no** geofence transition — it retries when accuracy improves, the user still satisfies the deferred edge (inside for enter, outside for leave), and all other conditions plus cooldown pass. State is lost on restart. Diagnostic logs: `deferred edge registered`, `deferred edge fired` (fire line includes `source=deferred`), `deferred edge expired`, `deferred edge cancelled` (user left the geofence before accuracy recovered).
 
 ---
 

@@ -22,6 +22,7 @@
       "trigger": "edge_true",
       "cooldown_s": 300,
       "min_location_accuracy_m": 50,
+      "accuracy_edge_grace_s": 120,
       "notify_on_fire": true,
       "notification_email": "github@hcma.info",
       "conditions": {
