@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import (
@@ -10,6 +11,7 @@ from app.presence_store import (
     geofence_ids_containing_location,
     list_user_locations,
     replace_user_locations,
+    upsert_user_location,
 )
 from app.rules_store import GeofenceRecord, list_geofences, replace_geofences
 
@@ -61,3 +63,49 @@ def test_geofence_ids_containing_location(tmp_path: Path) -> None:
     )
     inside = geofence_ids_containing_location(location, list_geofences(db))
     assert inside == ["house"]
+
+
+def test_upsert_user_location_log_includes_accuracy_m(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    location = UserLocationRecord(
+        user_id="hcma",
+        lat=41.20665,
+        lon=-73.89559,
+        accuracy_m=35,
+        received_at=1_718_377_050.0,
+        source="my-tracks",
+    )
+    with patch("app.presence_store._LOCATION_LOGGER.info") as info_mock:
+        upsert_user_location(
+            db,
+            location,
+            retention=default_location_history_retention(),
+        )
+
+    info_mock.assert_called_once()
+    message = info_mock.call_args[0][0] % info_mock.call_args[0][1:]
+    assert "accuracy_m=35" in message
+    assert "hcma" in message
+
+
+def test_upsert_user_location_log_shows_unknown_when_accuracy_missing(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    location = UserLocationRecord(
+        user_id="hcma",
+        lat=41.20665,
+        lon=-73.89559,
+        accuracy_m=None,
+        received_at=1_718_377_050.0,
+        source="my-tracks",
+    )
+    with patch("app.presence_store._LOCATION_LOGGER.info") as info_mock:
+        upsert_user_location(
+            db,
+            location,
+            retention=default_location_history_retention(),
+        )
+
+    message = info_mock.call_args[0][0] % info_mock.call_args[0][1:]
+    assert "accuracy_m=unknown" in message
