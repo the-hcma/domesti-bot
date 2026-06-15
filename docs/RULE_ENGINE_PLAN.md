@@ -35,7 +35,11 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 
 ### Evaluation model (location-driven edges)
 
-Rules fire on **geofence enter/leave transitions** when a live location update arrives on `POST /v1/webhooks/location_update`, not on a naive “composite became true at sunset” poll.
+**Shipped today:** `edge_true` rules fire on **geofence enter/leave transitions** when a live location update arrives on `POST /v1/webhooks/location_update`. They do **not** run on a timer.
+
+**Planned (Phase 2c):** **scheduled** rules — periodic housekeeping (e.g. turn off arrival lights when everyone has been home for N minutes after sunset). See [Phase 2c — Scheduled rules and device-state conditions](#phase-2c--scheduled-rules-and-device-state-conditions-planned).
+
+Rules fire on location ingest as follows:
 
 1. On ingest for user `P`, compute `now_inside` per enabled geofence (haversine; same math as `presence_store.geofence_ids_containing_location`).
 2. Compare to in-memory `was_inside[P, geofence_id]`; detect **enter** and **leave**.
@@ -50,8 +54,9 @@ Rules fire on **geofence enter/leave transitions** when a live location update a
 
 ### In-memory evaluator state (acceptable until rule persistence)
 
-- Per `(user_id, geofence_id)`: previous inside flag.
-- Per rule: `last_fired_at` for cooldown.
+- Per `(user_id, geofence_id)`: previous inside flag; outside-since timestamp for enter debounce (shipped).
+- Per `(user_id, geofence_id)`: **inside-since** timestamp for dwell conditions (**Phase 2c**).
+- Per rule: `last_fired_at` for cooldown; per scheduled rule: `next_evaluate_at` (**Phase 2c**).
 - Lost on restart (re-entering a geofence after restart may re-fire if cooldown expired).
 
 ### Production rule ids (in `automation-rules.json.example`)
@@ -72,7 +77,7 @@ Rule evaluation runs on the **asyncio event loop** shared with FastAPI — no th
 | **Location ingest** | After `upsert_user_location`, schedule `asyncio.create_task(evaluator.handle_location_update(...), name="rule-eval-location")` so webhook handlers return quickly. |
 | **Device actions** | `await` existing async manager methods (`KasaDeviceManager.turn_on`, …) via the same paths as `/v1/ui/*`. |
 | **Email** | `await` async SMTP send helper (or `asyncio.to_thread` around the stdlib client if the helper stays sync). |
-| **Sunset boundary** | Optional `asyncio` background task with `await asyncio.sleep(interval)` for status/logging only — **not** for firing rule 1 at sunset (location edges only). |
+| **Sunset boundary** | Optional `asyncio` background task with `await asyncio.sleep(interval)` for status/logging only — **not** for firing `edge_true` rules at sunset (location edges only). **Phase 2c** extends this tick to evaluate `scheduled` rules. |
 | **Concurrency** | One `asyncio.Lock` (or per-user lock) inside the evaluator so overlapping locations for the same user serialize edge detection. |
 
 ### Relationship to `app/rule_engine.py`
@@ -165,6 +170,7 @@ Hook: end of `apply_location_update_webhook()` after `upsert_user_location`, wit
 - Hermetic tests: simulated fixes for Henrique/Kristen at house and Kristen at `west-point`.
 - `last_fired_at` / evaluator heartbeat on status API (PR-A4, once evaluator runs).
 - Later (Phase 2b): SQLite rule CRUD and **in-UI rule editing** (replaces file-only persist workflow).
+- Later (Phase 2c): **scheduled** trigger, geofence **dwell** conditions, **device-state** conditions — see below.
 
 ---
 
@@ -319,6 +325,9 @@ Serializable, versioned documents. Start with a **structured JSON schema** store
 | --- | --- | --- |
 | `users_inside_geofence` | `geofence_id`, `user_ids[]` | Every listed user has a **fresh** location reading and is inside the geofence (AND). Replaces my-tracks `CONDITION_ALL_INSIDE`. |
 | `users_outside_geofence` | `geofence_id`, `user_ids[]` | Every listed user is outside or stale/unknown (AND). Replaces my-tracks `CONDITION_ALL_OUTSIDE`. |
+| `users_inside_geofence_for_s` | `geofence_id`, `user_ids[]`, `min_inside_s` | **Phase 2c.** Every listed user is inside **and** has been continuously inside for at least `min_inside_s` seconds (AND). |
+| `devices_any_on` | `devices[]` (`family_id`, `device_id`) | **Phase 2c.** At least one listed device reports on (Kasa `is_on` cache from `DeviceStateWatcher`). |
+| `devices_all_on` | `devices[]` | **Phase 2c.** Every listed device reports on. |
 | `after_sunset` | `offset_minutes` (default 0) | Local time ≥ sunset + offset for home coordinates. |
 | `before_sunrise` | `offset_minutes` | For future “leave home” / morning rules. |
 | `all` / `any` | nested condition lists | Boolean composition. |
@@ -337,12 +346,13 @@ Actions run **sequentially** in list order; a failure logs and continues (one ba
 
 #### Trigger semantics
 
-| `trigger` | Behavior |
-| --- | --- |
-| `edge_true` | Fire when the composite condition transitions **false → true**. This is the arrival use case — prevents re-firing every poll while both people remain home. |
-| `while_true` | Fire on every evaluation while true (subject to cooldown). Useful for “close garage if everyone left” with `edge_false` variant later. |
+| `trigger` | Behavior | Shipped? |
+| --- | --- | --- |
+| `edge_true` | Fire when the composite condition transitions **false → true** on a **location ingest** that includes a matching geofence edge for the updating user. Arrival / departure use case — prevents re-firing every poll while someone remains inside. | **Yes** |
+| `while_true` | Fire on every evaluation while true (subject to cooldown). | **Schema only** — evaluator does not run `while_true` yet. |
+| `scheduled` | Re-evaluate on a timer while enabled; fire when all conditions are met and cooldown allows (repeat while still true). Requires `evaluate_interval_s` on the rule. | **Phase 2c** — planned. |
 
-Store per-rule state: `last_condition_value: bool`, `last_fired_at: float | None`.
+Store per-rule state: `last_condition_value: bool` (for future `while_true` / `edge_true` steady-state), `last_fired_at: float | None`, and for `scheduled` rules `next_evaluate_at: float | None`.
 
 **Cooldown** (`cooldown_s`): after a successful fire, suppress re-fire even if the edge re-occurs (e.g. GPS jitter briefly shows someone outside, then inside again).
 
@@ -790,7 +800,7 @@ Access through a facade module `app/rules_store.py` (mirrors `device_discovery_s
    - Load geofences, users, rules from SQLite into `RuleEngine`.
    - Start `RuleEvaluator` asyncio task.
 2. **On presence update** — synchronous registry write, then `evaluator.request_evaluation(reason="presence")`.
-3. **Periodic tick** — every 60s, re-check conditions (sunset boundary, stale presence).
+3. **Periodic tick** — every 60s, re-check conditions (sunset boundary, stale presence). **Today:** timestamp bookkeeping only. **Phase 2c:** evaluate `scheduled` rules whose interval has elapsed.
 4. **On rule/geofence CRUD** — reload in-memory snapshot (debounced 500ms).
 
 ### Edge detection algorithm
@@ -1152,6 +1162,172 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 
 - my-tracks roster + presence webhook env vars, cutover checklist, API key on LAN.
 
+### Phase 2c — Scheduled rules and device-state conditions (planned)
+
+**Motivating automation (operator request):** after sunset, if **Front door lights** or **Garage outside lights** are still on and **Henrique (`hcma`) and Kristen** have both been inside the home geofence for more than **10 minutes**, turn those lights off. Re-check every **15 minutes** until conditions no longer apply or cooldown suppresses repeat fires.
+
+This is **not** representable with today's `edge_true` + location-ingest model:
+
+| Requirement | `edge_true` (shipped) | Gap |
+| --- | --- | --- |
+| `after_sunset` | Yes | — |
+| Both users inside home | Yes (`users_inside_geofence` under `all`) | — |
+| Inside for **> 10 minutes** | No | No `inside_since` / dwell condition |
+| Lights **are on** | No | Conditions are presence/time only; no device-state predicates |
+| Re-check every **15 minutes** | No | Evaluator runs on location webhook only; 60s tick does not evaluate rules |
+
+`while_true` exists in the JSON schema but is **not wired** in `RuleEvaluator` — and even if it were, location-driven evaluation would miss “everyone home 10+ minutes with no new GPS fixes” unless combined with a timer.
+
+#### Design: `scheduled` trigger
+
+Add `trigger: "scheduled"` and a required per-rule interval:
+
+```json
+{
+  "trigger": "scheduled",
+  "evaluate_interval_s": 900
+}
+```
+
+Semantics:
+
+- On each evaluator tick (global loop stays **60s**), consider scheduled rules whose `next_evaluate_at <= now`.
+- Build `RuleEvaluationContext` (presence, sun, geofences) and, for device conditions, include `DeviceManagersState` from `app.state.device_state`.
+- If **all** conditions are met and `cooldown_s` has elapsed → run `device_actions` / `notify_on_fire` (same dispatcher as `edge_true`).
+- Set `next_evaluate_at = now + evaluate_interval_s` regardless of fire outcome (housekeeping cadence).
+- Fire log includes `source=scheduled` (mirrors `source=deferred` on accuracy grace).
+- `min_location_accuracy_m` and `accuracy_edge_grace_s` apply to presence reads used in dwell / inside checks on scheduled ticks (same as location path).
+
+**Not** the same as `while_true` on location ingest: scheduled rules are explicitly timer-driven and may read device cache without any webhook.
+
+Optional later: `fire_mode: "edge_true" | "while_true"` on scheduled rules if we need one-shot vs repeat-within-window; v1 uses **while true + cooldown** only.
+
+#### Design: geofence dwell — `users_inside_geofence_for_s`
+
+```json
+{
+  "type": "users_inside_geofence_for_s",
+  "geofence_id": "hcma-250m-around-home",
+  "user_ids": ["hcma", "kristen"],
+  "min_inside_s": 600
+}
+```
+
+True when every listed user is currently inside **and** `now - inside_since[user, geofence] >= min_inside_s`.
+
+**Evaluator state:** `_geofence_inside_since: dict[tuple[str, str], float]` — mirror of shipped `_geofence_outside_since` used for enter debounce. Updated on every location ingest when inside/outside flips; cleared on leave.
+
+**Startup seed:** derive from last stored locations (if inside at boot, `inside_since = received_at` or `now` — document choice in implementation PR).
+
+**Restart behavior:** in-memory only in v1 (same as outside dwell debounce). After restart, dwell clock resets unless we later persist `inside_since` in SQLite.
+
+Status API: condition row detail like `hcma inside 12 min (need 10 min)` / `kristen outside`.
+
+#### Design: device-state conditions
+
+```json
+{
+  "type": "devices_any_on",
+  "devices": [
+    { "family_id": "kasa", "device_id": "Front door lights" },
+    { "family_id": "kasa", "device_id": "Garage outside lights" }
+  ]
+}
+```
+
+- **`devices_any_on`:** met when **any** listed device is on (motivating rule: turn off if either arrival light is still on).
+- **`devices_all_on`:** met when **all** listed devices are on (future “all clear” rules).
+
+Reads **cached** `is_on` from `DeviceStateWatcher` / manager objects — same source as the tile UI, not a live LAN round-trip on every tick. If `device_state` is `None` (discovery incomplete), condition is **unmet** with detail `discovery not ready`.
+
+v1 scope: **Kasa** only; Sonos/Tailwind device conditions follow the same pattern later.
+
+#### Example bundle rule (target shape)
+
+```json
+{
+  "id": "evening-lights-off-both-home",
+  "label": "Turn off arrival lights when both home 10+ min after sunset",
+  "enabled": true,
+  "trigger": "scheduled",
+  "evaluate_interval_s": 900,
+  "cooldown_s": 300,
+  "min_location_accuracy_m": 50,
+  "accuracy_edge_grace_s": 120,
+  "notify_on_fire": false,
+  "conditions": {
+    "all": [
+      {
+        "type": "after_sunset",
+        "offset_minutes": 0,
+        "window_end": "midnight"
+      },
+      {
+        "type": "users_inside_geofence_for_s",
+        "geofence_id": "hcma-250m-around-home",
+        "user_ids": ["hcma", "kristen"],
+        "min_inside_s": 600
+      },
+      {
+        "type": "devices_any_on",
+        "devices": [
+          { "family_id": "kasa", "device_id": "Front door lights" },
+          { "family_id": "kasa", "device_id": "Garage outside lights" }
+        ]
+      }
+    ]
+  },
+  "device_actions": [
+    { "family_id": "kasa", "device_id": "Front door lights", "action": "turn_off" },
+    { "family_id": "kasa", "device_id": "Garage outside lights", "action": "turn_off" }
+  ]
+}
+```
+
+**Expected behavior:** after sunset, every 15 minutes, if both have been home ≥10 minutes and either light is still on → turn both off; 5-minute cooldown avoids hammering if something else toggles them.
+
+#### Evaluator changes (summary)
+
+```
+RuleEvaluator
+├── on_location_update()     → edge_true + update inside_since / outside_since maps
+└── _periodic_loop()         → every 60s:
+        expire stale deferred edges (existing)
+        for each scheduled rule due:
+            evaluate → maybe fire → advance next_evaluate_at
+```
+
+Diagnostic logs: `[rules] scheduled evaluate rule_id=… met=true|false`, `[rules] fired … source=scheduled`.
+
+#### Stacked implementation PRs
+
+| PR | Scope | Depends on |
+| --- | --- | --- |
+| **PR-C1** `feat/geofence-inside-dwell` | `_geofence_inside_since` on ingest; `users_inside_geofence_for_s` condition + status detail; tests | — |
+| **PR-C2** `feat/scheduled-rule-trigger` | `trigger: scheduled`, `evaluate_interval_s`, periodic evaluation path, `source=scheduled` logs | C1 optional but recommended first |
+| **PR-C3** `feat/device-state-rule-conditions` | `devices_any_on` / `devices_all_on`; pass device cache into evaluation context on scheduled (and status) path | device discovery ready |
+| **PR-C4** `docs/scheduled-rules-example` | `automation-rules.json.example` entry + rule inspector read-only fields | C1–C3 |
+| **PR-C5** (operator) | Add `evening-lights-off-both-home` to server `automation-rules.json` | C1–C3 merged |
+
+Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or immediately after.
+
+#### Edge cases (decide in implementation)
+
+| Case | v1 behavior |
+| --- | --- |
+| Process restart | Dwell clocks reset (in-memory); scheduled `next_evaluate_at` resets to `now` on boot |
+| User leaves before `min_inside_s` | Dwell condition unmet; `inside_since` cleared on leave |
+| Stale GPS while sitting at home | Scheduled tick uses **last stored** location; acceptable if my-tracks keeps relaying periodic fixes |
+| Lights turned on manually after auto-off | Next scheduled tick can fire again if cooldown elapsed |
+| One person home, other away | `users_inside_geofence_for_s` with both listed → unmet |
+| Discovery not ready | Device conditions unmet; log at debug |
+
+#### UI / schema
+
+- Extend `RuleOut` / `web/src/types.ts`: `trigger: "scheduled"`, `evaluate_interval_s?: number` (required when `scheduled`).
+- Rule inspector: show interval, dwell conditions, device predicates (read-only until Phase 2b edit).
+- Validation: `evaluate_interval_s >= 60`; `min_inside_s >= 1`; device ids validated like `device_actions`.
+
 ### my-tracks companion stack (separate repo — after domesti-bot PR5 roster webhook)
 
 | PR | Branch | Contents |
@@ -1209,6 +1385,7 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 ## Future extensions (out of scope for initial mainline)
 
 - `edge_false` trigger variant (explicit departure edge); `users_outside_geofence` condition ships in v1 but departure **actions** may follow later.
+- **`scheduled` rules, geofence dwell, device-state conditions** — planned in [Phase 2c](#phase-2c--scheduled-rules-and-device-state-conditions-planned); not future/optional once that phase lands.
 - Rectangular geofences, multi-zone OR semantics.
 - Email notification action (replaces my-tracks global automation email).
 - my-tracks `GET /export/owntracks` consumer for phone `setWaypoints` sync.
