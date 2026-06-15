@@ -43,6 +43,10 @@ class VizioSmartCastBusyError(VizioSmartCastError):
     """Device returned BLOCKED (pairing already in progress)."""
 
 
+class VizioSmartCastNotFoundError(VizioSmartCastError):
+    """Firmware does not expose the requested SmartCast endpoint."""
+
+
 @dataclass(frozen=True, slots=True)
 class VizioDeviceInfoSnapshot:
     model_name: str
@@ -55,6 +59,17 @@ class VizioDeviceInfoSnapshot:
 class VizioPairChallenge:
     challenge_type: int
     pairing_req_token: int
+
+
+@dataclass(frozen=True, slots=True)
+class VizioStateExtendedSnapshot:
+    """Aggregate TV state from ``GET /state_extended`` (modern firmware)."""
+
+    power_on: bool
+    power_mode: str
+    current_input: str
+    media_state: str
+    has_current_app: bool
 
 
 def coerce_mac_value(value: Any) -> str | None:
@@ -122,6 +137,55 @@ def parse_host_spec(raw: str, *, default_port: int = DEFAULT_VIZIO_PORT) -> tupl
             raise ValueError(f"Expected port in 1..65535, got {port}")
         return host, port
     return text, default_port
+
+
+def parse_state_extended(payload: dict[str, Any]) -> VizioStateExtendedSnapshot:
+    """Parse the flat ``/state_extended`` JSON envelope."""
+    ci_payload = _case_insensitive_mapping(payload)
+
+    power_on = False
+    power_status = ci_payload.get("power_status")
+    if isinstance(power_status, dict):
+        power_on = bool(_case_insensitive_mapping(power_status).get("value", 0))
+
+    power_mode = ""
+    power_mode_raw = ci_payload.get("power_mode")
+    if isinstance(power_mode_raw, dict):
+        power_mode = str(_case_insensitive_mapping(power_mode_raw).get("value", ""))
+
+    current_input = ""
+    current_input_raw = ci_payload.get("current_input")
+    if isinstance(current_input_raw, dict):
+        current_input = str(_case_insensitive_mapping(current_input_raw).get("name", ""))
+
+    has_current_app = False
+    app_current_raw = ci_payload.get("app_current")
+    if isinstance(app_current_raw, dict):
+        app_current = _case_insensitive_mapping(app_current_raw)
+        has_current_app = app_current.get("app_id") is not None
+
+    return VizioStateExtendedSnapshot(
+        power_on=power_on,
+        power_mode=power_mode,
+        current_input=current_input,
+        media_state=str(ci_payload.get("media_state", "")),
+        has_current_app=has_current_app,
+    )
+
+
+def tv_is_active(
+    *,
+    power_on: bool,
+    current_input: str = "",
+    media_state: str = "",
+    has_current_app: bool = False,
+) -> bool:
+    """Return whether the TV should read as on in the domesti-bot UI."""
+    _ = current_input, has_current_app
+    if power_on:
+        return True
+    media_label = media_state.rsplit("::", 1)[-1].strip().lower()
+    return media_label == "playing"
 
 
 class VizioSmartCastClient:
@@ -193,6 +257,24 @@ class VizioSmartCastClient:
             if mac is not None:
                 return mac
         return None
+
+    async def fetch_state_extended(self) -> VizioStateExtendedSnapshot:
+        """Bulk power/input/app/media poll for firmware with ``state_extended``."""
+        payload = await self._request_raw_json("/state_extended", auth=True)
+        return parse_state_extended(payload)
+
+    async def fetch_tv_active_state(self) -> bool:
+        """Return whether the TV is on or actively playing media (e.g. Cast)."""
+        try:
+            snapshot = await self.fetch_state_extended()
+        except VizioSmartCastNotFoundError:
+            return await self.get_power_on()
+        return tv_is_active(
+            power_on=snapshot.power_on,
+            current_input=snapshot.current_input,
+            media_state=snapshot.media_state,
+            has_current_app=snapshot.has_current_app,
+        )
 
     async def get_power_on(self) -> bool:
         payload = await self._request("GET", "/state/device/power_mode", auth=True)
@@ -331,11 +413,75 @@ class VizioSmartCastClient:
             return payload
         if result == "BLOCKED":
             raise VizioSmartCastBusyError(detail or "Operation blocked")
+        if result == "URI_NOT_FOUND":
+            raise VizioSmartCastNotFoundError(
+                detail or f"device has no endpoint at {path}"
+            )
         if result in {"REQUIRES_PAIRING", "PAIRING_DENIED"}:
             raise VizioSmartCastAuthError(detail or result)
         raise VizioSmartCastError(
             f"unexpected SmartCast status {result!r} from {path}: {detail}"
         )
+
+    async def _request_raw_json(self, path: str, *, auth: bool) -> dict[str, Any]:
+        """Issue GET and return parsed JSON without requiring the SCPL ITEMS envelope."""
+        if auth and not self._auth_token:
+            raise VizioSmartCastAuthError(
+                f"SmartCast endpoint {path} requires an auth token for {self.device_id}"
+            )
+        session = await self._ensure_session()
+        url = f"https://{self._host}:{self._port}{path}"
+        headers = {
+            "Content-Type": "application/json",
+            "VIZIO-SmartCast-Source": _SOURCE_HEADER,
+        }
+        if auth and self._auth_token:
+            headers["AUTH"] = self._auth_token
+        timeout = aiohttp.ClientTimeout(total=10.0, connect=2.0)
+        try:
+            async with session.request(
+                "GET",
+                url,
+                headers=headers,
+                ssl=False,
+                timeout=timeout,
+            ) as resp:
+                text = await resp.text()
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            raise VizioSmartCastConnectionError(
+                f"failed to reach {url}: {exc!r}"
+            ) from exc
+        if resp.status in (401, 403):
+            raise VizioSmartCastAuthError(
+                f"device returned HTTP {resp.status} for {path}"
+            )
+        if resp.status != 200:
+            raise VizioSmartCastConnectionError(
+                f"device returned HTTP {resp.status} for {path}"
+            )
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise VizioSmartCastError(
+                f"expected JSON body from {path}, got non-JSON"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise VizioSmartCastError(f"expected JSON object from {path}")
+        status = payload.get("STATUS")
+        if isinstance(status, dict):
+            result = str(status.get("RESULT") or "").upper()
+            detail = str(status.get("DETAIL") or "")
+            if result == "URI_NOT_FOUND":
+                raise VizioSmartCastNotFoundError(
+                    detail or f"device has no endpoint at {path}"
+                )
+            if result not in {"", "SUCCESS"}:
+                if result in {"REQUIRES_PAIRING", "PAIRING_DENIED"}:
+                    raise VizioSmartCastAuthError(detail or result)
+                raise VizioSmartCastError(
+                    f"unexpected SmartCast status {result!r} from {path}: {detail}"
+                )
+        return payload
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -343,6 +489,10 @@ class VizioSmartCastClient:
             self._session = aiohttp.ClientSession(connector=connector)
             self._owns_session = True
         return self._session
+
+
+def _case_insensitive_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
+    return {str(key).lower(): value for key, value in mapping.items()}
 
 
 def _first_item_value(payload: dict[str, Any]) -> Any:
