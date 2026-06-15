@@ -390,20 +390,29 @@ def test_migrate_vizio_auth_token_host_to_mac_skips_on_decrypt_error(
 
 
 @pytest.mark.asyncio
-async def test_refresh_power_state_marks_off_when_unreachable() -> None:
+async def test_refresh_power_state_marks_unknown_when_unreachable() -> None:
     tv = _tv(is_on=True)
-    tv._client.get_power_on = AsyncMock(  # noqa: SLF001
+    tv._client.fetch_tv_active_state = AsyncMock(  # noqa: SLF001
         side_effect=VizioSmartCastConnectionError("timeout")
     )
     await tv.refresh_power_state()
-    assert tv.ui_power_state() == "off"
-    assert tv.is_on is False
+    assert tv.ui_power_state() == "unknown"
+    assert tv.is_on is True
+
+
+@pytest.mark.asyncio
+async def test_refresh_power_state_uses_cast_activity_when_panel_off() -> None:
+    tv = _tv(is_on=False)
+    tv._client.fetch_tv_active_state = AsyncMock(return_value=True)  # noqa: SLF001
+    await tv.refresh_power_state()
+    assert tv.ui_power_state() == "on"
+    assert tv.is_on is True
 
 
 @pytest.mark.asyncio
 async def test_refresh_power_state_marks_unknown_on_auth_error() -> None:
     tv = _tv(is_on=True)
-    tv._client.get_power_on = AsyncMock(  # noqa: SLF001
+    tv._client.fetch_tv_active_state = AsyncMock(  # noqa: SLF001
         side_effect=VizioSmartCastAuthError("rejected token")
     )
     await tv.refresh_power_state()
@@ -415,7 +424,7 @@ async def test_refresh_power_state_marks_unknown_on_auth_error() -> None:
 async def test_refresh_power_state_clears_unknown_after_success() -> None:
     tv = _tv(is_on=False)
     tv._power_unknown = True  # noqa: SLF001
-    tv._client.get_power_on = AsyncMock(return_value=True)  # noqa: SLF001
+    tv._client.fetch_tv_active_state = AsyncMock(return_value=True)  # noqa: SLF001
     await tv.refresh_power_state()
     assert tv.ui_power_state() == "on"
 

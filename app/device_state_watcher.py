@@ -196,6 +196,11 @@ class TailwindPollingWatcher(DeviceStateWatcher):
                 pass
 
 
+# TODO(vizio-websocket-watcher): Subscribe via ``PUT /event/register`` and a
+# LAN WebSocket for push updates on ``state/device/power_mode``, ``app/current``,
+# and ``system/context_change``. Add hermetic tests with a mock WS server plus
+# a hardware smoke on a real TV; keep this poller as fallback when registration
+# fails (soundbars, older SoCs).
 class VizioPollingWatcher(DeviceStateWatcher):
     """Periodically re-read every Vizio TV's cached power state."""
 

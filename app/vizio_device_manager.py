@@ -117,16 +117,12 @@ class VizioTvDevice(SwitchDevice):
 
     async def refresh_power_state(self) -> None:
         try:
-            powered = await self._client.get_power_on()
-        except VizioSmartCastConnectionError:
-            self._power_unknown = False
-            self.set_power(False)
-            return
-        except VizioSmartCastAuthError:
+            active = await self._client.fetch_tv_active_state()
+        except (VizioSmartCastConnectionError, VizioSmartCastAuthError):
             self._power_unknown = True
             return
         self._power_unknown = False
-        self.set_power(powered)
+        self.set_power(active)
 
     async def turn_off(self) -> None:
         try:
