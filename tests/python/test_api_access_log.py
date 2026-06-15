@@ -5,9 +5,9 @@ picked at emit time based on path + status:
 
 * Successful responses to :data:`_QUIET_ACCESS_LOG_PATHS` → TRACE
   (poll heartbeats; ``/v1/ui/state`` is hit every 5s by the web UI);
+* Sub-500 responses on the same quiet paths (including discovery 503) → TRACE;
 * Other successful responses → DEBUG (routine client traffic stays below INFO);
-* 4xx/5xx responses on API paths (including the quiet paths) → INFO,
-  so genuine failures stay visible at the default log level;
+* 4xx/5xx responses on non-quiet API paths → INFO;
 * ``/static/…`` responses (including 404 missing icons) → DEBUG.
 
 These tests use ``caplog`` against the ``app.api`` logger (the same
@@ -109,13 +109,12 @@ def test_successful_ui_state_poll_is_logged_at_trace(
         )
 
 
-def test_failed_ui_state_poll_is_still_logged_at_info(
+def test_discovery_in_progress_ui_state_503_is_logged_at_trace(
     api_http_log_records: list[logging.LogRecord],
 ) -> None:
     """Discovery-in-progress returns 503 with ``Retry-After: 2``. The
-    failure path must stay at INFO so problems are visible without
-    cranking the level to DEBUG — only the successful-poll heartbeat
-    is demoted."""
+    UI bootstrap poll hammers this endpoint every 2s — demote to TRACE
+    so INFO stays readable while backends report progress."""
 
     client, _app = _client()
     r = client.get("/v1/ui/state")
@@ -125,8 +124,8 @@ def test_failed_ui_state_poll_is_still_logged_at_info(
     matching = [r for r in records if "/v1/ui/state" in r.getMessage()]
     assert matching
     for rec in matching:
-        assert rec.levelno == logging.INFO, (
-            f"expected INFO for 503, got {rec.levelname}: {rec.getMessage()}"
+        assert rec.levelno == TRACE_LEVEL, (
+            f"expected TRACE for discovery 503, got {rec.levelname}: {rec.getMessage()}"
         )
 
 
