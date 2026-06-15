@@ -91,11 +91,11 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _LANDING_PAGE_PATH = _STATIC_DIR / "index.html"
 
 
-# Paths whose *successful* (HTTP < 400) access log lines are emitted
-# at TRACE instead of DEBUG. These are the highest-frequency polling
-# endpoints whose [http] records would otherwise dominate DEBUG
-# output. Failure responses (>= 400) for the same paths still log at
-# INFO so genuine errors stay visible at the default level.
+# Paths whose access log lines are emitted at TRACE (including routine
+# discovery-in-progress 503s from the web UI bootstrap poll). These are
+# the highest-frequency polling endpoints whose [http] records would
+# otherwise dominate INFO output. Genuine 500s on the same paths still
+# log at INFO.
 #
 # This complements :class:`app.logging_config.HealthCheckFilter`,
 # which post-hoc demotes ``/health`` lines all the way to TRACE as
@@ -112,14 +112,18 @@ _STATIC_ACCESS_LOG_PREFIX: str = "/static/"
 
 def _access_log_level(path: str, status_code: int) -> int:
     """Pick the log level for a completed ``[http]`` access record."""
+    if path in _QUIET_ACCESS_LOG_PATHS:
+        # Discovery-in-progress uses 503; treat it like a poll heartbeat, not
+        # a server fault. Genuine 500s on the UI state route stay at INFO.
+        if status_code == 500:
+            return logging.INFO
+        return TRACE_LEVEL
     if status_code >= 500:
         return logging.INFO
     if path.startswith(_STATIC_ACCESS_LOG_PREFIX):
         return logging.DEBUG
     if status_code >= 400:
         return logging.INFO
-    if path in _QUIET_ACCESS_LOG_PATHS:
-        return TRACE_LEVEL
     return logging.DEBUG
 
 
@@ -129,11 +133,11 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
     Level selection:
 
     * 5xx raised exceptions → ``logger.exception(...)`` (ERROR with traceback).
-    * 4xx/5xx responses on API paths → INFO (errors should stay visible at
-      the default level); static asset fetches under ``/static/`` log at
-      DEBUG even on 404 (missing icons are routine browser noise).
-    * Successful responses to paths in :data:`_QUIET_ACCESS_LOG_PATHS` → TRACE
-      (poll heartbeats; see the constant's docstring).
+    * 4xx/5xx responses on most API paths → INFO; paths in
+      :data:`_QUIET_ACCESS_LOG_PATHS` demote sub-500 responses to TRACE
+      (bootstrap/discovery 503 polls and successful UI heartbeats).
+    * Static asset fetches under ``/static/`` log at DEBUG even on 404
+      (missing icons are routine browser noise).
     * Other successful responses → DEBUG (routine client traffic stays below INFO).
 
     The :class:`app.logging_config.HealthCheckFilter` demotes ``/health`` lines

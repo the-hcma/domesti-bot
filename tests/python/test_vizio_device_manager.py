@@ -9,7 +9,12 @@ import pytest
 
 from app import device_discovery_store
 from app.vizio_credentials import migrate_vizio_auth_token_host_to_mac
-from app.vizio_device_manager import VizioDeviceManager, VizioTvDevice, VizioTvEndpoint
+from app.vizio_device_manager import (
+    VizioDeviceManager,
+    VizioTvDevice,
+    VizioTvEndpoint,
+    _WOL_BOOTSTRAP_WAIT_DEADLINE_S,
+)
 from app.vizio_smartcast_client import (
     VizioSmartCastAuthError,
     VizioSmartCastConnectionError,
@@ -527,6 +532,52 @@ async def test_turn_off_treats_unreachable_as_off() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_on_wait_for_api_uses_default_deadline() -> None:
+    tv = _tv()
+    tv._mac = "00:bd:3e:d5:f0:11"  # noqa: SLF001
+    tv._client.power_on = AsyncMock(  # noqa: SLF001
+        side_effect=[
+            VizioSmartCastConnectionError("down"),
+            None,
+        ]
+    )
+    with (
+        patch("app.vizio_device_manager.send_wake_on_lan"),
+        patch.object(
+            VizioTvDevice,
+            "_wait_for_api",
+            new_callable=AsyncMock,
+        ) as wait_for_api,
+    ):
+        await tv.turn_on()
+    wait_for_api.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_wait_for_api_raises_after_bootstrap_deadline() -> None:
+    tv = _tv()
+    monotonic_values = iter([0.0, 0.0, _WOL_BOOTSTRAP_WAIT_DEADLINE_S + 1.0])
+
+    def fake_monotonic() -> float:
+        try:
+            return next(monotonic_values)
+        except StopIteration:
+            return _WOL_BOOTSTRAP_WAIT_DEADLINE_S + 1.0
+
+    with (
+        patch("app.vizio_device_manager.time.monotonic", side_effect=fake_monotonic),
+        patch(
+            "asyncio.open_connection",
+            new_callable=AsyncMock,
+            side_effect=OSError("connection refused"),
+        ),
+        patch("asyncio.sleep", new_callable=AsyncMock),
+    ):
+        with pytest.raises(VizioSmartCastConnectionError, match=r"12s"):
+            await tv._wait_for_api(deadline_s=_WOL_BOOTSTRAP_WAIT_DEADLINE_S)
+
+
+@pytest.mark.asyncio
 async def test_wake_and_probe_tv_connect_auth_error_returns_none(tmp_path: Path) -> None:
     mgr = VizioDeviceManager(
         configured_hosts=[],
@@ -644,7 +695,7 @@ async def test_wake_and_probe_tv_happy_path_returns_connected_device(tmp_path: P
         result = await mgr._wake_and_probe_tv(endpoint, "test-token")
     assert result is connected
     wol.assert_called_once_with("00:bd:3e:d5:f0:11")
-    wait_for_api.assert_awaited_once()
+    wait_for_api.assert_awaited_once_with(deadline_s=_WOL_BOOTSTRAP_WAIT_DEADLINE_S)
     connect.assert_awaited_once()
 
 

@@ -55,8 +55,10 @@ import argparse
 import asyncio
 import httpx
 import io
+import logging
 import os
 import sys
+import time
 from collections.abc import Awaitable, Callable
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -85,6 +87,8 @@ from app.vizio_device_manager import (
     VizioDeviceManager,
     configured_vizio_host_specs,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 COMMANDS = (
     "clear-display-name",
@@ -226,6 +230,35 @@ _FAMILY_SOURCE_LABEL: dict[str, str] = {
 }
 
 
+def _bootstrap_family_summary(
+    slug: str,
+    result: dict[str, Any],
+    *,
+    ok_verb: str,
+) -> str:
+    """Format one backend's bootstrap outcome for structured log output."""
+    label = _FAMILY_BOOT_LABEL[slug]
+    prefix = f"[startup] {label}:"
+    if result.get("skipped"):
+        detail = (result.get("detail") or "").strip()
+        suffix = f" — {detail}" if detail else ""
+        return f"{prefix} skipped{suffix}"
+    if result.get("exc") is not None:
+        return f"{prefix} failed — {result['exc']}"
+    if result.get("ok"):
+        source_label = _FAMILY_SOURCE_LABEL.get(str(result.get("source") or ""))
+        count = result.get("count")
+        unit = _FAMILY_UNIT_PLURAL.get(slug)
+        bits: list[str] = []
+        if source_label is not None:
+            bits.append(source_label)
+        if count is not None and unit is not None:
+            bits.append(f"{count} {unit}")
+        suffix = f" ({', '.join(bits)})" if bits else ""
+        return f"{prefix} {ok_verb}{suffix}"
+    return f"{prefix} (no status)"
+
+
 def _print_family_parallel_line(
     theme: _Theme,
     slug: str,
@@ -256,6 +289,29 @@ def _print_family_parallel_line(
         print(theme.ok(f"  {label}: {ok_verb}{suffix}"), flush=True)
     else:
         print(theme.dim(f"  {label}: (no status)"), flush=True)
+
+
+async def _timed_family_boot(
+    slug: str,
+    boot_coro: Awaitable[dict[str, Any]],
+    *,
+    log_progress: bool,
+) -> dict[str, Any]:
+    """Run one backend ``fetch`` and log start/finish with wall-clock timing."""
+    if log_progress:
+        _LOGGER.info(
+            "[startup] %s: discovery starting",
+            _FAMILY_BOOT_LABEL[slug],
+        )
+    started = time.monotonic()
+    result = await boot_coro
+    if log_progress:
+        _LOGGER.info(
+            "%s in %.1fs",
+            _bootstrap_family_summary(slug, result, ok_verb="ready"),
+            time.monotonic() - started,
+        )
+    return result
 
 
 class _CmdCtx(NamedTuple):
@@ -2489,12 +2545,13 @@ async def bootstrap_device_managers(
 
     if log_progress:
         print(theme.warn("Discovering devices (parallel)…"), flush=True)
+        _LOGGER.info("[startup] discovering devices (parallel)")
     bundles = await asyncio.gather(
-        boot_androidtv(),
-        boot_tailwind(),
-        boot_kasa(),
-        boot_sonos(),
-        boot_vizio(),
+        _timed_family_boot("androidtv", boot_androidtv(), log_progress=log_progress),
+        _timed_family_boot("gotailwind", boot_tailwind(), log_progress=log_progress),
+        _timed_family_boot("kasa", boot_kasa(), log_progress=log_progress),
+        _timed_family_boot("sonos", boot_sonos(), log_progress=log_progress),
+        _timed_family_boot("vizio", boot_vizio(), log_progress=log_progress),
     )
     by_slug = {b["slug"]: b for b in bundles}
     if log_progress:
