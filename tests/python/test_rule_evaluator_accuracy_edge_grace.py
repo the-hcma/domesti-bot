@@ -174,6 +174,26 @@ def _setup_evaluator(
     return clock, db, device, evaluator
 
 
+def _formatted_logger_calls(info_mock: MagicMock) -> list[str]:
+    messages: list[str] = []
+    for call in info_mock.call_args_list:
+        args = call.args
+        if not args:
+            continue
+        fmt = str(args[0])
+        if len(args) > 1:
+            messages.append(fmt % args[1:])
+        else:
+            messages.append(fmt)
+    return messages
+
+
+def _info_messages_matching(info_mock: MagicMock, needle: str) -> list[str]:
+    return [
+        message for message in _formatted_logger_calls(info_mock) if needle in message
+    ]
+
+
 def _move_inside(
     db: Path,
     clock: dict[str, float],
@@ -216,7 +236,7 @@ async def test_accuracy_edge_grace_fires_after_later_good_accuracy_fix(
 
 
 @pytest.mark.asyncio
-async def test_accuracy_edge_grace_registers_without_geofence_transition(
+async def test_accuracy_edge_grace_does_not_register_without_geofence_transition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -229,10 +249,10 @@ async def test_accuracy_edge_grace_registers_without_geofence_transition(
     _seed_presence_db(
         db,
         user_id="henrique",
-        lat=41.194085,
-        lon=-73.888365,
+        lat=44.0,
+        lon=-73.0,
         received_at=clock["now"],
-        accuracy_m=120,
+        accuracy_m=20,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     evaluator = RuleEvaluator(
@@ -248,12 +268,44 @@ async def test_accuracy_edge_grace_registers_without_geofence_transition(
         ),
         now_fn=lambda: clock["now"],
     )
-    await evaluator.on_location_update("henrique")
-    assert device.calls == []
-
-    _move_inside(db, clock, accuracy_m=20)
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
     await evaluator.on_location_update("henrique")
     assert device.calls == ["on"]
+
+    with patch("app.rule_evaluator._LOGGER.info") as info_mock:
+        clock["now"] += 60.0
+        upsert_user_location(
+            db,
+            UserLocationRecord(
+                user_id="henrique",
+                lat=41.194085,
+                lon=-73.888365,
+                accuracy_m=120,
+                received_at=clock["now"],
+                source="test",
+            ),
+            retention=default_location_history_retention(),
+        )
+        await evaluator.on_location_update("henrique")
+
+    registered = [
+        message
+        for message in _info_messages_matching(info_mock, "deferred edge registered")
+        if "rule_id=arrive-home" in message
+    ]
+    assert registered == []
 
 
 @pytest.mark.asyncio
@@ -284,7 +336,7 @@ async def test_accuracy_edge_grace_expires_without_firing(
 
     _move_inside(db, clock, accuracy_m=20)
     await evaluator.on_location_update("henrique")
-    assert device.calls == []
+    assert device.calls == ["on"]
 
 
 @pytest.mark.asyncio
@@ -305,7 +357,7 @@ async def test_accuracy_edge_grace_keeps_original_expiration(
 
     _move_inside(db, clock, accuracy_m=20, delta_s=31.0)
     await evaluator.on_location_update("henrique")
-    assert device.calls == []
+    assert device.calls == ["on"]
 
 
 @pytest.mark.asyncio
@@ -323,4 +375,4 @@ async def test_accuracy_edge_grace_disabled_when_field_unset(
 
     _move_inside(db, clock, accuracy_m=20)
     await evaluator.on_location_update("henrique")
-    assert device.calls == []
+    assert device.calls == ["on"]

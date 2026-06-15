@@ -217,7 +217,8 @@ class RuleEvaluator:
         inside_ids: set[str],
         ctx: RuleEvaluationContext,
         now: float,
-    ) -> None:
+    ) -> set[str]:
+        fired_rule_ids: set[str] = set()
         keys_for_user = [
             key for key in self._deferred_accuracy_edges if key[1] == user_id
         ]
@@ -279,6 +280,8 @@ class RuleEvaluator:
                 user_id=user_id,
                 fire_source="deferred",
             )
+            fired_rule_ids.add(rule.id)
+        return fired_rule_ids
 
     def _clear_deferred_accuracy_edges_for_rule(
         self,
@@ -463,6 +466,7 @@ class RuleEvaluator:
             user_id,
             location,
             geofences,
+            accuracy_limit_m=_geofence_edge_accuracy_limit_m(),
         )
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         now = self._now_fn()
@@ -479,7 +483,7 @@ class RuleEvaluator:
                 transitions_summary,
             )
         ctx = await self._build_evaluation_context(now=datetime.now(UTC))
-        await self._attempt_deferred_accuracy_edge_fires(
+        deferred_fired_rule_ids = await self._attempt_deferred_accuracy_edge_fires(
             user_id=user_id,
             location=location,
             inside_ids=inside_ids,
@@ -488,6 +492,8 @@ class RuleEvaluator:
         )
         for rule in list_automation_rules():
             if not rule.enabled or rule.trigger != "edge_true":
+                continue
+            if rule.id in deferred_fired_rule_ids:
                 continue
             if user_id not in collect_rule_user_ids(rule):
                 continue
@@ -504,12 +510,6 @@ class RuleEvaluator:
                             rule.conditions.all,
                             user_id,
                             transitions,
-                        )
-                    if not intents:
-                        intents = _collect_geofence_state_intents(
-                            rule.conditions.all,
-                            inside_ids,
-                            user_id,
                         )
                     intents = _dedupe_geofence_intents(intents)
                     if intents:
@@ -579,7 +579,10 @@ class RuleEvaluator:
             return
         geofences = list_geofences(cache_path)
         locations = list_user_locations(cache_path)
+        accuracy_limit_m = _geofence_edge_accuracy_limit_m()
         for user_id, location in locations.items():
+            if not _location_accuracy_passes(location, accuracy_limit_m):
+                continue
             inside_ids = set(geofence_ids_containing_location(location, geofences))
             for geofence in geofences:
                 if not geofence.enabled:
@@ -593,10 +596,37 @@ class RuleEvaluator:
         user_id: str,
         location: UserLocationRecord,
         geofences: list[GeofenceRecord],
+        *,
+        accuracy_limit_m: int | None,
     ) -> dict[str, GeofenceTransition]:
         inside_ids = set(geofence_ids_containing_location(location, geofences))
+        mutate_state = _location_accuracy_passes(location, accuracy_limit_m)
+        if not mutate_state and _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug(
+                "[rules] geofence edge state unchanged user_id=%s "
+                "accuracy_m=%s limit_m=%s",
+                user_id,
+                location.accuracy_m,
+                accuracy_limit_m,
+            )
+        return self._compute_geofence_transitions(
+            user_id,
+            geofences,
+            inside_ids,
+            observed_at=location.received_at,
+            mutate_state=mutate_state,
+        )
+
+    def _compute_geofence_transitions(
+        self,
+        user_id: str,
+        geofences: list[GeofenceRecord],
+        inside_ids: set[str],
+        *,
+        observed_at: float,
+        mutate_state: bool,
+    ) -> dict[str, GeofenceTransition]:
         transitions: dict[str, GeofenceTransition] = {}
-        observed_at = location.received_at
         for geofence in geofences:
             if not geofence.enabled:
                 continue
@@ -610,8 +640,9 @@ class RuleEvaluator:
                 dwell_elapsed = outside_since is None or (
                     observed_at - outside_since >= _MIN_GEOFENCE_OUTSIDE_DWELL_S
                 )
-                self._geofence_was_inside[key] = True
-                self._geofence_outside_since.pop(key, None)
+                if mutate_state:
+                    self._geofence_was_inside[key] = True
+                    self._geofence_outside_since.pop(key, None)
                 if dwell_elapsed:
                     transition = GeofenceTransition(entered=True)
                 elif outside_since is not None:
@@ -623,15 +654,18 @@ class RuleEvaluator:
                         - (observed_at - outside_since),
                     )
             elif was_inside and not now_inside:
-                self._geofence_was_inside[key] = False
-                self._geofence_outside_since[key] = observed_at
+                if mutate_state:
+                    self._geofence_was_inside[key] = False
+                    self._geofence_outside_since[key] = observed_at
                 transition = GeofenceTransition(left=True)
             elif now_inside:
-                self._geofence_was_inside[key] = True
-                self._geofence_outside_since.pop(key, None)
+                if mutate_state:
+                    self._geofence_was_inside[key] = True
+                    self._geofence_outside_since.pop(key, None)
             else:
-                self._geofence_was_inside[key] = False
-                self._geofence_outside_since.setdefault(key, observed_at)
+                if mutate_state:
+                    self._geofence_was_inside[key] = False
+                    self._geofence_outside_since.setdefault(key, observed_at)
             if transition.entered or transition.left:
                 transitions[geofence_id] = transition
                 _log_geofence_transition(
@@ -643,9 +677,29 @@ class RuleEvaluator:
 
 
 def _accuracy_passes(rule: RuleOut, location: UserLocationRecord) -> bool:
+    return _location_accuracy_passes(location, rule.min_location_accuracy_m)
+
+
+def _geofence_edge_accuracy_limit_m() -> int | None:
+    limits = [
+        rule.min_location_accuracy_m
+        for rule in list_automation_rules()
+        if rule.enabled and rule.trigger == "edge_true"
+    ]
+    if not limits:
+        return None
+    return min(limits)
+
+
+def _location_accuracy_passes(
+    location: UserLocationRecord,
+    limit_m: int | None,
+) -> bool:
+    if limit_m is None:
+        return True
     if location.accuracy_m is None:
         return True
-    return location.accuracy_m <= rule.min_location_accuracy_m
+    return location.accuracy_m <= limit_m
 
 
 def _accuracy_edge_grace_s(rule: RuleOut) -> int | None:
@@ -671,19 +725,6 @@ def _collect_geofence_edge_intents(
     for condition in conditions:
         intents.extend(
             _condition_geofence_edge_intents(condition, user_id, transitions),
-        )
-    return intents
-
-
-def _collect_geofence_state_intents(
-    conditions: list[RuleConditionOut],
-    inside_ids: set[str],
-    user_id: str,
-) -> list[tuple[str, DeferredGeofenceEvent]]:
-    intents: list[tuple[str, DeferredGeofenceEvent]] = []
-    for condition in conditions:
-        intents.extend(
-            _condition_geofence_state_intents(condition, inside_ids, user_id),
         )
     return intents
 
@@ -719,40 +760,6 @@ def _condition_geofence_edge_intents(
         for child in condition.conditions:
             intents.extend(
                 _condition_geofence_edge_intents(child, user_id, transitions),
-            )
-        return intents
-    return []
-
-
-def _condition_geofence_state_intents(
-    condition: RuleConditionOut,
-    inside_ids: set[str],
-    user_id: str,
-) -> list[tuple[str, DeferredGeofenceEvent]]:
-    if isinstance(condition, UsersInsideGeofenceCondition):
-        if not rule_references_user_id(condition.user_ids, user_id):
-            return []
-        if condition.geofence_id in inside_ids:
-            return [(condition.geofence_id, "entered")]
-        return []
-    if isinstance(condition, UsersOutsideGeofenceCondition):
-        if not rule_references_user_id(condition.user_ids, user_id):
-            return []
-        if condition.geofence_id not in inside_ids:
-            return [(condition.geofence_id, "left")]
-        return []
-    if isinstance(condition, AllConditionsCondition):
-        intents: list[tuple[str, DeferredGeofenceEvent]] = []
-        for child in condition.conditions:
-            intents.extend(
-                _condition_geofence_state_intents(child, inside_ids, user_id),
-            )
-        return intents
-    if isinstance(condition, AnyConditionsCondition):
-        intents = []
-        for child in condition.conditions:
-            intents.extend(
-                _condition_geofence_state_intents(child, inside_ids, user_id),
             )
         return intents
     return []
