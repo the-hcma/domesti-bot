@@ -118,8 +118,12 @@ class VizioTvDevice(SwitchDevice):
     async def refresh_power_state(self) -> None:
         try:
             active = await self._client.fetch_tv_active_state()
-        except (VizioSmartCastConnectionError, VizioSmartCastAuthError):
+        except VizioSmartCastAuthError:
             self._power_unknown = True
+            return
+        except VizioSmartCastConnectionError:
+            self._power_unknown = False
+            self.set_power(False)
             return
         self._power_unknown = False
         self.set_power(active)
@@ -408,6 +412,26 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             )
             return None, endpoint
 
+    async def _endpoint_with_resolved_mac(
+        self,
+        endpoint: VizioTvEndpoint,
+    ) -> VizioTvEndpoint:
+        """Attach a MAC from ARP when the cached endpoint does not have one."""
+        mac = endpoint.mac
+        if mac is not None:
+            return endpoint
+        mac = await asyncio.to_thread(lookup_mac_via_arp, endpoint.host)
+        if mac is None:
+            return endpoint
+        return VizioTvEndpoint(
+            host=endpoint.host,
+            port=endpoint.port,
+            display_name=endpoint.display_name,
+            model=endpoint.model,
+            mac=mac,
+            diid=endpoint.diid,
+        )
+
     def _initial_targets(self) -> list[VizioTvEndpoint]:
         out: list[VizioTvEndpoint] = []
         seen_ids: set[str] = set()
@@ -448,18 +472,10 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
 
     async def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice:
         """Return a cached TV tile when SmartCast is unreachable at bootstrap."""
-        mac = endpoint.mac
-        if mac is None:
-            mac = await asyncio.to_thread(lookup_mac_via_arp, endpoint.host)
-        if mac is not None:
-            endpoint = VizioTvEndpoint(
-                host=endpoint.host,
-                port=endpoint.port,
-                display_name=endpoint.display_name,
-                model=endpoint.model,
-                mac=mac,
-                diid=endpoint.diid,
-            )
+        endpoint = await self._endpoint_with_resolved_mac(endpoint)
+        probed = await self._wake_and_probe_tv(endpoint, token)
+        if probed is not None:
+            return probed
         client = VizioSmartCastClient(
             endpoint.host,
             port=endpoint.port,
@@ -524,6 +540,16 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             diid=endpoint.diid,
         )
 
+    def _resolve_token(self, endpoint: VizioTvEndpoint) -> tuple[str, str]:
+        token, source = resolve_vizio_auth_token(
+            mac=endpoint.mac,
+            host=endpoint.host,
+            cli_token=self._cli_auth_token,
+            env_token=self._env_auth_token,
+            cache_path=self._discovery_cache_path,
+        )
+        return token, source
+
     def _should_run_ssdp(
         self,
         *,
@@ -552,12 +578,50 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         except (TimeoutError, OSError):
             return False
 
-    def _resolve_token(self, endpoint: VizioTvEndpoint) -> tuple[str, str]:
-        token, source = resolve_vizio_auth_token(
-            mac=endpoint.mac,
-            host=endpoint.host,
-            cli_token=self._cli_auth_token,
-            env_token=self._env_auth_token,
-            cache_path=self._discovery_cache_path,
+    async def _wake_and_probe_tv(
+        self,
+        endpoint: VizioTvEndpoint,
+        token: str,
+    ) -> VizioTvDevice | None:
+        """WoL once at bootstrap, poll SmartCast, and connect when the TV answers."""
+        mac = endpoint.mac
+        if mac is None:
+            return None
+        endpoint = await self._relocate_endpoint(endpoint, force_arp=True)
+        await asyncio.to_thread(send_wake_on_lan, mac)
+        client = VizioSmartCastClient(
+            endpoint.host,
+            port=endpoint.port,
+            auth_token=token,
+            session=self._session,
         )
-        return token, source
+        label = (endpoint.display_name or endpoint.model or endpoint.host).strip()
+        probe = VizioTvDevice(
+            endpoint,
+            client,
+            display_name=label or None,
+            mac=mac,
+        )
+        try:
+            await probe._wait_for_api()
+        except VizioSmartCastConnectionError:
+            _LOGGER.info(
+                "Vizio TV %s did not answer SmartCast after Wake-on-LAN; treating as off",
+                endpoint.device_id,
+            )
+            return None
+        endpoint = await self._relocate_endpoint(endpoint, force_arp=True)
+        try:
+            return await self._connect_endpoint(endpoint, token)
+        except VizioSmartCastAuthError:
+            _LOGGER.warning(
+                "Vizio TV %s auth rejected after Wake-on-LAN probe; treating as off",
+                endpoint.device_id,
+            )
+            return None
+        except VizioSmartCastConnectionError:
+            _LOGGER.info(
+                "Vizio TV %s unreachable after Wake-on-LAN probe; treating as off",
+                endpoint.device_id,
+            )
+            return None

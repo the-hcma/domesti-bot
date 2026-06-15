@@ -111,6 +111,12 @@ async def test_fetch_keeps_unreachable_cached_tv_as_off(tmp_path: Path) -> None:
             new_callable=AsyncMock,
             side_effect=VizioSmartCastConnectionError("timeout"),
         ),
+        patch.object(
+            VizioDeviceManager,
+            "_wake_and_probe_tv",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch(
             "app.vizio_device_manager.lookup_mac_via_arp",
             return_value="00:bd:3e:d5:f0:11",
@@ -224,6 +230,12 @@ async def test_rediscover_keeps_offline_cached_tv_when_ssdp_finds_nothing(
     with (
         patch.object(
             VizioDeviceManager,
+            "_wake_and_probe_tv",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch.object(
+            VizioDeviceManager,
             "_smartcast_port_open",
             new_callable=AsyncMock,
             return_value=False,
@@ -263,6 +275,12 @@ async def test_fetch_skips_deviceinfo_when_smartcast_port_closed(tmp_path: Path)
     )
     connect = AsyncMock()
     with (
+        patch.object(
+            VizioDeviceManager,
+            "_wake_and_probe_tv",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch.object(
             VizioDeviceManager,
             "_connect_endpoint",
@@ -306,6 +324,12 @@ async def test_fetch_skips_ssdp_when_cached_mac_tv_is_offline(tmp_path: Path) ->
     )
     ssdp = AsyncMock(return_value=[])
     with (
+        patch.object(
+            VizioDeviceManager,
+            "_wake_and_probe_tv",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
         patch.object(
             VizioDeviceManager,
             "_smartcast_port_open",
@@ -390,14 +414,14 @@ def test_migrate_vizio_auth_token_host_to_mac_skips_on_decrypt_error(
 
 
 @pytest.mark.asyncio
-async def test_refresh_power_state_marks_unknown_when_unreachable() -> None:
+async def test_refresh_power_state_marks_off_when_unreachable() -> None:
     tv = _tv(is_on=True)
     tv._client.fetch_tv_active_state = AsyncMock(  # noqa: SLF001
         side_effect=VizioSmartCastConnectionError("timeout")
     )
     await tv.refresh_power_state()
-    assert tv.ui_power_state() == "unknown"
-    assert tv.is_on is True
+    assert tv.ui_power_state() == "off"
+    assert tv.is_on is False
 
 
 @pytest.mark.asyncio
@@ -430,6 +454,68 @@ async def test_refresh_power_state_clears_unknown_after_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_offline_tv_wake_probe_connects_when_api_opens(tmp_path: Path) -> None:
+    db = tmp_path / "cache.sqlite"
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token="test-token",
+    )
+    mgr._session = MagicMock()  # noqa: SLF001
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    connected = _tv(is_on=True)
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_wake_and_probe_tv",
+            new_callable=AsyncMock,
+            return_value=connected,
+        ) as wake_probe,
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            new_callable=AsyncMock,
+        ) as connect,
+    ):
+        tv = await mgr._offline_tv(endpoint, "test-token")
+    wake_probe.assert_awaited_once()
+    connect.assert_not_called()
+    assert tv is connected
+    assert tv.ui_power_state() == "on"
+
+
+@pytest.mark.asyncio
+async def test_offline_tv_wake_probe_failure_defaults_to_off(tmp_path: Path) -> None:
+    db = tmp_path / "cache.sqlite"
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token="test-token",
+    )
+    mgr._session = MagicMock()  # noqa: SLF001
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    with patch.object(
+        VizioDeviceManager,
+        "_wake_and_probe_tv",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        tv = await mgr._offline_tv(endpoint, "test-token")
+    assert tv.ui_power_state() == "off"
+    assert tv.is_on is False
+
+
+@pytest.mark.asyncio
 async def test_turn_off_treats_unreachable_as_off() -> None:
     tv = _tv(is_on=True)
     tv._client.power_off = AsyncMock(  # noqa: SLF001
@@ -438,3 +524,180 @@ async def test_turn_off_treats_unreachable_as_off() -> None:
     await tv.turn_off()
     assert tv.ui_power_state() == "off"
     assert tv.is_on is False
+
+
+@pytest.mark.asyncio
+async def test_wake_and_probe_tv_connect_auth_error_returns_none(tmp_path: Path) -> None:
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=tmp_path / "cache.sqlite",
+        cli_auth_token="test-token",
+    )
+    mgr._session = MagicMock()  # noqa: SLF001
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_relocate_endpoint",
+            new_callable=AsyncMock,
+            side_effect=lambda ep, **_: ep,
+        ),
+        patch("app.vizio_device_manager.send_wake_on_lan") as wol,
+        patch.object(
+            VizioTvDevice,
+            "_wait_for_api",
+            new_callable=AsyncMock,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            new_callable=AsyncMock,
+            side_effect=VizioSmartCastAuthError("rejected token"),
+        ),
+    ):
+        result = await mgr._wake_and_probe_tv(endpoint, "test-token")
+    assert result is None
+    wol.assert_called_once_with("00:bd:3e:d5:f0:11")
+
+
+@pytest.mark.asyncio
+async def test_wake_and_probe_tv_connect_connection_error_returns_none(
+    tmp_path: Path,
+) -> None:
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=tmp_path / "cache.sqlite",
+        cli_auth_token="test-token",
+    )
+    mgr._session = MagicMock()  # noqa: SLF001
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_relocate_endpoint",
+            new_callable=AsyncMock,
+            side_effect=lambda ep, **_: ep,
+        ),
+        patch("app.vizio_device_manager.send_wake_on_lan") as wol,
+        patch.object(
+            VizioTvDevice,
+            "_wait_for_api",
+            new_callable=AsyncMock,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            new_callable=AsyncMock,
+            side_effect=VizioSmartCastConnectionError("timeout"),
+        ),
+    ):
+        result = await mgr._wake_and_probe_tv(endpoint, "test-token")
+    assert result is None
+    wol.assert_called_once_with("00:bd:3e:d5:f0:11")
+
+
+@pytest.mark.asyncio
+async def test_wake_and_probe_tv_happy_path_returns_connected_device(tmp_path: Path) -> None:
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=tmp_path / "cache.sqlite",
+        cli_auth_token="test-token",
+    )
+    mgr._session = MagicMock()  # noqa: SLF001
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    connected = _tv(is_on=True)
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_relocate_endpoint",
+            new_callable=AsyncMock,
+            side_effect=lambda ep, **_: ep,
+        ),
+        patch("app.vizio_device_manager.send_wake_on_lan") as wol,
+        patch.object(
+            VizioTvDevice,
+            "_wait_for_api",
+            new_callable=AsyncMock,
+        ) as wait_for_api,
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            new_callable=AsyncMock,
+            return_value=connected,
+        ) as connect,
+    ):
+        result = await mgr._wake_and_probe_tv(endpoint, "test-token")
+    assert result is connected
+    wol.assert_called_once_with("00:bd:3e:d5:f0:11")
+    wait_for_api.assert_awaited_once()
+    connect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_wake_and_probe_tv_missing_mac_returns_none_without_wol(tmp_path: Path) -> None:
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=tmp_path / "cache.sqlite",
+        cli_auth_token="test-token",
+    )
+    mgr._session = MagicMock()  # noqa: SLF001
+    endpoint = VizioTvEndpoint(host="192.168.86.201", port=7345, display_name="Kitchen TV")
+    with patch("app.vizio_device_manager.send_wake_on_lan") as wol:
+        result = await mgr._wake_and_probe_tv(endpoint, "test-token")
+    assert result is None
+    wol.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_wake_and_probe_tv_wait_for_api_failure_returns_none(tmp_path: Path) -> None:
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=tmp_path / "cache.sqlite",
+        cli_auth_token="test-token",
+    )
+    mgr._session = MagicMock()  # noqa: SLF001
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_relocate_endpoint",
+            new_callable=AsyncMock,
+            side_effect=lambda ep, **_: ep,
+        ),
+        patch("app.vizio_device_manager.send_wake_on_lan") as wol,
+        patch.object(
+            VizioTvDevice,
+            "_wait_for_api",
+            new_callable=AsyncMock,
+            side_effect=VizioSmartCastConnectionError("timeout"),
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            new_callable=AsyncMock,
+        ) as connect,
+    ):
+        result = await mgr._wake_and_probe_tv(endpoint, "test-token")
+    assert result is None
+    wol.assert_called_once_with("00:bd:3e:d5:f0:11")
+    connect.assert_not_called()
