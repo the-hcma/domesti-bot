@@ -151,12 +151,16 @@ def parse_state_extended(payload: dict[str, Any]) -> VizioStateExtendedSnapshot:
     power_mode = ""
     power_mode_raw = ci_payload.get("power_mode")
     if isinstance(power_mode_raw, dict):
-        power_mode = str(_case_insensitive_mapping(power_mode_raw).get("value", ""))
+        power_mode = _optional_string(
+            _case_insensitive_mapping(power_mode_raw).get("value")
+        )
 
     current_input = ""
     current_input_raw = ci_payload.get("current_input")
     if isinstance(current_input_raw, dict):
-        current_input = str(_case_insensitive_mapping(current_input_raw).get("name", ""))
+        current_input = _optional_string(
+            _case_insensitive_mapping(current_input_raw).get("name")
+        )
 
     has_current_app = False
     app_current_raw = ci_payload.get("app_current")
@@ -168,20 +172,13 @@ def parse_state_extended(payload: dict[str, Any]) -> VizioStateExtendedSnapshot:
         power_on=power_on,
         power_mode=power_mode,
         current_input=current_input,
-        media_state=str(ci_payload.get("media_state", "")),
+        media_state=_optional_string(ci_payload.get("media_state")),
         has_current_app=has_current_app,
     )
 
 
-def tv_is_active(
-    *,
-    power_on: bool,
-    current_input: str = "",
-    media_state: str = "",
-    has_current_app: bool = False,
-) -> bool:
+def tv_is_active(*, power_on: bool, media_state: str = "") -> bool:
     """Return whether the TV should read as on in the domesti-bot UI."""
-    _ = current_input, has_current_app
     if power_on:
         return True
     media_label = media_state.rsplit("::", 1)[-1].strip().lower()
@@ -271,9 +268,7 @@ class VizioSmartCastClient:
             return await self.get_power_on()
         return tv_is_active(
             power_on=snapshot.power_on,
-            current_input=snapshot.current_input,
             media_state=snapshot.media_state,
-            has_current_app=snapshot.has_current_app,
         )
 
     async def get_power_on(self) -> bool:
@@ -455,6 +450,10 @@ class VizioSmartCastClient:
             raise VizioSmartCastAuthError(
                 f"device returned HTTP {resp.status} for {path}"
             )
+        if resp.status == 404:
+            raise VizioSmartCastNotFoundError(
+                f"device has no endpoint at {path}"
+            )
         if resp.status != 200:
             raise VizioSmartCastConnectionError(
                 f"device returned HTTP {resp.status} for {path}"
@@ -503,3 +502,9 @@ def _first_item_value(payload: dict[str, Any]) -> Any:
     if not isinstance(first, dict):
         return None
     return first.get("VALUE")
+
+
+def _optional_string(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return ""

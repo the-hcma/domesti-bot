@@ -56,12 +56,7 @@ def test_parse_state_extended_reads_power_and_media() -> None:
 
 
 def test_tv_is_active_when_panel_off_but_cast_playing() -> None:
-    assert tv_is_active(
-        power_on=False,
-        current_input="SMARTCAST",
-        media_state="MediaState::Playing",
-        has_current_app=True,
-    )
+    assert tv_is_active(power_on=False, media_state="MediaState::Playing")
 
 
 def test_tv_is_active_when_panel_on() -> None:
@@ -69,12 +64,21 @@ def test_tv_is_active_when_panel_on() -> None:
 
 
 def test_tv_is_active_when_panel_off_and_idle() -> None:
-    assert not tv_is_active(
-        power_on=False,
-        current_input="SMARTCAST",
-        media_state="MediaState::Stopped",
-        has_current_app=True,
+    assert not tv_is_active(power_on=False, media_state="MediaState::Stopped")
+
+
+def test_parse_state_extended_treats_null_fields_as_empty() -> None:
+    snapshot = parse_state_extended(
+        {
+            "POWER_STATUS": {"VALUE": 0},
+            "POWER_MODE": {"VALUE": None},
+            "CURRENT_INPUT": {"NAME": None},
+            "MEDIA_STATE": None,
+        }
     )
+    assert snapshot.power_mode == ""
+    assert snapshot.current_input == ""
+    assert snapshot.media_state == ""
 
 
 @pytest.mark.asyncio
