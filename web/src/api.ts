@@ -12,6 +12,7 @@
 
 import type {
   GeofenceOut,
+  HealthOut,
   LocationHistoryRetentionIn,
   LocationHistoryRetentionOut,
   MetaOut,
@@ -113,10 +114,28 @@ export function authHeaders(): Record<string, string> {
   return headers;
 }
 
+const HEALTH_FETCH_TIMEOUT_MS = 3000;
+const STATE_FETCH_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 async function call<T>(
   method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT",
   path: string,
   body?: unknown,
+  timeoutMs?: number,
 ): Promise<T> {
   const headers = authHeaders();
   const init: RequestInit = { method, headers };
@@ -124,7 +143,10 @@ async function call<T>(
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  const response = await fetch(path, init);
+  const response =
+    timeoutMs === undefined
+      ? await fetch(path, init)
+      : await fetchWithTimeout(path, init, timeoutMs);
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new HttpError(response.status, text);
@@ -203,6 +225,9 @@ export const api = {
       `/v1/rules/geofences/${encodeURIComponent(geofenceId)}`,
     );
   },
+  fetchHealth(): Promise<HealthOut> {
+    return call<HealthOut>("GET", "/health", undefined, HEALTH_FETCH_TIMEOUT_MS);
+  },
   fetchMeta(): Promise<MetaOut> {
     return call<MetaOut>("GET", "/v1/meta");
   },
@@ -258,7 +283,12 @@ export const api = {
     return callNullableJson<SmtpConfigOut>("GET", "/v1/settings/smtp");
   },
   fetchState(): Promise<UIStateOut> {
-    return call<UIStateOut>("GET", "/v1/ui/state");
+    return call<UIStateOut>(
+      "GET",
+      "/v1/ui/state",
+      undefined,
+      STATE_FETCH_TIMEOUT_MS,
+    );
   },
   fetchTailwindTokenSettings(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("GET", "/v1/settings/tailwind-token");

@@ -4,7 +4,7 @@ Companion to **PR #295** (`fix: cap Vizio bootstrap WoL wait and improve discove
 
 ## Background
 
-PR **#294** added a one-shot WoL + SmartCast wait during Vizio bootstrap (`_wake_and_probe_tv` in `_offline_tv`) so eco/standby TVs could establish an initial on/off baseline instead of staying **unknown**. After merge, discovery blocked ~66s when the TV never answered, and logs showed no evidence WoL had ever succeeded on this install.
+PR **#294** added a one-shot WoL + SmartCast wait during Vizio bootstrap (`_wake_and_probe_tv` in `_offline_tv`) so eco/standby TVs could establish an initial on/off baseline instead of staying **unknown**. That blocked discovery for up to **12s per offline TV** and still did not wake eco-mode sets in the field. Bootstrap now registers unreachable TVs as **off** immediately; WoL runs only on explicit **`turn_on`**.
 
 ## Kitchen TV (field unit)
 
@@ -48,13 +48,12 @@ Our field symptoms match eco/standby: no L2 presence, no SSDP, port 7345 down, m
 
 The `turn_on` WoL path (since #268) only runs after a failed `power_on` REST call; it has **never been proven** on this TV from logs.
 
-## PR #295 scope (what we ship now)
+## PR #295 scope (shipped on main)
 
-- Cap bootstrap WoL wait at **12s** (`_WOL_BOOTSTRAP_WAIT_DEADLINE_S`); keep **60s** for user-initiated `turn_on`.
 - Demote `/v1/ui/state` discovery **503** access lines to **TRACE**.
-- Add `[startup]` per-backend discovery timing logs and Vizio bootstrap probe lines.
+- Add `[startup]` per-backend discovery timing logs.
 
-We **do not** claim WoL works from eco sleep until the checklist below passes.
+Bootstrap WoL was removed in a follow-up PR — unreachable TVs register as **off** immediately; WoL runs only on explicit `turn_on` (60s wait cap).
 
 ## Follow-up checklist (later work)
 
@@ -84,4 +83,4 @@ We **do not** claim WoL works from eco sleep until the checklist below passes.
 
 - Vizio SmartCast API notes (WoL unsupported in Eco Mode): [exiva/Vizio_SmartCast_API](https://github.com/exiva/Vizio_SmartCast_API/blob/master/README.md)
 - Home Assistant Vizio integration (Eco Mode power-on limitation): [home-assistant.io/integrations/vizio](https://www.home-assistant.io/integrations/vizio/)
-- Code: `app/vizio_wol.py`, `VizioTvDevice.turn_on`, `VizioDeviceManager._wake_and_probe_tv`
+- Code: `app/vizio_wol.py`, `VizioTvDevice.turn_on`

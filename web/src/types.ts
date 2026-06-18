@@ -8,6 +8,14 @@ export interface MetaOut {
   commit: string;
 }
 
+export interface HealthOut {
+  status: string;
+  service: string;
+  ready: boolean;
+  discovery: "ready" | "in_progress" | "failed";
+  error: string | null;
+}
+
 export type UIDeviceKind = "switch" | "speaker" | "door";
 
 export type UIDeviceState =

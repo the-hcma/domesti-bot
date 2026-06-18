@@ -34,7 +34,6 @@ from app.vizio_wol import send_wake_on_lan
 _LOGGER = logging.getLogger(__name__)
 
 _API_PROBE_TIMEOUT_S = 2.0
-_WOL_BOOTSTRAP_WAIT_DEADLINE_S = 12.0
 _WOL_POLL_INTERVAL_S = 2.0
 _WOL_WAIT_DEADLINE_S = 60.0
 
@@ -116,9 +115,9 @@ class VizioTvDevice(SwitchDevice):
             return self._endpoint.model
         return self._endpoint.host
 
-    async def refresh_power_state(self) -> None:
+    async def refresh_power_state(self, *, poll: bool = False) -> None:
         try:
-            active = await self._client.fetch_tv_active_state()
+            active = await self._client.fetch_tv_active_state(poll=poll)
         except VizioSmartCastAuthError:
             self._power_unknown = True
             return
@@ -473,18 +472,15 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         return out
 
     async def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice:
-        """Return a cached TV tile when SmartCast is unreachable at bootstrap."""
+        """Return a cached off tile when SmartCast is unreachable at bootstrap."""
         _LOGGER.info(
             "Vizio TV %s bootstrap: SmartCast unreachable at %s:%s; "
-            "probing with Wake-on-LAN",
+            "registering as off (Wake-on-LAN runs only on explicit turn_on)",
             endpoint.device_id,
             endpoint.host,
             endpoint.port,
         )
         endpoint = await self._endpoint_with_resolved_mac(endpoint)
-        probed = await self._wake_and_probe_tv(endpoint, token)
-        if probed is not None:
-            return probed
         client = VizioSmartCastClient(
             endpoint.host,
             port=endpoint.port,
@@ -586,60 +582,3 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             return True
         except (TimeoutError, OSError):
             return False
-
-    async def _wake_and_probe_tv(
-        self,
-        endpoint: VizioTvEndpoint,
-        token: str,
-    ) -> VizioTvDevice | None:
-        """WoL once at bootstrap, poll SmartCast, and connect when the TV answers."""
-        mac = endpoint.mac
-        if mac is None:
-            return None
-        endpoint = await self._relocate_endpoint(endpoint, force_arp=True)
-        _LOGGER.info(
-            "Vizio TV %s bootstrap: sent Wake-on-LAN to %s; waiting up to %.0fs "
-            "for SmartCast at %s:%s",
-            endpoint.device_id,
-            mac,
-            _WOL_BOOTSTRAP_WAIT_DEADLINE_S,
-            endpoint.host,
-            endpoint.port,
-        )
-        await asyncio.to_thread(send_wake_on_lan, mac)
-        client = VizioSmartCastClient(
-            endpoint.host,
-            port=endpoint.port,
-            auth_token=token,
-            session=self._session,
-        )
-        label = (endpoint.display_name or endpoint.model or endpoint.host).strip()
-        probe = VizioTvDevice(
-            endpoint,
-            client,
-            display_name=label or None,
-            mac=mac,
-        )
-        try:
-            await probe._wait_for_api(deadline_s=_WOL_BOOTSTRAP_WAIT_DEADLINE_S)
-        except VizioSmartCastConnectionError:
-            _LOGGER.info(
-                "Vizio TV %s did not answer SmartCast after Wake-on-LAN; treating as off",
-                endpoint.device_id,
-            )
-            return None
-        endpoint = await self._relocate_endpoint(endpoint, force_arp=True)
-        try:
-            return await self._connect_endpoint(endpoint, token)
-        except VizioSmartCastAuthError:
-            _LOGGER.warning(
-                "Vizio TV %s auth rejected after Wake-on-LAN probe; treating as off",
-                endpoint.device_id,
-            )
-            return None
-        except VizioSmartCastConnectionError:
-            _LOGGER.info(
-                "Vizio TV %s unreachable after Wake-on-LAN probe; treating as off",
-                endpoint.device_id,
-            )
-            return None
