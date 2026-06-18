@@ -865,3 +865,134 @@ async def test_rule_evaluator_skips_inside_since_seed_when_dwell_rule_rejects_ac
         now_fn=lambda: 1_700_000_000.0,
     )
     assert evaluator.geofence_inside_since_snapshot() == {}
+
+
+def _scheduled_inside_house_rule(*, cooldown_s: int) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(all=[_henrique_inside_house_condition()]),
+        cooldown_s=cooldown_s,
+        device_actions=[
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Garage",
+                action=RuleDeviceActionType.TURN_ON,
+            ),
+        ],
+        enabled=True,
+        id="scheduled-inside",
+        label="Scheduled inside",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        schedule_cron="* * * * *",
+        trigger="scheduled",
+    )
+
+
+def _setup_scheduled_evaluator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    cooldown_s: int,
+) -> _ArriveHomeFixture:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _scheduled_inside_house_rule(cooldown_s=cooldown_s))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        received_at=clock["now"],
+    )
+    device = _FakeKasa("192.168.1.10", "Garage")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    return _ArriveHomeFixture(
+        clock=clock,
+        db=db,
+        device=device,
+        evaluator=evaluator,
+    )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_seeds_next_evaluate_at_on_boot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_scheduled_evaluator(tmp_path, monkeypatch, cooldown_s=0)
+    next_at = fixture.evaluator.next_evaluate_at_for_rule("scheduled-inside")
+    assert next_at is not None
+    assert next_at >= fixture.clock["now"]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_fires_when_due_and_conditions_met(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_scheduled_evaluator(tmp_path, monkeypatch, cooldown_s=0)
+    runtime = fixture.evaluator._rule_state["scheduled-inside"]
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == ["on"]
+    fire_state = fixture.evaluator.fire_state_for_rule("scheduled-inside")
+    assert fire_state.last_fired_at is not None
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_respects_cooldown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_scheduled_evaluator(tmp_path, monkeypatch, cooldown_s=600)
+    runtime = fixture.evaluator._rule_state["scheduled-inside"]
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    runtime.last_fired_at = fixture.clock["now"] - 30.0
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == []
+    assert runtime.next_evaluate_at is not None
+    assert runtime.next_evaluate_at > fixture.clock["now"]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_advances_next_evaluate_at_when_conditions_unmet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_scheduled_evaluator(tmp_path, monkeypatch, cooldown_s=0)
+    upsert_user_location(
+        fixture.db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=44.0,
+            lon=-73.0,
+            accuracy_m=20,
+            received_at=fixture.clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    runtime = fixture.evaluator._rule_state["scheduled-inside"]
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    previous_next = runtime.next_evaluate_at
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == []
+    assert runtime.next_evaluate_at is not None
+    assert runtime.next_evaluate_at > previous_next

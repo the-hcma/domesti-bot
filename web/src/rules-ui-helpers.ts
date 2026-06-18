@@ -1,6 +1,7 @@
 // Shared Automations hub UI helpers (info badges, family labels, toggles).
 
 import { createAuditedTimeElement } from "./format-timestamp.js";
+import type { RuleTrigger } from "./types.js";
 
 export const ALL_DAYS_OF_WEEK = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -299,7 +300,7 @@ export function resolveRosterUser<T extends { user_id: string }>(
 export function ruleStatusHeadline(rule: {
   condition_currently_true: boolean;
   last_fired_at: string | null;
-  trigger: "edge_true" | "while_true";
+  trigger: RuleTrigger;
 }): string {
   if (rule.trigger === "edge_true") {
     if (rule.condition_currently_true) {
@@ -307,22 +308,29 @@ export function ruleStatusHeadline(rule: {
     }
     return "Waiting — outside active window";
   }
+  if (rule.trigger === "scheduled") {
+    return rule.condition_currently_true
+      ? "Ready — conditions currently met"
+      : "Waiting — conditions not met yet";
+  }
   return rule.condition_currently_true
     ? "Ready — all conditions met"
     : "Waiting — conditions not met yet";
 }
 
-export function ruleLastMetLabel(
-  trigger: "edge_true" | "while_true",
-): string {
-  return trigger === "edge_true" ? "Last met " : "Last fired ";
+export function ruleLastMetLabel(trigger: RuleTrigger): string {
+  if (trigger === "edge_true") {
+    return "Last met ";
+  }
+  return "Last fired ";
 }
 
 export function appendRuleLastMetLine(
   parent: HTMLElement,
   rule: {
     last_fired_at: string | null;
-    trigger: "edge_true" | "while_true";
+    next_evaluate_at: string | null;
+    trigger: RuleTrigger;
   },
 ): void {
   const fired = document.createElement("p");
@@ -334,6 +342,13 @@ export function appendRuleLastMetLine(
     fired.append("Never");
   }
   parent.append(fired);
+  if (rule.trigger === "scheduled" && rule.next_evaluate_at != null) {
+    const next = document.createElement("p");
+    next.className = "rules-card-meta";
+    next.append(document.createTextNode("Next evaluate "));
+    next.append(createAuditedTimeElement(rule.next_evaluate_at));
+    parent.append(next);
+  }
 }
 
 export function preventBrowserAutofill(input: HTMLInputElement): void {

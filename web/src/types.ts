@@ -139,7 +139,7 @@ export interface VizioPairCompleteOut {
 
 // --- Rule engine (mirror planned ``app/api/schemas.py`` rule models) ---
 
-export type RuleTrigger = "edge_true" | "while_true";
+export type RuleTrigger = "edge_true" | "scheduled" | "while_true";
 
 export type RuleActionType =
   | "turn_on"
@@ -212,11 +212,10 @@ export interface RuleConditionsOut {
   all: RuleConditionOut[];
 }
 
-export interface RuleOut {
+interface RuleOutShared {
   id: string;
   label: string;
   enabled: boolean;
-  trigger: RuleTrigger;
   cooldown_s: number;
   /** Retry geofence edges for this many seconds after an accuracy skip (omit to disable). */
   accuracy_edge_grace_s?: number | null;
@@ -228,6 +227,17 @@ export interface RuleOut {
   conditions: RuleConditionsOut;
   device_actions: RuleDeviceActionOut[];
 }
+
+export type RuleOut =
+  | (RuleOutShared & {
+      trigger: "scheduled";
+      /** 5-field cron (minute hour day month weekday); home timezone from settings. */
+      schedule_cron: string;
+    })
+  | (RuleOutShared & {
+      trigger: "edge_true" | "while_true";
+      schedule_cron?: null;
+    });
 
 export interface SmtpConfigIn {
   host: string;
@@ -393,8 +403,9 @@ export interface RuleStatusSummaryOut {
   conditions: RuleConditionStatusOut[];
   last_fired_at: string | null;
   last_error: string | null;
+  next_evaluate_at: string | null;
   reference_issues: RuleReferenceIssueOut[];
-  trigger: "edge_true" | "while_true";
+  trigger: RuleTrigger;
 }
 
 export interface RulesEvaluatorOut {
