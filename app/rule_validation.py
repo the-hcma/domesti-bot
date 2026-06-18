@@ -13,6 +13,7 @@ from app.api.schemas import (
     RuleOut,
     RuleReferenceIssueOut,
     UsersInsideGeofenceCondition,
+    UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
 )
 from app.device_enums import DeviceFamilyId
@@ -310,7 +311,11 @@ def _validate_users(
 def _walk_geofence_ids(condition: RuleConditionOut, ids: set[str]) -> None:
     if isinstance(
         condition,
-        (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+        (
+            UsersInsideGeofenceCondition,
+            UsersInsideGeofenceForSCondition,
+            UsersOutsideGeofenceCondition,
+        ),
     ):
         ids.add(condition.geofence_id)
         return
@@ -326,7 +331,11 @@ def _walk_geofence_ids(condition: RuleConditionOut, ids: set[str]) -> None:
 def _walk_user_ids(condition: RuleConditionOut, ids: set[str]) -> None:
     if isinstance(
         condition,
-        (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+        (
+            UsersInsideGeofenceCondition,
+            UsersInsideGeofenceForSCondition,
+            UsersOutsideGeofenceCondition,
+        ),
     ):
         ids.update(user_id.strip() for user_id in condition.user_ids if user_id.strip())
         return

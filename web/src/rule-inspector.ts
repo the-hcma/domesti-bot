@@ -4,6 +4,7 @@ import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
   formatDeviceActionPhrase,
+  formatGeofenceDwellLabel,
   formatPresenceEventLabel,
   formatTimingCondition,
   resolveDeviceLabel,
@@ -42,6 +43,8 @@ function appendConditionTree(
     if (condition.type === "all" || condition.type === "any") {
       item.textContent = condition.type === "all" ? "All of" : "Any of";
       appendConditionTree(item, condition.conditions, context);
+    } else if (condition.type === "users_inside_geofence_for_s") {
+      item.textContent = formatGeofenceDwellLabel(condition, context);
     } else if (
       condition.type === "users_inside_geofence"
       || condition.type === "users_outside_geofence"

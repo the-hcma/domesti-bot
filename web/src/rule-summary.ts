@@ -40,6 +40,25 @@ function looksLikeIpv4(value: string): boolean {
   return IPV4_RE.test(value.trim());
 }
 
+export function referencesGeofenceId(
+  condition: RuleConditionOut,
+  geofenceId: string,
+): boolean {
+  if (
+    condition.type === "users_inside_geofence"
+    || condition.type === "users_inside_geofence_for_s"
+    || condition.type === "users_outside_geofence"
+  ) {
+    return condition.geofence_id === geofenceId;
+  }
+  if (condition.type === "all" || condition.type === "any") {
+    return condition.conditions.some((child) =>
+      referencesGeofenceId(child, geofenceId),
+    );
+  }
+  return false;
+}
+
 export function resolveDeviceLabel(
   familyId: string,
   deviceId: string,
@@ -83,6 +102,7 @@ export function collectUserIdsFromConditions(
   const walk = (condition: RuleConditionOut): void => {
     if (
       condition.type === "users_inside_geofence"
+      || condition.type === "users_inside_geofence_for_s"
       || condition.type === "users_outside_geofence"
     ) {
       for (const userId of condition.user_ids) {
@@ -168,6 +188,34 @@ function formatDaysOfWeek(days: readonly number[]): string {
   return `On ${joinNames(labels)}`;
 }
 
+function formatDwellDuration(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  if (whole < 60) {
+    return `${whole} sec`;
+  }
+  const minutes = Math.floor(whole / 60);
+  const remainder = whole % 60;
+  if (remainder === 0) {
+    return `${minutes} min`;
+  }
+  return `${minutes} min ${remainder} sec`;
+}
+
+function formatDwellNeed(minInsideS: number): string {
+  return formatDwellDuration(minInsideS);
+}
+
+export function formatGeofenceDwellLabel(
+  condition: Extract<RuleConditionOut, { type: "users_inside_geofence_for_s" }>,
+  context: RuleSummaryContext,
+): string {
+  const names = userDisplayNames(condition.user_ids, context);
+  const where = geofenceLabel(condition.geofence_id, context);
+  const who = joinNames(names);
+  const needLabel = formatDwellNeed(condition.min_inside_s);
+  return `${who} inside ${where} for ${needLabel}+`;
+}
+
 export function formatPresenceEventLabel(
   condition: Extract<
     RuleConditionOut,
@@ -187,6 +235,7 @@ export function formatPresenceEventLabel(
 export function formatTimingCondition(condition: RuleConditionOut): string | null {
   switch (condition.type) {
     case "users_inside_geofence":
+    case "users_inside_geofence_for_s":
     case "users_outside_geofence":
       return null;
     case "all":
@@ -258,6 +307,10 @@ export function summarizeRule(
   const presence: string[] = [];
   const timing: string[] = [];
   walkRuleConditions(rule.conditions.all, (condition) => {
+    if (condition.type === "users_inside_geofence_for_s") {
+      presence.push(formatGeofenceDwellLabel(condition, context));
+      return;
+    }
     if (
       condition.type === "users_inside_geofence"
       || condition.type === "users_outside_geofence"

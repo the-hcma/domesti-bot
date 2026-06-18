@@ -16,10 +16,12 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
+    GeofenceOut,
     RuleConditionOut,
     RuleOut,
     UserLocationOut,
     UsersInsideGeofenceCondition,
+    UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
@@ -102,6 +104,7 @@ class RuleEvaluator:
             tuple[str, str, str, str],
             _DeferredAccuracyEdge,
         ] = {}
+        self._geofence_inside_since: dict[tuple[str, str], float] = {}
         self._geofence_outside_since: dict[tuple[str, str], float] = {}
         self._geofence_was_inside: dict[tuple[str, str], bool] = {}
         self._last_run_at: float | None = None
@@ -128,6 +131,9 @@ class RuleEvaluator:
             last_error=state.last_error,
             last_fired_at=state.last_fired_at,
         )
+
+    def geofence_inside_since_snapshot(self) -> dict[tuple[str, str], float]:
+        return dict(self._geofence_inside_since)
 
     @property
     def last_run_at(self) -> float | None:
@@ -200,6 +206,7 @@ class RuleEvaluator:
                 )
         roster_user_id_lookup = build_roster_user_id_lookup(list(user_display_names))
         return RuleEvaluationContext(
+            geofence_inside_since=self.geofence_inside_since_snapshot(),
             geofences=tuple(geofences),
             now=effective_now,
             roster_user_id_lookup=roster_user_id_lookup,
@@ -462,11 +469,15 @@ class RuleEvaluator:
         if location is None:
             return
         geofences = list_geofences(cache_path)
+        rules = list_automation_rules()
+        edge_accuracy_limit_m = _geofence_edge_accuracy_limit_m(rules)
+        dwell_accuracy_limit_m = _geofence_dwell_accuracy_limit_m(rules)
         transitions = self._update_geofence_transitions(
             user_id,
             location,
             geofences,
-            accuracy_limit_m=_geofence_edge_accuracy_limit_m(),
+            accuracy_limit_m=edge_accuracy_limit_m,
+            dwell_accuracy_limit_m=dwell_accuracy_limit_m,
         )
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         now = self._now_fn()
@@ -490,7 +501,7 @@ class RuleEvaluator:
             ctx=ctx,
             now=now,
         )
-        for rule in list_automation_rules():
+        for rule in rules:
             if not rule.enabled or rule.trigger != "edge_true":
                 continue
             if rule.id in deferred_fired_rule_ids:
@@ -579,17 +590,33 @@ class RuleEvaluator:
             return
         geofences = list_geofences(cache_path)
         locations = list_user_locations(cache_path)
-        accuracy_limit_m = _geofence_edge_accuracy_limit_m()
+        rules = list_automation_rules()
+        edge_accuracy_limit_m = _geofence_edge_accuracy_limit_m(rules)
+        dwell_accuracy_limit_m = _geofence_dwell_accuracy_limit_m(rules)
         for user_id, location in locations.items():
-            if not _location_accuracy_passes(location, accuracy_limit_m):
-                continue
             inside_ids = set(geofence_ids_containing_location(location, geofences))
+            edge_accuracy_passes = _location_accuracy_passes(
+                location,
+                edge_accuracy_limit_m,
+            )
+            dwell_accuracy_passes = _location_accuracy_passes(
+                location,
+                dwell_accuracy_limit_m,
+            )
             for geofence in geofences:
                 if not geofence.enabled:
                     continue
-                self._geofence_was_inside[(user_id, geofence.geofence_id)] = (
-                    geofence.geofence_id in inside_ids
-                )
+                geofence_id = geofence.geofence_id
+                key = (user_id, geofence_id)
+                was_inside = geofence_id in inside_ids
+                if edge_accuracy_passes:
+                    self._geofence_was_inside[key] = was_inside
+                if (
+                    dwell_accuracy_limit_m is not None
+                    and was_inside
+                    and dwell_accuracy_passes
+                ):
+                    self._geofence_inside_since[key] = location.received_at
 
     def _update_geofence_transitions(
         self,
@@ -598,6 +625,7 @@ class RuleEvaluator:
         geofences: list[GeofenceRecord],
         *,
         accuracy_limit_m: int | None,
+        dwell_accuracy_limit_m: int | None,
     ) -> dict[str, GeofenceTransition]:
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         mutate_state = _location_accuracy_passes(location, accuracy_limit_m)
@@ -614,6 +642,8 @@ class RuleEvaluator:
             geofences,
             inside_ids,
             observed_at=location.received_at,
+            dwell_accuracy_limit_m=dwell_accuracy_limit_m,
+            location=location,
             mutate_state=mutate_state,
         )
 
@@ -623,10 +653,16 @@ class RuleEvaluator:
         geofences: list[GeofenceRecord],
         inside_ids: set[str],
         *,
+        dwell_accuracy_limit_m: int | None,
+        location: UserLocationRecord,
         observed_at: float,
         mutate_state: bool,
     ) -> dict[str, GeofenceTransition]:
         transitions: dict[str, GeofenceTransition] = {}
+        track_dwell = dwell_accuracy_limit_m is not None and _location_accuracy_passes(
+            location,
+            dwell_accuracy_limit_m,
+        )
         for geofence in geofences:
             if not geofence.enabled:
                 continue
@@ -643,6 +679,8 @@ class RuleEvaluator:
                 if mutate_state:
                     self._geofence_was_inside[key] = True
                     self._geofence_outside_since.pop(key, None)
+                if track_dwell:
+                    self._geofence_inside_since[key] = observed_at
                 if dwell_elapsed:
                     transition = GeofenceTransition(entered=True)
                 elif outside_since is not None:
@@ -657,15 +695,21 @@ class RuleEvaluator:
                 if mutate_state:
                     self._geofence_was_inside[key] = False
                     self._geofence_outside_since[key] = observed_at
+                if track_dwell:
+                    self._geofence_inside_since.pop(key, None)
                 transition = GeofenceTransition(left=True)
             elif now_inside:
                 if mutate_state:
                     self._geofence_was_inside[key] = True
                     self._geofence_outside_since.pop(key, None)
+                if track_dwell and key not in self._geofence_inside_since:
+                    self._geofence_inside_since[key] = observed_at
             else:
                 if mutate_state:
                     self._geofence_was_inside[key] = False
                     self._geofence_outside_since.setdefault(key, observed_at)
+                if track_dwell:
+                    self._geofence_inside_since.pop(key, None)
             if transition.entered or transition.left:
                 transitions[geofence_id] = transition
                 _log_geofence_transition(
@@ -678,28 +722,6 @@ class RuleEvaluator:
 
 def _accuracy_passes(rule: RuleOut, location: UserLocationRecord) -> bool:
     return _location_accuracy_passes(location, rule.min_location_accuracy_m)
-
-
-def _geofence_edge_accuracy_limit_m() -> int | None:
-    limits = [
-        rule.min_location_accuracy_m
-        for rule in list_automation_rules()
-        if rule.enabled and rule.trigger == "edge_true"
-    ]
-    if not limits:
-        return None
-    return min(limits)
-
-
-def _location_accuracy_passes(
-    location: UserLocationRecord,
-    limit_m: int | None,
-) -> bool:
-    if limit_m is None:
-        return True
-    if location.accuracy_m is None:
-        return True
-    return location.accuracy_m <= limit_m
 
 
 def _accuracy_edge_grace_s(rule: RuleOut) -> int | None:
@@ -763,6 +785,16 @@ def _condition_geofence_edge_intents(
             )
         return intents
     return []
+
+
+def _condition_has_dwell(condition: RuleConditionOut) -> bool:
+    if isinstance(condition, UsersInsideGeofenceForSCondition):
+        return True
+    if isinstance(condition, AllConditionsCondition):
+        return any(_condition_has_dwell(child) for child in condition.conditions)
+    if isinstance(condition, AnyConditionsCondition):
+        return any(_condition_has_dwell(child) for child in condition.conditions)
+    return False
 
 
 def _condition_triggered_geofence_edge(
@@ -859,6 +891,57 @@ def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
     return "; ".join(unmet) if unmet else "none"
 
 
+def _geofence_dwell_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
+    limits = [
+        rule.min_location_accuracy_m
+        for rule in rules
+        if rule.enabled and _rule_has_dwell_condition(rule)
+    ]
+    if not limits:
+        return None
+    return min(limits)
+
+
+def _geofence_edge_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
+    limits = [
+        rule.min_location_accuracy_m
+        for rule in rules
+        if rule.enabled and rule.trigger == "edge_true"
+    ]
+    if not limits:
+        return None
+    return min(limits)
+
+
+def _geofence_record_to_out(record: GeofenceRecord) -> GeofenceOut:
+    return GeofenceOut(
+        center_lat=record.center_lat,
+        center_lon=record.center_lon,
+        enabled=record.enabled,
+        geofence_id=record.geofence_id,
+        label=record.label,
+        owntracks_rid=record.owntracks_rid,
+        radius_m=record.radius_m,
+    )
+
+
+def _location_accuracy_passes(
+    location: UserLocationRecord,
+    limit_m: int | None,
+) -> bool:
+    if limit_m is None:
+        return True
+    if location.accuracy_m is None:
+        return True
+    return location.accuracy_m <= limit_m
+
+
+def _location_received_at_iso(location: UserLocationRecord) -> str:
+    return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
+        "+00:00", "Z"
+    )
+
+
 def _log_deferred_edge_cancelled(
     *,
     rule_id: str,
@@ -951,6 +1034,17 @@ def _log_geofence_transition(
     )
 
 
+def _log_location_evaluation_task(task: asyncio.Task[object]) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        _LOGGER.exception(
+            "[rules] location evaluation task failed",
+            exc_info=exc,
+        )
+
+
 def _log_rule_skipped(
     rule_id: str,
     user_id: str,
@@ -967,35 +1061,8 @@ def _log_rule_skipped(
     )
 
 
-def _geofence_record_to_out(record: GeofenceRecord):
-    from app.api.schemas import GeofenceOut
-
-    return GeofenceOut(
-        center_lat=record.center_lat,
-        center_lon=record.center_lon,
-        enabled=record.enabled,
-        geofence_id=record.geofence_id,
-        label=record.label,
-        owntracks_rid=record.owntracks_rid,
-        radius_m=record.radius_m,
-    )
-
-
-def _location_received_at_iso(location: UserLocationRecord) -> str:
-    return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
-        "+00:00", "Z"
-    )
-
-
-def _log_location_evaluation_task(task: asyncio.Task[object]) -> None:
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        _LOGGER.exception(
-            "[rules] location evaluation task failed",
-            exc_info=exc,
-        )
+def _rule_has_dwell_condition(rule: RuleOut) -> bool:
+    return any(_condition_has_dwell(condition) for condition in rule.conditions.all)
 
 
 def _user_triggered_geofence_edge(

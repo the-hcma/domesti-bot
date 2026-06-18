@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from app.api.schemas import (
     RuleConditionsOut,
     RuleOut,
     UsersInsideGeofenceCondition,
+    UsersInsideGeofenceForSCondition,
+    UsersOutsideGeofenceCondition,
 )
 from unittest.mock import MagicMock, patch
 
@@ -45,6 +50,28 @@ def _arrival_rule() -> RuleOut:
         notify_on_fire=False,
         trigger="edge_true",
     )
+
+
+def test_geofence_condition_rejects_empty_user_ids() -> None:
+    with pytest.raises(ValidationError):
+        UsersInsideGeofenceCondition(
+            type="users_inside_geofence",
+            geofence_id="house",
+            user_ids=[],
+        )
+    with pytest.raises(ValidationError):
+        UsersInsideGeofenceForSCondition(
+            type="users_inside_geofence_for_s",
+            geofence_id="house",
+            min_inside_s=600,
+            user_ids=[],
+        )
+    with pytest.raises(ValidationError):
+        UsersOutsideGeofenceCondition(
+            type="users_outside_geofence",
+            geofence_id="house",
+            user_ids=[],
+        )
 
 
 def test_resolve_roster_user_id_is_case_insensitive() -> None:
