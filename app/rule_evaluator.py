@@ -25,6 +25,7 @@ from app.api.schemas import (
     UsersOutsideGeofenceCondition,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
+from app.cron_schedule import next_scheduled_evaluate_at
 from app.domesti_bot_cli import DeviceManagersState
 from app.presence_store import (
     UserLocationRecord,
@@ -54,7 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 _MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
 _RULE_EVALUATOR_TICK_S = 60.0
 DeferredGeofenceEvent = Literal["entered", "left"]
-RuleFireSource = Literal["deferred", "immediate"]
+RuleFireSource = Literal["deferred", "immediate", "scheduled"]
 
 
 @dataclass(frozen=True)
@@ -77,12 +78,14 @@ class GeofenceTransition:
 class RuleEvaluatorFireState:
     last_error: str | None = None
     last_fired_at: float | None = None
+    next_evaluate_at: float | None = None
 
 
 @dataclass
 class _RuleRuntimeState:
     last_error: str | None = None
     last_fired_at: float | None = None
+    next_evaluate_at: float | None = None
 
 
 class RuleEvaluator:
@@ -115,6 +118,7 @@ class RuleEvaluator:
         self._tick_task: asyncio.Task[None] | None = None
         self._load_persisted_rule_state()
         self._seed_geofence_state()
+        self._seed_scheduled_evaluate_times()
 
     async def close(self) -> None:
         self._stop.set()
@@ -130,6 +134,7 @@ class RuleEvaluator:
         return RuleEvaluatorFireState(
             last_error=state.last_error,
             last_fired_at=state.last_fired_at,
+            next_evaluate_at=state.next_evaluate_at,
         )
 
     def geofence_inside_since_snapshot(self) -> dict[tuple[str, str], float]:
@@ -138,6 +143,12 @@ class RuleEvaluator:
     @property
     def last_run_at(self) -> float | None:
         return self._last_run_at
+
+    def next_evaluate_at_for_rule(self, rule_id: str) -> float | None:
+        state = self._rule_state.get(rule_id)
+        if state is None:
+            return None
+        return state.next_evaluate_at
 
     @property
     def next_sun_check_at(self) -> float | None:
@@ -215,6 +226,86 @@ class RuleEvaluator:
             user_display_names=user_display_names,
             user_locations=user_locations,
         )
+
+    def _advance_scheduled_evaluate_time(
+        self,
+        rule: RuleOut,
+        *,
+        timezone: ZoneInfo,
+    ) -> None:
+        cron_expr = (rule.schedule_cron or "").strip()
+        if cron_expr == "":
+            return
+        runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+        now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+        runtime.next_evaluate_at = next_scheduled_evaluate_at(
+            cron_expr,
+            now,
+            timezone,
+        )
+
+    async def _evaluate_scheduled_rules(self) -> None:
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        settings = load_settings_location()
+        timezone = ZoneInfo(settings.timezone)
+        now_epoch = self._now_fn()
+        now = datetime.fromtimestamp(now_epoch, tz=timezone)
+        ctx = await self._build_evaluation_context(now=now)
+        for rule in list_automation_rules():
+            if not rule.enabled or rule.trigger != "scheduled":
+                continue
+            cron_expr = (rule.schedule_cron or "").strip()
+            if cron_expr == "":
+                continue
+            runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+            if runtime.next_evaluate_at is None:
+                runtime.next_evaluate_at = next_scheduled_evaluate_at(
+                    cron_expr,
+                    now,
+                    timezone,
+                    due_if_matching=True,
+                )
+            if runtime.next_evaluate_at > now_epoch:
+                continue
+            user_ids = collect_rule_user_ids(rule)
+            user_id = next(iter(sorted(user_ids))) if user_ids else ""
+            evaluation = evaluate_rule(rule, ctx)
+            _LOGGER.info(
+                "[rules] scheduled evaluate rule_id=%s met=%s",
+                rule.id,
+                evaluation.all_met,
+            )
+            if evaluation.all_met and self._cooldown_elapsed(rule, runtime):
+                await self._execute_rule(
+                    rule,
+                    evaluation=evaluation,
+                    fire_source="scheduled",
+                    transitions={},
+                    user_id=user_id,
+                )
+            elif evaluation.all_met:
+                remaining_s = rule.cooldown_s - (
+                    now_epoch - (runtime.last_fired_at or 0.0)
+                )
+                _log_rule_skipped(
+                    rule.id,
+                    user_id,
+                    reason="cooldown",
+                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                )
+            else:
+                _log_rule_skipped(
+                    rule.id,
+                    user_id,
+                    reason="conditions_not_met",
+                    detail=_format_unmet_conditions_for_log(evaluation),
+                )
+            self._advance_scheduled_evaluate_time(
+                rule,
+                timezone=timezone,
+            )
 
     async def _attempt_deferred_accuracy_edge_fires(
         self,
@@ -402,12 +493,23 @@ class RuleEvaluator:
 
     async def _periodic_loop(self) -> None:
         while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=_RULE_EVALUATOR_TICK_S,
+                )
+                break
+            except TimeoutError:
+                pass
             self._last_run_at = self._now_fn()
             self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=_RULE_EVALUATOR_TICK_S)
-            except TimeoutError:
-                continue
+                async with self._process_lock:
+                    await self._evaluate_scheduled_rules()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                _LOGGER.exception("[rules] scheduled rule tick failed")
 
     def _persist_rule_state(self, rule_id: str) -> None:
         cache_path = self._cache_path
@@ -617,6 +719,25 @@ class RuleEvaluator:
                     and dwell_accuracy_passes
                 ):
                     self._geofence_inside_since[key] = location.received_at
+
+    def _seed_scheduled_evaluate_times(self) -> None:
+        settings = load_settings_location()
+        timezone = ZoneInfo(settings.timezone)
+        now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+        for rule in list_automation_rules():
+            if not rule.enabled or rule.trigger != "scheduled":
+                continue
+            cron_expr = (rule.schedule_cron or "").strip()
+            if cron_expr == "":
+                continue
+            runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+            if runtime.next_evaluate_at is None:
+                runtime.next_evaluate_at = next_scheduled_evaluate_at(
+                    cron_expr,
+                    now,
+                    timezone,
+                    due_if_matching=True,
+                )
 
     def _update_geofence_transitions(
         self,

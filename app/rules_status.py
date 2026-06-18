@@ -121,6 +121,11 @@ def build_rules_status(
     for rule in rules:
         evaluation = evaluate_rule(rule, eval_ctx)
         fire_state = _fire_state_for_rule(evaluator, rule.id)
+        next_evaluate_at: str | None = None
+        if rule.trigger == "scheduled" and rule.enabled and evaluator is not None:
+            scheduled_at = evaluator.next_evaluate_at_for_rule(rule.id)
+            if scheduled_at is not None:
+                next_evaluate_at = _epoch_to_iso_z(scheduled_at)
         rule_rows.append(
             RuleStatusSummaryOut(
                 condition_currently_true=evaluation.all_met,
@@ -134,6 +139,7 @@ def build_rules_status(
                     if fire_state.last_fired_at is not None
                     else None
                 ),
+                next_evaluate_at=next_evaluate_at,
                 reference_issues=validate_rule(rule, validation_ctx),
                 trigger=rule.trigger,
             )

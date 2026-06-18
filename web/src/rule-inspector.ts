@@ -166,6 +166,9 @@ export function mountRuleInspectorPanel(
   appendDefinitionRow(meta, "Rule id", rule.id);
   appendDefinitionRow(meta, "Enabled", rule.enabled ? "Yes" : "No");
   appendDefinitionRow(meta, "Trigger", rule.trigger);
+  if (rule.trigger === "scheduled") {
+    appendDefinitionRow(meta, "Schedule (cron)", rule.schedule_cron);
+  }
   appendDefinitionRow(meta, "Cooldown", `${rule.cooldown_s} s`);
   appendDefinitionRow(
     meta,

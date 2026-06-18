@@ -206,3 +206,87 @@ def test_validate_rule_flags_missing_smtp_when_auth_required() -> None:
     )
     issues = validate_rule(rule, ctx)
     assert any(issue.kind == "missing_smtp" for issue in issues)
+
+
+def test_rule_out_requires_schedule_cron_for_scheduled_trigger() -> None:
+    with pytest.raises(ValidationError, match="schedule_cron"):
+        RuleOut(
+            conditions=RuleConditionsOut(all=[]),
+            cooldown_s=60,
+            device_actions=[],
+            enabled=True,
+            id="bad-scheduled",
+            label="Bad scheduled",
+            min_location_accuracy_m=50,
+            notification_email=None,
+            notify_on_fire=False,
+            trigger="scheduled",
+        )
+
+
+def test_rule_out_rejects_schedule_cron_on_edge_true_trigger() -> None:
+    with pytest.raises(ValidationError, match="only allowed when trigger is scheduled"):
+        RuleOut(
+            conditions=RuleConditionsOut(all=[]),
+            cooldown_s=60,
+            device_actions=[],
+            enabled=True,
+            id="bad-cron",
+            label="Bad cron",
+            min_location_accuracy_m=50,
+            notification_email=None,
+            notify_on_fire=False,
+            schedule_cron="* * * * *",
+            trigger="edge_true",
+        )
+
+
+def test_rule_out_rejects_invalid_schedule_cron() -> None:
+    with pytest.raises(ValidationError, match="5-field cron"):
+        RuleOut(
+            conditions=RuleConditionsOut(all=[]),
+            cooldown_s=60,
+            device_actions=[],
+            enabled=True,
+            id="bad-cron-expr",
+            label="Bad cron expr",
+            min_location_accuracy_m=50,
+            notification_email=None,
+            notify_on_fire=False,
+            schedule_cron="not-a-cron",
+            trigger="scheduled",
+        )
+
+
+def test_rule_out_normalizes_schedule_cron_whitespace() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="trimmed-cron",
+        label="Trimmed cron",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        schedule_cron="  */15 * * * *  ",
+        trigger="scheduled",
+    )
+    assert rule.schedule_cron == "*/15 * * * *"
+
+
+def test_rule_out_coerces_whitespace_only_schedule_cron_to_none_for_edge_true() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="blank-cron",
+        label="Blank cron",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        schedule_cron="   ",
+        trigger="edge_true",
+    )
+    assert rule.schedule_cron is None

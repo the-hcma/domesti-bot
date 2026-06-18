@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+
+RuleTriggerOut = Literal["edge_true", "scheduled", "while_true"]
 
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
@@ -614,7 +617,28 @@ class RuleOut(BaseModel):
     min_location_accuracy_m: int
     notification_email: str | None = None
     notify_on_fire: bool
-    trigger: Literal["edge_true", "while_true"]
+    schedule_cron: str | None = Field(
+        default=None,
+        description=(
+            "5-field cron expression (minute hour day month weekday). "
+            "Required when trigger is scheduled; timezone from settings_location."
+        ),
+    )
+    trigger: RuleTriggerOut
+
+    @model_validator(mode="after")
+    def _validate_schedule_cron(self) -> Self:
+        cron = (self.schedule_cron or "").strip()
+        if self.trigger == "scheduled":
+            validate_schedule_cron_expression(cron)
+            self.schedule_cron = cron
+            return self
+        if cron != "":
+            raise ValueError(
+                "schedule_cron is only allowed when trigger is scheduled"
+            )
+        self.schedule_cron = None
+        return self
 
 
 class RuleReferenceIssueOut(BaseModel):
@@ -642,8 +666,9 @@ class RuleStatusSummaryOut(BaseModel):
     label: str
     last_error: str | None = None
     last_fired_at: str | None = None
+    next_evaluate_at: str | None = None
     reference_issues: list[RuleReferenceIssueOut] = Field(default_factory=list)
-    trigger: Literal["edge_true", "while_true"]
+    trigger: RuleTriggerOut
 
 
 class RulesValidationOut(BaseModel):

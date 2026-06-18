@@ -99,6 +99,7 @@ def test_put_smtp_without_secrets_key_returns_503(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(tmp_path / "missing-config.json"))
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     response = client.put(
         "/v1/settings/smtp",
