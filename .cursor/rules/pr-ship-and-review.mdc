@@ -1,0 +1,73 @@
+---
+description: Ship a PR end-to-end — local gates, submit, Copilot review loop, operator email
+alwaysApply: true
+---
+
+# PR ship, Copilot review, and operator email
+
+When the user asks to **ship**, **submit**, **open a PR**, or **follow the flow**, run this sequence in a **stack worktree** (never the primary clone). See `pr-workflow.mdc` for worktree/Graphite basics.
+
+## 1. Local quality gates (all must pass before submit)
+
+From the stack worktree, after `uv sync --group dev`:
+
+```bash
+uv run pyright
+uv run pytest -m "not integration and not browser" -n auto
+uv run pytest -m browser                    # when web/HTML/layout changed
+shellcheck $(git ls-files scripts | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$')
+cd web && pnpm install --frozen-lockfile && pnpm run check   # when web/ changed
+```
+
+Fix failures before committing. Do not skip hooks or push with failing gates.
+
+## 2. Commit and submit
+
+```bash
+gt create fix/<slug> --all --message "fix: …"   # or gt modify --all --message "…" to amend
+gt submit --no-interactive --publish
+```
+
+Patch title/body if stale: `gh api repos/the-hcma/domesti-bot/pulls/<n> --method PATCH --field title=… --field body=…`
+
+## 3. Request Copilot review
+
+```bash
+gh pr edit <n> --add-reviewer @copilot
+```
+
+Poll until CI is green: `sleep 10 && gh pr checks <n>`
+
+## 4. Copilot loop (iterate until clean)
+
+1. Fetch inline comments: `gh api repos/the-hcma/domesti-bot/pulls/<n>/comments --jq '…'`
+2. Triage each thread — fix valid issues in the worktree; reply on-thread (`gh api repos/the-hcma/domesti-bot/pulls/<n>/comments/<id>/replies -f body=…`) when fixed.
+3. `gt modify --all --message "…"` (or `--no-edit` for fixups), push via `gt submit` / `git push`.
+4. Post a summary `gh pr comment` and **re-request** `gh pr edit <n> --add-reviewer @copilot`.
+5. Repeat until `mergeStateStatus` is **CLEAN**, CI passes, and Copilot has no outstanding actionable feedback.
+
+Do **not** add the `merge-it` label unless the user explicitly confirms.
+
+## 5. Email operator when ready for human review
+
+When CI is green, Copilot is addressed, and the PR is merge-ready pending human approval:
+
+```bash
+printf '%s\n' \
+  'From: domesti-bot@hcma.info' \
+  'To: github@hcma.info' \
+  'Subject: PR ready for review: <title> (domesti-bot #<n>)' \
+  'Content-Type: text/plain; charset=UTF-8' \
+  '' \
+  'Henrique,' \
+  '' \
+  'PR #<n> is ready for your review:' \
+  'https://github.com/the-hcma/domesti-bot/pull/<n>' \
+  '' \
+  '<2–4 bullet summary>' \
+  '' \
+  'CI: all checks passing. Copilot review addressed.' \
+  | /usr/sbin/sendmail -t -oi
+```
+
+Tell the user the PR URL and that the email was sent.

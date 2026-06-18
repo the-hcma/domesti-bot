@@ -43,9 +43,11 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
-from app.vizio_device_manager import VizioDeviceManager
+from app.vizio_device_manager import VizioDeviceManager, VizioTvDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+_VIZIO_WATCHER_REFRESH_TIMEOUT_S = 5.0
 
 # Default cadence between two polls of the same backend. Generous on
 # purpose: LAN devices don't change state often, and the action handlers
@@ -214,15 +216,27 @@ class VizioPollingWatcher(DeviceStateWatcher):
         self._interval_s = interval_s
 
     async def _refresh_once(self) -> None:
-        for tv in self._mgr.tvs:
+        async def _refresh_tv(tv: VizioTvDevice) -> None:
             try:
-                await tv.refresh_power_state()
+                await asyncio.wait_for(
+                    tv.refresh_power_state(poll=True),
+                    timeout=_VIZIO_WATCHER_REFRESH_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                _LOGGER.warning(
+                    "[state-watcher vizio] %s update timed out after %.1fs; "
+                    "keeping last known state",
+                    tv.identifier,
+                    _VIZIO_WATCHER_REFRESH_TIMEOUT_S,
+                )
             except Exception as exc:
                 _log_watcher_refresh_failure(
                     backend="vizio",
                     device_id=tv.identifier,
                     exc=exc,
                 )
+
+        await asyncio.gather(*(_refresh_tv(tv) for tv in self._mgr.tvs))
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():

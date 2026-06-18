@@ -102,6 +102,8 @@ class DomestiBotController {
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
   private connected = false;
+  private devicesReady = false;
+  private refreshInFlight = false;
   private pollTimer: number | null = null;
   // The recoverable-action toast lives outside ``#app`` so it
   // survives the ``replaceChildren()`` calls inside ``render()``.
@@ -144,9 +146,10 @@ class DomestiBotController {
     const deadline =
       performance.now() + DomestiBotController.BOOTSTRAP_DEADLINE_MS;
     while (true) {
+      this.beginHealthProbe();
       try {
         this.state = await api.fetchState();
-        this.connected = true;
+        this.markBackendReadyFromState();
         this.applyPendingPredictionsTo(this.state);
         warmCompactTileIcons(this.state);
         this.render();
@@ -160,21 +163,50 @@ class DomestiBotController {
             );
             return;
           }
-          // Keep the spinner up — DOM is already rendered, no need
-          // to repaint every tick. Just wait and retry.
           await DomestiBotController.sleep(
             DomestiBotController.BOOTSTRAP_RETRY_MS,
           );
           continue;
         }
-        // Any other error (auth, 500, network, 503 with a different
-        // detail like "Device discovery failed: ...") is permanent
-        // from the bootstrap's point of view; surface it so the user
-        // can read what went wrong.
         this.renderError("Failed to load device state", err);
         return;
       }
     }
+  }
+
+  private beginHealthProbe(): void {
+    // Decoupled from /v1/ui/state so the 3s health timeout can update
+    // connection chrome without waiting for the slower state poll.
+    void api.fetchHealth().then(
+      (health) => {
+        this.connected = health.status === "ok";
+        this.devicesReady = health.ready;
+        this.syncConnectionChrome();
+      },
+      () => {
+        this.connected = false;
+        this.devicesReady = false;
+        this.syncConnectionChrome();
+      },
+    );
+  }
+
+  private syncConnectionChrome(): void {
+    this.root.dataset["connected"] = this.connected ? "true" : "false";
+    if (this.state !== null) {
+      this.render();
+    }
+  }
+
+  private markBackendReadyFromState(): void {
+    // A successful /v1/ui/state implies the backend answered and discovery
+    // finished — do not leave the UI offline when /health alone timed out.
+    this.connected = true;
+    this.devicesReady = true;
+  }
+
+  private controlsEnabled(): boolean {
+    return this.connected && this.devicesReady;
   }
 
   private async loadMeta(): Promise<void> {
@@ -493,23 +525,24 @@ class DomestiBotController {
   }
 
   private async refresh(): Promise<void> {
-    // Post-bootstrap refresh. By the time this runs ``init`` has
-    // either populated ``this.state`` (success) or rendered the
-    // error banner (gave up). A null ``this.state`` here would
-    // mean the poll fired before bootstrap finished, which can't
-    // happen with the current sequencing (``schedulePoll`` is
-    // only called after ``bootstrap``).
+    if (this.refreshInFlight) {
+      return;
+    }
+    this.refreshInFlight = true;
+    this.beginHealthProbe();
     try {
-      this.state = await api.fetchState();
-      this.connected = true;
+      const state = await api.fetchState();
+      this.markBackendReadyFromState();
+      this.state = state;
       this.applyPendingPredictionsTo(this.state);
       warmCompactTileIcons(this.state);
       this.render();
     } catch {
-      // Network blip mid-session — keep the cached tiles, flip the
-      // family frames to red, and let the next tick recover.
-      this.connected = false;
-      if (this.state) this.render();
+      if (this.state) {
+        this.render();
+      }
+    } finally {
+      this.refreshInFlight = false;
     }
   }
 
@@ -578,7 +611,7 @@ class DomestiBotController {
       globalBtn.type = "button";
       globalBtn.className = "btn btn-bulk tile-header-global-off";
       globalBtn.textContent = "Turn off / pause / close everything";
-      globalBtn.disabled = !this.connected;
+      globalBtn.disabled = !this.controlsEnabled();
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
       });
@@ -634,8 +667,11 @@ class DomestiBotController {
       return;
     }
 
+    const controlsEnabled = this.controlsEnabled();
     for (const family of state.families) {
-      this.root.append(renderFamily(family, this, this.connected));
+      this.root.append(
+        renderFamily(family, this, this.connected, controlsEnabled),
+      );
     }
     this.restoreScrollAfterRender(scrollX, scrollY);
   }
@@ -2029,12 +2065,13 @@ function renderDeviceCompact(
 function renderFamily(
   family: UIFamilyOut,
   controller: DomestiBotController,
-  connected: boolean,
+  backendConnected: boolean,
+  controlsEnabled: boolean,
 ): HTMLElement {
   const section = document.createElement("section");
   section.className = "family";
   section.dataset["familyId"] = family.id;
-  section.dataset["connected"] = connected ? "true" : "false";
+  section.dataset["connected"] = backendConnected ? "true" : "false";
   section.style.setProperty("--family-color", family.color);
 
   const header = document.createElement("header");
@@ -2068,7 +2105,7 @@ function renderFamily(
         : family.id === "sonos"
           ? "Pause all"
           : "Close all";
-    bulkBtn.disabled = !connected;
+    bulkBtn.disabled = !controlsEnabled;
     bulkBtn.addEventListener("click", () => {
       controller.bulkActionFamilyTile(family.id);
     });
@@ -2081,7 +2118,7 @@ function renderFamily(
     ? "tile-grid tile-grid-compact"
     : "tile-grid";
   for (const device of family.devices) {
-    grid.append(renderDevice(device, controller, connected));
+    grid.append(renderDevice(device, controller, controlsEnabled));
   }
   section.append(grid);
   return section;

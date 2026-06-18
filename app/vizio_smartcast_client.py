@@ -22,6 +22,9 @@ _SOURCE_HEADER = "domesti-bot"
 _POWER_ON = (11, 1)
 _POWER_OFF = (11, 0)
 
+_DEFAULT_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10.0, connect=2.0)
+_POLL_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=3.0, connect=1.0)
+
 _MAC_KEY_RE = re.compile(r"mac", re.I)
 _MAC_COLON_RE = re.compile(r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 _MAC_PLAIN_RE = re.compile(r"^[0-9a-fA-F]{12}$")
@@ -255,24 +258,42 @@ class VizioSmartCastClient:
                 return mac
         return None
 
-    async def fetch_state_extended(self) -> VizioStateExtendedSnapshot:
+    async def fetch_state_extended(
+        self,
+        *,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ) -> VizioStateExtendedSnapshot:
         """Bulk power/input/app/media poll for firmware with ``state_extended``."""
-        payload = await self._request_raw_json("/state_extended", auth=True)
+        payload = await self._request_raw_json(
+            "/state_extended",
+            auth=True,
+            timeout=timeout,
+        )
         return parse_state_extended(payload)
 
-    async def fetch_tv_active_state(self) -> bool:
+    async def fetch_tv_active_state(self, *, poll: bool = False) -> bool:
         """Return whether the TV is on or actively playing media (e.g. Cast)."""
+        timeout = _POLL_REQUEST_TIMEOUT if poll else _DEFAULT_REQUEST_TIMEOUT
         try:
-            snapshot = await self.fetch_state_extended()
+            snapshot = await self.fetch_state_extended(timeout=timeout)
         except VizioSmartCastNotFoundError:
-            return await self.get_power_on()
+            return await self.get_power_on(timeout=timeout)
         return tv_is_active(
             power_on=snapshot.power_on,
             media_state=snapshot.media_state,
         )
 
-    async def get_power_on(self) -> bool:
-        payload = await self._request("GET", "/state/device/power_mode", auth=True)
+    async def get_power_on(
+        self,
+        *,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ) -> bool:
+        payload = await self._request(
+            "GET",
+            "/state/device/power_mode",
+            auth=True,
+            timeout=timeout,
+        )
         value = _first_item_value(payload)
         return bool(value)
 
@@ -355,6 +376,7 @@ class VizioSmartCastClient:
         *,
         json_body: dict[str, Any] | None = None,
         auth: bool,
+        timeout: aiohttp.ClientTimeout | None = None,
     ) -> dict[str, Any]:
         if auth and not self._auth_token:
             raise VizioSmartCastAuthError(
@@ -368,7 +390,7 @@ class VizioSmartCastClient:
         }
         if auth and self._auth_token:
             headers["AUTH"] = self._auth_token
-        timeout = aiohttp.ClientTimeout(total=10.0, connect=2.0)
+        request_timeout = timeout or _DEFAULT_REQUEST_TIMEOUT
         try:
             async with session.request(
                 method,
@@ -376,7 +398,7 @@ class VizioSmartCastClient:
                 json=json_body,
                 headers=headers,
                 ssl=False,
-                timeout=timeout,
+                timeout=request_timeout,
             ) as resp:
                 text = await resp.text()
         except (TimeoutError, aiohttp.ClientError) as exc:
@@ -418,7 +440,13 @@ class VizioSmartCastClient:
             f"unexpected SmartCast status {result!r} from {path}: {detail}"
         )
 
-    async def _request_raw_json(self, path: str, *, auth: bool) -> dict[str, Any]:
+    async def _request_raw_json(
+        self,
+        path: str,
+        *,
+        auth: bool,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ) -> dict[str, Any]:
         """Issue GET and return parsed JSON without requiring the SCPL ITEMS envelope."""
         if auth and not self._auth_token:
             raise VizioSmartCastAuthError(
@@ -432,14 +460,14 @@ class VizioSmartCastClient:
         }
         if auth and self._auth_token:
             headers["AUTH"] = self._auth_token
-        timeout = aiohttp.ClientTimeout(total=10.0, connect=2.0)
+        request_timeout = timeout or _DEFAULT_REQUEST_TIMEOUT
         try:
             async with session.request(
                 "GET",
                 url,
                 headers=headers,
                 ssl=False,
-                timeout=timeout,
+                timeout=request_timeout,
             ) as resp:
                 text = await resp.text()
         except (TimeoutError, aiohttp.ClientError) as exc:

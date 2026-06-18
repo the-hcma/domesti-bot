@@ -33,6 +33,7 @@ from app.device_state_watcher import (
     KasaPollingWatcher,
     SonosPollingWatcher,
     TailwindPollingWatcher,
+    VizioPollingWatcher,
     build_default_watchers,
     poll_interval_from_env,
     run_device_state_watchers,
@@ -41,6 +42,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
+from app.vizio_device_manager import VizioDeviceManager
 
 
 def _fake_kasa_mgr(identifiers: list[str]) -> KasaDeviceManager:
@@ -88,6 +90,20 @@ def _fake_tailwind_mgr(identifiers: list[str]) -> GotailwindDeviceManager:
     mgr.doors = tuple(doors)
     mgr.is_open = AsyncMock(return_value=False)
     return cast(GotailwindDeviceManager, mgr)
+
+
+def _fake_vizio_mgr(identifiers: list[str]) -> VizioDeviceManager:
+    """Build a Mock Vizio manager whose ``tvs`` exposes ``identifier``."""
+
+    tvs = []
+    for ident in identifiers:
+        tv = MagicMock()
+        tv.identifier = ident
+        tv.refresh_power_state = AsyncMock()
+        tvs.append(tv)
+    mgr = MagicMock(spec=VizioDeviceManager)
+    mgr.tvs = tuple(tvs)
+    return cast(VizioDeviceManager, mgr)
 
 
 async def _wait_for_await_count(
@@ -304,6 +320,22 @@ async def test_tailwind_watcher_keeps_going_when_one_door_raises() -> None:
     await _wait_for_await_count(is_open, 3)
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_vizio_watcher_calls_refresh_power_state_with_poll_flag() -> None:
+    mgr = _fake_vizio_mgr(["tv-a", "tv-b"])
+    watcher = VizioPollingWatcher(mgr, interval_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await asyncio.sleep(0.05)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+    for tv in mgr.tvs:
+        refresh = cast(AsyncMock, tv.refresh_power_state)
+        assert refresh.await_count >= 1
+        assert refresh.await_args_list[0].kwargs == {"poll": True}
 
 
 def test_build_default_watchers_omits_optional_when_managers_are_none() -> None:
