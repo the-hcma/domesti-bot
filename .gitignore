@@ -4,6 +4,7 @@
 
 # Local git worktrees; never commit as nested repo entries.
 .worktrees/
+etc/systemd/
 
 *.sqlite
 *.sqlite-journal
