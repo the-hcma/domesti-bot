@@ -1,0 +1,40 @@
+# User systemd unit for domesti-bot (HTTP API + web UI).
+#
+# repository-helpers ``setup-service`` substitutes ``@@REPO_DIR@@`` with the
+# git worktree path, installs to ``~/.config/systemd/user/``, enables linger,
+# and runs ``scripts/on-deploy`` before (re)start. Same pattern as fpdf's
+# ``etc/systemd/fpdf.service`` (``--listen-all`` so other hosts reach port 8003
+# when nginx is not on this machine).
+#
+# Port 8003 on all interfaces. Keep ``ExecStart`` and ``ExecStartPost`` ports
+# aligned if you change either.
+#
+# ``ExecStartPost`` hits ``GET /health`` on loopback; that still works when the
+# server binds ``0.0.0.0:8003`` because the stack accepts ``127.0.0.1:8003``.
+#
+# Logs: ``~/scratch/domesti-bot/domesti-bot.log`` (``setup-service`` also
+# ensures ``~/scratch/domesti-bot/`` exists).
+#
+# Secrets (``TAILWIND_TOKEN``, ``KASA_*``, ``DOMESTI_API_KEY``): use
+# ``systemctl --user edit domesti-bot`` and set ``EnvironmentFile=`` to a
+# mode-600 file under your home directory, or export them via
+# ``~/.config/environment.d/*.conf`` (see docs/AGENTS.md Security).
+
+[Unit]
+Description=domesti-bot - home automation service
+After=network.target
+StartLimitIntervalSec=100
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=@@REPO_DIR@@
+ExecStart=@@REPO_DIR@@/scripts/domesti-bot-server --listen-all --listen-port 8003 --no-browser
+Restart=always
+RestartSec=5
+StandardOutput=append:%h/scratch/domesti-bot/domesti-bot.log
+StandardError=append:%h/scratch/domesti-bot/domesti-bot.log
+ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
+
+[Install]
+WantedBy=default.target
