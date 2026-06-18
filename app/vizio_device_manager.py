@@ -1,11 +1,10 @@
-"""Vizio SmartCast TV control (HTTPS REST on port 7345, WoL for power-on)."""
+"""Vizio SmartCast TV control (HTTPS REST on port 7345)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,7 +19,7 @@ from app.vizio_credentials import (
     vizio_device_id_from_parts,
 )
 from app.vizio_discovery import VizioDiscoveredHost, discover_vizio_hosts_ssdp
-from app.vizio_mac import lookup_mac_via_arp, resolve_vizio_tv_ip, resolve_vizio_tv_mac
+from app.vizio_mac import lookup_mac_via_arp, resolve_vizio_tv_ip
 from app.vizio_smartcast_client import (
     DEFAULT_VIZIO_PORT,
     VizioSmartCastAuthError,
@@ -28,14 +27,12 @@ from app.vizio_smartcast_client import (
     VizioSmartCastConnectionError,
     device_id_for,
     parse_host_spec,
+    resolve_vizio_tv_mac,
 )
-from app.vizio_wol import send_wake_on_lan
 
 _LOGGER = logging.getLogger(__name__)
 
 _API_PROBE_TIMEOUT_S = 2.0
-_WOL_POLL_INTERVAL_S = 2.0
-_WOL_WAIT_DEADLINE_S = 60.0
 
 
 def configured_vizio_host_specs(
@@ -140,14 +137,7 @@ class VizioTvDevice(SwitchDevice):
         self.set_power(False)
 
     async def turn_on(self) -> None:
-        try:
-            await self._client.power_on()
-        except VizioSmartCastConnectionError:
-            if self._mac is None:
-                raise
-            await asyncio.to_thread(send_wake_on_lan, self._mac)
-            await self._wait_for_api()
-            await self._client.power_on()
+        await self._client.power_on()
         self._power_unknown = False
         self.set_power(True)
 
@@ -156,27 +146,6 @@ class VizioTvDevice(SwitchDevice):
         if self._power_unknown:
             return "unknown"
         return "on" if self._on else "off"
-
-    async def _wait_for_api(self, *, deadline_s: float | None = None) -> None:
-        wait_deadline_s = _WOL_WAIT_DEADLINE_S if deadline_s is None else deadline_s
-        deadline = time.monotonic() + wait_deadline_s
-        host = self._endpoint.host
-        port = self._endpoint.port
-        while time.monotonic() < deadline:
-            try:
-                _, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port),
-                    timeout=_API_PROBE_TIMEOUT_S,
-                )
-                writer.close()
-                await writer.wait_closed()
-                return
-            except (TimeoutError, OSError):
-                await asyncio.sleep(_WOL_POLL_INTERVAL_S)
-        raise VizioSmartCastConnectionError(
-            f"SmartCast API on {host}:{port} did not become reachable within "
-            f"{wait_deadline_s:.0f}s after Wake-on-LAN"
-        )
 
 
 class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
@@ -475,7 +444,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         """Return a cached off tile when SmartCast is unreachable at bootstrap."""
         _LOGGER.info(
             "Vizio TV %s bootstrap: SmartCast unreachable at %s:%s; "
-            "registering as off (Wake-on-LAN runs only on explicit turn_on)",
+            "registering as off",
             endpoint.device_id,
             endpoint.host,
             endpoint.port,

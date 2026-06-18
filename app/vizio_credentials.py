@@ -13,7 +13,7 @@ from app.db.secrets import (
     save_vizio_auth_token_to_db,
     vizio_auth_token_stored_in_db,
 )
-from app.vizio_wol import normalize_mac
+from app.vizio_mac import normalize_mac
 
 VizioAuthSource = Literal["cli", "env", "database", "none"]
 

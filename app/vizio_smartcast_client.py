@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -10,7 +11,7 @@ from typing import Any
 
 import aiohttp
 
-from app.vizio_wol import normalize_mac
+from app.vizio_mac import lookup_mac_via_arp, normalize_mac
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,6 +179,25 @@ def parse_state_extended(payload: dict[str, Any]) -> VizioStateExtendedSnapshot:
         media_state=_optional_string(ci_payload.get("media_state")),
         has_current_app=has_current_app,
     )
+
+
+async def resolve_vizio_tv_mac(
+    client: VizioSmartCastClient,
+    *,
+    host: str,
+) -> str | None:
+    """Return a normalized MAC from SmartCast network info, else local ARP."""
+    try:
+        mac = await client.fetch_network_mac()
+        if mac is not None:
+            return mac
+    except (
+        VizioSmartCastAuthError,
+        VizioSmartCastConnectionError,
+        VizioSmartCastNotFoundError,
+    ) as exc:
+        _LOGGER.debug("SmartCast network MAC lookup for %s failed: %s", host, exc)
+    return await asyncio.to_thread(lookup_mac_via_arp, host)
 
 
 def tv_is_active(*, power_on: bool, media_state: str = "") -> bool:

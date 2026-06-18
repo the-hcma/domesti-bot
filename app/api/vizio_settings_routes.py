@@ -44,7 +44,6 @@ from app.vizio_device_manager import VizioDeviceManager, configured_vizio_host_s
 from app.vizio_mac import (
     is_vizio_mac_device_id,
     lookup_ip_via_arp_for_mac,
-    resolve_vizio_tv_mac,
 )
 from app.vizio_smartcast_client import (
     DEFAULT_VIZIO_PORT,
@@ -55,6 +54,7 @@ from app.vizio_smartcast_client import (
     VizioSmartCastConnectionError,
     device_id_for,
     parse_host_spec,
+    resolve_vizio_tv_mac,
 )
 
 router = APIRouter(prefix="/v1/settings/vizio", tags=["settings"])

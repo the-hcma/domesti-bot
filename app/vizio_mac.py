@@ -7,13 +7,6 @@ import logging
 import re
 import subprocess
 
-from app.vizio_smartcast_client import (
-    VizioSmartCastAuthError,
-    VizioSmartCastClient,
-    VizioSmartCastConnectionError,
-)
-from app.vizio_wol import normalize_mac
-
 _LOGGER = logging.getLogger(__name__)
 
 _ARP_MAC_RE = re.compile(
@@ -103,19 +96,22 @@ def lookup_mac_via_arp(host: str) -> str | None:
         return None
 
 
-async def resolve_vizio_tv_mac(
-    client: VizioSmartCastClient,
-    *,
-    host: str,
-) -> str | None:
-    """Return a normalized MAC from SmartCast network info, else local ARP."""
-    try:
-        mac = await client.fetch_network_mac()
-        if mac is not None:
-            return mac
-    except (VizioSmartCastAuthError, VizioSmartCastConnectionError) as exc:
-        _LOGGER.debug("SmartCast network MAC lookup for %s failed: %s", host, exc)
-    return await asyncio.to_thread(lookup_mac_via_arp, host)
+def normalize_mac(mac: str) -> str:
+    """Return lowercase colon-separated MAC or raise ``ValueError``."""
+    text = mac.strip()
+    if re.search(r"[:.\-]", text):
+        parts = re.split(r"[:.\-]", text)
+        if len(parts) != 6:
+            raise ValueError(f"Expected six MAC octets, got {mac!r}")
+        try:
+            return ":".join(f"{int(part, 16):02x}" for part in parts)
+        except ValueError as exc:
+            raise ValueError(f"Expected a valid MAC address, got {mac!r}") from exc
+    cleaned = re.sub(r"[^0-9a-fA-F]", "", text)
+    if len(cleaned) != 12:
+        raise ValueError(f"Expected a 12-hex-digit MAC, got {mac!r}")
+    pairs = [cleaned[i : i + 2] for i in range(0, 12, 2)]
+    return ":".join(p.lower() for p in pairs)
 
 
 async def resolve_vizio_tv_ip(*, mac: str, fallback_host: str | None = None) -> str | None:
