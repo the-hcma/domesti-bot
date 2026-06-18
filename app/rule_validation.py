@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
+    DevicesAllOnCondition,
+    DevicesAnyOnCondition,
+    RuleConditionDeviceRefOut,
     RuleConditionOut,
     RuleDeviceActionOut,
     RuleOut,
@@ -75,6 +78,14 @@ def build_roster_user_id_lookup(roster_user_ids: list[str]) -> dict[str, str]:
     return lookup
 
 
+def collect_rule_device_refs(rule: RuleOut) -> set[tuple[DeviceFamilyId, str]]:
+    """Return every device reference from device-state conditions on ``rule``."""
+    refs: set[tuple[DeviceFamilyId, str]] = set()
+    for condition in rule.conditions.all:
+        _walk_device_refs(condition, refs)
+    return refs
+
+
 def collect_rule_geofence_ids(rule: RuleOut) -> set[str]:
     """Return every ``geofence_id`` referenced by ``rule``."""
     ids: set[str] = set()
@@ -120,6 +131,7 @@ def validate_rule(
     issues.extend(_validate_users(rule, ctx))
     issues.extend(_validate_geofences(rule, ctx))
     issues.extend(_validate_device_actions(rule, ctx))
+    issues.extend(_validate_device_conditions(rule, ctx))
     issues.extend(_validate_notification(rule, ctx))
     return issues
 
@@ -136,12 +148,37 @@ def _device_action_issue(
     ctx: RuleValidationContext,
     action: RuleDeviceActionOut,
 ) -> RuleReferenceIssueOut | None:
-    reference = action.device_id.strip()
+    return _device_reference_issue(
+        ctx,
+        family_id=action.family_id,
+        device_id=action.device_id,
+        context_label="device_actions",
+    )
+
+
+def _device_reference_issue(
+    ctx: RuleValidationContext,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+    context_label: str,
+    kasa_only: bool = False,
+) -> RuleReferenceIssueOut | None:
+    reference = device_id.strip()
     if reference == "":
         return RuleReferenceIssueOut(
             detail=(
-                f"Expected non-empty {action.family_id.value} device_id "
-                "in device_actions"
+                f"Expected non-empty {family_id.value} device_id "
+                f"in {context_label}"
+            ),
+            kind="unknown_device",
+            reference=reference,
+        )
+    if kasa_only and family_id != DeviceFamilyId.KASA:
+        return RuleReferenceIssueOut(
+            detail=(
+                f"Device conditions support {DeviceFamilyId.KASA.display_name()} "
+                f"only in v1, got {family_id.display_name()!r} in {context_label}"
             ),
             kind="unknown_device",
             reference=reference,
@@ -149,14 +186,14 @@ def _device_action_issue(
     if ctx.device_state is None:
         return RuleReferenceIssueOut(
             detail=(
-                f"Cannot verify {action.family_id.value} device "
+                f"Cannot verify {family_id.value} device "
                 f'"{reference}" — device discovery is not ready yet'
             ),
             kind="discovery_pending",
             reference=reference,
         )
     try:
-        if _device_action_resolves(ctx, action):
+        if _device_reference_resolves(ctx, family_id=family_id, device_id=reference):
             return None
     except RuleActionDispatchError as exc:
         return RuleReferenceIssueOut(
@@ -166,7 +203,7 @@ def _device_action_issue(
         )
     return RuleReferenceIssueOut(
         detail=(
-            f'Unknown {action.family_id.value} device "{reference}" '
+            f'Unknown {family_id.value} device "{reference}" '
             "(not found in the current device list)."
         ),
         kind="unknown_device",
@@ -178,20 +215,33 @@ def _device_action_resolves(
     ctx: RuleValidationContext,
     action: RuleDeviceActionOut,
 ) -> bool:
+    return _device_reference_resolves(
+        ctx,
+        family_id=action.family_id,
+        device_id=action.device_id,
+    )
+
+
+def _device_reference_resolves(
+    ctx: RuleValidationContext,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+) -> bool:
     state = ctx.device_state
     if state is None:
         return False
-    match action.family_id:
+    match family_id:
         case DeviceFamilyId.KASA:
             return (
-                resolve_kasa_host_by_label(state.kasa_mgr, action.device_id)
+                resolve_kasa_host_by_label(state.kasa_mgr, device_id)
                 is not None
             )
         case DeviceFamilyId.SONOS:
             return (
                 resolve_sonos_identifier_by_label(
                     state.sonos_mgr,
-                    action.device_id,
+                    device_id,
                 )
                 is not None
             )
@@ -199,7 +249,7 @@ def _device_action_resolves(
             return (
                 resolve_tailwind_identifier_by_label(
                     state.tailwind_mgr,
-                    action.device_id,
+                    device_id,
                 )
                 is not None
             )
@@ -238,6 +288,24 @@ def _validate_device_actions(
     issues: list[RuleReferenceIssueOut] = []
     for action in rule.device_actions:
         issue = _device_action_issue(ctx, action)
+        if issue is not None:
+            issues.append(issue)
+    return issues
+
+
+def _validate_device_conditions(
+    rule: RuleOut,
+    ctx: RuleValidationContext,
+) -> list[RuleReferenceIssueOut]:
+    issues: list[RuleReferenceIssueOut] = []
+    for family_id, device_id in sorted(collect_rule_device_refs(rule)):
+        issue = _device_reference_issue(
+            ctx,
+            family_id=family_id,
+            device_id=device_id,
+            context_label="conditions",
+            kasa_only=True,
+        )
         if issue is not None:
             issues.append(issue)
     return issues
@@ -306,6 +374,23 @@ def _validate_users(
         if resolve_roster_user_id(user_id, ctx.roster_user_id_lookup) is None:
             issues.append(_unknown_user_issue(user_id, ctx))
     return issues
+
+
+def _walk_device_refs(
+    condition: RuleConditionOut,
+    refs: set[tuple[DeviceFamilyId, str]],
+) -> None:
+    if isinstance(condition, DevicesAllOnCondition | DevicesAnyOnCondition):
+        for ref in condition.devices:
+            refs.add((ref.family_id, ref.device_id))
+        return
+    if isinstance(condition, AllConditionsCondition):
+        for child in condition.conditions:
+            _walk_device_refs(child, refs)
+        return
+    if isinstance(condition, AnyConditionsCondition):
+        for child in condition.conditions:
+            _walk_device_refs(child, refs)
 
 
 def _walk_geofence_ids(condition: RuleConditionOut, ids: set[str]) -> None:

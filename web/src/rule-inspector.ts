@@ -4,6 +4,7 @@ import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
   formatDeviceActionPhrase,
+  formatDeviceStateCondition,
   formatGeofenceDwellLabel,
   formatPresenceEventLabel,
   formatTimingCondition,
@@ -50,6 +51,11 @@ function appendConditionTree(
       || condition.type === "users_outside_geofence"
     ) {
       item.textContent = formatPresenceEventLabel(condition, context);
+    } else if (
+      condition.type === "devices_all_on"
+      || condition.type === "devices_any_on"
+    ) {
+      item.textContent = formatDeviceStateCondition(condition, context);
     } else {
       const timing = formatTimingCondition(condition);
       item.textContent = timing ?? condition.type;

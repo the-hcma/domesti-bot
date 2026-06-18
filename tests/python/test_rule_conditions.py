@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -11,7 +13,10 @@ import pytest
 from app.api.schemas import (
     AfterSunsetCondition,
     AnyConditionsCondition,
+    DevicesAllOnCondition,
+    DevicesAnyOnCondition,
     GeofenceOut,
+    RuleConditionDeviceRefOut,
     UserLocationOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
@@ -19,6 +24,9 @@ from app.api.schemas import (
     RuleOut,
     SettingsLocationOut,
 )
+from app.device_enums import DeviceFamilyId
+from app.domesti_bot_cli import DeviceManagersState
+from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import (
     RuleEvaluationContext,
     compute_rules_sun_out,
@@ -105,6 +113,7 @@ def _evening_arrival_any_rule() -> RuleOut:
 def _ctx(
     *,
     now: datetime,
+    device_state: DeviceManagersState | None = None,
     geofences: tuple[GeofenceOut, ...] = (),
     geofence_inside_since: dict[tuple[str, str], float] | None = None,
     user_locations: dict[str, UserLocationOut] | None = None,
@@ -112,6 +121,7 @@ def _ctx(
     sun = compute_rules_sun_out(_SETTINGS, now=now)
     user_display_names = {"henrique": "Henrique", "kristen": "Kristen"}
     return RuleEvaluationContext(
+        device_state=device_state,
         geofence_inside_since=geofence_inside_since or {},
         geofences=geofences,
         now=now,
@@ -122,6 +132,33 @@ def _ctx(
         user_locations=user_locations or {},
         sun=sun,
         timezone=_TZ,
+    )
+
+
+class _FakeKasaSwitch:
+    def __init__(self, host: str, label: str, *, is_on: bool) -> None:
+        self._kDevice = MagicMock()
+        self._kDevice.host = host
+        self.identifier = host
+        self.preferred_label = label
+        self._on = is_on
+
+    @property
+    def is_on(self) -> bool:
+        return self._on
+
+
+def _kasa_device_state(*switches: _FakeKasaSwitch) -> DeviceManagersState:
+    mgr = MagicMock(spec=KasaDeviceManager)
+    mgr.switches = tuple(switches)
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        args=argparse.Namespace(),
+        cache_path=None,
+        kasa_mgr=mgr,
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        vizio_mgr=None,
     )
 
 
@@ -493,6 +530,170 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
     )
     assert result.conditions[0].met is False
     assert "Kristen outside" in result.conditions[0].detail
+
+
+def _device_state_rule(
+    condition: DevicesAnyOnCondition | DevicesAllOnCondition,
+) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(all=[condition]),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="device-state",
+        label="Device state",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+
+
+def test_devices_any_on_met_when_one_switch_on() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOnCondition(
+            type="devices_any_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Garage outside lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "On: Front door lights" in result.conditions[0].detail
+
+
+def test_devices_any_on_met_when_one_on_and_another_missing() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOnCondition(
+            type="devices_any_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Garage outside lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "On: Front door lights" in result.conditions[0].detail
+    assert "not found: Garage outside lights" in result.conditions[0].detail
+
+
+def test_devices_any_on_unmet_when_all_off() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=False),
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOnCondition(
+            type="devices_any_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.conditions[0].met is False
+    assert "All off" in result.conditions[0].detail
+
+
+def test_devices_any_on_unmet_when_discovery_not_ready() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    rule = _device_state_rule(
+        DevicesAnyOnCondition(
+            type="devices_any_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=None))
+    assert result.conditions[0].met is False
+    assert result.conditions[0].detail == "discovery not ready"
+
+
+def test_devices_all_on_met_when_every_switch_on() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=True),
+    )
+    rule = _device_state_rule(
+        DevicesAllOnCondition(
+            type="devices_all_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Garage outside lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert "All on" in result.conditions[0].detail
+
+
+def test_devices_all_on_unmet_when_one_switch_off() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
+    )
+    rule = _device_state_rule(
+        DevicesAllOnCondition(
+            type="devices_all_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Garage outside lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.conditions[0].met is False
+    assert "Off: Garage outside lights" in result.conditions[0].detail
 
 
 def test_build_rules_status_from_example_bundle(

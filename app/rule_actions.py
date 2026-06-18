@@ -68,6 +68,20 @@ async def dispatch_rule_device_actions(
     return errors
 
 
+def cached_kasa_is_on(state: DeviceManagersState, device_id: str) -> bool | None:
+    """Return cached on/off for a Kasa label or host, or ``None`` when not found."""
+    try:
+        host = resolve_kasa_host_by_label(state.kasa_mgr, device_id)
+    except RuleActionDispatchError:
+        return None
+    if host is None:
+        return None
+    switch = find_kasa_by_host(state.kasa_mgr, host)
+    if switch is None:
+        return None
+    return switch.is_on
+
+
 def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | None:
     """Resolve a Kasa tile label (or host) to the canonical LAN host."""
     needle = device_id.strip()

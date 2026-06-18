@@ -6,6 +6,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from astral import LocationInfo
@@ -19,8 +20,11 @@ from app.api.schemas import (
     BeforeLocalTimeCondition,
     BeforeSunriseCondition,
     DaysOfWeekCondition,
+    DevicesAllOnCondition,
+    DevicesAnyOnCondition,
     GeofenceOut,
     LocalTimeWindowCondition,
+    RuleConditionDeviceRefOut,
     UserLocationOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
@@ -31,7 +35,12 @@ from app.api.schemas import (
     RulesSunOut,
     SettingsLocationOut,
 )
+from app.device_enums import DeviceFamilyId
+from app.rule_actions import cached_kasa_is_on
 from app.rule_validation import resolve_roster_user_id
+
+if TYPE_CHECKING:
+    from app.domesti_bot_cli import DeviceManagersState
 
 MINUTES_PER_DAY = 24 * 60
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
@@ -49,6 +58,7 @@ class RuleEvaluationContext:
     user_locations: dict[str, UserLocationOut]
     sun: RulesSunOut
     timezone: ZoneInfo
+    device_state: DeviceManagersState | None = None
     geofence_inside_since: dict[tuple[str, str], float] = field(default_factory=dict)
 
     def resolve_user_id(self, reference: str) -> str | None:
@@ -150,6 +160,17 @@ def _conditions_are_presence_only(
     )
 
 
+def _cached_device_is_on(
+    ctx: RuleEvaluationContext,
+    ref: RuleConditionDeviceRefOut,
+) -> bool | None:
+    if ctx.device_state is None:
+        return None
+    if ref.family_id != DeviceFamilyId.KASA:
+        return None
+    return cached_kasa_is_on(ctx.device_state, ref.device_id)
+
+
 def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
     if isinstance(
         condition,
@@ -169,6 +190,30 @@ def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
             _counts_for_steady_armed_state(child) for child in condition.conditions
         )
     return True
+
+
+def _device_condition_power_labels(
+    devices: list[RuleConditionDeviceRefOut],
+    ctx: RuleEvaluationContext,
+) -> tuple[list[str], list[str], list[str]]:
+    on_labels: list[str] = []
+    off_labels: list[str] = []
+    missing_labels: list[str] = []
+    for ref in devices:
+        label = ref.device_id.strip()
+        is_on = _cached_device_is_on(ctx, ref)
+        if is_on is None:
+            if ref.family_id != DeviceFamilyId.KASA:
+                missing_labels.append(
+                    f"{label} (unsupported family {ref.family_id.value})",
+                )
+            else:
+                missing_labels.append(label)
+        elif is_on:
+            on_labels.append(label)
+        else:
+            off_labels.append(label)
+    return on_labels, off_labels, missing_labels
 
 
 def _evaluate_after_local_time(
@@ -336,6 +381,10 @@ def _evaluate_condition(
         return _evaluate_before_sunrise(condition, rule, ctx)
     if isinstance(condition, DaysOfWeekCondition):
         return _evaluate_days_of_week(condition, rule, ctx)
+    if isinstance(condition, DevicesAllOnCondition):
+        return _evaluate_devices_all_on(condition, rule, ctx)
+    if isinstance(condition, DevicesAnyOnCondition):
+        return _evaluate_devices_any_on(condition, rule, ctx)
     if isinstance(condition, LocalTimeWindowCondition):
         return _evaluate_local_time_window(condition, rule, ctx)
     if isinstance(condition, UsersInsideGeofenceCondition):
@@ -374,6 +423,82 @@ def _evaluate_days_of_week(
         condition=condition,
         detail=detail,
         label="Days of week",
+        met=met,
+    )
+
+
+def _evaluate_devices_all_on(
+    condition: DevicesAllOnCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    if ctx.device_state is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="discovery not ready",
+            label="All devices on",
+            met=False,
+        )
+    on_labels, off_labels, missing_labels = _device_condition_power_labels(
+        condition.devices,
+        ctx,
+    )
+    if missing_labels:
+        met = False
+        detail = f"Not found: {', '.join(missing_labels)}"
+    elif off_labels:
+        met = False
+        detail = f"Off: {', '.join(off_labels)}"
+    else:
+        met = True
+        detail = f"All on ({', '.join(on_labels)})"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="All devices on",
+        met=met,
+    )
+
+
+def _evaluate_devices_any_on(
+    condition: DevicesAnyOnCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    if ctx.device_state is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="discovery not ready",
+            label="Any device on",
+            met=False,
+        )
+    on_labels, off_labels, missing_labels = _device_condition_power_labels(
+        condition.devices,
+        ctx,
+    )
+    if on_labels:
+        met = True
+        detail = f"On: {', '.join(on_labels)}"
+        if missing_labels:
+            detail = (
+                f"{detail} (not found: {', '.join(missing_labels)})"
+            )
+    elif off_labels:
+        met = False
+        if missing_labels:
+            detail = (
+                f"All resolved devices off ({', '.join(off_labels)}); "
+                f"not found: {', '.join(missing_labels)}"
+            )
+        else:
+            detail = f"All off ({', '.join(off_labels)})"
+    else:
+        met = False
+        detail = f"Not found: {', '.join(missing_labels)}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="Any device on",
         met=met,
     )
 

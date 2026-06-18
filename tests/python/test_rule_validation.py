@@ -6,7 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import (
+    DevicesAnyOnCondition,
+    RuleConditionDeviceRefOut,
     RuleConditionsOut,
+    RuleDeviceActionOut,
     RuleOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
@@ -14,7 +17,6 @@ from app.api.schemas import (
 )
 from unittest.mock import MagicMock, patch
 
-from app.api.schemas import RuleDeviceActionOut
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.rule_validation import (
     RosterUserRow,
@@ -290,3 +292,86 @@ def test_rule_out_coerces_whitespace_only_schedule_cron_to_none_for_edge_true() 
         trigger="edge_true",
     )
     assert rule.schedule_cron is None
+
+
+def test_devices_any_on_condition_rejects_empty_devices() -> None:
+    with pytest.raises(ValidationError):
+        DevicesAnyOnCondition(type="devices_any_on", devices=[])
+
+
+def test_validate_rule_flags_non_kasa_device_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOnCondition(
+                    type="devices_any_on",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Kitchen",
+                            family_id=DeviceFamilyId.SONOS,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="sonos-condition",
+        label="Sonos condition",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "unknown_device"
+    assert "Kasa only" in issues[0].detail
+
+
+def test_validate_rule_flags_blank_device_condition_ref() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOnCondition(
+                    type="devices_any_on",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="   ",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="blank-device-condition",
+        label="Blank device condition",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "unknown_device"
+    assert "conditions" in issues[0].detail

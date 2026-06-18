@@ -217,6 +217,7 @@ class RuleEvaluator:
                 )
         roster_user_id_lookup = build_roster_user_id_lookup(list(user_display_names))
         return RuleEvaluationContext(
+            device_state=self._device_state_getter(),
             geofence_inside_since=self.geofence_inside_since_snapshot(),
             geofences=tuple(geofences),
             now=effective_now,
