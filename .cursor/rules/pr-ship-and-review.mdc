@@ -7,6 +7,8 @@ alwaysApply: true
 
 When the user asks to **ship**, **submit**, **open a PR**, or **follow the flow**, run this sequence in a **stack worktree** (never the primary clone). See `pr-workflow.mdc` for worktree/Graphite basics.
 
+Helper script: **`scripts/wait-for-copilot-review`** (requires `gh`, `git`, `jq`, `gt`; `sendmail` only for `email-success` / `email-failure`).
+
 ## 1. Local quality gates (all must pass before submit)
 
 From the stack worktree, after `uv sync --group dev`:
@@ -30,44 +32,77 @@ gt submit --no-interactive --publish
 
 Patch title/body if stale: `gh api repos/the-hcma/domesti-bot/pulls/<n> --method PATCH --field title=… --field body=…`
 
-## 3. Request Copilot review
-
-```bash
-gh pr edit <n> --add-reviewer @copilot
-```
-
 Poll until CI is green: `sleep 10 && gh pr checks <n>`
 
-## 4. Copilot loop (iterate until clean)
+## 3. Copilot review loop (30-minute total cap)
 
-1. Fetch inline comments: `gh api repos/the-hcma/domesti-bot/pulls/<n>/comments --jq '…'`
-2. Triage each thread — fix valid issues in the worktree; reply on-thread (`gh api repos/the-hcma/domesti-bot/pulls/<n>/comments/<id>/replies -f body=…`) when fixed.
-3. `gt modify --all --message "…"` (or `--no-edit` for fixups), push via `gt submit` / `git push`.
-4. Post a summary `gh pr comment` and **re-request** `gh pr edit <n> --add-reviewer @copilot`.
-5. Repeat until `mergeStateStatus` is **CLEAN**, CI passes, and Copilot has no outstanding actionable feedback.
+**Total deadline: 30 minutes** from the first `request`. Track `LOOP_STARTED=$(date +%s)` and abort when `$(date +%s) - LOOP_STARTED >= 1800`.
+
+Each iteration:
+
+0. **Merged?** — if `status` reports `pr_merged: true`, stop the loop (exit **0** from `check`; do not request/wait/triage).
+1. **Status** — `./scripts/wait-for-copilot-review status --pr <n>` (JSON: `pr_merged`, `fresh_review_on_head`, `unaddressed_copilot_threads`, `merge_state_status`, `satisfied`).
+2. **Request** — `./scripts/wait-for-copilot-review request --pr <n>`
+3. **Wait** — `./scripts/wait-for-copilot-review wait --pr <n> --timeout <remaining-or-300>`
+   - Exit **0** early when the PR merges during the wait.
+   - Exit **2** = per-wait timeout → if total time remains, `request` again; else go to failure email.
+4. **Check** — `./scripts/wait-for-copilot-review check --pr <n>`
+   - Exit **0** (`satisfied: true`, or `pr_merged: true`) → loop complete; go to §4 success email (skip if already merged).
+   - Exit **3** → Copilot threads still lack a human reply (JSON printed); triage below.
+   - Exit **4** → `mergeStateStatus` is BEHIND/DIRTY/CONFLICTING → run `restack` (below) or fix conflicts, then re-check.
+   - Exit **2** → no fresh review on head yet; go back to step 3 if time remains.
+
+### Triage unaddressed threads (exit 3)
+
+`list-threads` / `check` exit **3** lists Copilot threads with **no human reply** — including threads that were resolved without a reply (do not resolve before replying).
+
+For **each** valid Copilot comment:
+
+1. Fix in the worktree when the comment is still actionable.
+2. Reply on-thread using `comment_id` from the JSON:
+   `gh api repos/the-hcma/domesti-bot/pulls/<n>/comments/<comment_id>/replies -f body="Fixed in <sha>: …"`
+   For stale comments already fixed on a later head, reply explaining which commit addressed it.
+3. **Resolve** only after replying, using `thread_id`:
+   `./scripts/wait-for-copilot-review resolve-thread --thread-id <PRRT_…>`
+   Or batch: `./scripts/wait-for-copilot-review resolve-addressed --pr <n>`
+
+Then: `gt modify --all --message "…"`, push, wait for CI green, and **start the next iteration** (new head ⇒ request + wait + check again).
+
+### Restack when BEHIND (exit 4)
+
+```bash
+./scripts/wait-for-copilot-review restack --pr <n>
+```
+
+Runs `gt sync`, `gt restack`, and `gt submit` in the current worktree. Re-run `check` until `merge_state_status` is **CLEAN** or **BLOCKED**.
+
+Repeat until `check` returns **0** or the **30-minute total** expires.
+
+### Failure (total timeout)
+
+```bash
+./scripts/wait-for-copilot-review email-failure --pr <n> \
+  --reason "Copilot review loop exceeded 30 minutes with unresolved threads or no fresh review."
+```
+
+Tell the user the loop failed and the failure email was sent. Do **not** add `merge-it`.
+
+## 4. Success email (human review)
+
+When CI is green, `check` is **0** (`satisfied: true`, including `unaddressed_copilot_threads == 0` and `merge_ready`):
+
+```bash
+./scripts/wait-for-copilot-review email-success --pr <n>
+```
 
 Do **not** add the `merge-it` label unless the user explicitly confirms.
 
-## 5. Email operator when ready for human review
+## Quick reference — script exit codes
 
-When CI is green, Copilot is addressed, and the PR is merge-ready pending human approval:
-
-```bash
-printf '%s\n' \
-  'From: domesti-bot@hcma.info' \
-  'To: github@hcma.info' \
-  'Subject: PR ready for review: <title> (domesti-bot #<n>)' \
-  'Content-Type: text/plain; charset=UTF-8' \
-  '' \
-  'Henrique,' \
-  '' \
-  'PR #<n> is ready for your review:' \
-  'https://github.com/the-hcma/domesti-bot/pull/<n>' \
-  '' \
-  '<2–4 bullet summary>' \
-  '' \
-  'CI: all checks passing. Copilot review addressed.' \
-  | /usr/sbin/sendmail -t -oi
-```
-
-Tell the user the PR URL and that the email was sent.
+| Code | Meaning |
+| --- | --- |
+| 0 | Success / satisfied (or PR already merged) |
+| 1 | Usage or prerequisite error |
+| 2 | Timed out waiting for fresh Copilot review (`wait`) or not fresh yet (`check`) |
+| 3 | Copilot threads still lack a human reply (`check`; includes resolved-without-reply) |
+| 4 | `mergeStateStatus` is BEHIND/DIRTY/CONFLICTING — run `restack` or fix conflicts |
