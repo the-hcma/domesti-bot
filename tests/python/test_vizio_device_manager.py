@@ -13,7 +13,6 @@ from app.vizio_device_manager import (
     VizioDeviceManager,
     VizioTvDevice,
     VizioTvEndpoint,
-    _WOL_WAIT_DEADLINE_S,
 )
 from app.vizio_smartcast_client import (
     VizioSmartCastAuthError,
@@ -435,7 +434,7 @@ async def test_refresh_power_state_clears_unknown_after_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_offline_tv_registers_off_without_wake_on_lan(tmp_path: Path) -> None:
+async def test_offline_tv_registers_off(tmp_path: Path) -> None:
     db = tmp_path / "cache.sqlite"
     mgr = VizioDeviceManager(
         configured_hosts=[],
@@ -449,16 +448,12 @@ async def test_offline_tv_registers_off_without_wake_on_lan(tmp_path: Path) -> N
         display_name="Kitchen TV",
         mac="00:bd:3e:d5:f0:11",
     )
-    with (
-        patch("app.vizio_device_manager.send_wake_on_lan") as wol,
-        patch.object(
-            VizioDeviceManager,
-            "_connect_endpoint",
-            new_callable=AsyncMock,
-        ) as connect,
-    ):
+    with patch.object(
+        VizioDeviceManager,
+        "_connect_endpoint",
+        new_callable=AsyncMock,
+    ) as connect:
         tv = await mgr._offline_tv(endpoint, "test-token")
-    wol.assert_not_called()
     connect.assert_not_called()
     assert tv.ui_power_state() == "off"
     assert tv.is_on is False
@@ -484,46 +479,12 @@ async def test_turn_off_treats_unreachable_as_off() -> None:
 
 
 @pytest.mark.asyncio
-async def test_turn_on_wait_for_api_uses_default_deadline() -> None:
+async def test_turn_on_propagates_connection_error_when_unreachable() -> None:
     tv = _tv()
-    tv._mac = "00:bd:3e:d5:f0:11"  # noqa: SLF001
     tv._client.power_on = AsyncMock(  # noqa: SLF001
-        side_effect=[
-            VizioSmartCastConnectionError("down"),
-            None,
-        ]
+        side_effect=VizioSmartCastConnectionError("timeout")
     )
-    with (
-        patch("app.vizio_device_manager.send_wake_on_lan"),
-        patch.object(
-            VizioTvDevice,
-            "_wait_for_api",
-            new_callable=AsyncMock,
-        ) as wait_for_api,
-    ):
+    with pytest.raises(VizioSmartCastConnectionError, match="timeout"):
         await tv.turn_on()
-    wait_for_api.assert_awaited_once_with()
-
-
-@pytest.mark.asyncio
-async def test_wait_for_api_raises_after_deadline() -> None:
-    tv = _tv()
-    monotonic_values = iter([0.0, 0.0, _WOL_WAIT_DEADLINE_S + 1.0])
-
-    def fake_monotonic() -> float:
-        try:
-            return next(monotonic_values)
-        except StopIteration:
-            return _WOL_WAIT_DEADLINE_S + 1.0
-
-    with (
-        patch("app.vizio_device_manager.time.monotonic", side_effect=fake_monotonic),
-        patch(
-            "asyncio.open_connection",
-            new_callable=AsyncMock,
-            side_effect=OSError("connection refused"),
-        ),
-        patch("asyncio.sleep", new_callable=AsyncMock),
-    ):
-        with pytest.raises(VizioSmartCastConnectionError, match=r"60s"):
-            await tv._wait_for_api()
+    assert tv.ui_power_state() == "off"
+    assert tv.is_on is False

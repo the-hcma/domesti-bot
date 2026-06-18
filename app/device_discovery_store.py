@@ -32,9 +32,12 @@ from app.db.models import (
 from app.db.schema import bootstrap_schema, ensure_schema_if_exists
 from app.db.session import discovery_session
 from app.vizio_credentials import vizio_device_id_from_parts
-from app.vizio_mac import device_id_for_vizio, is_vizio_mac_device_id
+from app.vizio_mac import (
+    device_id_for_vizio,
+    is_vizio_mac_device_id,
+    normalize_mac,
+)
 from app.vizio_smartcast_client import device_id_for, parse_host_spec
-from app.vizio_wol import normalize_mac
 
 
 def open_db(path: Path) -> sqlite3.Connection:

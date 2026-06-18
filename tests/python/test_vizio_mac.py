@@ -12,9 +12,12 @@ from app.vizio_mac import (
     lookup_ip_via_arp_for_mac,
     lookup_mac_via_arp,
     resolve_vizio_tv_ip,
+)
+from app.vizio_smartcast_client import (
+    VizioSmartCastNotFoundError,
+    extract_mac_from_payload,
     resolve_vizio_tv_mac,
 )
-from app.vizio_smartcast_client import extract_mac_from_payload
 
 
 def test_device_id_for_vizio_normalizes_mac() -> None:
@@ -79,6 +82,22 @@ def test_lookup_mac_via_arp_parses_macos_output(monkeypatch: pytest.MonkeyPatch)
         lambda *args, **kwargs: _Result(),
     )
     assert lookup_mac_via_arp("192.168.86.201") == "00:bd:3e:d5:f0:11"
+
+
+@pytest.mark.asyncio
+async def test_resolve_vizio_tv_mac_falls_back_to_arp_on_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MagicMock()
+    client.fetch_network_mac = AsyncMock(
+        side_effect=VizioSmartCastNotFoundError("networkinfo missing")
+    )
+    monkeypatch.setattr(
+        "app.vizio_smartcast_client.lookup_mac_via_arp",
+        lambda host: "00:bd:3e:d5:f0:11",
+    )
+    mac = await resolve_vizio_tv_mac(client, host="192.168.86.201")
+    assert mac == "00:bd:3e:d5:f0:11"
 
 
 @pytest.mark.asyncio

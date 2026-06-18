@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.db.models import AppSecret
 from app.db.secrets_key import SecretsKeySource, load_secrets_key_material
 from app.db.session import discovery_session
-from app.vizio_wol import normalize_mac
+from app.vizio_mac import normalize_mac
 
 _SMTP_PASSWORD_KEY = "smtp_password"
 _MYTRACKS_ADMIN_PASSWORD_KEY = "mytracks_admin_password"
