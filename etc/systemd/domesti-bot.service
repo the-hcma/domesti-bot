@@ -1,6 +1,5 @@
 # User systemd unit for domesti-bot (HTTP API + web UI).
 #
-# Template: repository-helpers/share/systemd-unit-templates/domesti-bot.service
 # repository-helpers ``setup-service`` substitutes ``@@REPO_DIR@@`` with the
 # git worktree path, installs to ``~/.config/systemd/user/``, enables linger,
 # and runs ``scripts/on-deploy`` before (re)start. Same pattern as fpdf's
