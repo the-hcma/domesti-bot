@@ -262,7 +262,8 @@ documented in [`docs/AGENTS.md`](docs/AGENTS.md). Notable rules:
 ## Production deployment
 
 The production target is a **systemd user unit**. The template at
-[`etc/systemd/domesti-bot.service`](etc/systemd/domesti-bot.service) is what
+[repository-helpers/share/systemd-unit-templates/domesti-bot.service](https://github.com/the-hcma/repository-helpers/blob/main/share/systemd-unit-templates/domesti-bot.service)
+is what
 [`repository-helpers`](https://github.com/the-hcma/repository-helpers)
 `setup-service` installs (same `@@REPO_DIR@@` contract as fpdf). It passes
 `--listen-all --listen-port 8003` so the API listens on all interfaces (use
