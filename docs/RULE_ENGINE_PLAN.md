@@ -350,7 +350,7 @@ Actions run **sequentially** in list order; a failure logs and continues (one ba
 | --- | --- | --- |
 | `edge_true` | Fire when the composite condition transitions **false → true** on a **location ingest** that includes a matching geofence edge for the updating user. Arrival / departure use case — prevents re-firing every poll while someone remains inside. | **Yes** |
 | `while_true` | Fire on every evaluation while true (subject to cooldown). | **Schema only** — evaluator does not run `while_true` yet. |
-| `scheduled` | Re-evaluate on a timer while enabled; fire when all conditions are met and cooldown allows (repeat while still true). Requires `evaluate_interval_s` on the rule. | **Phase 2c** — planned. |
+| `scheduled` | Re-evaluate on a cron schedule while enabled; fire when all conditions are met and cooldown allows (repeat while still true). Requires `schedule_cron` on the rule (5-field cron; timezone from `settings_location.timezone`). Evaluated via **`croniter`** (added in PR-C2). | **Phase 2c** — planned. |
 
 Store per-rule state: `last_condition_value: bool` (for future `while_true` / `edge_true` steady-state), `last_fired_at: float | None`, and for `scheduled` rules `next_evaluate_at: float | None`.
 
@@ -1180,21 +1180,23 @@ This is **not** representable with today's `edge_true` + location-ingest model:
 
 #### Design: `scheduled` trigger
 
-Add `trigger: "scheduled"` and a required per-rule interval:
+Add `trigger: "scheduled"` and a required per-rule cron expression:
 
 ```json
 {
   "trigger": "scheduled",
-  "evaluate_interval_s": 900
+  "schedule_cron": "*/15 * * * *"
 }
 ```
+
+Use standard **5-field cron** (`minute hour day month weekday`). The home timezone from `settings_location.timezone` in the rule bundle anchors evaluation (same clock as `after_sunset` / local-time conditions). **`croniter`** computes the next fire time (dependency added in **PR-C2** — doc-only in C1).
 
 Semantics:
 
 - On each evaluator tick (global loop stays **60s**), consider scheduled rules whose `next_evaluate_at <= now`.
-- Build `RuleEvaluationContext` (presence, sun, geofences) and, for device conditions, include `DeviceManagersState` from `app.state.device_state`.
+- Build `RuleEvaluationContext` (presence, sun, geofences, `geofence_inside_since`) and, for device conditions, include `DeviceManagersState` from `app.state.device_state`.
 - If **all** conditions are met and `cooldown_s` has elapsed → run `device_actions` / `notify_on_fire` (same dispatcher as `edge_true`).
-- Set `next_evaluate_at = now + evaluate_interval_s` regardless of fire outcome (housekeeping cadence).
+- Set `next_evaluate_at` to the next `croniter` match after `now` regardless of fire outcome (housekeeping cadence).
 - Fire log includes `source=scheduled` (mirrors `source=deferred` on accuracy grace).
 - `min_location_accuracy_m` and `accuracy_edge_grace_s` apply to presence reads used in dwell / inside checks on scheduled ticks (same as location path).
 
@@ -1250,7 +1252,7 @@ v1 scope: **Kasa** only; Sonos/Tailwind device conditions follow the same patter
   "label": "Turn off arrival lights when both home 10+ min after sunset",
   "enabled": true,
   "trigger": "scheduled",
-  "evaluate_interval_s": 900,
+  "schedule_cron": "*/15 * * * *",
   "cooldown_s": 300,
   "min_location_accuracy_m": 50,
   "accuracy_edge_grace_s": 120,
@@ -1304,7 +1306,7 @@ Diagnostic logs: `[rules] scheduled evaluate rule_id=… met=true|false`, `[rule
 | PR | Scope | Depends on |
 | --- | --- | --- |
 | **PR-C1** `feat/geofence-inside-dwell` | `_geofence_inside_since` on ingest; `users_inside_geofence_for_s` condition + status detail; tests | — |
-| **PR-C2** `feat/scheduled-rule-trigger` | `trigger: scheduled`, `evaluate_interval_s`, periodic evaluation path, `source=scheduled` logs | C1 optional but recommended first |
+| **PR-C2** `feat/scheduled-rule-trigger` | `trigger: scheduled`, `schedule_cron`, `croniter` dependency, periodic evaluation path, `source=scheduled` logs | C1 optional but recommended first |
 | **PR-C3** `feat/device-state-rule-conditions` | `devices_any_on` / `devices_all_on`; pass device cache into evaluation context on scheduled (and status) path | device discovery ready |
 | **PR-C4** `docs/scheduled-rules-example` | `automation-rules.json.example` entry + rule inspector read-only fields | C1–C3 |
 | **PR-C5** (operator) | Add `evening-lights-off-both-home` to server `automation-rules.json` | C1–C3 merged |
@@ -1324,9 +1326,10 @@ Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or 
 
 #### UI / schema
 
-- Extend `RuleOut` / `web/src/types.ts`: `trigger: "scheduled"`, `evaluate_interval_s?: number` (required when `scheduled`).
-- Rule inspector: show interval, dwell conditions, device predicates (read-only until Phase 2b edit).
-- Validation: `evaluate_interval_s >= 60`; `min_inside_s >= 1`; device ids validated like `device_actions`.
+- Extend `RuleOut` / `web/src/types.ts`: `trigger: "scheduled"`, `schedule_cron?: string` (required when `scheduled`; 5-field cron).
+- Rule inspector: show cron schedule, dwell conditions, device predicates (read-only until Phase 2b edit).
+- Add runtime dependency: `uv add croniter` in **PR-C2** (not C1).
+- Validation: valid `schedule_cron` expression; `min_inside_s >= 1`; device ids validated like `device_actions`.
 
 ### my-tracks companion stack (separate repo — after domesti-bot PR5 roster webhook)
 

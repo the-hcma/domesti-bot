@@ -542,13 +542,20 @@ class LocalTimeWindowCondition(BaseModel):
 class UsersInsideGeofenceCondition(BaseModel):
     type: Literal["users_inside_geofence"]
     geofence_id: str
-    user_ids: list[str]
+    user_ids: list[str] = Field(min_length=1)
+
+
+class UsersInsideGeofenceForSCondition(BaseModel):
+    type: Literal["users_inside_geofence_for_s"]
+    geofence_id: str
+    min_inside_s: int = Field(ge=1)
+    user_ids: list[str] = Field(min_length=1)
 
 
 class UsersOutsideGeofenceCondition(BaseModel):
     type: Literal["users_outside_geofence"]
     geofence_id: str
-    user_ids: list[str]
+    user_ids: list[str] = Field(min_length=1)
 
 
 RuleConditionOut = Annotated[
@@ -561,6 +568,7 @@ RuleConditionOut = Annotated[
     | DaysOfWeekCondition
     | LocalTimeWindowCondition
     | UsersInsideGeofenceCondition
+    | UsersInsideGeofenceForSCondition
     | UsersOutsideGeofenceCondition,
     Field(discriminator="type"),
 ]

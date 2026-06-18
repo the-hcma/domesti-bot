@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
@@ -23,6 +23,7 @@ from app.api.schemas import (
     LocalTimeWindowCondition,
     UserLocationOut,
     UsersInsideGeofenceCondition,
+    UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
     RuleConditionOut,
     RuleConditionStatusOut,
@@ -48,6 +49,7 @@ class RuleEvaluationContext:
     user_locations: dict[str, UserLocationOut]
     sun: RulesSunOut
     timezone: ZoneInfo
+    geofence_inside_since: dict[tuple[str, str], float] = field(default_factory=dict)
 
     def resolve_user_id(self, reference: str) -> str | None:
         return resolve_roster_user_id(reference, self.roster_user_id_lookup)
@@ -138,7 +140,11 @@ def _conditions_are_presence_only(
     return all(
         isinstance(
             condition,
-            (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+            (
+                UsersInsideGeofenceCondition,
+                UsersInsideGeofenceForSCondition,
+                UsersOutsideGeofenceCondition,
+            ),
         )
         for condition in conditions
     )
@@ -147,7 +153,11 @@ def _conditions_are_presence_only(
 def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
     if isinstance(
         condition,
-        (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+        (
+            UsersInsideGeofenceCondition,
+            UsersInsideGeofenceForSCondition,
+            UsersOutsideGeofenceCondition,
+        ),
     ):
         return False
     if isinstance(condition, AllConditionsCondition):
@@ -330,6 +340,8 @@ def _evaluate_condition(
         return _evaluate_local_time_window(condition, rule, ctx)
     if isinstance(condition, UsersInsideGeofenceCondition):
         return _evaluate_users_geofence(condition, rule, ctx, want_inside=True)
+    if isinstance(condition, UsersInsideGeofenceForSCondition):
+        return _evaluate_users_inside_geofence_for_s(condition, rule, ctx)
     if isinstance(condition, UsersOutsideGeofenceCondition):
         return _evaluate_users_geofence(condition, rule, ctx, want_inside=False)
     return RuleConditionStatusOut(
@@ -503,6 +515,95 @@ def _evaluate_users_geofence(
     )
 
 
+def _evaluate_users_inside_geofence_for_s(
+    condition: UsersInsideGeofenceForSCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    fence_label = (
+        geofence.label
+        if geofence is not None
+        else condition.geofence_id
+    )
+    if geofence is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=f'Unknown geofence "{condition.geofence_id}"',
+            label="Geofence dwell",
+            met=False,
+        )
+
+    min_accuracy_m = rule.min_location_accuracy_m
+    now_epoch = ctx.now.timestamp()
+    need_label = _format_dwell_need_s(condition.min_inside_s)
+    presence_lines: list[str] = []
+    unmet = False
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            presence_lines.append(
+                f'"{rule_user_id}": not in user roster (sync users from My Tracks)',
+            )
+            unmet = True
+            continue
+        location = ctx.user_locations.get(roster_user_id)
+        name = _user_display_name(ctx, roster_user_id)
+        if location is None:
+            presence_lines.append(f"{name}: no location yet")
+            unmet = True
+            continue
+        if not _location_usable_for_rule(location, min_accuracy_m):
+            presence_lines.append(f"{name}: location ignored (low accuracy)")
+            unmet = True
+            continue
+        if not _user_inside_geofence(location, geofence, min_accuracy_m):
+            presence_lines.append(f"{name} outside")
+            unmet = True
+            continue
+        inside_since = ctx.geofence_inside_since.get(
+            (roster_user_id, condition.geofence_id),
+        )
+        if inside_since is None:
+            presence_lines.append(f"{name} inside (dwell not started)")
+            unmet = True
+            continue
+        inside_s = now_epoch - inside_since
+        elapsed_label = _format_dwell_elapsed_s(inside_s)
+        presence_lines.append(
+            f"{name} inside {elapsed_label} (need {need_label})",
+        )
+        if inside_s < condition.min_inside_s:
+            unmet = True
+
+    selected_names: list[str] = []
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            selected_names.append(rule_user_id)
+            continue
+        selected_names.append(_user_display_name(ctx, roster_user_id))
+    who = _join_names(selected_names)
+    label = f"Inside {fence_label} {need_label}+ ({who})"
+    if unmet:
+        detail = "; ".join(presence_lines)
+        met = False
+    else:
+        detail = (
+            f"Everyone inside {fence_label} for at least {need_label}"
+        )
+        met = True
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=label,
+        met=met,
+    )
+
+
 def _location_usable_for_rule(
     location: UserLocationOut | None,
     min_accuracy_m: int,
@@ -512,6 +613,25 @@ def _location_usable_for_rule(
     if location.accuracy_m is not None and location.accuracy_m > min_accuracy_m:
         return False
     return True
+
+
+def _format_dwell_duration_s(total_s: float | int) -> str:
+    whole = max(0, int(total_s))
+    if whole < 60:
+        return f"{whole} sec"
+    minutes = whole // 60
+    seconds = whole % 60
+    if seconds == 0:
+        return f"{minutes} min"
+    return f"{minutes} min {seconds} sec"
+
+
+def _format_dwell_elapsed_s(elapsed_s: float) -> str:
+    return _format_dwell_duration_s(elapsed_s)
+
+
+def _format_dwell_need_s(min_inside_s: int) -> str:
+    return _format_dwell_duration_s(min_inside_s)
 
 
 def _format_hhmm_display(hhmm: str) -> str:

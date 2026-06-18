@@ -162,6 +162,12 @@ export type RuleConditionOut =
       user_ids: string[];
     }
   | {
+      type: "users_inside_geofence_for_s";
+      geofence_id: string;
+      user_ids: string[];
+      min_inside_s: number;
+    }
+  | {
       type: "users_outside_geofence";
       geofence_id: string;
       user_ids: string[];

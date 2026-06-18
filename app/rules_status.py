@@ -94,7 +94,13 @@ def build_rules_status(
     roster_user_id_lookup = build_roster_user_id_lookup(
         [row.user_id for row in users],
     )
+    inside_since = (
+        evaluator.geofence_inside_since_snapshot()
+        if evaluator is not None
+        else {}
+    )
     eval_ctx = RuleEvaluationContext(
+        geofence_inside_since=inside_since,
         geofences=tuple(geofences),
         now=effective_now,
         roster_user_id_lookup=roster_user_id_lookup,

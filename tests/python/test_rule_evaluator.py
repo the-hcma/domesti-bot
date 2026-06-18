@@ -17,6 +17,7 @@ from app.api.schemas import (
     RuleDeviceActionOut,
     RuleOut,
     UsersInsideGeofenceCondition,
+    UsersInsideGeofenceForSCondition,
 )
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
@@ -52,7 +53,7 @@ class _ArriveHomeFixture:
     evaluator: RuleEvaluator
 
 
-def _write_bundle(path: Path, rule: RuleOut) -> None:
+def _write_bundle(path: Path, *rules: RuleOut) -> None:
     payload = {
         "version": 1,
         "device_id_resolution": "preferred_label",
@@ -62,7 +63,7 @@ def _write_bundle(path: Path, rule: RuleOut) -> None:
             "timezone": "America/New_York",
             "home_label": "Home",
         },
-        "rules": [rule.model_dump(mode="json")],
+        "rules": [rule.model_dump(mode="json") for rule in rules],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -151,6 +152,30 @@ def _arrive_home_rule(*, cooldown_s: int) -> RuleOut:
     )
 
 
+def _dwell_home_rule(*, cooldown_s: int) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=cooldown_s,
+        device_actions=[],
+        enabled=True,
+        id="dwell-home",
+        label="Dwell home",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="while_true",
+    )
+
+
 def _setup_arrive_home_evaluator(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -190,6 +215,38 @@ def _setup_arrive_home_evaluator(
         clock=clock,
         db=db,
         device=device,
+        evaluator=evaluator,
+    )
+
+
+def _setup_dwell_home_evaluator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    cooldown_s: int,
+) -> _ArriveHomeFixture:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _dwell_home_rule(cooldown_s=cooldown_s))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(
+        db,
+        user_id="henrique",
+        lat=44.0,
+        lon=-73.0,
+        received_at=clock["now"],
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: clock["now"],
+    )
+    return _ArriveHomeFixture(
+        clock=clock,
+        db=db,
+        device=_FakeKasa("192.168.1.10", "Garage"),
         evaluator=evaluator,
     )
 
@@ -463,3 +520,348 @@ async def test_rule_evaluator_fires_geofence_reenter_after_dwell_window(
     await fixture.evaluator.on_location_update("henrique")
 
     assert fixture.device.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_seeds_geofence_inside_since_on_boot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    dwell_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="dwell-only",
+        label="Dwell only",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="while_true",
+    )
+    _write_bundle(bundle, dwell_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    received_at = 1_700_000_000.0
+    _seed_presence_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        received_at=received_at,
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: received_at,
+    )
+    assert evaluator.geofence_inside_since_snapshot() == {
+        ("henrique", "house"): received_at,
+    }
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    edge_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceCondition(
+                    type="users_inside_geofence",
+                    geofence_id="house",
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="edge-strict",
+        label="Edge strict",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="edge_true",
+    )
+    dwell_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="dwell-loose",
+        label="Dwell loose",
+        min_location_accuracy_m=200,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="while_true",
+    )
+    _write_bundle(bundle, edge_rule, dwell_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    received_at = 1_700_000_000.0
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Test",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=120,
+            received_at=received_at,
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: received_at,
+    )
+    assert evaluator.geofence_inside_since_snapshot() == {
+        ("henrique", "house"): received_at,
+    }
+    assert ("henrique", "house") not in evaluator._geofence_was_inside
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_tracks_inside_since_on_dwell_eligible_enter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_dwell_home_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+    )
+    _seed_henrique_inside_house(fixture)
+    evaluator = RuleEvaluator(
+        cache_path=fixture.db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: fixture.clock["now"],
+    )
+    enter_at = fixture.clock["now"]
+    _move_henrique_outside_house(fixture)
+    await evaluator.on_location_update("henrique")
+    fixture.clock["now"] += 310.0
+    _move_henrique_inside_house(fixture)
+    await evaluator.on_location_update("henrique")
+
+    assert evaluator.geofence_inside_since_snapshot() == {
+        ("henrique", "house"): fixture.clock["now"],
+    }
+    assert evaluator.geofence_inside_since_snapshot()[("henrique", "house")] > enter_at
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_clears_inside_since_on_leave(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_dwell_home_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+    )
+    _seed_henrique_inside_house(fixture)
+    evaluator = RuleEvaluator(
+        cache_path=fixture.db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: fixture.clock["now"],
+    )
+    assert evaluator.geofence_inside_since_snapshot() == {
+        ("henrique", "house"): fixture.clock["now"],
+    }
+
+    _move_henrique_outside_house(fixture)
+    await evaluator.on_location_update("henrique")
+
+    assert evaluator.geofence_inside_since_snapshot() == {}
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_sets_inside_since_on_debounced_reenter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_dwell_home_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+    )
+    _seed_henrique_inside_house(fixture)
+    evaluator = RuleEvaluator(
+        cache_path=fixture.db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: fixture.clock["now"],
+    )
+
+    _move_henrique_outside_house(fixture)
+    await evaluator.on_location_update("henrique")
+    fixture.clock["now"] += 30.0
+    upsert_user_location(
+        fixture.db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=fixture.clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+
+    assert evaluator.geofence_inside_since_snapshot() == {
+        ("henrique", "house"): fixture.clock["now"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_skips_inside_since_seed_when_no_dwell_rules(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _arrive_home_rule(cooldown_s=0))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    received_at = 1_700_000_000.0
+    _seed_presence_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        received_at=received_at,
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: received_at,
+    )
+    assert evaluator.geofence_inside_since_snapshot() == {}
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_skips_inside_since_seed_when_dwell_rule_rejects_accuracy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    dwell_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="dwell-only",
+        label="Dwell only",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="while_true",
+    )
+    _write_bundle(bundle, dwell_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Test",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=120,
+            received_at=1_700_000_000.0,
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: 1_700_000_000.0,
+    )
+    assert evaluator.geofence_inside_since_snapshot() == {}

@@ -14,6 +14,7 @@ from app.api.schemas import (
     GeofenceOut,
     UserLocationOut,
     UsersInsideGeofenceCondition,
+    UsersInsideGeofenceForSCondition,
     RuleConditionsOut,
     RuleOut,
     SettingsLocationOut,
@@ -105,11 +106,13 @@ def _ctx(
     *,
     now: datetime,
     geofences: tuple[GeofenceOut, ...] = (),
+    geofence_inside_since: dict[tuple[str, str], float] | None = None,
     user_locations: dict[str, UserLocationOut] | None = None,
 ) -> RuleEvaluationContext:
     sun = compute_rules_sun_out(_SETTINGS, now=now)
     user_display_names = {"henrique": "Henrique", "kristen": "Kristen"}
     return RuleEvaluationContext(
+        geofence_inside_since=geofence_inside_since or {},
         geofences=geofences,
         now=now,
         roster_user_id_lookup=build_roster_user_id_lookup(
@@ -119,6 +122,52 @@ def _ctx(
         user_locations=user_locations or {},
         sun=sun,
         timezone=_TZ,
+    )
+
+
+def _house_geofence() -> GeofenceOut:
+    return GeofenceOut(
+        center_lat=41.194072,
+        center_lon=-73.888325,
+        enabled=True,
+        geofence_id="house",
+        label="House",
+        owntracks_rid=None,
+        radius_m=250,
+    )
+
+
+def _henrique_inside_location() -> UserLocationOut:
+    return UserLocationOut(
+        accuracy_m=20,
+        lat=41.1941,
+        lon=-73.8883,
+        received_at="2026-06-09T23:00:00Z",
+        source="owntracks",
+    )
+
+
+def _dwell_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="both-home-dwell",
+        label="Both home dwell",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="while_true",
     )
 
 
@@ -286,6 +335,164 @@ def test_users_geofence_unknown_user_reports_roster_miss() -> None:
         ),
     )
     assert '"henrique": not in user roster' in result.conditions[1].detail
+
+
+def test_users_inside_geofence_for_s_met_after_dwell_elapsed() -> None:
+    now = datetime(2026, 6, 9, 21, 12, tzinfo=_TZ)
+    inside_since = now.timestamp() - 720.0
+    result = evaluate_rule(
+        _dwell_rule(),
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_inside_since={("henrique", "house"): inside_since},
+            user_locations={"henrique": _henrique_inside_location()},
+        ),
+    )
+    assert result.conditions[0].met is True
+    assert "Everyone inside House for at least 10 min" in result.conditions[0].detail
+    assert result.all_met is True
+
+
+def test_users_inside_geofence_for_s_formats_subminute_dwell_in_seconds() -> None:
+    now = datetime(2026, 6, 9, 21, 0, 35, tzinfo=_TZ)
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=30,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="short-dwell",
+        label="Short dwell",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="while_true",
+    )
+    inside_since = now.timestamp() - 35.0
+    result = evaluate_rule(
+        rule,
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_inside_since={("henrique", "house"): inside_since},
+            user_locations={"henrique": _henrique_inside_location()},
+        ),
+    )
+    assert result.conditions[0].met is True
+    assert "Everyone inside House for at least 30 sec" in result.conditions[0].detail
+    assert result.conditions[0].label == "Inside House 30 sec+ (Henrique)"
+
+
+def test_users_inside_geofence_for_s_formats_non_minute_aligned_need() -> None:
+    now = datetime(2026, 6, 9, 21, 1, 5, tzinfo=_TZ)
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=61,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="odd-dwell",
+        label="Odd dwell",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="while_true",
+    )
+    inside_since = now.timestamp() - 65.0
+    result = evaluate_rule(
+        rule,
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_inside_since={("henrique", "house"): inside_since},
+            user_locations={"henrique": _henrique_inside_location()},
+        ),
+    )
+    assert result.conditions[0].met is True
+    assert "1 min 1 sec" in result.conditions[0].detail
+
+
+def test_users_inside_geofence_for_s_unmet_before_dwell_elapsed() -> None:
+    now = datetime(2026, 6, 9, 21, 5, tzinfo=_TZ)
+    inside_since = now.timestamp() - 300.0
+    result = evaluate_rule(
+        _dwell_rule(),
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_inside_since={("henrique", "house"): inside_since},
+            user_locations={"henrique": _henrique_inside_location()},
+        ),
+    )
+    assert result.conditions[0].met is False
+    assert "Henrique inside 5 min (need 10 min)" in result.conditions[0].detail
+
+
+def test_users_inside_geofence_for_s_reports_user_outside() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    kristen_outside = UserLocationOut(
+        accuracy_m=20,
+        lat=44.417597,
+        lon=-72.023842,
+        received_at="2026-06-09T23:00:00Z",
+        source="owntracks",
+    )
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique", "kristen"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="both-home-dwell",
+        label="Both home dwell",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="while_true",
+    )
+    inside_since = now.timestamp() - 900.0
+    result = evaluate_rule(
+        rule,
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_inside_since={
+                ("henrique", "house"): inside_since,
+                ("kristen", "house"): inside_since,
+            },
+            user_locations={
+                "henrique": _henrique_inside_location(),
+                "kristen": kristen_outside,
+            },
+        ),
+    )
+    assert result.conditions[0].met is False
+    assert "Kristen outside" in result.conditions[0].detail
 
 
 def test_build_rules_status_from_example_bundle(

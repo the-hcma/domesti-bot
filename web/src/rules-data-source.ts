@@ -8,6 +8,7 @@ import {
   type MockMyTracksSettings,
   type MockStoreSeed,
 } from "./rules-mock-fixtures.js";
+import { referencesGeofenceId } from "./rule-summary.js";
 import type {
   GeofenceOut,
   MyTracksGeofencesSyncOut,
@@ -167,11 +168,8 @@ export class MockRulesDataSource implements RulesDataSource {
 
   async deleteGeofence(geofenceId: string): Promise<void> {
     const inUse = this.store.rules.some((rule) =>
-      rule.conditions.all.some(
-        (c) =>
-          (c.type === "users_inside_geofence" ||
-            c.type === "users_outside_geofence") &&
-          c.geofence_id === geofenceId,
+      rule.conditions.all.some((condition) =>
+        referencesGeofenceId(condition, geofenceId),
       ),
     );
     if (inUse) {
