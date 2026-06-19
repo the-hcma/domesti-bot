@@ -4,7 +4,7 @@ This document is the **domesti-bot** side of integrating with [my-tracks](https:
 
 **Rule evaluation, geofence definitions, and device actions stay in domesti-bot.** my-tracks remains the location ingest and map service. After pairing, my-tracks **pushes** live location updates to domesti-bot; roster and geofence **definitions** are still pulled manually by domesti-bot (no my-tracks push webhooks for those).
 
-**Status:** **domesti-bot integration is complete** for the operator workflow shipped in PRs [#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216): relay-key webhooks, pairing APIs + Settings UI (pair/re-pair, retention, relay-key reveal, reset), manual roster/geofence sync, live user map with legend + polling, and `scripts/internal/verify-mytracks-pairing`. **Deferred (not integration blockers):** verify-roundtrip and emergency-toggle **buttons** in Settings (APIs exist; use the verify script today), `RuleEvaluator` on live ingest (see `docs/RULE_ENGINE_PLAN.md`), and my-tracks production cutover for live relay (my-tracks repo).
+**Status:** **domesti-bot integration is complete** for the operator workflow shipped in PRs [#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216): relay-key webhooks, pairing APIs + Settings UI (pair/re-pair, retention, relay-key reveal, reset), manual roster/geofence sync, live user map with legend + polling, and `scripts/internal/verify-mytracks-pairing`. **Rule evaluation** on live location ingest is **shipped** (file-backed `RuleEvaluator`, Phase 2a–2c in `docs/RULE_ENGINE_PLAN.md`). **Deferred (not integration blockers):** verify-roundtrip and emergency-toggle **buttons** in Settings (APIs exist; use the verify script today), and my-tracks production cutover for live relay (my-tracks repo).
 
 ---
 
@@ -16,7 +16,7 @@ This document is the **domesti-bot** side of integrating with [my-tracks](https:
 | User roster (automation) | my-tracks (source of truth) | **Manual pull** by domesti-bot (`POST /v1/rules/users/sync`) |
 | Geofence definitions (automation) | domesti-bot | **Manual pull** (`POST /v1/rules/geofences/sync`) from my-tracks export APIs |
 | Live location updates for rules | my-tracks → domesti-bot | **Automatic push** after pairing (`POST` to domesti-bot webhook URLs) |
-| Rule evaluation & device actions | domesti-bot | `RuleEvaluator` (future PRs; see `docs/RULE_ENGINE_PLAN.md`) |
+| Rule evaluation & device actions | domesti-bot | `RuleEvaluator` on live ingest + scheduled tick (see `docs/RULE_ENGINE_PLAN.md`) |
 
 ---
 
@@ -83,7 +83,7 @@ Optional override: `DOMESTI_PUBLIC_BASE_URL` env may pre-fill the pairing form w
 | User presence map (Automations) | `web/src/presence-map.ts` — legend, device colors, 5s status polling |
 | Operator verify script | `scripts/internal/verify-mytracks-pairing` |
 
-**Deferred:** verify-roundtrip button and emergency-toggle button in Settings (APIs: `PATCH /v1/settings/my-tracks/location-updates`, `last_verify_*` fields on pair-status); `RuleEvaluator` on live ingest (`docs/RULE_ENGINE_PLAN.md`).
+**Deferred:** verify-roundtrip button and emergency-toggle button in Settings (APIs: `PATCH /v1/settings/my-tracks/location-updates`, `last_verify_*` fields on pair-status).
 
 ---
 
@@ -218,7 +218,7 @@ POST /v1/webhooks/location_update
 - Upsert `rule_user_last_location` (latest snapshot for status UI / geofence checks).
 - Append one row to `rule_user_location_history`, then prune per [retention policy](#location-history-retention).
 - Log `[location] stored location for …` at INFO; prune logs `[location] pruned N history row(s) for …`.
-- Future: `RuleEvaluator.request_evaluation(reason="location_update")`.
+- `RuleEvaluator.request_evaluation(reason="location_update")` on each stored location.
 
 Honour `timestamp` when present (ISO-8601 UTC preferred); readings older than the cached latest are ignored (no history append).
 
@@ -235,7 +235,7 @@ Same request body and auth as live relay. Differences:
 | Trigger | my-tracks on each saved location update | my-tracks P4 test button; domesti-bot verify roundtrip |
 | Respects emergency switch | yes (`503`) | **no** — verify must still work when live ingest is paused |
 | Persists location | yes (latest + history) | **no** — validate auth + schema; return `204` without writing (accepts any `user_id` for connectivity checks); logs `test webhook accepted for … (discarded)` |
-| Evaluator | future: schedule | never |
+| Evaluator | schedules rule evaluation | never |
 
 This keeps production rule state clean while operators confirm connectivity.
 
@@ -437,7 +437,7 @@ Helpers in `app/db/secrets.py`: `save_mytracks_relay_api_key_to_db`, `load_mytra
 | **D2** | `app_secrets` relay key; `pair_with_my_tracks()`; pairing APIs; `PATCH …/location-updates`; `PATCH …/location-history-retention`; pairing attempt logging | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)) |
 | **D3** | Settings UI: pair/re-pair, retention, relay-key reveal, reset; Automations user map legend + live polling | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216)) |
 | **D3b** (optional) | Verify-roundtrip + emergency-toggle buttons in Settings | Deferred (APIs + verify script exist) |
-| **D4** (later) | File-backed `RuleEvaluator` on live `POST /v1/webhooks/location_update` (rules in `automation-rules.json`, no rule SQLite yet) | In progress — bundle in `automation-rules.json.example`; see **Phase 2a** in `docs/RULE_ENGINE_PLAN.md` |
+| **D4** | File-backed `RuleEvaluator` on live `POST /v1/webhooks/location_update` (rules in `automation-rules.json`, no rule SQLite yet) | **Done** — Phase 2a–2c in `docs/RULE_ENGINE_PLAN.md`; example bundle in `automation-rules.json.example` |
 
 **my-tracks companions:** [#1087](https://github.com/the-hcma/my-tracks/pull/1087) (pair + config); add `user_location_test_url` to pair payload; P3 live relay; P4 test button → **test URL only**.
 

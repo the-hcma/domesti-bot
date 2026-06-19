@@ -26,7 +26,7 @@ This document tracks **remaining** planned work. Shipped items are summarized be
 - **Icons**: server resolves `UIDeviceOut.compact_icon` (object name beats room name beats Kasa model); client draws `garage_open` / `garage_closed` from live door state.
 - **Bulk buttons**: warm orange (`--bulk`); per-tile off actions stay red (`--danger`).
 - **About**: mobile robot icon or desktop ☰ menu; same modal content everywhere.
-- **Deploy**: `git pull` then `setup-service` / `./scripts/on-deploy` rebuilds when inputs or `dist/main.js` drift. Installed PWAs need a new service worker (currently **`domesti-bot-pwa-v18`** in `sw.js`) or clear site data for shell HTML.
+- **Deploy**: `git pull` then `setup-service` / `./scripts/on-deploy` rebuilds when inputs or `dist/main.js` drift. Installed PWAs need a new service worker (currently **`domesti-bot-pwa-v20`** in `sw.js`) or clear site data for shell HTML.
 - **PWA user docs**: root `README.md` *Progressive Web App* section; `web/README.md` points to cache-bump workflow.
 
 ---

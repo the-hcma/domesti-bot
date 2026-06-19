@@ -7,15 +7,20 @@
 
 A self-hosted home-automation control surface for the devices on your home
 network. `domesti-bot` discovers and controls TP-Link Kasa smart plugs/lights,
-Sonos zones, and GoTailwind garage-door controllers, then exposes them through
-a small tile-based web UI for one-tap control from any phone or laptop on the
+Sonos zones, GoTailwind garage doors, and Vizio SmartCast TVs, then exposes them
+through a tile-based web UI for one-tap control from any phone or laptop on the
 same LAN.
 
-The project is intentionally narrow in scope: no cloud round-trips, no
-external accounts beyond the ones each device family already requires, and no
-heavyweight rules engine. Everything runs on a single machine inside the
-network the devices are on — typically the same Linux server that already
-hosts other always-on services.
+A **file-backed rules engine** drives **Automations**: presence from
+[my-tracks](https://github.com/the-hcma/my-tracks) (geofence enter/leave),
+scheduled cron rules (dwell, device-state, once-per-day caps), Kasa actions, and
+email notifications. Rule definitions live in `automation-rules.json` today;
+edit the file and restart the server to change automations.
+
+The project is intentionally narrow in scope: no mandatory cloud round-trips, no
+vendor SaaS beyond what each device family already requires. Everything runs on
+a single machine inside the network the devices are on — typically the same
+Linux server that already hosts other always-on services.
 
 ## Features
 
@@ -30,6 +35,16 @@ hosts other always-on services.
   idempotent operations so a "Close everything" bulk action survives doors
   that are already closed. The Tailwind Local Control Key can be stored
   encrypted in the discovery SQLite database (see [Encrypted secrets](#encrypted-secrets)).
+- **Vizio SmartCast TVs** — power on/off per TV (Wake-on-LAN where supported).
+  Configure TVs in desktop ☰ → **Settings**.
+- **Automations (rules engine)** — `automation-rules.json` at the server root
+  (template: `automation-rules.json.example`). Edge rules on geofence enter/leave;
+  scheduled cron rules (sunset, dwell, device on/off, once-per-day). Kasa actions
+  and optional email on fire. Desktop ☰ → **Automations** — see
+  [Automations](#automations).
+- **My Tracks presence** — pair with a my-tracks server for live location
+  webhooks; sync user roster and geofence definitions into domesti-bot. See
+  [`docs/MY_TRACKS_INTEGRATION_PLAN.md`](docs/MY_TRACKS_INTEGRATION_PLAN.md).
 - **Encrypted secrets** — Fernet-encrypted values in SQLite (Tailwind token
   today); master key in gitignored `domesti-bot.config.json` at the repo root.
   Create it with the `setup-secrets` REPL command or copy
@@ -41,8 +56,8 @@ hosts other always-on services.
 - **REPL CLI** (`scripts/domesti-bot`) — same discovery / control surface
   exposed as an interactive `prompt_toolkit` shell for scripting and
   troubleshooting, including `setup-secrets` to create `domesti-bot.config.json`.
-- **Continuous state monitoring** — background pollers keep the UI's view of
-  Kasa, Sonos, and Tailwind state in sync without manual refresh.
+- **Continuous state monitoring** — background pollers keep tile state fresh
+  (Kasa, Sonos, Tailwind, Vizio) without manual refresh.
 
 ## Quick start
 
@@ -94,8 +109,9 @@ Need the device-control REPL instead of the HTTP API? Run
 
 Most operation is zero-config — devices are discovered on the LAN via mDNS /
 broadcast probes, and discovered configurations are persisted in an SQLite
-cache (`~/.config/domesti-bot/kasa_discovery.sqlite3` by default) so subsequent
-startups are fast.
+cache (`~/.cache/rule-engine/device_discovery.sqlite` by default; override with
+`--discovery-cache`) so subsequent startups are fast. Geofences, user roster,
+encrypted secrets, and rule **fire state** live in the same database file.
 
 ### `domesti-bot.config.json`
 
@@ -119,6 +135,7 @@ Optional environment variables:
 | Variable | Effect |
 |---|---|
 | `DOMESTI_API_KEY` | When set, every `/v1/…` endpoint requires the `X-Domesti-Api-Key` header. Unset = unauthenticated (intended for trusted LAN only). |
+| `DOMESTI_AUTOMATION_RULES_FILE` | Path to the automation rule bundle (default: `./automation-rules.json` beside the config file). |
 | `DOMESTI_BOT_CONFIG_FILE` | Override path to the config JSON file (default: `./domesti-bot.config.json` at repo root). |
 | `DOMESTI_BOT_SECRETS_KEY` | Fernet master key for encrypted SQLite secrets. Overrides `domesti-bot.config.json` when set. |
 | `DOMESTI_LISTEN_HOST` | Default bind address for the HTTP server. Overridden by `--listen-host` / `--listen-all`. |
@@ -171,15 +188,16 @@ After starting the server, the landing page hydrates a tile UI:
 *Compact mobile layout on a phone: family sections (green frame = connected), per-device tiles (green = on / playing, red = off / paused), and the global **Turn off / pause / close everything** control at the top.*
 
 - One section per device family (`Lights & plugs`, `Sonos zones`,
-  `Garage doors`) with a family-coloured icon and frame.
+  `Garage doors`, `Vizio TVs`) with a family-coloured icon and frame.
 - One tile per device. Tap to toggle (on/off, play/pause, open/close); the
   tile updates optimistically and reconciles with the next background poll
   (every 5 seconds).
 - Per-family bulk button (`Turn off all`, `Pause all`, `Close all`) and a
   global `Turn off / pause / close everything` button at the top (warm orange,
   distinct from red per-tile off controls).
-- On **desktop** viewports, a **☰** menu with **Settings** (Tailwind token).
-  The menu is hidden on mobile form factors.
+- On **desktop** viewports, a **☰** menu with **Automations** (rules, geofences,
+  users, mail), **Settings** (Tailwind, My Tracks, Vizio), and **About**.
+  The menu is hidden on narrow mobile form factors (tiles + PWA install still work).
 - Per-tile "Exclude from all-off" (and analogous) checkbox so the top-of-page
   bulk action skips devices you don't want it touching.
 - Connectivity indicator: family frames turn red when the backend is
@@ -195,9 +213,9 @@ it. Assets live under `app/api/static/`:
 - `icons/` — launcher icons referenced by the manifest
 
 The TypeScript bundle registers the worker on load. After you deploy a new
-version, the service worker cache version in `sw.js` (for example
-`domesti-bot-pwa-v15`) must be bumped so installed clients pick up HTML, CSS,
-and `dist/main.js` changes.
+version, bump the service worker cache version in `app/api/static/sw.js` (currently
+**`domesti-bot-pwa-v20`**) so installed clients pick up HTML, CSS, and
+`dist/main.js` changes.
 
 **Install requirements:** Chromium-based browsers need a secure context
 (`https://` or `http://127.0.0.1`). On a plain HTTP LAN URL, you still get
@@ -207,22 +225,49 @@ you terminate TLS or use loopback. When the server is reachable with
 `http://<server-lan-ip>:<port>/` and use the in-app install banner when
 offered.
 
+## Automations
+
+Production automations are **file-backed** today:
+
+1. Copy `automation-rules.json.example` → `automation-rules.json` beside
+   `domesti-bot.config.json` (gitignored on your server).
+2. Pair **My Tracks** (desktop ☰ → **Settings**) and sync **Users** / **Geofences**
+   under ☰ → **Automations** so rule `user_id` and `geofence_id` values match.
+3. Configure **Mail** under Automations if rules use `notify_on_fire`.
+4. Edit `automation-rules.json`, then restart `domesti-bot-server` (or the
+   systemd user unit).
+
+**Triggers:** `edge_true` (fire on geofence enter/leave for the arriving user)
+and `scheduled` (cron + conditions such as `after_sunset`, dwell, device on/off,
+`fire_once_per_local_day`).
+
+**UI:** desktop ☰ → **Automations** — live **Status** (per-condition ✓/✗),
+read-only **Rules** inspector, **Geofences** map editor, **Users** roster, **Mail**.
+In-UI rule editing is planned ([`docs/RULE_ENGINE_PLAN.md`](docs/RULE_ENGINE_PLAN.md)
+Phase 2b).
+
+**Docs:** [`docs/README.md`](docs/README.md) indexes operator and contributor
+guides.
+
 ## Project layout
 
-```
+```text
 domesti-bot/
 ├── app/                          Domain code (device managers, rule engine)
-│   ├── *_device_manager.py       One per family (kasa, sonos, gotailwind, …)
+│   ├── *_device_manager.py       Per family (kasa, sonos, gotailwind, vizio, …)
+│   ├── rule_evaluator.py         Automation evaluation (edge + scheduled)
+│   ├── automation_rules_loader.py  Parse automation-rules.json
 │   ├── db/                       SQLAlchemy models + encrypted secrets
-│   ├── device_discovery_store.py   SQLite cache facade (shared by all managers)
-│   └── api/                      FastAPI HTTP surface (subpackage)
+│   ├── device_discovery_store.py SQLite cache facade (devices + rules state)
+│   └── api/                      FastAPI HTTP surface (tiles, rules, webhooks)
+├── automation-rules.json.example Committed rule bundle template
 ├── config/serve.py               uvicorn entrypoint
 ├── tests/python/                 pytest suite (hermetic + LAN-integration)
-├── web/src/                      TypeScript source for the tile UI
+├── web/src/                      TypeScript (tiles + Automations hub)
 ├── scripts/domesti-bot           REPL CLI
 ├── scripts/domesti-bot-server    HTTP server launcher
 ├── production/                   systemd unit template + on-deploy hooks
-├── docs/images/                  README screenshots and other doc assets
+├── docs/                         Operator plans + contributor guides (see docs/README.md)
 └── docs/AGENTS.md                Developer reference (canonical)
 ```
 
@@ -237,7 +282,7 @@ uv sync
 
 # The full set of CI gates, in the order they run on every PR:
 uv run pyright                       # type errors over app/, config/, scripts/, tests/
-uv run pytest -m "not integration" -n auto   # hermetic (parallel; matches CI)
+uv run pytest -m "not integration and not browser" -n auto   # hermetic (parallel; mirrors CI)
 shellcheck $(git ls-files scripts production/scripts | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$')
 
 # Frontend, when web/src/ is touched:
