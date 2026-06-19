@@ -1,7 +1,8 @@
 # `web/` — domesti-bot browser bundle
 
-TypeScript source for the browser-side tile dashboard served by the
-domesti-bot FastAPI server. Compiled output is written to
+TypeScript source for the browser-side dashboard served by the domesti-bot
+FastAPI server: device tiles, desktop ☰ menu (Automations hub, Settings,
+About), and PWA registration. Compiled output is written to
 `../app/api/static/dist/` and served at `/static/dist/` by the Python server.
 
 ## Conventions
@@ -9,9 +10,8 @@ domesti-bot FastAPI server. Compiled output is written to
 - **Toolchain:** `pnpm` + `esbuild` + `typescript`. `pnpm` is bootstrapped via
   Node's built-in `corepack` (no extra global install needed). Node ≥ 20.
 - **No bundler magic:** one `esbuild` call. No Vite, no Webpack, no Rollup.
-- **No frameworks** in PR1. Vanilla TypeScript + DOM. Frameworks (if ever
-  needed) are an explicit, documented decision per stack — not an organic
-  drift.
+- **No frameworks.** Vanilla TypeScript + DOM. Adding React/Vue/Svelte requires
+  an explicit decision and an update to `docs/AGENTS.md` in the same PR.
 - **Strict TS:** `strict`, `noUncheckedIndexedAccess`,
   `exactOptionalPropertyTypes`, `verbatimModuleSyntax`. Existing files do not
   silence these.
