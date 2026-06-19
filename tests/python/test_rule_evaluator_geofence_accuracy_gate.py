@@ -223,7 +223,7 @@ async def test_low_accuracy_enter_still_defers_until_good_accuracy_fix(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"],
+        received_at=clock["now"] - 400.0,
         accuracy_m=20,
     )
     device = _FakeKasa("192.168.1.10", "Garage")

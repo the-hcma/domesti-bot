@@ -170,7 +170,7 @@ Hook: end of `apply_location_update_webhook()` after `upsert_user_location`, wit
 
 **Optional / later (not blocking operators):**
 
-- Persist geofence **dwell** clocks (`inside_since`) across restart (today in-memory only).
+- Persist geofence **dwell** clocks (`inside_since` / `outside_since`) across restart — **shipped** via `rule_user_geofence_state` (#316 history backfill interim; follow-up PR persists transition rows directly).
 - Device-state conditions for Sonos / Tailwind (Kasa only today).
 - `edge_false` trigger variant; rule fire history UI; mobile editor — see [Future extensions](#future-extensions-out-of-scope-for-initial-mainline).
 
@@ -785,6 +785,7 @@ Add tables via `app/db/models.py` + `bootstrap_schema` (additive only).
 | --- | --- |
 | `rule_users` | user_id PK, display_name, tracking_device_label, enabled, updated_at |
 | `rule_user_last_location` | user_id PK, lat, lon, accuracy_m, received_at, source |
+| `rule_user_geofence_state` | `(user_id, geofence_id)` PK, was_inside, outside_since, inside_since, last_location_received_at, updated_at — geofence edge/dwell transition state |
 | `users_sync` | singleton: last_synced_at, source (`my-tracks`) |
 | `rule_geofences` | geofence_id PK, label, center_lat, center_lon, radius_m, enabled, owntracks_rid (nullable), updated_at |
 | `automation_rules` | rule_id PK, label, enabled, trigger, cooldown_s, conditions_json, actions_json, updated_at |
@@ -1311,9 +1312,13 @@ True when every listed user is currently inside **and** `now - inside_since[user
 
 **Evaluator state:** `_geofence_inside_since: dict[tuple[str, str], float]` — mirror of shipped `_geofence_outside_since` used for enter debounce. Updated on every location ingest when inside/outside flips; cleared on leave.
 
-**Startup seed:** derive from last stored locations (if inside at boot, `inside_since = received_at` or `now` — document choice in implementation PR).
+**Persistence:** `rule_user_geofence_state` in the discovery SQLite file stores `(user_id, geofence_id) → was_inside, outside_since, inside_since`. The evaluator loads this on startup and upserts on every edge-accuracy transition. Rows missing on first boot are backfilled once from scoped location history.
 
-**Restart behavior:** in-memory only in v1 (same as outside dwell debounce). After restart, dwell clock resets unless we later persist `inside_since` in SQLite.
+**Live gap reconcile:** when edge-accuracy location ingest shows a user outside but in-memory `outside_since` is newer than history implies (webhook gaps, coarse GPS), the evaluator expands `outside_since` from history before evaluating enter edges.
+
+**Startup seed:** load persisted rows; backfill missing keys from history; no full per-user history walk on every restart once rows exist.
+
+**Restart behavior:** dwell and outside debounce clocks survive restart via `rule_user_geofence_state` (history backfill only for pairs without a persisted row).
 
 Status API: condition row detail like `hcma inside 12 min (need 10 min)` / `kristen outside`.
 

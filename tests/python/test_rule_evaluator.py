@@ -721,6 +721,68 @@ async def test_rule_evaluator_seeds_outside_since_from_history_and_fires_enter_a
 
 
 @pytest.mark.asyncio
+async def test_rule_evaluator_reconciles_outside_since_after_location_gap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """History reconcile restores a truncated away streak before enter-edge evaluation."""
+    fixture = _setup_arrive_home_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+    )
+    outside_start = fixture.clock["now"] - 400.0
+    for offset in (100, 200, 400):
+        upsert_user_location(
+            fixture.db,
+            UserLocationRecord(
+                user_id="henrique",
+                lat=44.0,
+                lon=-73.0,
+                accuracy_m=20,
+                received_at=outside_start + offset,
+                source="test",
+            ),
+            retention=default_location_history_retention(),
+        )
+    fixture.clock["now"] = outside_start + 400
+    fixture.evaluator = RuleEvaluator(
+        cache_path=fixture.db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr([fixture.device]),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=fixture.db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: fixture.clock["now"],
+    )
+    key = ("henrique", "house")
+    fixture.evaluator._geofence_outside_since[key] = fixture.clock["now"] - 61.0
+    await fixture.evaluator.on_location_update("henrique")
+    assert fixture.evaluator.geofence_outside_since_snapshot() == {
+        key: outside_start,
+    }
+    fixture.clock["now"] += 30.0
+    upsert_user_location(
+        fixture.db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=fixture.clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await fixture.evaluator.on_location_update("henrique")
+    assert fixture.device.calls == ["on"]
+
+
+@pytest.mark.asyncio
 async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
