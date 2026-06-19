@@ -6,7 +6,8 @@
     "device_id values are tile/REPL display names; the rule evaluator resolves them to Kasa hosts or Tailwind door ids.",
     "Geofence ids must match Automations → Geofences (house is typical for home; west-point for West Point).",
     "SMTP must be configured under Automations → Mail for notification emails to send.",
-    "Rule 1 fires when Henrique OR Kristen enters house after sunset (arrival edge, not merely present at sunset)."
+    "Rule 1 fires when Henrique OR Kristen enters house after sunset (arrival edge, not merely present at sunset).",
+    "Rule 2 (evening-lights-off-both-home) runs every 15 min after sunset: when both have been home 10+ min and either arrival light is still on, turn both off."
   ],
   "settings_location": {
     "lat": 41.194072,
@@ -64,6 +65,57 @@
           "family_id": "kasa",
           "device_id": "Garage outside lights",
           "action": "turn_on"
+        }
+      ]
+    },
+    {
+      "id": "evening-lights-off-both-home",
+      "label": "Turn off arrival lights when both home 10+ min after sunset",
+      "enabled": true,
+      "trigger": "scheduled",
+      "schedule_cron": "*/15 * * * *",
+      "cooldown_s": 300,
+      "min_location_accuracy_m": 50,
+      "accuracy_edge_grace_s": 120,
+      "notify_on_fire": false,
+      "conditions": {
+        "all": [
+          {
+            "type": "after_sunset",
+            "offset_minutes": 0,
+            "window_end": "midnight"
+          },
+          {
+            "type": "users_inside_geofence_for_s",
+            "geofence_id": "house",
+            "user_ids": ["henrique", "kristen"],
+            "min_inside_s": 600
+          },
+          {
+            "type": "devices_any_on",
+            "devices": [
+              {
+                "family_id": "kasa",
+                "device_id": "Front door lights"
+              },
+              {
+                "family_id": "kasa",
+                "device_id": "Garage outside lights"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "kasa",
+          "device_id": "Front door lights",
+          "action": "turn_off"
+        },
+        {
+          "family_id": "kasa",
+          "device_id": "Garage outside lights",
+          "action": "turn_off"
         }
       ]
     },

@@ -21,8 +21,13 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     bundle = load_automation_rules_bundle()
     assert bundle.version == 1
-    assert len(bundle.rules) == 3
+    assert len(bundle.rules) == 4
     assert bundle.rules[0].id == "evening-arrival-home-lights"
+    lights_off = next(
+        rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home"
+    )
+    assert lights_off.trigger == "scheduled"
+    assert lights_off.schedule_cron == "*/15 * * * *"
     assert automation_rules_source() == "operator"
 
 
@@ -35,6 +40,7 @@ def test_list_automation_rules_returns_all_rules(
     rules = list_automation_rules()
     assert {rule.id for rule in rules} == {
         "evening-arrival-home-lights",
+        "evening-lights-off-both-home",
         "kristen-west-point-arrive",
         "kristen-west-point-leave",
     }

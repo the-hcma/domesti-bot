@@ -71,8 +71,13 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     listed = client.get("/v1/rules")
     assert listed.status_code == HTTPStatus.OK
     ids = {row["id"] for row in listed.json()}
-    assert "evening-arrival-home-lights" in ids
-    assert len(ids) == 3
+    expected_ids = {
+        "evening-arrival-home-lights",
+        "evening-lights-off-both-home",
+        "kristen-west-point-arrive",
+        "kristen-west-point-leave",
+    }
+    assert ids == expected_ids
 
     one = client.get("/v1/rules/evening-arrival-home-lights")
     assert one.status_code == HTTPStatus.OK
@@ -85,7 +90,7 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     status = client.get("/v1/rules/status")
     assert status.status_code == HTTPStatus.OK
     body = status.json()
-    assert len(body["rules"]) == 3
+    assert {row["id"] for row in body["rules"]} == expected_ids
     assert body["sun"]["sunset_at"].endswith("Z")
 
 
