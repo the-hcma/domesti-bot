@@ -199,7 +199,20 @@ export type RuleConditionOut =
       /** JavaScript ``Date.getDay()`` values: 0 = Sunday … 6 = Saturday. */
       type: "days_of_week";
       days: number[];
+    }
+  | {
+      type: "devices_all_on";
+      devices: RuleConditionDeviceRefOut[];
+    }
+  | {
+      type: "devices_any_on";
+      devices: RuleConditionDeviceRefOut[];
     };
+
+export interface RuleConditionDeviceRefOut {
+  device_id: string;
+  family_id: string;
+}
 
 export interface TimeConditionTemplateOut {
   template_id: string;

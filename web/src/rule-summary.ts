@@ -26,6 +26,8 @@ export interface RuleSummarySections {
   presence: string[];
   /** Clock and astronomical time windows. */
   timing: string[];
+  /** Device power-state requirements. */
+  devices: string[];
   /** Device commands when the rule fires. */
   actions: string[];
 }
@@ -237,6 +239,8 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case "users_inside_geofence":
     case "users_inside_geofence_for_s":
     case "users_outside_geofence":
+    case "devices_all_on":
+    case "devices_any_on":
       return null;
     case "all":
     case "any":
@@ -266,6 +270,23 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case "days_of_week":
       return formatDaysOfWeek(condition.days);
   }
+}
+
+export function formatDeviceStateCondition(
+  condition: Extract<
+    RuleConditionOut,
+    { type: "devices_all_on" | "devices_any_on" }
+  >,
+  context: RuleSummaryContext,
+): string {
+  const labels = condition.devices.map((entry) =>
+    resolveDeviceLabel(entry.family_id, entry.device_id, context),
+  );
+  const joined = joinNames(labels);
+  if (condition.type === "devices_any_on") {
+    return `Any of ${joined} is on`;
+  }
+  return `All of ${joined} are on`;
 }
 
 export function formatDeviceActionPhrase(
@@ -306,6 +327,7 @@ export function summarizeRule(
 ): RuleSummarySections {
   const presence: string[] = [];
   const timing: string[] = [];
+  const devices: string[] = [];
   walkRuleConditions(rule.conditions.all, (condition) => {
     if (condition.type === "users_inside_geofence_for_s") {
       presence.push(formatGeofenceDwellLabel(condition, context));
@@ -318,6 +340,13 @@ export function summarizeRule(
       presence.push(formatPresenceEventLabel(condition, context));
       return;
     }
+    if (
+      condition.type === "devices_all_on"
+      || condition.type === "devices_any_on"
+    ) {
+      devices.push(formatDeviceStateCondition(condition, context));
+      return;
+    }
     const timingLine = formatTimingCondition(condition);
     if (timingLine !== null) {
       timing.push(timingLine);
@@ -327,7 +356,7 @@ export function summarizeRule(
     const label = resolveDeviceLabel(entry.family_id, entry.device_id, context);
     return formatDeviceActionPhrase(entry.action, label);
   });
-  return { presence, timing, actions };
+  return { presence, timing, devices, actions };
 }
 
 function appendSummarySection(
@@ -383,6 +412,7 @@ export function appendRuleSummaryBody(
   body.className = "rules-rule-summary";
   appendPresenceSummarySection(body, sections.presence);
   appendSummarySection(body, "When", sections.timing);
+  appendSummarySection(body, "If", sections.devices);
   appendSummarySection(body, "Then", sections.actions);
   if (body.childElementCount > 0) {
     parent.append(body);

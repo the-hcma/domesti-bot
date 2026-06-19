@@ -100,6 +100,7 @@ def build_rules_status(
         else {}
     )
     eval_ctx = RuleEvaluationContext(
+        device_state=device_state,
         geofence_inside_since=inside_since,
         geofences=tuple(geofences),
         now=effective_now,

@@ -536,6 +536,23 @@ class DaysOfWeekCondition(BaseModel):
     days: list[int]
 
 
+class RuleConditionDeviceRefOut(BaseModel):
+    """One device reference inside a device-state rule condition."""
+
+    device_id: str
+    family_id: DeviceFamilyId
+
+
+class DevicesAllOnCondition(BaseModel):
+    type: Literal["devices_all_on"]
+    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
+
+
+class DevicesAnyOnCondition(BaseModel):
+    type: Literal["devices_any_on"]
+    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
+
+
 class LocalTimeWindowCondition(BaseModel):
     type: Literal["local_time_window"]
     end_hhmm: str
@@ -569,6 +586,8 @@ RuleConditionOut = Annotated[
     | BeforeLocalTimeCondition
     | BeforeSunriseCondition
     | DaysOfWeekCondition
+    | DevicesAllOnCondition
+    | DevicesAnyOnCondition
     | LocalTimeWindowCondition
     | UsersInsideGeofenceCondition
     | UsersInsideGeofenceForSCondition
