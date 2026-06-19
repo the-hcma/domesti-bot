@@ -31,9 +31,12 @@ from app.cron_schedule import (
     next_scheduled_evaluate_at,
 )
 from app.domesti_bot_cli import DeviceManagersState
+from app.location_history_retention import LocationHistoryRetention
+from app.mytracks_store import load_location_history_retention
 from app.presence_store import (
     UserLocationRecord,
     geofence_ids_containing_location,
+    list_user_location_history_for_user,
     list_user_locations,
 )
 from app.rule_actions import (
@@ -56,6 +59,7 @@ from app.rule_validation import (
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 
 _LOGGER = logging.getLogger(__name__)
+_GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
 _MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
 _RULE_EVALUATOR_TICK_S = 60.0
 DeferredGeofenceEvent = Literal["entered", "left"]
@@ -105,8 +109,8 @@ class RuleEvaluator:
         self._cache_path = cache_path
         self._device_state_getter = device_state_getter
         self._now_fn = now_fn or time.time
-        # Outside-since timestamps are in-memory only; a restart clears them so the
-        # first geofence enter after a bounce is never falsely debounced.
+        # Geofence streak timestamps are rebuilt from SQLite location history on
+        # startup so outside/inside dwell debounce survives restarts.
         self._deferred_accuracy_edges: dict[
             tuple[str, str, str, str],
             _DeferredAccuracyEdge,
@@ -142,7 +146,12 @@ class RuleEvaluator:
         )
 
     def geofence_inside_since_snapshot(self) -> dict[tuple[str, str], float]:
+        """Return a copy of inside-dwell streak start times keyed by user and geofence."""
         return dict(self._geofence_inside_since)
+
+    def geofence_outside_since_snapshot(self) -> dict[tuple[str, str], float]:
+        """Return a copy of outside-dwell streak start times keyed by user and geofence."""
+        return dict(self._geofence_outside_since)
 
     @property
     def last_run_at(self) -> float | None:
@@ -719,6 +728,7 @@ class RuleEvaluator:
         self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
 
     def _seed_geofence_state(self) -> None:
+        """Initialize geofence transition maps from SQLite history or latest locations."""
         cache_path = self._cache_path
         if cache_path is None:
             return
@@ -727,7 +737,44 @@ class RuleEvaluator:
         rules = list_automation_rules()
         edge_accuracy_limit_m = _geofence_edge_accuracy_limit_m(rules)
         dwell_accuracy_limit_m = _geofence_dwell_accuracy_limit_m(rules)
+        retention = load_location_history_retention(cache_path)
+        history_since = _geofence_seed_history_since_epoch(
+            rules,
+            now=self._now_fn(),
+            retention=retention,
+        )
         for user_id, location in locations.items():
+            history = list_user_location_history_for_user(
+                cache_path,
+                user_id,
+                since=history_since,
+            )
+            if history:
+                for geofence in geofences:
+                    if not geofence.enabled:
+                        continue
+                    was_inside, outside_since, inside_since = (
+                        _reconstruct_geofence_seed_from_history(
+                            geofence,
+                            history,
+                            dwell_accuracy_limit_m=dwell_accuracy_limit_m,
+                            edge_accuracy_limit_m=edge_accuracy_limit_m,
+                        )
+                    )
+                    if (
+                        was_inside is None
+                        and outside_since is None
+                        and inside_since is None
+                    ):
+                        continue
+                    key = (user_id, geofence.geofence_id)
+                    if was_inside is not None:
+                        self._geofence_was_inside[key] = was_inside
+                        if not was_inside and outside_since is not None:
+                            self._geofence_outside_since[key] = outside_since
+                    if inside_since is not None:
+                        self._geofence_inside_since[key] = inside_since
+                continue
             inside_ids = set(geofence_ids_containing_location(location, geofences))
             edge_accuracy_passes = _location_accuracy_passes(
                 location,
@@ -1045,6 +1092,7 @@ def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
 
 
 def _geofence_dwell_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
+    """Return the strictest accuracy limit among enabled rules with dwell conditions."""
     limits = [
         rule.min_location_accuracy_m
         for rule in rules
@@ -1056,6 +1104,7 @@ def _geofence_dwell_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
 
 
 def _geofence_edge_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
+    """Return the strictest accuracy limit among enabled ``edge_true`` rules."""
     limits = [
         rule.min_location_accuracy_m
         for rule in rules
@@ -1066,7 +1115,30 @@ def _geofence_edge_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
     return min(limits)
 
 
+def _geofence_seed_history_since_epoch(
+    rules: list[RuleOut],
+    *,
+    now: float,
+    retention: LocationHistoryRetention,
+) -> float:
+    """Return the oldest ``received_at`` to load when seeding geofence streak state."""
+    lookback_s = _MIN_GEOFENCE_OUTSIDE_DWELL_S
+    lookback_s = max(lookback_s, _max_dwell_min_inside_s(rules))
+    for rule in rules:
+        if not rule.enabled:
+            continue
+        grace_s = rule.accuracy_edge_grace_s
+        if grace_s is not None and grace_s > 0:
+            lookback_s = max(lookback_s, float(grace_s))
+    if retention.unlimited:
+        lookback_s = max(lookback_s, _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S)
+    else:
+        lookback_s = max(lookback_s, retention.max_age_s)
+    return now - lookback_s
+
+
 def _geofence_record_to_out(record: GeofenceRecord) -> GeofenceOut:
+    """Map a persisted geofence row to the HTTP response schema."""
     return GeofenceOut(
         center_lat=record.center_lat,
         center_lon=record.center_lon,
@@ -1082,6 +1154,7 @@ def _location_accuracy_passes(
     location: UserLocationRecord,
     limit_m: int | None,
 ) -> bool:
+    """Return whether ``location`` meets an optional accuracy ceiling in metres."""
     if limit_m is None:
         return True
     if location.accuracy_m is None:
@@ -1090,9 +1163,105 @@ def _location_accuracy_passes(
 
 
 def _location_received_at_iso(location: UserLocationRecord) -> str:
+    """Format ``location.received_at`` as a UTC ISO-8601 string with a ``Z`` suffix."""
     return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
         "+00:00", "Z"
     )
+
+
+def _max_dwell_min_inside_s(rules: list[RuleOut]) -> float:
+    """Return the largest ``min_inside_s`` across enabled dwell rules."""
+    max_s = 0.0
+    for rule in rules:
+        if not rule.enabled:
+            continue
+        max_s = max(
+            max_s,
+            _max_dwell_min_inside_s_from_conditions(rule.conditions.all),
+        )
+    return max_s
+
+
+def _max_dwell_min_inside_s_from_conditions(
+    conditions: list[RuleConditionOut],
+) -> float:
+    """Return the largest ``min_inside_s`` nested under ``conditions``."""
+    max_s = 0.0
+    for condition in conditions:
+        if isinstance(condition, UsersInsideGeofenceForSCondition):
+            max_s = max(max_s, float(condition.min_inside_s))
+        elif isinstance(condition, AllConditionsCondition):
+            max_s = max(
+                max_s,
+                _max_dwell_min_inside_s_from_conditions(condition.conditions),
+            )
+        elif isinstance(condition, AnyConditionsCondition):
+            max_s = max(
+                max_s,
+                _max_dwell_min_inside_s_from_conditions(condition.conditions),
+            )
+    return max_s
+
+
+def _reconstruct_geofence_seed_from_history(
+    geofence: GeofenceRecord,
+    history: list[UserLocationRecord],
+    *,
+    dwell_accuracy_limit_m: int | None,
+    edge_accuracy_limit_m: int | None,
+) -> tuple[bool | None, float | None, float | None]:
+    """Rebuild geofence streak timestamps from ordered location history rows."""
+    if not history:
+        return None, None, None
+    was_inside: bool | None = None
+    for row in reversed(history):
+        if not _location_accuracy_passes(row, edge_accuracy_limit_m):
+            continue
+        inside_ids = set(geofence_ids_containing_location(row, [geofence]))
+        was_inside = geofence.geofence_id in inside_ids
+        break
+    outside_since: float | None = None
+    if was_inside is False:
+        streak_start: float | None = None
+        latest_outside_at: float | None = None
+        saw_inside_before_streak = False
+        for row in reversed(history):
+            if not _location_accuracy_passes(row, edge_accuracy_limit_m):
+                continue
+            inside_ids = set(geofence_ids_containing_location(row, [geofence]))
+            if geofence.geofence_id in inside_ids:
+                saw_inside_before_streak = True
+                break
+            streak_start = row.received_at
+            if latest_outside_at is None:
+                latest_outside_at = row.received_at
+        if streak_start is not None and latest_outside_at is not None:
+            if saw_inside_before_streak:
+                outside_since = streak_start
+            elif (
+                latest_outside_at - streak_start >= _MIN_GEOFENCE_OUTSIDE_DWELL_S
+            ):
+                outside_since = streak_start
+    inside_since: float | None = None
+    if dwell_accuracy_limit_m is not None:
+        currently_inside_dwell: bool | None = None
+        for row in reversed(history):
+            if not _location_accuracy_passes(row, dwell_accuracy_limit_m):
+                continue
+            inside_ids = set(geofence_ids_containing_location(row, [geofence]))
+            currently_inside_dwell = geofence.geofence_id in inside_ids
+            break
+        if currently_inside_dwell:
+            streak_start = None
+            for row in reversed(history):
+                if not _location_accuracy_passes(row, dwell_accuracy_limit_m):
+                    continue
+                inside_ids = set(geofence_ids_containing_location(row, [geofence]))
+                if geofence.geofence_id not in inside_ids:
+                    break
+                streak_start = row.received_at
+            inside_since = streak_start
+    return was_inside, outside_since, inside_since
 
 
 def _log_deferred_edge_cancelled(

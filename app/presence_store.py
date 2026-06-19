@@ -64,6 +64,31 @@ def geofence_ids_containing_location(
     return inside
 
 
+def list_user_location_history_for_user(
+    path: Path,
+    user_id: str,
+    *,
+    since: float | None = None,
+) -> list[UserLocationRecord]:
+    """Return location history for ``user_id`` oldest-first.
+
+    When ``since`` is set, only rows with ``received_at >= since`` are returned.
+    """
+    with discovery_session(path) as session:
+        query = select(RuleUserLocationHistory).where(
+            RuleUserLocationHistory.user_id == user_id
+        )
+        if since is not None:
+            query = query.where(RuleUserLocationHistory.received_at >= since)
+        rows = session.scalars(
+            query.order_by(
+                RuleUserLocationHistory.received_at.asc(),
+                RuleUserLocationHistory.id.asc(),
+            )
+        ).all()
+        return [_history_to_record(row) for row in rows]
+
+
 def list_user_locations(path: Path) -> dict[str, UserLocationRecord]:
     """Return the latest location per user id."""
     with discovery_session(path) as session:
@@ -253,6 +278,7 @@ def upsert_user_location(
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return the great-circle distance in metres between two WGS84 points."""
     earth_radius_m = 6_371_000.0
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
@@ -265,7 +291,20 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * earth_radius_m * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _history_to_record(row: RuleUserLocationHistory) -> UserLocationRecord:
+    """Map a ``RuleUserLocationHistory`` ORM row to ``UserLocationRecord``."""
+    return UserLocationRecord(
+        user_id=row.user_id,
+        lat=row.lat,
+        lon=row.lon,
+        accuracy_m=row.accuracy_m,
+        received_at=row.received_at,
+        source=row.source,
+    )
+
+
 def _location_to_record(row: RuleUserLastLocation) -> UserLocationRecord:
+    """Map a ``RuleUserLastLocation`` ORM row to ``UserLocationRecord``."""
     return UserLocationRecord(
         user_id=row.user_id,
         lat=row.lat,
