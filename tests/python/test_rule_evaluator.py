@@ -184,6 +184,7 @@ def _setup_arrive_home_evaluator(
     cooldown_s: int,
     device_state_getter: Callable[[], DeviceManagersState | None] | None = None,
 ) -> _ArriveHomeFixture:
+    """Create an arrive-home rule evaluator with henrique starting outside the house."""
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
     _write_bundle(bundle, _arrive_home_rule(cooldown_s=cooldown_s))
@@ -195,7 +196,7 @@ def _setup_arrive_home_evaluator(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"],
+        received_at=clock["now"] - 400.0,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     state = DeviceManagersState(
@@ -326,7 +327,7 @@ async def test_rule_evaluator_records_error_when_notification_email_fails(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"],
+        received_at=clock["now"] - 400.0,
     )
     evaluator = RuleEvaluator(
         cache_path=db,
@@ -528,6 +529,7 @@ async def test_rule_evaluator_seeds_geofence_inside_since_on_boot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Boot seeding sets ``inside_since`` when the latest location is inside."""
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
     dwell_rule = RuleOut(
@@ -570,6 +572,152 @@ async def test_rule_evaluator_seeds_geofence_inside_since_on_boot(
     assert evaluator.geofence_inside_since_snapshot() == {
         ("henrique", "house"): received_at,
     }
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_seeds_inside_since_from_history_streak_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boot seeding sets ``inside_since`` to the streak start, not the latest fix."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    dwell_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="dwell-only",
+        label="Dwell only",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    _write_bundle(bundle, dwell_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    base = 1_700_000_000.0
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Test",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    for offset in (0, 300, 600, 900, 1200):
+        upsert_user_location(
+            db,
+            UserLocationRecord(
+                user_id="henrique",
+                lat=41.194085,
+                lon=-73.888365,
+                accuracy_m=20,
+                received_at=base + offset,
+                source="test",
+            ),
+            retention=default_location_history_retention(),
+        )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: base + 1200,
+    )
+    assert evaluator.geofence_inside_since_snapshot() == {
+        ("henrique", "house"): base,
+    }
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_seeds_outside_since_from_history_and_fires_enter_after_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Outside streak history survives restart so enter-edge rules fire without re-debouncing."""
+    fixture = _setup_arrive_home_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+    )
+    outside_start = fixture.clock["now"] - 400.0
+    for offset in (100, 200, 400):
+        upsert_user_location(
+            fixture.db,
+            UserLocationRecord(
+                user_id="henrique",
+                lat=44.0,
+                lon=-73.0,
+                accuracy_m=20,
+                received_at=outside_start + offset,
+                source="test",
+            ),
+            retention=default_location_history_retention(),
+        )
+    fixture.clock["now"] = outside_start + 400
+    fixture.evaluator = RuleEvaluator(
+        cache_path=fixture.db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr([fixture.device]),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=fixture.db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: fixture.clock["now"],
+    )
+    assert fixture.evaluator.geofence_outside_since_snapshot() == {
+        ("henrique", "house"): outside_start,
+    }
+    await fixture.evaluator.on_location_update("henrique")
+    assert fixture.evaluator.geofence_outside_since_snapshot() == {
+        ("henrique", "house"): outside_start,
+    }
+    fixture.clock["now"] += 30.0
+    upsert_user_location(
+        fixture.db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=fixture.clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await fixture.evaluator.on_location_update("henrique")
+    assert fixture.device.calls == ["on"]
 
 
 @pytest.mark.asyncio
