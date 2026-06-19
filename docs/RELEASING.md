@@ -4,7 +4,13 @@ PyPI publishing is automated from `main` via [Release Please](https://github.com
 
 ## Published releases
 
-- **0.1.0** (2026-05-19) — first PyPI release ([`domesti-bot` on PyPI](https://pypi.org/project/domesti-bot/)). Install: `pipx install domesti-bot`.
+Release history lives in [`CHANGELOG.md`](../CHANGELOG.md). The installable version is always
+[`[project].version`](../pyproject.toml) on `main` after a release PR merges, mirrored on
+[PyPI](https://pypi.org/project/domesti-bot/).
+
+The README PyPI badge (`https://img.shields.io/pypi/v/domesti-bot`) tracks PyPI automatically —
+no manual bump in git. After each publish, CI runs `scripts/verify-pypi-release
+--check-shields-badge` to confirm PyPI and the badge match `pyproject.toml`.
 
 ## Merge strategy (avoid duplicate changelog lines)
 
@@ -20,8 +26,8 @@ Duplicate lines in [release PR #112](https://github.com/the-hcma/domesti-bot/pul
 
 1. Land changes on `main` with [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, …).
 2. Release Please opens or updates a **release PR** that bumps `[project].version` in `pyproject.toml` and `CHANGELOG.md`.
-3. Merge the release PR. GitHub creates a version tag (for example `v0.2.0`) and the **Publish PyPI** workflow runs.
-4. CI builds the web bundle, embeds version/commit metadata, runs `uv build`, and `uv publish`.
+3. Merge the release PR. GitHub creates a version tag (for example `v1.2.0`) and the **Publish PyPI** workflow runs.
+4. CI builds the web bundle, embeds version/commit metadata, runs `uv build`, `uv publish`, then **`scripts/verify-pypi-release --check-shields-badge`**.
 
 ## Build metadata
 
