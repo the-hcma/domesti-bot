@@ -1320,6 +1320,10 @@ True when every listed user is currently inside **and** `now - inside_since[user
 
 **Restart behavior:** dwell and outside debounce clocks survive restart via `rule_user_geofence_state` (history backfill only for pairs without a persisted row).
 
+**Location history pruning:** `prune_user_location_history` runs after each stored webhook and when retention settings change. It deletes rows from `rule_user_location_history` only — it never reads or rewrites `rule_user_geofence_state`. Dwell/edge columns are updated on live edge-accuracy ingest (`_persist_geofence_transition_state`), so `outside_since` / `inside_since` captured at transition time survive routine prunes while the server is ingesting locations.
+
+**Known gap (offline + pruned history):** History backfill and live gap reconcile only see readings still retained (`max_age_s` ∪ `min_keep_count`). If the evaluator was down long enough that no row was persisted (or the row is stale vs. the latest reading) *and* the true inside/outside streak started before that window, restart cannot reconstruct the full streak — enter-edge debounce may be too short. Steady-state ingest avoids this. Not addressed in code today; optional future hardening: snapshot streak anchors before aggressive retention changes or reconcile persisted rows on prune (tracked here for operators).
+
 Status API: condition row detail like `hcma inside 12 min (need 10 min)` / `kristen outside`.
 
 #### Design: device-state conditions
