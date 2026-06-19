@@ -199,3 +199,6 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Verify PyPI release and README badge
+        run: ./scripts/verify-pypi-release --check-shields-badge

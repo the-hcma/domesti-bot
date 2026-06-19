@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# Poll PyPI (and optionally shields.io) until the published version matches
+# [project].version in pyproject.toml. Used after release-please publish.
+set -euo pipefail
+
+readonly default_package='domesti-bot'
+readonly default_timeout_s=300
+readonly default_poll_interval_s=15
+readonly pyproject_path='pyproject.toml'
+readonly curl_connect_timeout_s=5
+readonly curl_max_time_s=15
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/verify-pypi-release [options]
+
+Poll until domesti-bot on PyPI reports the expected version.
+
+Options:
+  --package NAME           PyPI project name (default: domesti-bot)
+  --version VERSION        Expected version (default: read from pyproject.toml)
+  --timeout SECONDS        Give up after this many seconds (default: 300)
+  --poll-interval SECONDS  Seconds between attempts (default: 15)
+  --check-shields-badge    Also assert shields.io PyPI badge matches
+  -h, --help               Show this help
+
+Exit codes:
+  0  PyPI (and optional badge) match the expected version
+  1  usage / prerequisite error
+  2  timed out waiting for PyPI to show the expected version
+  3  timed out waiting for shields.io badge (when --check-shields-badge is set)
+EOF
+}
+
+die() {
+  printf 'verify-pypi-release: %s\n' "$*" >&2
+  exit 1
+}
+
+fetch_pypi_version() {
+  local -r package="$1"
+  curl -fsSL \
+    --connect-timeout "${curl_connect_timeout_s}" \
+    --max-time "${curl_max_time_s}" \
+    "https://pypi.org/pypi/${package}/json" | jq -r '.info.version'
+}
+
+fetch_shields_version() {
+  local -r package="$1"
+  local raw
+  raw="$(curl -fsSL \
+    --connect-timeout "${curl_connect_timeout_s}" \
+    --max-time "${curl_max_time_s}" \
+    "https://img.shields.io/pypi/v/${package}.json" | jq -r '.value // .message')"
+  normalize_shields_version "${raw}"
+}
+
+main() {
+  local package="${default_package}"
+  local expected_version=''
+  local timeout_s="${default_timeout_s}"
+  local poll_interval_s="${default_poll_interval_s}"
+  local check_shields_badge=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --package)
+        package="$(require_option_value --package "${2:-}")"
+        shift 2
+        ;;
+      --version)
+        expected_version="$(require_option_value --version "${2:-}")"
+        shift 2
+        ;;
+      --timeout)
+        timeout_s="$(require_option_value --timeout "${2:-}")"
+        shift 2
+        ;;
+      --poll-interval)
+        poll_interval_s="$(require_option_value --poll-interval "${2:-}")"
+        shift 2
+        ;;
+      --check-shields-badge)
+        check_shields_badge=true
+        shift
+        ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "unknown argument: $1"
+        ;;
+    esac
+  done
+
+  require_cmd curl
+  require_cmd jq
+
+  expected_version="$(read_expected_version "${expected_version}")"
+  if [[ ! "${timeout_s}" =~ ^[0-9]+$ ]] || [[ "${timeout_s}" -lt 1 ]]; then
+    die "Expected a positive integer for --timeout, got ${timeout_s@Q}"
+  fi
+  if [[ ! "${poll_interval_s}" =~ ^[0-9]+$ ]] || [[ "${poll_interval_s}" -lt 1 ]]; then
+    die "Expected a positive integer for --poll-interval, got ${poll_interval_s@Q}"
+  fi
+
+  local deadline=$((SECONDS + timeout_s))
+  local pypi_version=''
+  while ((SECONDS < deadline)); do
+    if ! pypi_version="$(fetch_pypi_version "${package}")"; then
+      printf 'verify-pypi-release: transient PyPI lookup failure; retrying…\n' >&2
+      sleep "${poll_interval_s}"
+      continue
+    fi
+    if [[ "${pypi_version}" == "${expected_version}" ]]; then
+      printf 'verify-pypi-release: PyPI %s is at %s\n' "${package}" "${pypi_version}" >&2
+      if [[ "${check_shields_badge}" == 'true' ]]; then
+        wait_for_shields_badge "${package}" "${expected_version}" "${deadline}" "${poll_interval_s}"
+      fi
+      exit 0
+    fi
+    printf 'verify-pypi-release: PyPI has %s, waiting for %s…\n' \
+      "${pypi_version}" "${expected_version}" >&2
+    sleep "${poll_interval_s}"
+  done
+
+  printf 'verify-pypi-release: timed out after %ss; PyPI still at %s, expected %s\n' \
+    "${timeout_s}" "${pypi_version}" "${expected_version}" >&2
+  exit 2
+}
+
+normalize_shields_version() {
+  local raw="$1"
+  raw="${raw#v}"
+  printf '%s' "${raw}"
+}
+
+read_expected_version() {
+  local -r explicit_version="${1:-}"
+  if [[ -n "${explicit_version}" ]]; then
+    printf '%s' "${explicit_version}"
+    return 0
+  fi
+  [[ -f "${pyproject_path}" ]] || die "missing ${pyproject_path}; pass --version"
+  require_cmd uv
+  uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])'
+}
+
+require_cmd() {
+  local -r name="$1"
+  command -v "${name}" >/dev/null 2>&1 || die "required command not found: ${name}"
+}
+
+require_option_value() {
+  local -r flag="$1"
+  local -r value="${2:-}"
+  if [[ -z "${value}" || "${value}" == --* ]]; then
+    die "option ${flag} requires a value"
+  fi
+  printf '%s' "${value}"
+}
+
+wait_for_shields_badge() {
+  local -r package="$1"
+  local -r expected_version="$2"
+  local -r deadline="$3"
+  local -r poll_interval_s="$4"
+  local badge_version=''
+
+  while ((SECONDS < deadline)); do
+    badge_version=''
+    if badge_version="$(fetch_shields_version "${package}")"; then
+      if [[ "${badge_version}" == "${expected_version}" ]]; then
+        printf 'verify-pypi-release: shields.io badge matches %s\n' "${badge_version}" >&2
+        return 0
+      fi
+      printf 'verify-pypi-release: shields.io has %s, waiting for %s…\n' \
+        "${badge_version}" "${expected_version}" >&2
+    else
+      printf 'verify-pypi-release: transient shields.io lookup failure; retrying…\n' >&2
+    fi
+    sleep "${poll_interval_s}"
+  done
+
+  printf 'verify-pypi-release: timed out waiting for shields.io; last=%s expected=%s\n' \
+    "${badge_version:-unknown}" "${expected_version}" >&2
+  exit 3
+}
+
+main "$@"
