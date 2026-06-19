@@ -330,6 +330,7 @@ export function appendRuleLastMetLine(
   rule: {
     last_fired_at: string | null;
     next_evaluate_at: string | null;
+    scheduled_detail: string | null;
     trigger: RuleTrigger;
   },
 ): void {
@@ -348,6 +349,12 @@ export function appendRuleLastMetLine(
     next.append(document.createTextNode("Next evaluate "));
     next.append(createAuditedTimeElement(rule.next_evaluate_at));
     parent.append(next);
+  }
+  if (rule.scheduled_detail != null && rule.scheduled_detail !== "") {
+    const detail = document.createElement("p");
+    detail.className = "rules-card-meta";
+    detail.textContent = rule.scheduled_detail;
+    parent.append(detail);
   }
 }
 

@@ -246,10 +246,13 @@ export type RuleOut =
       trigger: "scheduled";
       /** 5-field cron (minute hour day month weekday); home timezone from settings. */
       schedule_cron: string;
+      /** At most one fire per local calendar day (home timezone). */
+      fire_once_per_local_day?: boolean;
     })
   | (RuleOutShared & {
       trigger: "edge_true" | "while_true";
       schedule_cron?: null;
+      fire_once_per_local_day?: false;
     });
 
 export interface SmtpConfigIn {
@@ -417,6 +420,7 @@ export interface RuleStatusSummaryOut {
   last_fired_at: string | null;
   last_error: string | null;
   next_evaluate_at: string | null;
+  scheduled_detail: string | null;
   reference_issues: RuleReferenceIssueOut[];
   trigger: RuleTrigger;
 }

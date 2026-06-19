@@ -73,6 +73,7 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     ids = {row["id"] for row in listed.json()}
     expected_ids = {
         "evening-arrival-home-lights",
+        "evening-interior-lights-on-anyone-home",
         "evening-lights-off-both-home",
         "kristen-west-point-arrive",
         "kristen-west-point-leave",

@@ -2,10 +2,29 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
+
+
+def fired_on_same_local_calendar_day(
+    last_fired_at: float | None,
+    now_epoch: float,
+    timezone: ZoneInfo,
+) -> bool:
+    """True when ``last_fired_at`` and ``now_epoch`` fall on the same local date."""
+    if last_fired_at is None:
+        return False
+    return local_calendar_date(last_fired_at, timezone) == local_calendar_date(
+        now_epoch,
+        timezone,
+    )
+
+
+def local_calendar_date(epoch_seconds: float, timezone: ZoneInfo) -> date:
+    """Return the local calendar date for ``epoch_seconds`` in ``timezone``."""
+    return datetime.fromtimestamp(epoch_seconds, tz=timezone).date()
 
 
 def next_scheduled_evaluate_at(

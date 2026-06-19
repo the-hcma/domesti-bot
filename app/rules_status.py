@@ -22,6 +22,7 @@ from app.api.schemas import (
     UserStatusOut,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
+from app.cron_schedule import fired_on_same_local_calendar_day
 from app.presence_store import (
     UserLocationRecord,
     geofence_ids_containing_location,
@@ -123,10 +124,24 @@ def build_rules_status(
         evaluation = evaluate_rule(rule, eval_ctx)
         fire_state = _fire_state_for_rule(evaluator, rule.id)
         next_evaluate_at: str | None = None
+        scheduled_detail: str | None = None
         if rule.trigger == "scheduled" and rule.enabled and evaluator is not None:
             scheduled_at = evaluator.next_evaluate_at_for_rule(rule.id)
             if scheduled_at is not None:
                 next_evaluate_at = _epoch_to_iso_z(scheduled_at)
+        if (
+            rule.trigger == "scheduled"
+            and rule.fire_once_per_local_day
+            and fire_state.last_fired_at is not None
+            and fired_on_same_local_calendar_day(
+                fire_state.last_fired_at,
+                effective_now.timestamp(),
+                tz,
+            )
+        ):
+            scheduled_detail = (
+                "Already fired today (next eligible after local midnight)"
+            )
         rule_rows.append(
             RuleStatusSummaryOut(
                 condition_currently_true=evaluation.all_met,
@@ -142,6 +157,7 @@ def build_rules_status(
                 ),
                 next_evaluate_at=next_evaluate_at,
                 reference_issues=validate_rule(rule, validation_ctx),
+                scheduled_detail=scheduled_detail,
                 trigger=rule.trigger,
             )
         )
