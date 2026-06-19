@@ -631,6 +631,13 @@ class RuleOut(BaseModel):
     cooldown_s: int
     device_actions: list[RuleDeviceActionOut]
     enabled: bool
+    fire_once_per_local_day: bool = Field(
+        default=False,
+        description=(
+            "When true on a scheduled rule, fire at most once per local calendar day "
+            "(timezone from settings_location)."
+        ),
+    )
     id: str
     label: str
     min_location_accuracy_m: int
@@ -646,7 +653,7 @@ class RuleOut(BaseModel):
     trigger: RuleTriggerOut
 
     @model_validator(mode="after")
-    def _validate_schedule_cron(self) -> Self:
+    def _validate_trigger_fields(self) -> Self:
         cron = (self.schedule_cron or "").strip()
         if self.trigger == "scheduled":
             validate_schedule_cron_expression(cron)
@@ -657,6 +664,10 @@ class RuleOut(BaseModel):
                 "schedule_cron is only allowed when trigger is scheduled"
             )
         self.schedule_cron = None
+        if self.fire_once_per_local_day:
+            raise ValueError(
+                "fire_once_per_local_day is only allowed when trigger is scheduled"
+            )
         return self
 
 
@@ -687,6 +698,7 @@ class RuleStatusSummaryOut(BaseModel):
     last_fired_at: str | None = None
     next_evaluate_at: str | None = None
     reference_issues: list[RuleReferenceIssueOut] = Field(default_factory=list)
+    scheduled_detail: str | None = None
     trigger: RuleTriggerOut
 
 

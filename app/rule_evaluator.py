@@ -25,7 +25,11 @@ from app.api.schemas import (
     UsersOutsideGeofenceCondition,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
-from app.cron_schedule import next_scheduled_evaluate_at
+from app.cron_schedule import (
+    fired_on_same_local_calendar_day,
+    local_calendar_date,
+    next_scheduled_evaluate_at,
+)
 from app.domesti_bot_cli import DeviceManagersState
 from app.presence_store import (
     UserLocationRecord,
@@ -278,24 +282,40 @@ class RuleEvaluator:
                 rule.id,
                 evaluation.all_met,
             )
-            if evaluation.all_met and self._cooldown_elapsed(rule, runtime):
-                await self._execute_rule(
-                    rule,
-                    evaluation=evaluation,
-                    fire_source="scheduled",
-                    transitions={},
-                    user_id=user_id,
-                )
-            elif evaluation.all_met:
-                remaining_s = rule.cooldown_s - (
-                    now_epoch - (runtime.last_fired_at or 0.0)
-                )
-                _log_rule_skipped(
-                    rule.id,
-                    user_id,
-                    reason="cooldown",
-                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
-                )
+            if evaluation.all_met:
+                if rule.fire_once_per_local_day and fired_on_same_local_calendar_day(
+                    runtime.last_fired_at,
+                    now_epoch,
+                    timezone,
+                ):
+                    fired_date = local_calendar_date(
+                        runtime.last_fired_at or now_epoch,
+                        timezone,
+                    )
+                    _log_rule_skipped(
+                        rule.id,
+                        user_id,
+                        reason="daily_cap",
+                        detail=f"last_fired_local_date={fired_date.isoformat()}",
+                    )
+                elif self._cooldown_elapsed(rule, runtime):
+                    await self._execute_rule(
+                        rule,
+                        evaluation=evaluation,
+                        fire_source="scheduled",
+                        transitions={},
+                        user_id=user_id,
+                    )
+                else:
+                    remaining_s = rule.cooldown_s - (
+                        now_epoch - (runtime.last_fired_at or 0.0)
+                    )
+                    _log_rule_skipped(
+                        rule.id,
+                        user_id,
+                        reason="cooldown",
+                        detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                    )
             else:
                 _log_rule_skipped(
                     rule.id,
@@ -418,10 +438,13 @@ class RuleEvaluator:
             if rule.device_actions:
                 errors.append("Device discovery still in progress; actions skipped")
         elif rule.device_actions:
-            performed_side_effect = True
-            errors.extend(
-                await dispatch_rule_device_actions(device_state, rule.device_actions)
+            action_errors = await dispatch_rule_device_actions(
+                device_state,
+                rule.device_actions,
             )
+            errors.extend(action_errors)
+            if not action_errors:
+                performed_side_effect = True
         if rule.notify_on_fire and self._cache_path is not None:
             try:
                 await asyncio.to_thread(
@@ -442,8 +465,16 @@ class RuleEvaluator:
                 )
             self._persist_rule_state(rule.id)
             return
-        runtime.last_fired_at = self._now_fn()
         runtime.last_error = "; ".join(errors) if errors else None
+        if errors:
+            _LOGGER.warning(
+                "[rules] rule_id=%s matched but side effects failed: %s",
+                rule.id,
+                runtime.last_error,
+            )
+            self._persist_rule_state(rule.id)
+            return
+        runtime.last_fired_at = self._now_fn()
         self._persist_rule_state(rule.id)
         self._clear_deferred_accuracy_edges_for_rule(rule.id, user_id)
         duration_ms = (time.monotonic() - started) * 1000.0

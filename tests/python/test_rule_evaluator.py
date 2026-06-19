@@ -867,7 +867,11 @@ async def test_rule_evaluator_skips_inside_since_seed_when_dwell_rule_rejects_ac
     assert evaluator.geofence_inside_since_snapshot() == {}
 
 
-def _scheduled_inside_house_rule(*, cooldown_s: int) -> RuleOut:
+def _scheduled_inside_house_rule(
+    *,
+    cooldown_s: int,
+    fire_once_per_local_day: bool = False,
+) -> RuleOut:
     return RuleOut(
         conditions=RuleConditionsOut(all=[_henrique_inside_house_condition()]),
         cooldown_s=cooldown_s,
@@ -879,6 +883,7 @@ def _scheduled_inside_house_rule(*, cooldown_s: int) -> RuleOut:
             ),
         ],
         enabled=True,
+        fire_once_per_local_day=fire_once_per_local_day,
         id="scheduled-inside",
         label="Scheduled inside",
         min_location_accuracy_m=50,
@@ -894,10 +899,17 @@ def _setup_scheduled_evaluator(
     monkeypatch: pytest.MonkeyPatch,
     *,
     cooldown_s: int,
+    fire_once_per_local_day: bool = False,
 ) -> _ArriveHomeFixture:
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
-    _write_bundle(bundle, _scheduled_inside_house_rule(cooldown_s=cooldown_s))
+    _write_bundle(
+        bundle,
+        _scheduled_inside_house_rule(
+            cooldown_s=cooldown_s,
+            fire_once_per_local_day=fire_once_per_local_day,
+        ),
+    )
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
 
     clock = {"now": 1_700_000_000.0}
@@ -996,3 +1008,83 @@ async def test_scheduled_rule_advances_next_evaluate_at_when_conditions_unmet(
     assert fixture.device.calls == []
     assert runtime.next_evaluate_at is not None
     assert runtime.next_evaluate_at > previous_next
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_fire_once_per_local_day_failed_fire_does_not_consume_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_scheduled_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+        fire_once_per_local_day=True,
+    )
+    runtime = fixture.evaluator._rule_state["scheduled-inside"]
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    with patch(
+        "app.rule_evaluator.dispatch_rule_device_actions",
+        return_value=["Device not found: Garage"],
+    ):
+        await fixture.evaluator._evaluate_scheduled_rules()
+    assert runtime.last_fired_at is None
+    assert runtime.last_error == "Device not found: Garage"
+
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == ["on"]
+    assert runtime.last_fired_at == fixture.clock["now"]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_fire_once_per_local_day_fires_after_local_midnight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_scheduled_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+        fire_once_per_local_day=True,
+    )
+    runtime = fixture.evaluator._rule_state["scheduled-inside"]
+    runtime.last_fired_at = fixture.clock["now"] - 86_400.0
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_fire_once_per_local_day_fires_first_tick(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_scheduled_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+        fire_once_per_local_day=True,
+    )
+    runtime = fixture.evaluator._rule_state["scheduled-inside"]
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_fire_once_per_local_day_skips_second_tick_same_day(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_scheduled_evaluator(
+        tmp_path,
+        monkeypatch,
+        cooldown_s=0,
+        fire_once_per_local_day=True,
+    )
+    runtime = fixture.evaluator._rule_state["scheduled-inside"]
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    runtime.last_fired_at = fixture.clock["now"] - 60.0
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == []

@@ -35,9 +35,7 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 
 ### Evaluation model (location-driven edges)
 
-**Shipped today:** `edge_true` rules fire on **geofence enter/leave transitions** when a live location update arrives on `POST /v1/webhooks/location_update`. They do **not** run on a timer.
-
-**Planned (Phase 2c):** **scheduled** rules — periodic housekeeping (e.g. turn off arrival lights when everyone has been home for N minutes after sunset). See [Phase 2c — Scheduled rules and device-state conditions](#phase-2c--scheduled-rules-and-device-state-conditions-planned).
+**Shipped today:** `edge_true` rules fire on **geofence enter/leave transitions** when a live location update arrives on `POST /v1/webhooks/location_update`. **`scheduled`** rules (Phase 2c) re-evaluate on a cron cadence via the 60s evaluator tick. See [Phase 2c](#phase-2c--scheduled-rules-and-device-state-conditions-shipped).
 
 Rules fire on location ingest as follows:
 
@@ -64,6 +62,8 @@ Rules fire on location ingest as follows:
 | `id` | Summary |
 | --- | --- |
 | `evening-arrival-home-lights` | Henrique **or** Kristen enters `house` after sunset → three Kasa `turn_on` + email |
+| `evening-lights-off-both-home` | Scheduled: both home 10+ min after sunset, either arrival light on → `turn_off` (example / operator) |
+| `evening-interior-lights-on-anyone-home` | Scheduled + **once per day**: anyone home after sunset → interior lamps `turn_on` (example) |
 | `kristen-west-point-arrive` | Kristen enters `west-point` → email only |
 | `kristen-west-point-leave` | Kristen leaves `west-point` → email only |
 
@@ -350,9 +350,9 @@ Actions run **sequentially** in list order; a failure logs and continues (one ba
 | --- | --- | --- |
 | `edge_true` | Fire when the composite condition transitions **false → true** on a **location ingest** that includes a matching geofence edge for the updating user. Arrival / departure use case — prevents re-firing every poll while someone remains inside. | **Yes** |
 | `while_true` | Fire on every evaluation while true (subject to cooldown). | **Schema only** — evaluator does not run `while_true` yet. |
-| `scheduled` | Re-evaluate on a cron schedule while enabled; fire when all conditions are met and cooldown allows (repeat while still true). Requires `schedule_cron` on the rule (5-field cron; timezone from `settings_location.timezone`). Evaluated via **`croniter`** (added in PR-C2). | **Phase 2c** — planned. |
+| `scheduled` | Re-evaluate on a cron schedule while enabled; fire when all conditions are met and cooldown allows (repeat while still true unless `fire_once_per_local_day` is set). Requires `schedule_cron` on the rule (5-field cron; timezone from `settings_location.timezone`). Evaluated via **`croniter`**. | **Yes** (Phase 2c) |
 
-Store per-rule state: `last_condition_value: bool` (for future `while_true` / `edge_true` steady-state), `last_fired_at: float | None`, and for `scheduled` rules `next_evaluate_at: float | None`.
+Store per-rule state: `last_condition_value: bool` (for future `while_true` / `edge_true` steady-state), `last_fired_at: float | None`, and for `scheduled` rules `next_evaluate_at: float | None`. When `fire_once_per_local_day` is true (scheduled only), derive “already fired today” from `last_fired_at` in `settings_location.timezone` (no extra persisted field required).
 
 **Cooldown** (`cooldown_s`): after a successful fire, suppress re-fire even if the edge re-occurs (e.g. GPS jitter briefly shows someone outside, then inside again).
 
@@ -1162,25 +1162,28 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 
 - my-tracks roster + presence webhook env vars, cutover checklist, API key on LAN.
 
-### Phase 2c — Scheduled rules and device-state conditions (planned)
+### Phase 2c — Scheduled rules and device-state conditions (shipped)
 
-**Motivating automation (operator request):** after sunset, if **Front door lights** or **Garage outside lights** are still on and **Henrique (`hcma`) and Kristen** have both been inside the home geofence for more than **10 minutes**, turn those lights off. Re-check every **15 minutes** until conditions no longer apply or cooldown suppresses repeat fires.
+**Motivating automation A (shipped):** after sunset, if **Front door lights** or **Garage outside lights** are still on and **Henrique (`hcma`) and Kristen** have both been inside the home geofence for more than **10 minutes**, turn those lights off. Re-check every **15 minutes** until conditions no longer apply or cooldown suppresses repeat fires. Example rule: `evening-lights-off-both-home` in `automation-rules.json.example`.
 
-This is **not** representable with today's `edge_true` + location-ingest model:
+**Motivating automation B (shipped — Phase 2d):** after sunset, if **either** `hcma` **or** `kristen` is currently inside the home geofence, turn on **Kitchen lamp**, **Living room lamp**, and **Living room lamp2** — but **at most once per local calendar day** (0 or 1 fires per evening; no repeat until the next day even if the cron keeps ticking). See [fire_once_per_local_day](#design-fire_once_per_local_day-on-scheduled-rules-shipped).
 
-| Requirement | `edge_true` (shipped) | Gap |
-| --- | --- | --- |
-| `after_sunset` | Yes | — |
-| Both users inside home | Yes (`users_inside_geofence` under `all`) | — |
-| Inside for **> 10 minutes** | No | No `inside_since` / dwell condition |
-| Lights **are on** | No | Conditions are presence/time only; no device-state predicates |
-| Re-check every **15 minutes** | No | Evaluator runs on location webhook only; 60s tick does not evaluate rules |
+This class of automation is **not** representable with `edge_true` + location-ingest alone:
+
+| Requirement | `edge_true` (shipped) | `scheduled` + cooldown (shipped) | Gap |
+| --- | --- | --- | --- |
+| `after_sunset` | Yes | Yes | — |
+| User(s) inside home (steady state) | Only on **enter** edge | Yes (`users_inside_geofence` on each tick) | — |
+| Both users inside for **> N minutes** | No | Yes (`users_inside_geofence_for_s`) | — |
+| Lights **are on** / **off** predicates | No | Yes (`devices_any_on` / `devices_all_on`) | — |
+| Re-check every **15 minutes** | No | Yes (`schedule_cron`) | — |
+| **At most one fire per local day** | No (edge per arrival) | No (rolling `cooldown_s` only) | **`fire_once_per_local_day`** (shipped) |
 
 `while_true` exists in the JSON schema but is **not wired** in `RuleEvaluator` — and even if it were, location-driven evaluation would miss “everyone home 10+ minutes with no new GPS fixes” unless combined with a timer.
 
-#### Design: `scheduled` trigger
+#### Design: `scheduled` trigger (shipped)
 
-Add `trigger: "scheduled"` and a required per-rule cron expression:
+Per-rule cron expression (required when `trigger` is `scheduled`):
 
 ```json
 {
@@ -1189,12 +1192,12 @@ Add `trigger: "scheduled"` and a required per-rule cron expression:
 }
 ```
 
-Use standard **5-field cron** (`minute hour day month weekday`). The home timezone from `settings_location.timezone` in the rule bundle anchors evaluation (same clock as `after_sunset` / local-time conditions). **`croniter`** computes the next fire time (dependency added in **PR-C2** — doc-only in C1).
+Use standard **5-field cron** (`minute hour day month weekday`). The home timezone from `settings_location.timezone` in the rule bundle anchors evaluation (same clock as `after_sunset` / local-time conditions). **`croniter`** computes the next fire time.
 
-Semantics:
+Semantics (shipped):
 
 - On each evaluator tick (global loop stays **60s**), consider scheduled rules whose `next_evaluate_at <= now`.
-- Build `RuleEvaluationContext` (presence, sun, geofences, `geofence_inside_since`) and, for device conditions, include `DeviceManagersState` from `app.state.device_state`.
+- Build `RuleEvaluationContext` (presence, sun, geofences, `geofence_inside_since`, device cache) from `app.state.device_state` when needed.
 - If **all** conditions are met and `cooldown_s` has elapsed → run `device_actions` / `notify_on_fire` (same dispatcher as `edge_true`).
 - Set `next_evaluate_at` to the next `croniter` match after `now` regardless of fire outcome (housekeeping cadence).
 - Fire log includes `source=scheduled` (mirrors `source=deferred` on accuracy grace).
@@ -1202,7 +1205,95 @@ Semantics:
 
 **Not** the same as `while_true` on location ingest: scheduled rules are explicitly timer-driven and may read device cache without any webhook.
 
-Optional later: `fire_mode: "edge_true" | "while_true"` on scheduled rules if we need one-shot vs repeat-within-window; v1 uses **while true + cooldown** only.
+Default repeat semantics: **while conditions stay true**, a scheduled rule may fire again on a later cron tick once `cooldown_s` elapses. For **at most one fire per local calendar day**, use `fire_once_per_local_day` (below).
+
+#### Design: `fire_once_per_local_day` on scheduled rules (shipped)
+
+**Problem:** Operators want “turn the lights on when someone is home after sunset” without re-firing every 15 minutes all evening. A long `cooldown_s` (e.g. 86400) is a poor substitute — it is a **rolling** window, not aligned to local midnight, and can still allow two fires in one calendar evening if timing lines up badly.
+
+**Solution:** optional boolean on `RuleOut`, **only valid when `trigger` is `scheduled`**:
+
+```json
+{
+  "fire_once_per_local_day": true
+}
+```
+
+- **Default:** `false` (omit field) — preserves today’s repeat-while-true + `cooldown_s` behavior.
+- **When `true`:** after a successful fire, suppress any further fires until the **next local calendar date** in `settings_location.timezone` (same IANA zone as `after_sunset` / cron). Cron evaluation **continues** (`next_evaluate_at` still advances); only the **fire** path is gated.
+- **“Local day” boundary:** midnight in `settings_location.timezone` (00:00:00 → next day). Compare `date(last_fired_at)` vs `date(now)` in that zone.
+- **State:** reuse persisted `last_fired_at` from `rule_fire_state` / `_RuleRuntimeState`; no new SQLite column required for v1.
+- **Restart:** if `last_fired_at` falls on **today** (home tz), treat as already fired today — still 0–1 fires per day across restarts.
+- **Interaction with `cooldown_s`:** both must pass. For once-per-day rules, set a modest `cooldown_s` (e.g. 300) to debounce double-fires on the same tick; the daily cap is the real guard.
+- **Status API:** when capped, condition rows still evaluate live; add rule-level detail such as `Already fired today (next eligible after local midnight)` on the scheduled rule summary or a dedicated status field.
+- **Logs:** `[rules] scheduled evaluate rule_id=… met=true` then `reason=daily_cap` with `last_fired_local_date=…` when skipped.
+
+**Evaluator change (summary):** in `_evaluate_scheduled_rules`, after `evaluation.all_met` and before `_cooldown_elapsed`, if `rule.fire_once_per_local_day` and `last_fired_at` is the same local date as `now`, skip fire (log `daily_cap`).
+
+**Schema / validation:**
+
+- `fire_once_per_local_day: bool | None` on `RuleOut` (default `false`).
+- Reject `fire_once_per_local_day: true` when `trigger` is not `scheduled`.
+- Web: `web/src/types.ts`, rule inspector read-only checkbox/label.
+
+**Example bundle rule (operator shape — home geofence + roster ids from production `automation-rules.json`):**
+
+```json
+{
+  "id": "evening-interior-lights-on-anyone-home",
+  "label": "Turn on interior lamps when anyone home after sunset (once per day)",
+  "enabled": true,
+  "trigger": "scheduled",
+  "schedule_cron": "*/15 * * * *",
+  "fire_once_per_local_day": true,
+  "cooldown_s": 300,
+  "min_location_accuracy_m": 50,
+  "notify_on_fire": false,
+  "conditions": {
+    "all": [
+      {
+        "type": "after_sunset",
+        "offset_minutes": 0,
+        "window_end": "midnight"
+      },
+      {
+        "type": "any",
+        "conditions": [
+          {
+            "type": "users_inside_geofence",
+            "geofence_id": "hcma-250m-around-home",
+            "user_ids": ["hcma"]
+          },
+          {
+            "type": "users_inside_geofence",
+            "geofence_id": "hcma-250m-around-home",
+            "user_ids": ["kristen"]
+          }
+        ]
+      }
+    ]
+  },
+  "device_actions": [
+    { "family_id": "kasa", "device_id": "Kitchen lamp", "action": "turn_on" },
+    { "family_id": "kasa", "device_id": "Living room lamp", "action": "turn_on" },
+    { "family_id": "kasa", "device_id": "Living room lamp2", "action": "turn_on" }
+  ]
+}
+```
+
+**Expected behavior:**
+
+1. After local sunset, every 15 minutes the rule is **evaluated**.
+2. If **either** `hcma` or `kristen` is inside `hcma-250m-around-home` (last stored location, accuracy gate applies), conditions are met.
+3. On the **first** such tick with no fire yet **today**, run the three `turn_on` actions (and email if `notify_on_fire`).
+4. Later ticks the same evening: `met=true` but **skipped** (`daily_cap`) until after local midnight.
+5. Next evening: eligible again (0 or 1 fire).
+
+**Contrast with `evening-arrival-home-lights` (`edge_true`):** arrival rule fires on **enter** after sunset (good for garage approach lighting). This rule covers “someone is **already** home when evening starts” or “arrived earlier” without requiring a fresh geofence edge — but only **once** per night.
+
+**Contrast with `evening-lights-off-both-home`:** off rule uses **dwell** (both home 10+ min) + **devices_any_on** and **repeats** while lights stay on (cooldown-limited). On rule uses **anyone home** + **once per day** — complementary, not duplicate.
+
+**Not in scope for Phase 2d:** `fire_once_per_local_day` on `edge_true` (edge + daily cap is a different product); persisting “fired date” separately from `last_fired_at` (derive from timestamp unless we later need “fired today but rolled back”).
 
 #### Design: geofence dwell — `users_inside_geofence_for_s`
 
@@ -1310,8 +1401,9 @@ Diagnostic logs: `[rules] scheduled evaluate rule_id=… met=true|false`, `[rule
 | **PR-C3** `feat/device-state-rule-conditions` | `devices_any_on` / `devices_all_on`; pass device cache into evaluation context on scheduled (and status) path | device discovery ready |
 | **PR-C4** `docs/scheduled-rules-example` | `automation-rules.json.example` entry + rule inspector read-only fields | C1–C3 |
 | **PR-C5** (operator) | Add `evening-lights-off-both-home` to server `automation-rules.json` | C1–C3 merged |
+| **PR-C6** `feat/scheduled-fire-once-per-day` | `fire_once_per_local_day` on scheduled rules; evaluator daily cap; status detail; example `evening-interior-lights-on-anyone-home` | C2 (shipped) |
 
-Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or immediately after.
+Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or immediately after. **C6** is independent once scheduled evaluation is on `main`.
 
 #### Edge cases (decide in implementation)
 
@@ -1320,16 +1412,21 @@ Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or 
 | Process restart | Dwell clocks reset (in-memory); scheduled `next_evaluate_at` resets to `now` on boot |
 | User leaves before `min_inside_s` | Dwell condition unmet; `inside_since` cleared on leave |
 | Stale GPS while sitting at home | Scheduled tick uses **last stored** location; acceptable if my-tracks keeps relaying periodic fixes |
-| Lights turned on manually after auto-off | Next scheduled tick can fire again if cooldown elapsed |
+| Lights turned on manually after auto-off | Next scheduled tick can fire again if cooldown elapsed (unless `fire_once_per_local_day`) |
 | One person home, other away | `users_inside_geofence_for_s` with both listed → unmet |
 | Discovery not ready | Device conditions unmet; log at debug |
+| `fire_once_per_local_day` + already fired today | `met=true` but skip fire until next local date; log `daily_cap` |
+| `fire_once_per_local_day` + restart same evening | `last_fired_at` on today's local date → still capped |
+| `fire_once_per_local_day` + never met until 11:55pm | Fires once that tick; further ticks before midnight capped |
+| `fire_once_per_local_day` + conditions true before sunset | Unmet until `after_sunset`; first eligible tick after sunset may fire |
 
 #### UI / schema
 
 - Extend `RuleOut` / `web/src/types.ts`: `trigger: "scheduled"`, `schedule_cron?: string` (required when `scheduled`; 5-field cron).
-- Rule inspector: show cron schedule, dwell conditions, device predicates (read-only until Phase 2b edit).
-- Add runtime dependency: `uv add croniter` in **PR-C2** (not C1).
-- Validation: valid `schedule_cron` expression; `min_inside_s >= 1`; device ids validated like `device_actions`.
+- **Phase 2d:** `fire_once_per_local_day?: boolean` (scheduled only; default false).
+- Rule inspector: show cron schedule, dwell conditions, device predicates, daily-cap flag (read-only until Phase 2b edit).
+- Runtime dependency: **`croniter`** (shipped in C2).
+- Validation: valid `schedule_cron` expression; `min_inside_s >= 1`; device ids validated like `device_actions`; reject `fire_once_per_local_day` on non-scheduled triggers.
 
 ### my-tracks companion stack (separate repo — after domesti-bot PR5 roster webhook)
 
@@ -1351,6 +1448,8 @@ Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or 
 | Condition eval | Both inside / one outside / stale user / before vs after sunset (mock clock) |
 | Edge trigger | Sequence: A outside → A inside → B inside ⇒ fires once; staying inside does not re-fire |
 | Cooldown | Second edge within window suppressed |
+| Scheduled + daily cap | Same local date: second eligible tick skipped with `daily_cap` |
+| Scheduled + daily cap | New local date: may fire again when conditions met |
 | API | `httpx.AsyncClient` per endpoint; auth header |
 | Actions | Mock managers; assert `turn_on` / `open` called with canonical keys |
 | UI (Phase 1) | Mock hub CRUD; Rules menu hidden on mobile; geofence draw mode; map at 1024px |
@@ -1388,7 +1487,7 @@ Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or 
 ## Future extensions (out of scope for initial mainline)
 
 - `edge_false` trigger variant (explicit departure edge); `users_outside_geofence` condition ships in v1 but departure **actions** may follow later.
-- **`scheduled` rules, geofence dwell, device-state conditions** — planned in [Phase 2c](#phase-2c--scheduled-rules-and-device-state-conditions-planned); not future/optional once that phase lands.
+- **`scheduled` rules, geofence dwell, device-state conditions, `fire_once_per_local_day`** — **shipped** (Phase 2c–2d).
 - Rectangular geofences, multi-zone OR semantics.
 - Email notification action (replaces my-tracks global automation email).
 - my-tracks `GET /export/owntracks` consumer for phone `setWaypoints` sync.

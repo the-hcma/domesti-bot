@@ -375,3 +375,38 @@ def test_validate_rule_flags_blank_device_condition_ref() -> None:
     assert len(issues) == 1
     assert issues[0].kind == "unknown_device"
     assert "conditions" in issues[0].detail
+
+
+def test_rule_out_accepts_fire_once_per_local_day_on_scheduled_trigger() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        fire_once_per_local_day=True,
+        id="daily-cap",
+        label="Daily cap",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        schedule_cron="*/15 * * * *",
+        trigger="scheduled",
+    )
+    assert rule.fire_once_per_local_day is True
+
+
+def test_rule_out_rejects_fire_once_per_local_day_on_edge_true_trigger() -> None:
+    with pytest.raises(ValidationError, match="fire_once_per_local_day"):
+        RuleOut(
+            conditions=RuleConditionsOut(all=[]),
+            cooldown_s=60,
+            device_actions=[],
+            enabled=True,
+            fire_once_per_local_day=True,
+            id="bad-daily-cap",
+            label="Bad daily cap",
+            min_location_accuracy_m=50,
+            notification_email=None,
+            notify_on_fire=False,
+            trigger="edge_true",
+        )

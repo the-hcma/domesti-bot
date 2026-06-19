@@ -132,6 +132,7 @@ export class MockRulesDataSource implements RulesDataSource {
         last_fired_at: this.store.rule_last_fired_at[rule.id] ?? null,
         last_error: null,
         next_evaluate_at: null,
+        scheduled_detail: null,
         reference_issues: [],
         trigger: rule.trigger,
       })),
