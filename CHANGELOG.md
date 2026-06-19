@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/the-hcma/domesti-bot/compare/v1.1.0...v1.2.0) (2026-06-19)
+
+
+### Features
+
+* persist geofence transition state across restarts ([#317](https://github.com/the-hcma/domesti-bot/issues/317)) ([85af553](https://github.com/the-hcma/domesti-bot/commit/85af55376e2f09107c0edc5fe4ed65438b749aff))
+* seed geofence dwell state from location history on restart ([#316](https://github.com/the-hcma/domesti-bot/issues/316)) ([43f87ce](https://github.com/the-hcma/domesti-bot/commit/43f87ce9bec6fdbd3aa8051b90a40c518bd9c27e))
+
+
+### Documentation
+
+* modernize user-facing documentation ([#313](https://github.com/the-hcma/domesti-bot/issues/313)) ([b71c8c4](https://github.com/the-hcma/domesti-bot/commit/b71c8c446ca0fe97c039c265df8a52c9fe685bfd))
+
 ## [1.1.0](https://github.com/the-hcma/domesti-bot/compare/v1.0.1...v1.1.0) (2026-06-19)
 
 
