@@ -16,7 +16,7 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 
 **my-tracks pairing and relay (canonical):** see [`docs/MY_TRACKS_INTEGRATION_PLAN.md`](MY_TRACKS_INTEGRATION_PLAN.md) for HTTPS public URLs, domesti-bot-initiated pairing, live vs test webhook paths (`/v1/webhooks/location_update` and `/v1/webhooks/location_update/test`), manual roster/geofence sync, verify roundtrip, and the emergency location-update switch. Sections below that describe a roster **push** webhook are superseded by manual **pull** sync in that plan unless noted otherwise.
 
-**Delivery order:** Phase 1 (desktop Automations UI + mocks) is **largely shipped**. Phase 2 now starts with a **file-backed evaluator** that runs the production rule bundle without SQLite rule CRUD; rule persistence and full UI wire-up follow later.
+**Delivery order:** Phase 1 (desktop Automations UI + mocks) is **largely shipped**. Phase **2a–2d** (file-backed evaluator, scheduled rules, dwell, device-state, once-per-day cap) are **shipped** — operators use `automation-rules.json` + restart. **Phase 2b** (SQLite rule CRUD + in-UI edit) is the next major track.
 
 ---
 
@@ -99,9 +99,9 @@ Live evaluation uses **SQLite geofences** + **`presence_store` haversine** (same
 | Phase | Rules tab / Status tab behavior |
 | --- | --- |
 | **A1b (done #222)** | Rules list from `GET /v1/rules`; read-only cards (no Add/Edit/Delete). |
-| **A1c (next)** | **Click a rule** → read-only **inspector** (same internal wiring as the Phase 1 mock editor: conditions, device actions, cooldown, notify email, trigger) — view only, no Save. |
-| **A2** | Status tab per-condition ✓/✗ comes from **`GET /v1/rules/status`** (Python). **Delete** `web/src/rules-evaluate.ts` — no client-side rule evaluation. |
-| **Phase 2b (later)** | In-UI rule **edit** + SQLite persistence (replaces file-only workflow). |
+| **A1c (shipped)** | **Click a rule** → read-only **inspector** (`web/src/rule-inspector.ts`): conditions, device actions, cooldown, cron / daily-cap flags, notify email, trigger — view only, no Save. |
+| **A2 (shipped)** | Status tab per-condition ✓/✗ from **`GET /v1/rules/status`** (Python). Client `web/src/rules-evaluate.ts` **removed** — no browser-side rule evaluation. |
+| **Phase 2b (next)** | In-UI rule **edit** + SQLite persistence for rule definitions (replaces file-only workflow). |
 
 Until Phase 2b, operators change rules by editing `automation-rules.json` and restarting the server.
 
@@ -110,10 +110,10 @@ Until Phase 2b, operators change rules by editing `automation-rules.json` and re
 ```
 automation-rules.json          # operator copy (gitignored)
 automation-rules.json.example
-app/automation_rules_loader.py # parse + validate bundle (done — also serves GET /v1/rules)
-app/rule_conditions.py         # replaces web/src/rules-evaluate.ts; astral; feeds GET /v1/rules/status
-app/rule_actions.py            # Kasa/Tailwind dispatch + SMTP notify
-app/rule_evaluator.py          # asyncio edge state, cooldown, dispatch; grows Rule/RuleEngine stubs
+app/automation_rules_loader.py # parse + validate bundle; serves GET /v1/rules
+app/rule_conditions.py         # astral + geofence conditions; feeds GET /v1/rules/status
+app/rule_actions.py            # Kasa/Tailwind dispatch + SMTP notify (shipped)
+app/rule_evaluator.py          # asyncio edge + scheduled evaluation, cooldown, dispatch (shipped)
 ```
 
 Hook: end of `apply_location_update_webhook()` after `upsert_user_location`, with `app.state.device_state` for actuators. Optional slow asyncio tick for logging only — **not** for firing rule 1 at sunset.
@@ -135,12 +135,13 @@ Hook: end of `apply_location_update_webhook()` after `upsert_user_location`, wit
 | Geofence + user roster (SQLite) | **Done** | `app/rules_store.py`, `app/api/rules_routes.py` |
 | SMTP settings + test send | **Done** | `app/smtp_service.py`, `app/api/smtp_routes.py` |
 | Automations UI — rules list from bundle | **Done** (#222) | `web/src/rules-dialog.ts`, `web/src/rules-data-source.ts` |
-| Automations UI — read-only rule inspector (click → wiring) | **Not started** (PR-A1c) | refactor `openRuleEditor` → view-only panel |
+| Automations UI — read-only rule inspector (click → wiring) | **Done** | `web/src/rule-inspector.ts`, `openRuleInspector` in `rules-dialog.ts` |
 | Rule bundle template + loader | **Done** (#222) | `automation-rules.json.example`, `app/automation_rules_loader.py` |
-| Server condition evaluation + `GET /v1/rules/status` | **Not started** (PR-A2) | `app/rule_conditions.py` |
-| Client TS rule evaluation | **Temporary** — removed in PR-A2 | `web/src/rules-evaluate.ts` |
-| File-backed rule evaluator (asyncio) | **Not started** (PR-A4) | `app/rule_evaluator.py` |
-| Rule SQLite persistence + in-UI edit | **Deferred** (Phase 2b) | — |
+| Server condition evaluation + `GET /v1/rules/status` | **Done** | `app/rule_conditions.py`, `app/rules_status.py` |
+| Client TS rule evaluation | **Removed** | (was `web/src/rules-evaluate.ts`) |
+| File-backed rule evaluator (asyncio) | **Done** | `app/rule_evaluator.py` — `edge_true` + `scheduled` |
+| Scheduled rules, dwell, device-state, once-per-day | **Done** (Phase 2c–2d) | `schedule_cron`, `users_inside_geofence_for_s`, `devices_any_on` / `all_on`, `fire_once_per_local_day` |
+| Rule SQLite persistence + in-UI edit | **Deferred** (Phase 2b) | Rule **definitions** still file-only; geofences/users already in SQLite |
 | Hermetic tests beyond geofence distance | Minimal (`test_rule_engine.py`; `RuleEngine` test is a placeholder) | `tests/python/test_rule_engine.py` |
 
 ### What my-tracks has today (to migrate or sunset)
@@ -160,17 +161,20 @@ Hook: end of `apply_location_update_webhook()` after `upsert_user_location`, wit
 3. **Distance math uses pyproj UTM** — WGS84 lat/lon → meters via `EPSG:4326` → `EPSG:32618` (UTM zone 18N). This is correct for the current home coordinates in tests but must become **zone-aware** before rules ship for arbitrary locations.
 4. **SQLite is the persistence home** — discovery cache, UI preferences, and encrypted secrets already live in one file (`device_discovery_store` / `app/db/`). Rules, geofences, and tracked users should extend that database, not introduce a second store.
 
-### Gaps to close (file-backed track)
+### Gaps to close (remaining)
 
-- Read-only **rule inspector** in Automations (PR-A1c): click rule → see conditions, actions, cooldown, email — no Save.
-- Python condition evaluator + `GET /v1/rules/status` (PR-A2); **delete** `web/src/rules-evaluate.ts`.
-- `astral` sunset checks using bundle `settings_location`.
-- Python condition evaluator + **enter/leave edge** semantics on location ingest (PR-A4).
-- Action dispatcher: resolve `preferred_label` → device manager; Kasa `turn_on`; rule notification email via SMTP (PR-A3).
-- Hermetic tests: simulated fixes for Henrique/Kristen at house and Kristen at `west-point`.
-- `last_fired_at` / evaluator heartbeat on status API (PR-A4, once evaluator runs).
-- Later (Phase 2b): SQLite rule CRUD and **in-UI rule editing** (replaces file-only persist workflow).
-- Later (Phase 2c): **scheduled** trigger, geofence **dwell** conditions, **device-state** conditions — see below.
+**Phase 2b — rule definition persistence (primary gap):**
+
+- SQLite tables + API for automation **rules** (geofences/users/roster already persisted).
+- In-UI rule edit / enable / add / delete — replaces `automation-rules.json` + restart for rule wiring.
+
+**Optional / later (not blocking operators):**
+
+- Persist geofence **dwell** clocks (`inside_since`) across restart (today in-memory only).
+- Device-state conditions for Sonos / Tailwind (Kasa only today).
+- `edge_false` trigger variant; rule fire history UI; mobile editor — see [Future extensions](#future-extensions-out-of-scope-for-initial-mainline).
+
+**Shipped (formerly listed here):** read-only inspector (A1c), server status (A2), action dispatch (A3), location + scheduled evaluator (A4), Phase 2c–2d scheduled/dwell/device/once-per-day.
 
 ---
 
@@ -349,10 +353,9 @@ Actions run **sequentially** in list order; a failure logs and continues (one ba
 | `trigger` | Behavior | Shipped? |
 | --- | --- | --- |
 | `edge_true` | Fire when the composite condition transitions **false → true** on a **location ingest** that includes a matching geofence edge for the updating user. Arrival / departure use case — prevents re-firing every poll while someone remains inside. | **Yes** |
-| `while_true` | Fire on every evaluation while true (subject to cooldown). | **Schema only** — evaluator does not run `while_true` yet. |
 | `scheduled` | Re-evaluate on a cron schedule while enabled; fire when all conditions are met and cooldown allows (repeat while still true unless `fire_once_per_local_day` is set). Requires `schedule_cron` on the rule (5-field cron; timezone from `settings_location.timezone`). Evaluated via **`croniter`**. | **Yes** (Phase 2c) |
 
-Store per-rule state: `last_condition_value: bool` (for future `while_true` / `edge_true` steady-state), `last_fired_at: float | None`, and for `scheduled` rules `next_evaluate_at: float | None`. When `fire_once_per_local_day` is true (scheduled only), derive “already fired today” from `last_fired_at` in `settings_location.timezone` (no extra persisted field required).
+Store per-rule state: `last_condition_value: bool` (reserved — not used yet), `last_fired_at: float | None`, and for `scheduled` rules `next_evaluate_at: float | None`. When `fire_once_per_local_day` is true (scheduled only), derive “already fired today” from `last_fired_at` in `settings_location.timezone` (no extra persisted field required).
 
 **Cooldown** (`cooldown_s`): after a successful fire, suppress re-fire even if the edge re-occurs (e.g. GPS jitter briefly shows someone outside, then inside again).
 
@@ -1066,9 +1069,9 @@ No new Python rule modules in this phase (existing tile server unchanged except 
 
 ---
 
-### Phase 2a — File-backed evaluator (current track)
+### Phase 2a — File-backed evaluator (shipped)
 
-Ship production automations from `automation-rules.json` **before** SQLite rule tables or Automations rule CRUD.
+Ship production automations from `automation-rules.json` **before** SQLite **rule** tables or in-UI rule CRUD. **Status:** core track **complete** (A1–A4 + inspector). Rule definitions remain file-backed until Phase 2b.
 
 #### PR-A1 — `feat/automation-rules-bundle` (merged #221)
 
@@ -1083,31 +1086,31 @@ Ship production automations from `automation-rules.json` **before** SQLite rule 
 - Automations UI reads the bundle (read-only Rules tab; pill shows `automation-rules.json`).
 - Nested `all`/`any` rule summaries in `web/src/rule-summary.ts`.
 
-#### PR-A1c — `feat/rules-ui-read-only-inspector` (next)
+#### PR-A1c — `feat/rules-ui-read-only-inspector` (shipped)
 
-- Refactor the Phase 1 rule **editor** form into a read-only **inspector** (`openRuleInspector`): same wiring view (conditions — including nested `all`/`any` — device actions, cooldown, accuracy threshold, notify email, trigger, rule id).
-- **Rules** tab: click a rule card → inspector. **Status** tab: click rule name → inspector (replace today's call to editable `openRuleEditor`).
-- No Save, no enable toggle, no Add/Delete — file bundle remains the source of truth until Phase 2b.
-- Keep `web/src/rules-evaluate.ts` temporarily so Status ✓/✗ still works until PR-A2 lands.
+- Read-only **inspector** (`openRuleInspector` in `web/src/rule-inspector.ts`): conditions (nested `all`/`any`), device actions, cooldown, accuracy threshold, cron / `fire_once_per_local_day`, notify email, trigger, rule id.
+- **Rules** tab (read-only / file-backed mode): click rule card → inspector. **Status** tab: click rule name → inspector.
+- No Save, no enable toggle, no Add/Delete in read-only mode — file bundle remains source of truth until Phase 2b. (Mock data source still exposes the Phase 1 editor for local UI dev.)
 
-#### PR-A2 — `feat/rule-conditions-and-astral`
+#### PR-A2 — `feat/rule-conditions-and-astral` (shipped)
 
-- `uv add astral`; `app/rule_conditions.py` — geofence (haversine + SQLite), sunset, nested `any`/`all`; builds on `app/rule_engine.py` predicate/action patterns.
-- `GET /v1/rules/status` — `RulesStatusOut` wire shape (users, geofences, per-rule condition rows with `met`/`label`/`detail`, sun row).
-- **Remove** `web/src/rules-evaluate.ts` and client `evaluateRule` usage in `rules-data-source.ts`; Status tab polls server status only.
-- Hermetic tests with bundle coordinates + frozen clock for sunset.
+- `astral` sunset; `app/rule_conditions.py` — geofence (haversine + SQLite), sunset, nested `any`/`all`.
+- `GET /v1/rules/status` — `RulesStatusOut` (users, geofences, per-rule condition rows, sun row, scheduled detail).
+- Removed `web/src/rules-evaluate.ts`; Status tab polls server only.
 
-#### PR-A3 — `feat/rule-actions-dispatch`
+#### PR-A3 — `feat/rule-actions-dispatch` (shipped)
 
-- `app/rule_actions.py`: label → device resolution, Kasa `turn_on`, SMTP rule notifications.
+- `app/rule_actions.py`: label → device resolution, Kasa actions, SMTP rule notifications.
 
-#### PR-A4 — `feat/rule-evaluator-location-ingest`
+#### PR-A4 — `feat/rule-evaluator-location-ingest` (shipped)
 
-- `app/rule_evaluator.py` — **asyncio** `RuleEvaluator` (lifespan + `create_task` on ingest).
-- Hook after `upsert_user_location`; in-memory edge + cooldown state.
-- Integration test with the three production rules.
+- `app/rule_evaluator.py` — asyncio `RuleEvaluator` (lifespan + background tick + `create_task` on ingest).
+- Hook after `upsert_user_location`; edge + cooldown + `last_fired_at` persistence; accuracy grace deferrals.
+- Hermetic tests for production rule shapes (arrival, west-point, scheduled).
 
-### Phase 2b — Backend persistence (deferred)
+### Phase 2b — Rule definition persistence (deferred — next major track)
+
+**Note:** Geofence CRUD, user roster sync, and presence ingest **already ship** via `rules_store` and related routes. Phase 2b here means persisting **automation rule rows** (conditions, actions, triggers) and wiring the Automations UI Save/Edit/Delete to HTTP — not re-building geofences/users.
 
 Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1. The wire-up PR is the contract gate.
 
@@ -1179,8 +1182,6 @@ This class of automation is **not** representable with `edge_true` + location-in
 | Re-check every **15 minutes** | No | Yes (`schedule_cron`) | — |
 | **At most one fire per local day** | No (edge per arrival) | No (rolling `cooldown_s` only) | **`fire_once_per_local_day`** (shipped) |
 
-`while_true` exists in the JSON schema but is **not wired** in `RuleEvaluator` — and even if it were, location-driven evaluation would miss “everyone home 10+ minutes with no new GPS fixes” unless combined with a timer.
-
 #### Design: `scheduled` trigger (shipped)
 
 Per-rule cron expression (required when `trigger` is `scheduled`):
@@ -1203,7 +1204,7 @@ Semantics (shipped):
 - Fire log includes `source=scheduled` (mirrors `source=deferred` on accuracy grace).
 - `min_location_accuracy_m` and `accuracy_edge_grace_s` apply to presence reads used in dwell / inside checks on scheduled ticks (same as location path).
 
-**Not** the same as `while_true` on location ingest: scheduled rules are explicitly timer-driven and may read device cache without any webhook.
+Scheduled rules are explicitly timer-driven and may read device cache without any webhook.
 
 Default repeat semantics: **while conditions stay true**, a scheduled rule may fire again on a later cron tick once `cooldown_s` elapses. For **at most one fire per local calendar day**, use `fire_once_per_local_day` (below).
 

@@ -139,7 +139,7 @@ export interface VizioPairCompleteOut {
 
 // --- Rule engine (mirror planned ``app/api/schemas.py`` rule models) ---
 
-export type RuleTrigger = "edge_true" | "scheduled" | "while_true";
+export type RuleTrigger = "edge_true" | "scheduled";
 
 export type RuleActionType =
   | "turn_on"
@@ -250,7 +250,7 @@ export type RuleOut =
       fire_once_per_local_day?: boolean;
     })
   | (RuleOutShared & {
-      trigger: "edge_true" | "while_true";
+      trigger: "edge_true";
       schedule_cron?: null;
       fire_once_per_local_day?: false;
     });
