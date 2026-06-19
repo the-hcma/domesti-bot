@@ -172,7 +172,8 @@ def _dwell_home_rule(*, cooldown_s: int) -> RuleOut:
         min_location_accuracy_m=50,
         notification_email=None,
         notify_on_fire=False,
-        trigger="while_true",
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
     )
 
 
@@ -548,7 +549,8 @@ async def test_rule_evaluator_seeds_geofence_inside_since_on_boot(
         min_location_accuracy_m=50,
         notification_email=None,
         notify_on_fire=False,
-        trigger="while_true",
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
     )
     _write_bundle(bundle, dwell_rule)
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
@@ -616,7 +618,8 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
         min_location_accuracy_m=200,
         notification_email=None,
         notify_on_fire=False,
-        trigger="while_true",
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
     )
     _write_bundle(bundle, edge_rule, dwell_rule)
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
@@ -816,7 +819,8 @@ async def test_rule_evaluator_skips_inside_since_seed_when_dwell_rule_rejects_ac
         min_location_accuracy_m=50,
         notification_email=None,
         notify_on_fire=False,
-        trigger="while_true",
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
     )
     _write_bundle(bundle, dwell_rule)
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))

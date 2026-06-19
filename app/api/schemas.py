@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 
-RuleTriggerOut = Literal["edge_true", "scheduled", "while_true"]
+RuleTriggerOut = Literal["edge_true", "scheduled"]
 
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]

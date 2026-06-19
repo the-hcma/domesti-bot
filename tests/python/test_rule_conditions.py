@@ -204,7 +204,8 @@ def _dwell_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_email=None,
         notify_on_fire=False,
-        trigger="while_true",
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
     )
 
 
@@ -412,7 +413,8 @@ def test_users_inside_geofence_for_s_formats_subminute_dwell_in_seconds() -> Non
         min_location_accuracy_m=50,
         notification_email=None,
         notify_on_fire=False,
-        trigger="while_true",
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
     )
     inside_since = now.timestamp() - 35.0
     result = evaluate_rule(
@@ -450,7 +452,8 @@ def test_users_inside_geofence_for_s_formats_non_minute_aligned_need() -> None:
         min_location_accuracy_m=50,
         notification_email=None,
         notify_on_fire=False,
-        trigger="while_true",
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
     )
     inside_since = now.timestamp() - 65.0
     result = evaluate_rule(
@@ -510,7 +513,8 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
         min_location_accuracy_m=50,
         notification_email=None,
         notify_on_fire=False,
-        trigger="while_true",
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
     )
     inside_since = now.timestamp() - 900.0
     result = evaluate_rule(
