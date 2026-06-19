@@ -101,6 +101,18 @@ class RuleUser(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class RuleUserGeofenceState(Base):
+    __tablename__ = "rule_user_geofence_state"
+
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    geofence_id: Mapped[str] = mapped_column(String, primary_key=True)
+    inside_since: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_location_received_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    outside_since: Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+    was_inside: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class RuleUserLastLocation(Base):
     __tablename__ = "rule_user_last_location"
 

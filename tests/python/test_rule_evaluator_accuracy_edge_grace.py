@@ -155,7 +155,7 @@ def _setup_evaluator(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"],
+        received_at=clock["now"] - 400.0,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     evaluator = RuleEvaluator(
@@ -251,7 +251,7 @@ async def test_accuracy_edge_grace_does_not_register_without_geofence_transition
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"],
+        received_at=clock["now"] - 400.0,
         accuracy_m=20,
     )
     device = _FakeKasa("192.168.1.10", "Garage")

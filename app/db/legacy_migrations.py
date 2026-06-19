@@ -20,6 +20,7 @@ def apply_legacy_column_migrations(engine: object) -> None:
         _apply_androidtv_uuid_model_migration(conn)
         _apply_mytracks_pairing_columns_migration(conn)
         _apply_mytracks_user_nomenclature_migration(conn)
+        _apply_rule_user_geofence_state_last_location_migration(conn)
         _apply_rule_user_tables_migration(conn)
 
 
@@ -106,6 +107,21 @@ def _apply_mytracks_user_nomenclature_migration(conn: Connection) -> None:
                 "AND participant_location_test_url IS NOT NULL"
             )
         )
+
+
+def _apply_rule_user_geofence_state_last_location_migration(conn: Connection) -> None:
+    inspector = inspect(conn)
+    if "rule_user_geofence_state" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("rule_user_geofence_state")}
+    if "last_location_received_at" in cols:
+        return
+    conn.execute(
+        text(
+            "ALTER TABLE rule_user_geofence_state "
+            "ADD COLUMN last_location_received_at REAL"
+        )
+    )
 
 
 def _apply_rule_user_tables_migration(conn: Connection) -> None:
