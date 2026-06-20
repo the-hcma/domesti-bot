@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.1](https://github.com/the-hcma/domesti-bot/compare/v1.2.0...v1.2.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **ci:** verify PyPI release via version JSON API ([#321](https://github.com/the-hcma/domesti-bot/issues/321)) ([9fb8ec3](https://github.com/the-hcma/domesti-bot/commit/9fb8ec3d484ab4bff3a99a55e889ad60a14b5f82))
+
+
+### Documentation
+
+* geofence persisted state vs location-history pruning ([#318](https://github.com/the-hcma/domesti-bot/issues/318)) ([f22ebae](https://github.com/the-hcma/domesti-bot/commit/f22ebae04c98fc64a7d8f9a334703ec77c122c47))
+
 ## [1.2.0](https://github.com/the-hcma/domesti-bot/compare/v1.1.0...v1.2.0) (2026-06-19)
 
 
