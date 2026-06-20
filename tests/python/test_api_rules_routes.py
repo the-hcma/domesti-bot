@@ -72,6 +72,7 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     assert listed.status_code == HTTPStatus.OK
     ids = {row["id"] for row in listed.json()}
     expected_ids = {
+        "away-pause-media",
         "evening-arrival-home-lights",
         "evening-interior-lights-on-anyone-home",
         "evening-lights-off-both-home",

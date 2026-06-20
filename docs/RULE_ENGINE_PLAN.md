@@ -64,6 +64,7 @@ Rules fire on location ingest as follows:
 | `evening-arrival-home-lights` | Henrique **or** Kristen enters `house` after sunset → three Kasa `turn_on` + email |
 | `evening-lights-off-both-home` | Scheduled: both home 10+ min after sunset, either arrival light on → `turn_off` (example / operator) |
 | `evening-interior-lights-on-anyone-home` | Scheduled + **once per day**: anyone home after sunset → interior lamps `turn_on` (example) |
+| `away-pause-media` | Scheduled every 10 min: both outside `house`, any listed Sonos zone or Vizio TV on → `pause` / `turn_off` + email (example) |
 | `kristen-west-point-arrive` | Kristen enters `west-point` → email only |
 | `kristen-west-point-leave` | Kristen leaves `west-point` → email only |
 
@@ -171,7 +172,7 @@ Hook: end of `apply_location_update_webhook()` after `upsert_user_location`, wit
 **Optional / later (not blocking operators):**
 
 - Persist geofence **dwell** clocks (`inside_since` / `outside_since`) across restart — **shipped** via `rule_user_geofence_state` (#316 history backfill interim; follow-up PR persists transition rows directly).
-- Device-state conditions for Sonos / Tailwind (Kasa only today).
+- Device-state conditions for Tailwind / Google Cast (Kasa, Sonos, and Vizio ship today).
 - `edge_false` trigger variant; rule fire history UI; mobile editor — see [Future extensions](#future-extensions-out-of-scope-for-initial-mainline).
 
 **Shipped (formerly listed here):** read-only inspector (A1c), server status (A2), action dispatch (A3), location + scheduled evaluator (A4), Phase 2c–2d scheduled/dwell/device/once-per-day.
@@ -330,8 +331,8 @@ Serializable, versioned documents. Start with a **structured JSON schema** store
 | `users_inside_geofence` | `geofence_id`, `user_ids[]` | Every listed user has a **fresh** location reading and is inside the geofence (AND). Replaces my-tracks `CONDITION_ALL_INSIDE`. |
 | `users_outside_geofence` | `geofence_id`, `user_ids[]` | Every listed user is outside or stale/unknown (AND). Replaces my-tracks `CONDITION_ALL_OUTSIDE`. |
 | `users_inside_geofence_for_s` | `geofence_id`, `user_ids[]`, `min_inside_s` | **Phase 2c.** Every listed user is inside **and** has been continuously inside for at least `min_inside_s` seconds (AND). |
-| `devices_any_on` | `devices[]` (`family_id`, `device_id`) | **Phase 2c.** At least one listed device reports on (Kasa `is_on` cache from `DeviceStateWatcher`). |
-| `devices_all_on` | `devices[]` | **Phase 2c.** Every listed device reports on. |
+| `devices_any_on` | `devices[]` (`family_id`, `device_id`) | **Phase 2c.** At least one listed device reports on/playing: Kasa `is_on`, Sonos `is_playing`, or Vizio cached power — all from `DeviceStateWatcher`. |
+| `devices_all_on` | `devices[]` | **Phase 2c.** Every listed device reports on/playing (same cache sources as `devices_any_on`). |
 | `after_sunset` | `offset_minutes` (default 0) | Local time ≥ sunset + offset for home coordinates. |
 | `before_sunrise` | `offset_minutes` | For future “leave home” / morning rules. |
 | `all` / `any` | nested condition lists | Boolean composition. |
@@ -342,9 +343,12 @@ Serializable, versioned documents. Start with a **structured JSON schema** store
 | --- | --- | --- |
 | `turn_on` | `{family_id: "kasa", device_id: host}` | `KasaDeviceManager.turn_on` / device alias resolution |
 | `turn_off` | same | `turn_off` |
+| `turn_on` | `{family_id: "vizio", device_id}` | Vizio SmartCast `turn_on` |
+| `turn_off` | `{family_id: "vizio", device_id}` | Vizio SmartCast `turn_off` |
 | `open` | `{family_id: "tailwind", device_id}` | `GotailwindDeviceManager.open` |
 | `close` | same | `close` |
-| `pause` | `{family_id: "sonos", device_id}` | Sonos pause (future rules) |
+| `pause` | `{family_id: "sonos", device_id}` | Sonos `pause` |
+| `resume` | `{family_id: "sonos", device_id}` | Sonos `resume` |
 
 Actions run **sequentially** in list order; a failure logs and continues (one bad switch must not block the garage).
 
@@ -1349,12 +1353,12 @@ Status API: condition row detail like `hcma inside 12 min (need 10 min)` / `kris
 }
 ```
 
-- **`devices_any_on`:** met when **any** listed device is on (motivating rule: turn off if either arrival light is still on).
-- **`devices_all_on`:** met when **all** listed devices are on (future “all clear” rules).
+- **`devices_any_on`:** met when **any** listed device is on or playing (motivating rule: turn off if either arrival light is still on, or pause media when everyone is away).
+- **`devices_all_on`:** met when **all** listed devices are on or playing (future “all clear” rules).
 
-Reads **cached** `is_on` from `DeviceStateWatcher` / manager objects — same source as the tile UI, not a live LAN round-trip on every tick. If `device_state` is `None` (discovery incomplete), condition is **unmet** with detail `discovery not ready`.
+Reads **cached** state from `DeviceStateWatcher` / manager objects — Kasa `is_on`, Sonos `is_playing`, Vizio `ui_power_state()` — same source as the tile UI, not a live LAN round-trip on every tick. If `device_state` is `None` (discovery incomplete), condition is **unmet** with detail `discovery not ready`.
 
-v1 scope: **Kasa** only; Sonos/Tailwind device conditions follow the same pattern later.
+**Shipped families:** Kasa, Sonos, Vizio. Tailwind doors and Google Cast are not device-state predicates yet (validation fails for those `family_id` values).
 
 #### Example bundle rule (target shape)
 
@@ -1400,6 +1404,48 @@ v1 scope: **Kasa** only; Sonos/Tailwind device conditions follow the same patter
 
 **Expected behavior:** after sunset, every 15 minutes, if both have been home ≥10 minutes and either light is still on → turn both off; 5-minute cooldown avoids hammering if something else toggles them.
 
+#### Example: away media rule (`away-pause-media`)
+
+```json
+{
+  "id": "away-pause-media",
+  "label": "Pause Sonos and turn off TV when Henrique and Kristen are away from home",
+  "enabled": true,
+  "trigger": "scheduled",
+  "schedule_cron": "*/10 * * * *",
+  "cooldown_s": 300,
+  "min_location_accuracy_m": 50,
+  "notify_on_fire": true,
+  "notification_email": "github@hcma.info",
+  "conditions": {
+    "all": [
+      {
+        "type": "users_outside_geofence",
+        "geofence_id": "house",
+        "user_ids": ["henrique", "kristen"]
+      },
+      {
+        "type": "devices_any_on",
+        "devices": [
+          { "family_id": "sonos", "device_id": "Kitchen" },
+          { "family_id": "sonos", "device_id": "Living Room" },
+          { "family_id": "sonos", "device_id": "Master Bedroom" },
+          { "family_id": "vizio", "device_id": "Kitchen TV" }
+        ]
+      }
+    ]
+  },
+  "device_actions": [
+    { "family_id": "sonos", "device_id": "Kitchen", "action": "pause" },
+    { "family_id": "sonos", "device_id": "Living Room", "action": "pause" },
+    { "family_id": "sonos", "device_id": "Master Bedroom", "action": "pause" },
+    { "family_id": "vizio", "device_id": "Kitchen TV", "action": "turn_off" }
+  ]
+}
+```
+
+**Expected behavior:** every 10 minutes, when **both** users are outside the home geofence and **any** listed Sonos zone is playing or the Kitchen TV is on → pause all three zones, turn off the TV, send email. Device labels must match the tile UI (`preferred_label`).
+
 #### Evaluator changes (summary)
 
 ```
@@ -1420,8 +1466,9 @@ Diagnostic logs: `[rules] scheduled evaluate rule_id=… met=true|false`, `[rule
 | **PR-C1** `feat/geofence-inside-dwell` | `_geofence_inside_since` on ingest; `users_inside_geofence_for_s` condition + status detail; tests | — |
 | **PR-C2** `feat/scheduled-rule-trigger` | `trigger: scheduled`, `schedule_cron`, `croniter` dependency, periodic evaluation path, `source=scheduled` logs | C1 optional but recommended first |
 | **PR-C3** `feat/device-state-rule-conditions` | `devices_any_on` / `devices_all_on`; pass device cache into evaluation context on scheduled (and status) path | device discovery ready |
-| **PR-C4** `docs/scheduled-rules-example` | `automation-rules.json.example` entry + rule inspector read-only fields | C1–C3 |
-| **PR-C5** (operator) | Add `evening-lights-off-both-home` to server `automation-rules.json` | C1–C3 merged |
+| **PR-C4** `docs/scheduled-rules-example` | `automation-rules.json.example` entries + rule inspector read-only fields | C1–C3 |
+| **PR-C5** (operator) | Add production rules to server `automation-rules.json` | C1–C3 merged |
+| **#322** `feat/sonos-vizio-rule-devices` | Sonos/Vizio `devices_any_on` / `all_on`; Vizio `turn_on` / `turn_off` dispatch | **Merged** |
 | **PR-C6** `feat/scheduled-fire-once-per-day` | `fire_once_per_local_day` on scheduled rules; evaluator daily cap; status detail; example `evening-interior-lights-on-anyone-home` | C2 (shipped) |
 
 Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or immediately after. **C6** is independent once scheduled evaluation is on `main`.
@@ -1512,7 +1559,8 @@ Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or 
 - Rectangular geofences, multi-zone OR semantics.
 - Email notification action (replaces my-tracks global automation email).
 - my-tracks `GET /export/owntracks` consumer for phone `setWaypoints` sync.
-- Sonos / Android TV actions in rules.
+- Sonos pause/resume and Vizio turn on/off in rule device actions — **shipped** (#322).
+- Google Cast (Android TV) actions and device-state conditions (manager temporarily disabled).
 - Rule history log table + UI timeline.
 - WebSocket push to UI instead of 10s status polling.
 - Mobile rule editor (explicitly deferred).

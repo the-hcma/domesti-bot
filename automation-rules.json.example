@@ -3,12 +3,13 @@
   "device_id_resolution": "preferred_label",
   "_notes": [
     "Copy this file to automation-rules.json in the repo/server root (same directory as domesti-bot.config.json).",
-    "device_id values are tile/REPL display names; the rule evaluator resolves them to Kasa hosts or Tailwind door ids.",
+    "device_id values are tile/REPL display names; the evaluator resolves them to Kasa hosts, Sonos zone labels, Vizio TV labels, or Tailwind door ids.",
     "Geofence ids must match Automations → Geofences (house is typical for home; west-point for West Point).",
     "SMTP must be configured under Automations → Mail for notification emails to send.",
     "Rule 1 fires when Henrique OR Kristen enters house after sunset (arrival edge, not merely present at sunset).",
     "Rule 2 (evening-lights-off-both-home) runs every 15 min after sunset: when both have been home 10+ min and either arrival light is still on, turn both off.",
-    "Rule 3 (evening-interior-lights-on-anyone-home) runs every 15 min after sunset: when either person is home, turn on interior lamps once per local day."
+    "Rule 3 (evening-interior-lights-on-anyone-home) runs every 15 min after sunset: when either person is home, turn on interior lamps once per local day.",
+    "Rule 4 (away-pause-media) runs every 10 min: when Henrique AND Kristen are outside house and any listed Sonos zone or Kitchen TV is on, pause zones, turn off the TV, and email."
   ],
   "settings_location": {
     "lat": 41.194072,
@@ -169,6 +170,69 @@
           "family_id": "kasa",
           "device_id": "Living room lamp2",
           "action": "turn_on"
+        }
+      ]
+    },
+    {
+      "id": "away-pause-media",
+      "label": "Pause Sonos and turn off TV when Henrique and Kristen are away from home",
+      "enabled": true,
+      "trigger": "scheduled",
+      "schedule_cron": "*/10 * * * *",
+      "cooldown_s": 300,
+      "min_location_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_email": "github@hcma.info",
+      "conditions": {
+        "all": [
+          {
+            "type": "users_outside_geofence",
+            "geofence_id": "house",
+            "user_ids": ["henrique", "kristen"]
+          },
+          {
+            "type": "devices_any_on",
+            "devices": [
+              {
+                "family_id": "sonos",
+                "device_id": "Kitchen"
+              },
+              {
+                "family_id": "sonos",
+                "device_id": "Living Room"
+              },
+              {
+                "family_id": "sonos",
+                "device_id": "Master Bedroom"
+              },
+              {
+                "family_id": "vizio",
+                "device_id": "Kitchen TV"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "sonos",
+          "device_id": "Kitchen",
+          "action": "pause"
+        },
+        {
+          "family_id": "sonos",
+          "device_id": "Living Room",
+          "action": "pause"
+        },
+        {
+          "family_id": "sonos",
+          "device_id": "Master Bedroom",
+          "action": "pause"
+        },
+        {
+          "family_id": "vizio",
+          "device_id": "Kitchen TV",
+          "action": "turn_off"
         }
       ]
     },
