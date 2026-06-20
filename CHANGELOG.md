@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/the-hcma/domesti-bot/compare/v1.2.1...v1.3.0) (2026-06-20)
+
+
+### Features
+
+* extend rule device conditions to Sonos and Vizio ([#322](https://github.com/the-hcma/domesti-bot/issues/322)) ([65d46f4](https://github.com/the-hcma/domesti-bot/commit/65d46f48128c56309000773d54582d29d87bebca))
+
 ## [1.2.1](https://github.com/the-hcma/domesti-bot/compare/v1.2.0...v1.2.1) (2026-06-20)
 
 
