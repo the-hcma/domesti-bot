@@ -299,7 +299,7 @@ def test_devices_any_on_condition_rejects_empty_devices() -> None:
         DevicesAnyOnCondition(type="devices_any_on", devices=[])
 
 
-def test_validate_rule_flags_non_kasa_device_condition() -> None:
+def test_validate_rule_accepts_sonos_device_condition_when_zone_exists() -> None:
     rule = RuleOut(
         conditions=RuleConditionsOut(
             all=[
@@ -332,10 +332,94 @@ def test_validate_rule_flags_non_kasa_device_condition() -> None:
         roster_user_id_lookup={},
         smtp_configured=True,
     )
+    with patch(
+        "app.rule_validation.resolve_sonos_identifier_by_label",
+        return_value="RINCON_AAAA",
+    ):
+        issues = validate_rule(rule, ctx)
+    assert issues == []
+
+
+def test_validate_rule_flags_androidtv_device_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOnCondition(
+                    type="devices_any_on",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Living Room TV",
+                            family_id=DeviceFamilyId.ANDROIDTV,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="cast-condition",
+        label="Cast condition",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
     issues = validate_rule(rule, ctx)
     assert len(issues) == 1
     assert issues[0].kind == "unknown_device"
-    assert "Kasa only" in issues[0].detail
+    assert 'Unknown androidtv device "Living Room TV"' in issues[0].detail
+
+
+def test_validate_rule_flags_unknown_sonos_device_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOnCondition(
+                    type="devices_any_on",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Kitchen",
+                            family_id=DeviceFamilyId.SONOS,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="sonos-condition",
+        label="Sonos condition",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with patch(
+        "app.rule_validation.resolve_sonos_identifier_by_label",
+        return_value=None,
+    ):
+        issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "unknown_device"
+    assert 'Unknown sonos device "Kitchen"' in issues[0].detail
 
 
 def test_validate_rule_flags_blank_device_condition_ref() -> None:

@@ -27,6 +27,8 @@ from app.api.schemas import (
 from app.device_enums import DeviceFamilyId
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
+from app.sonos_device_manager import SonosDeviceManager
+from app.vizio_device_manager import VizioDeviceManager
 from app.rule_conditions import (
     RuleEvaluationContext,
     compute_rules_sun_out,
@@ -160,6 +162,23 @@ def _kasa_device_state(*switches: _FakeKasaSwitch) -> DeviceManagersState:
         tailwind_mgr=None,
         vizio_mgr=None,
     )
+
+
+class _FakeSonosZone:
+    def __init__(self, identifier: str, label: str, *, is_playing: bool | None) -> None:
+        self.identifier = identifier
+        self.preferred_label = label
+        self.is_playing = is_playing
+
+
+class _FakeVizioTv:
+    def __init__(self, device_id: str, label: str, *, power: str) -> None:
+        self.identifier = device_id
+        self.preferred_label = label
+        self._power = power
+
+    def ui_power_state(self) -> str:
+        return self._power
 
 
 def _house_geofence() -> GeofenceOut:
@@ -554,6 +573,28 @@ def _device_state_rule(
     )
 
 
+def _media_device_state(
+    *,
+    sonos_zones: tuple[_FakeSonosZone, ...] = (),
+    vizio_tvs: tuple[_FakeVizioTv, ...] = (),
+) -> DeviceManagersState:
+    kasa_mgr = MagicMock(spec=KasaDeviceManager)
+    kasa_mgr.switches = ()
+    sonos_mgr = MagicMock(spec=SonosDeviceManager)
+    sonos_mgr.players = sonos_zones
+    vizio_mgr = MagicMock(spec=VizioDeviceManager)
+    vizio_mgr.tvs = vizio_tvs
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        args=argparse.Namespace(),
+        cache_path=None,
+        kasa_mgr=kasa_mgr,
+        sonos_mgr=sonos_mgr,
+        tailwind_mgr=None,
+        vizio_mgr=vizio_mgr,
+    )
+
+
 def test_devices_any_on_met_when_one_switch_on() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     state = _kasa_device_state(
@@ -646,6 +687,57 @@ def test_devices_any_on_unmet_when_discovery_not_ready() -> None:
     result = evaluate_rule(rule, _ctx(now=now, device_state=None))
     assert result.conditions[0].met is False
     assert result.conditions[0].detail == "discovery not ready"
+
+
+def test_devices_any_on_met_when_sonos_zone_playing() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _media_device_state(
+        sonos_zones=(
+            _FakeSonosZone("RINCON_AAAA", "Kitchen", is_playing=True),
+            _FakeSonosZone("RINCON_BBBB", "Living Room", is_playing=False),
+        ),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOnCondition(
+            type="devices_any_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Kitchen",
+                    family_id=DeviceFamilyId.SONOS,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Living Room",
+                    family_id=DeviceFamilyId.SONOS,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "On: Kitchen" in result.conditions[0].detail
+
+
+def test_devices_any_on_met_when_vizio_tv_on() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _media_device_state(
+        vizio_tvs=(_FakeVizioTv("192.168.1.10", "Kitchen TV", power="on"),),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOnCondition(
+            type="devices_any_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Kitchen TV",
+                    family_id=DeviceFamilyId.VIZIO,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "On: Kitchen TV" in result.conditions[0].detail
 
 
 def test_devices_all_on_met_when_every_switch_on() -> None:

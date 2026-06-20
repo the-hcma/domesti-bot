@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "domesti-bot"
 version = "1.2.1"
-description = "Self-hosted LAN control surface for TP-Link Kasa, Sonos, and GoTailwind devices, with a tile-based web UI."
+description = "Self-hosted LAN home automation: tile UI and rule engine for TP-Link Kasa, Sonos, Vizio SmartCast, and GoTailwind devices, with My Tracks presence and geofence-driven automations."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -18,8 +18,12 @@ keywords = [
     "fastapi",
     "home-automation",
     "kasa",
+    "my-tracks",
+    "owntracks",
+    "rule-engine",
     "sonos",
     "tailwind",
+    "vizio",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

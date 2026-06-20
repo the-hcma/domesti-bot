@@ -17,6 +17,8 @@ from app.rule_actions import (
     dispatch_rule_device_actions,
     resolve_kasa_host_by_label,
 )
+from app.sonos_device_manager import SonosDeviceManager
+from app.vizio_device_manager import VizioDeviceManager
 
 
 class _FakeKasa:
@@ -34,22 +36,51 @@ class _FakeKasa:
         self.calls.append("off")
 
 
+class _FakeVizioTv:
+    def __init__(self, device_id: str, label: str, *, is_on: bool) -> None:
+        self.identifier = device_id
+        self.preferred_label = label
+        self.is_on = is_on
+        self.calls: list[str] = []
+
+    async def turn_off(self) -> None:
+        self.calls.append("off")
+        self.is_on = False
+
+    async def turn_on(self) -> None:
+        self.calls.append("on")
+        self.is_on = True
+
+    def ui_power_state(self) -> str:
+        return "on" if self.is_on else "off"
+
+
+def _device_state(
+    kasa_mgr: KasaDeviceManager | None = None,
+    *,
+    vizio_mgr: VizioDeviceManager | None = None,
+) -> DeviceManagersState:
+    return DeviceManagersState(
+        kasa_mgr=kasa_mgr or _kasa_mgr([]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=vizio_mgr,
+        cache_path=None,
+        args=argparse.Namespace(),
+    )
+
+
 def _kasa_mgr(devices: list[_FakeKasa]) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(devices)
     return cast(KasaDeviceManager, mgr)
 
 
-def _device_state(kasa_mgr: KasaDeviceManager) -> DeviceManagersState:
-    return DeviceManagersState(
-        kasa_mgr=kasa_mgr,
-        sonos_mgr=None,
-        tailwind_mgr=None,
-        androidtv_mgr=None,
-        vizio_mgr=None,
-        cache_path=None,
-        args=argparse.Namespace(),
-    )
+def _vizio_mgr(tvs: list[_FakeVizioTv]) -> VizioDeviceManager:
+    mgr = MagicMock(spec=VizioDeviceManager)
+    mgr.tvs = tuple(tvs)
+    return cast(VizioDeviceManager, mgr)
 
 
 def test_resolve_kasa_host_by_label_matches_display_name() -> None:
@@ -60,6 +91,24 @@ def test_resolve_kasa_host_by_label_matches_display_name() -> None:
 def test_resolve_kasa_host_by_label_matches_host() -> None:
     mgr = _kasa_mgr([_FakeKasa("192.168.1.10", "Garage")])
     assert resolve_kasa_host_by_label(mgr, "192.168.1.10") == "192.168.1.10"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rule_device_actions_turns_off_vizio_by_label() -> None:
+    tv = _FakeVizioTv("192.168.1.10", "Kitchen TV", is_on=True)
+    state = _device_state(vizio_mgr=_vizio_mgr([tv]))
+    errors = await dispatch_rule_device_actions(
+        state,
+        [
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.VIZIO,
+                device_id="Kitchen TV",
+                action=RuleDeviceActionType.TURN_OFF,
+            ),
+        ],
+    )
+    assert errors == []
+    assert tv.calls == ["off"]
 
 
 @pytest.mark.asyncio

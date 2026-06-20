@@ -12,6 +12,7 @@ from app.api.ui_state import (
     find_kasa_by_host,
     find_sonos_by_identifier,
     find_tailwind_by_identifier,
+    find_vizio_by_id,
 )
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
@@ -20,6 +21,7 @@ from app.kasa_device_manager import KasaDeviceManager
 from app.smtp_service import SmtpConnectionParams, smtp_friendly_error
 from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
 from app.sonos_device_manager import SonosDeviceManager
+from app.vizio_device_manager import VizioDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,10 +38,12 @@ async def dispatch_device_action(
     match action.family_id:
         case DeviceFamilyId.KASA:
             await _dispatch_kasa_action(state.kasa_mgr, action)
-        case DeviceFamilyId.TAILWIND:
-            await _dispatch_tailwind_action(state.tailwind_mgr, action)
         case DeviceFamilyId.SONOS:
             await _dispatch_sonos_action(state.sonos_mgr, action)
+        case DeviceFamilyId.TAILWIND:
+            await _dispatch_tailwind_action(state.tailwind_mgr, action)
+        case DeviceFamilyId.VIZIO:
+            await _dispatch_vizio_action(state.vizio_mgr, action)
         case _:
             raise RuleActionDispatchError(
                 "Expected supported device family, got "
@@ -80,6 +84,44 @@ def cached_kasa_is_on(state: DeviceManagersState, device_id: str) -> bool | None
     if switch is None:
         return None
     return switch.is_on
+
+
+def cached_sonos_is_playing(state: DeviceManagersState, device_id: str) -> bool | None:
+    """Return cached playback state for a Sonos zone label, or ``None`` when not found."""
+    try:
+        identifier = resolve_sonos_identifier_by_label(state.sonos_mgr, device_id)
+    except RuleActionDispatchError:
+        return None
+    if identifier is None:
+        return None
+    mgr = state.sonos_mgr
+    if mgr is None:
+        return None
+    zone = find_sonos_by_identifier(mgr, identifier)
+    if zone is None:
+        return None
+    if zone.is_playing is None:
+        return None
+    return zone.is_playing
+
+
+def cached_vizio_is_on(state: DeviceManagersState, device_id: str) -> bool | None:
+    """Return cached on/off for a Vizio TV label, or ``None`` when not found or unknown."""
+    try:
+        identifier = resolve_vizio_identifier_by_label(state.vizio_mgr, device_id)
+    except RuleActionDispatchError:
+        return None
+    if identifier is None:
+        return None
+    mgr = state.vizio_mgr
+    if mgr is None:
+        return None
+    tv = find_vizio_by_id(mgr, identifier)
+    if tv is None:
+        return None
+    if tv.ui_power_state() == "unknown":
+        return None
+    return tv.ui_power_state() == "on"
 
 
 def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | None:
@@ -162,6 +204,35 @@ def resolve_tailwind_identifier_by_label(
     if len(unique) > 1:
         raise RuleActionDispatchError(
             f"Ambiguous {DeviceFamilyId.TAILWIND.display_name()} door {device_id!r}; "
+            f"matches: {', '.join(unique)}"
+        )
+    return None
+
+
+def resolve_vizio_identifier_by_label(
+    mgr: VizioDeviceManager | None,
+    device_id: str,
+) -> str | None:
+    """Resolve a Vizio TV label to its canonical identifier."""
+    if mgr is None:
+        return None
+    needle = device_id.strip()
+    if not needle:
+        return None
+    if find_vizio_by_id(mgr, needle) is not None:
+        return needle
+    lower_needle = needle.lower()
+    matches: list[str] = []
+    for tv in mgr.tvs:
+        candidates = {tv.identifier.lower(), tv.preferred_label.lower()}
+        if lower_needle in candidates:
+            matches.append(tv.identifier)
+    unique = sorted(set(matches))
+    if len(unique) == 1:
+        return unique[0]
+    if len(unique) > 1:
+        raise RuleActionDispatchError(
+            f"Ambiguous {DeviceFamilyId.VIZIO.display_name()} TV {device_id!r}; "
             f"matches: {', '.join(unique)}"
         )
     return None
@@ -307,4 +378,34 @@ async def _dispatch_tailwind_action(
             raise RuleActionDispatchError(
                 f"Expected {DeviceFamilyId.TAILWIND.display_name()} action open or "
                 f"close, got {action.action.display_label()!r}"
+            )
+
+
+async def _dispatch_vizio_action(
+    mgr: VizioDeviceManager | None,
+    action: RuleDeviceActionOut,
+) -> None:
+    if mgr is None:
+        raise RuleActionDispatchError(
+            f"{DeviceFamilyId.VIZIO.display_name()} manager is not configured on this server"
+        )
+    identifier = resolve_vizio_identifier_by_label(mgr, action.device_id)
+    if identifier is None:
+        raise RuleActionDispatchError(
+            f"Unknown {DeviceFamilyId.VIZIO.display_name()} TV: {action.device_id!r}"
+        )
+    tv = find_vizio_by_id(mgr, identifier)
+    if tv is None:
+        raise RuleActionDispatchError(
+            f"Unknown {DeviceFamilyId.VIZIO.display_name()} TV: {action.device_id!r}"
+        )
+    match action.action:
+        case RuleDeviceActionType.TURN_ON:
+            await tv.turn_on()
+        case RuleDeviceActionType.TURN_OFF:
+            await tv.turn_off()
+        case _:
+            raise RuleActionDispatchError(
+                f"Expected {DeviceFamilyId.VIZIO.display_name()} action turn on or "
+                f"turn off, got {action.action.display_label()!r}"
             )
