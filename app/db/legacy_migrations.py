@@ -21,6 +21,7 @@ def apply_legacy_column_migrations(engine: object) -> None:
         _apply_mytracks_pairing_columns_migration(conn)
         _apply_mytracks_user_nomenclature_migration(conn)
         _apply_rule_user_geofence_state_last_location_migration(conn)
+        _apply_rule_user_location_connection_type_migration(conn)
         _apply_rule_user_tables_migration(conn)
 
 
@@ -122,6 +123,17 @@ def _apply_rule_user_geofence_state_last_location_migration(conn: Connection) ->
             "ADD COLUMN last_location_received_at REAL"
         )
     )
+
+
+def _apply_rule_user_location_connection_type_migration(conn: Connection) -> None:
+    inspector = inspect(conn)
+    for table in ("rule_user_last_location", "rule_user_location_history"):
+        if table not in inspector.get_table_names():
+            continue
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        if "connection_type" in cols:
+            continue
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN connection_type VARCHAR"))
 
 
 def _apply_rule_user_tables_migration(conn: Connection) -> None:

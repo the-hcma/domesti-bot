@@ -118,6 +118,7 @@ class RuleUserLastLocation(Base):
 
     user_id: Mapped[str] = mapped_column(String, primary_key=True)
     accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    connection_type: Mapped[str | None] = mapped_column(String, nullable=True)
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lon: Mapped[float] = mapped_column(Float, nullable=False)
     received_at: Mapped[float] = mapped_column(Float, nullable=False)
@@ -130,6 +131,7 @@ class RuleUserLocationHistory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    connection_type: Mapped[str | None] = mapped_column(String, nullable=True)
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lon: Mapped[float] = mapped_column(Float, nullable=False)
     received_at: Mapped[float] = mapped_column(Float, nullable=False)

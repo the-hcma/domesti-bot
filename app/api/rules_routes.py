@@ -212,6 +212,7 @@ def _users_status(cache_path: Path) -> list[UserStatusOut]:
             received_at = _location_received_at_iso(location)
             last_location = UserLocationOut(
                 accuracy_m=location.accuracy_m,
+                connection_type=location.connection_type,
                 lat=location.lat,
                 lon=location.lon,
                 received_at=received_at,

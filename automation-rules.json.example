@@ -15,7 +15,9 @@
     "lat": 41.194072,
     "lon": -73.8883254,
     "timezone": "America/New_York",
-    "home_label": "Home"
+    "home_label": "Home",
+    "wifi_home_presence_enabled": true,
+    "wifi_home_geofence_id": "house"
   },
   "rules": [
     {

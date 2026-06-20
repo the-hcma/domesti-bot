@@ -62,6 +62,11 @@ from app.rule_validation import (
     rule_references_user_id,
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
+from app.presence_connection_type import connection_type_is_wifi
+from app.wifi_home_presence import (
+    wifi_home_geofence_ids,
+    wifi_home_presence_applies,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
@@ -228,6 +233,7 @@ class RuleEvaluator:
             for uid, location in stored.items():
                 user_locations[uid] = UserLocationOut(
                     accuracy_m=location.accuracy_m,
+                    connection_type=location.connection_type,
                     lat=location.lat,
                     lon=location.lon,
                     received_at=_location_received_at_iso(location),
@@ -275,6 +281,55 @@ class RuleEvaluator:
                 self._geofence_outside_since[key] = record.outside_since
             if record.inside_since is not None:
                 self._geofence_inside_since[key] = record.inside_since
+
+    def _apply_wifi_home_presence(
+        self,
+        user_id: str,
+        location: UserLocationRecord,
+        geofences: list[GeofenceRecord],
+        *,
+        observed_at: float,
+    ) -> None:
+        """Sync home geofence ``was_inside`` from low-accuracy WiFi without enter edges."""
+        if not connection_type_is_wifi(location.connection_type):
+            return
+        settings = load_settings_location()
+        target_ids = wifi_home_geofence_ids(settings, geofences)
+        if not target_ids:
+            return
+        edge_accuracy_limit_m = _geofence_edge_accuracy_limit_m(list_automation_rules())
+        if edge_accuracy_limit_m is None:
+            return
+        for geofence in geofences:
+            geofence_id = geofence.geofence_id
+            if geofence_id not in target_ids:
+                continue
+            if not wifi_home_presence_applies(
+                settings,
+                geofence_id,
+                location.connection_type,
+                accuracy_m=location.accuracy_m,
+                geofences=geofences,
+                lat=location.lat,
+                lon=location.lon,
+                min_accuracy_m=edge_accuracy_limit_m,
+            ):
+                continue
+            key = (user_id, geofence_id)
+            if self._geofence_was_inside.get(key, False):
+                continue
+            self._geofence_was_inside[key] = True
+            self._geofence_outside_since.pop(key, None)
+            self._persist_geofence_transition_state(
+                user_id,
+                geofence_id,
+                last_location_received_at=observed_at,
+            )
+            _log_wifi_home_presence_reconciled(
+                user_id=user_id,
+                geofence_id=geofence_id,
+                connection_type=location.connection_type,
+            )
 
     def _backfill_geofence_state_for_key(
         self,
@@ -781,6 +836,12 @@ class RuleEvaluator:
             accuracy_limit_m=edge_accuracy_limit_m,
             dwell_accuracy_limit_m=dwell_accuracy_limit_m,
         )
+        self._apply_wifi_home_presence(
+            user_id,
+            location,
+            geofences,
+            observed_at=location.received_at,
+        )
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         now = self._now_fn()
         expired_deferred_keys = self._expire_deferred_accuracy_edges(user_id, now)
@@ -795,7 +856,9 @@ class RuleEvaluator:
                 location.accuracy_m,
                 transitions_summary,
             )
-        ctx = await self._build_evaluation_context(now=datetime.now(UTC))
+        ctx = await self._build_evaluation_context(
+            now=datetime.fromtimestamp(self._now_fn(), tz=UTC),
+        )
         deferred_fired_rule_ids = await self._attempt_deferred_accuracy_edge_fires(
             user_id=user_id,
             location=location,
@@ -1020,25 +1083,25 @@ class RuleEvaluator:
                 if mutate_state:
                     self._geofence_was_inside[key] = True
                     self._geofence_outside_since.pop(key, None)
-                if track_dwell:
-                    self._geofence_inside_since[key] = observed_at
-                if dwell_elapsed:
-                    transition = GeofenceTransition(entered=True)
-                elif outside_since is not None:
-                    _log_geofence_enter_debounced(
-                        user_id=user_id,
-                        geofence_id=geofence_id,
-                        outside_s=observed_at - outside_since,
-                        dwell_remaining_s=_MIN_GEOFENCE_OUTSIDE_DWELL_S
-                        - (observed_at - outside_since),
-                    )
+                    if track_dwell:
+                        self._geofence_inside_since[key] = observed_at
+                    if dwell_elapsed:
+                        transition = GeofenceTransition(entered=True)
+                    elif outside_since is not None:
+                        _log_geofence_enter_debounced(
+                            user_id=user_id,
+                            geofence_id=geofence_id,
+                            outside_s=observed_at - outside_since,
+                            dwell_remaining_s=_MIN_GEOFENCE_OUTSIDE_DWELL_S
+                            - (observed_at - outside_since),
+                        )
             elif was_inside and not now_inside:
                 if mutate_state:
                     self._geofence_was_inside[key] = False
                     self._geofence_outside_since[key] = observed_at
-                if track_dwell:
-                    self._geofence_inside_since.pop(key, None)
-                transition = GeofenceTransition(left=True)
+                    if track_dwell:
+                        self._geofence_inside_since.pop(key, None)
+                    transition = GeofenceTransition(left=True)
             elif now_inside:
                 if mutate_state:
                     self._geofence_was_inside[key] = True
@@ -1517,6 +1580,20 @@ def _log_location_evaluation_task(task: asyncio.Task[object]) -> None:
             "[rules] location evaluation task failed",
             exc_info=exc,
         )
+
+
+def _log_wifi_home_presence_reconciled(
+    *,
+    user_id: str,
+    geofence_id: str,
+    connection_type: str | None,
+) -> None:
+    _LOGGER.info(
+        "[rules] wifi home presence reconciled user_id=%s geofence_id=%s connection_type=%s",
+        user_id,
+        geofence_id,
+        connection_type,
+    )
 
 
 def _log_rule_skipped(

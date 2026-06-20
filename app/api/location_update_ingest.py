@@ -56,6 +56,7 @@ def apply_location_update_webhook(
             lat=body.lat,
             lon=body.lon,
             accuracy_m=body.accuracy_m,
+            connection_type=body.connection_type,
             received_at=received_at,
             source=body.source or "my-tracks",
         ),

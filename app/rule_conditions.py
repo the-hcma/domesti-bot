@@ -35,6 +35,7 @@ from app.api.schemas import (
     RulesSunOut,
     SettingsLocationOut,
 )
+from app.automation_rules_loader import load_settings_location
 from app.device_enums import DeviceFamilyId
 from app.rule_actions import (
     cached_kasa_is_on,
@@ -42,6 +43,7 @@ from app.rule_actions import (
     cached_vizio_is_on,
 )
 from app.rule_validation import resolve_roster_user_id
+from app.wifi_home_presence import wifi_home_presence_applies
 
 if TYPE_CHECKING:
     from app.domesti_bot_cli import DeviceManagersState
@@ -574,6 +576,7 @@ def _evaluate_users_geofence(
         )
 
     min_accuracy_m = rule.min_location_accuracy_m
+    settings = load_settings_location()
     presence_lines: list[str] = []
     unmet_names: list[str] = []
     ignored_accuracy: list[str] = []
@@ -590,6 +593,20 @@ def _evaluate_users_geofence(
         if location is None:
             presence_lines.append(f"{name}: no location yet")
             unmet_names.append(name)
+            continue
+        if wifi_home_presence_applies(
+            settings,
+            condition.geofence_id,
+            location.connection_type,
+            accuracy_m=location.accuracy_m,
+            geofences=ctx.geofences,
+            lat=location.lat,
+            lon=location.lon,
+            min_accuracy_m=min_accuracy_m,
+        ):
+            presence_lines.append(f"{name} is inside {fence_label} (WiFi home presence)")
+            if not want_inside:
+                unmet_names.append(name)
             continue
         if not _location_usable_for_rule(location, min_accuracy_m):
             ignored_accuracy.append(
