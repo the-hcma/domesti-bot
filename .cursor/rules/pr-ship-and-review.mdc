@@ -50,6 +50,12 @@ Patch title/body if stale: `gh pr edit <n> --title … --body …`
 
 ## 3. Agent review loop
 
+**Prerequisites:** `gh auth` must be set up for the operator running the loop. Copy
+`${rh}/etc/agent-review.env.example` to `~/.config/agent-review.env` with
+`AGENT_REVIEW_REPORT_TO` and SMTP before `complete`. `complete_ready: true` is
+reported by `"${rh}/scripts/wait-for-agent-review" check --pr <n>` (or `status`)
+JSON when CI is green and agent review threads are clear.
+
 Prefer the built-in loop:
 
 ```bash
