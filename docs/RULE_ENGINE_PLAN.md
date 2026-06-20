@@ -1320,6 +1320,21 @@ True when every listed user is currently inside **and** `now - inside_since[user
 
 **Restart behavior:** dwell and outside debounce clocks survive restart via `rule_user_geofence_state` (history backfill only for pairs without a persisted row).
 
+**Location history pruning:** `prune_user_location_history` runs after each stored webhook and when retention settings change. It deletes rows from `rule_user_location_history` only — it never reads or rewrites `rule_user_geofence_state`. Dwell/edge columns are updated on live edge-accuracy ingest (`_persist_geofence_transition_state`), so `outside_since` / `inside_since` captured at transition time survive routine prunes while the server is ingesting locations.
+
+**Known gap (offline + pruned history):** History backfill and live gap reconcile only see readings still retained (`max_age_s` ∪ `min_keep_count`). If the evaluator was down long enough that no row was persisted (or the row is stale vs. the latest reading) *and* the true inside/outside streak started before that window, restart cannot reconstruct the full streak.
+
+**Implications when the gap bites:**
+
+- **Enter-edge rules (`edge_true`, e.g. arrive-home):** `outside_since` may be missing or anchored only to the oldest retained outside reading inside the window, not the real leave time. Enter debounce (default 300s away before an enter edge counts) can be **too short** — the first good-accuracy inside fix after restart may fire the rule even when the user was only briefly outside or the GPS point is a boundary flutter, not a genuine return from a trip.
+- **Inside-dwell rules (`users_inside_geofence_for_s`):** `inside_since` may be seeded to a recent inside reading (or left unset until the next dwell-eligible fix) instead of the true arrival. Scheduled rules that require “inside for N minutes” can **delay** until N minutes elapse from the reconstructed timestamp, even if the person has been home much longer.
+- **Status / operator visibility:** `/v1/rules/status` dwell detail (e.g. “inside 3 min (need 10 min)”) can **under-report** how long someone has actually been home after a bad restart seed.
+- **Leave edges:** less common, but a stale `was_inside` vs. latest geometry mismatch can produce a spurious leave transition on the first edge-accuracy update after restart, then a debounced re-enter — usually visible as a flicker in transition logs, not a second device action if cooldown/debounce still apply.
+- **When risk is low:** evaluator running continuously while locations ingest; persisted rows updated on each edge-accuracy transition; default retention (24h ∪ 20 readings) usually covers debounce/dwell lookbacks once rows exist.
+- **When risk is elevated:** prolonged outage or `--no-rules` deploy gap across a real leave/return; first boot with an empty `rule_user_geofence_state`; tightening retention (shorter `max_age_hours` / smaller `min_keep_count`) while the server is stopped.
+
+Not addressed in code today. Optional future hardening: snapshot streak anchors before aggressive retention changes, reconcile persisted rows on prune, or refuse to shrink retention while geofence rows reference timestamps outside the new window (tracked here for operators).
+
 Status API: condition row detail like `hcma inside 12 min (need 10 min)` / `kristen outside`.
 
 #### Design: device-state conditions
