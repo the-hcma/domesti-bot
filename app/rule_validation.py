@@ -25,6 +25,7 @@ from app.rule_actions import (
     resolve_kasa_host_by_label,
     resolve_sonos_identifier_by_label,
     resolve_tailwind_identifier_by_label,
+    resolve_vizio_identifier_by_label,
 )
 
 if TYPE_CHECKING:
@@ -162,7 +163,6 @@ def _device_reference_issue(
     family_id: DeviceFamilyId,
     device_id: str,
     context_label: str,
-    kasa_only: bool = False,
 ) -> RuleReferenceIssueOut | None:
     reference = device_id.strip()
     if reference == "":
@@ -170,15 +170,6 @@ def _device_reference_issue(
             detail=(
                 f"Expected non-empty {family_id.value} device_id "
                 f"in {context_label}"
-            ),
-            kind="unknown_device",
-            reference=reference,
-        )
-    if kasa_only and family_id != DeviceFamilyId.KASA:
-        return RuleReferenceIssueOut(
-            detail=(
-                f"Device conditions support {DeviceFamilyId.KASA.display_name()} "
-                f"only in v1, got {family_id.display_name()!r} in {context_label}"
             ),
             kind="unknown_device",
             reference=reference,
@@ -253,6 +244,14 @@ def _device_reference_resolves(
                 )
                 is not None
             )
+        case DeviceFamilyId.VIZIO:
+            return (
+                resolve_vizio_identifier_by_label(
+                    state.vizio_mgr,
+                    device_id,
+                )
+                is not None
+            )
         case _:
             return False
 
@@ -304,7 +303,6 @@ def _validate_device_conditions(
             family_id=family_id,
             device_id=device_id,
             context_label="conditions",
-            kasa_only=True,
         )
         if issue is not None:
             issues.append(issue)

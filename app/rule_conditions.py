@@ -36,7 +36,11 @@ from app.api.schemas import (
     SettingsLocationOut,
 )
 from app.device_enums import DeviceFamilyId
-from app.rule_actions import cached_kasa_is_on
+from app.rule_actions import (
+    cached_kasa_is_on,
+    cached_sonos_is_playing,
+    cached_vizio_is_on,
+)
 from app.rule_validation import resolve_roster_user_id
 
 if TYPE_CHECKING:
@@ -166,9 +170,16 @@ def _cached_device_is_on(
 ) -> bool | None:
     if ctx.device_state is None:
         return None
-    if ref.family_id != DeviceFamilyId.KASA:
-        return None
-    return cached_kasa_is_on(ctx.device_state, ref.device_id)
+    state = ctx.device_state
+    match ref.family_id:
+        case DeviceFamilyId.KASA:
+            return cached_kasa_is_on(state, ref.device_id)
+        case DeviceFamilyId.SONOS:
+            return cached_sonos_is_playing(state, ref.device_id)
+        case DeviceFamilyId.VIZIO:
+            return cached_vizio_is_on(state, ref.device_id)
+        case _:
+            return None
 
 
 def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
@@ -203,12 +214,16 @@ def _device_condition_power_labels(
         label = ref.device_id.strip()
         is_on = _cached_device_is_on(ctx, ref)
         if is_on is None:
-            if ref.family_id != DeviceFamilyId.KASA:
+            if ref.family_id in (
+                DeviceFamilyId.KASA,
+                DeviceFamilyId.SONOS,
+                DeviceFamilyId.VIZIO,
+            ):
+                missing_labels.append(label)
+            else:
                 missing_labels.append(
                     f"{label} (unsupported family {ref.family_id.value})",
                 )
-            else:
-                missing_labels.append(label)
         elif is_on:
             on_labels.append(label)
         else:
