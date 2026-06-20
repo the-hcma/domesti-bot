@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Poll PyPI (and optionally shields.io) until the published version matches
-# [project].version in pyproject.toml. Used after release-please publish.
+# Poll PyPI until the expected release version is published with artifacts.
+# Used after release-please publish.
 set -euo pipefail
 
 readonly default_package='domesti-bot'
-readonly default_timeout_s=300
+readonly default_timeout_s=600
 readonly default_poll_interval_s=15
 readonly pyproject_path='pyproject.toml'
 readonly curl_connect_timeout_s=5
@@ -19,15 +19,15 @@ Poll until domesti-bot on PyPI reports the expected version.
 Options:
   --package NAME           PyPI project name (default: domesti-bot)
   --version VERSION        Expected version (default: read from pyproject.toml)
-  --timeout SECONDS        Give up after this many seconds (default: 300)
+  --timeout SECONDS        Give up after this many seconds (default: 600)
   --poll-interval SECONDS  Seconds between attempts (default: 15)
-  --check-shields-badge    Also assert shields.io PyPI badge matches
+  --check-shields-badge    Also assert shields.io PyPI badge matches (optional)
   -h, --help               Show this help
 
 Exit codes:
-  0  PyPI (and optional badge) match the expected version
+  0  PyPI release (and optional badge) match the expected version
   1  usage / prerequisite error
-  2  timed out waiting for PyPI to show the expected version
+  2  timed out waiting for PyPI to publish the expected version
   3  timed out waiting for shields.io badge (when --check-shields-badge is set)
 EOF
 }
@@ -37,12 +37,21 @@ die() {
   exit 1
 }
 
-fetch_pypi_version() {
+fetch_pypi_latest_version() {
   local -r package="$1"
   curl -fsSL \
     --connect-timeout "${curl_connect_timeout_s}" \
     --max-time "${curl_max_time_s}" \
     "https://pypi.org/pypi/${package}/json" | jq -r '.info.version'
+}
+
+fetch_pypi_release_json() {
+  local -r package="$1"
+  local -r version="$2"
+  curl -fsSL \
+    --connect-timeout "${curl_connect_timeout_s}" \
+    --max-time "${curl_max_time_s}" \
+    "https://pypi.org/pypi/${package}/${version}/json"
 }
 
 fetch_shields_version() {
@@ -106,27 +115,36 @@ main() {
   fi
 
   local deadline=$((SECONDS + timeout_s))
-  local pypi_version=''
+  local latest_version=''
   while ((SECONDS < deadline)); do
-    if ! pypi_version="$(fetch_pypi_version "${package}")"; then
-      printf 'verify-pypi-release: transient PyPI lookup failure; retrying…\n' >&2
-      sleep "${poll_interval_s}"
-      continue
-    fi
-    if [[ "${pypi_version}" == "${expected_version}" ]]; then
-      printf 'verify-pypi-release: PyPI %s is at %s\n' "${package}" "${pypi_version}" >&2
+    if pypi_release_is_available "${package}" "${expected_version}"; then
+      printf 'verify-pypi-release: PyPI %s/%s is published with artifacts\n' \
+        "${package}" "${expected_version}" >&2
       if [[ "${check_shields_badge}" == 'true' ]]; then
         wait_for_shields_badge "${package}" "${expected_version}" "${deadline}" "${poll_interval_s}"
       fi
       exit 0
     fi
-    printf 'verify-pypi-release: PyPI has %s, waiting for %s…\n' \
-      "${pypi_version}" "${expected_version}" >&2
+    latest_version=''
+    if latest_version="$(fetch_pypi_latest_version "${package}" 2>/dev/null || true)"; then
+      :
+    fi
+    if [[ -n "${latest_version}" ]]; then
+      printf 'verify-pypi-release: waiting for PyPI %s/%s (project latest is %s)…\n' \
+        "${package}" "${expected_version}" "${latest_version}" >&2
+    else
+      printf 'verify-pypi-release: waiting for PyPI %s/%s (transient lookup failure)…\n' \
+        "${package}" "${expected_version}" >&2
+    fi
     sleep "${poll_interval_s}"
   done
 
-  printf 'verify-pypi-release: timed out after %ss; PyPI still at %s, expected %s\n' \
-    "${timeout_s}" "${pypi_version}" "${expected_version}" >&2
+  latest_version=''
+  if latest_version="$(fetch_pypi_latest_version "${package}" 2>/dev/null || true)"; then
+    :
+  fi
+  printf 'verify-pypi-release: timed out after %ss; latest=%s expected release=%s\n' \
+    "${timeout_s}" "${latest_version:-unknown}" "${expected_version}" >&2
   exit 2
 }
 
@@ -134,6 +152,27 @@ normalize_shields_version() {
   local raw="$1"
   raw="${raw#v}"
   printf '%s' "${raw}"
+}
+
+pypi_release_is_available() {
+  local -r package="$1"
+  local -r version="$2"
+  local release_json=''
+  local reported_version=''
+  local artifact_count=''
+
+  if ! release_json="$(fetch_pypi_release_json "${package}" "${version}" 2>/dev/null)"; then
+    return 1
+  fi
+  reported_version="$(printf '%s' "${release_json}" | jq -r '.info.version')"
+  if [[ "${reported_version}" != "${version}" ]]; then
+    return 1
+  fi
+  artifact_count="$(printf '%s' "${release_json}" | jq '.urls | length')"
+  if [[ ! "${artifact_count}" =~ ^[0-9]+$ ]] || [[ "${artifact_count}" -lt 1 ]]; then
+    return 1
+  fi
+  return 0
 }
 
 read_expected_version() {
