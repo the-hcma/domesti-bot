@@ -81,7 +81,7 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
 - Repo scripts (`scripts/domesti-bot`, …) remain for git-checkout dev; PyPI users get `domesti-bot` / `domesti-bot-server` console scripts.
 - CLI `--version` on both entry points; `format_cli_version_line()` in `app/build_info.py`.
 - Web bundle: `app/api/static/dist/main.js` is gitignored; **release CI runs `pnpm run build`** before `uv build`; hatch `artifacts` pick up `dist/` without duplicating committed static files.
-- `.github/workflows/release-please.yml` — trusted publisher + GitHub `pypi` environment; post-publish **`scripts/verify-pypi-release --check-shields-badge`** confirms PyPI and the README shields.io badge match `pyproject.toml`.
+- `.github/workflows/release-please.yml` — trusted publisher + GitHub `pypi` environment; post-publish **`scripts/verify-pypi-release`** polls the PyPI version JSON API until the release exists with artifacts.
 - README PyPI badge (`https://img.shields.io/pypi/v/domesti-bot`) is dynamic — no committed version string.
 
 ---
@@ -108,7 +108,7 @@ Implemented in `app/build_info.py` (see tests in `tests/python/test_build_info.p
     - `cd web && pnpm install --frozen-lockfile && pnpm run build`
     - Set `DOMESTI_EMBED_VERSION` / `DOMESTI_EMBED_COMMIT` → `uv run python scripts/embed_build_metadata.py`
     - `uv build` → `uv publish` (PyPI trusted publishing / OIDC preferred)
-    - **`scripts/verify-pypi-release --check-shields-badge`** — poll PyPI until `info.version` matches `pyproject.toml`; assert the README shields.io badge matches too.
+    - **`scripts/verify-pypi-release`** — poll `https://pypi.org/pypi/domesti-bot/<version>/json` until the release exists with at least one artifact (shields.io badge check optional via `--check-shields-badge`).
 - [x] GitHub environment + PyPI trusted publisher for `the-hcma/domesti-bot`.
 
 ### Phase 3: Documentation
