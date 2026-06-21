@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/the-hcma/domesti-bot/compare/v1.3.0...v1.4.0) (2026-06-21)
+
+
+### Features
+
+* presence conn type, accuracy edge gate, and low-accuracy WiFi home ([#327](https://github.com/the-hcma/domesti-bot/issues/327)) ([8b99b5c](https://github.com/the-hcma/domesti-bot/commit/8b99b5c4de31e347a2885acfc16da575a4ce15d2))
+
+
+### Documentation
+
+* add away-pause-media example and refresh rule plan ([#324](https://github.com/the-hcma/domesti-bot/issues/324)) ([34becc3](https://github.com/the-hcma/domesti-bot/commit/34becc35f298f70378edaaa57e5c5bbfcf246504))
+
 ## [1.3.0](https://github.com/the-hcma/domesti-bot/compare/v1.2.1...v1.3.0) (2026-06-20)
 
 
