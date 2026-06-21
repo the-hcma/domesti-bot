@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.presence_connection_type import normalize_presence_connection_type
 
 RuleTriggerOut = Literal["edge_true", "scheduled"]
 
@@ -472,6 +473,7 @@ class UserLocationOut(BaseModel):
     """Latest known GPS location for a user."""
 
     accuracy_m: int | None
+    connection_type: str | None = None
     lat: float
     lon: float
     received_at: str
@@ -482,6 +484,14 @@ class LocationUpdateWebhookIn(BaseModel):
     """Live or test location-update payload from my-tracks."""
 
     accuracy_m: int | None = None
+    connection_type: str | None = Field(
+        default=None,
+        max_length=1,
+        description=(
+            "OwnTracks conn: w=WiFi, m=mobile/cell, o=no network at publish "
+            "(OwnTracks offline/queued waypoint — not “user away from home”)"
+        ),
+    )
     device_id: str | None = None
     lat: float = Field(..., ge=-90.0, le=90.0)
     lon: float = Field(..., ge=-180.0, le=180.0)
@@ -489,6 +499,24 @@ class LocationUpdateWebhookIn(BaseModel):
     source: str | None = None
     timestamp: str = Field(..., min_length=1)
     user_id: str = Field(..., min_length=1)
+
+    @field_validator("connection_type", mode="before")
+    @classmethod
+    def _normalize_connection_type(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Expected str or None for connection_type, got {type(value).__name__}",
+            )
+        if value.strip() == "":
+            return None
+        normalized = normalize_presence_connection_type(value)
+        if normalized is None:
+            raise ValueError(
+                f"Expected OwnTracks conn code w, m, or o, got {value!r}",
+            )
+        return normalized
 
 
 class UserStatusOut(UserOut):
@@ -861,6 +889,22 @@ class SettingsLocationOut(BaseModel):
     lat: float
     lon: float
     timezone: str
+    wifi_home_geofence_id: str | None = Field(
+        default=None,
+        description=(
+            "When set, low-accuracy OwnTracks WiFi (conn=w) reports whose coordinates "
+            "lie within this geofence radius plus 20% slack reconcile home presence "
+            "without firing an enter edge. When unset, geofences containing settings "
+            "lat/lon are used."
+        ),
+    )
+    wifi_home_presence_enabled: bool = Field(
+        default=True,
+        description=(
+            "When true, low-accuracy WiFi fixes within home geofence radius + 20% "
+            "sync inside state without low-accuracy GPS enter/leave edges."
+        ),
+    )
 
 
 AllConditionsCondition.model_rebuild()

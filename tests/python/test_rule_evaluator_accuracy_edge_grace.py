@@ -309,7 +309,7 @@ async def test_accuracy_edge_grace_does_not_register_without_geofence_transition
 
 
 @pytest.mark.asyncio
-async def test_accuracy_edge_grace_expires_without_firing(
+async def test_low_accuracy_inside_never_registers_deferred_edge(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -318,44 +318,21 @@ async def test_accuracy_edge_grace_expires_without_firing(
         monkeypatch,
         accuracy_edge_grace_s=60,
     )
-    _move_inside(db, clock, accuracy_m=120)
-    await evaluator.on_location_update("henrique")
-
-    clock["now"] += 120.0
-    _move_inside(db, clock, accuracy_m=120)
     with patch("app.rule_evaluator._LOGGER.info") as info_mock:
+        _move_inside(db, clock, accuracy_m=120)
         await evaluator.on_location_update("henrique")
 
-    expired = [
-        str(call.args[0] % call.args[1:])
-        for call in info_mock.call_args_list
-        if call.args and "deferred edge expired" in str(call.args[0])
-    ]
-    assert expired
+        clock["now"] += 120.0
+        _move_inside(db, clock, accuracy_m=120)
+        await evaluator.on_location_update("henrique")
+
+    registered = _info_messages_matching(info_mock, "deferred edge registered")
+    expired = _info_messages_matching(info_mock, "deferred edge expired")
+    assert registered == []
+    assert expired == []
     assert device.calls == []
 
     _move_inside(db, clock, accuracy_m=20)
-    await evaluator.on_location_update("henrique")
-    assert device.calls == ["on"]
-
-
-@pytest.mark.asyncio
-async def test_accuracy_edge_grace_keeps_original_expiration(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clock, db, device, evaluator = _setup_evaluator(
-        tmp_path,
-        monkeypatch,
-        accuracy_edge_grace_s=60,
-    )
-    _move_inside(db, clock, accuracy_m=120)
-    await evaluator.on_location_update("henrique")
-
-    _move_inside(db, clock, accuracy_m=120, delta_s=30.0)
-    await evaluator.on_location_update("henrique")
-
-    _move_inside(db, clock, accuracy_m=20, delta_s=31.0)
     await evaluator.on_location_update("henrique")
     assert device.calls == ["on"]
 

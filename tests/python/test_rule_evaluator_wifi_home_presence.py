@@ -1,4 +1,4 @@
-"""Hermetic tests for geofence edge state accuracy gating."""
+"""Hermetic tests for WiFi-at-home geofence presence reconciliation."""
 
 from __future__ import annotations
 
@@ -37,27 +37,6 @@ class _FakeKasa:
         self.calls.append("on")
 
 
-def _write_bundle(path: Path, rule: RuleOut) -> None:
-    payload = {
-        "version": 1,
-        "device_id_resolution": "preferred_label",
-        "settings_location": {
-            "lat": 41.194072,
-            "lon": -73.8883254,
-            "timezone": "America/New_York",
-            "home_label": "Home",
-        },
-        "rules": [rule.model_dump(mode="json")],
-    }
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
-    mgr = MagicMock(spec=KasaDeviceManager)
-    mgr.switches = (device,)
-    return cast(KasaDeviceManager, mgr)
-
-
 def _arrive_home_rule() -> RuleOut:
     return RuleOut(
         accuracy_edge_grace_s=120,
@@ -88,6 +67,12 @@ def _arrive_home_rule() -> RuleOut:
     )
 
 
+def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
+    mgr = MagicMock(spec=KasaDeviceManager)
+    mgr.switches = (device,)
+    return cast(KasaDeviceManager, mgr)
+
+
 def _seed_db(
     cache_path: Path,
     *,
@@ -96,6 +81,7 @@ def _seed_db(
     lon: float,
     received_at: float,
     accuracy_m: int | None,
+    connection_type: str | None = None,
 ) -> None:
     replace_users(
         cache_path,
@@ -131,6 +117,7 @@ def _seed_db(
             lat=lat,
             lon=lon,
             accuracy_m=accuracy_m,
+            connection_type=connection_type,
             received_at=received_at,
             source="test",
         ),
@@ -138,208 +125,29 @@ def _seed_db(
     )
 
 
-@pytest.mark.asyncio
-async def test_low_accuracy_outside_fix_does_not_flip_inside_state_or_fire(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    bundle = tmp_path / "rules.json"
-    db = tmp_path / "discovery.sqlite"
-    _write_bundle(bundle, _arrive_home_rule())
-    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-
-    clock = {"now": 1_700_000_000.0}
-    _seed_db(
-        db,
-        user_id="henrique",
-        lat=41.194085,
-        lon=-73.888365,
-        received_at=clock["now"],
-        accuracy_m=20,
-    )
-    device = _FakeKasa("192.168.1.10", "Garage")
-    evaluator = RuleEvaluator(
-        cache_path=db,
-        device_state_getter=lambda: DeviceManagersState(
-            kasa_mgr=_kasa_mgr(device),
-            sonos_mgr=None,
-            tailwind_mgr=None,
-            androidtv_mgr=None,
-            vizio_mgr=None,
-            cache_path=db,
-            args=argparse.Namespace(),
-        ),
-        now_fn=lambda: clock["now"],
-    )
-    await evaluator.on_location_update("henrique")
-    assert device.calls == []
-
-    clock["now"] += 60.0
-    upsert_user_location(
-        db,
-        UserLocationRecord(
-            user_id="henrique",
-            lat=41.19167,
-            lon=-73.88399,
-            accuracy_m=300,
-            received_at=clock["now"],
-            source="test",
-        ),
-        retention=default_location_history_retention(),
-    )
-    await evaluator.on_location_update("henrique")
-    assert device.calls == []
-
-    clock["now"] += 60.0
-    upsert_user_location(
-        db,
-        UserLocationRecord(
-            user_id="henrique",
-            lat=41.19423,
-            lon=-73.88822,
-            accuracy_m=12,
-            received_at=clock["now"],
-            source="test",
-        ),
-        retention=default_location_history_retention(),
-    )
-    await evaluator.on_location_update("henrique")
-    assert device.calls == []
+def _write_bundle(path: Path, rule: RuleOut) -> None:
+    payload = {
+        "version": 1,
+        "device_id_resolution": "preferred_label",
+        "settings_location": {
+            "lat": 41.194072,
+            "lon": -73.8883254,
+            "timezone": "America/New_York",
+            "home_label": "Home",
+            "wifi_home_presence_enabled": True,
+            "wifi_home_geofence_id": "house",
+        },
+        "rules": [rule.model_dump(mode="json")],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 @pytest.mark.asyncio
-async def test_low_accuracy_enter_waits_for_good_accuracy_fix(
+async def test_wifi_home_reconciles_after_mobile_leave_without_false_arrive(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Low-accuracy fixes do not emit geofence edges or deferred grace intents."""
-    bundle = tmp_path / "rules.json"
-    db = tmp_path / "discovery.sqlite"
-    _write_bundle(bundle, _arrive_home_rule())
-    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-
-    clock = {"now": 1_700_000_000.0}
-    _seed_db(
-        db,
-        user_id="henrique",
-        lat=44.0,
-        lon=-73.0,
-        received_at=clock["now"] - 400.0,
-        accuracy_m=20,
-    )
-    device = _FakeKasa("192.168.1.10", "Garage")
-    evaluator = RuleEvaluator(
-        cache_path=db,
-        device_state_getter=lambda: DeviceManagersState(
-            kasa_mgr=_kasa_mgr(device),
-            sonos_mgr=None,
-            tailwind_mgr=None,
-            androidtv_mgr=None,
-            vizio_mgr=None,
-            cache_path=db,
-            args=argparse.Namespace(),
-        ),
-        now_fn=lambda: clock["now"],
-    )
-
-    clock["now"] += 60.0
-    upsert_user_location(
-        db,
-        UserLocationRecord(
-            user_id="henrique",
-            lat=41.19423,
-            lon=-73.88822,
-            accuracy_m=120,
-            received_at=clock["now"],
-            source="test",
-        ),
-        retention=default_location_history_retention(),
-    )
-    await evaluator.on_location_update("henrique")
-    assert device.calls == []
-
-    clock["now"] += 30.0
-    upsert_user_location(
-        db,
-        UserLocationRecord(
-            user_id="henrique",
-            lat=41.19423,
-            lon=-73.88822,
-            accuracy_m=20,
-            received_at=clock["now"],
-            source="test",
-        ),
-        retention=default_location_history_retention(),
-    )
-    await evaluator.on_location_update("henrique")
-    assert device.calls == ["on"]
-
-
-@pytest.mark.asyncio
-async def test_low_accuracy_inside_does_not_register_deferred_edge(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    bundle = tmp_path / "rules.json"
-    db = tmp_path / "discovery.sqlite"
-    _write_bundle(bundle, _arrive_home_rule())
-    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-
-    clock = {"now": 1_700_000_000.0}
-    _seed_db(
-        db,
-        user_id="henrique",
-        lat=44.0,
-        lon=-73.0,
-        received_at=clock["now"] - 400.0,
-        accuracy_m=20,
-    )
-    device = _FakeKasa("192.168.1.10", "Garage")
-    evaluator = RuleEvaluator(
-        cache_path=db,
-        device_state_getter=lambda: DeviceManagersState(
-            kasa_mgr=_kasa_mgr(device),
-            sonos_mgr=None,
-            tailwind_mgr=None,
-            androidtv_mgr=None,
-            vizio_mgr=None,
-            cache_path=db,
-            args=argparse.Namespace(),
-        ),
-        now_fn=lambda: clock["now"],
-    )
-
-    clock["now"] += 60.0
-    upsert_user_location(
-        db,
-        UserLocationRecord(
-            user_id="henrique",
-            lat=41.19405,
-            lon=-73.88827,
-            accuracy_m=100,
-            received_at=clock["now"],
-            source="test",
-        ),
-        retention=default_location_history_retention(),
-    )
-    with patch("app.rule_evaluator._LOGGER.info") as info_mock:
-        await evaluator.on_location_update("henrique")
-
-    deferred = [
-        str(call.args[0] % call.args[1:])
-        for call in info_mock.call_args_list
-        if call.args and "deferred edge registered" in str(call.args[0])
-    ]
-    assert deferred == []
-    assert device.calls == []
-
-
-@pytest.mark.asyncio
-async def test_good_leave_then_bad_inside_does_not_defer_arrive_edge(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Regression: bad-accuracy inside after a good leave must not register deferred edges."""
+    """Jun-20-style replay: mobile away, WiFi resyncs home, later mobile GPS enter does not fire."""
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
     _write_bundle(bundle, _arrive_home_rule())
@@ -379,12 +187,38 @@ async def test_good_leave_then_bad_inside_does_not_defer_arrive_edge(
             lat=41.19167,
             lon=-73.88399,
             accuracy_m=4,
+            connection_type="m",
             received_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
     )
     await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] += 19 * 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=300,
+            connection_type="w",
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    with patch("app.rule_evaluator._LOGGER.info") as info_mock:
+        await evaluator.on_location_update("henrique")
+
+    reconciled = [
+        str(call.args[0] % call.args[1:])
+        for call in info_mock.call_args_list
+        if call.args and "wifi home presence reconciled" in str(call.args[0])
+    ]
+    assert reconciled
     assert device.calls == []
 
     clock["now"] += 3 * 3600.0
@@ -394,7 +228,78 @@ async def test_good_leave_then_bad_inside_does_not_defer_arrive_edge(
             user_id="henrique",
             lat=41.19405,
             lon=-73.88827,
-            accuracy_m=100,
+            accuracy_m=5,
+            connection_type="m",
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_wifi_far_from_home_does_not_reconcile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WiFi on a distant network must not sync home presence without home coordinates."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _arrive_home_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        received_at=clock["now"] - 400.0,
+        accuracy_m=20,
+    )
+    device = _FakeKasa("192.168.1.10", "Garage")
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr(device),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: clock["now"],
+    )
+    await evaluator.on_location_update("henrique")
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.19167,
+            lon=-73.88399,
+            accuracy_m=4,
+            connection_type="m",
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.2000,
+            lon=-73.9000,
+            accuracy_m=300,
+            connection_type="w",
             received_at=clock["now"],
             source="test",
         ),
@@ -403,10 +308,10 @@ async def test_good_leave_then_bad_inside_does_not_defer_arrive_edge(
     with patch("app.rule_evaluator._LOGGER.info") as info_mock:
         await evaluator.on_location_update("henrique")
 
-    deferred = [
+    reconciled = [
         str(call.args[0] % call.args[1:])
         for call in info_mock.call_args_list
-        if call.args and "deferred edge registered" in str(call.args[0])
+        if call.args and "wifi home presence reconciled" in str(call.args[0])
     ]
-    assert deferred == []
+    assert reconciled == []
     assert device.calls == []

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +18,10 @@ from app.location_history_retention import (
     retained_history_row_ids,
 )
 from app.logging_config import format_log_timestamp
+from app.presence_connection_type import (
+    connection_type_label_for_log,
+    normalize_presence_connection_type,
+)
 from app.rules_store import GeofenceRecord
 
 _LOCATION_LOGGER = logging.getLogger("location")
@@ -31,6 +35,7 @@ class UserLocationRecord:
     received_at: float
     source: str | None
     user_id: str
+    connection_type: str | None = None
 
 
 def count_user_location_history(path: Path, user_id: str) -> int:
@@ -180,25 +185,28 @@ def replace_user_locations(
     with discovery_session(path) as session:
         session.execute(delete(RuleUserLastLocation))
         for location in locations:
+            stored_location = _location_with_normalized_connection_type(location)
             session.add(
                 RuleUserLastLocation(
-                    user_id=location.user_id,
-                    lat=location.lat,
-                    lon=location.lon,
-                    accuracy_m=location.accuracy_m,
-                    received_at=location.received_at,
-                    source=location.source,
+                    user_id=stored_location.user_id,
+                    lat=stored_location.lat,
+                    lon=stored_location.lon,
+                    accuracy_m=stored_location.accuracy_m,
+                    connection_type=stored_location.connection_type,
+                    received_at=stored_location.received_at,
+                    source=stored_location.source,
                     updated_at=now,
                 )
             )
             session.add(
                 RuleUserLocationHistory(
-                    user_id=location.user_id,
-                    lat=location.lat,
-                    lon=location.lon,
-                    accuracy_m=location.accuracy_m,
-                    received_at=location.received_at,
-                    source=location.source,
+                    user_id=stored_location.user_id,
+                    lat=stored_location.lat,
+                    lon=stored_location.lon,
+                    accuracy_m=stored_location.accuracy_m,
+                    connection_type=stored_location.connection_type,
+                    received_at=stored_location.received_at,
+                    source=stored_location.source,
                     updated_at=now,
                 )
             )
@@ -218,6 +226,7 @@ def upsert_user_location(
     retention: LocationHistoryRetention,
 ) -> bool:
     """Upsert one user location and append history; return False when stale."""
+    location = _location_with_normalized_connection_type(location)
     now = time.time()
     stored = False
     with discovery_session(path) as session:
@@ -231,6 +240,7 @@ def upsert_user_location(
                     lat=location.lat,
                     lon=location.lon,
                     accuracy_m=location.accuracy_m,
+                    connection_type=location.connection_type,
                     received_at=location.received_at,
                     source=location.source,
                     updated_at=now,
@@ -240,6 +250,7 @@ def upsert_user_location(
             row.lat = location.lat
             row.lon = location.lon
             row.accuracy_m = location.accuracy_m
+            row.connection_type = location.connection_type
             row.received_at = location.received_at
             row.source = location.source
             row.updated_at = now
@@ -261,12 +272,14 @@ def upsert_user_location(
             if location.accuracy_m is None
             else f"{location.accuracy_m:g}"
         )
+        connection_label = connection_type_label_for_log(location.connection_type)
         _LOCATION_LOGGER.info(
-            "stored location for %s (%.5f, %.5f) accuracy_m=%s at %s",
+            "stored location for %s (%.5f, %.5f) accuracy_m=%s connection_type=%s at %s",
             location.user_id,
             location.lat,
             location.lon,
             accuracy_label,
+            connection_label,
             format_log_timestamp(location.received_at),
         )
         prune_user_location_history(
@@ -291,6 +304,15 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * earth_radius_m * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _location_with_normalized_connection_type(
+    location: UserLocationRecord,
+) -> UserLocationRecord:
+    normalized = normalize_presence_connection_type(location.connection_type)
+    if normalized == location.connection_type:
+        return location
+    return replace(location, connection_type=normalized)
+
+
 def _history_to_record(row: RuleUserLocationHistory) -> UserLocationRecord:
     """Map a ``RuleUserLocationHistory`` ORM row to ``UserLocationRecord``."""
     return UserLocationRecord(
@@ -298,6 +320,7 @@ def _history_to_record(row: RuleUserLocationHistory) -> UserLocationRecord:
         lat=row.lat,
         lon=row.lon,
         accuracy_m=row.accuracy_m,
+        connection_type=row.connection_type,
         received_at=row.received_at,
         source=row.source,
     )
@@ -310,6 +333,7 @@ def _location_to_record(row: RuleUserLastLocation) -> UserLocationRecord:
         lat=row.lat,
         lon=row.lon,
         accuracy_m=row.accuracy_m,
+        connection_type=row.connection_type,
         received_at=row.received_at,
         source=row.source,
     )

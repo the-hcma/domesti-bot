@@ -143,6 +143,62 @@ def test_location_update_webhook_stores_location_for_known_user(
     assert locations["henrique"].lat == 41.194085
 
 
+def test_location_update_webhook_stores_connection_type(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    payload = {**_LOCATION_UPDATE_PAYLOAD, "connection_type": "w"}
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    assert list_user_locations(db)["henrique"].connection_type == "w"
+
+
+def test_location_update_webhook_canonicalizes_connection_type(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    payload = {**_LOCATION_UPDATE_PAYLOAD, "connection_type": "W"}
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    assert list_user_locations(db)["henrique"].connection_type == "w"
+
+
+def test_location_update_webhook_rejects_invalid_connection_type(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    payload = {**_LOCATION_UPDATE_PAYLOAD, "connection_type": "x"}
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
 def test_location_update_webhook_returns_404_for_unknown_user(
     tmp_path: Path,
     fernet_key: str,

@@ -85,7 +85,31 @@ def test_upsert_user_location_log_includes_accuracy_m(tmp_path: Path) -> None:
     info_mock.assert_called_once()
     message = info_mock.call_args[0][0] % info_mock.call_args[0][1:]
     assert "accuracy_m=35" in message
+    assert "connection_type=unknown" in message
     assert "hcma" in message
+
+
+def test_upsert_user_location_log_includes_connection_type(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    location = UserLocationRecord(
+        user_id="hcma",
+        lat=41.19405,
+        lon=-73.88826,
+        accuracy_m=11,
+        received_at=1_718_377_050.0,
+        source="my-tracks",
+        connection_type="w",
+    )
+    with patch("app.presence_store._LOCATION_LOGGER.info") as info_mock:
+        upsert_user_location(
+            db,
+            location,
+            retention=default_location_history_retention(),
+        )
+
+    message = info_mock.call_args[0][0] % info_mock.call_args[0][1:]
+    assert "connection_type=wifi" in message
+    assert "accuracy_m=11" in message
 
 
 def test_upsert_user_location_log_shows_unknown_when_accuracy_missing(
@@ -109,3 +133,4 @@ def test_upsert_user_location_log_shows_unknown_when_accuracy_missing(
 
     message = info_mock.call_args[0][0] % info_mock.call_args[0][1:]
     assert "accuracy_m=unknown" in message
+    assert "connection_type=unknown" in message
