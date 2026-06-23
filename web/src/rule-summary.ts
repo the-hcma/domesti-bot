@@ -254,6 +254,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case "users_outside_geofence":
     case "users_outside_geofence_for_s":
     case "devices_all_on":
+    case "devices_any_off":
     case "devices_any_on":
     case "devices_any_open":
       return null;
@@ -290,7 +291,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
 export function formatDeviceStateCondition(
   condition: Extract<
     RuleConditionOut,
-    { type: "devices_all_on" | "devices_any_on" | "devices_any_open" }
+    { type: "devices_all_on" | "devices_any_off" | "devices_any_on" | "devices_any_open" }
   >,
   context: RuleSummaryContext,
 ): string {
@@ -298,6 +299,9 @@ export function formatDeviceStateCondition(
     resolveDeviceLabel(entry.family_id, entry.device_id, context),
   );
   const joined = joinNames(labels);
+  if (condition.type === "devices_any_off") {
+    return `Any of ${joined} is off`;
+  }
   if (condition.type === "devices_any_on") {
     return `Any of ${joined} is on`;
   }
@@ -364,6 +368,7 @@ export function summarizeRule(
     }
     if (
       condition.type === "devices_all_on"
+      || condition.type === "devices_any_off"
       || condition.type === "devices_any_on"
       || condition.type === "devices_any_open"
     ) {

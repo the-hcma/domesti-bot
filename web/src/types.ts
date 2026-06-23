@@ -211,6 +211,10 @@ export type RuleConditionOut =
       devices: RuleConditionDeviceRefOut[];
     }
   | {
+      type: "devices_any_off";
+      devices: RuleConditionDeviceRefOut[];
+    }
+  | {
       type: "devices_any_on";
       devices: RuleConditionDeviceRefOut[];
     }

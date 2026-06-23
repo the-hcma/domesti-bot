@@ -576,6 +576,11 @@ class DevicesAllOnCondition(BaseModel):
     devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
 
 
+class DevicesAnyOffCondition(BaseModel):
+    type: Literal["devices_any_off"]
+    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
+
+
 class DevicesAnyOnCondition(BaseModel):
     type: Literal["devices_any_on"]
     devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
@@ -627,6 +632,7 @@ RuleConditionOut = Annotated[
     | BeforeSunriseCondition
     | DaysOfWeekCondition
     | DevicesAllOnCondition
+    | DevicesAnyOffCondition
     | DevicesAnyOnCondition
     | DevicesAnyOpenCondition
     | LocalTimeWindowCondition

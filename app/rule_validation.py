@@ -9,6 +9,7 @@ from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
     DevicesAllOnCondition,
+    DevicesAnyOffCondition,
     DevicesAnyOnCondition,
     DevicesAnyOpenCondition,
     RuleConditionDeviceRefOut,
@@ -383,7 +384,10 @@ def _walk_device_refs(
 ) -> None:
     if isinstance(
         condition,
-        DevicesAllOnCondition | DevicesAnyOnCondition | DevicesAnyOpenCondition,
+        DevicesAllOnCondition
+        | DevicesAnyOffCondition
+        | DevicesAnyOnCondition
+        | DevicesAnyOpenCondition,
     ):
         for ref in condition.devices:
             refs.add((ref.family_id, ref.device_id))
