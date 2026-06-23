@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/the-hcma/domesti-bot/compare/v1.5.0...v1.6.0) (2026-06-23)
+
+
+### Features
+
+* away shutdown rules, outside dwell, and multi-email notify ([#334](https://github.com/the-hcma/domesti-bot/issues/334)) ([57c5fe9](https://github.com/the-hcma/domesti-bot/commit/57c5fe902655cb8a91e9c4e87f8b2315ead4fec6))
+
 ## [1.5.0](https://github.com/the-hcma/domesti-bot/compare/v1.4.0...v1.5.0) (2026-06-23)
 
 
