@@ -20,6 +20,7 @@ from app.rule_actions import (
     resolve_kasa_host_by_label,
     send_rule_notification_email,
 )
+from app.smtp_store import SmtpConfigRecord
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
 
@@ -171,13 +172,13 @@ def test_send_rule_notification_email_logs_error_when_recipient_missing(
         id="test-rule",
         label="Test",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=True,
         trigger="edge_true",
     )
     with (
         patch("app.rule_actions._LOGGER.error") as error_mock,
-        pytest.raises(RuleActionDispatchError, match="notification_email"),
+        pytest.raises(RuleActionDispatchError, match="notification_emails"),
     ):
         send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
     error_mock.assert_called_once()
@@ -195,10 +196,49 @@ def test_send_rule_notification_email_returns_disabled_outcome_when_notify_off(
         id="test-rule",
         label="Test",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="edge_true",
     )
     outcome = send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
     assert outcome == RuleNotificationEmailOutcome.disabled()
     assert outcome.format_for_log() == "disabled"
+
+
+def test_send_rule_notification_email_sends_to_all_recipients(
+    tmp_path: Path,
+) -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="test-rule",
+        label="Test",
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com", "alerts@example.com"],
+        notify_on_fire=True,
+        trigger="edge_true",
+    )
+    smtp_config = SmtpConfigRecord(
+        from_address="bot@example.com",
+        host="smtp.example.com",
+        last_test_recipient=None,
+        mail_domain="example.com",
+        password_configured=False,
+        port=25,
+        username="",
+    )
+    with (
+        patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
+        patch("app.rule_actions.smtp_send_ready", return_value=True),
+        patch("app.rule_actions.resolve_password_for_send", return_value=""),
+        patch("app.smtp_service.deliver_email_message") as deliver_mock,
+    ):
+        outcome = send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
+
+    assert outcome == RuleNotificationEmailOutcome.sent_to(
+        ["ops@example.com", "alerts@example.com"],
+    )
+    message = deliver_mock.call_args[0][1]
+    assert message["To"] == "ops@example.com, alerts@example.com"

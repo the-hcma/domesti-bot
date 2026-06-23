@@ -10,6 +10,7 @@ from app.api.schemas import (
     AnyConditionsCondition,
     DevicesAllOnCondition,
     DevicesAnyOnCondition,
+    DevicesAnyOpenCondition,
     RuleConditionDeviceRefOut,
     RuleConditionOut,
     RuleDeviceActionOut,
@@ -18,6 +19,8 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
+    UsersOutsideGeofenceForSCondition,
+    normalized_rule_notification_emails,
 )
 from app.device_enums import DeviceFamilyId
 from app.rule_actions import (
@@ -335,14 +338,14 @@ def _validate_notification(
 ) -> list[RuleReferenceIssueOut]:
     if not rule.notify_on_fire:
         return []
-    recipient = (rule.notification_email or "").strip()
+    recipients = normalized_rule_notification_emails(rule)
     issues: list[RuleReferenceIssueOut] = []
-    if recipient == "":
+    if not recipients:
         issues.append(
             RuleReferenceIssueOut(
                 detail=(
                     f'Rule "{rule.id}" has notify_on_fire enabled but no '
-                    "notification_email"
+                    "notification_emails"
                 ),
                 kind="missing_notification_email",
                 reference=rule.id,
@@ -357,7 +360,7 @@ def _validate_notification(
                     "(configure under Automations → Mail)."
                 ),
                 kind="missing_smtp",
-                reference=recipient,
+                reference=recipients[0],
             ),
         )
     return issues
@@ -378,7 +381,10 @@ def _walk_device_refs(
     condition: RuleConditionOut,
     refs: set[tuple[DeviceFamilyId, str]],
 ) -> None:
-    if isinstance(condition, DevicesAllOnCondition | DevicesAnyOnCondition):
+    if isinstance(
+        condition,
+        DevicesAllOnCondition | DevicesAnyOnCondition | DevicesAnyOpenCondition,
+    ):
         for ref in condition.devices:
             refs.add((ref.family_id, ref.device_id))
         return
@@ -398,6 +404,7 @@ def _walk_geofence_ids(condition: RuleConditionOut, ids: set[str]) -> None:
             UsersInsideGeofenceCondition,
             UsersInsideGeofenceForSCondition,
             UsersOutsideGeofenceCondition,
+            UsersOutsideGeofenceForSCondition,
         ),
     ):
         ids.add(condition.geofence_id)
@@ -418,6 +425,7 @@ def _walk_user_ids(condition: RuleConditionOut, ids: set[str]) -> None:
             UsersInsideGeofenceCondition,
             UsersInsideGeofenceForSCondition,
             UsersOutsideGeofenceCondition,
+            UsersOutsideGeofenceForSCondition,
         ),
     ):
         ids.update(user_id.strip() for user_id in condition.user_ids if user_id.strip())

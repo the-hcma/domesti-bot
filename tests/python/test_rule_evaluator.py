@@ -18,6 +18,7 @@ from app.api.schemas import (
     RuleOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
+    UsersOutsideGeofenceForSCondition,
 )
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
@@ -146,7 +147,7 @@ def _arrive_home_rule(*, cooldown_s: int) -> RuleOut:
         id="arrive-home",
         label="Arrive home",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="edge_true",
     )
@@ -170,7 +171,7 @@ def _dwell_home_rule(*, cooldown_s: int) -> RuleOut:
         id="dwell-home",
         label="Dwell home",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -314,7 +315,7 @@ async def test_rule_evaluator_records_error_when_notification_email_fails(
     notify_rule = _arrive_home_rule(cooldown_s=300).model_copy(
         update={
             "device_actions": [],
-            "notification_email": "ops@example.com",
+            "notification_emails": ["ops@example.com"],
             "notify_on_fire": True,
         },
     )
@@ -549,7 +550,7 @@ async def test_rule_evaluator_seeds_geofence_inside_since_on_boot(
         id="dwell-only",
         label="Dwell only",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -599,7 +600,7 @@ async def test_rule_evaluator_seeds_inside_since_from_history_streak_start(
         id="dwell-only",
         label="Dwell only",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -805,7 +806,7 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
         id="edge-strict",
         label="Edge strict",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="edge_true",
     )
@@ -826,7 +827,7 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
         id="dwell-loose",
         label="Dwell loose",
         min_location_accuracy_m=200,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -882,6 +883,107 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
         ("henrique", "house"): received_at,
     }
     assert ("henrique", "house") not in evaluator._geofence_was_inside
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_seeds_outside_since_when_dwell_accuracy_passes_edge_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    edge_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceCondition(
+                    type="users_inside_geofence",
+                    geofence_id="house",
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="edge-strict",
+        label="Edge strict",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="edge_true",
+    )
+    dwell_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersOutsideGeofenceForSCondition(
+                    type="users_outside_geofence_for_s",
+                    geofence_id="house",
+                    min_outside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="dwell-loose",
+        label="Dwell loose",
+        min_location_accuracy_m=200,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    _write_bundle(bundle, edge_rule, dwell_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    received_at = 1_700_000_000.0
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Test",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=44.0,
+            lon=-73.0,
+            accuracy_m=120,
+            received_at=received_at,
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: received_at,
+    )
+    assert evaluator.geofence_outside_since_snapshot() == {
+        ("henrique", "house"): received_at,
+    }
 
 
 @pytest.mark.asyncio
@@ -1027,7 +1129,7 @@ async def test_rule_evaluator_skips_inside_since_seed_when_dwell_rule_rejects_ac
         id="dwell-only",
         label="Dwell only",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -1101,7 +1203,7 @@ def _scheduled_inside_house_rule(
         id="scheduled-inside",
         label="Scheduled inside",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         schedule_cron="* * * * *",
         trigger="scheduled",

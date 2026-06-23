@@ -731,8 +731,9 @@ class RulesHubController {
     notifyField.append(notifyRow);
     const notifyEmail = document.createElement("input");
     notifyEmail.type = "email";
-    notifyEmail.placeholder = "you@example.com";
-    notifyEmail.value = existing?.notification_email ?? "";
+    notifyEmail.multiple = true;
+    notifyEmail.placeholder = "you@example.com, partner@example.com";
+    notifyEmail.value = (existing?.notification_emails ?? []).join(", ");
     notifyEmail.disabled = !notifyCb.checked;
     notifyCb.addEventListener("change", () => {
       notifyEmail.disabled = !notifyCb.checked;
@@ -867,7 +868,12 @@ class RulesHubController {
           cooldown_s: Number(cooldownInput.value) || 300,
           min_location_accuracy_m: Number(accuracyInput.value) || DEFAULT_MIN_LOCATION_ACCURACY_M,
           notify_on_fire: notifyCb.checked,
-          notification_email: notifyCb.checked ? notifyEmail.value.trim() : null,
+          notification_emails: notifyCb.checked
+            ? notifyEmail.value
+                .split(",")
+                .map((entry) => entry.trim())
+                .filter((entry) => entry.length > 0)
+            : [],
           conditions: { all: conditions },
           device_actions,
         };
@@ -1302,10 +1308,10 @@ class RulesHubController {
 
       appendRuleSummaryBody(card, summarizeRule(rule, summaryContext));
 
-      if (rule.notify_on_fire && rule.notification_email !== null) {
+      if (rule.notify_on_fire && rule.notification_emails.length > 0) {
         const notifyMeta = document.createElement("p");
         notifyMeta.className = "rules-card-meta";
-        notifyMeta.textContent = `Email on fire → ${rule.notification_email}`;
+        notifyMeta.textContent = `Email on fire → ${rule.notification_emails.join(", ")}`;
         card.append(notifyMeta);
       }
 

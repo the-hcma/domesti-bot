@@ -107,9 +107,15 @@ def build_rules_status(
         if evaluator is not None
         else {}
     )
+    outside_since = (
+        evaluator.geofence_outside_since_snapshot()
+        if evaluator is not None
+        else {}
+    )
     eval_ctx = RuleEvaluationContext(
         device_state=device_state,
         geofence_inside_since=inside_since,
+        geofence_outside_since=outside_since,
         geofences=tuple(geofences),
         now=effective_now,
         roster_user_id_lookup=roster_user_id_lookup,

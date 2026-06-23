@@ -21,7 +21,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     bundle = load_automation_rules_bundle()
     assert bundle.version == 1
-    assert len(bundle.rules) == 6
+    assert len(bundle.rules) == 7
     assert bundle.rules[0].id == "evening-arrival-home-lights"
     lights_off = next(
         rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home"
@@ -45,7 +45,8 @@ def test_list_automation_rules_returns_all_rules(
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     rules = list_automation_rules()
     assert {rule.id for rule in rules} == {
-        "away-pause-media",
+        "away-garage-open-alert",
+        "away-shutdown-everyone-outside-20m",
         "evening-arrival-home-lights",
         "evening-interior-lights-on-anyone-home",
         "evening-lights-off-both-home",

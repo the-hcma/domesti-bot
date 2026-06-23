@@ -173,6 +173,12 @@ export type RuleConditionOut =
       user_ids: string[];
     }
   | {
+      type: "users_outside_geofence_for_s";
+      geofence_id: string;
+      user_ids: string[];
+      min_outside_s: number;
+    }
+  | {
       type: "after_sunset";
       offset_minutes: number;
       /** Default ``midnight`` — evening window ends at local midnight. */
@@ -207,6 +213,10 @@ export type RuleConditionOut =
   | {
       type: "devices_any_on";
       devices: RuleConditionDeviceRefOut[];
+    }
+  | {
+      type: "devices_any_open";
+      devices: RuleConditionDeviceRefOut[];
     };
 
 export interface RuleConditionDeviceRefOut {
@@ -236,7 +246,7 @@ interface RuleOutShared {
   min_location_accuracy_m: number;
   /** Send email when this automation fires (requires SMTP in Mail tab). */
   notify_on_fire: boolean;
-  notification_email: string | null;
+  notification_emails: string[];
   conditions: RuleConditionsOut;
   device_actions: RuleDeviceActionOut[];
 }

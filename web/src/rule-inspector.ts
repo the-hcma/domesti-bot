@@ -5,6 +5,7 @@ import {
   buildRuleSummaryContext,
   formatDeviceActionPhrase,
   formatDeviceStateCondition,
+  formatGeofenceAwayDwellLabel,
   formatGeofenceDwellLabel,
   formatPresenceEventLabel,
   formatTimingCondition,
@@ -46,6 +47,8 @@ function appendConditionTree(
       appendConditionTree(item, condition.conditions, context);
     } else if (condition.type === "users_inside_geofence_for_s") {
       item.textContent = formatGeofenceDwellLabel(condition, context);
+    } else if (condition.type === "users_outside_geofence_for_s") {
+      item.textContent = formatGeofenceAwayDwellLabel(condition, context);
     } else if (
       condition.type === "users_inside_geofence"
       || condition.type === "users_outside_geofence"
@@ -54,6 +57,7 @@ function appendConditionTree(
     } else if (
       condition.type === "devices_all_on"
       || condition.type === "devices_any_on"
+      || condition.type === "devices_any_open"
     ) {
       item.textContent = formatDeviceStateCondition(condition, context);
     } else {
@@ -191,8 +195,8 @@ export function mountRuleInspectorPanel(
       `${rule.accuracy_edge_grace_s} s`,
     );
   }
-  if (rule.notify_on_fire && rule.notification_email !== null) {
-    appendDefinitionRow(meta, "Email on fire", rule.notification_email);
+  if (rule.notify_on_fire && rule.notification_emails.length > 0) {
+    appendDefinitionRow(meta, "Email on fire", rule.notification_emails.join(", "));
   }
 
   const summaryHost = document.createElement("div");

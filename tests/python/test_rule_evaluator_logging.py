@@ -95,7 +95,7 @@ def _scheduled_anyone_home_rule(*, cooldown_s: int) -> RuleOut:
         id="scheduled-anyone-home",
         label="Scheduled anyone home",
         min_location_accuracy_m=50,
-        notification_email="ops@example.com",
+        notification_emails=["ops@example.com"],
         notify_on_fire=True,
         schedule_cron="* * * * *",
         trigger="scheduled",
@@ -174,7 +174,7 @@ def _arrive_home_rule(*, cooldown_s: int) -> RuleOut:
         id="arrive-home",
         label="Arrive home",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="edge_true",
     )
@@ -506,7 +506,7 @@ async def test_scheduled_fire_logs_presence_user_ids_and_email_outcome(
     with (
         patch(
             "app.rule_evaluator.send_rule_notification_email",
-            return_value=RuleNotificationEmailOutcome.sent_to("ops@example.com"),
+            return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
         ),
         patch("app.rule_evaluator._LOGGER.info") as info_mock,
     ):

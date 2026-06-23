@@ -9,7 +9,7 @@ from html import escape
 from pathlib import Path
 from typing import Literal
 
-from app.api.schemas import RuleDeviceActionOut, RuleOut
+from app.api.schemas import RuleDeviceActionOut, RuleOut, normalized_rule_notification_emails
 from app.api.ui_state import (
     find_kasa_by_host,
     find_sonos_by_identifier,
@@ -37,24 +37,24 @@ class RuleNotificationEmailOutcome:
     """Outcome of attempting to send a rule notification email."""
 
     kind: Literal["disabled", "sent"]
-    recipient: str | None = None
+    recipients: tuple[str, ...] | None = None
 
     @classmethod
     def disabled(cls) -> RuleNotificationEmailOutcome:
-        return cls(kind="disabled", recipient=None)
+        return cls(kind="disabled", recipients=None)
 
     def format_for_log(self) -> str:
         if self.kind == "disabled":
             return "disabled"
         if self.kind == "sent":
-            if self.recipient is None:
-                raise AssertionError("sent outcome requires recipient")
-            return f"sent to={self.recipient}"
+            if not self.recipients:
+                raise AssertionError("sent outcome requires recipients")
+            return f"sent to={','.join(self.recipients)}"
         raise AssertionError(f"Unexpected notification email outcome kind {self.kind!r}")
 
     @classmethod
-    def sent_to(cls, recipient: str) -> RuleNotificationEmailOutcome:
-        return cls(kind="sent", recipient=recipient)
+    def sent_to(cls, recipients: list[str]) -> RuleNotificationEmailOutcome:
+        return cls(kind="sent", recipients=tuple(recipients))
 
 
 async def dispatch_device_action(
@@ -130,6 +130,23 @@ def cached_sonos_is_playing(state: DeviceManagersState, device_id: str) -> bool 
     if zone.is_playing is None:
         return None
     return zone.is_playing
+
+
+def cached_tailwind_is_open(state: DeviceManagersState, device_id: str) -> bool | None:
+    """Return cached open/closed for a Tailwind door label, or ``None`` when not found."""
+    try:
+        identifier = resolve_tailwind_identifier_by_label(state.tailwind_mgr, device_id)
+    except RuleActionDispatchError:
+        return None
+    if identifier is None:
+        return None
+    mgr = state.tailwind_mgr
+    if mgr is None:
+        return None
+    door = find_tailwind_by_identifier(mgr, identifier)
+    if door is None:
+        return None
+    return door.is_open
 
 
 def cached_vizio_is_on(state: DeviceManagersState, device_id: str) -> bool | None:
@@ -268,19 +285,20 @@ def resolve_vizio_identifier_by_label(
 def send_rule_notification_email(
     cache_path: Path,
     *,
+    notification_detail: str | None = None,
     rule: RuleOut,
 ) -> RuleNotificationEmailOutcome:
     """Send the rule notification email when ``notify_on_fire`` is enabled."""
     if not rule.notify_on_fire:
         return RuleNotificationEmailOutcome.disabled()
-    recipient = (rule.notification_email or "").strip()
-    if recipient == "":
+    recipients = normalized_rule_notification_emails(rule)
+    if not recipients:
         _LOGGER.error(
-            "[rules] rule_id=%s notify_on_fire enabled but notification_email is missing",
+            "[rules] rule_id=%s notify_on_fire enabled but notification_emails is empty",
             rule.id,
         )
         raise RuleActionDispatchError(
-            f"Rule {rule.id!r} has notify_on_fire but no notification_email"
+            f"Rule {rule.id!r} has notify_on_fire but no notification_emails"
         )
     config = load_smtp_config(cache_path)
     if config is None or not smtp_send_ready(config):
@@ -299,19 +317,28 @@ def send_rule_notification_email(
     subject = f"domesti-bot rule fired: {rule.label}"
     plain_body = (
         f'The automation rule "{rule.label}" ({rule.id}) just fired.\n\n'
+    )
+    if notification_detail:
+        plain_body += f"{notification_detail}\n\n"
+    plain_body += (
         "Open Automations → Status in domesti-bot for live condition details."
     )
     safe_label = escape(rule.label, quote=False)
     safe_id = escape(rule.id, quote=False)
+    safe_detail = escape(notification_detail, quote=False) if notification_detail else ""
+    html_detail = (
+        f"<p>{safe_detail}</p>" if notification_detail else ""
+    )
     html_body = (
         f"<p>The automation rule <strong>{safe_label}</strong> "
         f"(<code>{safe_id}</code>) just fired.</p>"
+        f"{html_detail}"
         "<p>Open Automations → Status in domesti-bot for live condition details.</p>"
     )
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = params.from_address
-    message["To"] = recipient
+    message["To"] = ", ".join(recipients)
     message.set_content(plain_body)
     message.add_alternative(html_body, subtype="html")
     try:
@@ -322,8 +349,12 @@ def send_rule_notification_email(
         raise RuleActionDispatchError(
             smtp_friendly_error(exc, host=params.host)
         ) from exc
-    _LOGGER.info("[rules] notification email sent for rule_id=%s to %s", rule.id, recipient)
-    return RuleNotificationEmailOutcome.sent_to(recipient)
+    _LOGGER.info(
+        "[rules] notification email sent for rule_id=%s to %s",
+        rule.id,
+        ", ".join(recipients),
+    )
+    return RuleNotificationEmailOutcome.sent_to(recipients)
 
 
 async def _dispatch_kasa_action(

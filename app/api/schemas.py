@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -581,6 +581,11 @@ class DevicesAnyOnCondition(BaseModel):
     devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
 
 
+class DevicesAnyOpenCondition(BaseModel):
+    type: Literal["devices_any_open"]
+    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
+
+
 class LocalTimeWindowCondition(BaseModel):
     type: Literal["local_time_window"]
     end_hhmm: str
@@ -606,6 +611,13 @@ class UsersOutsideGeofenceCondition(BaseModel):
     user_ids: list[str] = Field(min_length=1)
 
 
+class UsersOutsideGeofenceForSCondition(BaseModel):
+    type: Literal["users_outside_geofence_for_s"]
+    geofence_id: str
+    min_outside_s: int = Field(ge=1)
+    user_ids: list[str] = Field(min_length=1)
+
+
 RuleConditionOut = Annotated[
     AfterLocalTimeCondition
     | AfterSunsetCondition
@@ -616,10 +628,12 @@ RuleConditionOut = Annotated[
     | DaysOfWeekCondition
     | DevicesAllOnCondition
     | DevicesAnyOnCondition
+    | DevicesAnyOpenCondition
     | LocalTimeWindowCondition
     | UsersInsideGeofenceCondition
     | UsersInsideGeofenceForSCondition
-    | UsersOutsideGeofenceCondition,
+    | UsersOutsideGeofenceCondition
+    | UsersOutsideGeofenceForSCondition,
     Field(discriminator="type"),
 ]
 
@@ -669,7 +683,10 @@ class RuleOut(BaseModel):
     id: str
     label: str
     min_location_accuracy_m: int
-    notification_email: str | None = None
+    notification_emails: list[str] = Field(
+        default_factory=list,
+        description="Recipients when notify_on_fire is true.",
+    )
     notify_on_fire: bool
     schedule_cron: str | None = Field(
         default=None,
@@ -679,6 +696,22 @@ class RuleOut(BaseModel):
         ),
     )
     trigger: RuleTriggerOut
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_notification_email(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "notification_emails" in data:
+            return data
+        legacy = data.get("notification_email")
+        if legacy is None:
+            return data
+        migrated = dict(data)
+        text = str(legacy).strip()
+        migrated["notification_emails"] = [text] if text else []
+        migrated.pop("notification_email", None)
+        return migrated
 
     @model_validator(mode="after")
     def _validate_trigger_fields(self) -> Self:
@@ -697,6 +730,19 @@ class RuleOut(BaseModel):
                 "fire_once_per_local_day is only allowed when trigger is scheduled"
             )
         return self
+
+
+def normalized_rule_notification_emails(rule: RuleOut) -> list[str]:
+    """Return de-duplicated non-empty notification recipients for ``rule``."""
+    seen: set[str] = set()
+    recipients: list[str] = []
+    for raw in rule.notification_emails:
+        email = raw.strip()
+        if email == "" or email in seen:
+            continue
+        seen.add(email)
+        recipients.append(email)
+    return recipients
 
 
 class RuleReferenceIssueOut(BaseModel):
