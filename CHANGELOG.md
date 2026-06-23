@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/the-hcma/domesti-bot/compare/v1.4.0...v1.5.0) (2026-06-23)
+
+
+### Features
+
+* WiFi dwell presence, history backfill, and 10m scheduled eval ([#332](https://github.com/the-hcma/domesti-bot/issues/332)) ([35e005b](https://github.com/the-hcma/domesti-bot/commit/35e005b068e8169e88eaef6c440bd1fe1dd5d93d))
+
 ## [1.4.0](https://github.com/the-hcma/domesti-bot/compare/v1.3.0...v1.4.0) (2026-06-21)
 
 
