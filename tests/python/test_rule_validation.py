@@ -48,7 +48,7 @@ def _arrival_rule() -> RuleOut:
         id="evening-arrival-home-lights",
         label="Evening arrival",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="edge_true",
     )
@@ -178,7 +178,7 @@ def test_validate_rule_accepts_notify_on_fire_when_smtp_relay_ready() -> None:
     rule = _arrival_rule().model_copy(
         update={
             "notify_on_fire": True,
-            "notification_email": "ops@hcma.info",
+            "notification_emails": ["ops@hcma.info"],
         },
     )
     ctx = RuleValidationContext(
@@ -196,7 +196,7 @@ def test_validate_rule_flags_missing_notification_email() -> None:
     rule = _arrival_rule().model_copy(
         update={
             "notify_on_fire": True,
-            "notification_email": None,
+            "notification_emails": [],
         },
     )
     ctx = RuleValidationContext(
@@ -214,7 +214,7 @@ def test_validate_rule_flags_missing_smtp_when_auth_required() -> None:
     rule = _arrival_rule().model_copy(
         update={
             "notify_on_fire": True,
-            "notification_email": "ops@hcma.info",
+            "notification_emails": ["ops@hcma.info"],
         },
     )
     ctx = RuleValidationContext(
@@ -238,7 +238,7 @@ def test_rule_out_requires_schedule_cron_for_scheduled_trigger() -> None:
             id="bad-scheduled",
             label="Bad scheduled",
             min_location_accuracy_m=50,
-            notification_email=None,
+            notification_emails=[],
             notify_on_fire=False,
             trigger="scheduled",
         )
@@ -254,7 +254,7 @@ def test_rule_out_rejects_schedule_cron_on_edge_true_trigger() -> None:
             id="bad-cron",
             label="Bad cron",
             min_location_accuracy_m=50,
-            notification_email=None,
+            notification_emails=[],
             notify_on_fire=False,
             schedule_cron="* * * * *",
             trigger="edge_true",
@@ -271,7 +271,7 @@ def test_rule_out_rejects_invalid_schedule_cron() -> None:
             id="bad-cron-expr",
             label="Bad cron expr",
             min_location_accuracy_m=50,
-            notification_email=None,
+            notification_emails=[],
             notify_on_fire=False,
             schedule_cron="not-a-cron",
             trigger="scheduled",
@@ -287,7 +287,7 @@ def test_rule_out_normalizes_schedule_cron_whitespace() -> None:
         id="trimmed-cron",
         label="Trimmed cron",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         schedule_cron="  */15 * * * *  ",
         trigger="scheduled",
@@ -304,7 +304,7 @@ def test_rule_out_coerces_whitespace_only_schedule_cron_to_none_for_edge_true() 
         id="blank-cron",
         label="Blank cron",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         schedule_cron="   ",
         trigger="edge_true",
@@ -338,7 +338,7 @@ def test_validate_rule_accepts_sonos_device_condition_when_zone_exists() -> None
         id="sonos-condition",
         label="Sonos condition",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -379,7 +379,7 @@ def test_validate_rule_flags_androidtv_device_condition() -> None:
         id="cast-condition",
         label="Cast condition",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -418,7 +418,7 @@ def test_validate_rule_flags_unknown_sonos_device_condition() -> None:
         id="sonos-condition",
         label="Sonos condition",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -461,7 +461,7 @@ def test_validate_rule_flags_blank_device_condition_ref() -> None:
         id="blank-device-condition",
         label="Blank device condition",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/15 * * * *",
@@ -489,7 +489,7 @@ def test_rule_out_accepts_fire_once_per_local_day_on_scheduled_trigger() -> None
         id="daily-cap",
         label="Daily cap",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         schedule_cron="*/15 * * * *",
         trigger="scheduled",
@@ -508,7 +508,7 @@ def test_rule_out_rejects_fire_once_per_local_day_on_edge_true_trigger() -> None
             id="bad-daily-cap",
             label="Bad daily cap",
             min_location_accuracy_m=50,
-            notification_email=None,
+            notification_emails=[],
             notify_on_fire=False,
             trigger="edge_true",
         )

@@ -23,6 +23,7 @@ from app.api.schemas import (
     DaysOfWeekCondition,
     DevicesAllOnCondition,
     DevicesAnyOnCondition,
+    DevicesAnyOpenCondition,
     GeofenceOut,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
@@ -30,6 +31,7 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
+    UsersOutsideGeofenceForSCondition,
     RuleConditionOut,
     RuleConditionStatusOut,
     RuleOut,
@@ -41,6 +43,7 @@ from app.device_enums import DeviceFamilyId
 from app.rule_actions import (
     cached_kasa_is_on,
     cached_sonos_is_playing,
+    cached_tailwind_is_open,
     cached_vizio_is_on,
 )
 from app.rule_validation import resolve_roster_user_id
@@ -69,6 +72,7 @@ class RuleEvaluationContext:
     timezone: ZoneInfo
     device_state: DeviceManagersState | None = None
     geofence_inside_since: dict[tuple[str, str], float] = field(default_factory=dict)
+    geofence_outside_since: dict[tuple[str, str], float] = field(default_factory=dict)
 
     def resolve_user_id(self, reference: str) -> str | None:
         return resolve_roster_user_id(reference, self.roster_user_id_lookup)
@@ -194,6 +198,7 @@ def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
             UsersInsideGeofenceCondition,
             UsersInsideGeofenceForSCondition,
             UsersOutsideGeofenceCondition,
+            UsersOutsideGeofenceForSCondition,
         ),
     ):
         return False
@@ -234,6 +239,44 @@ def _device_condition_power_labels(
         else:
             off_labels.append(label)
     return on_labels, off_labels, missing_labels
+
+
+def _cached_device_is_open(
+    ctx: RuleEvaluationContext,
+    ref: RuleConditionDeviceRefOut,
+) -> bool | None:
+    state = ctx.device_state
+    if state is None:
+        return None
+    match ref.family_id:
+        case DeviceFamilyId.TAILWIND:
+            return cached_tailwind_is_open(state, ref.device_id)
+        case _:
+            return None
+
+
+def _device_condition_open_labels(
+    devices: list[RuleConditionDeviceRefOut],
+    ctx: RuleEvaluationContext,
+) -> tuple[list[str], list[str], list[str]]:
+    open_labels: list[str] = []
+    closed_labels: list[str] = []
+    missing_labels: list[str] = []
+    for ref in devices:
+        label = ref.device_id.strip()
+        is_open = _cached_device_is_open(ctx, ref)
+        if is_open is None:
+            if ref.family_id == DeviceFamilyId.TAILWIND:
+                missing_labels.append(label)
+            else:
+                missing_labels.append(
+                    f"{label} (unsupported family {ref.family_id.value})",
+                )
+        elif is_open:
+            open_labels.append(label)
+        else:
+            closed_labels.append(label)
+    return open_labels, closed_labels, missing_labels
 
 
 def _evaluate_after_local_time(
@@ -405,6 +448,8 @@ def _evaluate_condition(
         return _evaluate_devices_all_on(condition, rule, ctx)
     if isinstance(condition, DevicesAnyOnCondition):
         return _evaluate_devices_any_on(condition, rule, ctx)
+    if isinstance(condition, DevicesAnyOpenCondition):
+        return _evaluate_devices_any_open(condition, rule, ctx)
     if isinstance(condition, LocalTimeWindowCondition):
         return _evaluate_local_time_window(condition, rule, ctx)
     if isinstance(condition, UsersInsideGeofenceCondition):
@@ -413,6 +458,8 @@ def _evaluate_condition(
         return _evaluate_users_inside_geofence_for_s(condition, rule, ctx)
     if isinstance(condition, UsersOutsideGeofenceCondition):
         return _evaluate_users_geofence(condition, rule, ctx, want_inside=False)
+    if isinstance(condition, UsersOutsideGeofenceForSCondition):
+        return _evaluate_users_outside_geofence_for_s(condition, rule, ctx)
     return RuleConditionStatusOut(
         condition=condition,
         detail="Unsupported condition type for status display",
@@ -519,6 +566,49 @@ def _evaluate_devices_any_on(
         condition=condition,
         detail=detail,
         label="Any device on",
+        met=met,
+    )
+
+
+def _evaluate_devices_any_open(
+    condition: DevicesAnyOpenCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    if ctx.device_state is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="discovery not ready",
+            label="Any device open",
+            met=False,
+        )
+    open_labels, closed_labels, missing_labels = _device_condition_open_labels(
+        condition.devices,
+        ctx,
+    )
+    if open_labels:
+        met = True
+        detail = f"Open: {', '.join(open_labels)}"
+        if missing_labels:
+            detail = (
+                f"{detail} (not found: {', '.join(missing_labels)})"
+            )
+    elif closed_labels:
+        met = False
+        if missing_labels:
+            detail = (
+                f"All resolved devices closed ({', '.join(closed_labels)}); "
+                f"not found: {', '.join(missing_labels)}"
+            )
+        else:
+            detail = f"All closed ({', '.join(closed_labels)})"
+    else:
+        met = False
+        detail = f"Not found: {', '.join(missing_labels)}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="Any device open",
         met=met,
     )
 
@@ -792,6 +882,107 @@ def _evaluate_users_inside_geofence_for_s(
     )
 
 
+def _evaluate_users_outside_geofence_for_s(
+    condition: UsersOutsideGeofenceForSCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    fence_label = (
+        geofence.label
+        if geofence is not None
+        else condition.geofence_id
+    )
+    if geofence is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=f'Unknown geofence "{condition.geofence_id}"',
+            label="Geofence away dwell",
+            met=False,
+        )
+
+    min_accuracy_m = rule.min_location_accuracy_m
+    now_epoch = ctx.now.timestamp()
+    need_label = _format_dwell_need_s(condition.min_outside_s)
+    presence_lines: list[str] = []
+    unmet = False
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            presence_lines.append(
+                f'"{rule_user_id}": not in user roster (sync users from My Tracks)',
+            )
+            unmet = True
+            continue
+        location = ctx.user_locations.get(roster_user_id)
+        name = _user_display_name(ctx, roster_user_id)
+        if location is None:
+            presence_lines.append(f"{name}: no location yet")
+            unmet = True
+            continue
+        counts_inside, used_wifi = _user_counts_inside_geofence_for_rule(
+            location,
+            geofence,
+            condition.geofence_id,
+            min_accuracy_m,
+            ctx,
+        )
+        if counts_inside:
+            if used_wifi:
+                presence_lines.append(
+                    f"{name} is inside {fence_label} (WiFi home presence)",
+                )
+            else:
+                presence_lines.append(f"{name} inside {fence_label}")
+            unmet = True
+            continue
+        if not _location_usable_for_rule(location, min_accuracy_m):
+            presence_lines.append(f"{name}: location ignored (low accuracy)")
+            unmet = True
+            continue
+        outside_since = ctx.geofence_outside_since.get(
+            (roster_user_id, condition.geofence_id),
+        )
+        if outside_since is None:
+            presence_lines.append(f"{name} outside (dwell not started)")
+            unmet = True
+            continue
+        outside_s = now_epoch - outside_since
+        elapsed_label = _format_dwell_elapsed_s(outside_s)
+        presence_lines.append(
+            f"{name} outside {elapsed_label} (need {need_label})",
+        )
+        if outside_s < condition.min_outside_s:
+            unmet = True
+
+    selected_names: list[str] = []
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            selected_names.append(rule_user_id)
+            continue
+        selected_names.append(_user_display_name(ctx, roster_user_id))
+    who = _join_names(selected_names)
+    label = f"Outside {fence_label} {need_label}+ ({who})"
+    if unmet:
+        detail = "; ".join(presence_lines)
+        met = False
+    else:
+        detail = (
+            f"Everyone outside {fence_label} for at least {need_label}"
+        )
+        met = True
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=label,
+        met=met,
+    )
+
+
 def _location_usable_for_rule(
     location: UserLocationOut | None,
     min_accuracy_m: int,
@@ -976,6 +1167,12 @@ def _presence_user_ids_for_condition(
             rule,
             ctx,
         )
+    if isinstance(condition, UsersOutsideGeofenceForSCondition):
+        return _roster_user_ids_satisfying_users_outside_geofence_for_s(
+            condition,
+            rule,
+            ctx,
+        )
     if isinstance(
         condition,
         (
@@ -986,6 +1183,7 @@ def _presence_user_ids_for_condition(
             DaysOfWeekCondition,
             DevicesAllOnCondition,
             DevicesAnyOnCondition,
+            DevicesAnyOpenCondition,
             LocalTimeWindowCondition,
         ),
     ):
@@ -1111,6 +1309,49 @@ def _roster_user_ids_satisfying_users_outside_geofence(
             continue
         if not _user_inside_geofence(location, geofence, min_accuracy_m):
             satisfied.add(roster_user_id)
+    return satisfied
+
+
+def _roster_user_ids_satisfying_users_outside_geofence_for_s(
+    condition: UsersOutsideGeofenceForSCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> set[str]:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    if geofence is None:
+        return set()
+    min_accuracy_m = rule.min_location_accuracy_m
+    now_epoch = ctx.now.timestamp()
+    satisfied: set[str] = set()
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            continue
+        location = ctx.user_locations.get(roster_user_id)
+        if location is None:
+            continue
+        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+            location,
+            geofence,
+            condition.geofence_id,
+            min_accuracy_m,
+            ctx,
+        )
+        if counts_inside:
+            continue
+        if not _location_usable_for_rule(location, min_accuracy_m):
+            continue
+        outside_since = ctx.geofence_outside_since.get(
+            (roster_user_id, condition.geofence_id),
+        )
+        if outside_since is None:
+            continue
+        if now_epoch - outside_since < condition.min_outside_s:
+            continue
+        satisfied.add(roster_user_id)
     return satisfied
 
 

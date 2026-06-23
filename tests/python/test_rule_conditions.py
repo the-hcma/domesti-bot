@@ -15,17 +15,20 @@ from app.api.schemas import (
     AnyConditionsCondition,
     DevicesAllOnCondition,
     DevicesAnyOnCondition,
+    DevicesAnyOpenCondition,
     GeofenceOut,
     RuleConditionDeviceRefOut,
     UserLocationOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
+    UsersOutsideGeofenceForSCondition,
     RuleConditionsOut,
     RuleOut,
     SettingsLocationOut,
 )
 from app.device_enums import DeviceFamilyId
 from app.domesti_bot_cli import DeviceManagersState
+from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
@@ -70,7 +73,7 @@ def _evening_rule() -> RuleOut:
         id="evening-arrival-home-lights",
         label="Evening arrival",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="edge_true",
     )
@@ -108,7 +111,7 @@ def _evening_arrival_any_rule() -> RuleOut:
         id="evening-arrival-home-lights",
         label="Evening arrival",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="edge_true",
     )
@@ -120,6 +123,7 @@ def _ctx(
     device_state: DeviceManagersState | None = None,
     geofences: tuple[GeofenceOut, ...] = (),
     geofence_inside_since: dict[tuple[str, str], float] | None = None,
+    geofence_outside_since: dict[tuple[str, str], float] | None = None,
     user_locations: dict[str, UserLocationOut] | None = None,
 ) -> RuleEvaluationContext:
     sun = compute_rules_sun_out(_SETTINGS, now=now)
@@ -127,6 +131,7 @@ def _ctx(
     return RuleEvaluationContext(
         device_state=device_state,
         geofence_inside_since=geofence_inside_since or {},
+        geofence_outside_since=geofence_outside_since or {},
         geofences=geofences,
         now=now,
         roster_user_id_lookup=build_roster_user_id_lookup(
@@ -223,7 +228,7 @@ def _dwell_rule() -> RuleOut:
         id="both-home-dwell",
         label="Both home dwell",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
@@ -479,6 +484,58 @@ def test_users_inside_geofence_for_s_met_after_dwell_elapsed() -> None:
     assert result.all_met is True
 
 
+def _outside_dwell_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersOutsideGeofenceForSCondition(
+                    type="users_outside_geofence_for_s",
+                    geofence_id="house",
+                    min_outside_s=1200,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="away-dwell",
+        label="Away dwell",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/10 * * * *",
+    )
+
+
+def _henrique_outside_location() -> UserLocationOut:
+    return UserLocationOut(
+        accuracy_m=20,
+        lat=44.417597,
+        lon=-72.023842,
+        received_at="2026-06-09T23:00:00Z",
+        source="owntracks",
+    )
+
+
+def test_users_outside_geofence_for_s_met_after_dwell() -> None:
+    now = datetime(2026, 6, 9, 21, 12, tzinfo=_TZ)
+    outside_since = now.timestamp() - 1300.0
+    result = evaluate_rule(
+        _outside_dwell_rule(),
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_outside_since={("henrique", "house"): outside_since},
+            user_locations={"henrique": _henrique_outside_location()},
+        ),
+    )
+    assert result.conditions[0].met is True
+    assert "Everyone outside House for at least 20 min" in result.conditions[0].detail
+    assert result.all_met is True
+
+
 def test_users_inside_geofence_for_s_met_with_wifi_home_presence_low_accuracy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -519,7 +576,7 @@ def test_users_inside_geofence_for_s_met_with_wifi_home_presence_low_accuracy(
         id="both-home-dwell",
         label="Both home dwell",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
@@ -578,7 +635,7 @@ def test_users_inside_geofence_for_s_rejects_low_accuracy_without_wifi() -> None
         id="kristen-dwell",
         label="Kristen dwell",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
@@ -639,7 +696,7 @@ def _jun22_evening_lights_off_rule() -> RuleOut:
         id="evening-lights-off-both-home",
         label="Turn off arrival lights when both home 10+ min after sunset",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
@@ -794,7 +851,7 @@ def test_users_inside_geofence_for_s_formats_subminute_dwell_in_seconds() -> Non
         id="short-dwell",
         label="Short dwell",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
@@ -833,7 +890,7 @@ def test_users_inside_geofence_for_s_formats_non_minute_aligned_need() -> None:
         id="odd-dwell",
         label="Odd dwell",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
@@ -894,7 +951,7 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
         id="both-home-dwell",
         label="Both home dwell",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
@@ -920,7 +977,7 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
 
 
 def _device_state_rule(
-    condition: DevicesAnyOnCondition | DevicesAllOnCondition,
+    condition: DevicesAllOnCondition | DevicesAnyOnCondition | DevicesAnyOpenCondition,
 ) -> RuleOut:
     return RuleOut(
         conditions=RuleConditionsOut(all=[condition]),
@@ -930,7 +987,7 @@ def _device_state_rule(
         id="device-state",
         label="Device state",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
@@ -957,6 +1014,54 @@ def _media_device_state(
         tailwind_mgr=None,
         vizio_mgr=vizio_mgr,
     )
+
+
+class _FakeTailwindDoor:
+    def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
+        self.identifier = identifier
+        self.preferred_label = label
+        self.is_open = is_open
+
+
+def _tailwind_device_state(*doors: _FakeTailwindDoor) -> DeviceManagersState:
+    mgr = MagicMock(spec=GotailwindDeviceManager)
+    mgr.doors = tuple(doors)
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        args=argparse.Namespace(),
+        cache_path=None,
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
+        sonos_mgr=None,
+        tailwind_mgr=mgr,
+        vizio_mgr=None,
+    )
+
+
+def test_devices_any_open_reports_open_tailwind_door() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _tailwind_device_state(
+        _FakeTailwindDoor("door-left", "Left", is_open=True),
+        _FakeTailwindDoor("door-right", "Right", is_open=False),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOpenCondition(
+            type="devices_any_open",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Left",
+                    family_id=DeviceFamilyId.TAILWIND,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Right",
+                    family_id=DeviceFamilyId.TAILWIND,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "Open: Left" in result.conditions[0].detail
 
 
 def test_devices_any_on_met_when_one_switch_on() -> None:
@@ -1164,6 +1269,6 @@ def test_build_rules_status_from_example_bundle(
     example = repo_root / "automation-rules.json.example"
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     status = build_rules_status(cache_path=tmp_path / "unused.sqlite")
-    assert len(status.rules) == 6
+    assert len(status.rules) == 7
     assert status.sun.sunset_at.endswith("Z")
     assert status.evaluator.last_run_at is not None

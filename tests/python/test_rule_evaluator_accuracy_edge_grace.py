@@ -132,7 +132,7 @@ def _arrive_home_rule(*, accuracy_edge_grace_s: int | None) -> RuleOut:
         id="arrive-home",
         label="Arrive home",
         min_location_accuracy_m=50,
-        notification_email=None,
+        notification_emails=[],
         notify_on_fire=False,
         trigger="edge_true",
     )

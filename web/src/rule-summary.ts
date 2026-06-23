@@ -50,6 +50,7 @@ export function referencesGeofenceId(
     condition.type === "users_inside_geofence"
     || condition.type === "users_inside_geofence_for_s"
     || condition.type === "users_outside_geofence"
+    || condition.type === "users_outside_geofence_for_s"
   ) {
     return condition.geofence_id === geofenceId;
   }
@@ -106,6 +107,7 @@ export function collectUserIdsFromConditions(
       condition.type === "users_inside_geofence"
       || condition.type === "users_inside_geofence_for_s"
       || condition.type === "users_outside_geofence"
+      || condition.type === "users_outside_geofence_for_s"
     ) {
       for (const userId of condition.user_ids) {
         ids.add(userId);
@@ -218,6 +220,17 @@ export function formatGeofenceDwellLabel(
   return `${who} inside ${where} for ${needLabel}+`;
 }
 
+export function formatGeofenceAwayDwellLabel(
+  condition: Extract<RuleConditionOut, { type: "users_outside_geofence_for_s" }>,
+  context: RuleSummaryContext,
+): string {
+  const names = userDisplayNames(condition.user_ids, context);
+  const where = geofenceLabel(condition.geofence_id, context);
+  const who = joinNames(names);
+  const needLabel = formatDwellNeed(condition.min_outside_s);
+  return `${who} outside ${where} for ${needLabel}+`;
+}
+
 export function formatPresenceEventLabel(
   condition: Extract<
     RuleConditionOut,
@@ -239,8 +252,10 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case "users_inside_geofence":
     case "users_inside_geofence_for_s":
     case "users_outside_geofence":
+    case "users_outside_geofence_for_s":
     case "devices_all_on":
     case "devices_any_on":
+    case "devices_any_open":
       return null;
     case "all":
     case "any":
@@ -275,7 +290,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
 export function formatDeviceStateCondition(
   condition: Extract<
     RuleConditionOut,
-    { type: "devices_all_on" | "devices_any_on" }
+    { type: "devices_all_on" | "devices_any_on" | "devices_any_open" }
   >,
   context: RuleSummaryContext,
 ): string {
@@ -285,6 +300,9 @@ export function formatDeviceStateCondition(
   const joined = joinNames(labels);
   if (condition.type === "devices_any_on") {
     return `Any of ${joined} is on`;
+  }
+  if (condition.type === "devices_any_open") {
+    return `Any of ${joined} is open`;
   }
   return `All of ${joined} are on`;
 }
@@ -333,6 +351,10 @@ export function summarizeRule(
       presence.push(formatGeofenceDwellLabel(condition, context));
       return;
     }
+    if (condition.type === "users_outside_geofence_for_s") {
+      presence.push(formatGeofenceAwayDwellLabel(condition, context));
+      return;
+    }
     if (
       condition.type === "users_inside_geofence"
       || condition.type === "users_outside_geofence"
@@ -343,6 +365,7 @@ export function summarizeRule(
     if (
       condition.type === "devices_all_on"
       || condition.type === "devices_any_on"
+      || condition.type === "devices_any_open"
     ) {
       devices.push(formatDeviceStateCondition(condition, context));
       return;

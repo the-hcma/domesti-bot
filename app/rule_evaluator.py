@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
+    DevicesAnyOpenCondition,
     GeofenceOut,
     RuleConditionOut,
     RuleOut,
@@ -24,6 +25,8 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
+    UsersOutsideGeofenceForSCondition,
+    normalized_rule_notification_emails,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
 from app.cron_schedule import (
@@ -54,6 +57,7 @@ from app.rule_actions import (
 from app.rule_conditions import (
     RuleEvaluationContext,
     RuleEvaluationResult,
+    _evaluate_condition,
     compute_rules_sun_out,
     evaluate_rule,
     presence_user_ids_for_rule,
@@ -247,6 +251,7 @@ class RuleEvaluator:
         return RuleEvaluationContext(
             device_state=self._device_state_getter(),
             geofence_inside_since=self.geofence_inside_since_snapshot(),
+            geofence_outside_since=self.geofence_outside_since_snapshot(),
             geofences=tuple(geofences),
             now=effective_now,
             roster_user_id_lookup=roster_user_id_lookup,
@@ -434,6 +439,9 @@ class RuleEvaluator:
                         accuracy_m=location.accuracy_m,
                         threshold_m=dwell_accuracy_limit_m,
                     )
+            elif dwell_inside is False and dwell_accuracy_limit_m is not None:
+                self._geofence_outside_since[key] = location.received_at
+                seeded = True
         if seeded:
             self._persist_geofence_transition_state(
                 user_id,
@@ -642,9 +650,16 @@ class RuleEvaluator:
                 performed_side_effect = True
         if rule.notify_on_fire and self._cache_path is not None:
             try:
+                ctx = await self._build_evaluation_context(
+                    now=datetime.fromtimestamp(self._now_fn(), tz=UTC),
+                )
                 email_outcome = await asyncio.to_thread(
                     send_rule_notification_email,
                     self._cache_path,
+                    notification_detail=_notification_detail_from_evaluation(
+                        rule,
+                        ctx,
+                    ),
                     rule=rule,
                 )
                 performed_side_effect = True
@@ -1167,10 +1182,12 @@ class RuleEvaluator:
             elif was_inside and not now_inside_for_dwell:
                 if mutate_state:
                     self._geofence_was_inside[key] = False
-                    self._geofence_outside_since[key] = observed_at
                     if track_dwell:
                         self._geofence_inside_since.pop(key, None)
                     transition = GeofenceTransition(left=True)
+                if track_dwell:
+                    self._geofence_outside_since.setdefault(key, observed_at)
+                    self._geofence_inside_since.pop(key, None)
             elif now_inside_for_dwell:
                 if mutate_state or wifi_dwell_inside:
                     self._geofence_was_inside[key] = True
@@ -1187,8 +1204,8 @@ class RuleEvaluator:
             else:
                 if mutate_state:
                     self._geofence_was_inside[key] = False
-                    self._geofence_outside_since.setdefault(key, observed_at)
                 if track_dwell:
+                    self._geofence_outside_since.setdefault(key, observed_at)
                     self._geofence_inside_since.pop(key, None)
             if transition.entered or transition.left:
                 transitions[geofence_id] = transition
@@ -1274,7 +1291,10 @@ def _condition_geofence_edge_intents(
 
 
 def _condition_has_dwell(condition: RuleConditionOut) -> bool:
-    if isinstance(condition, UsersInsideGeofenceForSCondition):
+    if isinstance(
+        condition,
+        UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition,
+    ):
         return True
     if isinstance(condition, AllConditionsCondition):
         return any(_condition_has_dwell(child) for child in condition.conditions)
@@ -1379,14 +1399,51 @@ def _format_rule_email_outcome_for_log(
         return RuleNotificationEmailOutcome.disabled().format_for_log()
     if email_outcome is not None:
         return email_outcome.format_for_log()
-    recipient = (rule.notification_email or "").strip()
-    if recipient == "":
+    recipients = normalized_rule_notification_emails(rule)
+    if not recipients:
         return "skipped reason=no_recipient"
+    recipient_list = ",".join(recipients)
     if email_error:
-        return f"failed to={recipient} detail={email_error}"
+        return f"failed to={recipient_list} detail={email_error}"
     if cache_path is None:
-        return f"not_attempted to={recipient}"
-    return f"not_attempted to={recipient}"
+        return f"not_attempted to={recipient_list}"
+    return f"not_attempted to={recipient_list}"
+
+
+def _notification_detail_from_condition(
+    condition: RuleConditionOut,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> str | None:
+    if isinstance(condition, DevicesAnyOpenCondition):
+        row = _evaluate_condition(condition, rule, ctx)
+        if row.met:
+            return row.detail
+        return None
+    if isinstance(condition, AllConditionsCondition):
+        for child in condition.conditions:
+            detail = _notification_detail_from_condition(child, rule, ctx)
+            if detail is not None:
+                return detail
+        return None
+    if isinstance(condition, AnyConditionsCondition):
+        for child in condition.conditions:
+            detail = _notification_detail_from_condition(child, rule, ctx)
+            if detail is not None:
+                return detail
+        return None
+    return None
+
+
+def _notification_detail_from_evaluation(
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> str | None:
+    for condition in rule.conditions.all:
+        detail = _notification_detail_from_condition(condition, rule, ctx)
+        if detail is not None:
+            return detail
+    return None
 
 
 def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
@@ -1495,8 +1552,14 @@ def _max_dwell_min_inside_s_from_conditions(
     """Return the largest ``min_inside_s`` nested under ``conditions``."""
     max_s = 0.0
     for condition in conditions:
-        if isinstance(condition, UsersInsideGeofenceForSCondition):
-            max_s = max(max_s, float(condition.min_inside_s))
+        if isinstance(
+            condition,
+            UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition,
+        ):
+            if isinstance(condition, UsersInsideGeofenceForSCondition):
+                max_s = max(max_s, float(condition.min_inside_s))
+            else:
+                max_s = max(max_s, float(condition.min_outside_s))
         elif isinstance(condition, AllConditionsCondition):
             max_s = max(
                 max_s,

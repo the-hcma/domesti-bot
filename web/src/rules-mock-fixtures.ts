@@ -157,7 +157,7 @@ export function createMockStoreSeed(): MockStoreSeed {
         cooldown_s: 300,
         min_location_accuracy_m: 50,
         notify_on_fire: false,
-        notification_email: null,
+        notification_emails: [],
         conditions: {
           all: [
             {
