@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from app.api.schemas import SettingsLocationOut
 from app.presence_store import _haversine_m
+from app.presence_store import UserLocationRecord
 from app.rules_store import GeofenceRecord
 from app.wifi_home_presence import (
     WIFI_HOME_GEOFENCE_RADIUS_SCALE,
+    effective_geofence_ids_containing_location,
+    history_row_geofence_inside,
     location_accuracy_is_low,
     location_within_wifi_home_proximity,
     wifi_home_geofence_ids,
     wifi_home_presence_applies,
 )
+from app.rule_evaluator import _reconstruct_geofence_seed_from_history
 
 _MIN_ACCURACY_M = 50
 
@@ -146,3 +150,85 @@ def test_wifi_home_presence_requires_coordinates_within_slack_radius() -> None:
         accuracy_m=300,
         min_accuracy_m=_MIN_ACCURACY_M,
     )
+
+
+def test_effective_geofence_ids_includes_wifi_home() -> None:
+    settings = _settings(wifi_home_geofence_id="house")
+    geofences = [_house_geofence()]
+    location = UserLocationRecord(
+        user_id="kristen",
+        lat=41.1941344,
+        lon=-73.8882358,
+        accuracy_m=97,
+        connection_type="w",
+        received_at=1_700_000_000.0,
+        source="test",
+    )
+    assert effective_geofence_ids_containing_location(
+        location,
+        geofences,
+        settings=settings,
+        min_accuracy_m=_MIN_ACCURACY_M,
+    ) == ["house"]
+
+
+def test_history_row_geofence_inside_credits_wifi() -> None:
+    settings = _settings(wifi_home_geofence_id="house")
+    geofences = [_house_geofence()]
+    row = UserLocationRecord(
+        user_id="kristen",
+        lat=41.1941344,
+        lon=-73.8882358,
+        accuracy_m=97,
+        connection_type="w",
+        received_at=1_700_000_000.0,
+        source="test",
+    )
+    assert (
+        history_row_geofence_inside(
+            row,
+            geofences[0],
+            geofences,
+            settings=settings,
+            min_accuracy_m=_MIN_ACCURACY_M,
+        )
+        is True
+    )
+
+
+def test_reconstruct_geofence_seed_credits_wifi_dwell_streak() -> None:
+    settings = _settings(wifi_home_geofence_id="house")
+    geofences = [_house_geofence()]
+    inside_since_at = 1_700_000_000.0
+    history = [
+        UserLocationRecord(
+            user_id="kristen",
+            lat=41.1941344,
+            lon=-73.8882358,
+            accuracy_m=97,
+            connection_type="w",
+            received_at=inside_since_at,
+            source="test",
+        ),
+        UserLocationRecord(
+            user_id="kristen",
+            lat=41.1941344,
+            lon=-73.8882358,
+            accuracy_m=97,
+            connection_type="w",
+            received_at=inside_since_at + 600.0,
+            source="test",
+        ),
+    ]
+    was_inside, outside_since, inside_since = _reconstruct_geofence_seed_from_history(
+        geofences[0],
+        history,
+        dwell_accuracy_limit_m=_MIN_ACCURACY_M,
+        edge_accuracy_limit_m=_MIN_ACCURACY_M,
+        geofences=geofences,
+        settings=settings,
+        user_id="kristen",
+    )
+    assert was_inside is True
+    assert outside_since is None
+    assert inside_since == inside_since_at

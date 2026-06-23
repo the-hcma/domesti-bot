@@ -192,6 +192,24 @@ def test_validate_rule_accepts_notify_on_fire_when_smtp_relay_ready() -> None:
     assert not any(issue.kind == "missing_smtp" for issue in issues)
 
 
+def test_validate_rule_flags_missing_notification_email() -> None:
+    rule = _arrival_rule().model_copy(
+        update={
+            "notify_on_fire": True,
+            "notification_email": None,
+        },
+    )
+    ctx = RuleValidationContext(
+        device_state=None,
+        geofence_ids=frozenset({"house"}),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup=build_roster_user_id_lookup(["henrique"]),
+        smtp_configured=True,
+    )
+    issues = validate_rule(rule, ctx)
+    assert any(issue.kind == "missing_notification_email" for issue in issues)
+
+
 def test_validate_rule_flags_missing_smtp_when_auth_required() -> None:
     rule = _arrival_rule().model_copy(
         update={

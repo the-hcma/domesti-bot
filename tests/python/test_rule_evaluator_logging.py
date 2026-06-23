@@ -12,6 +12,7 @@ import pytest
 
 from app.api.schemas import (
     AfterSunsetCondition,
+    AnyConditionsCondition,
     RuleConditionsOut,
     RuleDeviceActionOut,
     RuleOut,
@@ -24,6 +25,7 @@ from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
 from app.rule_evaluator import RuleEvaluator
+from app.rule_actions import RuleNotificationEmailOutcome
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
 
@@ -58,6 +60,46 @@ def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = (device,)
     return cast(KasaDeviceManager, mgr)
+
+
+def _scheduled_anyone_home_rule(*, cooldown_s: int) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AnyConditionsCondition(
+                    type="any",
+                    conditions=[
+                        UsersInsideGeofenceCondition(
+                            type="users_inside_geofence",
+                            geofence_id="house",
+                            user_ids=["henrique"],
+                        ),
+                        UsersInsideGeofenceCondition(
+                            type="users_inside_geofence",
+                            geofence_id="house",
+                            user_ids=["kristen"],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=cooldown_s,
+        device_actions=[
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Garage",
+                action=RuleDeviceActionType.TURN_ON,
+            ),
+        ],
+        enabled=True,
+        id="scheduled-anyone-home",
+        label="Scheduled anyone home",
+        min_location_accuracy_m=50,
+        notification_email="ops@example.com",
+        notify_on_fire=True,
+        schedule_cron="* * * * *",
+        trigger="scheduled",
+    )
 
 
 def _seed_presence_db(
@@ -211,7 +253,8 @@ async def test_fired_log_includes_user_transitions_and_conditions(
     fired = _info_messages_matching(info_mock, "fired rule_id=arrive-home")
     assert fired
     message = fired[0]
-    assert "user_id=henrique" in message
+    assert "user_ids=henrique" in message
+    assert "email=disabled" in message
     assert "house:entered" in message
     assert "conditions=Presence at House (Test): Test is inside House" in message
     assert "=unmet" not in message
@@ -371,3 +414,108 @@ async def test_conditions_not_met_logs_skip_reason(
     ]
     assert skipped
     assert device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_scheduled_fire_logs_presence_user_ids_and_email_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _scheduled_anyone_home_rule(cooldown_s=0))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Henrique",
+                last_name="",
+                display_name="Henrique",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+            UserRecord(
+                user_id="kristen",
+                first_name="Kristen",
+                last_name="",
+                display_name="Kristen",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=44.0,
+            lon=-73.0,
+            accuracy_m=20,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="kristen",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    device = _FakeKasa("192.168.1.10", "Garage")
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr(device),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: clock["now"],
+    )
+    runtime = evaluator._rule_state["scheduled-anyone-home"]
+    runtime.next_evaluate_at = clock["now"] - 1.0
+
+    with (
+        patch(
+            "app.rule_evaluator.send_rule_notification_email",
+            return_value=RuleNotificationEmailOutcome.sent_to("ops@example.com"),
+        ),
+        patch("app.rule_evaluator._LOGGER.info") as info_mock,
+    ):
+        await evaluator._evaluate_scheduled_rules()
+
+    fired = _info_messages_matching(info_mock, "fired rule_id=scheduled-anyone-home")
+    assert fired
+    message = fired[0]
+    assert "user_ids=kristen" in message
+    assert "user_ids=henrique" not in message
+    assert "email=sent to=ops@example.com" in message
+    assert device.calls == ["on"]

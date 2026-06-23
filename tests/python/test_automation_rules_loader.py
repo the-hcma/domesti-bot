@@ -27,7 +27,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
         rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home"
     )
     assert lights_off.trigger == "scheduled"
-    assert lights_off.schedule_cron == "*/15 * * * *"
+    assert lights_off.schedule_cron == "*/10 * * * *"
     interior = next(
         rule
         for rule in bundle.rules

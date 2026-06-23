@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -31,8 +31,10 @@ from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
 from app.rule_conditions import (
     RuleEvaluationContext,
+    _presence_user_ids_for_condition,
     compute_rules_sun_out,
     evaluate_rule,
+    presence_user_ids_for_rule,
 )
 from app.rule_validation import build_roster_user_id_lookup
 from app.rules_status import build_rules_status
@@ -224,7 +226,7 @@ def _dwell_rule() -> RuleOut:
         notification_email=None,
         notify_on_fire=False,
         trigger="scheduled",
-        schedule_cron="*/15 * * * *",
+        schedule_cron="*/10 * * * *",
     )
 
 
@@ -268,6 +270,72 @@ def test_users_inside_geofence_met_with_location() -> None:
     assert result.conditions[1].met is False
     assert "Henrique is inside House" in result.conditions[1].detail
     assert result.all_met is True
+
+
+def test_presence_user_ids_for_rule_returns_only_users_inside_any_branch() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    geofence = GeofenceOut(
+        center_lat=41.194072,
+        center_lon=-73.888325,
+        enabled=True,
+        geofence_id="house",
+        label="House",
+        owntracks_rid=None,
+        radius_m=250,
+    )
+    kristen_location = UserLocationOut(
+        accuracy_m=20,
+        lat=41.1941,
+        lon=-73.8883,
+        received_at="2026-06-09T23:00:00Z",
+        source="owntracks",
+    )
+    henrique_location = UserLocationOut(
+        accuracy_m=20,
+        lat=44.0,
+        lon=-73.0,
+        received_at="2026-06-09T23:00:00Z",
+        source="owntracks",
+    )
+    ctx = _ctx(
+        now=now,
+        geofences=(geofence,),
+        user_locations={
+            "henrique": henrique_location,
+            "kristen": kristen_location,
+        },
+    )
+    assert presence_user_ids_for_rule(_evening_arrival_any_rule(), ctx) == ("kristen",)
+
+
+def test_presence_user_ids_for_condition_ignores_non_presence_types() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    ctx = _ctx(now=now, geofences=(), user_locations={})
+    rule = _evening_rule()
+    assert (
+        _presence_user_ids_for_condition(
+            AfterSunsetCondition(type="after_sunset", offset_minutes=0),
+            rule,
+            ctx,
+        )
+        == set()
+    )
+    assert (
+        _presence_user_ids_for_condition(
+            DevicesAnyOnCondition(
+                type="devices_any_on",
+                devices=[
+                    RuleConditionDeviceRefOut(
+                        device_id="Garage",
+                        family_id=DeviceFamilyId.KASA,
+                    ),
+                ],
+            ),
+            rule,
+            ctx,
+        )
+        == set()
+    )
 
 
 def test_users_inside_geofence_ignores_low_accuracy() -> None:
@@ -411,6 +479,302 @@ def test_users_inside_geofence_for_s_met_after_dwell_elapsed() -> None:
     assert result.all_met is True
 
 
+def test_users_inside_geofence_for_s_met_with_wifi_home_presence_low_accuracy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.rule_conditions.load_settings_location",
+        lambda: SettingsLocationOut(
+            lat=41.194072,
+            lon=-73.8883254,
+            timezone="America/New_York",
+            wifi_home_geofence_id="house",
+            wifi_home_presence_enabled=True,
+        ),
+    )
+    now = datetime(2026, 6, 9, 21, 12, tzinfo=_TZ)
+    inside_since = now.timestamp() - 720.0
+    kristen_wifi = UserLocationOut(
+        accuracy_m=97,
+        connection_type="w",
+        lat=41.1941344,
+        lon=-73.8882358,
+        received_at="2026-06-09T23:00:00Z",
+        source="my-tracks",
+    )
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique", "kristen"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="both-home-dwell",
+        label="Both home dwell",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/10 * * * *",
+    )
+    with patch("app.rule_conditions._LOGGER.info") as info_mock:
+        result = evaluate_rule(
+            rule,
+            _ctx(
+                now=now,
+                geofences=(_house_geofence(),),
+                geofence_inside_since={
+                    ("henrique", "house"): inside_since,
+                    ("kristen", "house"): inside_since,
+                },
+                user_locations={
+                    "henrique": _henrique_inside_location(),
+                    "kristen": kristen_wifi,
+                },
+            ),
+        )
+    assert result.conditions[0].met is True
+    override_logs = [
+        call
+        for call in info_mock.call_args_list
+        if call.args
+        and "wifi home presence overrode low-accuracy location" in str(call.args[0])
+    ]
+    assert override_logs
+
+
+def test_users_inside_geofence_for_s_rejects_low_accuracy_without_wifi() -> None:
+    now = datetime(2026, 6, 9, 21, 12, tzinfo=_TZ)
+    inside_since = now.timestamp() - 720.0
+    kristen_mobile = UserLocationOut(
+        accuracy_m=97,
+        connection_type="m",
+        lat=41.1941344,
+        lon=-73.8882358,
+        received_at="2026-06-09T23:00:00Z",
+        source="my-tracks",
+    )
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["kristen"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="kristen-dwell",
+        label="Kristen dwell",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/10 * * * *",
+    )
+    result = evaluate_rule(
+        rule,
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_inside_since={("kristen", "house"): inside_since},
+            user_locations={"kristen": kristen_mobile},
+        ),
+    )
+    assert result.conditions[0].met is False
+    assert "location ignored (low accuracy)" in result.conditions[0].detail
+
+
+_JUN22_KRISTEN_INSIDE_SINCE = datetime(2026, 6, 22, 20, 34, 41, tzinfo=_TZ).timestamp()
+_JUN22_HENRIQUE_INSIDE_SINCE = datetime(2026, 6, 22, 21, 26, 24, tzinfo=_TZ).timestamp()
+_JUN22_TICK_2130 = datetime(2026, 6, 22, 21, 30, 36, tzinfo=_TZ)
+_JUN22_TICK_2140 = datetime(2026, 6, 22, 21, 40, 0, tzinfo=_TZ)
+_JUN22_TICK_2145 = datetime(2026, 6, 22, 21, 45, 39, tzinfo=_TZ)
+
+
+def _jun22_evening_lights_off_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterSunsetCondition(
+                    type="after_sunset",
+                    offset_minutes=0,
+                    window_end="midnight",
+                ),
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique", "kristen"],
+                ),
+                DevicesAnyOnCondition(
+                    type="devices_any_on",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Front door lights",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                        RuleConditionDeviceRefOut(
+                            device_id="Garage outside lights",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="evening-lights-off-both-home",
+        label="Turn off arrival lights when both home 10+ min after sunset",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/10 * * * *",
+    )
+
+
+def _jun22_kristen_low_accuracy_location(
+    *,
+    connection_type: str,
+) -> UserLocationOut:
+    return UserLocationOut(
+        accuracy_m=97,
+        connection_type=connection_type,
+        lat=41.1941344,
+        lon=-73.8882358,
+        received_at="2026-06-23T01:45:00Z",
+        source="my-tracks",
+    )
+
+
+def _jun22_replay_ctx(
+    now: datetime,
+    *,
+    connection_type: str = "w",
+    lights_on: bool = False,
+) -> RuleEvaluationContext:
+    state = _kasa_device_state(
+        _FakeKasaSwitch("10", "Front door lights", is_on=lights_on),
+        _FakeKasaSwitch("11", "Garage outside lights", is_on=False),
+    )
+    return _ctx(
+        now=now,
+        device_state=state,
+        geofences=(_house_geofence(),),
+        geofence_inside_since={
+            ("henrique", "house"): _JUN22_HENRIQUE_INSIDE_SINCE,
+            ("kristen", "house"): _JUN22_KRISTEN_INSIDE_SINCE,
+        },
+        user_locations={
+            "henrique": _henrique_inside_location(),
+            "kristen": _jun22_kristen_low_accuracy_location(
+                connection_type=connection_type,
+            ),
+        },
+    )
+
+
+def _patch_wifi_home_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.rule_conditions.load_settings_location",
+        lambda: SettingsLocationOut(
+            lat=41.194072,
+            lon=-73.8883254,
+            timezone="America/New_York",
+            wifi_home_geofence_id="house",
+            wifi_home_presence_enabled=True,
+        ),
+    )
+
+
+def test_jun22_2145_dwell_rejects_kristen_without_wifi() -> None:
+    result = evaluate_rule(
+        _jun22_evening_lights_off_rule(),
+        _jun22_replay_ctx(_JUN22_TICK_2145, connection_type="m"),
+    )
+    dwell = result.conditions[1]
+    assert dwell.met is False
+    assert "Kristen: location ignored (low accuracy)" in dwell.detail
+    assert result.all_met is False
+
+
+def test_jun22_2145_dwell_accepts_kristen_with_wifi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_wifi_home_settings(monkeypatch)
+    result = evaluate_rule(
+        _jun22_evening_lights_off_rule(),
+        _jun22_replay_ctx(_JUN22_TICK_2145, connection_type="w"),
+    )
+    dwell = result.conditions[1]
+    assert dwell.met is True
+    assert "Everyone inside House for at least 10 min" in dwell.detail
+
+
+def test_jun22_2130_full_rule_unmet_henrique_dwell_short_with_wifi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_wifi_home_settings(monkeypatch)
+    result = evaluate_rule(
+        _jun22_evening_lights_off_rule(),
+        _jun22_replay_ctx(_JUN22_TICK_2130, connection_type="w"),
+    )
+    dwell = result.conditions[1]
+    assert dwell.met is False
+    assert "Henrique inside 4 min 12 sec (need 10 min)" in dwell.detail
+    assert result.all_met is False
+
+
+def test_jun22_2145_full_rule_unmet_lights_off_with_wifi_fix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_wifi_home_settings(monkeypatch)
+    result = evaluate_rule(
+        _jun22_evening_lights_off_rule(),
+        _jun22_replay_ctx(_JUN22_TICK_2145, connection_type="w", lights_on=False),
+    )
+    assert result.conditions[0].met is True
+    assert result.conditions[1].met is True
+    assert result.conditions[2].met is False
+    assert "All off" in result.conditions[2].detail
+    assert result.all_met is False
+
+
+def test_jun22_2140_full_rule_met_lights_on_with_wifi_fix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_wifi_home_settings(monkeypatch)
+    result = evaluate_rule(
+        _jun22_evening_lights_off_rule(),
+        _jun22_replay_ctx(_JUN22_TICK_2140, connection_type="w", lights_on=True),
+    )
+    assert result.all_met is True
+
+
+def test_jun22_2145_full_rule_met_lights_on_with_wifi_fix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_wifi_home_settings(monkeypatch)
+    result = evaluate_rule(
+        _jun22_evening_lights_off_rule(),
+        _jun22_replay_ctx(_JUN22_TICK_2145, connection_type="w", lights_on=True),
+    )
+    assert result.all_met is True
+
+
 def test_users_inside_geofence_for_s_formats_subminute_dwell_in_seconds() -> None:
     now = datetime(2026, 6, 9, 21, 0, 35, tzinfo=_TZ)
     rule = RuleOut(
@@ -433,7 +797,7 @@ def test_users_inside_geofence_for_s_formats_subminute_dwell_in_seconds() -> Non
         notification_email=None,
         notify_on_fire=False,
         trigger="scheduled",
-        schedule_cron="*/15 * * * *",
+        schedule_cron="*/10 * * * *",
     )
     inside_since = now.timestamp() - 35.0
     result = evaluate_rule(
@@ -472,7 +836,7 @@ def test_users_inside_geofence_for_s_formats_non_minute_aligned_need() -> None:
         notification_email=None,
         notify_on_fire=False,
         trigger="scheduled",
-        schedule_cron="*/15 * * * *",
+        schedule_cron="*/10 * * * *",
     )
     inside_since = now.timestamp() - 65.0
     result = evaluate_rule(
@@ -533,7 +897,7 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
         notification_email=None,
         notify_on_fire=False,
         trigger="scheduled",
-        schedule_cron="*/15 * * * *",
+        schedule_cron="*/10 * * * *",
     )
     inside_since = now.timestamp() - 900.0
     result = evaluate_rule(
@@ -569,7 +933,7 @@ def _device_state_rule(
         notification_email=None,
         notify_on_fire=False,
         trigger="scheduled",
-        schedule_cron="*/15 * * * *",
+        schedule_cron="*/10 * * * *",
     )
 
 

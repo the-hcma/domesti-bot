@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from email.message import EmailMessage
 from html import escape
 from pathlib import Path
+from typing import Literal
 
 from app.api.schemas import RuleDeviceActionOut, RuleOut
 from app.api.ui_state import (
@@ -28,6 +30,31 @@ _LOGGER = logging.getLogger(__name__)
 
 class RuleActionDispatchError(Exception):
     """Raised when a single rule device action cannot be dispatched."""
+
+
+@dataclass(frozen=True)
+class RuleNotificationEmailOutcome:
+    """Outcome of attempting to send a rule notification email."""
+
+    kind: Literal["disabled", "sent"]
+    recipient: str | None = None
+
+    @classmethod
+    def disabled(cls) -> RuleNotificationEmailOutcome:
+        return cls(kind="disabled", recipient=None)
+
+    def format_for_log(self) -> str:
+        if self.kind == "disabled":
+            return "disabled"
+        if self.kind == "sent":
+            if self.recipient is None:
+                raise AssertionError("sent outcome requires recipient")
+            return f"sent to={self.recipient}"
+        raise AssertionError(f"Unexpected notification email outcome kind {self.kind!r}")
+
+    @classmethod
+    def sent_to(cls, recipient: str) -> RuleNotificationEmailOutcome:
+        return cls(kind="sent", recipient=recipient)
 
 
 async def dispatch_device_action(
@@ -242,12 +269,16 @@ def send_rule_notification_email(
     cache_path: Path,
     *,
     rule: RuleOut,
-) -> None:
+) -> RuleNotificationEmailOutcome:
     """Send the rule notification email when ``notify_on_fire`` is enabled."""
     if not rule.notify_on_fire:
-        return
+        return RuleNotificationEmailOutcome.disabled()
     recipient = (rule.notification_email or "").strip()
     if recipient == "":
+        _LOGGER.error(
+            "[rules] rule_id=%s notify_on_fire enabled but notification_email is missing",
+            rule.id,
+        )
         raise RuleActionDispatchError(
             f"Rule {rule.id!r} has notify_on_fire but no notification_email"
         )
@@ -292,6 +323,7 @@ def send_rule_notification_email(
             smtp_friendly_error(exc, host=params.host)
         ) from exc
     _LOGGER.info("[rules] notification email sent for rule_id=%s to %s", rule.id, recipient)
+    return RuleNotificationEmailOutcome.sent_to(recipient)
 
 
 async def _dispatch_kasa_action(
