@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from app.api.schemas import GeofenceOut, SettingsLocationOut
+from app.api.schemas import GeofenceOut, RuleOut, SettingsLocationOut
 from app.presence_connection_type import connection_type_is_wifi
-from app.presence_store import UserLocationRecord, _haversine_m
+from app.presence_store import UserLocationRecord, _haversine_m, geofence_ids_containing_location
 from app.rules_store import GeofenceRecord
 
 GeofencePresenceTarget = GeofenceRecord | GeofenceOut
@@ -40,6 +40,77 @@ def _geofence_ids_containing_point(
         if distance_m <= float(geofence.radius_m):
             inside.append(geofence.geofence_id)
     return frozenset(inside)
+
+
+def effective_geofence_ids_containing_location(
+    location: UserLocationRecord,
+    geofences: Sequence[GeofenceRecord],
+    *,
+    settings: SettingsLocationOut,
+    min_accuracy_m: int | None,
+) -> list[str]:
+    """Return geofence ids that contain ``location``, including WiFi home presence."""
+    if min_accuracy_m is None:
+        return geofence_ids_containing_location(location, list(geofences))
+    inside: list[str] = []
+    geofence_list = list(geofences)
+    for geofence in geofence_list:
+        if not geofence.enabled:
+            continue
+        geofence_id = geofence.geofence_id
+        if wifi_home_presence_applies(
+            settings,
+            geofence_id,
+            location.connection_type,
+            accuracy_m=location.accuracy_m,
+            geofences=geofence_list,
+            lat=location.lat,
+            lon=location.lon,
+            min_accuracy_m=min_accuracy_m,
+        ):
+            inside.append(geofence_id)
+            continue
+        if location.accuracy_m is not None and location.accuracy_m > min_accuracy_m:
+            continue
+        if geofence_id in geofence_ids_containing_location(location, [geofence]):
+            inside.append(geofence_id)
+    return inside
+
+
+def geofence_presence_accuracy_limit_m(rules: Sequence[RuleOut]) -> int | None:
+    """Return the strictest accuracy limit among enabled automation rules."""
+    limits = [rule.min_location_accuracy_m for rule in rules if rule.enabled]
+    if not limits:
+        return None
+    return min(limits)
+
+
+def history_row_geofence_inside(
+    row: UserLocationRecord,
+    geofence: GeofenceRecord,
+    geofences: Sequence[GeofenceRecord],
+    *,
+    settings: SettingsLocationOut,
+    min_accuracy_m: int | None,
+) -> bool | None:
+    """Return inside/outside for a history row, or None when the row is unusable."""
+    if min_accuracy_m is None:
+        return geofence.geofence_id in geofence_ids_containing_location(row, [geofence])
+    geofence_list = list(geofences)
+    if wifi_home_presence_applies(
+        settings,
+        geofence.geofence_id,
+        row.connection_type,
+        accuracy_m=row.accuracy_m,
+        geofences=geofence_list,
+        lat=row.lat,
+        lon=row.lon,
+        min_accuracy_m=min_accuracy_m,
+    ):
+        return True
+    if row.accuracy_m is not None and row.accuracy_m > min_accuracy_m:
+        return None
+    return geofence.geofence_id in geofence_ids_containing_location(row, [geofence])
 
 
 def location_accuracy_is_low(

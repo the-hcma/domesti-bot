@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from dataclasses import dataclass, field
@@ -47,6 +48,8 @@ from app.wifi_home_presence import wifi_home_presence_applies
 
 if TYPE_CHECKING:
     from app.domesti_bot_cli import DeviceManagersState
+
+_LOGGER = logging.getLogger(__name__)
 
 MINUTES_PER_DAY = 24 * 60
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
@@ -604,6 +607,12 @@ def _evaluate_users_geofence(
             lon=location.lon,
             min_accuracy_m=min_accuracy_m,
         ):
+            _log_wifi_home_presence_overrode_low_accuracy(
+                roster_user_id,
+                condition.geofence_id,
+                accuracy_m=location.accuracy_m,
+                threshold_m=min_accuracy_m,
+            )
             presence_lines.append(f"{name} is inside {fence_label} (WiFi home presence)")
             if not want_inside:
                 unmet_names.append(name)
@@ -713,14 +722,31 @@ def _evaluate_users_inside_geofence_for_s(
             presence_lines.append(f"{name}: no location yet")
             unmet = True
             continue
-        if not _location_usable_for_rule(location, min_accuracy_m):
-            presence_lines.append(f"{name}: location ignored (low accuracy)")
+        counts_inside, used_wifi = _user_counts_inside_geofence_for_rule(
+            location,
+            geofence,
+            condition.geofence_id,
+            min_accuracy_m,
+            ctx,
+        )
+        if used_wifi:
+            _log_wifi_home_presence_overrode_low_accuracy(
+                roster_user_id,
+                condition.geofence_id,
+                accuracy_m=location.accuracy_m,
+                threshold_m=min_accuracy_m,
+            )
+        if not counts_inside:
+            if not _location_usable_for_rule(location, min_accuracy_m):
+                presence_lines.append(f"{name}: location ignored (low accuracy)")
+            else:
+                presence_lines.append(f"{name} outside")
             unmet = True
             continue
-        if not _user_inside_geofence(location, geofence, min_accuracy_m):
-            presence_lines.append(f"{name} outside")
-            unmet = True
-            continue
+        if used_wifi:
+            presence_lines.append(
+                f"{name} is inside {fence_label} (WiFi home presence)",
+            )
         inside_since = ctx.geofence_inside_since.get(
             (roster_user_id, condition.geofence_id),
         )
@@ -730,9 +756,14 @@ def _evaluate_users_inside_geofence_for_s(
             continue
         inside_s = now_epoch - inside_since
         elapsed_label = _format_dwell_elapsed_s(inside_s)
-        presence_lines.append(
-            f"{name} inside {elapsed_label} (need {need_label})",
-        )
+        if used_wifi:
+            presence_lines.append(
+                f"{name} inside {elapsed_label} via WiFi home presence (need {need_label})",
+            )
+        else:
+            presence_lines.append(
+                f"{name} inside {elapsed_label} (need {need_label})",
+            )
         if inside_s < condition.min_inside_s:
             unmet = True
 
@@ -882,6 +913,23 @@ def _local_minutes_from_iso(iso: str, tz: ZoneInfo) -> int:
     return _local_minutes_from_dt(dt)
 
 
+def _log_wifi_home_presence_overrode_low_accuracy(
+    user_id: str,
+    geofence_id: str,
+    *,
+    accuracy_m: int | None,
+    threshold_m: int,
+) -> None:
+    _LOGGER.info(
+        "[rules] wifi home presence overrode low-accuracy location "
+        "user_id=%s geofence_id=%s accuracy_m=%s threshold_m=%s",
+        user_id,
+        geofence_id,
+        accuracy_m,
+        threshold_m,
+    )
+
+
 def _parse_hhmm(hhmm: str) -> int | None:
     match = _HHMM_RE.match(hhmm.strip())
     if match is None:
@@ -891,6 +939,204 @@ def _parse_hhmm(hhmm: str) -> int | None:
     if hour < 0 or hour > 23 or minute < 0 or minute > 59:
         return None
     return hour * 60 + minute
+
+
+def _presence_user_ids_for_condition(
+    condition: RuleConditionOut,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> set[str]:
+    if isinstance(condition, AllConditionsCondition):
+        ids: set[str] = set()
+        for child in condition.conditions:
+            ids.update(_presence_user_ids_for_condition(child, rule, ctx))
+        return ids
+    if isinstance(condition, AnyConditionsCondition):
+        ids: set[str] = set()
+        for child in condition.conditions:
+            child_ids = _presence_user_ids_for_condition(child, rule, ctx)
+            if child_ids:
+                ids.update(child_ids)
+        return ids
+    if isinstance(condition, UsersInsideGeofenceCondition):
+        return _roster_user_ids_satisfying_users_inside_geofence(
+            condition,
+            rule,
+            ctx,
+        )
+    if isinstance(condition, UsersInsideGeofenceForSCondition):
+        return _roster_user_ids_satisfying_users_inside_geofence_for_s(
+            condition,
+            rule,
+            ctx,
+        )
+    if isinstance(condition, UsersOutsideGeofenceCondition):
+        return _roster_user_ids_satisfying_users_outside_geofence(
+            condition,
+            rule,
+            ctx,
+        )
+    if isinstance(
+        condition,
+        (
+            AfterLocalTimeCondition,
+            AfterSunsetCondition,
+            BeforeLocalTimeCondition,
+            BeforeSunriseCondition,
+            DaysOfWeekCondition,
+            DevicesAllOnCondition,
+            DevicesAnyOnCondition,
+            LocalTimeWindowCondition,
+        ),
+    ):
+        return set()
+    _LOGGER.error(
+        "[rules] unhandled condition type %s in presence_user_ids_for_condition",
+        type(condition).__name__,
+    )
+    raise AssertionError(
+        f"Unhandled condition type {type(condition).__name__!r} in "
+        "presence_user_ids_for_condition"
+    )
+
+
+def _roster_user_ids_satisfying_users_inside_geofence(
+    condition: UsersInsideGeofenceCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> set[str]:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    if geofence is None:
+        return set()
+    settings = load_settings_location()
+    min_accuracy_m = rule.min_location_accuracy_m
+    satisfied: set[str] = set()
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            continue
+        location = ctx.user_locations.get(roster_user_id)
+        if location is None:
+            continue
+        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+            location,
+            geofence,
+            condition.geofence_id,
+            min_accuracy_m,
+            ctx,
+        )
+        if counts_inside:
+            satisfied.add(roster_user_id)
+    return satisfied
+
+
+def _roster_user_ids_satisfying_users_inside_geofence_for_s(
+    condition: UsersInsideGeofenceForSCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> set[str]:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    if geofence is None:
+        return set()
+    settings = load_settings_location()
+    min_accuracy_m = rule.min_location_accuracy_m
+    now_epoch = ctx.now.timestamp()
+    satisfied: set[str] = set()
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            continue
+        location = ctx.user_locations.get(roster_user_id)
+        if location is None:
+            continue
+        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+            location,
+            geofence,
+            condition.geofence_id,
+            min_accuracy_m,
+            ctx,
+        )
+        if not counts_inside:
+            continue
+        inside_since = ctx.geofence_inside_since.get(
+            (roster_user_id, condition.geofence_id),
+        )
+        if inside_since is None:
+            continue
+        if now_epoch - inside_since < condition.min_inside_s:
+            continue
+        satisfied.add(roster_user_id)
+    return satisfied
+
+
+def _roster_user_ids_satisfying_users_outside_geofence(
+    condition: UsersOutsideGeofenceCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> set[str]:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    if geofence is None:
+        return set()
+    settings = load_settings_location()
+    min_accuracy_m = rule.min_location_accuracy_m
+    satisfied: set[str] = set()
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            continue
+        location = ctx.user_locations.get(roster_user_id)
+        if location is None:
+            continue
+        if wifi_home_presence_applies(
+            settings,
+            condition.geofence_id,
+            location.connection_type,
+            accuracy_m=location.accuracy_m,
+            geofences=ctx.geofences,
+            lat=location.lat,
+            lon=location.lon,
+            min_accuracy_m=min_accuracy_m,
+        ):
+            continue
+        if not _location_usable_for_rule(location, min_accuracy_m):
+            continue
+        if not _user_inside_geofence(location, geofence, min_accuracy_m):
+            satisfied.add(roster_user_id)
+    return satisfied
+
+
+def _user_counts_inside_geofence_for_rule(
+    location: UserLocationOut,
+    geofence: GeofenceOut,
+    geofence_id: str,
+    min_accuracy_m: int,
+    ctx: RuleEvaluationContext,
+) -> tuple[bool, bool]:
+    """Return whether a user counts as inside and whether WiFi overrode low GPS."""
+    settings = load_settings_location()
+    if wifi_home_presence_applies(
+        settings,
+        geofence_id,
+        location.connection_type,
+        accuracy_m=location.accuracy_m,
+        geofences=ctx.geofences,
+        lat=location.lat,
+        lon=location.lon,
+        min_accuracy_m=min_accuracy_m,
+    ):
+        return True, True
+    if not _location_usable_for_rule(location, min_accuracy_m):
+        return False, False
+    return _user_inside_geofence(location, geofence, min_accuracy_m), False
 
 
 def _user_display_name(
@@ -924,3 +1170,14 @@ def _user_inside_geofence(
 
 def _to_iso_z(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def presence_user_ids_for_rule(
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> tuple[str, ...]:
+    """Return roster user ids whose geofence presence currently satisfies the rule."""
+    ids: set[str] = set()
+    for condition in rule.conditions.all:
+        ids.update(_presence_user_ids_for_condition(condition, rule, ctx))
+    return tuple(sorted(ids))

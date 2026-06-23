@@ -15,6 +15,7 @@ from app.api.schemas import (
     RuleDeviceActionOut,
     RuleOut,
     UsersInsideGeofenceCondition,
+    UsersInsideGeofenceForSCondition,
 )
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
@@ -125,7 +126,7 @@ def _seed_db(
     )
 
 
-def _write_bundle(path: Path, rule: RuleOut) -> None:
+def _write_bundle(path: Path, *rules: RuleOut) -> None:
     payload = {
         "version": 1,
         "device_id_resolution": "preferred_label",
@@ -137,7 +138,7 @@ def _write_bundle(path: Path, rule: RuleOut) -> None:
             "wifi_home_presence_enabled": True,
             "wifi_home_geofence_id": "house",
         },
-        "rules": [rule.model_dump(mode="json")],
+        "rules": [rule.model_dump(mode="json") for rule in rules],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -315,3 +316,163 @@ async def test_wifi_far_from_home_does_not_reconcile(
     ]
     assert reconciled == []
     assert device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_wifi_home_seeds_dwell_inside_since_for_low_accuracy_wifi(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    dwell_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="dwell-home",
+        label="Dwell home",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="* * * * *",
+    )
+    _write_bundle(bundle, _arrive_home_rule(), dwell_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        received_at=clock["now"] - 400.0,
+        accuracy_m=20,
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: clock["now"],
+    )
+    await evaluator.on_location_update("henrique")
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.19167,
+            lon=-73.88399,
+            accuracy_m=4,
+            connection_type="m",
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=300,
+            connection_type="w",
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    with patch("app.rule_evaluator._LOGGER.info") as info_mock:
+        await evaluator.on_location_update("henrique")
+
+    inside_since = evaluator.geofence_inside_since_snapshot().get(("henrique", "house"))
+    assert inside_since == clock["now"]
+    override_logs = [
+        call
+        for call in info_mock.call_args_list
+        if call.args
+        and "wifi home presence overrode low-accuracy location" in str(call.args[0])
+    ]
+    assert override_logs
+
+
+@pytest.mark.asyncio
+async def test_wifi_home_reconcile_runs_for_dwell_only_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    dwell_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="dwell-home",
+        label="Dwell home",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/10 * * * *",
+    )
+    _write_bundle(bundle, dwell_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_db(
+        db,
+        user_id="henrique",
+        lat=41.19167,
+        lon=-73.88399,
+        received_at=clock["now"] - 120.0,
+        accuracy_m=4,
+        connection_type="m",
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: clock["now"],
+    )
+    await evaluator.on_location_update("henrique")
+
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=300,
+            connection_type="w",
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+
+    inside_since = evaluator.geofence_inside_since_snapshot().get(("henrique", "house"))
+    assert inside_since == clock["now"]

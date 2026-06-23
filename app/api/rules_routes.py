@@ -28,8 +28,11 @@ from app.api.settings_routes import discovery_cache_path_from_request
 from app.server_runtime import runtime
 from app.presence_store import (
     UserLocationRecord,
-    geofence_ids_containing_location,
     list_user_locations,
+)
+from app.wifi_home_presence import (
+    effective_geofence_ids_containing_location,
+    geofence_presence_accuracy_limit_m,
 )
 from app.rules_status import build_rules_status, build_rules_validation
 from app.rules_store import (
@@ -201,6 +204,12 @@ def _users_status(cache_path: Path) -> list[UserStatusOut]:
     users = list_users(cache_path)
     locations = list_user_locations(cache_path)
     geofences = list_geofences(cache_path)
+    settings = load_settings_location()
+    try:
+        rules = list_automation_rules()
+    except AutomationRulesLoadError:
+        rules = []
+    min_accuracy_m = geofence_presence_accuracy_limit_m(rules)
     now = time.time()
     rows: list[UserStatusOut] = []
     for user in users:
@@ -219,7 +228,12 @@ def _users_status(cache_path: Path) -> list[UserStatusOut]:
                 source=location.source,
             )
             age_seconds = max(0, int(now - location.received_at))
-            inside_geofence_ids = geofence_ids_containing_location(location, geofences)
+            inside_geofence_ids = effective_geofence_ids_containing_location(
+                location,
+                geofences,
+                settings=settings,
+                min_accuracy_m=min_accuracy_m,
+            )
         rows.append(
             UserStatusOut(
                 age_seconds=age_seconds,

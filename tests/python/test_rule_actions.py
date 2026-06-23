@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.api.schemas import RuleDeviceActionOut
+from app.api.schemas import RuleConditionsOut, RuleDeviceActionOut, RuleOut
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_actions import (
     RuleActionDispatchError,
+    RuleNotificationEmailOutcome,
     dispatch_rule_device_actions,
     resolve_kasa_host_by_label,
+    send_rule_notification_email,
 )
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
@@ -155,3 +158,47 @@ def test_resolve_kasa_host_by_label_raises_on_ambiguous_label() -> None:
     )
     with pytest.raises(RuleActionDispatchError, match="Ambiguous Kasa device"):
         resolve_kasa_host_by_label(mgr, "Garage")
+
+
+def test_send_rule_notification_email_logs_error_when_recipient_missing(
+    tmp_path: Path,
+) -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="test-rule",
+        label="Test",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=True,
+        trigger="edge_true",
+    )
+    with (
+        patch("app.rule_actions._LOGGER.error") as error_mock,
+        pytest.raises(RuleActionDispatchError, match="notification_email"),
+    ):
+        send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
+    error_mock.assert_called_once()
+    assert "test-rule" in error_mock.call_args.args[1]
+
+
+def test_send_rule_notification_email_returns_disabled_outcome_when_notify_off(
+    tmp_path: Path,
+) -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="test-rule",
+        label="Test",
+        min_location_accuracy_m=50,
+        notification_email=None,
+        notify_on_fire=False,
+        trigger="edge_true",
+    )
+    outcome = send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
+    assert outcome == RuleNotificationEmailOutcome.disabled()
+    assert outcome.format_for_log() == "disabled"
