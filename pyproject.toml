@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "domesti-bot"
-version = "1.5.0"
+version = "1.6.0"
 description = "Self-hosted LAN home automation: tile UI and rule engine for TP-Link Kasa, Sonos, Vizio SmartCast, and GoTailwind devices, with My Tracks presence and geofence-driven automations."
 readme = "README.md"
 license = "MIT"
