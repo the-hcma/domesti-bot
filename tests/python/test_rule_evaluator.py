@@ -25,7 +25,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
-from app.rule_actions import RuleActionDispatchError
+from app.rule_actions import RuleActionDispatchError, RuleNotificationEmailOutcome
 from app.rule_evaluator import (
     GeofenceTransition,
     RuleEvaluator,
@@ -1404,3 +1404,94 @@ async def test_scheduled_rule_fire_once_per_local_day_skips_second_tick_same_day
     runtime.last_fired_at = fixture.clock["now"] - 60.0
     await fixture.evaluator._evaluate_scheduled_rules()
     assert fixture.device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    notify_rule = _arrive_home_rule(cooldown_s=300).model_copy(
+        update={
+            "device_actions": [
+                RuleDeviceActionOut(
+                    family_id=DeviceFamilyId.KASA,
+                    device_id="Front door lights",
+                    action=RuleDeviceActionType.TURN_ON,
+                ),
+            ],
+            "notification_emails": ["ops@example.com"],
+            "notify_on_fire": True,
+        },
+    )
+    _write_bundle(bundle, notify_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    device = _FakeKasa("192.168.1.20", "Front door lights")
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(
+        db,
+        user_id="henrique",
+        lat=44.0,
+        lon=-73.0,
+        received_at=clock["now"] - 400.0,
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr([device]),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: clock["now"],
+    )
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    with (
+        patch(
+            "app.rule_evaluator.dispatch_rule_device_actions",
+            return_value=["Sonos zone 'Living Room' skipped: already paused"],
+        ),
+        patch(
+            "app.rule_evaluator.send_rule_notification_email",
+            return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+        ),
+        patch("app.rule_evaluator._LOGGER.info") as info_mock,
+        patch("app.rule_evaluator._LOGGER.warning") as warning_mock,
+    ):
+        await evaluator.on_location_update("henrique")
+
+    fire_state = evaluator.fire_state_for_rule("arrive-home")
+    assert fire_state.last_fired_at == clock["now"]
+    assert fire_state.last_error is not None
+    assert "Living Room" in fire_state.last_error
+    warning_mock.assert_called_once()
+    assert "partial side-effect failures" in warning_mock.call_args.args[0]
+    fired_logs = [
+        call
+        for call in info_mock.call_args_list
+        if call.args
+        and call.args[0]
+        == (
+            "[rules] fired rule_id=%s user_ids=%s source=%s transitions=%s "
+            "conditions=%s actions=%d email=%s duration_ms=%.0f%s"
+        )
+    ]
+    assert len(fired_logs) == 1

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import smtplib
 import socket
 from dataclasses import dataclass
@@ -12,6 +13,42 @@ from html import escape
 _LOGGER = logging.getLogger(__name__)
 
 _SMTP_TIMEOUT_S = 10.0
+_QUEUE_ID_RE = re.compile(r"queued as ([0-9A-Za-z]+)", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class SmtpDeliveryResult:
+    """Outcome of handing a message to the configured SMTP relay."""
+
+    host: str
+    port: int
+    recipients: tuple[str, ...]
+    smtp_code: int
+    smtp_response: str
+
+    def format_for_log(self, *, redact_recipients: bool = False) -> str:
+        parts = [
+            f"smtp={self.smtp_code}",
+            f"host={self.host}:{self.port}",
+        ]
+        if redact_recipients:
+            parts.insert(0, f"recipient_count={len(self.recipients)}")
+        else:
+            parts.insert(0, f"to={','.join(self.recipients)}")
+        queue_id = self.queue_id
+        if queue_id is not None:
+            parts.append(f"queue_id={queue_id}")
+        response = self.smtp_response.strip()
+        if response:
+            parts.append(f"response={response!r}")
+        return " ".join(parts)
+
+    @property
+    def queue_id(self) -> str | None:
+        match = _QUEUE_ID_RE.search(self.smtp_response)
+        if match is None:
+            return None
+        return match.group(1)
 
 
 @dataclass(frozen=True)
@@ -22,6 +59,101 @@ class SmtpConnectionParams:
     password: str
     port: int
     username: str
+
+
+class _LoggingSmtpMixin:
+    smtp_data_code: int
+    smtp_data_response: str
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.smtp_data_code = 0
+        self.smtp_data_response = ""
+
+    def data(self, msg: bytes | str) -> tuple[int, bytes]:
+        code, repl = super().data(msg)  # type: ignore[misc]
+        self.smtp_data_code = code
+        self.smtp_data_response = _decode_smtp_response(repl)
+        return code, repl
+
+
+class _LoggingSMTP(_LoggingSmtpMixin, smtplib.SMTP):
+    pass
+
+
+class _LoggingSMTPSSL(_LoggingSmtpMixin, smtplib.SMTP_SSL):
+    pass
+
+
+def _decode_smtp_response(raw: bytes | str) -> str:
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace")
+    return raw
+
+
+def _deliver_message(smtp: smtplib.SMTP, message: EmailMessage) -> None:
+    refused = smtp.send_message(message)
+    if refused:
+        raise smtplib.SMTPRecipientsRefused(refused)
+
+
+def _maybe_login(smtp: smtplib.SMTP, params: SmtpConnectionParams) -> None:
+    if params.username == "" and params.password == "":
+        return
+    smtp.login(params.username, params.password)
+
+
+def _message_recipients(message: EmailMessage) -> tuple[str, ...]:
+    to_header = message.get("To", "")
+    recipients = [part.strip() for part in to_header.split(",") if part.strip()]
+    return tuple(recipients)
+
+
+def _send_message(
+    params: SmtpConnectionParams,
+    message: EmailMessage,
+) -> SmtpDeliveryResult:
+    recipients = _message_recipients(message)
+    use_ssl = params.port == 465
+    if use_ssl:
+        with _LoggingSMTPSSL(
+            params.host,
+            params.port,
+            timeout=_SMTP_TIMEOUT_S,
+        ) as smtp:
+            _maybe_login(smtp, params)
+            _deliver_message(smtp, message)
+            smtp_code = smtp.smtp_data_code
+            smtp_response = smtp.smtp_data_response
+        return SmtpDeliveryResult(
+            host=params.host,
+            port=params.port,
+            recipients=recipients,
+            smtp_code=smtp_code,
+            smtp_response=smtp_response,
+        )
+    with _LoggingSMTP(params.host, params.port, timeout=_SMTP_TIMEOUT_S) as smtp:
+        if params.port in (587, 2525):
+            smtp.starttls()
+        _maybe_login(smtp, params)
+        _deliver_message(smtp, message)
+        smtp_code = smtp.smtp_data_code
+        smtp_response = smtp.smtp_data_response
+    return SmtpDeliveryResult(
+        host=params.host,
+        port=params.port,
+        recipients=recipients,
+        smtp_code=smtp_code,
+        smtp_response=smtp_response,
+    )
+
+
+def deliver_email_message(
+    params: SmtpConnectionParams,
+    message: EmailMessage,
+) -> SmtpDeliveryResult:
+    """Send a prepared email message using the given SMTP connection parameters."""
+    return _send_message(params, message)
 
 
 def instance_url_from_mail_domain(mail_domain: str) -> str:
@@ -84,12 +216,10 @@ def send_test_email(
         )
     message.set_content("\n\n".join(plain_lines))
     message.add_alternative("\n".join(html_lines), subtype="html")
-    _send_message(params, message)
+    delivery = _send_message(params, message)
     _LOGGER.info(
-        "SMTP test email sent to %s via %s:%s",
-        recipient,
-        params.host,
-        params.port,
+        "SMTP test email sent %s",
+        delivery.format_for_log(),
     )
 
 
@@ -129,35 +259,11 @@ def smtp_friendly_error(exc: Exception, *, host: str = "") -> str:
             f"Could not connect to the server{host_label} — verify the host and port are "
             f"correct and the server is reachable. ({msg})"
         )
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return (
+            f"SMTP relay refused {len(exc.recipients)} recipient(s) — "
+            "verify notification addresses are valid."
+        )
     if isinstance(exc, smtplib.SMTPException):
         return f"SMTP error: {msg}"
     return msg
-
-
-def deliver_email_message(params: SmtpConnectionParams, message: EmailMessage) -> None:
-    """Send a prepared email message using the given SMTP connection parameters."""
-    _send_message(params, message)
-
-
-def _send_message(params: SmtpConnectionParams, message: EmailMessage) -> None:
-    use_ssl = params.port == 465
-    if use_ssl:
-        with smtplib.SMTP_SSL(
-            params.host,
-            params.port,
-            timeout=_SMTP_TIMEOUT_S,
-        ) as smtp:
-            _maybe_login(smtp, params)
-            smtp.send_message(message)
-        return
-    with smtplib.SMTP(params.host, params.port, timeout=_SMTP_TIMEOUT_S) as smtp:
-        if params.port in (587, 2525):
-            smtp.starttls()
-        _maybe_login(smtp, params)
-        smtp.send_message(message)
-
-
-def _maybe_login(smtp: smtplib.SMTP, params: SmtpConnectionParams) -> None:
-    if params.username == "" and params.password == "":
-        return
-    smtp.login(params.username, params.password)

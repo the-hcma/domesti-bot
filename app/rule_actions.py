@@ -20,7 +20,7 @@ from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
-from app.smtp_service import SmtpConnectionParams, smtp_friendly_error
+from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult, smtp_friendly_error
 from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
@@ -38,23 +38,37 @@ class RuleNotificationEmailOutcome:
 
     kind: Literal["disabled", "sent"]
     recipients: tuple[str, ...] | None = None
+    delivery: SmtpDeliveryResult | None = None
 
     @classmethod
     def disabled(cls) -> RuleNotificationEmailOutcome:
         return cls(kind="disabled", recipients=None)
 
-    def format_for_log(self) -> str:
+    def format_for_log(self, *, redact_recipients: bool = False) -> str:
         if self.kind == "disabled":
             return "disabled"
         if self.kind == "sent":
             if not self.recipients:
                 raise AssertionError("sent outcome requires recipients")
-            return f"sent to={','.join(self.recipients)}"
+            if redact_recipients:
+                parts = ["sent"]
+                if self.delivery is None:
+                    parts.append(f"recipient_count={len(self.recipients)}")
+            else:
+                parts = [f"sent to={','.join(self.recipients)}"]
+            if self.delivery is not None:
+                parts.append(self.delivery.format_for_log(redact_recipients=redact_recipients))
+            return " ".join(parts)
         raise AssertionError(f"Unexpected notification email outcome kind {self.kind!r}")
 
     @classmethod
-    def sent_to(cls, recipients: list[str]) -> RuleNotificationEmailOutcome:
-        return cls(kind="sent", recipients=tuple(recipients))
+    def sent_to(
+        cls,
+        recipients: list[str],
+        *,
+        delivery: SmtpDeliveryResult | None = None,
+    ) -> RuleNotificationEmailOutcome:
+        return cls(kind="sent", recipients=tuple(recipients), delivery=delivery)
 
 
 async def dispatch_device_action(
@@ -88,14 +102,22 @@ async def dispatch_rule_device_actions(
         try:
             await dispatch_device_action(state, action)
         except RuleActionDispatchError as exc:
-            errors.append(str(exc))
-            _LOGGER.warning(
-                "[rules] device action failed family=%s device=%s action=%s: %s",
-                action.family_id,
-                action.device_id,
-                action.action,
-                exc,
+            message = str(exc)
+        except Exception as exc:
+            message = (
+                f"{action.family_id.display_name()} device {action.device_id!r} "
+                f"{action.action.display_label()} failed: {exc}"
             )
+        else:
+            continue
+        errors.append(message)
+        _LOGGER.warning(
+            "[rules] device action failed family=%s device=%s action=%s: %s",
+            action.family_id,
+            action.device_id,
+            action.action,
+            message,
+        )
     return errors
 
 
@@ -344,17 +366,24 @@ def send_rule_notification_email(
     try:
         from app.smtp_service import deliver_email_message
 
-        deliver_email_message(params, message)
+        delivery = deliver_email_message(params, message)
     except Exception as exc:
-        raise RuleActionDispatchError(
-            smtp_friendly_error(exc, host=params.host)
-        ) from exc
+        friendly = smtp_friendly_error(exc, host=params.host)
+        _LOGGER.error(
+            "[rules] notification email failed for rule_id=%s recipient_count=%d host=%s:%s: %s",
+            rule.id,
+            len(recipients),
+            params.host,
+            params.port,
+            friendly,
+        )
+        raise RuleActionDispatchError(friendly) from exc
     _LOGGER.info(
-        "[rules] notification email sent for rule_id=%s to %s",
+        "[rules] notification email sent for rule_id=%s %s",
         rule.id,
-        ", ".join(recipients),
+        delivery.format_for_log(redact_recipients=True),
     )
-    return RuleNotificationEmailOutcome.sent_to(recipients)
+    return RuleNotificationEmailOutcome.sent_to(recipients, delivery=delivery)
 
 
 async def _dispatch_kasa_action(
