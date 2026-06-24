@@ -176,6 +176,21 @@ def test_validate_rule_flags_unknown_geofence() -> None:
     assert any(issue.kind == "unknown_geofence" for issue in issues)
 
 
+def test_validate_rule_flags_geofence_edge_grace_disabled() -> None:
+    rule = _arrival_rule().model_copy(update={"accuracy_edge_grace_s": 0})
+    ctx = RuleValidationContext(
+        device_state=None,
+        geofence_ids=frozenset({"house"}),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup=build_roster_user_id_lookup(["henrique"]),
+        smtp_configured=True,
+    )
+    issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "geofence_edge_grace_disabled"
+    assert issues[0].reference == rule.id
+
+
 def test_validate_rule_accepts_notify_on_fire_when_smtp_relay_ready() -> None:
     rule = _arrival_rule().model_copy(
         update={
@@ -312,6 +327,25 @@ def test_rule_out_coerces_whitespace_only_schedule_cron_to_none_for_edge_true() 
         trigger="edge_true",
     )
     assert rule.schedule_cron is None
+
+
+def test_rule_out_coerces_null_accuracy_edge_grace_s_to_zero() -> None:
+    rule = RuleOut.model_validate(
+        {
+            "accuracy_edge_grace_s": None,
+            "conditions": {"all": []},
+            "cooldown_s": 60,
+            "device_actions": [],
+            "enabled": True,
+            "id": "legacy-grace-null",
+            "label": "Legacy grace null",
+            "min_location_accuracy_m": 50,
+            "notification_emails": [],
+            "notify_on_fire": False,
+            "trigger": "edge_true",
+        },
+    )
+    assert rule.accuracy_edge_grace_s == 0
 
 
 def test_devices_any_off_condition_rejects_empty_devices() -> None:

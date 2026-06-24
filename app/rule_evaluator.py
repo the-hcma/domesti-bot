@@ -79,6 +79,7 @@ from app.wifi_home_presence import (
 _LOGGER = logging.getLogger(__name__)
 _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
 _GEO_INSIDE_STATE_RECONCILE_S = 600.0
+_GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
 _MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
 _RULE_EVALUATOR_TICK_S = 60.0
 DeferredGeofenceEvent = Literal["entered", "left"]
@@ -135,6 +136,7 @@ class RuleEvaluator:
             _DeferredAccuracyEdge,
         ] = {}
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
+        self._geofence_geo_outside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_inside_since: dict[tuple[str, str], float] = {}
         self._geofence_outside_since: dict[tuple[str, str], float] = {}
         self._geofence_was_inside: dict[tuple[str, str], bool] = {}
@@ -1106,6 +1108,11 @@ class RuleEvaluator:
     ) -> dict[str, GeofenceTransition]:
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         mutate_state = _location_accuracy_passes(location, accuracy_limit_m)
+        was_inside_before_history_reconcile = {
+            key: value
+            for key, value in self._geofence_was_inside.items()
+            if key[0] == user_id
+        }
         if not mutate_state and _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
                 "[rules] geofence edge state unchanged user_id=%s "
@@ -1137,6 +1144,7 @@ class RuleEvaluator:
             dwell_accuracy_limit_m=dwell_accuracy_limit_m,
             location=location,
             mutate_state=mutate_state,
+            was_inside_before_history_reconcile=was_inside_before_history_reconcile,
         )
 
     def _compute_geofence_transitions(
@@ -1149,6 +1157,7 @@ class RuleEvaluator:
         location: UserLocationRecord,
         observed_at: float,
         mutate_state: bool,
+        was_inside_before_history_reconcile: dict[tuple[str, str], bool],
     ) -> dict[str, GeofenceTransition]:
         transitions: dict[str, GeofenceTransition] = {}
         settings = load_settings_location()
@@ -1158,6 +1167,11 @@ class RuleEvaluator:
             geofence_id = geofence.geofence_id
             key = (user_id, geofence_id)
             was_inside = self._geofence_was_inside.get(key, False)
+            prior_was_inside = was_inside_before_history_reconcile.get(
+                key,
+                was_inside,
+            )
+            depart_edge_pending = prior_was_inside and not was_inside
             gps_inside = geofence_id in inside_ids
             wifi_dwell_inside = False
             if dwell_accuracy_limit_m is not None:
@@ -1178,6 +1192,7 @@ class RuleEvaluator:
             )
             transition = GeofenceTransition()
             if gps_inside:
+                self._geofence_geo_outside_streak_since.pop(key, None)
                 streak_since = self._geofence_geo_inside_streak_since.get(key)
                 if streak_since is None:
                     streak_since = observed_at
@@ -1218,6 +1233,32 @@ class RuleEvaluator:
                             )
             else:
                 self._geofence_geo_inside_streak_since.pop(key, None)
+                outside_streak_since = self._geofence_geo_outside_streak_since.get(key)
+                if outside_streak_since is None:
+                    outside_streak_since = observed_at
+                    self._geofence_geo_outside_streak_since[key] = outside_streak_since
+                if (
+                    (was_inside or prior_was_inside)
+                    and observed_at - outside_streak_since
+                    >= _GEO_OUTSIDE_STATE_RECONCILE_S
+                ):
+                    if mutate_state:
+                        self._geofence_was_inside[key] = False
+                        was_inside = False
+                        if track_dwell:
+                            self._geofence_inside_since.pop(key, None)
+                        self._geofence_outside_since.setdefault(key, outside_streak_since)
+                        self._clear_deferred_accuracy_edges_for_geofence(
+                            user_id,
+                            geofence_id,
+                            event="left",
+                        )
+                        _log_geofence_outside_reconciled(
+                            geofence_id=geofence_id,
+                            streak_s=observed_at - outside_streak_since,
+                            user_id=user_id,
+                        )
+                        transition = GeofenceTransition(left=True)
             if gps_inside and not was_inside:
                 outside_since = self._geofence_outside_since.get(key)
                 dwell_elapsed = outside_since is None or (
@@ -1238,7 +1279,7 @@ class RuleEvaluator:
                             dwell_remaining_s=_MIN_GEOFENCE_OUTSIDE_DWELL_S
                             - (observed_at - outside_since),
                         )
-            elif was_inside and not now_inside_for_dwell:
+            elif (was_inside or depart_edge_pending) and not now_inside_for_dwell:
                 if mutate_state:
                     self._geofence_was_inside[key] = False
                     if track_dwell:
@@ -1803,20 +1844,6 @@ def _log_deferred_edge_registered(
     )
 
 
-def _log_geofence_inside_reconciled(
-    *,
-    geofence_id: str,
-    streak_s: float,
-    user_id: str,
-) -> None:
-    _LOGGER.info(
-        "[rules] geofence inside reconciled user_id=%s geofence_id=%s streak_s=%.0f",
-        user_id,
-        geofence_id,
-        streak_s,
-    )
-
-
 def _log_geofence_enter_debounced(
     *,
     user_id: str,
@@ -1831,6 +1858,34 @@ def _log_geofence_enter_debounced(
         geofence_id,
         outside_s,
         max(0.0, dwell_remaining_s),
+    )
+
+
+def _log_geofence_inside_reconciled(
+    *,
+    geofence_id: str,
+    streak_s: float,
+    user_id: str,
+) -> None:
+    _LOGGER.info(
+        "[rules] geofence inside reconciled user_id=%s geofence_id=%s streak_s=%.0f",
+        user_id,
+        geofence_id,
+        streak_s,
+    )
+
+
+def _log_geofence_outside_reconciled(
+    *,
+    geofence_id: str,
+    streak_s: float,
+    user_id: str,
+) -> None:
+    _LOGGER.info(
+        "[rules] geofence outside reconciled user_id=%s geofence_id=%s streak_s=%.0f",
+        user_id,
+        geofence_id,
+        streak_s,
     )
 
 

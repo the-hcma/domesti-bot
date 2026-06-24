@@ -251,8 +251,8 @@ interface RuleOutShared {
   label: string;
   enabled: boolean;
   cooldown_s: number;
-  /** Retry geofence edges for this many seconds after an accuracy skip (omit to disable). */
-  accuracy_edge_grace_s?: number | null;
+  /** Retry geofence edges for this many seconds after an accuracy skip (0 disables; default 120). */
+  accuracy_edge_grace_s?: number;
   /** Locations with horizontal accuracy worse than this (meters) are ignored. */
   min_location_accuracy_m: number;
   /** Send email when this automation fires (requires SMTP in Mail tab). */
@@ -426,6 +426,7 @@ export interface RuleReferenceIssueOut {
     | "missing_notification_email"
     | "missing_smtp"
     | "unknown_device"
+    | "geofence_edge_grace_disabled"
     | "unknown_geofence"
     | "unknown_user";
   reference: string;

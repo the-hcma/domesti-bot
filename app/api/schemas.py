@@ -684,13 +684,14 @@ class RuleDeviceActionOut(BaseModel):
 class RuleOut(BaseModel):
     """One automation rule from ``automation-rules.json``."""
 
-    accuracy_edge_grace_s: int | None = Field(
-        default=None,
-        ge=1,
+    accuracy_edge_grace_s: int = Field(
+        default=120,
+        ge=0,
         description=(
             "When a geofence edge matches but GPS accuracy fails "
             "``min_location_accuracy_m``, retry firing for this many seconds "
-            "on subsequent location updates once accuracy improves."
+            "on subsequent location updates once accuracy improves. "
+            "Set to ``0`` to disable."
         ),
     )
     conditions: RuleConditionsOut
@@ -720,6 +721,13 @@ class RuleOut(BaseModel):
         ),
     )
     trigger: RuleTriggerOut
+
+    @field_validator("accuracy_edge_grace_s", mode="before")
+    @classmethod
+    def _coerce_accuracy_edge_grace_s(cls, value: Any) -> Any:
+        if value is None:
+            return 0
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -775,6 +783,7 @@ class RuleReferenceIssueOut(BaseModel):
     detail: str
     kind: Literal[
         "discovery_pending",
+        "geofence_edge_grace_disabled",
         "missing_notification_email",
         "missing_smtp",
         "unknown_device",
