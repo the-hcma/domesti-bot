@@ -15,6 +15,7 @@ from app.api.schemas import (
     RuleDeviceActionOut,
     RuleOut,
     UsersInsideGeofenceCondition,
+    UsersOutsideGeofenceCondition,
 )
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
@@ -35,6 +36,9 @@ class _FakeKasa:
 
     async def turn_on(self) -> None:
         self.calls.append("on")
+
+    async def turn_off(self) -> None:
+        self.calls.append("off")
 
 
 def _write_bundle(path: Path, rule: RuleOut) -> None:
@@ -81,6 +85,36 @@ def _arrive_home_rule() -> RuleOut:
         enabled=True,
         id="arrive-home",
         label="Arrive home",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="edge_true",
+    )
+
+
+def _leave_home_rule() -> RuleOut:
+    return RuleOut(
+        accuracy_edge_grace_s=120,
+        conditions=RuleConditionsOut(
+            all=[
+                UsersOutsideGeofenceCondition(
+                    type="users_outside_geofence",
+                    geofence_id="house",
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Garage",
+                action=RuleDeviceActionType.TURN_OFF,
+            ),
+        ],
+        enabled=True,
+        id="leave-home",
+        label="Leave home",
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
@@ -512,3 +546,89 @@ async def test_prolonged_geo_inside_streak_fires_arrive_after_accurate_location(
     )
     await evaluator.on_location_update("henrique")
     assert device.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_prolonged_geo_outside_streak_fires_leave_after_accurate_location(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sustained GPS-outside with poor accuracy reconciles a leave edge; a later accurate location fires."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _leave_home_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        received_at=clock["now"],
+        accuracy_m=20,
+    )
+    device = _FakeKasa("192.168.1.10", "Garage")
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr(device),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: clock["now"],
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.20693,
+            lon=-73.89602,
+            accuracy_m=300,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] += 601.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.20693,
+            lon=-73.89602,
+            accuracy_m=300,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.20693,
+            lon=-73.89602,
+            accuracy_m=12,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == ["off"]

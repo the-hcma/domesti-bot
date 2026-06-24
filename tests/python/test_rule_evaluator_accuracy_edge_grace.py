@@ -108,7 +108,7 @@ def _seed_presence_db(
     )
 
 
-def _arrive_home_rule(*, accuracy_edge_grace_s: int | None) -> RuleOut:
+def _arrive_home_rule(*, accuracy_edge_grace_s: int = 120) -> RuleOut:
     return RuleOut(
         accuracy_edge_grace_s=accuracy_edge_grace_s,
         conditions=RuleConditionsOut(
@@ -142,7 +142,7 @@ def _setup_evaluator(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    accuracy_edge_grace_s: int | None,
+    accuracy_edge_grace_s: int = 120,
 ) -> tuple[dict[str, float], Path, _FakeKasa, RuleEvaluator]:
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
@@ -338,14 +338,14 @@ async def test_low_accuracy_inside_never_registers_deferred_edge(
 
 
 @pytest.mark.asyncio
-async def test_accuracy_edge_grace_disabled_when_field_unset(
+async def test_accuracy_edge_grace_disabled_when_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     clock, db, device, evaluator = _setup_evaluator(
         tmp_path,
         monkeypatch,
-        accuracy_edge_grace_s=None,
+        accuracy_edge_grace_s=0,
     )
     _move_inside(db, clock, accuracy_m=120)
     await evaluator.on_location_update("henrique")

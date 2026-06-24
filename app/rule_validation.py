@@ -134,6 +134,7 @@ def validate_rule(
     """Return reference issues for one rule (empty when everything resolves)."""
     issues: list[RuleReferenceIssueOut] = []
     issues.extend(_validate_users(rule, ctx))
+    issues.extend(_validate_geofence_edge_grace(rule))
     issues.extend(_validate_geofences(rule, ctx))
     issues.extend(_validate_device_actions(rule, ctx))
     issues.extend(_validate_device_conditions(rule, ctx))
@@ -311,6 +312,26 @@ def _validate_device_conditions(
         if issue is not None:
             issues.append(issue)
     return issues
+
+
+def _validate_geofence_edge_grace(rule: RuleOut) -> list[RuleReferenceIssueOut]:
+    if rule.trigger != "edge_true":
+        return []
+    if not collect_rule_geofence_ids(rule):
+        return []
+    if rule.accuracy_edge_grace_s > 0:
+        return []
+    return [
+        RuleReferenceIssueOut(
+            detail=(
+                f'Rule "{rule.id}" uses geofence edge conditions but '
+                "accuracy_edge_grace_s is 0 — poor GPS accuracy can block "
+                "enter/leave edges silently. Use the default 120 s or higher."
+            ),
+            kind="geofence_edge_grace_disabled",
+            reference=rule.id,
+        ),
+    ]
 
 
 def _validate_geofences(
