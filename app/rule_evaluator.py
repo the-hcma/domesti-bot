@@ -650,6 +650,7 @@ class RuleEvaluator:
         runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
         started = time.monotonic()
         errors: list[str] = []
+        probable_successes: list[str] = []
         email_outcome: RuleNotificationEmailOutcome | None = None
         email_error: str | None = None
         performed_side_effect = not rule.device_actions and not rule.notify_on_fire
@@ -658,12 +659,13 @@ class RuleEvaluator:
             if rule.device_actions:
                 errors.append("Device discovery still in progress; actions skipped")
         elif rule.device_actions:
-            action_errors = await dispatch_rule_device_actions(
+            dispatch_result = await dispatch_rule_device_actions(
                 device_state,
                 rule.device_actions,
             )
-            errors.extend(action_errors)
-            if not action_errors:
+            errors.extend(dispatch_result.errors)
+            probable_successes = list(dispatch_result.probable_successes)
+            if not dispatch_result.errors:
                 performed_side_effect = True
         if rule.notify_on_fire and self._cache_path is not None:
             try:
@@ -707,7 +709,7 @@ class RuleEvaluator:
         duration_ms = (time.monotonic() - started) * 1000.0
         _LOGGER.info(
             "[rules] fired rule_id=%s user_ids=%s source=%s transitions=%s conditions=%s "
-            "actions=%d email=%s duration_ms=%.0f%s",
+            "actions=%d email=%s duration_ms=%.0f%s%s",
             rule.id,
             log_user_ids,
             fire_source,
@@ -722,6 +724,7 @@ class RuleEvaluator:
             ),
             duration_ms,
             f" errors={runtime.last_error!r}" if runtime.last_error else "",
+            f" probable={'; '.join(probable_successes)!r}" if probable_successes else "",
         )
 
     def _expire_deferred_accuracy_edges(

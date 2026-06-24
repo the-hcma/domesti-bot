@@ -33,6 +33,18 @@ class RuleActionDispatchError(Exception):
 
 
 @dataclass(frozen=True)
+class RuleDeviceDispatchResult:
+    """Outcome of dispatching all device actions for one rule fire."""
+
+    errors: tuple[str, ...]
+    probable_successes: tuple[str, ...]
+
+    @classmethod
+    def empty(cls) -> RuleDeviceDispatchResult:
+        return cls(errors=(), probable_successes=())
+
+
+@dataclass(frozen=True)
 class RuleNotificationEmailOutcome:
     """Outcome of attempting to send a rule notification email."""
 
@@ -95,30 +107,50 @@ async def dispatch_device_action(
 async def dispatch_rule_device_actions(
     state: DeviceManagersState,
     actions: list[RuleDeviceActionOut],
-) -> list[str]:
-    """Run device actions sequentially; return human-readable errors."""
+) -> RuleDeviceDispatchResult:
+    """Run device actions sequentially; collect hard errors and probable off outcomes."""
     errors: list[str] = []
+    probable_successes: list[str] = []
     for action in actions:
         try:
             await dispatch_device_action(state, action)
         except RuleActionDispatchError as exc:
-            message = str(exc)
+            errors.append(str(exc))
+            _LOGGER.warning(
+                "[rules] device action failed family=%s device=%s action=%s: %s",
+                action.family_id,
+                action.device_id,
+                action.action,
+                exc,
+            )
         except Exception as exc:
             message = (
                 f"{action.family_id.display_name()} device {action.device_id!r} "
                 f"{action.action.display_label()} failed: {exc}"
             )
-        else:
-            continue
-        errors.append(message)
-        _LOGGER.warning(
-            "[rules] device action failed family=%s device=%s action=%s: %s",
-            action.family_id,
-            action.device_id,
-            action.action,
-            message,
-        )
-    return errors
+            if _device_action_failure_is_probable(action):
+                probable = f"{message} (probable)"
+                probable_successes.append(probable)
+                _LOGGER.info(
+                    "[rules] device action probable success family=%s device=%s action=%s: %s",
+                    action.family_id,
+                    action.device_id,
+                    action.action,
+                    probable,
+                )
+            else:
+                errors.append(message)
+                _LOGGER.warning(
+                    "[rules] device action failed family=%s device=%s action=%s: %s",
+                    action.family_id,
+                    action.device_id,
+                    action.action,
+                    message,
+                )
+    return RuleDeviceDispatchResult(
+        errors=tuple(errors),
+        probable_successes=tuple(probable_successes),
+    )
 
 
 def cached_kasa_is_on(state: DeviceManagersState, device_id: str) -> bool | None:
@@ -384,6 +416,15 @@ def send_rule_notification_email(
         delivery.format_for_log(redact_recipients=True),
     )
     return RuleNotificationEmailOutcome.sent_to(recipients, delivery=delivery)
+
+
+def _device_action_failure_is_probable(action: RuleDeviceActionOut) -> bool:
+    """Return whether a failed off/pause/close action may still have succeeded."""
+    match action.action:
+        case RuleDeviceActionType.CLOSE | RuleDeviceActionType.PAUSE | RuleDeviceActionType.TURN_OFF:
+            return True
+        case _:
+            return False
 
 
 async def _dispatch_kasa_action(

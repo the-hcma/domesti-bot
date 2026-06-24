@@ -15,6 +15,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_actions import (
     RuleActionDispatchError,
+    RuleDeviceDispatchResult,
     RuleNotificationEmailOutcome,
     dispatch_rule_device_actions,
     resolve_kasa_host_by_label,
@@ -102,7 +103,7 @@ def test_resolve_kasa_host_by_label_matches_host() -> None:
 async def test_dispatch_rule_device_actions_turns_off_vizio_by_label() -> None:
     tv = _FakeVizioTv("192.168.1.10", "Kitchen TV", is_on=True)
     state = _device_state(vizio_mgr=_vizio_mgr([tv]))
-    errors = await dispatch_rule_device_actions(
+    result = await dispatch_rule_device_actions(
         state,
         [
             RuleDeviceActionOut(
@@ -112,7 +113,7 @@ async def test_dispatch_rule_device_actions_turns_off_vizio_by_label() -> None:
             ),
         ],
     )
-    assert errors == []
+    assert result == RuleDeviceDispatchResult.empty()
     assert tv.calls == ["off"]
 
 
@@ -120,7 +121,7 @@ async def test_dispatch_rule_device_actions_turns_off_vizio_by_label() -> None:
 async def test_dispatch_rule_device_actions_turns_on_by_label() -> None:
     device = _FakeKasa("192.168.1.20", "Front door lights")
     state = _device_state(_kasa_mgr([device]))
-    errors = await dispatch_rule_device_actions(
+    result = await dispatch_rule_device_actions(
         state,
         [
             RuleDeviceActionOut(
@@ -130,14 +131,14 @@ async def test_dispatch_rule_device_actions_turns_on_by_label() -> None:
             ),
         ],
     )
-    assert errors == []
+    assert result == RuleDeviceDispatchResult.empty()
     assert device.calls == ["on"]
 
 
 @pytest.mark.asyncio
 async def test_dispatch_rule_device_actions_collects_unknown_device_error() -> None:
     state = _device_state(_kasa_mgr([]))
-    errors = await dispatch_rule_device_actions(
+    result = await dispatch_rule_device_actions(
         state,
         [
             RuleDeviceActionOut(
@@ -147,8 +148,8 @@ async def test_dispatch_rule_device_actions_collects_unknown_device_error() -> N
             ),
         ],
     )
-    assert len(errors) == 1
-    assert "Unknown Kasa device" in errors[0]
+    assert len(result.errors) == 1
+    assert "Unknown Kasa device" in result.errors[0]
 
 
 class _FakeSonosZone:
@@ -170,7 +171,7 @@ def _sonos_mgr(zones: list[_FakeSonosZone]) -> SonosDeviceManager:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_rule_device_actions_skips_sonos_transition_unavailable() -> None:
+async def test_dispatch_rule_device_actions_records_probable_sonos_pause_failure() -> None:
     kasa = _FakeKasa("192.168.1.20", "Kitchen lamp")
     sonos = _FakeSonosZone("RINCON_TEST", "Living Room")
     state = DeviceManagersState(
@@ -182,7 +183,7 @@ async def test_dispatch_rule_device_actions_skips_sonos_transition_unavailable()
         cache_path=None,
         args=argparse.Namespace(),
     )
-    errors = await dispatch_rule_device_actions(
+    result = await dispatch_rule_device_actions(
         state,
         [
             RuleDeviceActionOut(
@@ -198,9 +199,10 @@ async def test_dispatch_rule_device_actions_skips_sonos_transition_unavailable()
         ],
     )
     assert kasa.calls == ["off"]
-    assert len(errors) == 1
-    assert "Living Room" in errors[0]
-    assert "failed" in errors[0]
+    assert result.errors == ()
+    assert len(result.probable_successes) == 1
+    assert "Living Room" in result.probable_successes[0]
+    assert "(probable)" in result.probable_successes[0]
 
 
 def test_resolve_kasa_host_by_label_raises_on_ambiguous_label() -> None:

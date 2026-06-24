@@ -25,7 +25,11 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
-from app.rule_actions import RuleActionDispatchError, RuleNotificationEmailOutcome
+from app.rule_actions import (
+    RuleActionDispatchError,
+    RuleDeviceDispatchResult,
+    RuleNotificationEmailOutcome,
+)
 from app.rule_evaluator import (
     GeofenceTransition,
     RuleEvaluator,
@@ -1341,7 +1345,10 @@ async def test_scheduled_rule_fire_once_per_local_day_failed_fire_does_not_consu
     runtime.next_evaluate_at = fixture.clock["now"] - 1.0
     with patch(
         "app.rule_evaluator.dispatch_rule_device_actions",
-        return_value=["Device not found: Garage"],
+        return_value=RuleDeviceDispatchResult(
+            errors=("Device not found: Garage",),
+            probable_successes=(),
+        ),
     ):
         await fixture.evaluator._evaluate_scheduled_rules()
     assert runtime.last_fired_at is None
@@ -1467,7 +1474,10 @@ async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors
     with (
         patch(
             "app.rule_evaluator.dispatch_rule_device_actions",
-            return_value=["Sonos zone 'Living Room' skipped: already paused"],
+            return_value=RuleDeviceDispatchResult(
+                errors=("Sonos zone 'Living Room' skipped: already paused",),
+                probable_successes=(),
+            ),
         ),
         patch(
             "app.rule_evaluator.send_rule_notification_email",
@@ -1491,7 +1501,7 @@ async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors
         and call.args[0]
         == (
             "[rules] fired rule_id=%s user_ids=%s source=%s transitions=%s "
-            "conditions=%s actions=%d email=%s duration_ms=%.0f%s"
+            "conditions=%s actions=%d email=%s duration_ms=%.0f%s%s"
         )
     ]
     assert len(fired_logs) == 1
