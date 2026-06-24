@@ -410,3 +410,105 @@ async def test_good_leave_then_bad_inside_does_not_defer_arrive_edge(
     ]
     assert deferred == []
     assert device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_prolonged_geo_inside_streak_fires_arrive_after_accurate_location(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sustained GPS-inside with poor accuracy reconciles an enter edge; a later accurate location fires."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _arrive_home_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        received_at=clock["now"],
+        accuracy_m=20,
+    )
+    device = _FakeKasa("192.168.1.10", "Garage")
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: DeviceManagersState(
+            kasa_mgr=_kasa_mgr(device),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            vizio_mgr=None,
+            cache_path=db,
+            args=argparse.Namespace(),
+        ),
+        now_fn=lambda: clock["now"],
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.20693,
+            lon=-73.89602,
+            accuracy_m=4,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.19405,
+            lon=-73.88827,
+            accuracy_m=100,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] += 601.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.19405,
+            lon=-73.88827,
+            accuracy_m=100,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.19405,
+            lon=-73.88827,
+            accuracy_m=5,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+    assert device.calls == ["on"]
