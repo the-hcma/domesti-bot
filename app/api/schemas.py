@@ -134,6 +134,20 @@ class UIFamilyOut(BaseModel):
     devices: list[UIDeviceOut] = Field(default_factory=list)
 
 
+class UIOperatorAlertOut(BaseModel):
+    """Dismissible operator alert surfaced above the device tile grid."""
+
+    message: str = Field(..., description="Human-readable failure detail.")
+    reason_code: str = Field(
+        ...,
+        description="Stable machine-readable code (e.g. ``smtp_delivery_failed``).",
+    )
+    recorded_at: float = Field(
+        ...,
+        description="Unix epoch seconds when the alert was recorded.",
+    )
+
+
 class UIStateOut(BaseModel):
     """Top-level payload for ``GET /v1/ui/state``.
 
@@ -143,6 +157,10 @@ class UIStateOut(BaseModel):
     """
 
     families: list[UIFamilyOut] = Field(default_factory=list)
+    operator_alert: UIOperatorAlertOut | None = Field(
+        default=None,
+        description="Persistent operator alert (e.g. SMTP notification failure).",
+    )
 
 
 class UIBulkActionOut(BaseModel):

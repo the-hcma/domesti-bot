@@ -21,6 +21,7 @@ from app.rule_actions import (
     resolve_kasa_host_by_label,
     send_rule_notification_email,
 )
+from app.operator_alerts import operator_alert_store
 from app.smtp_service import SmtpDeliveryResult
 from app.smtp_store import SmtpConfigRecord
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
@@ -258,6 +259,92 @@ def test_send_rule_notification_email_returns_disabled_outcome_when_notify_off(
     outcome = send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
     assert outcome == RuleNotificationEmailOutcome.disabled()
     assert outcome.format_for_log() == "disabled"
+
+
+def test_send_rule_notification_email_clears_operator_alert_on_success(
+    tmp_path: Path,
+) -> None:
+    operator_alert_store.record_smtp_notification_failure(message="stale failure")
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="test-rule",
+        label="Test",
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com"],
+        notify_on_fire=True,
+        trigger="edge_true",
+    )
+    smtp_config = SmtpConfigRecord(
+        from_address="bot@example.com",
+        host="smtp.example.com",
+        last_test_recipient=None,
+        mail_domain="example.com",
+        password_configured=False,
+        port=25,
+        username="",
+    )
+    delivery = SmtpDeliveryResult(
+        host="smtp.example.com",
+        port=25,
+        recipients=("ops@example.com",),
+        smtp_code=250,
+        smtp_response="2.0.0 Ok: queued as UNITTEST",
+    )
+    with (
+        patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
+        patch("app.rule_actions.smtp_send_ready", return_value=True),
+        patch("app.rule_actions.resolve_password_for_send", return_value=""),
+        patch("app.smtp_service.deliver_email_message", return_value=delivery),
+    ):
+        send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
+
+    assert operator_alert_store.current_smtp_notification_failure() is None
+
+
+def test_send_rule_notification_email_records_operator_alert_on_smtp_failure(
+    tmp_path: Path,
+) -> None:
+    operator_alert_store.clear_smtp_notification_failure()
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="test-rule",
+        label="Test",
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com"],
+        notify_on_fire=True,
+        trigger="edge_true",
+    )
+    smtp_config = SmtpConfigRecord(
+        from_address="bot@example.com",
+        host="smtp.example.com",
+        last_test_recipient=None,
+        mail_domain="example.com",
+        password_configured=False,
+        port=25,
+        username="",
+    )
+    with (
+        patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
+        patch("app.rule_actions.smtp_send_ready", return_value=True),
+        patch("app.rule_actions.resolve_password_for_send", return_value=""),
+        patch(
+            "app.smtp_service.deliver_email_message",
+            side_effect=ConnectionRefusedError("connection refused"),
+        ),
+        pytest.raises(RuleActionDispatchError),
+    ):
+        send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
+
+    alert = operator_alert_store.current_smtp_notification_failure()
+    assert alert is not None
+    assert alert.reason_code == "smtp_delivery_failed"
+    assert "smtp.example.com" in alert.message
 
 
 def test_send_rule_notification_email_sends_to_all_recipients(

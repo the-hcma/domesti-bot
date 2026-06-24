@@ -20,6 +20,7 @@ from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
+from app.operator_alerts import operator_alert_store
 from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult, smtp_friendly_error
 from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
 from app.sonos_device_manager import SonosDeviceManager
@@ -401,6 +402,7 @@ def send_rule_notification_email(
         delivery = deliver_email_message(params, message)
     except Exception as exc:
         friendly = smtp_friendly_error(exc, host=params.host)
+        operator_alert_store.record_smtp_notification_failure(message=friendly)
         _LOGGER.error(
             "[rules] notification email failed for rule_id=%s recipient_count=%d host=%s:%s: %s",
             rule.id,
@@ -410,6 +412,7 @@ def send_rule_notification_email(
             friendly,
         )
         raise RuleActionDispatchError(friendly) from exc
+    operator_alert_store.clear_smtp_notification_failure()
     _LOGGER.info(
         "[rules] notification email sent for rule_id=%s %s",
         rule.id,

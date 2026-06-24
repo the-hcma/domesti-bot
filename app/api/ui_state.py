@@ -28,8 +28,9 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from app import device_discovery_store
-from app.api.schemas import UIDeviceOut, UIFamilyOut, UISonosStreamFavoriteOut, UIStateOut
+from app.api.schemas import UIDeviceOut, UIFamilyOut, UIOperatorAlertOut, UISonosStreamFavoriteOut, UIStateOut
 from app.domesti_bot_cli import DeviceManagersState
+from app.operator_alerts import operator_alert_store
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 from app.rule_engine import DoorPosition, SwitchPowerState
@@ -582,7 +583,15 @@ def build_ui_state(
         families.append(
             UIFamilyOut(id=family_id, label=label, color=color, devices=devices)
         )
-    return UIStateOut(families=families)
+    operator_alert: UIOperatorAlertOut | None = None
+    smtp_alert = operator_alert_store.current_smtp_notification_failure()
+    if smtp_alert is not None:
+        operator_alert = UIOperatorAlertOut(
+            message=smtp_alert.message,
+            reason_code=smtp_alert.reason_code,
+            recorded_at=smtp_alert.recorded_at,
+        )
+    return UIStateOut(families=families, operator_alert=operator_alert)
 
 
 async def bulk_close_tailwind_apply(

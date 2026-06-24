@@ -26,8 +26,9 @@ from fastapi.testclient import TestClient
 
 from app import device_discovery_store
 from app.api.app import create_app
-from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
+from app.api.schemas import UIDeviceOut, UIFamilyOut, UIOperatorAlertOut, UIStateOut
 from app.api.ui_state import build_ui_state
+from app.operator_alerts import operator_alert_store
 from app.domesti_bot_cli import DeviceManagersState
 from app.server_runtime import runtime
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -146,9 +147,24 @@ def _state(
 
 
 def test_build_ui_state_emits_no_families_when_kasa_is_empty_and_no_tailwind() -> None:
+    operator_alert_store.clear_smtp_notification_failure()
     state = _state(kasa_mgr=_fake_kasa_mgr([]))
     out = build_ui_state(state, cache_path=None)
-    assert out == UIStateOut(families=[])
+    assert out == UIStateOut(families=[], operator_alert=None)
+
+
+def test_build_ui_state_includes_operator_alert() -> None:
+    operator_alert_store.record_smtp_notification_failure(
+        message="Connection refused",
+        reason_code="smtp_delivery_failed",
+    )
+    try:
+        out = build_ui_state(_state(kasa_mgr=_fake_kasa_mgr([])), cache_path=None)
+    finally:
+        operator_alert_store.clear_smtp_notification_failure()
+    assert out.operator_alert is not None
+    assert out.operator_alert.message == "Connection refused"
+    assert out.operator_alert.reason_code == "smtp_delivery_failed"
 
 
 def test_build_ui_state_emits_only_kasa_family_when_tailwind_manager_absent() -> None:
@@ -459,7 +475,7 @@ def test_ui_state_out_is_a_pydantic_model_with_expected_fields() -> None:
     field names verbatim."""
 
     fields = UIStateOut.model_fields
-    assert set(fields.keys()) == {"families"}
+    assert set(fields.keys()) == {"families", "operator_alert"}
     family_fields = UIFamilyOut.model_fields
     assert set(family_fields.keys()) == {"id", "label", "color", "devices"}
     device_fields = UIDeviceOut.model_fields

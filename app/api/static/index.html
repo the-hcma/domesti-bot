@@ -186,6 +186,19 @@
     }
     .tile-error { background: var(--danger); color: white; padding: 10px 14px;
       border-radius: 6px; margin-bottom: 12px; }
+    /* Operator alert banner — SMTP delivery failures and similar
+       process-local warnings. Lives inside ``#app`` (unlike the action
+       toast) so it scrolls with the dashboard. Dismissal is remembered
+       in ``localStorage`` keyed by reason_code + recorded_at. */
+    .operator-alert-banner { background: var(--danger); color: white;
+      padding: 10px 14px; border-radius: 6px; margin-bottom: 12px;
+      display: flex; align-items: flex-start; gap: 12px; }
+    .operator-alert-message { flex: 1; line-height: 1.4; margin: 0; }
+    .operator-alert-dismiss { background: transparent; color: inherit;
+      border: 0; font-size: 18px; line-height: 1; padding: 0 4px;
+      cursor: pointer; opacity: 0.85; }
+    .operator-alert-dismiss:hover, .operator-alert-dismiss:focus-visible {
+      opacity: 1; outline: 1px solid currentColor; }
     /* Recoverable per-action toast — surfaces server-side hints like
        a Sonos 409 ("queue is empty, pick something to play first").
        Pinned to the viewport (NOT to ``#app``) so the background poll's

@@ -13,6 +13,7 @@ import type {
   UIDeviceOut,
   UIDeviceState,
   UIFamilyOut,
+  UIOperatorAlertOut,
   UIStateOut,
 } from "./types.js";
 
@@ -406,6 +407,10 @@ class DomestiBotController {
     }
   }
 
+  private operatorAlertStorageKey(alert: UIOperatorAlertOut): string {
+    return `domesti-dismissed-operator-alert:${alert.reason_code}:${alert.recorded_at}`;
+  }
+
   private applyPendingPredictionsTo(state: UIStateOut): void {
     // After a fresh ``fetchState()`` lands, overlay any still-active
     // optimistic predictions onto the canonical snapshot so the user
@@ -456,6 +461,29 @@ class DomestiBotController {
 
   private clearAllPendingPredictions(): void {
     this.pendingPredictions.clear();
+  }
+
+  private createOperatorAlertElement(alert: UIOperatorAlertOut): HTMLElement {
+    const banner = document.createElement("aside");
+    banner.className = "operator-alert-banner";
+    banner.setAttribute("role", "alert");
+
+    const text = document.createElement("p");
+    text.className = "operator-alert-message";
+    text.textContent = alert.message;
+
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "operator-alert-dismiss";
+    dismiss.setAttribute("aria-label", "Dismiss");
+    dismiss.textContent = "\u00d7";
+    dismiss.addEventListener("click", () => {
+      this.dismissOperatorAlert(alert);
+      banner.remove();
+    });
+
+    banner.append(text, dismiss);
+    return banner;
   }
 
   private predictBulkOffForFamily(familyId: string): void {
@@ -597,6 +625,7 @@ class DomestiBotController {
     this.root.replaceChildren();
     this.root.dataset["connected"] = this.connected ? "true" : "false";
     this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
+    this.renderOperatorAlert(state.operator_alert);
     if (state.families.length > 0) {
       const header = document.createElement("header");
       header.className = "tile-header tile-header-global";
@@ -684,6 +713,22 @@ class DomestiBotController {
     if (this.actionToast !== null) {
       this.actionToast.remove();
       this.actionToast = null;
+    }
+  }
+
+  private dismissOperatorAlert(alert: UIOperatorAlertOut): void {
+    try {
+      localStorage.setItem(this.operatorAlertStorageKey(alert), "1");
+    } catch {
+      // Storage may be unavailable (private mode, quota).
+    }
+  }
+
+  private isOperatorAlertDismissed(alert: UIOperatorAlertOut): boolean {
+    try {
+      return localStorage.getItem(this.operatorAlertStorageKey(alert)) === "1";
+    } catch {
+      return false;
     }
   }
 
@@ -814,6 +859,16 @@ class DomestiBotController {
     label.textContent = message;
     row.append(spinner, label);
     this.root.append(row);
+  }
+
+  private renderOperatorAlert(alert: UIOperatorAlertOut | null | undefined): void {
+    if (alert == null) {
+      return;
+    }
+    if (this.isOperatorAlertDismissed(alert)) {
+      return;
+    }
+    this.root.prepend(this.createOperatorAlertElement(alert));
   }
 
   /** Keep the document scroll position when ``#app`` is rebuilt (mobile Safari jumps to top). */

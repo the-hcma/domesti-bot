@@ -52,8 +52,15 @@ export interface UIFamilyOut {
   devices: UIDeviceOut[];
 }
 
+export interface UIOperatorAlertOut {
+  message: string;
+  reason_code: string;
+  recorded_at: number;
+}
+
 export interface UIStateOut {
   families: UIFamilyOut[];
+  operator_alert?: UIOperatorAlertOut | null;
 }
 
 export interface UIBulkActionOut {
