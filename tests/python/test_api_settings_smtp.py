@@ -62,7 +62,7 @@ def test_put_smtp_settings_persists_config(
     assert saved.host == "localhost"
 
 
-@patch("app.smtp_service.smtplib.SMTP")
+@patch("app.smtp_service._LoggingSMTP")
 def test_post_smtp_test_email_sends_via_plain_smtp(
     smtp_cls: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
@@ -72,6 +72,9 @@ def test_post_smtp_test_email_sends_via_plain_smtp(
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
     smtp_instance = MagicMock()
+    smtp_instance.smtp_data_code = 250
+    smtp_instance.smtp_data_response = "2.0.0 Ok: queued as TESTQID"
+    smtp_instance.send_message.return_value = {}
     smtp_cls.return_value.__enter__.return_value = smtp_instance
 
     response = client.post(

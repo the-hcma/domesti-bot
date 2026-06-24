@@ -517,5 +517,5 @@ async def test_scheduled_fire_logs_presence_user_ids_and_email_outcome(
     message = fired[0]
     assert "user_ids=kristen" in message
     assert "user_ids=henrique" not in message
-    assert "email=sent to=ops@example.com" in message
+    assert "email=sent recipient_count=1" in message
     assert device.calls == ["on"]

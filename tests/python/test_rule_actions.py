@@ -20,8 +20,9 @@ from app.rule_actions import (
     resolve_kasa_host_by_label,
     send_rule_notification_email,
 )
+from app.smtp_service import SmtpDeliveryResult
 from app.smtp_store import SmtpConfigRecord
-from app.sonos_device_manager import SonosDeviceManager
+from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
 from app.vizio_device_manager import VizioDeviceManager
 
 
@@ -150,6 +151,58 @@ async def test_dispatch_rule_device_actions_collects_unknown_device_error() -> N
     assert "Unknown Kasa device" in errors[0]
 
 
+class _FakeSonosZone:
+    def __init__(self, identifier: str, label: str) -> None:
+        self.identifier = identifier
+        self.preferred_label = label
+
+    async def pause(self) -> None:
+        raise SonosTransitionUnavailableError(
+            "Sonos zone 'Living Room' cannot pause from its current transport state "
+            "(likely already paused / stopped)."
+        )
+
+
+def _sonos_mgr(zones: list[_FakeSonosZone]) -> SonosDeviceManager:
+    mgr = MagicMock(spec=SonosDeviceManager)
+    mgr.players = tuple(zones)
+    return cast(SonosDeviceManager, mgr)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rule_device_actions_skips_sonos_transition_unavailable() -> None:
+    kasa = _FakeKasa("192.168.1.20", "Kitchen lamp")
+    sonos = _FakeSonosZone("RINCON_TEST", "Living Room")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([kasa]),
+        sonos_mgr=_sonos_mgr([sonos]),
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=None,
+        args=argparse.Namespace(),
+    )
+    errors = await dispatch_rule_device_actions(
+        state,
+        [
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Kitchen lamp",
+                action=RuleDeviceActionType.TURN_OFF,
+            ),
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.SONOS,
+                device_id="Living Room",
+                action=RuleDeviceActionType.PAUSE,
+            ),
+        ],
+    )
+    assert kasa.calls == ["off"]
+    assert len(errors) == 1
+    assert "Living Room" in errors[0]
+    assert "failed" in errors[0]
+
+
 def test_resolve_kasa_host_by_label_raises_on_ambiguous_label() -> None:
     mgr = _kasa_mgr(
         [
@@ -229,16 +282,25 @@ def test_send_rule_notification_email_sends_to_all_recipients(
         port=25,
         username="",
     )
+    delivery = SmtpDeliveryResult(
+        host="smtp.example.com",
+        port=25,
+        recipients=("ops@example.com", "alerts@example.com"),
+        smtp_code=250,
+        smtp_response="2.0.0 Ok: queued as UNITTEST",
+    )
     with (
         patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
         patch("app.rule_actions.smtp_send_ready", return_value=True),
         patch("app.rule_actions.resolve_password_for_send", return_value=""),
-        patch("app.smtp_service.deliver_email_message") as deliver_mock,
+        patch("app.smtp_service.deliver_email_message", return_value=delivery) as deliver_mock,
     ):
         outcome = send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
 
     assert outcome == RuleNotificationEmailOutcome.sent_to(
         ["ops@example.com", "alerts@example.com"],
+        delivery=delivery,
     )
+    assert "queue_id=UNITTEST" in outcome.format_for_log()
     message = deliver_mock.call_args[0][1]
     assert message["To"] == "ops@example.com, alerts@example.com"

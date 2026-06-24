@@ -679,12 +679,10 @@ class RuleEvaluator:
         runtime.last_error = "; ".join(errors) if errors else None
         if errors:
             _LOGGER.warning(
-                "[rules] rule_id=%s matched but side effects failed: %s",
+                "[rules] rule_id=%s matched with partial side-effect failures: %s",
                 rule.id,
                 runtime.last_error,
             )
-            self._persist_rule_state(rule.id)
-            return
         runtime.last_fired_at = self._now_fn()
         self._persist_rule_state(rule.id)
         deferred_user_id = edge_user_id or log_user_ids.partition(",")[0]
@@ -1398,7 +1396,7 @@ def _format_rule_email_outcome_for_log(
     if not rule.notify_on_fire:
         return RuleNotificationEmailOutcome.disabled().format_for_log()
     if email_outcome is not None:
-        return email_outcome.format_for_log()
+        return email_outcome.format_for_log(redact_recipients=True)
     recipients = normalized_rule_notification_emails(rule)
     if not recipients:
         return "skipped reason=no_recipient"
