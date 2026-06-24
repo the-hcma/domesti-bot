@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.7.0](https://github.com/the-hcma/domesti-bot/compare/v1.6.0...v1.7.0) (2026-06-24)
+
+
+### Features
+
+* add devices_any_off rule condition ([#336](https://github.com/the-hcma/domesti-bot/issues/336)) ([d2331ab](https://github.com/the-hcma/domesti-bot/commit/d2331abd62845bbae727f6652b850c019c93f0f5))
+* show dismissible SMTP failure banner in web UI ([#341](https://github.com/the-hcma/domesti-bot/issues/341)) ([3c90faa](https://github.com/the-hcma/domesti-bot/commit/3c90faa8997ec49d39a4a348df8900db13536e03))
+* treat unresponsive off actions as probable successes ([#340](https://github.com/the-hcma/domesti-bot/issues/340)) ([ffa8931](https://github.com/the-hcma/domesti-bot/commit/ffa893159be00bdc079265ec3dc9dbffec34780d))
+
+
+### Bug Fixes
+
+* emit geofence leave edges after history reconcile and poor GPS ([#344](https://github.com/the-hcma/domesti-bot/issues/344)) ([a5a349c](https://github.com/the-hcma/domesti-bot/commit/a5a349c0b711c606bfb35e68533bba7848c77df1))
+* fire geofence enter edge after sustained GPS inside streak ([#339](https://github.com/the-hcma/domesti-bot/issues/339)) ([644dcfb](https://github.com/the-hcma/domesti-bot/commit/644dcfb4f2aba85b6ea401359d51c1f0344a5e68))
+* harden rule notification email dispatch and logging ([#338](https://github.com/the-hcma/domesti-bot/issues/338)) ([2a89ccf](https://github.com/the-hcma/domesti-bot/commit/2a89ccf458d430fa09e68b230fabfafe594dc696))
+
 ## [1.6.0](https://github.com/the-hcma/domesti-bot/compare/v1.5.0...v1.6.0) (2026-06-23)
 
 
