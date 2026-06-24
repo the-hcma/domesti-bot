@@ -14,6 +14,7 @@ from app.api.schemas import (
     AfterSunsetCondition,
     AnyConditionsCondition,
     DevicesAllOnCondition,
+    DevicesAnyOffCondition,
     DevicesAnyOnCondition,
     DevicesAnyOpenCondition,
     GeofenceOut,
@@ -32,6 +33,7 @@ from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
+from app.rule_actions import cached_kasa_is_on
 from app.rule_conditions import (
     RuleEvaluationContext,
     _presence_user_ids_for_condition,
@@ -977,7 +979,12 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
 
 
 def _device_state_rule(
-    condition: DevicesAllOnCondition | DevicesAnyOnCondition | DevicesAnyOpenCondition,
+    condition: (
+        DevicesAllOnCondition
+        | DevicesAnyOffCondition
+        | DevicesAnyOnCondition
+        | DevicesAnyOpenCondition
+    ),
 ) -> RuleOut:
     return RuleOut(
         conditions=RuleConditionsOut(all=[condition]),
@@ -1115,7 +1122,47 @@ def test_devices_any_on_met_when_one_on_and_another_missing() -> None:
     assert result.all_met is True
     assert result.conditions[0].met is True
     assert "On: Front door lights" in result.conditions[0].detail
-    assert "not found: Garage outside lights" in result.conditions[0].detail
+
+
+def test_devices_any_on_short_circuits_after_first_on_device() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOnCondition(
+            type="devices_any_on",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Garage outside lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    call_count = 0
+    original = cached_kasa_is_on
+
+    def counting_cached_kasa_is_on(
+        device_state: DeviceManagersState,
+        device_id: str,
+    ) -> bool | None:
+        nonlocal call_count
+        call_count += 1
+        return original(device_state, device_id)
+
+    with patch(
+        "app.rule_conditions.cached_kasa_is_on",
+        side_effect=counting_cached_kasa_is_on,
+    ):
+        result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.conditions[0].met is True
+    assert call_count == 1
 
 
 def test_devices_any_on_unmet_when_all_off() -> None:
@@ -1207,6 +1254,169 @@ def test_devices_any_on_met_when_vizio_tv_on() -> None:
     assert result.all_met is True
     assert result.conditions[0].met is True
     assert "On: Kitchen TV" in result.conditions[0].detail
+
+
+def test_devices_any_off_met_when_one_switch_off() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOffCondition(
+            type="devices_any_off",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Garage outside lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "Off: Garage outside lights" in result.conditions[0].detail
+
+
+def test_devices_any_off_met_when_one_off_and_another_missing() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOffCondition(
+            type="devices_any_off",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Garage outside lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "Off: Garage outside lights" in result.conditions[0].detail
+
+
+def test_devices_any_off_short_circuits_after_first_off_device() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOffCondition(
+            type="devices_any_off",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Garage outside lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    call_count = 0
+    original = cached_kasa_is_on
+
+    def counting_cached_kasa_is_on(
+        device_state: DeviceManagersState,
+        device_id: str,
+    ) -> bool | None:
+        nonlocal call_count
+        call_count += 1
+        return original(device_state, device_id)
+
+    with patch(
+        "app.rule_conditions.cached_kasa_is_on",
+        side_effect=counting_cached_kasa_is_on,
+    ):
+        result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.conditions[0].met is True
+    assert call_count == 2
+
+
+def test_devices_any_off_unmet_when_all_on() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
+        _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=True),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOffCondition(
+            type="devices_any_off",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.conditions[0].met is False
+    assert "All on" in result.conditions[0].detail
+
+
+def test_devices_any_off_unmet_when_discovery_not_ready() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    rule = _device_state_rule(
+        DevicesAnyOffCondition(
+            type="devices_any_off",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Front door lights",
+                    family_id=DeviceFamilyId.KASA,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=None))
+    assert result.conditions[0].met is False
+    assert result.conditions[0].detail == "discovery not ready"
+
+
+def test_devices_any_off_met_when_sonos_zone_paused() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _media_device_state(
+        sonos_zones=(
+            _FakeSonosZone("RINCON_AAAA", "Kitchen", is_playing=True),
+            _FakeSonosZone("RINCON_BBBB", "Living Room", is_playing=False),
+        ),
+    )
+    rule = _device_state_rule(
+        DevicesAnyOffCondition(
+            type="devices_any_off",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id="Kitchen",
+                    family_id=DeviceFamilyId.SONOS,
+                ),
+                RuleConditionDeviceRefOut(
+                    device_id="Living Room",
+                    family_id=DeviceFamilyId.SONOS,
+                ),
+            ],
+        ),
+    )
+    result = evaluate_rule(rule, _ctx(now=now, device_state=state))
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "Off: Living Room" in result.conditions[0].detail
 
 
 def test_devices_all_on_met_when_every_switch_on() -> None:

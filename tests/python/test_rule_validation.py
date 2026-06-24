@@ -6,7 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import (
+    DevicesAnyOffCondition,
     DevicesAnyOnCondition,
+    DevicesAnyOpenCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
     RuleDeviceActionOut,
@@ -312,9 +314,182 @@ def test_rule_out_coerces_whitespace_only_schedule_cron_to_none_for_edge_true() 
     assert rule.schedule_cron is None
 
 
+def test_devices_any_off_condition_rejects_empty_devices() -> None:
+    with pytest.raises(ValidationError):
+        DevicesAnyOffCondition(type="devices_any_off", devices=[])
+
+
 def test_devices_any_on_condition_rejects_empty_devices() -> None:
     with pytest.raises(ValidationError):
         DevicesAnyOnCondition(type="devices_any_on", devices=[])
+
+
+def test_validate_rule_accepts_kasa_devices_any_off_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOffCondition(
+                    type="devices_any_off",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Basement lamp",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="kasa-any-off",
+        label="Kasa any off",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with patch(
+        "app.rule_validation.resolve_kasa_host_by_label",
+        return_value="192.168.1.10",
+    ):
+        issues = validate_rule(rule, ctx)
+    assert issues == []
+
+
+def test_validate_rule_flags_unknown_kasa_devices_any_off_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOffCondition(
+                    type="devices_any_off",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Basement lamp",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="kasa-any-off-missing",
+        label="Kasa any off missing",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with patch(
+        "app.rule_validation.resolve_kasa_host_by_label",
+        return_value=None,
+    ):
+        issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "unknown_device"
+    assert 'Unknown kasa device "Basement lamp"' in issues[0].detail
+
+
+def test_validate_rule_accepts_tailwind_devices_any_open_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOpenCondition(
+                    type="devices_any_open",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Henrique's side",
+                            family_id=DeviceFamilyId.TAILWIND,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="tailwind-any-open",
+        label="Tailwind any open",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with patch(
+        "app.rule_validation.resolve_tailwind_identifier_by_label",
+        return_value="door1",
+    ):
+        issues = validate_rule(rule, ctx)
+    assert issues == []
+
+
+def test_validate_rule_flags_unknown_tailwind_devices_any_open_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOpenCondition(
+                    type="devices_any_open",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Henrique's side",
+                            family_id=DeviceFamilyId.TAILWIND,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="tailwind-any-open-missing",
+        label="Tailwind any open missing",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with patch(
+        "app.rule_validation.resolve_tailwind_identifier_by_label",
+        return_value=None,
+    ):
+        issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "unknown_device"
+    assert 'Unknown tailwind device "Henrique\'s side"' in issues[0].detail
 
 
 def test_validate_rule_accepts_sonos_device_condition_when_zone_exists() -> None:

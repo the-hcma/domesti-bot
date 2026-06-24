@@ -7,6 +7,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -22,6 +23,7 @@ from app.api.schemas import (
     BeforeSunriseCondition,
     DaysOfWeekCondition,
     DevicesAllOnCondition,
+    DevicesAnyOffCondition,
     DevicesAnyOnCondition,
     DevicesAnyOpenCondition,
     GeofenceOut,
@@ -57,6 +59,15 @@ _LOGGER = logging.getLogger(__name__)
 MINUTES_PER_DAY = 24 * 60
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 _DAY_NAMES = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+
+class DeviceOpenShortCircuitMatch(StrEnum):
+    OPEN = "open"
+
+
+class DevicePowerShortCircuitMatch(StrEnum):
+    OFF = "off"
+    ON = "on"
 
 
 @dataclass(frozen=True)
@@ -216,6 +227,9 @@ def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
 def _device_condition_power_labels(
     devices: list[RuleConditionDeviceRefOut],
     ctx: RuleEvaluationContext,
+    *,
+    fail_fast_unmet: bool = False,
+    short_circuit_match: DevicePowerShortCircuitMatch | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     on_labels: list[str] = []
     off_labels: list[str] = []
@@ -234,10 +248,19 @@ def _device_condition_power_labels(
                 missing_labels.append(
                     f"{label} (unsupported family {ref.family_id.value})",
                 )
+            if fail_fast_unmet:
+                break
         elif is_on:
             on_labels.append(label)
+            if short_circuit_match == DevicePowerShortCircuitMatch.ON:
+                break
         else:
             off_labels.append(label)
+            if (
+                short_circuit_match == DevicePowerShortCircuitMatch.OFF
+                or fail_fast_unmet
+            ):
+                break
     return on_labels, off_labels, missing_labels
 
 
@@ -258,6 +281,9 @@ def _cached_device_is_open(
 def _device_condition_open_labels(
     devices: list[RuleConditionDeviceRefOut],
     ctx: RuleEvaluationContext,
+    *,
+    fail_fast_unmet: bool = False,
+    short_circuit_match: DeviceOpenShortCircuitMatch | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     open_labels: list[str] = []
     closed_labels: list[str] = []
@@ -272,10 +298,16 @@ def _device_condition_open_labels(
                 missing_labels.append(
                     f"{label} (unsupported family {ref.family_id.value})",
                 )
+            if fail_fast_unmet:
+                break
         elif is_open:
             open_labels.append(label)
+            if short_circuit_match == DeviceOpenShortCircuitMatch.OPEN:
+                break
         else:
             closed_labels.append(label)
+            if fail_fast_unmet:
+                break
     return open_labels, closed_labels, missing_labels
 
 
@@ -446,6 +478,8 @@ def _evaluate_condition(
         return _evaluate_days_of_week(condition, rule, ctx)
     if isinstance(condition, DevicesAllOnCondition):
         return _evaluate_devices_all_on(condition, rule, ctx)
+    if isinstance(condition, DevicesAnyOffCondition):
+        return _evaluate_devices_any_off(condition, rule, ctx)
     if isinstance(condition, DevicesAnyOnCondition):
         return _evaluate_devices_any_on(condition, rule, ctx)
     if isinstance(condition, DevicesAnyOpenCondition):
@@ -509,6 +543,7 @@ def _evaluate_devices_all_on(
     on_labels, off_labels, missing_labels = _device_condition_power_labels(
         condition.devices,
         ctx,
+        fail_fast_unmet=True,
     )
     if missing_labels:
         met = False
@@ -523,6 +558,50 @@ def _evaluate_devices_all_on(
         condition=condition,
         detail=detail,
         label="All devices on",
+        met=met,
+    )
+
+
+def _evaluate_devices_any_off(
+    condition: DevicesAnyOffCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    if ctx.device_state is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="discovery not ready",
+            label="Any device off",
+            met=False,
+        )
+    on_labels, off_labels, missing_labels = _device_condition_power_labels(
+        condition.devices,
+        ctx,
+        short_circuit_match=DevicePowerShortCircuitMatch.OFF,
+    )
+    if off_labels:
+        met = True
+        detail = f"Off: {', '.join(off_labels)}"
+        if missing_labels:
+            detail = (
+                f"{detail} (not found: {', '.join(missing_labels)})"
+            )
+    elif on_labels:
+        met = False
+        if missing_labels:
+            detail = (
+                f"All resolved devices on ({', '.join(on_labels)}); "
+                f"not found: {', '.join(missing_labels)}"
+            )
+        else:
+            detail = f"All on ({', '.join(on_labels)})"
+    else:
+        met = False
+        detail = f"Not found: {', '.join(missing_labels)}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="Any device off",
         met=met,
     )
 
@@ -542,6 +621,7 @@ def _evaluate_devices_any_on(
     on_labels, off_labels, missing_labels = _device_condition_power_labels(
         condition.devices,
         ctx,
+        short_circuit_match=DevicePowerShortCircuitMatch.ON,
     )
     if on_labels:
         met = True
@@ -585,6 +665,7 @@ def _evaluate_devices_any_open(
     open_labels, closed_labels, missing_labels = _device_condition_open_labels(
         condition.devices,
         ctx,
+        short_circuit_match=DeviceOpenShortCircuitMatch.OPEN,
     )
     if open_labels:
         met = True
@@ -1182,6 +1263,7 @@ def _presence_user_ids_for_condition(
             BeforeSunriseCondition,
             DaysOfWeekCondition,
             DevicesAllOnCondition,
+            DevicesAnyOffCondition,
             DevicesAnyOnCondition,
             DevicesAnyOpenCondition,
             LocalTimeWindowCondition,
