@@ -16,10 +16,14 @@ on:
     - cron: '0 7 * * 4'
   workflow_dispatch:
 
+# Cancel in-progress reruns for the same trigger only. push and pull_request must
+# not share a group: cancel-in-progress would leave CANCELLED required checks on
+# the PR commit and block merge even when pull_request CI passed. pull_request
+# actions are also split (opened/synchronize vs edited) so review-bot description
+# patches do not cancel an in-flight test run for the same commit.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.event.action || github.event_name }}
   cancel-in-progress: true
-
 jobs:
   guard:
     permissions:
@@ -63,6 +67,16 @@ jobs:
             exit 0
           fi
 
+
+          # CodeRabbit appends review summaries to the PR description (pull_request
+          # edited). We want its review comments only, not a second full CI run.
+          if [[ "${{ github.event_name }}" == "pull_request" ]] \
+              && [[ "${{ github.event.action }}" == "edited" ]] \
+              && [[ "${{ github.event.sender.login }}" == "coderabbitai[bot]" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Pull request CI skipped: CodeRabbit description edit (review metadata only)"
+            exit 0
+          fi
           # Skip push CI when an open PR already covers this branch.
           # GitHub always delivers pull_request synchronize for PR-head pushes;
           # the push trigger is only for restacks without an open PR.
