@@ -36,6 +36,7 @@ from app.vizio_device_manager import VizioDeviceManager
 from app.rule_actions import cached_kasa_is_on
 from app.rule_conditions import (
     RuleEvaluationContext,
+    _effective_location_for_rule,
     _presence_user_ids_for_condition,
     compute_rules_sun_out,
     evaluate_rule,
@@ -126,23 +127,25 @@ def _ctx(
     geofences: tuple[GeofenceOut, ...] = (),
     geofence_inside_since: dict[tuple[str, str], float] | None = None,
     geofence_outside_since: dict[tuple[str, str], float] | None = None,
+    user_location_history: dict[str, tuple[UserLocationOut, ...]] | None = None,
     user_locations: dict[str, UserLocationOut] | None = None,
 ) -> RuleEvaluationContext:
     sun = compute_rules_sun_out(_SETTINGS, now=now)
     user_display_names = {"henrique": "Henrique", "kristen": "Kristen"}
     return RuleEvaluationContext(
-        device_state=device_state,
-        geofence_inside_since=geofence_inside_since or {},
-        geofence_outside_since=geofence_outside_since or {},
         geofences=geofences,
         now=now,
         roster_user_id_lookup=build_roster_user_id_lookup(
             list(user_display_names.keys()),
         ),
-        user_display_names=user_display_names,
-        user_locations=user_locations or {},
         sun=sun,
         timezone=_TZ,
+        user_display_names=user_display_names,
+        user_locations=user_locations or {},
+        device_state=device_state,
+        geofence_inside_since=geofence_inside_since or {},
+        geofence_outside_since=geofence_outside_since or {},
+        user_location_history=user_location_history or {},
     )
 
 
@@ -250,6 +253,80 @@ def test_after_sunset_not_met_midday() -> None:
     result = evaluate_rule(_evening_rule(), _ctx(now=now))
     assert result.conditions[0].met is False
     assert "Outside sunset" in result.conditions[0].detail
+
+
+def test_effective_location_for_rule_ignores_usable_location_older_than_ten_minutes() -> None:
+    now_epoch = datetime(2026, 6, 25, 17, 20, 0, tzinfo=_TZ).timestamp()
+    latest = UserLocationOut(
+        accuracy_m=120,
+        lat=41.19,
+        lon=-73.88,
+        received_at="2026-06-25T21:20:00Z",
+        source="my-tracks",
+    )
+    old_good = UserLocationOut(
+        accuracy_m=8,
+        lat=41.19283,
+        lon=-73.88230,
+        received_at="2026-06-25T21:03:36Z",
+        source="my-tracks",
+    )
+    assert (
+        _effective_location_for_rule(
+            latest,
+            (old_good,),
+            min_accuracy_m=50,
+            now_epoch=now_epoch,
+        )
+        is None
+    )
+
+
+def test_effective_location_for_rule_returns_latest_when_usable() -> None:
+    now_epoch = datetime(2026, 6, 25, 17, 4, 0, tzinfo=_TZ).timestamp()
+    latest = UserLocationOut(
+        accuracy_m=8,
+        lat=41.19283,
+        lon=-73.88230,
+        received_at="2026-06-25T21:04:00Z",
+        source="my-tracks",
+    )
+    assert (
+        _effective_location_for_rule(
+            latest,
+            (),
+            min_accuracy_m=50,
+            now_epoch=now_epoch,
+        )
+        == latest
+    )
+
+
+def test_effective_location_for_rule_walks_back_within_ten_minutes() -> None:
+    now_epoch = datetime(2026, 6, 25, 17, 10, 0, tzinfo=_TZ).timestamp()
+    latest = UserLocationOut(
+        accuracy_m=83,
+        lat=41.19336,
+        lon=-73.87992,
+        received_at="2026-06-25T21:10:00Z",
+        source="my-tracks",
+    )
+    good = UserLocationOut(
+        accuracy_m=8,
+        lat=41.19283,
+        lon=-73.88230,
+        received_at="2026-06-25T21:03:36Z",
+        source="my-tracks",
+    )
+    assert (
+        _effective_location_for_rule(
+            latest,
+            (good,),
+            min_accuracy_m=50,
+            now_epoch=now_epoch,
+        )
+        == good
+    )
 
 
 def test_users_inside_geofence_met_with_location() -> None:
@@ -538,6 +615,101 @@ def test_users_outside_geofence_for_s_met_after_dwell() -> None:
     assert result.all_met is True
 
 
+def test_users_outside_geofence_for_s_met_with_outside_dwell_timer_despite_low_accuracy_latest() -> (
+    None
+):
+    now = datetime(2026, 6, 25, 17, 20, 56, tzinfo=_TZ)
+    outside_since = datetime(2026, 6, 25, 17, 0, 53, tzinfo=_TZ).timestamp()
+    henrique_bad_latest = UserLocationOut(
+        accuracy_m=83,
+        connection_type="mobile",
+        lat=41.19336,
+        lon=-73.87992,
+        received_at="2026-06-25T21:20:33Z",
+        source="my-tracks",
+    )
+    henrique_good_history = UserLocationOut(
+        accuracy_m=8,
+        connection_type="mobile",
+        lat=41.19283,
+        lon=-73.88230,
+        received_at="2026-06-25T21:15:36Z",
+        source="my-tracks",
+    )
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersOutsideGeofenceForSCondition(
+                    type="users_outside_geofence_for_s",
+                    geofence_id="house",
+                    min_outside_s=1200,
+                    user_ids=["henrique", "kristen"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="away-dwell-both",
+        label="Away dwell both",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/10 * * * *",
+    )
+    result = evaluate_rule(
+        rule,
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_outside_since={
+                ("henrique", "house"): outside_since,
+                ("kristen", "house"): outside_since,
+            },
+            user_location_history={"henrique": (henrique_good_history,)},
+            user_locations={
+                "henrique": henrique_bad_latest,
+                "kristen": _henrique_outside_location(),
+            },
+        ),
+    )
+    assert result.conditions[0].met is True
+
+
+def test_users_outside_geofence_for_s_vetoed_when_walkback_shows_accurate_inside() -> None:
+    now = datetime(2026, 6, 25, 17, 20, 56, tzinfo=_TZ)
+    outside_since = datetime(2026, 6, 25, 17, 0, 53, tzinfo=_TZ).timestamp()
+    henrique_bad_latest = UserLocationOut(
+        accuracy_m=83,
+        connection_type="mobile",
+        lat=41.19336,
+        lon=-73.87992,
+        received_at="2026-06-25T21:20:33Z",
+        source="my-tracks",
+    )
+    henrique_inside_history = UserLocationOut(
+        accuracy_m=4,
+        connection_type="mobile",
+        lat=41.19425,
+        lon=-73.88863,
+        received_at="2026-06-25T21:15:36Z",
+        source="my-tracks",
+    )
+    result = evaluate_rule(
+        _outside_dwell_rule(),
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_outside_since={("henrique", "house"): outside_since},
+            user_location_history={"henrique": (henrique_inside_history,)},
+            user_locations={"henrique": henrique_bad_latest},
+        ),
+    )
+    assert result.conditions[0].met is False
+    assert "Henrique inside House" in result.conditions[0].detail
+
+
 def test_users_inside_geofence_for_s_met_with_wifi_home_presence_low_accuracy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -583,33 +755,27 @@ def test_users_inside_geofence_for_s_met_with_wifi_home_presence_low_accuracy(
         trigger="scheduled",
         schedule_cron="*/10 * * * *",
     )
-    with patch("app.rule_conditions._LOGGER.info") as info_mock:
-        result = evaluate_rule(
-            rule,
-            _ctx(
-                now=now,
-                geofences=(_house_geofence(),),
-                geofence_inside_since={
-                    ("henrique", "house"): inside_since,
-                    ("kristen", "house"): inside_since,
-                },
-                user_locations={
-                    "henrique": _henrique_inside_location(),
-                    "kristen": kristen_wifi,
-                },
-            ),
-        )
+    result = evaluate_rule(
+        rule,
+        _ctx(
+            now=now,
+            geofences=(_house_geofence(),),
+            geofence_inside_since={
+                ("henrique", "house"): inside_since,
+                ("kristen", "house"): inside_since,
+            },
+            user_locations={
+                "henrique": _henrique_inside_location(),
+                "kristen": kristen_wifi,
+            },
+        ),
+    )
     assert result.conditions[0].met is True
-    override_logs = [
-        call
-        for call in info_mock.call_args_list
-        if call.args
-        and "wifi home presence overrode low-accuracy location" in str(call.args[0])
-    ]
-    assert override_logs
+    assert "Everyone inside House for at least 10 min" in result.conditions[0].detail
 
 
-def test_users_inside_geofence_for_s_rejects_low_accuracy_without_wifi() -> None:
+def test_users_inside_geofence_for_s_met_with_inside_dwell_timer_despite_low_accuracy(
+) -> None:
     now = datetime(2026, 6, 9, 21, 12, tzinfo=_TZ)
     inside_since = now.timestamp() - 720.0
     kristen_mobile = UserLocationOut(
@@ -651,8 +817,8 @@ def test_users_inside_geofence_for_s_rejects_low_accuracy_without_wifi() -> None
             user_locations={"kristen": kristen_mobile},
         ),
     )
-    assert result.conditions[0].met is False
-    assert "location ignored (low accuracy)" in result.conditions[0].detail
+    assert result.conditions[0].met is True
+    assert "Everyone inside House for at least 10 min" in result.conditions[0].detail
 
 
 _JUN22_KRISTEN_INSIDE_SINCE = datetime(2026, 6, 22, 20, 34, 41, tzinfo=_TZ).timestamp()
@@ -759,15 +925,14 @@ def _patch_wifi_home_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_jun22_2145_dwell_rejects_kristen_without_wifi() -> None:
+def test_jun22_2145_dwell_accepts_kristen_with_inside_timer_without_wifi() -> None:
     result = evaluate_rule(
         _jun22_evening_lights_off_rule(),
         _jun22_replay_ctx(_JUN22_TICK_2145, connection_type="m"),
     )
     dwell = result.conditions[1]
-    assert dwell.met is False
-    assert "Kristen: location ignored (low accuracy)" in dwell.detail
-    assert result.all_met is False
+    assert dwell.met is True
+    assert "Everyone inside House for at least 10 min" in dwell.detail
 
 
 def test_jun22_2145_dwell_accepts_kristen_with_wifi(
