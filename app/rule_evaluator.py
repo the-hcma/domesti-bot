@@ -234,6 +234,7 @@ class RuleEvaluator:
         cache_path = self._cache_path
         geofences = []
         user_display_names: dict[str, str] = {}
+        user_home_wifi_bssid: dict[str, str | None] = {}
         user_location_history: dict[str, tuple[UserLocationOut, ...]] = {}
         user_locations: dict[str, UserLocationOut] = {}
         if cache_path is not None:
@@ -243,6 +244,9 @@ class RuleEvaluator:
             users = list_users(cache_path)
             user_display_names = {
                 row.user_id: row.display_name for row in users
+            }
+            user_home_wifi_bssid = {
+                row.user_id: row.home_wifi_bssid for row in users
             }
             stored = list_user_locations(cache_path)
             now_epoch = effective_now.timestamp()
@@ -256,21 +260,31 @@ class RuleEvaluator:
             for uid, location in stored.items():
                 user_locations[uid] = UserLocationOut(
                     accuracy_m=location.accuracy_m,
+                    battery_level=location.battery_level,
                     connection_type=location.connection_type,
+                    fix_source=location.fix_source,
                     lat=location.lat,
                     lon=location.lon,
                     received_at=_location_received_at_iso(location),
                     source=location.source,
+                    trigger=location.trigger,
+                    wifi_bssid=location.wifi_bssid,
+                    wifi_ssid=location.wifi_ssid,
                 )
                 history_rows = walkback_by_user.get(uid, ())
                 user_location_history[uid] = tuple(
                     UserLocationOut(
                         accuracy_m=row.accuracy_m,
+                        battery_level=row.battery_level,
                         connection_type=row.connection_type,
+                        fix_source=row.fix_source,
                         lat=row.lat,
                         lon=row.lon,
                         received_at=_location_received_at_iso(row),
                         source=row.source,
+                        trigger=row.trigger,
+                        wifi_bssid=row.wifi_bssid,
+                        wifi_ssid=row.wifi_ssid,
                     )
                     for row in history_rows
                 )
@@ -282,6 +296,7 @@ class RuleEvaluator:
             sun=sun,
             timezone=tz,
             user_display_names=user_display_names,
+            user_home_wifi_bssid=user_home_wifi_bssid,
             user_locations=user_locations,
             device_state=self._device_state_getter(),
             geofence_inside_since=self.geofence_inside_since_snapshot(),
@@ -342,6 +357,7 @@ class RuleEvaluator:
             wifi_accuracy_limit_m = dwell_accuracy_limit_m
         if wifi_accuracy_limit_m is None:
             return
+        home_wifi_bssid = _home_wifi_bssid_for_user(self._cache_path, user_id)
         for geofence in geofences:
             geofence_id = geofence.geofence_id
             if geofence_id not in target_ids:
@@ -355,6 +371,8 @@ class RuleEvaluator:
                 lat=location.lat,
                 lon=location.lon,
                 min_accuracy_m=wifi_accuracy_limit_m,
+                home_wifi_bssid=home_wifi_bssid,
+                observed_wifi_bssid=location.wifi_bssid,
             ):
                 continue
             key = (user_id, geofence_id)
@@ -410,6 +428,7 @@ class RuleEvaluator:
         )
         settings = load_settings_location()
         geofence_list = list_geofences(cache_path)
+        home_wifi_bssid = _home_wifi_bssid_for_user(cache_path, user_id)
         seeded = False
         if history:
             was_inside, outside_since, inside_since = (
@@ -421,6 +440,7 @@ class RuleEvaluator:
                     geofences=geofence_list,
                     settings=settings,
                     user_id=user_id,
+                    home_wifi_bssid=home_wifi_bssid,
                 )
             )
             if was_inside is not None:
@@ -438,6 +458,7 @@ class RuleEvaluator:
                 geofence_list,
                 settings=settings,
                 min_accuracy_m=edge_accuracy_limit_m,
+                home_wifi_bssid=home_wifi_bssid,
             )
             dwell_inside = history_row_geofence_inside(
                 location,
@@ -445,6 +466,7 @@ class RuleEvaluator:
                 geofence_list,
                 settings=settings,
                 min_accuracy_m=dwell_accuracy_limit_m,
+                home_wifi_bssid=home_wifi_bssid,
             )
             if edge_inside is not None:
                 self._geofence_was_inside[key] = edge_inside
@@ -461,6 +483,8 @@ class RuleEvaluator:
                     lat=location.lat,
                     lon=location.lon,
                     min_accuracy_m=dwell_accuracy_limit_m,
+                    home_wifi_bssid=home_wifi_bssid,
+                    observed_wifi_bssid=location.wifi_bssid,
                 ):
                     _log_wifi_home_presence_overrode_low_accuracy(
                         user_id=user_id,
@@ -1186,6 +1210,7 @@ class RuleEvaluator:
     ) -> dict[str, GeofenceTransition]:
         transitions: dict[str, GeofenceTransition] = {}
         settings = load_settings_location()
+        home_wifi_bssid = _home_wifi_bssid_for_user(self._cache_path, user_id)
         for geofence in geofences:
             if not geofence.enabled:
                 continue
@@ -1209,6 +1234,8 @@ class RuleEvaluator:
                     lat=location.lat,
                     lon=location.lon,
                     min_accuracy_m=dwell_accuracy_limit_m,
+                    home_wifi_bssid=home_wifi_bssid,
+                    observed_wifi_bssid=location.wifi_bssid,
                 )
             now_inside_for_dwell = gps_inside or wifi_dwell_inside
             track_dwell = dwell_accuracy_limit_m is not None and (
@@ -1639,6 +1666,18 @@ def _geofence_record_to_out(record: GeofenceRecord) -> GeofenceOut:
     )
 
 
+def _home_wifi_bssid_for_user(
+    cache_path: Path | None,
+    user_id: str,
+) -> str | None:
+    if cache_path is None:
+        return None
+    for row in list_users(cache_path):
+        if row.user_id == user_id:
+            return row.home_wifi_bssid
+    return None
+
+
 def _location_accuracy_passes(
     location: UserLocationRecord,
     limit_m: int | None,
@@ -1722,6 +1761,7 @@ def _reconstruct_geofence_seed_from_history(
     geofences: list[GeofenceRecord],
     settings: SettingsLocationOut,
     user_id: str | None = None,
+    home_wifi_bssid: str | None = None,
 ) -> tuple[bool | None, float | None, float | None]:
     """Rebuild geofence streak timestamps from ordered location history rows."""
     if not history:
@@ -1734,6 +1774,7 @@ def _reconstruct_geofence_seed_from_history(
             geofences,
             settings=settings,
             min_accuracy_m=edge_accuracy_limit_m,
+            home_wifi_bssid=home_wifi_bssid,
         )
         if inside is None:
             continue
@@ -1767,6 +1808,7 @@ def _reconstruct_geofence_seed_from_history(
                 geofences,
                 settings=settings,
                 min_accuracy_m=dwell_accuracy_limit_m,
+                home_wifi_bssid=home_wifi_bssid,
             )
             if inside is None:
                 continue
@@ -1797,6 +1839,8 @@ def _reconstruct_geofence_seed_from_history(
                     lat=row.lat,
                     lon=row.lon,
                     min_accuracy_m=dwell_accuracy_limit_m,
+                    home_wifi_bssid=home_wifi_bssid,
+                    observed_wifi_bssid=row.wifi_bssid,
                 ):
                     streak_wifi_row = row
             inside_since = streak_start

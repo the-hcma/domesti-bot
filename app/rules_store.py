@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 
 from app.db.models import RuleGeofence, RuleUser
 from app.db.session import discovery_session
+from app.presence_wifi import normalize_wifi_bssid
 from app.user_names import default_display_name, format_person_display_name, parse_person_name
 
 
@@ -32,6 +33,8 @@ class UserRecord:
     last_name: str
     tracking_device_label: str
     user_id: str
+    home_wifi_bssid: str | None = None
+    home_wifi_ssid: str | None = None
 
 
 def count_geofences(path: Path) -> int:
@@ -87,8 +90,19 @@ def replace_users(path: Path, users: list[UserRecord]) -> int:
     """Replace the full user roster, preserving ``user_id`` values from the export."""
     now = time.time()
     with discovery_session(path) as session:
+        preserved_home_wifi: dict[str, tuple[str | None, str | None]] = {
+            row.user_id: (row.home_wifi_ssid, row.home_wifi_bssid)
+            for row in session.scalars(select(RuleUser)).all()
+        }
         session.execute(delete(RuleUser))
         for user in users:
+            home_wifi_ssid = user.home_wifi_ssid
+            home_wifi_bssid = user.home_wifi_bssid
+            if home_wifi_ssid is None and home_wifi_bssid is None:
+                home_wifi_ssid, home_wifi_bssid = preserved_home_wifi.get(
+                    user.user_id,
+                    (None, None),
+                )
             session.add(
                 RuleUser(
                     user_id=user.user_id,
@@ -97,10 +111,38 @@ def replace_users(path: Path, users: list[UserRecord]) -> int:
                     display_name=user.display_name,
                     tracking_device_label=user.tracking_device_label,
                     enabled=1 if user.enabled else 0,
+                    home_wifi_ssid=home_wifi_ssid,
+                    home_wifi_bssid=normalize_wifi_bssid(home_wifi_bssid),
                     updated_at=now,
                 )
             )
     return len(users)
+
+
+def set_user_home_wifi(
+    path: Path,
+    user_id: str,
+    *,
+    wifi_ssid: str | None,
+    wifi_bssid: str | None,
+) -> UserRecord:
+    """Persist the operator-selected home WiFi network for ``user_id``."""
+    trimmed_user_id = user_id.strip()
+    normalized_bssid = normalize_wifi_bssid(wifi_bssid)
+    trimmed_ssid = (wifi_ssid or "").strip() or None
+    if normalized_bssid is None:
+        trimmed_ssid = None
+    elif trimmed_ssid is None:
+        raise ValueError("Expected wifi_ssid when wifi_bssid is set, got None")
+    now = time.time()
+    with discovery_session(path) as session:
+        row = session.get(RuleUser, trimmed_user_id)
+        if row is None:
+            raise KeyError(trimmed_user_id)
+        row.home_wifi_ssid = trimmed_ssid
+        row.home_wifi_bssid = normalized_bssid
+        row.updated_at = now
+        return _user_to_record(row)
 
 
 def save_geofence(path: Path, geofence: GeofenceRecord) -> GeofenceRecord:
@@ -181,4 +223,6 @@ def _user_to_record(row: RuleUser) -> UserRecord:
         display_name=row.display_name,
         tracking_device_label=row.tracking_device_label,
         enabled=bool(row.enabled),
+        home_wifi_bssid=row.home_wifi_bssid,
+        home_wifi_ssid=row.home_wifi_ssid,
     )

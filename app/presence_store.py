@@ -22,9 +22,17 @@ from app.presence_connection_type import (
     connection_type_label_for_log,
     normalize_presence_connection_type,
 )
+from app.presence_wifi import normalize_wifi_bssid
 from app.rules_store import GeofenceRecord
 
 _LOCATION_LOGGER = logging.getLogger("location")
+
+
+@dataclass(frozen=True)
+class ObservedWifiNetwork:
+    last_seen_at: float
+    wifi_bssid: str
+    wifi_ssid: str
 
 
 @dataclass(frozen=True)
@@ -35,7 +43,12 @@ class UserLocationRecord:
     received_at: float
     source: str | None
     user_id: str
+    battery_level: int | None = None
     connection_type: str | None = None
+    fix_source: str | None = None
+    trigger: str | None = None
+    wifi_bssid: str | None = None
+    wifi_ssid: str | None = None
 
 
 def count_user_location_history(path: Path, user_id: str) -> int:
@@ -67,6 +80,48 @@ def geofence_ids_containing_location(
         if distance_m <= geofence.radius_m:
             inside.append(geofence.geofence_id)
     return inside
+
+
+def list_observed_wifi_networks_for_user(
+    path: Path,
+    user_id: str,
+    *,
+    limit: int = 20,
+) -> list[ObservedWifiNetwork]:
+    """Return distinct WiFi networks seen in ``user_id`` location history."""
+    if limit <= 0:
+        raise ValueError(f"Expected limit > 0, got {limit}")
+    with discovery_session(path) as session:
+        rows = session.scalars(
+            select(RuleUserLocationHistory)
+            .where(RuleUserLocationHistory.user_id == user_id)
+            .where(RuleUserLocationHistory.wifi_bssid.is_not(None))
+            .where(RuleUserLocationHistory.wifi_ssid.is_not(None))
+            .order_by(
+                RuleUserLocationHistory.received_at.desc(),
+                RuleUserLocationHistory.id.desc(),
+            )
+        ).all()
+    latest_by_bssid: dict[str, ObservedWifiNetwork] = {}
+    for row in rows:
+        bssid = normalize_wifi_bssid(row.wifi_bssid)
+        ssid = (row.wifi_ssid or "").strip()
+        if bssid is None or ssid == "":
+            continue
+        if bssid in latest_by_bssid:
+            continue
+        latest_by_bssid[bssid] = ObservedWifiNetwork(
+            wifi_ssid=ssid,
+            wifi_bssid=bssid,
+            last_seen_at=row.received_at,
+        )
+        if len(latest_by_bssid) >= limit:
+            break
+    return sorted(
+        latest_by_bssid.values(),
+        key=lambda network: network.last_seen_at,
+        reverse=True,
+    )
 
 
 def list_user_location_history_for_user(
@@ -253,17 +308,22 @@ def replace_user_locations(
     with discovery_session(path) as session:
         session.execute(delete(RuleUserLastLocation))
         for location in locations:
-            stored_location = _location_with_normalized_connection_type(location)
+            stored_location = _location_with_normalized_fields(location)
             session.add(
                 RuleUserLastLocation(
                     user_id=stored_location.user_id,
                     lat=stored_location.lat,
                     lon=stored_location.lon,
                     accuracy_m=stored_location.accuracy_m,
+                    battery_level=stored_location.battery_level,
                     connection_type=stored_location.connection_type,
+                    fix_source=stored_location.fix_source,
                     received_at=stored_location.received_at,
                     source=stored_location.source,
+                    trigger=stored_location.trigger,
                     updated_at=now,
+                    wifi_bssid=stored_location.wifi_bssid,
+                    wifi_ssid=stored_location.wifi_ssid,
                 )
             )
             session.add(
@@ -272,10 +332,15 @@ def replace_user_locations(
                     lat=stored_location.lat,
                     lon=stored_location.lon,
                     accuracy_m=stored_location.accuracy_m,
+                    battery_level=stored_location.battery_level,
                     connection_type=stored_location.connection_type,
+                    fix_source=stored_location.fix_source,
                     received_at=stored_location.received_at,
                     source=stored_location.source,
+                    trigger=stored_location.trigger,
                     updated_at=now,
+                    wifi_bssid=stored_location.wifi_bssid,
+                    wifi_ssid=stored_location.wifi_ssid,
                 )
             )
     for location in locations:
@@ -294,7 +359,7 @@ def upsert_user_location(
     retention: LocationHistoryRetention,
 ) -> bool:
     """Upsert one user location and append history; return False when stale."""
-    location = _location_with_normalized_connection_type(location)
+    location = _location_with_normalized_fields(location)
     now = time.time()
     stored = False
     with discovery_session(path) as session:
@@ -308,29 +373,45 @@ def upsert_user_location(
                     lat=location.lat,
                     lon=location.lon,
                     accuracy_m=location.accuracy_m,
+                    battery_level=location.battery_level,
                     connection_type=location.connection_type,
+                    fix_source=location.fix_source,
                     received_at=location.received_at,
                     source=location.source,
+                    trigger=location.trigger,
                     updated_at=now,
+                    wifi_bssid=location.wifi_bssid,
+                    wifi_ssid=location.wifi_ssid,
                 )
             )
         else:
             row.lat = location.lat
             row.lon = location.lon
             row.accuracy_m = location.accuracy_m
+            row.battery_level = location.battery_level
             row.connection_type = location.connection_type
+            row.fix_source = location.fix_source
             row.received_at = location.received_at
             row.source = location.source
+            row.trigger = location.trigger
             row.updated_at = now
+            row.wifi_bssid = location.wifi_bssid
+            row.wifi_ssid = location.wifi_ssid
         session.add(
             RuleUserLocationHistory(
                 user_id=location.user_id,
                 lat=location.lat,
                 lon=location.lon,
                 accuracy_m=location.accuracy_m,
+                battery_level=location.battery_level,
+                connection_type=location.connection_type,
+                fix_source=location.fix_source,
                 received_at=location.received_at,
                 source=location.source,
+                trigger=location.trigger,
                 updated_at=now,
+                wifi_bssid=location.wifi_bssid,
+                wifi_ssid=location.wifi_ssid,
             )
         )
         stored = True
@@ -341,13 +422,15 @@ def upsert_user_location(
             else f"{location.accuracy_m:g}"
         )
         connection_label = connection_type_label_for_log(location.connection_type)
+        metadata_suffix = _location_log_metadata_suffix(location)
         _LOCATION_LOGGER.info(
-            "stored location for %s (%.5f, %.5f) accuracy_m=%s connection_type=%s at %s",
+            "stored location for %s (%.5f, %.5f) accuracy_m=%s connection_type=%s%s at %s",
             location.user_id,
             location.lat,
             location.lon,
             accuracy_label,
             connection_label,
+            metadata_suffix,
             format_log_timestamp(location.received_at),
         )
         prune_user_location_history(
@@ -372,15 +455,6 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * earth_radius_m * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _location_with_normalized_connection_type(
-    location: UserLocationRecord,
-) -> UserLocationRecord:
-    normalized = normalize_presence_connection_type(location.connection_type)
-    if normalized == location.connection_type:
-        return location
-    return replace(location, connection_type=normalized)
-
-
 def _history_to_record(row: RuleUserLocationHistory) -> UserLocationRecord:
     """Map a ``RuleUserLocationHistory`` ORM row to ``UserLocationRecord``."""
     return UserLocationRecord(
@@ -388,10 +462,32 @@ def _history_to_record(row: RuleUserLocationHistory) -> UserLocationRecord:
         lat=row.lat,
         lon=row.lon,
         accuracy_m=row.accuracy_m,
+        battery_level=row.battery_level,
         connection_type=row.connection_type,
+        fix_source=row.fix_source,
         received_at=row.received_at,
         source=row.source,
+        trigger=row.trigger,
+        wifi_bssid=row.wifi_bssid,
+        wifi_ssid=row.wifi_ssid,
     )
+
+
+def _location_log_metadata_suffix(location: UserLocationRecord) -> str:
+    parts: list[str] = []
+    if location.wifi_ssid is not None:
+        parts.append(f"wifi_ssid={location.wifi_ssid!r}")
+    if location.wifi_bssid is not None:
+        parts.append(f"wifi_bssid={location.wifi_bssid}")
+    if location.fix_source is not None:
+        parts.append(f"fix_source={location.fix_source!r}")
+    if location.trigger is not None:
+        parts.append(f"trigger={location.trigger!r}")
+    if location.battery_level is not None:
+        parts.append(f"battery_level={location.battery_level}")
+    if not parts:
+        return ""
+    return " " + " ".join(parts)
 
 
 def _location_to_record(row: RuleUserLastLocation) -> UserLocationRecord:
@@ -401,7 +497,31 @@ def _location_to_record(row: RuleUserLastLocation) -> UserLocationRecord:
         lat=row.lat,
         lon=row.lon,
         accuracy_m=row.accuracy_m,
+        battery_level=row.battery_level,
         connection_type=row.connection_type,
+        fix_source=row.fix_source,
         received_at=row.received_at,
         source=row.source,
+        trigger=row.trigger,
+        wifi_bssid=row.wifi_bssid,
+        wifi_ssid=row.wifi_ssid,
+    )
+
+
+def _location_with_normalized_fields(
+    location: UserLocationRecord,
+) -> UserLocationRecord:
+    normalized_connection_type = normalize_presence_connection_type(
+        location.connection_type,
+    )
+    normalized_wifi_bssid = normalize_wifi_bssid(location.wifi_bssid)
+    if (
+        normalized_connection_type == location.connection_type
+        and normalized_wifi_bssid == location.wifi_bssid
+    ):
+        return location
+    return replace(
+        location,
+        connection_type=normalized_connection_type,
+        wifi_bssid=normalized_wifi_bssid,
     )

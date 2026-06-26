@@ -24,6 +24,8 @@ import type {
   MyTracksSettingsIn,
   MyTracksSettingsOut,
   MyTracksSyncIn,
+  ObservedWifiNetworkOut,
+  UserHomeWifiIn,
   UserOut,
   UserStatusOut,
   RuleOut,
@@ -270,6 +272,12 @@ export const api = {
   fetchRulesUsers(): Promise<UserOut[]> {
     return call<UserOut[]>("GET", "/v1/rules/users");
   },
+  fetchUserObservedWifi(userId: string): Promise<ObservedWifiNetworkOut[]> {
+    return call<ObservedWifiNetworkOut[]>(
+      "GET",
+      `/v1/rules/users/${encodeURIComponent(userId)}/observed-wifi`,
+    );
+  },
   fetchRulesUserStatus(): Promise<UserStatusOut[]> {
     return call<UserStatusOut[]>("GET", "/v1/rules/users/status");
   },
@@ -317,6 +325,16 @@ export const api = {
       "PUT",
       `/v1/rules/geofences/${encodeURIComponent(geofence.geofence_id)}`,
       geofence,
+    );
+  },
+  putUserHomeWifi(
+    userId: string,
+    body: UserHomeWifiIn,
+  ): Promise<UserOut> {
+    return call<UserOut>(
+      "PUT",
+      `/v1/rules/users/${encodeURIComponent(userId)}/home-wifi`,
+      body,
     );
   },
   putTailwindToken(token: string): Promise<TailwindTokenSetOut> {

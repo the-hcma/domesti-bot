@@ -16,6 +16,8 @@ import type {
   MyTracksSettingsIn,
   MyTracksSettingsOut,
   MyTracksSyncIn,
+  ObservedWifiNetworkOut,
+  UserHomeWifiIn,
   UserLocationOut,
   UserOut,
   UserStatusOut,
@@ -45,9 +47,14 @@ export interface RulesDataSource {
   getMyTracksSettings(): Promise<MyTracksSettingsOut | null>;
   listUserStatus(): Promise<UserStatusOut[]>;
   listUsers(): Promise<UserOut[]>;
+  listUserObservedWifi(userId: string): Promise<ObservedWifiNetworkOut[]>;
   resetMyTracksSettings(): Promise<void>;
   saveMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut>;
   saveUser(user: UserOut): Promise<UserOut>;
+  setUserHomeWifi(
+    userId: string,
+    homeWifi: UserHomeWifiIn,
+  ): Promise<UserOut>;
   syncGeofencesFromMyTracks(
     credentials: MyTracksSyncIn,
   ): Promise<MyTracksGeofencesSyncOut>;
@@ -232,6 +239,10 @@ export class MockRulesDataSource implements RulesDataSource {
     return structuredClone(this.store.users);
   }
 
+  async listUserObservedWifi(_userId: string): Promise<ObservedWifiNetworkOut[]> {
+    return [];
+  }
+
   async saveUser(user: UserOut): Promise<UserOut> {
     const idx = this.store.users.findIndex(
       (p) => p.user_id === user.user_id,
@@ -242,6 +253,22 @@ export class MockRulesDataSource implements RulesDataSource {
       this.store.users.push(structuredClone(user));
     }
     return structuredClone(user);
+  }
+
+  async setUserHomeWifi(
+    userId: string,
+    homeWifi: UserHomeWifiIn,
+  ): Promise<UserOut> {
+    const user = this.store.users.find((row) => row.user_id === userId);
+    if (user === undefined) {
+      throw new Error(`Expected user ${JSON.stringify(userId)}, got none`);
+    }
+    const updated: UserOut = {
+      ...user,
+      home_wifi_bssid: homeWifi.wifi_bssid,
+      home_wifi_ssid: homeWifi.wifi_ssid,
+    };
+    return this.saveUser(updated);
   }
 
   async getMyTracksSettings(): Promise<MyTracksSettingsOut | null> {
@@ -583,6 +610,13 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return this.inner.listUsers();
   }
 
+  async listUserObservedWifi(userId: string): Promise<ObservedWifiNetworkOut[]> {
+    if (this.rulesLive) {
+      return await api.fetchUserObservedWifi(userId);
+    }
+    return this.inner.listUserObservedWifi(userId);
+  }
+
   async listRules(): Promise<RuleOut[]> {
     const rules = await this.loadFileBackedRules();
     if (rules !== null) {
@@ -616,6 +650,16 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
 
   saveUser(user: UserOut): Promise<UserOut> {
     return this.inner.saveUser(user);
+  }
+
+  setUserHomeWifi(
+    userId: string,
+    homeWifi: UserHomeWifiIn,
+  ): Promise<UserOut> {
+    if (this.rulesLive) {
+      return api.putUserHomeWifi(userId, homeWifi);
+    }
+    return this.inner.setUserHomeWifi(userId, homeWifi);
   }
 
   saveRule(rule: RuleOut): Promise<RuleOut> {

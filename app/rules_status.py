@@ -282,11 +282,16 @@ def _load_users_status(cache_path: Path | None) -> list[UserStatusOut]:
             received_at = _location_received_at_iso(location)
             last_location = UserLocationOut(
                 accuracy_m=location.accuracy_m,
+                battery_level=location.battery_level,
                 connection_type=location.connection_type,
+                fix_source=location.fix_source,
                 lat=location.lat,
                 lon=location.lon,
                 received_at=received_at,
                 source=location.source,
+                trigger=location.trigger,
+                wifi_bssid=location.wifi_bssid,
+                wifi_ssid=location.wifi_ssid,
             )
             age_seconds = max(0, int(now - location.received_at))
             inside_geofence_ids = effective_geofence_ids_containing_location(
@@ -294,6 +299,7 @@ def _load_users_status(cache_path: Path | None) -> list[UserStatusOut]:
                 geofences,
                 settings=settings,
                 min_accuracy_m=min_accuracy_m,
+                home_wifi_bssid=user.home_wifi_bssid,
             )
         rows.append(
             UserStatusOut(

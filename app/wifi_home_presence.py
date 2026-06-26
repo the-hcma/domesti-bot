@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from app.api.schemas import GeofenceOut, RuleOut, SettingsLocationOut
 from app.presence_connection_type import connection_type_is_wifi
 from app.presence_store import UserLocationRecord, _haversine_m, geofence_ids_containing_location
+from app.presence_wifi import normalize_wifi_bssid, wifi_bssids_match
 from app.rules_store import GeofenceRecord
 
 GeofencePresenceTarget = GeofenceRecord | GeofenceOut
@@ -48,6 +49,7 @@ def effective_geofence_ids_containing_location(
     *,
     settings: SettingsLocationOut,
     min_accuracy_m: int | None,
+    home_wifi_bssid: str | None = None,
 ) -> list[str]:
     """Return geofence ids that contain ``location``, including WiFi home presence."""
     if min_accuracy_m is None:
@@ -67,6 +69,8 @@ def effective_geofence_ids_containing_location(
             lat=location.lat,
             lon=location.lon,
             min_accuracy_m=min_accuracy_m,
+            home_wifi_bssid=home_wifi_bssid,
+            observed_wifi_bssid=location.wifi_bssid,
         ):
             inside.append(geofence_id)
             continue
@@ -92,6 +96,7 @@ def history_row_geofence_inside(
     *,
     settings: SettingsLocationOut,
     min_accuracy_m: int | None,
+    home_wifi_bssid: str | None = None,
 ) -> bool | None:
     """Return inside/outside for a history row, or None when the row is unusable."""
     if min_accuracy_m is None:
@@ -106,6 +111,8 @@ def history_row_geofence_inside(
         lat=row.lat,
         lon=row.lon,
         min_accuracy_m=min_accuracy_m,
+        home_wifi_bssid=home_wifi_bssid,
+        observed_wifi_bssid=row.wifi_bssid,
     ):
         return True
     if row.accuracy_m is not None and row.accuracy_m > min_accuracy_m:
@@ -166,17 +173,25 @@ def wifi_home_presence_applies(
     lat: float,
     lon: float,
     min_accuracy_m: int,
+    home_wifi_bssid: str | None = None,
+    observed_wifi_bssid: str | None = None,
 ) -> bool:
-    """Return whether a low-accuracy WiFi fix should be treated as inside ``geofence_id``.
+    """Return whether a WiFi reading should be treated as inside ``geofence_id``.
 
-    Requires ``conn=w``, accuracy worse than ``min_accuracy_m``, and coordinates
-    within the home geofence radius plus 20% slack from center.
+  When ``home_wifi_bssid`` is configured, match on normalized BSSID only (no
+  geofence-radius fallback). Otherwise use low-accuracy ``conn=w`` plus proximity
+  slack from the geofence center.
     """
+    if geofence_id not in wifi_home_geofence_ids(settings, geofences):
+        return False
+    normalized_home_bssid = normalize_wifi_bssid(home_wifi_bssid)
+    if normalized_home_bssid is not None:
+        if not connection_type_is_wifi(connection_type):
+            return False
+        return wifi_bssids_match(observed_wifi_bssid, normalized_home_bssid)
     if not connection_type_is_wifi(connection_type):
         return False
     if not location_accuracy_is_low(accuracy_m, min_accuracy_m):
-        return False
-    if geofence_id not in wifi_home_geofence_ids(settings, geofences):
         return False
     for geofence in geofences:
         if geofence.geofence_id != geofence_id or not geofence.enabled:

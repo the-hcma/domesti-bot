@@ -11,10 +11,12 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.api.schemas import (
     GeofenceOut,
+    ObservedWifiNetworkOut,
     RuleOut,
     RulesStatusOut,
     RulesValidationOut,
     SettingsLocationOut,
+    UserHomeWifiIn,
     UserLocationOut,
     UserOut,
     UserStatusOut,
@@ -28,6 +30,7 @@ from app.api.settings_routes import discovery_cache_path_from_request
 from app.server_runtime import runtime
 from app.presence_store import (
     UserLocationRecord,
+    list_observed_wifi_networks_for_user,
     list_user_locations,
 )
 from app.wifi_home_presence import (
@@ -42,6 +45,8 @@ from app.rules_store import (
     list_geofences,
     list_users,
     save_geofence,
+    set_user_home_wifi,
+    user_exists,
 )
 
 router = APIRouter(prefix="/v1/rules", tags=["rules"])
@@ -76,6 +81,60 @@ async def get_users(request: Request) -> list[UserOut]:
     if cache_path is None:
         return []
     return [_user_to_schema(row) for row in list_users(cache_path)]
+
+
+@router.get(
+    "/users/{user_id}/observed-wifi",
+    response_model=list[ObservedWifiNetworkOut],
+)
+async def get_user_observed_wifi(user_id: str, request: Request) -> list[ObservedWifiNetworkOut]:
+    """Return distinct WiFi networks seen in ``user_id`` location history."""
+    cache_path = discovery_cache_path_from_request(request)
+    if cache_path is None:
+        return []
+    trimmed_user_id = user_id.strip()
+    if not user_exists(cache_path, trimmed_user_id):
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown user_id {trimmed_user_id!r}",
+        )
+    return [
+        ObservedWifiNetworkOut(
+            wifi_ssid=network.wifi_ssid,
+            wifi_bssid=network.wifi_bssid,
+            last_seen_at=_epoch_to_iso_z(network.last_seen_at),
+        )
+        for network in list_observed_wifi_networks_for_user(cache_path, trimmed_user_id)
+    ]
+
+
+@router.put("/users/{user_id}/home-wifi", response_model=UserOut)
+async def put_user_home_wifi(
+    user_id: str,
+    body: UserHomeWifiIn,
+    request: Request,
+) -> UserOut:
+    """Set or clear the home WiFi network for ``user_id``."""
+    cache_path = _require_discovery_cache(request)
+    trimmed_user_id = user_id.strip()
+    try:
+        saved = set_user_home_wifi(
+            cache_path,
+            trimmed_user_id,
+            wifi_ssid=body.wifi_ssid,
+            wifi_bssid=body.wifi_bssid,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown user_id {trimmed_user_id!r}",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return _user_to_schema(saved)
 
 
 @router.get("/users/status", response_model=list[UserStatusOut])
@@ -183,6 +242,10 @@ def _geofence_to_schema(record: GeofenceRecord) -> GeofenceOut:
     )
 
 
+def _epoch_to_iso_z(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, tz=UTC).isoformat().replace("+00:00", "Z")
+
+
 def _location_received_at_iso(location: UserLocationRecord) -> str:
     return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
         "+00:00", "Z"
@@ -194,6 +257,8 @@ def _user_to_schema(record: UserRecord) -> UserOut:
         display_name=record.display_name,
         enabled=record.enabled,
         first_name=record.first_name,
+        home_wifi_bssid=record.home_wifi_bssid,
+        home_wifi_ssid=record.home_wifi_ssid,
         last_name=record.last_name,
         tracking_device_label=record.tracking_device_label,
         user_id=record.user_id,
@@ -221,11 +286,16 @@ def _users_status(cache_path: Path) -> list[UserStatusOut]:
             received_at = _location_received_at_iso(location)
             last_location = UserLocationOut(
                 accuracy_m=location.accuracy_m,
+                battery_level=location.battery_level,
                 connection_type=location.connection_type,
+                fix_source=location.fix_source,
                 lat=location.lat,
                 lon=location.lon,
                 received_at=received_at,
                 source=location.source,
+                trigger=location.trigger,
+                wifi_bssid=location.wifi_bssid,
+                wifi_ssid=location.wifi_ssid,
             )
             age_seconds = max(0, int(now - location.received_at))
             inside_geofence_ids = effective_geofence_ids_containing_location(
@@ -233,6 +303,7 @@ def _users_status(cache_path: Path) -> list[UserStatusOut]:
                 geofences,
                 settings=settings,
                 min_accuracy_m=min_accuracy_m,
+                home_wifi_bssid=user.home_wifi_bssid,
             )
         rows.append(
             UserStatusOut(

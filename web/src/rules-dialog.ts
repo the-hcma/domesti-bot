@@ -48,6 +48,7 @@ import { createAuditedTimeElement } from "./format-timestamp.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
 import type {
   GeofenceOut,
+  UserOut,
   UserStatusOut,
   RuleActionDeviceOut,
   RuleActionType,
@@ -1353,6 +1354,7 @@ class RulesHubController {
     const sync = await this.dataSource.getMyTracksUsersSync();
     const settings = await this.dataSource.getMyTracksSettings();
     const mapUsers = await this.dataSource.listUserStatus();
+    const rosterUsers = await this.dataSource.listUsers();
 
     const lead = document.createElement("p");
     lead.className = "settings-dialog-lead";
@@ -1384,10 +1386,23 @@ class RulesHubController {
     });
     syncRow.append(syncMeta, syncBtn);
 
+    const homeWifiHeading = document.createElement("h3");
+    homeWifiHeading.className = "rules-section-title";
+    homeWifiHeading.textContent = "Home WiFi";
+    const homeWifiLead = document.createElement("p");
+    homeWifiLead.className = "rules-card-meta";
+    homeWifiLead.textContent =
+      "Pick the network each person uses at home. Labels show the friendly SSID; matching uses the access-point BSSID.";
+    const homeWifiList = document.createElement("div");
+    homeWifiList.className = "rules-users-home-wifi-list";
+    for (const user of rosterUsers) {
+      homeWifiList.append(await this.createHomeWifiRow(user));
+    }
+
     const mapSection = document.createElement("section");
     mapSection.className = "rules-users-section";
 
-    this.body.append(lead, syncRow, mapSection);
+    this.body.append(lead, syncRow, homeWifiHeading, homeWifiLead, homeWifiList, mapSection);
     this.mountUserPresenceMap(
       mapSection,
       geofences,
@@ -1398,6 +1413,78 @@ class RulesHubController {
         showTextDetails: false,
       },
     );
+  }
+
+  private async createHomeWifiRow(user: UserOut): Promise<HTMLElement> {
+    const row = document.createElement("div");
+    row.className = "rules-users-home-wifi-row";
+    const label = document.createElement("label");
+    label.className = "settings-dialog-field";
+    const name = document.createElement("span");
+    name.textContent = userDisplayLabel(user.user_id, user.display_name);
+    const select = document.createElement("select");
+    select.className = "rules-select";
+    const noneOption = document.createElement("option");
+    noneOption.value = "";
+    noneOption.textContent = "Not set";
+    select.append(noneOption);
+    let networks: Awaited<ReturnType<RulesDataSource["listUserObservedWifi"]>> = [];
+    try {
+      networks = await this.dataSource.listUserObservedWifi(user.user_id);
+    } catch (err) {
+      console.warn("Failed to load observed WiFi networks", err);
+    }
+    for (const network of networks) {
+      const option = document.createElement("option");
+      option.value = network.wifi_bssid;
+      option.textContent = network.wifi_ssid;
+      option.dataset.ssid = network.wifi_ssid;
+      select.append(option);
+    }
+    if (user.home_wifi_bssid !== null) {
+      const hasOption = Array.from(select.options).some(
+        (option) => option.value === user.home_wifi_bssid,
+      );
+      if (!hasOption && user.home_wifi_ssid !== null) {
+        const savedOption = document.createElement("option");
+        savedOption.value = user.home_wifi_bssid;
+        savedOption.textContent = user.home_wifi_ssid;
+        savedOption.dataset.ssid = user.home_wifi_ssid;
+        select.append(savedOption);
+      }
+      select.value = user.home_wifi_bssid;
+    }
+    select.addEventListener("change", () => {
+      select.disabled = true;
+      void this.saveHomeWifiSelection(user.user_id, select).finally(() => {
+        select.disabled = false;
+      });
+    });
+    label.append(name, select);
+    row.append(label);
+    return row;
+  }
+
+  private async saveHomeWifiSelection(
+    userId: string,
+    select: HTMLSelectElement,
+  ): Promise<void> {
+    const selected = select.options[select.selectedIndex];
+    const wifiBssid = select.value === "" ? null : select.value;
+    const wifiSsid =
+      wifiBssid === null
+        ? null
+        : selected?.dataset.ssid ?? selected?.textContent ?? null;
+    try {
+      await this.dataSource.setUserHomeWifi(userId, {
+        wifi_bssid: wifiBssid,
+        wifi_ssid: wifiSsid,
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to save home WiFi";
+      showErrorToast(message);
+    }
   }
 
   private async setTab(tab: RulesTabId): Promise<void> {

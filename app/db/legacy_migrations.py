@@ -22,6 +22,8 @@ def apply_legacy_column_migrations(engine: object) -> None:
         _apply_mytracks_user_nomenclature_migration(conn)
         _apply_rule_user_geofence_state_last_location_migration(conn)
         _apply_rule_user_location_connection_type_migration(conn)
+        _apply_rule_user_location_metadata_migration(conn)
+        _apply_rule_user_home_wifi_migration(conn)
         _apply_rule_user_tables_migration(conn)
 
 
@@ -134,6 +136,38 @@ def _apply_rule_user_location_connection_type_migration(conn: Connection) -> Non
         if "connection_type" in cols:
             continue
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN connection_type VARCHAR"))
+
+
+def _apply_rule_user_location_metadata_migration(conn: Connection) -> None:
+    inspector = inspect(conn)
+    additions: list[tuple[str, str]] = [
+        ("battery_level", "INTEGER"),
+        ("fix_source", "VARCHAR"),
+        ("trigger", "VARCHAR"),
+        ("wifi_bssid", "VARCHAR"),
+        ("wifi_ssid", "VARCHAR"),
+    ]
+    for table in ("rule_user_last_location", "rule_user_location_history"):
+        if table not in inspector.get_table_names():
+            continue
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        for name, sql_type in additions:
+            if name not in cols:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+
+
+def _apply_rule_user_home_wifi_migration(conn: Connection) -> None:
+    inspector = inspect(conn)
+    if "rule_users" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("rule_users")}
+    additions: list[tuple[str, str]] = [
+        ("home_wifi_bssid", "VARCHAR"),
+        ("home_wifi_ssid", "VARCHAR"),
+    ]
+    for name, sql_type in additions:
+        if name not in cols:
+            conn.execute(text(f"ALTER TABLE rule_users ADD COLUMN {name} {sql_type}"))
 
 
 def _apply_rule_user_tables_migration(conn: Connection) -> None:
