@@ -124,6 +124,24 @@ def test_location_update_webhook_requires_user_id_field(
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
+def test_location_update_webhook_rejects_blank_user_id(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    payload = {**_LOCATION_UPDATE_PAYLOAD, "user_id": "   "}
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
 def test_location_update_webhook_stores_location_for_known_user(
     tmp_path: Path,
     fernet_key: str,
@@ -160,6 +178,38 @@ def test_location_update_webhook_stores_connection_type(
     )
     assert response.status_code == HTTPStatus.NO_CONTENT
     assert list_user_locations(db)["henrique"].connection_type == "w"
+
+
+def test_location_update_webhook_stores_wifi_metadata(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    payload = {
+        **_LOCATION_UPDATE_PAYLOAD,
+        "connection_type": "w",
+        "wifi_ssid": "HCMA-Home",
+        "wifi_bssid": "DE:AD:BE:EF:00:01",
+        "fix_source": "w",
+        "trigger": "p",
+        "battery_level": 77,
+    }
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    stored = list_user_locations(db)["henrique"]
+    assert stored.wifi_ssid == "HCMA-Home"
+    assert stored.wifi_bssid == "de:ad:be:ef:00:01"
+    assert stored.fix_source == "w"
+    assert stored.trigger == "p"
+    assert stored.battery_level == 77
 
 
 def test_location_update_webhook_canonicalizes_connection_type(

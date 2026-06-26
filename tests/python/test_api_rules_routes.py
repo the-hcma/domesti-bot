@@ -124,6 +124,75 @@ def test_get_rules_status_route_before_rule_id(
     assert missing.status_code == HTTPStatus.NOT_FOUND
 
 
+def test_put_user_home_wifi_and_list_observed_wifi(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Henrique",
+                tracking_device_label="Pixel",
+                enabled=True,
+            ),
+        ],
+    )
+    from app.location_history_retention import default_location_history_retention
+    from app.presence_store import UserLocationRecord, upsert_user_location
+
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.0,
+            lon=-73.0,
+            accuracy_m=20,
+            received_at=100.0,
+            source="my-tracks",
+            wifi_ssid="HomeNet",
+            wifi_bssid="aa:bb:cc:dd:ee:ff",
+        ),
+        retention=default_location_history_retention(),
+    )
+    client = _client(db)
+    observed = client.get("/v1/rules/users/henrique/observed-wifi")
+    assert observed.status_code == HTTPStatus.OK
+    assert observed.json()[0]["wifi_ssid"] == "HomeNet"
+    assert observed.json()[0]["wifi_bssid"] == "aa:bb:cc:dd:ee:ff"
+
+    put = client.put(
+        "/v1/rules/users/henrique/home-wifi",
+        json={"wifi_ssid": "HomeNet", "wifi_bssid": "aa:bb:cc:dd:ee:ff"},
+    )
+    assert put.status_code == HTTPStatus.OK
+    assert put.json()["home_wifi_bssid"] == "aa:bb:cc:dd:ee:ff"
+
+
+def test_put_user_home_wifi_rejects_partial_ssid_without_bssid(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Henrique",
+                tracking_device_label="Pixel",
+                enabled=True,
+            ),
+        ],
+    )
+    client = _client(db)
+    response = client.put(
+        "/v1/rules/users/henrique/home-wifi",
+        json={"wifi_ssid": "HomeNet", "wifi_bssid": "   "},
+    )
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
 def test_put_and_delete_geofence(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     client = _client(db)

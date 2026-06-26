@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.presence_connection_type import normalize_presence_connection_type
+from app.presence_wifi import normalize_wifi_bssid
 
 RuleTriggerOut = Literal["edge_true", "scheduled"]
 
@@ -482,26 +483,87 @@ class UserOut(BaseModel):
     display_name: str
     enabled: bool
     first_name: str
+    home_wifi_bssid: str | None = None
+    home_wifi_ssid: str | None = None
     last_name: str
     tracking_device_label: str
     user_id: str
+
+
+class ObservedWifiNetworkOut(BaseModel):
+    """Distinct WiFi network observed in a user's location history."""
+
+    last_seen_at: str
+    wifi_bssid: str
+    wifi_ssid: str
+
+
+class UserHomeWifiIn(BaseModel):
+    """Operator-selected home WiFi for one user."""
+
+    wifi_bssid: str | None = None
+    wifi_ssid: str | None = None
+
+    @field_validator("wifi_bssid", mode="before")
+    @classmethod
+    def _normalize_home_wifi_bssid(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Expected str or None for wifi_bssid, got {type(value).__name__}",
+            )
+        return normalize_wifi_bssid(value)
+
+    @field_validator("wifi_ssid", mode="before")
+    @classmethod
+    def _normalize_home_wifi_ssid(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Expected str or None for wifi_ssid, got {type(value).__name__}",
+            )
+        trimmed = value.strip()
+        if trimmed == "":
+            return None
+        return trimmed
+
+    @model_validator(mode="after")
+    def _validate_home_wifi_pair(self) -> Self:
+        has_bssid = self.wifi_bssid is not None
+        has_ssid = self.wifi_ssid is not None
+        if has_bssid != has_ssid:
+            raise ValueError(
+                "Expected wifi_bssid and wifi_ssid together or both cleared, "
+                f"got wifi_bssid={self.wifi_bssid!r}, wifi_ssid={self.wifi_ssid!r}",
+            )
+        return self
 
 
 class UserLocationOut(BaseModel):
     """Latest known GPS location for a user."""
 
     accuracy_m: int | None
+    battery_level: int | None = None
     connection_type: str | None = None
+    fix_source: str | None = None
     lat: float
     lon: float
     received_at: str
     source: str | None = None
+    trigger: str | None = None
+    wifi_bssid: str | None = None
+    wifi_ssid: str | None = None
 
 
 class LocationUpdateWebhookIn(BaseModel):
     """Live or test location-update payload from my-tracks."""
 
     accuracy_m: int | None = None
+    altitude_m: float | None = None
+    battery_level: int | None = None
+    battery_status: int | None = None
     connection_type: str | None = Field(
         default=None,
         max_length=1,
@@ -510,13 +572,28 @@ class LocationUpdateWebhookIn(BaseModel):
             "(OwnTracks offline/queued waypoint — not “user away from home”)"
         ),
     )
+    course: float | None = None
     device_id: str | None = None
+    fix_source: str | None = Field(
+        default=None,
+        description="OwnTracks positioning source (not the relay ``source`` field).",
+    )
     lat: float = Field(..., ge=-90.0, le=90.0)
     lon: float = Field(..., ge=-180.0, le=180.0)
+    monitoring_mode: int | None = None
     mqtt_user: str | None = None
+    owntracks_created_at: str | None = None
+    owntracks_message_id: str | None = None
+    received_at: str | None = None
     source: str | None = None
     timestamp: str = Field(..., min_length=1)
+    tracker_id: str | None = None
+    trigger: str | None = None
     user_id: str = Field(..., min_length=1)
+    velocity_kmh: float | None = None
+    vertical_accuracy_m: float | None = None
+    wifi_bssid: str | None = None
+    wifi_ssid: str | None = None
 
     @field_validator("connection_type", mode="before")
     @classmethod
@@ -535,6 +612,29 @@ class LocationUpdateWebhookIn(BaseModel):
                 f"Expected OwnTracks conn code w, m, or o, got {value!r}",
             )
         return normalized
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def _normalize_user_id(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Expected str for user_id, got {type(value).__name__}",
+            )
+        trimmed = value.strip()
+        if trimmed == "":
+            raise ValueError("Expected non-empty user_id, got blank value")
+        return trimmed
+
+    @field_validator("wifi_bssid", mode="before")
+    @classmethod
+    def _normalize_wifi_bssid(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Expected str or None for wifi_bssid, got {type(value).__name__}",
+            )
+        return normalize_wifi_bssid(value)
 
 
 class UserStatusOut(UserOut):

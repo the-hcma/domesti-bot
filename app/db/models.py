@@ -96,6 +96,8 @@ class RuleUser(Base):
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     first_name: Mapped[str] = mapped_column(String, nullable=False)
+    home_wifi_bssid: Mapped[str | None] = mapped_column(String, nullable=True)
+    home_wifi_ssid: Mapped[str | None] = mapped_column(String, nullable=True)
     last_name: Mapped[str] = mapped_column(String, nullable=False, default="")
     tracking_device_label: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
@@ -118,12 +120,17 @@ class RuleUserLastLocation(Base):
 
     user_id: Mapped[str] = mapped_column(String, primary_key=True)
     accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    battery_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     connection_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    fix_source: Mapped[str | None] = mapped_column(String, nullable=True)
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lon: Mapped[float] = mapped_column(Float, nullable=False)
     received_at: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
+    trigger: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+    wifi_bssid: Mapped[str | None] = mapped_column(String, nullable=True)
+    wifi_ssid: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class RuleUserLocationHistory(Base):
@@ -131,13 +138,18 @@ class RuleUserLocationHistory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     accuracy_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    battery_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     connection_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    fix_source: Mapped[str | None] = mapped_column(String, nullable=True)
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lon: Mapped[float] = mapped_column(Float, nullable=False)
     received_at: Mapped[float] = mapped_column(Float, nullable=False)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
+    trigger: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    wifi_bssid: Mapped[str | None] = mapped_column(String, nullable=True)
+    wifi_ssid: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class SonosKnownZone(Base):

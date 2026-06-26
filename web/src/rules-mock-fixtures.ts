@@ -88,6 +88,8 @@ const MOCK_MY_TRACKS_USERS: UserOut[] = [
     display_name: "Henrique",
     tracking_device_label: "Henrique's iPhone",
     enabled: true,
+    home_wifi_bssid: null,
+    home_wifi_ssid: null,
   },
   {
     user_id: "kristen",
@@ -96,6 +98,8 @@ const MOCK_MY_TRACKS_USERS: UserOut[] = [
     display_name: "Kristen",
     tracking_device_label: "Kristen's iPhone",
     enabled: true,
+    home_wifi_bssid: null,
+    home_wifi_ssid: null,
   },
 ];
 

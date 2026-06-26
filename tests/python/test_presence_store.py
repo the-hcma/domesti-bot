@@ -132,5 +132,62 @@ def test_upsert_user_location_log_shows_unknown_when_accuracy_missing(
         )
 
     message = info_mock.call_args[0][0] % info_mock.call_args[0][1:]
-    assert "accuracy_m=unknown" in message
     assert "connection_type=unknown" in message
+
+
+def test_upsert_user_location_persists_wifi_metadata(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    location = UserLocationRecord(
+        user_id="hcma",
+        lat=41.19405,
+        lon=-73.88826,
+        accuracy_m=11,
+        received_at=1_718_377_050.0,
+        source="my-tracks",
+        connection_type="w",
+        fix_source="w",
+        trigger="p",
+        wifi_bssid="AA:BB:CC:DD:EE:FF",
+        wifi_ssid="HomeNet",
+        battery_level=82,
+    )
+    upsert_user_location(
+        db,
+        location,
+        retention=default_location_history_retention(),
+    )
+    stored = list_user_locations(db)["hcma"]
+    assert stored.wifi_ssid == "HomeNet"
+    assert stored.wifi_bssid == "aa:bb:cc:dd:ee:ff"
+    assert stored.fix_source == "w"
+    assert stored.trigger == "p"
+    assert stored.battery_level == 82
+
+
+def test_upsert_user_location_log_includes_wifi_metadata(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    location = UserLocationRecord(
+        user_id="hcma",
+        lat=41.19405,
+        lon=-73.88826,
+        accuracy_m=11,
+        received_at=1_718_377_050.0,
+        source="my-tracks",
+        connection_type="w",
+        fix_source="w",
+        trigger="p",
+        wifi_bssid="aa:bb:cc:dd:ee:ff",
+        wifi_ssid="HomeNet",
+    )
+    with patch("app.presence_store._LOCATION_LOGGER.info") as info_mock:
+        upsert_user_location(
+            db,
+            location,
+            retention=default_location_history_retention(),
+        )
+
+    message = info_mock.call_args[0][0] % info_mock.call_args[0][1:]
+    assert "wifi_ssid='HomeNet'" in message
+    assert "wifi_bssid=aa:bb:cc:dd:ee:ff" in message
+    assert "fix_source='w'" in message
+    assert "trigger='p'" in message

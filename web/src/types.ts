@@ -388,17 +388,36 @@ export interface UserOut {
   display_name: string;
   enabled: boolean;
   first_name: string;
+  home_wifi_bssid: string | null;
+  home_wifi_ssid: string | null;
   last_name: string;
   tracking_device_label: string;
   user_id: string;
+}
+
+export interface ObservedWifiNetworkOut {
+  last_seen_at: string;
+  wifi_bssid: string;
+  wifi_ssid: string;
+}
+
+export interface UserHomeWifiIn {
+  wifi_bssid: string | null;
+  wifi_ssid: string | null;
 }
 
 export interface UserLocationOut {
   lat: number;
   lon: number;
   accuracy_m: number | null;
+  battery_level?: number | null;
+  connection_type?: string | null;
+  fix_source?: string | null;
   received_at: string;
   source: string | null;
+  trigger?: string | null;
+  wifi_bssid?: string | null;
+  wifi_ssid?: string | null;
 }
 
 export interface UserStatusOut extends UserOut {
