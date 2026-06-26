@@ -46,6 +46,7 @@ from app.presence_store import (
     UserLocationRecord,
     geofence_ids_containing_location,
     list_user_location_history_for_user,
+    list_user_location_history_for_walkback_by_user,
     list_user_locations,
 )
 from app.rule_actions import (
@@ -55,6 +56,7 @@ from app.rule_actions import (
     send_rule_notification_email,
 )
 from app.rule_conditions import (
+    LOCATION_HISTORY_WALKBACK_MAX_S,
     RuleEvaluationContext,
     RuleEvaluationResult,
     _evaluate_condition,
@@ -232,6 +234,7 @@ class RuleEvaluator:
         cache_path = self._cache_path
         geofences = []
         user_display_names: dict[str, str] = {}
+        user_location_history: dict[str, tuple[UserLocationOut, ...]] = {}
         user_locations: dict[str, UserLocationOut] = {}
         if cache_path is not None:
             geofences = [
@@ -242,6 +245,14 @@ class RuleEvaluator:
                 row.user_id: row.display_name for row in users
             }
             stored = list_user_locations(cache_path)
+            now_epoch = effective_now.timestamp()
+            walkback_max_s = LOCATION_HISTORY_WALKBACK_MAX_S
+            walkback_by_user = list_user_location_history_for_walkback_by_user(
+                cache_path,
+                list(stored.keys()),
+                now_epoch=now_epoch,
+                walkback_max_s=walkback_max_s,
+            )
             for uid, location in stored.items():
                 user_locations[uid] = UserLocationOut(
                     accuracy_m=location.accuracy_m,
@@ -251,11 +262,20 @@ class RuleEvaluator:
                     received_at=_location_received_at_iso(location),
                     source=location.source,
                 )
+                history_rows = walkback_by_user.get(uid, ())
+                user_location_history[uid] = tuple(
+                    UserLocationOut(
+                        accuracy_m=row.accuracy_m,
+                        connection_type=row.connection_type,
+                        lat=row.lat,
+                        lon=row.lon,
+                        received_at=_location_received_at_iso(row),
+                        source=row.source,
+                    )
+                    for row in history_rows
+                )
         roster_user_id_lookup = build_roster_user_id_lookup(list(user_display_names))
         return RuleEvaluationContext(
-            device_state=self._device_state_getter(),
-            geofence_inside_since=self.geofence_inside_since_snapshot(),
-            geofence_outside_since=self.geofence_outside_since_snapshot(),
             geofences=tuple(geofences),
             now=effective_now,
             roster_user_id_lookup=roster_user_id_lookup,
@@ -263,6 +283,11 @@ class RuleEvaluator:
             timezone=tz,
             user_display_names=user_display_names,
             user_locations=user_locations,
+            device_state=self._device_state_getter(),
+            geofence_inside_since=self.geofence_inside_since_snapshot(),
+            geofence_outside_since=self.geofence_outside_since_snapshot(),
+            user_location_history=user_location_history,
+            walkback_max_s=walkback_max_s,
         )
 
     def _advance_scheduled_evaluate_time(

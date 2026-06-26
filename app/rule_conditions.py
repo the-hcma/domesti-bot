@@ -59,6 +59,7 @@ _LOGGER = logging.getLogger(__name__)
 MINUTES_PER_DAY = 24 * 60
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 _DAY_NAMES = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+LOCATION_HISTORY_WALKBACK_MAX_S = 600.0
 
 
 class DeviceOpenShortCircuitMatch(StrEnum):
@@ -77,13 +78,17 @@ class RuleEvaluationContext:
     geofences: tuple[GeofenceOut, ...]
     now: datetime
     roster_user_id_lookup: dict[str, str]
-    user_display_names: dict[str, str]
-    user_locations: dict[str, UserLocationOut]
     sun: RulesSunOut
     timezone: ZoneInfo
+    user_display_names: dict[str, str]
+    user_locations: dict[str, UserLocationOut]
     device_state: DeviceManagersState | None = None
     geofence_inside_since: dict[tuple[str, str], float] = field(default_factory=dict)
     geofence_outside_since: dict[tuple[str, str], float] = field(default_factory=dict)
+    user_location_history: dict[str, tuple[UserLocationOut, ...]] = field(
+        default_factory=dict,
+    )
+    walkback_max_s: float = LOCATION_HISTORY_WALKBACK_MAX_S
 
     def resolve_user_id(self, reference: str) -> str | None:
         return resolve_roster_user_id(reference, self.roster_user_id_lookup)
@@ -224,6 +229,32 @@ def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
     return True
 
 
+def _accurate_inside_from_location(
+    location: UserLocationOut | None,
+    geofence: GeofenceOut,
+    geofence_id: str,
+    min_accuracy_m: int,
+    ctx: RuleEvaluationContext,
+) -> bool | None:
+    """Return inside/outside from an accurate location reading, or None when unusable."""
+    if location is None:
+        return None
+    counts_inside, used_wifi = _user_counts_inside_geofence_for_rule(
+        location,
+        geofence,
+        geofence_id,
+        min_accuracy_m,
+        ctx,
+    )
+    if used_wifi:
+        return True
+    if not _location_usable_for_rule(location, min_accuracy_m):
+        return None
+    if counts_inside:
+        return True
+    return False
+
+
 def _device_condition_power_labels(
     devices: list[RuleConditionDeviceRefOut],
     ctx: RuleEvaluationContext,
@@ -309,6 +340,30 @@ def _device_condition_open_labels(
             if fail_fast_unmet:
                 break
     return open_labels, closed_labels, missing_labels
+
+
+def _effective_location_for_rule(
+    latest: UserLocationOut | None,
+    history: tuple[UserLocationOut, ...] | list[UserLocationOut],
+    *,
+    min_accuracy_m: int,
+    now_epoch: float,
+    walkback_max_s: float = LOCATION_HISTORY_WALKBACK_MAX_S,
+) -> UserLocationOut | None:
+    """Return the newest usable reading within the walkback window.
+
+    ``history`` must be newest-first (as returned by
+    ``list_user_location_history_for_walkback``).
+    """
+    if latest is not None and _location_usable_for_rule(latest, min_accuracy_m):
+        return latest
+    cutoff = now_epoch - walkback_max_s
+    for row in history:
+        if _location_received_at_epoch(row) < cutoff:
+            break
+        if _location_usable_for_rule(row, min_accuracy_m):
+            return row
+    return None
 
 
 def _evaluate_after_local_time(
@@ -768,35 +823,44 @@ def _evaluate_users_geofence(
             presence_lines.append(f"{name}: no location yet")
             unmet_names.append(name)
             continue
+        effective = _resolved_location_for_geofence_rule(
+            location,
+            ctx.user_location_history.get(roster_user_id, ()),
+            geofence_id=condition.geofence_id,
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=ctx.now.timestamp(),
+            ctx=ctx,
+        )
+        if effective is None:
+            if not _location_usable_for_rule(location, min_accuracy_m):
+                ignored_accuracy.append(
+                    f"{name} (±{location.accuracy_m if location.accuracy_m is not None else '?'} m "
+                    f"> {min_accuracy_m} m threshold)",
+                )
+            presence_lines.append(f"{name}: location ignored (low accuracy)")
+            unmet_names.append(name)
+            continue
         if wifi_home_presence_applies(
             settings,
             condition.geofence_id,
-            location.connection_type,
-            accuracy_m=location.accuracy_m,
+            effective.connection_type,
+            accuracy_m=effective.accuracy_m,
             geofences=ctx.geofences,
-            lat=location.lat,
-            lon=location.lon,
+            lat=effective.lat,
+            lon=effective.lon,
             min_accuracy_m=min_accuracy_m,
         ):
             _log_wifi_home_presence_overrode_low_accuracy(
                 roster_user_id,
                 condition.geofence_id,
-                accuracy_m=location.accuracy_m,
+                accuracy_m=effective.accuracy_m,
                 threshold_m=min_accuracy_m,
             )
             presence_lines.append(f"{name} is inside {fence_label} (WiFi home presence)")
             if not want_inside:
                 unmet_names.append(name)
             continue
-        if not _location_usable_for_rule(location, min_accuracy_m):
-            ignored_accuracy.append(
-                f"{name} (±{location.accuracy_m if location.accuracy_m is not None else '?'} m "
-                f"> {min_accuracy_m} m threshold)",
-            )
-            presence_lines.append(f"{name}: location ignored (low accuracy)")
-            unmet_names.append(name)
-            continue
-        inside = _user_inside_geofence(location, geofence, min_accuracy_m)
+        inside = _user_inside_geofence(effective, geofence, min_accuracy_m)
         if inside:
             presence_lines.append(f"{name} is inside {fence_label}")
         else:
@@ -893,8 +957,45 @@ def _evaluate_users_inside_geofence_for_s(
             presence_lines.append(f"{name}: no location yet")
             unmet = True
             continue
-        counts_inside, used_wifi = _user_counts_inside_geofence_for_rule(
+        history = ctx.user_location_history.get(roster_user_id, ())
+        effective = _resolved_location_for_geofence_rule(
             location,
+            history,
+            geofence_id=condition.geofence_id,
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=now_epoch,
+            ctx=ctx,
+        )
+        inside_since = ctx.geofence_inside_since.get(
+            (roster_user_id, condition.geofence_id),
+        )
+        if inside_since is not None:
+            inside_s = now_epoch - inside_since
+            elapsed_label = _format_dwell_elapsed_s(inside_s)
+            accurate_inside = _accurate_inside_from_location(
+                effective,
+                geofence,
+                condition.geofence_id,
+                min_accuracy_m,
+                ctx,
+            )
+            if (
+                inside_s >= condition.min_inside_s
+                and accurate_inside is not False
+            ):
+                presence_lines.append(
+                    f"{name} inside {elapsed_label} (need {need_label})",
+                )
+                continue
+            if (
+                inside_s >= condition.min_inside_s
+                and accurate_inside is False
+            ):
+                presence_lines.append(f"{name} outside")
+                unmet = True
+                continue
+        counts_inside, used_wifi = _user_counts_inside_geofence_for_rule(
+            effective or location,
             geofence,
             condition.geofence_id,
             min_accuracy_m,
@@ -904,10 +1005,20 @@ def _evaluate_users_inside_geofence_for_s(
             _log_wifi_home_presence_overrode_low_accuracy(
                 roster_user_id,
                 condition.geofence_id,
-                accuracy_m=location.accuracy_m,
+                accuracy_m=(effective or location).accuracy_m,
                 threshold_m=min_accuracy_m,
             )
         if not counts_inside:
+            if inside_since is not None:
+                inside_s = now_epoch - inside_since
+                elapsed_label = _format_dwell_elapsed_s(inside_s)
+                if not _location_usable_for_rule(location, min_accuracy_m):
+                    presence_lines.append(f"{name}: location ignored (low accuracy)")
+                else:
+                    presence_lines.append(f"{name} outside")
+                if inside_s < condition.min_inside_s:
+                    unmet = True
+                continue
             if not _location_usable_for_rule(location, min_accuracy_m):
                 presence_lines.append(f"{name}: location ignored (low accuracy)")
             else:
@@ -918,9 +1029,6 @@ def _evaluate_users_inside_geofence_for_s(
             presence_lines.append(
                 f"{name} is inside {fence_label} (WiFi home presence)",
             )
-        inside_since = ctx.geofence_inside_since.get(
-            (roster_user_id, condition.geofence_id),
-        )
         if inside_since is None:
             presence_lines.append(f"{name} inside (dwell not started)")
             unmet = True
@@ -1004,8 +1112,38 @@ def _evaluate_users_outside_geofence_for_s(
             presence_lines.append(f"{name}: no location yet")
             unmet = True
             continue
-        counts_inside, used_wifi = _user_counts_inside_geofence_for_rule(
+        history = ctx.user_location_history.get(roster_user_id, ())
+        effective = _resolved_location_for_geofence_rule(
             location,
+            history,
+            geofence_id=condition.geofence_id,
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=now_epoch,
+            ctx=ctx,
+        )
+        outside_since = ctx.geofence_outside_since.get(
+            (roster_user_id, condition.geofence_id),
+        )
+        if outside_since is not None:
+            outside_s = now_epoch - outside_since
+            elapsed_label = _format_dwell_elapsed_s(outside_s)
+            accurate_inside = _accurate_inside_from_location(
+                effective,
+                geofence,
+                condition.geofence_id,
+                min_accuracy_m,
+                ctx,
+            )
+            if (
+                outside_s >= condition.min_outside_s
+                and accurate_inside is not True
+            ):
+                presence_lines.append(
+                    f"{name} outside {elapsed_label} (need {need_label})",
+                )
+                continue
+        counts_inside, used_wifi = _user_counts_inside_geofence_for_rule(
+            effective or location,
             geofence,
             condition.geofence_id,
             min_accuracy_m,
@@ -1020,22 +1158,21 @@ def _evaluate_users_outside_geofence_for_s(
                 presence_lines.append(f"{name} inside {fence_label}")
             unmet = True
             continue
-        if not _location_usable_for_rule(location, min_accuracy_m):
-            presence_lines.append(f"{name}: location ignored (low accuracy)")
-            unmet = True
-            continue
-        outside_since = ctx.geofence_outside_since.get(
-            (roster_user_id, condition.geofence_id),
-        )
         if outside_since is None:
-            presence_lines.append(f"{name} outside (dwell not started)")
+            if not _location_usable_for_rule(location, min_accuracy_m):
+                presence_lines.append(f"{name}: location ignored (low accuracy)")
+            else:
+                presence_lines.append(f"{name} outside (dwell not started)")
             unmet = True
             continue
         outside_s = now_epoch - outside_since
         elapsed_label = _format_dwell_elapsed_s(outside_s)
-        presence_lines.append(
-            f"{name} outside {elapsed_label} (need {need_label})",
-        )
+        if not _location_usable_for_rule(location, min_accuracy_m):
+            presence_lines.append(f"{name}: location ignored (low accuracy)")
+        else:
+            presence_lines.append(
+                f"{name} outside {elapsed_label} (need {need_label})",
+            )
         if outside_s < condition.min_outside_s:
             unmet = True
 
@@ -1062,17 +1199,6 @@ def _evaluate_users_outside_geofence_for_s(
         label=label,
         met=met,
     )
-
-
-def _location_usable_for_rule(
-    location: UserLocationOut | None,
-    min_accuracy_m: int,
-) -> bool:
-    if location is None:
-        return False
-    if location.accuracy_m is not None and location.accuracy_m > min_accuracy_m:
-        return False
-    return True
 
 
 def _format_dwell_duration_s(total_s: float | int) -> str:
@@ -1116,6 +1242,23 @@ def _format_window_display(start_hhmm: str, end_hhmm: str) -> str:
     return (
         f"{_format_hhmm_display(start_hhmm)} – {_format_hhmm_display(end_hhmm)}"
     )
+
+
+def _location_received_at_epoch(location: UserLocationOut) -> float:
+    return datetime.fromisoformat(
+        location.received_at.replace("Z", "+00:00"),
+    ).timestamp()
+
+
+def _location_usable_for_rule(
+    location: UserLocationOut | None,
+    min_accuracy_m: int,
+) -> bool:
+    if location is None:
+        return False
+    if location.accuracy_m is not None and location.accuracy_m > min_accuracy_m:
+        return False
+    return True
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -1280,6 +1423,38 @@ def _presence_user_ids_for_condition(
     )
 
 
+def _resolved_location_for_geofence_rule(
+    latest: UserLocationOut | None,
+    history: tuple[UserLocationOut, ...] | list[UserLocationOut],
+    *,
+    geofence_id: str,
+    min_accuracy_m: int,
+    now_epoch: float,
+    ctx: RuleEvaluationContext,
+) -> UserLocationOut | None:
+    """Prefer a raw WiFi-home reading, then walk back for the last usable GPS location."""
+    if latest is not None:
+        settings = load_settings_location()
+        if wifi_home_presence_applies(
+            settings,
+            geofence_id,
+            latest.connection_type,
+            accuracy_m=latest.accuracy_m,
+            geofences=ctx.geofences,
+            lat=latest.lat,
+            lon=latest.lon,
+            min_accuracy_m=min_accuracy_m,
+        ):
+            return latest
+    return _effective_location_for_rule(
+        latest,
+        history,
+        min_accuracy_m=min_accuracy_m,
+        now_epoch=now_epoch,
+        walkback_max_s=ctx.walkback_max_s,
+    )
+
+
 def _roster_user_ids_satisfying_users_inside_geofence(
     condition: UsersInsideGeofenceCondition,
     rule: RuleOut,
@@ -1301,8 +1476,18 @@ def _roster_user_ids_satisfying_users_inside_geofence(
         location = ctx.user_locations.get(roster_user_id)
         if location is None:
             continue
-        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+        effective = _resolved_location_for_geofence_rule(
             location,
+            ctx.user_location_history.get(roster_user_id, ()),
+            geofence_id=condition.geofence_id,
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=ctx.now.timestamp(),
+            ctx=ctx,
+        )
+        if effective is None:
+            continue
+        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+            effective,
             geofence,
             condition.geofence_id,
             min_accuracy_m,
@@ -1324,7 +1509,6 @@ def _roster_user_ids_satisfying_users_inside_geofence_for_s(
     )
     if geofence is None:
         return set()
-    settings = load_settings_location()
     min_accuracy_m = rule.min_location_accuracy_m
     now_epoch = ctx.now.timestamp()
     satisfied: set[str] = set()
@@ -1335,8 +1519,34 @@ def _roster_user_ids_satisfying_users_inside_geofence_for_s(
         location = ctx.user_locations.get(roster_user_id)
         if location is None:
             continue
-        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+        history = ctx.user_location_history.get(roster_user_id, ())
+        effective = _resolved_location_for_geofence_rule(
             location,
+            history,
+            geofence_id=condition.geofence_id,
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=now_epoch,
+            ctx=ctx,
+        )
+        inside_since = ctx.geofence_inside_since.get(
+            (roster_user_id, condition.geofence_id),
+        )
+        if inside_since is not None:
+            inside_s = now_epoch - inside_since
+            if inside_s >= condition.min_inside_s:
+                accurate_inside = _accurate_inside_from_location(
+                    effective,
+                    geofence,
+                    condition.geofence_id,
+                    min_accuracy_m,
+                    ctx,
+                )
+                if accurate_inside is not False:
+                    satisfied.add(roster_user_id)
+                    continue
+        location_eval = effective or location
+        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+            location_eval,
             geofence,
             condition.geofence_id,
             min_accuracy_m,
@@ -1344,9 +1554,6 @@ def _roster_user_ids_satisfying_users_inside_geofence_for_s(
         )
         if not counts_inside:
             continue
-        inside_since = ctx.geofence_inside_since.get(
-            (roster_user_id, condition.geofence_id),
-        )
         if inside_since is None:
             continue
         if now_epoch - inside_since < condition.min_inside_s:
@@ -1376,20 +1583,30 @@ def _roster_user_ids_satisfying_users_outside_geofence(
         location = ctx.user_locations.get(roster_user_id)
         if location is None:
             continue
+        effective = _resolved_location_for_geofence_rule(
+            location,
+            ctx.user_location_history.get(roster_user_id, ()),
+            geofence_id=condition.geofence_id,
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=ctx.now.timestamp(),
+            ctx=ctx,
+        )
+        if effective is None:
+            continue
         if wifi_home_presence_applies(
             settings,
             condition.geofence_id,
-            location.connection_type,
-            accuracy_m=location.accuracy_m,
+            effective.connection_type,
+            accuracy_m=effective.accuracy_m,
             geofences=ctx.geofences,
-            lat=location.lat,
-            lon=location.lon,
+            lat=effective.lat,
+            lon=effective.lon,
             min_accuracy_m=min_accuracy_m,
         ):
             continue
-        if not _location_usable_for_rule(location, min_accuracy_m):
+        if not _location_usable_for_rule(effective, min_accuracy_m):
             continue
-        if not _user_inside_geofence(location, geofence, min_accuracy_m):
+        if not _user_inside_geofence(effective, geofence, min_accuracy_m):
             satisfied.add(roster_user_id)
     return satisfied
 
@@ -1415,8 +1632,34 @@ def _roster_user_ids_satisfying_users_outside_geofence_for_s(
         location = ctx.user_locations.get(roster_user_id)
         if location is None:
             continue
-        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+        history = ctx.user_location_history.get(roster_user_id, ())
+        effective = _resolved_location_for_geofence_rule(
             location,
+            history,
+            geofence_id=condition.geofence_id,
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=now_epoch,
+            ctx=ctx,
+        )
+        outside_since = ctx.geofence_outside_since.get(
+            (roster_user_id, condition.geofence_id),
+        )
+        if outside_since is not None:
+            outside_s = now_epoch - outside_since
+            if outside_s >= condition.min_outside_s:
+                accurate_inside = _accurate_inside_from_location(
+                    effective,
+                    geofence,
+                    condition.geofence_id,
+                    min_accuracy_m,
+                    ctx,
+                )
+                if accurate_inside is not True:
+                    satisfied.add(roster_user_id)
+                    continue
+        location_eval = effective or location
+        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+            location_eval,
             geofence,
             condition.geofence_id,
             min_accuracy_m,
@@ -1424,11 +1667,8 @@ def _roster_user_ids_satisfying_users_outside_geofence_for_s(
         )
         if counts_inside:
             continue
-        if not _location_usable_for_rule(location, min_accuracy_m):
+        if not _location_usable_for_rule(location_eval, min_accuracy_m):
             continue
-        outside_since = ctx.geofence_outside_since.get(
-            (roster_user_id, condition.geofence_id),
-        )
         if outside_since is None:
             continue
         if now_epoch - outside_since < condition.min_outside_s:

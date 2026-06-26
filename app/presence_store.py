@@ -94,6 +94,74 @@ def list_user_location_history_for_user(
         return [_history_to_record(row) for row in rows]
 
 
+def list_user_location_history_for_walkback(
+    path: Path,
+    user_id: str,
+    *,
+    now_epoch: float,
+    walkback_max_s: float,
+    limit: int | None = None,
+) -> list[UserLocationRecord]:
+    """Return newest-first history within a walkback window.
+
+    When ``limit`` is set, cap rows per user; otherwise return every row in the
+    window bounded only by ``walkback_max_s``.
+    """
+    rows_by_user = list_user_location_history_for_walkback_by_user(
+        path,
+        {user_id},
+        now_epoch=now_epoch,
+        walkback_max_s=walkback_max_s,
+        limit_per_user=limit,
+    )
+    return rows_by_user.get(user_id, [])
+
+
+def list_user_location_history_for_walkback_by_user(
+    path: Path,
+    user_ids: set[str] | list[str],
+    *,
+    now_epoch: float,
+    walkback_max_s: float,
+    limit_per_user: int | None = None,
+) -> dict[str, list[UserLocationRecord]]:
+    """Return newest-first walkback history for each user in one SQLite session."""
+    if walkback_max_s <= 0:
+        raise ValueError(
+            f"Expected walkback_max_s > 0, got {walkback_max_s}",
+        )
+    if limit_per_user is not None and limit_per_user <= 0:
+        raise ValueError(f"Expected limit_per_user > 0, got {limit_per_user}")
+    unique_user_ids = set(user_ids)
+    if not unique_user_ids:
+        return {}
+    since = now_epoch - walkback_max_s
+    with discovery_session(path) as session:
+        rows = session.scalars(
+            select(RuleUserLocationHistory)
+            .where(RuleUserLocationHistory.user_id.in_(unique_user_ids))
+            .where(RuleUserLocationHistory.received_at >= since)
+            .order_by(
+                RuleUserLocationHistory.received_at.desc(),
+                RuleUserLocationHistory.id.desc(),
+            )
+        ).all()
+    history_by_user: dict[str, list[UserLocationRecord]] = {
+        user_id: [] for user_id in unique_user_ids
+    }
+    for row in rows:
+        bucket = history_by_user.get(row.user_id)
+        if bucket is None:
+            continue
+        if (
+            limit_per_user is not None
+            and len(bucket) >= limit_per_user
+        ):
+            continue
+        bucket.append(_history_to_record(row))
+    return history_by_user
+
+
 def list_user_locations(path: Path) -> dict[str, UserLocationRecord]:
     """Return the latest location per user id."""
     with discovery_session(path) as session:
