@@ -6,7 +6,7 @@
 
 import { api, HttpError } from "./api.js";
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
-import { openAutomationsHubDialog } from "./rules-dialog.js";
+import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
 import type {
   MetaOut,
   UIBulkActionOut,
@@ -2214,12 +2214,34 @@ function removeJsBootHint(): void {
   document.getElementById("app-js-boot-hint")?.remove();
 }
 
+function initAutomationsDeepLinks(): void {
+  let opening: Promise<void> | null = null;
+  const openFromHash = (): void => {
+    const link = parseAutomationsDeepLink(window.location.hash);
+    if (link === null) {
+      return;
+    }
+    if (
+      opening !== null
+      || document.querySelector("dialog.automations-dialog[open]") !== null
+    ) {
+      return;
+    }
+    opening = openAutomationsHubDialog(link).finally(() => {
+      opening = null;
+    });
+  };
+  openFromHash();
+  window.addEventListener("hashchange", openFromHash);
+}
+
 function start(): void {
   removeJsBootHint();
   applyCompactDefaultTheme();
   applyStoredColorTheme();
   initPwaInstallBanner();
   registerServiceWorker();
+  initAutomationsDeepLinks();
   const root = document.getElementById(APP_ROOT_ID);
   if (!root) {
     console.warn(`[domesti-bot] expected #${APP_ROOT_ID} in landing page`);

@@ -19,6 +19,13 @@ class DoorPosition(StrEnum):
     OPEN = "open"
 
 
+class SpeakerPlaybackState(StrEnum):
+    """Sonos zone transport view."""
+
+    PAUSED = "paused"
+    PLAYING = "playing"
+
+
 class SwitchPowerState(StrEnum):
     """Relay / outlet power view."""
 

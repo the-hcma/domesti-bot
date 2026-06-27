@@ -15,6 +15,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_actions import (
     RuleActionDispatchError,
+    RuleDeviceActionOutcome,
     RuleDeviceDispatchResult,
     RuleNotificationEmailOutcome,
     dispatch_rule_device_actions,
@@ -29,18 +30,25 @@ from app.vizio_device_manager import VizioDeviceManager
 
 
 class _FakeKasa:
-    def __init__(self, host: str, label: str) -> None:
+    def __init__(self, host: str, label: str, *, is_on: bool = False) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
         self.identifier = host
         self.preferred_label = label
         self.calls: list[str] = []
+        self._is_on = is_on
 
-    async def turn_on(self) -> None:
-        self.calls.append("on")
+    @property
+    def is_on(self) -> bool:
+        return self._is_on
 
     async def turn_off(self) -> None:
         self.calls.append("off")
+        self._is_on = False
+
+    async def turn_on(self) -> None:
+        self.calls.append("on")
+        self._is_on = True
 
 
 class _FakeVizioTv:
@@ -114,13 +122,17 @@ async def test_dispatch_rule_device_actions_turns_off_vizio_by_label() -> None:
             ),
         ],
     )
-    assert result == RuleDeviceDispatchResult.empty()
+    assert result.errors == ()
+    assert len(result.action_outcomes) == 1
+    outcome = result.action_outcomes[0]
+    assert outcome.before_state == "on"
+    assert outcome.after_state == "off"
     assert tv.calls == ["off"]
 
 
 @pytest.mark.asyncio
 async def test_dispatch_rule_device_actions_turns_on_by_label() -> None:
-    device = _FakeKasa("192.168.1.20", "Front door lights")
+    device = _FakeKasa("192.168.1.20", "Front door lights", is_on=False)
     state = _device_state(_kasa_mgr([device]))
     result = await dispatch_rule_device_actions(
         state,
@@ -132,7 +144,11 @@ async def test_dispatch_rule_device_actions_turns_on_by_label() -> None:
             ),
         ],
     )
-    assert result == RuleDeviceDispatchResult.empty()
+    assert result.errors == ()
+    assert len(result.action_outcomes) == 1
+    outcome = result.action_outcomes[0]
+    assert outcome.before_state == "off"
+    assert outcome.after_state == "on"
     assert device.calls == ["on"]
 
 
@@ -154,9 +170,16 @@ async def test_dispatch_rule_device_actions_collects_unknown_device_error() -> N
 
 
 class _FakeSonosZone:
-    def __init__(self, identifier: str, label: str) -> None:
+    def __init__(
+        self,
+        identifier: str,
+        label: str,
+        *,
+        is_playing: bool | None = True,
+    ) -> None:
         self.identifier = identifier
         self.preferred_label = label
+        self.is_playing = is_playing
 
     async def pause(self) -> None:
         raise SonosTransitionUnavailableError(
@@ -204,6 +227,80 @@ async def test_dispatch_rule_device_actions_records_probable_sonos_pause_failure
     assert len(result.probable_successes) == 1
     assert "Living Room" in result.probable_successes[0]
     assert "(probable)" in result.probable_successes[0]
+    sonos_outcome = result.action_outcomes[1]
+    assert sonos_outcome.probable is True
+    assert sonos_outcome.before_state == "playing"
+    assert sonos_outcome.after_state == "paused"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rule_device_actions_probable_failure_uses_expected_state_when_cache_stale() -> None:
+    kasa = _FakeKasa("192.168.1.20", "Kitchen lamp", is_on=True)
+
+    async def turn_off_raises_connection_error() -> None:
+        raise OSError("connection reset by peer")
+
+    kasa.turn_off = turn_off_raises_connection_error  # type: ignore[method-assign]
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([kasa]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=None,
+        args=argparse.Namespace(),
+    )
+    result = await dispatch_rule_device_actions(
+        state,
+        [
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Kitchen lamp",
+                action=RuleDeviceActionType.TURN_OFF,
+            ),
+        ],
+    )
+    assert result.errors == ()
+    assert len(result.probable_successes) == 1
+    outcome = result.action_outcomes[0]
+    assert outcome.probable is True
+    assert outcome.before_state == "on"
+    assert outcome.after_state == "off"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rule_device_actions_programmer_error_on_turn_off_is_hard_failure() -> None:
+    kasa = _FakeKasa("192.168.1.20", "Kitchen lamp")
+
+    async def broken_turn_off() -> None:
+        raise TypeError("unexpected programmer error")
+
+    kasa.turn_off = broken_turn_off  # type: ignore[method-assign]
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([kasa]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=None,
+        args=argparse.Namespace(),
+    )
+    result = await dispatch_rule_device_actions(
+        state,
+        [
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Kitchen lamp",
+                action=RuleDeviceActionType.TURN_OFF,
+            ),
+        ],
+    )
+    assert result.probable_successes == ()
+    assert len(result.errors) == 1
+    assert "unexpected programmer error" in result.errors[0]
+    assert len(result.action_outcomes) == 1
+    assert result.action_outcomes[0].succeeded is False
+    assert result.action_outcomes[0].probable is False
 
 
 def test_resolve_kasa_host_by_label_raises_on_ambiguous_label() -> None:
@@ -393,3 +490,73 @@ def test_send_rule_notification_email_sends_to_all_recipients(
     assert "queue_id=UNITTEST" in outcome.format_for_log()
     message = deliver_mock.call_args[0][1]
     assert message["To"] == "ops@example.com, alerts@example.com"
+
+
+def test_send_rule_notification_email_includes_device_states_and_rule_link(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_PUBLIC_BASE_URL", "https://domesti.example.com")
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="test-rule",
+        label="Test",
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com"],
+        notify_on_fire=True,
+        trigger="edge_true",
+    )
+    smtp_config = SmtpConfigRecord(
+        from_address="bot@example.com",
+        host="smtp.example.com",
+        last_test_recipient=None,
+        mail_domain="example.com",
+        password_configured=False,
+        port=25,
+        username="",
+    )
+    delivery = SmtpDeliveryResult(
+        host="smtp.example.com",
+        port=25,
+        recipients=("ops@example.com",),
+        smtp_code=250,
+        smtp_response="2.0.0 Ok: queued as UNITTEST",
+    )
+    outcomes = (
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_OFF,
+            after_state="off",
+            before_state="on",
+            device_id="Garage",
+            error=None,
+            family_id=DeviceFamilyId.KASA,
+            probable=False,
+            succeeded=True,
+        ),
+    )
+    with (
+        patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
+        patch("app.rule_actions.smtp_send_ready", return_value=True),
+        patch("app.rule_actions.resolve_password_for_send", return_value=""),
+        patch("app.smtp_service.deliver_email_message", return_value=delivery) as deliver_mock,
+    ):
+        send_rule_notification_email(
+            tmp_path / "cache.sqlite",
+            rule=rule,
+            device_action_outcomes=outcomes,
+            notification_detail="Garage door is open.",
+        )
+
+    message = deliver_mock.call_args[0][1]
+    plain_part = message.get_body(preferencelist=("plain",))
+    assert plain_part is not None
+    plain = plain_part.get_content()
+    assert isinstance(plain, str)
+    assert "Garage (Kasa): on → off" in plain
+    assert "Garage door is open." in plain
+    assert (
+        "https://domesti.example.com/#/automations/status/test-rule" in plain
+    )

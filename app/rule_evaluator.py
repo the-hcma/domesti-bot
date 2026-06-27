@@ -51,6 +51,7 @@ from app.presence_store import (
 )
 from app.rule_actions import (
     RuleActionDispatchError,
+    RuleDeviceDispatchResult,
     RuleNotificationEmailOutcome,
     dispatch_rule_device_actions,
     send_rule_notification_email,
@@ -738,6 +739,7 @@ class RuleEvaluator:
         email_error: str | None = None
         performed_side_effect = not rule.device_actions and not rule.notify_on_fire
         device_state = self._device_state_getter()
+        dispatch_result = RuleDeviceDispatchResult.empty()
         if device_state is None:
             if rule.device_actions:
                 errors.append("Device discovery still in progress; actions skipped")
@@ -758,6 +760,7 @@ class RuleEvaluator:
                 email_outcome = await asyncio.to_thread(
                     send_rule_notification_email,
                     self._cache_path,
+                    device_action_outcomes=dispatch_result.action_outcomes,
                     notification_detail=_notification_detail_from_evaluation(
                         rule,
                         ctx,

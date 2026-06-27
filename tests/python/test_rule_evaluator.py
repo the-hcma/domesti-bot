@@ -1358,6 +1358,7 @@ async def test_scheduled_rule_fire_once_per_local_day_failed_fire_does_not_consu
     with patch(
         "app.rule_evaluator.dispatch_rule_device_actions",
         return_value=RuleDeviceDispatchResult(
+            action_outcomes=(),
             errors=("Device not found: Garage",),
             probable_successes=(),
         ),
@@ -1487,6 +1488,7 @@ async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors
         patch(
             "app.rule_evaluator.dispatch_rule_device_actions",
             return_value=RuleDeviceDispatchResult(
+                action_outcomes=(),
                 errors=("Sonos zone 'Living Room' skipped: already paused",),
                 probable_successes=(),
             ),

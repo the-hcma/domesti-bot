@@ -73,6 +73,11 @@ type RulesTabId =
   | "rules"
   | "status";
 
+export type AutomationsHubOpenOptions = {
+  ruleId?: string;
+  tab?: RulesTabId;
+};
+
 function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
   switch (kind) {
     case "switch":
@@ -260,12 +265,22 @@ class RulesHubController {
   private dataSource: RulesDataSource;
   private pendingGeofenceFocusId: string | null = null;
   private pendingRuleInspectorId: string | null = null;
+  private pendingStatusRuleInspectorId: string | null = null;
   private presenceMap: PresenceMapController | null = null;
   private presencePollTimer: ReturnType<typeof window.setInterval> | null = null;
   private status: RulesStatusOut | null = null;
 
-  constructor(dataSource: RulesDataSource) {
+  constructor(dataSource: RulesDataSource, options: AutomationsHubOpenOptions = {}) {
     this.dataSource = dataSource;
+    const targetTab = options.tab ?? this.activeTab;
+    this.activeTab = targetTab;
+    if (options.ruleId !== undefined) {
+      if (targetTab === "status") {
+        this.pendingStatusRuleInspectorId = options.ruleId;
+      } else {
+        this.pendingRuleInspectorId = options.ruleId;
+      }
+    }
     this.dialog = document.createElement("dialog");
     this.dialog.className = "settings-dialog rules-dialog automations-dialog";
     this.dialog.setAttribute("autocomplete", "off");
@@ -970,7 +985,7 @@ class RulesHubController {
     }
     switch (this.activeTab) {
       case "status":
-        this.renderStatusTab(this.status);
+        await this.renderStatusTab(this.status);
         break;
       case "conditions":
         await this.renderConditionsTab(this.status);
@@ -1116,7 +1131,7 @@ class RulesHubController {
     );
   }
 
-  private renderStatusTab(status: RulesStatusOut): void {
+  private async renderStatusTab(status: RulesStatusOut): Promise<void> {
     const sunMsg = afterSunsetStatusMessage(status.sun);
     const sunBtn = document.createElement("button");
     sunBtn.type = "button";
@@ -1146,6 +1161,7 @@ class RulesHubController {
     for (const rule of status.rules) {
       const card = document.createElement("article");
       card.className = "rules-card rules-status-rule-card";
+      card.dataset.ruleId = rule.id;
       const row = document.createElement("div");
       row.className = "rules-card-row";
       const nameBtn = document.createElement("button");
@@ -1219,6 +1235,29 @@ class RulesHubController {
       status.users,
       { showUserFilters: true, showTextDetails: false },
     );
+    const focusRuleId = this.pendingStatusRuleInspectorId;
+    if (focusRuleId !== null) {
+      this.pendingStatusRuleInspectorId = null;
+      const statusRule = status.rules.find((row) => row.id === focusRuleId);
+      const card = ruleList.querySelector<HTMLElement>(
+        `[data-rule-id="${CSS.escape(focusRuleId)}"]`,
+      );
+      if (card !== null) {
+        card.tabIndex = -1;
+        card.classList.add("rules-status-rule-card-focused");
+        card.focus({ preventScroll: true });
+        card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
+      if (statusRule !== undefined) {
+        const definition = await this.dataSource.getRule(focusRuleId);
+        if (this.activeTab !== "status" || !this.body.contains(ruleList)) {
+          return;
+        }
+        if (definition !== null) {
+          await this.openRuleInspector(definition, statusRule);
+        }
+      }
+    }
   }
 
   private async renderRulesTab(): Promise<void> {
@@ -1517,13 +1556,34 @@ class RulesHubController {
   }
 }
 
-export async function openAutomationsHubDialog(): Promise<void> {
+export async function openAutomationsHubDialog(
+  options: AutomationsHubOpenOptions = {},
+): Promise<void> {
   const dataSource = await createRulesDataSource();
-  const hub = new RulesHubController(dataSource);
+  const hub = new RulesHubController(dataSource, options);
   await hub.open();
 }
 
 /** @deprecated Use openAutomationsHubDialog */
 export async function openRulesHubDialog(): Promise<void> {
   await openAutomationsHubDialog();
+}
+
+export function parseAutomationsDeepLink(
+  hash: string,
+): AutomationsHubOpenOptions | null {
+  const raw = hash.startsWith("#") ? hash.slice(1) : hash;
+  const match = /^\/automations\/status\/([^/?#]+)(?:[?#].*)?$/.exec(raw);
+  if (match === null) {
+    return null;
+  }
+  try {
+    const ruleId = decodeURIComponent(match[1] ?? "");
+    if (ruleId === "") {
+      return null;
+    }
+    return { tab: "status", ruleId };
+  } catch {
+    return null;
+  }
 }

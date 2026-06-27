@@ -33,7 +33,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.operator_alerts import operator_alert_store
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
-from app.rule_engine import DoorPosition, SwitchPowerState
+from app.rule_engine import DoorPosition, SpeakerPlaybackState, SwitchPowerState
 from app.sonos_device_manager import (
     SonosDeviceManager,
     SonosSpeakerDevice,
@@ -52,15 +52,6 @@ _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("vizio", "Vizio TVs", "#F97316"),
     ("tailwind", "Garage doors", "#10B981"),
 )
-
-# Speaker-kind state strings emitted on ``UIDeviceOut.state`` for Sonos.
-# Mirrors the ``on``/``off`` / ``open``/``closed`` pattern but uses
-# distinct values so the front-end can color and label them
-# independently. ``unknown`` covers the ``is_playing is None`` window
-# before the first watcher tick and any transient UPnP failure.
-_SONOS_PLAYING_STATE = "playing"
-_SONOS_PAUSED_STATE = "paused"
-
 
 async def _bulk_close_tailwind_apply_impl(
     mgr: GotailwindDeviceManager,
@@ -312,9 +303,9 @@ def _sonos_stream_favorites_out(
 
 def _sonos_state(is_playing: bool | None) -> str:
     if is_playing is True:
-        return _SONOS_PLAYING_STATE
+        return SpeakerPlaybackState.PLAYING
     if is_playing is False:
-        return _SONOS_PAUSED_STATE
+        return SpeakerPlaybackState.PAUSED
     return "unknown"
 
 
