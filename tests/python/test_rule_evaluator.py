@@ -14,11 +14,13 @@ import pytest
 
 from app.api.schemas import (
     RuleConditionsOut,
+    RuleConditionDeviceRefOut,
     RuleDeviceActionOut,
     RuleOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceForSCondition,
+    DevicesAnyOnCondition,
 )
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
@@ -39,15 +41,25 @@ from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, repla
 
 
 class _FakeKasa:
-    def __init__(self, host: str, label: str) -> None:
+    def __init__(self, host: str, label: str, *, is_on: bool = True) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
         self.identifier = host
         self.preferred_label = label
         self.calls: list[str] = []
+        self._on = is_on
+
+    @property
+    def is_on(self) -> bool:
+        return self._on
 
     async def turn_on(self) -> None:
+        self._on = True
         self.calls.append("on")
+
+    async def turn_off(self) -> None:
+        self._on = False
+        self.calls.append("off")
 
 
 @dataclass
@@ -1505,3 +1517,143 @@ async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors
         )
     ]
     assert len(fired_logs) == 1
+
+
+def _away_shutdown_rule(*, cooldown_s: int) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersOutsideGeofenceForSCondition(
+                    type="users_outside_geofence_for_s",
+                    geofence_id="house",
+                    min_outside_s=1200,
+                    user_ids=["henrique"],
+                ),
+                DevicesAnyOnCondition(
+                    type="devices_any_on",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Garage",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=cooldown_s,
+        device_actions=[
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Garage",
+                action=RuleDeviceActionType.TURN_OFF,
+            ),
+        ],
+        enabled=True,
+        id="away-shutdown",
+        label="Away shutdown",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        schedule_cron="*/10 * * * *",
+        trigger="scheduled",
+    )
+
+
+def _setup_away_shutdown_evaluator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    cooldown_s: int,
+) -> _ArriveHomeFixture:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _away_shutdown_rule(cooldown_s=cooldown_s))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(
+        db,
+        user_id="henrique",
+        lat=44.0,
+        lon=-73.0,
+        received_at=clock["now"],
+    )
+    device = _FakeKasa("192.168.1.10", "Garage", is_on=True)
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    return _ArriveHomeFixture(
+        clock=clock,
+        db=db,
+        device=device,
+        evaluator=evaluator,
+    )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_outside_dwell_fires_once_per_away_episode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_away_shutdown_evaluator(tmp_path, monkeypatch, cooldown_s=0)
+    runtime = fixture.evaluator._rule_state["away-shutdown"]
+    fixture.clock["now"] += 1300.0
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == ["off"]
+
+    fixture.clock["now"] += 600.0
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == ["off"]
+
+    _move_henrique_inside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+    _move_henrique_outside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+    fixture.device._on = True
+    fixture.clock["now"] += 1300.0
+    runtime.next_evaluate_at = fixture.clock["now"] - 1.0
+    await fixture.evaluator._evaluate_scheduled_rules()
+    assert fixture.device.calls == ["off", "off"]
+
+
+@pytest.mark.asyncio
+async def test_geofence_leave_resets_outside_since_on_redeparture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _setup_dwell_home_evaluator(tmp_path, monkeypatch, cooldown_s=0)
+    _seed_henrique_inside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+    first_outside_at = fixture.clock["now"] + 30.0
+    _move_henrique_outside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+    assert fixture.evaluator.geofence_outside_since_snapshot()[
+        ("henrique", "house")
+    ] == pytest.approx(first_outside_at)
+
+    _move_henrique_inside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+    assert ("henrique", "house") not in fixture.evaluator.geofence_outside_since_snapshot()
+
+    second_outside_at = fixture.clock["now"] + 30.0
+    _move_henrique_outside_house(fixture)
+    await fixture.evaluator.on_location_update("henrique")
+    outside_since = fixture.evaluator.geofence_outside_since_snapshot()[
+        ("henrique", "house")
+    ]
+    assert outside_since == pytest.approx(second_outside_at)
+    assert outside_since > first_outside_at

@@ -60,9 +60,12 @@ from app.rule_conditions import (
     RuleEvaluationContext,
     RuleEvaluationResult,
     _evaluate_condition,
+    _iter_dwell_for_s_conditions,
     compute_rules_sun_out,
+    consume_scheduled_dwell_episodes_for_fire,
     evaluate_rule,
     presence_user_ids_for_rule,
+    scheduled_dwell_episode_blocks_scheduled_fire,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
 from app.rule_validation import (
@@ -141,15 +144,19 @@ class RuleEvaluator:
         self._geofence_geo_outside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_inside_since: dict[tuple[str, str], float] = {}
         self._geofence_outside_since: dict[tuple[str, str], float] = {}
+        self._geofence_presence_episode: dict[tuple[str, str], int] = {}
         self._geofence_was_inside: dict[tuple[str, str], bool] = {}
         self._last_run_at: float | None = None
         self._next_sun_check_at: float | None = None
         self._process_lock = asyncio.Lock()
         self._rule_state: dict[str, _RuleRuntimeState] = {}
+        self._scheduled_inside_dwell_consumed: dict[tuple[str, str, str], int] = {}
+        self._scheduled_outside_dwell_consumed: dict[tuple[str, str, str], int] = {}
         self._stop = asyncio.Event()
         self._tick_task: asyncio.Task[None] | None = None
         self._load_persisted_rule_state()
         self._seed_geofence_state()
+        self._seed_scheduled_dwell_consumed_from_persisted_fire()
         self._seed_scheduled_evaluate_times()
 
     async def close(self) -> None:
@@ -176,6 +183,10 @@ class RuleEvaluator:
     def geofence_outside_since_snapshot(self) -> dict[tuple[str, str], float]:
         """Return a copy of outside-dwell streak start times keyed by user and geofence."""
         return dict(self._geofence_outside_since)
+
+    def geofence_presence_episode_snapshot(self) -> dict[tuple[str, str], int]:
+        """Return a copy of geofence presence episode counters keyed by user and geofence."""
+        return dict(self._geofence_presence_episode)
 
     @property
     def last_run_at(self) -> float | None:
@@ -301,6 +312,13 @@ class RuleEvaluator:
             device_state=self._device_state_getter(),
             geofence_inside_since=self.geofence_inside_since_snapshot(),
             geofence_outside_since=self.geofence_outside_since_snapshot(),
+            geofence_presence_episode=self.geofence_presence_episode_snapshot(),
+            scheduled_inside_dwell_consumed_episode=dict(
+                self._scheduled_inside_dwell_consumed,
+            ),
+            scheduled_outside_dwell_consumed_episode=dict(
+                self._scheduled_outside_dwell_consumed,
+            ),
             user_location_history=user_location_history,
             walkback_max_s=walkback_max_s,
         )
@@ -386,6 +404,7 @@ class RuleEvaluator:
             if not was_inside:
                 self._geofence_was_inside[key] = True
                 self._geofence_outside_since.pop(key, None)
+                self._bump_geofence_presence_episode(user_id, geofence_id)
                 _log_wifi_home_presence_reconciled(
                     user_id=user_id,
                     geofence_id=geofence_id,
@@ -495,12 +514,18 @@ class RuleEvaluator:
             elif dwell_inside is False and dwell_accuracy_limit_m is not None:
                 self._geofence_outside_since[key] = location.received_at
                 seeded = True
-        if seeded:
-            self._persist_geofence_transition_state(
-                user_id,
-                geofence_id,
-                last_location_received_at=location.received_at,
-            )
+            if seeded:
+                self._persist_geofence_transition_state(
+                    user_id,
+                    geofence_id,
+                    last_location_received_at=location.received_at,
+                )
+
+    def _bump_geofence_presence_episode(self, user_id: str, geofence_id: str) -> int:
+        key = (user_id, geofence_id)
+        episode = self._geofence_presence_episode.get(key, 0) + 1
+        self._geofence_presence_episode[key] = episode
+        return episode
 
     async def _evaluate_scheduled_rules(self) -> None:
         cache_path = self._cache_path
@@ -549,6 +574,13 @@ class RuleEvaluator:
                         log_user_ids,
                         reason="daily_cap",
                         detail=f"last_fired_local_date={fired_date.isoformat()}",
+                    )
+                elif scheduled_dwell_episode_blocks_scheduled_fire(rule, ctx):
+                    _log_rule_skipped(
+                        rule.id,
+                        log_user_ids,
+                        reason="dwell_episode_consumed",
+                        detail="scheduled dwell already fired this away/inside episode",
                     )
                 elif self._cooldown_elapsed(rule, runtime):
                     await self._execute_rule(
@@ -754,6 +786,15 @@ class RuleEvaluator:
                 runtime.last_error,
             )
         runtime.last_fired_at = self._now_fn()
+        if fire_source == "scheduled" and _rule_has_dwell_condition(rule):
+            consume_scheduled_dwell_episodes_for_fire(
+                rule,
+                await self._build_evaluation_context(
+                    now=datetime.fromtimestamp(self._now_fn(), tz=UTC),
+                ),
+                consumed_inside=self._scheduled_inside_dwell_consumed,
+                consumed_outside=self._scheduled_outside_dwell_consumed,
+            )
         self._persist_rule_state(rule.id)
         deferred_user_id = edge_user_id or log_user_ids.partition(",")[0]
         self._clear_deferred_accuracy_edges_for_rule(rule.id, deferred_user_id)
@@ -1146,6 +1187,39 @@ class RuleEvaluator:
                     due_if_matching=True,
                 )
 
+    def _seed_scheduled_dwell_consumed_from_persisted_fire(self) -> None:
+        """Reconstruct dwell episode consumption after restart for ongoing streaks."""
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        roster_user_ids = {row.user_id for row in list_users(cache_path)}
+        for rule in list_automation_rules():
+            if rule.trigger != "scheduled" or not _rule_has_dwell_condition(rule):
+                continue
+            runtime = self._rule_state.get(rule.id)
+            if runtime is None or runtime.last_fired_at is None:
+                continue
+            for condition in _iter_dwell_for_s_conditions(rule.conditions.all):
+                if isinstance(condition, UsersOutsideGeofenceForSCondition):
+                    consumed = self._scheduled_outside_dwell_consumed
+                    streak_by_key = self._geofence_outside_since
+                else:
+                    consumed = self._scheduled_inside_dwell_consumed
+                    streak_by_key = self._geofence_inside_since
+                for rule_user_id in condition.user_ids:
+                    roster_user_id = rule_user_id.strip()
+                    if roster_user_id not in roster_user_ids:
+                        continue
+                    key = (roster_user_id, condition.geofence_id)
+                    streak_start = streak_by_key.get(key)
+                    if streak_start is None:
+                        continue
+                    if runtime.last_fired_at >= streak_start:
+                        episode = self._geofence_presence_episode.get(key, 0)
+                        consumed[(rule.id, roster_user_id, condition.geofence_id)] = (
+                            episode
+                        )
+
     def _update_geofence_transitions(
         self,
         user_id: str,
@@ -1243,6 +1317,7 @@ class RuleEvaluator:
                 or wifi_dwell_inside
             )
             transition = GeofenceTransition()
+            episode_bumped = False
             if gps_inside:
                 self._geofence_geo_outside_streak_since.pop(key, None)
                 streak_since = self._geofence_geo_inside_streak_since.get(key)
@@ -1258,6 +1333,8 @@ class RuleEvaluator:
                         observed_at - outside_since >= _MIN_GEOFENCE_OUTSIDE_DWELL_S
                     )
                     if mutate_state:
+                        if not was_inside:
+                            self._bump_geofence_presence_episode(user_id, geofence_id)
                         self._geofence_was_inside[key] = True
                         self._geofence_outside_since.pop(key, None)
                         was_inside = True
@@ -1295,11 +1372,14 @@ class RuleEvaluator:
                     >= _GEO_OUTSIDE_STATE_RECONCILE_S
                 ):
                     if mutate_state:
+                        if was_inside or prior_was_inside:
+                            self._bump_geofence_presence_episode(user_id, geofence_id)
+                            episode_bumped = True
                         self._geofence_was_inside[key] = False
                         was_inside = False
                         if track_dwell:
                             self._geofence_inside_since.pop(key, None)
-                        self._geofence_outside_since.setdefault(key, outside_streak_since)
+                        self._geofence_outside_since[key] = outside_streak_since
                         self._clear_deferred_accuracy_edges_for_geofence(
                             user_id,
                             geofence_id,
@@ -1317,6 +1397,8 @@ class RuleEvaluator:
                     observed_at - outside_since >= _MIN_GEOFENCE_OUTSIDE_DWELL_S
                 )
                 if mutate_state:
+                    if not was_inside:
+                        self._bump_geofence_presence_episode(user_id, geofence_id)
                     self._geofence_was_inside[key] = True
                     self._geofence_outside_since.pop(key, None)
                     if track_dwell:
@@ -1332,16 +1414,25 @@ class RuleEvaluator:
                             - (observed_at - outside_since),
                         )
             elif (was_inside or depart_edge_pending) and not now_inside_for_dwell:
+                leaving_from_inside = was_inside or depart_edge_pending
                 if mutate_state:
+                    if leaving_from_inside and not episode_bumped:
+                        self._bump_geofence_presence_episode(user_id, geofence_id)
                     self._geofence_was_inside[key] = False
                     if track_dwell:
                         self._geofence_inside_since.pop(key, None)
                     transition = GeofenceTransition(left=True)
                 if track_dwell:
-                    self._geofence_outside_since.setdefault(key, observed_at)
+                    if leaving_from_inside:
+                        self._geofence_outside_since[key] = observed_at
+                    else:
+                        self._geofence_outside_since.setdefault(key, observed_at)
                     self._geofence_inside_since.pop(key, None)
             elif now_inside_for_dwell:
+                was_outside = not self._geofence_was_inside.get(key, False)
                 if mutate_state or wifi_dwell_inside:
+                    if was_outside:
+                        self._bump_geofence_presence_episode(user_id, geofence_id)
                     self._geofence_was_inside[key] = True
                     self._geofence_outside_since.pop(key, None)
                 if track_dwell and key not in self._geofence_inside_since:

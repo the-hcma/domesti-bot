@@ -85,6 +85,13 @@ class RuleEvaluationContext:
     device_state: DeviceManagersState | None = None
     geofence_inside_since: dict[tuple[str, str], float] = field(default_factory=dict)
     geofence_outside_since: dict[tuple[str, str], float] = field(default_factory=dict)
+    geofence_presence_episode: dict[tuple[str, str], int] = field(default_factory=dict)
+    scheduled_inside_dwell_consumed_episode: dict[tuple[str, str, str], int] = field(
+        default_factory=dict,
+    )
+    scheduled_outside_dwell_consumed_episode: dict[tuple[str, str, str], int] = field(
+        default_factory=dict,
+    )
     user_home_wifi_bssid: dict[str, str | None] = field(default_factory=dict)
     user_location_history: dict[str, tuple[UserLocationOut, ...]] = field(
         default_factory=dict,
@@ -127,6 +134,30 @@ def compute_rules_sun_out(
         sunrise_at=_to_iso_z(sunrise_at),
         sunset_at=_to_iso_z(sunset_at),
     )
+
+
+def consume_scheduled_dwell_episodes_for_fire(
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+    *,
+    consumed_inside: dict[tuple[str, str, str], int],
+    consumed_outside: dict[tuple[str, str, str], int],
+) -> None:
+    """Record the current geofence presence episode for each dwell condition user."""
+    for condition in _iter_dwell_for_s_conditions(rule.conditions.all):
+        if isinstance(condition, UsersOutsideGeofenceForSCondition):
+            target = consumed_outside
+        else:
+            target = consumed_inside
+        for rule_user_id in condition.user_ids:
+            roster_user_id = ctx.resolve_user_id(rule_user_id)
+            if roster_user_id is None:
+                continue
+            episode = ctx.geofence_presence_episode.get(
+                (roster_user_id, condition.geofence_id),
+                0,
+            )
+            target[(rule.id, roster_user_id, condition.geofence_id)] = episode
 
 
 def evaluate_rule(
@@ -1303,6 +1334,25 @@ def _is_in_before_sunrise_window(
     return now_minutes >= 0 and now_minutes < end
 
 
+def _iter_dwell_for_s_conditions(
+    conditions: list[RuleConditionOut],
+) -> list[UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition]:
+    found: list[
+        UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition
+    ] = []
+    for condition in conditions:
+        if isinstance(
+            condition,
+            UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition,
+        ):
+            found.append(condition)
+        elif isinstance(condition, AllConditionsCondition):
+            found.extend(_iter_dwell_for_s_conditions(condition.conditions))
+        elif isinstance(condition, AnyConditionsCondition):
+            found.extend(_iter_dwell_for_s_conditions(condition.conditions))
+    return found
+
+
 def _is_in_local_time_window(
     start_hhmm: str,
     end_hhmm: str,
@@ -1785,3 +1835,33 @@ def presence_user_ids_for_rule(
     for condition in rule.conditions.all:
         ids.update(_presence_user_ids_for_condition(condition, rule, ctx))
     return tuple(sorted(ids))
+
+
+def scheduled_dwell_episode_blocks_scheduled_fire(
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> bool:
+    """Return True when every dwell user already fired for the current presence episode."""
+    if rule.trigger != "scheduled":
+        return False
+    dwell_conditions = _iter_dwell_for_s_conditions(rule.conditions.all)
+    if not dwell_conditions:
+        return False
+    checked_any = False
+    for condition in dwell_conditions:
+        if isinstance(condition, UsersOutsideGeofenceForSCondition):
+            consumed = ctx.scheduled_outside_dwell_consumed_episode
+        else:
+            consumed = ctx.scheduled_inside_dwell_consumed_episode
+        for rule_user_id in condition.user_ids:
+            roster_user_id = ctx.resolve_user_id(rule_user_id)
+            if roster_user_id is None:
+                continue
+            checked_any = True
+            episode = ctx.geofence_presence_episode.get(
+                (roster_user_id, condition.geofence_id),
+                0,
+            )
+            if consumed.get((rule.id, roster_user_id, condition.geofence_id)) != episode:
+                return False
+    return checked_any
