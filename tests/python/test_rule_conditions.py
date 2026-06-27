@@ -41,6 +41,7 @@ from app.rule_conditions import (
     compute_rules_sun_out,
     evaluate_rule,
     presence_user_ids_for_rule,
+    scheduled_dwell_episode_blocks_scheduled_fire,
 )
 from app.rule_validation import build_roster_user_id_lookup
 from app.rules_status import build_rules_status
@@ -127,6 +128,8 @@ def _ctx(
     geofences: tuple[GeofenceOut, ...] = (),
     geofence_inside_since: dict[tuple[str, str], float] | None = None,
     geofence_outside_since: dict[tuple[str, str], float] | None = None,
+    geofence_presence_episode: dict[tuple[str, str], int] | None = None,
+    scheduled_outside_dwell_consumed_episode: dict[tuple[str, str, str], int] | None = None,
     user_location_history: dict[str, tuple[UserLocationOut, ...]] | None = None,
     user_locations: dict[str, UserLocationOut] | None = None,
 ) -> RuleEvaluationContext:
@@ -145,6 +148,10 @@ def _ctx(
         device_state=device_state,
         geofence_inside_since=geofence_inside_since or {},
         geofence_outside_since=geofence_outside_since or {},
+        geofence_presence_episode=geofence_presence_episode or {},
+        scheduled_outside_dwell_consumed_episode=(
+            scheduled_outside_dwell_consumed_episode or {}
+        ),
         user_location_history=user_location_history or {},
     )
 
@@ -613,6 +620,71 @@ def test_users_outside_geofence_for_s_met_after_dwell() -> None:
     assert result.conditions[0].met is True
     assert "Everyone outside House for at least 20 min" in result.conditions[0].detail
     assert result.all_met is True
+
+
+def test_scheduled_dwell_episode_blocks_scheduled_fire_when_consumed() -> None:
+    now = datetime(2026, 6, 9, 21, 12, tzinfo=_TZ)
+    outside_since = now.timestamp() - 1300.0
+    ctx = _ctx(
+        now=now,
+        geofences=(_house_geofence(),),
+        geofence_outside_since={("henrique", "house"): outside_since},
+        geofence_presence_episode={("henrique", "house"): 2},
+        scheduled_outside_dwell_consumed_episode={
+            ("away-dwell", "henrique", "house"): 2,
+        },
+        user_locations={"henrique": _henrique_outside_location()},
+    )
+    assert evaluate_rule(_outside_dwell_rule(), ctx).all_met is True
+    assert scheduled_dwell_episode_blocks_scheduled_fire(_outside_dwell_rule(), ctx)
+
+
+def test_scheduled_dwell_episode_does_not_block_when_one_user_episode_unconsumed() -> None:
+    now = datetime(2026, 6, 9, 21, 12, tzinfo=_TZ)
+    outside_since = now.timestamp() - 1300.0
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersOutsideGeofenceForSCondition(
+                    type="users_outside_geofence_for_s",
+                    geofence_id="house",
+                    min_outside_s=1200,
+                    user_ids=["henrique", "kristen"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="away-dwell-both",
+        label="Away dwell both",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+        schedule_cron="*/10 * * * *",
+    )
+    ctx = _ctx(
+        now=now,
+        geofences=(_house_geofence(),),
+        geofence_outside_since={
+            ("henrique", "house"): outside_since,
+            ("kristen", "house"): outside_since,
+        },
+        geofence_presence_episode={
+            ("henrique", "house"): 2,
+            ("kristen", "house"): 0,
+        },
+        scheduled_outside_dwell_consumed_episode={
+            ("away-dwell-both", "henrique", "house"): 0,
+            ("away-dwell-both", "kristen", "house"): 0,
+        },
+        user_locations={
+            "henrique": _henrique_outside_location(),
+            "kristen": _henrique_outside_location(),
+        },
+    )
+    assert scheduled_dwell_episode_blocks_scheduled_fire(rule, ctx) is False
 
 
 def test_users_outside_geofence_for_s_met_with_outside_dwell_timer_despite_low_accuracy_latest() -> (
