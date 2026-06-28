@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.8.0](https://github.com/the-hcma/domesti-bot/compare/v1.7.0...v1.8.0) (2026-06-28)
+
+
+### Features
+
+* improve rule notification emails with device state and deep links ([#354](https://github.com/the-hcma/domesti-bot/issues/354)) ([7e6a586](https://github.com/the-hcma/domesti-bot/commit/7e6a58636763ae5fe66c5ddfd33ab4f1b82ac9cc))
+* ingest location metadata, home WiFi roster, and BSSID presence ([#351](https://github.com/the-hcma/domesti-bot/issues/351)) ([564ed64](https://github.com/the-hcma/domesti-bot/commit/564ed640bc7f5ea8ef712f77aef46a7cf1c48425))
+* schedule astronomical rules via daily materialized cron ([#358](https://github.com/the-hcma/domesti-bot/issues/358)) ([dc3751e](https://github.com/the-hcma/domesti-bot/commit/dc3751e86fecdf842286d48956b5137d6a0e218d))
+* trust dwell timers with 10-minute location walkback ([#350](https://github.com/the-hcma/domesti-bot/issues/350)) ([430478d](https://github.com/the-hcma/domesti-bot/commit/430478d2ea71d1aeaf9f8dd14b68b7a45ac33567))
+
+
+### Bug Fixes
+
+* **ci:** key CI concurrency on head SHA ([#346](https://github.com/the-hcma/domesti-bot/issues/346)) ([2ada203](https://github.com/the-hcma/domesti-bot/commit/2ada203650e15ae48921b5a8f61d4a8278193efb))
+* one-shot scheduled dwell rules per geofence presence episode ([#353](https://github.com/the-hcma/domesti-bot/issues/353)) ([51f3ba5](https://github.com/the-hcma/domesti-bot/commit/51f3ba5cf639f86882a8c26b58887010aafc6692))
+* pin Kasa cache and rule email states after device actions ([#357](https://github.com/the-hcma/domesti-bot/issues/357)) ([a22483f](https://github.com/the-hcma/domesti-bot/commit/a22483f3f1dc249e5700859bd47a8e9d750d854e))
+
 ## [1.7.0](https://github.com/the-hcma/domesti-bot/compare/v1.6.0...v1.7.0) (2026-06-24)
 
 
