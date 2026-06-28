@@ -140,3 +140,18 @@ async def test_fetch_logs_ingest_shortfall_when_some_devices_fail_recovery(
         "discovered 3 device(s) on the LAN but only 2 completed" in m
         for m in warning_messages
     ), warning_messages
+
+
+@pytest.mark.asyncio
+async def test_turn_on_updates_cached_power_when_underlying_is_on_stays_stale() -> None:
+    """``KasaDevice`` should pin cache to the commanded state after I/O."""
+    from app.kasa_device_manager import KasaDevice
+
+    kdev = _kdev("192.168.1.10", "Basement leds", is_on=False)
+    kdev.turn_on = AsyncMock()
+    kd = KasaDevice("192.168.1.10", kdev, display_name="Basement leds")
+    assert kd.is_on is False
+    await kd.turn_on()
+    kdev.turn_on.assert_awaited_once()
+    assert kd.is_on is True
+    assert kdev.is_on is False

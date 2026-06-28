@@ -229,11 +229,16 @@ def after_state_for_action(
     succeeded: bool,
 ) -> str | None:
     """Return the best available post-action state label for notification email."""
-    if observed_after is not None:
-        return observed_after
     if not succeeded:
+        if observed_after is not None:
+            return observed_after
         return before_state
-    return expected_state_after_action(action)
+    expected = expected_state_after_action(action)
+    if observed_after is None:
+        return expected
+    if observed_after != before_state:
+        return observed_after
+    return expected
 
 
 def cached_kasa_is_on(state: DeviceManagersState, device_id: str) -> bool | None:
