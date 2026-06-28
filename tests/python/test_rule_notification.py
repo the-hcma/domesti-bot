@@ -14,7 +14,9 @@ from app.rule_notification import (
     build_rule_notification_bodies,
     domesti_public_base_url,
     format_device_action_outcomes,
+    format_devices_already_in_desired_state_message,
     rule_automation_status_url,
+    summarize_device_action_outcomes,
 )
 
 
@@ -89,6 +91,110 @@ def test_format_device_action_outcomes_includes_before_and_after() -> None:
     )
 
 
+def test_format_device_action_outcomes_omits_unchanged_devices() -> None:
+    outcomes = (
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_ON,
+            after_state="on",
+            before_state="off",
+            device_id="Basement leds",
+            error=None,
+            family_id=DeviceFamilyId.KASA,
+            probable=False,
+            succeeded=True,
+        ),
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_ON,
+            after_state="on",
+            before_state="on",
+            device_id="Basement lamp",
+            error=None,
+            family_id=DeviceFamilyId.KASA,
+            probable=False,
+            succeeded=True,
+        ),
+    )
+    assert format_device_action_outcomes(outcomes) == (
+        "Basement leds (Kasa): off → on",
+    )
+
+
+def test_format_devices_already_in_desired_state_message_lists_mixed_targets() -> None:
+    outcomes = (
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_OFF,
+            after_state="off",
+            before_state="off",
+            device_id="Kitchen TV",
+            error=None,
+            family_id=DeviceFamilyId.VIZIO,
+            probable=False,
+            succeeded=True,
+        ),
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.PAUSE,
+            after_state="paused",
+            before_state="paused",
+            device_id="Living room",
+            error=None,
+            family_id=DeviceFamilyId.SONOS,
+            probable=False,
+            succeeded=True,
+        ),
+    )
+    assert format_devices_already_in_desired_state_message(outcomes) == (
+        "All devices already in their desired (off, paused) state."
+    )
+
+
+def test_summarize_device_action_outcomes_includes_failed_without_error_text() -> None:
+    outcomes = (
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_ON,
+            after_state="off",
+            before_state="off",
+            device_id="Basement leds",
+            error=None,
+            family_id=DeviceFamilyId.KASA,
+            probable=False,
+            succeeded=False,
+        ),
+    )
+    summary = summarize_device_action_outcomes(outcomes)
+    assert summary.changed_lines == ("Basement leds (Kasa): failed",)
+    assert summary.no_change_message is None
+
+
+def test_summarize_device_action_outcomes_reports_all_already_desired() -> None:
+    outcomes = (
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_ON,
+            after_state="on",
+            before_state="on",
+            device_id="Basement leds",
+            error=None,
+            family_id=DeviceFamilyId.KASA,
+            probable=False,
+            succeeded=True,
+        ),
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_ON,
+            after_state="on",
+            before_state="on",
+            device_id="Basement lamp",
+            error=None,
+            family_id=DeviceFamilyId.KASA,
+            probable=False,
+            succeeded=True,
+        ),
+    )
+    summary = summarize_device_action_outcomes(outcomes)
+    assert summary.changed_lines == ()
+    assert summary.no_change_message == (
+        "All devices already in their desired (on) state."
+    )
+
+
 def test_build_rule_notification_bodies_includes_device_states_and_link(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -124,6 +230,34 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
         in html
     )
     assert "Open Automations → Status" not in plain
+
+
+def test_build_rule_notification_bodies_shows_all_clear_when_devices_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_PUBLIC_BASE_URL", "https://domesti.example.com")
+    rule = _sample_rule()
+    outcomes = (
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_ON,
+            after_state="on",
+            before_state="on",
+            device_id="Basement leds",
+            error=None,
+            family_id=DeviceFamilyId.KASA,
+            probable=False,
+            succeeded=True,
+        ),
+    )
+    plain, html = build_rule_notification_bodies(
+        rule,
+        cache_path=tmp_path / "cache.sqlite",
+        device_action_outcomes=outcomes,
+    )
+    assert "Basement leds (Kasa): on → on" not in plain
+    assert "All devices already in their desired (on) state." in plain
+    assert "All devices already in their desired (on) state." in html
 
 
 def test_build_rule_notification_bodies_falls_back_without_public_base_url(
