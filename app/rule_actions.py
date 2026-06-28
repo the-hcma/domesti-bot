@@ -23,7 +23,7 @@ from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.operator_alerts import operator_alert_store
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
-from app.rule_engine import DoorPosition, SpeakerPlaybackState, SwitchPowerState
+from app.rule_engine import DoorPosition, SpeakerPlaybackState, SwitchPowerState, expected_state_for_action_type
 from app.rule_notification import build_rule_notification_bodies
 from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult, smtp_friendly_error
 from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
@@ -451,19 +451,7 @@ async def dispatch_rule_device_actions(
 
 def expected_state_after_action(action: RuleDeviceActionOut) -> str:
     """Return the nominal end state after a successful device action."""
-    match action.action:
-        case RuleDeviceActionType.TURN_ON:
-            return SwitchPowerState.ON
-        case RuleDeviceActionType.TURN_OFF:
-            return SwitchPowerState.OFF
-        case RuleDeviceActionType.PAUSE:
-            return SpeakerPlaybackState.PAUSED
-        case RuleDeviceActionType.RESUME:
-            return SpeakerPlaybackState.PLAYING
-        case RuleDeviceActionType.OPEN:
-            return DoorPosition.OPEN
-        case RuleDeviceActionType.CLOSE:
-            return DoorPosition.CLOSED
+    return expected_state_for_action_type(action.action)
 
 
 def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | None:

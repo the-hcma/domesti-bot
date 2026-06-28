@@ -4,8 +4,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
 from enum import StrEnum
 from math import sqrt
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, assert_never
+
 from pyproj import Transformer
+
+from app.device_enums import RuleDeviceActionType
 
 # Transform to UTM (a standard meters-based coordinate system)
 
@@ -31,6 +34,25 @@ class SwitchPowerState(StrEnum):
 
     OFF = "off"
     ON = "on"
+
+
+def expected_state_for_action_type(action: RuleDeviceActionType) -> str:
+    """Return the nominal end state label after a successful device action."""
+    match action:
+        case RuleDeviceActionType.TURN_ON:
+            return SwitchPowerState.ON
+        case RuleDeviceActionType.TURN_OFF:
+            return SwitchPowerState.OFF
+        case RuleDeviceActionType.PAUSE:
+            return SpeakerPlaybackState.PAUSED
+        case RuleDeviceActionType.RESUME:
+            return SpeakerPlaybackState.PLAYING
+        case RuleDeviceActionType.OPEN:
+            return DoorPosition.OPEN
+        case RuleDeviceActionType.CLOSE:
+            return DoorPosition.CLOSED
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class Device:
