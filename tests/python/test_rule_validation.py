@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import (
+    AfterSunsetCondition,
     DevicesAnyOffCondition,
     DevicesAnyOnCondition,
     DevicesAnyOpenCondition,
@@ -243,6 +244,30 @@ def test_validate_rule_flags_missing_smtp_when_auth_required() -> None:
     )
     issues = validate_rule(rule, ctx)
     assert any(issue.kind == "missing_smtp" for issue in issues)
+
+
+def test_rule_out_allows_astronomical_schedule_without_cron() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterSunsetCondition(
+                    type="after_sunset",
+                    offset_minutes=-15,
+                    window_end="midnight",
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="astronomical-scheduled",
+        label="Astronomical scheduled",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="scheduled",
+    )
+    assert rule.schedule_cron is None
 
 
 def test_rule_out_requires_schedule_cron_for_scheduled_trigger() -> None:

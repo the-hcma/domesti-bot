@@ -11,9 +11,13 @@ def test_upsert_rule_fire_state_round_trips(tmp_path: Path) -> None:
     db = tmp_path / "discovery.sqlite"
     upsert_rule_fire_state(
         db,
+        effective_schedule_cron="15 17 * * *",
         last_error=None,
         last_fired_at=1_700_000_100.0,
+        next_evaluate_at=1_700_010_000.0,
         rule_id="arrive-home",
+        schedule_materialized_for="2023-11-14",
+        update_schedule_fields=True,
     )
     upsert_rule_fire_state(
         db,
@@ -27,3 +31,6 @@ def test_upsert_rule_fire_state_round_trips(tmp_path: Path) -> None:
     record = rows["arrive-home"]
     assert record.last_fired_at == 1_700_000_100.0
     assert record.last_error == "Device discovery still in progress; actions skipped"
+    assert record.effective_schedule_cron == "15 17 * * *"
+    assert record.next_evaluate_at == 1_700_010_000.0
+    assert record.schedule_materialized_for == "2023-11-14"

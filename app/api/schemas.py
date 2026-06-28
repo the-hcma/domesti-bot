@@ -847,11 +847,32 @@ class RuleOut(BaseModel):
 
     @model_validator(mode="after")
     def _validate_trigger_fields(self) -> Self:
+        from app.astronomical_schedule import extract_astronomical_anchor
+
         cron = (self.schedule_cron or "").strip()
         if self.trigger == "scheduled":
-            validate_schedule_cron_expression(cron)
-            self.schedule_cron = cron
-            return self
+            anchor = extract_astronomical_anchor(self)
+            astronomical_count = sum(
+                1
+                for condition in self.conditions.all
+                if condition.type in ("after_sunset", "before_sunrise")
+            )
+            if astronomical_count > 1:
+                raise ValueError(
+                    "scheduled rules may include at most one top-level "
+                    "after_sunset or before_sunrise condition"
+                )
+            if cron != "":
+                validate_schedule_cron_expression(cron)
+                self.schedule_cron = cron
+                return self
+            if anchor is not None:
+                self.schedule_cron = None
+                return self
+            raise ValueError(
+                "scheduled rules require schedule_cron or a top-level "
+                "after_sunset / before_sunrise condition"
+            )
         if cron != "":
             raise ValueError(
                 "schedule_cron is only allowed when trigger is scheduled"

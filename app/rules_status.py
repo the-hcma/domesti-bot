@@ -27,6 +27,7 @@ from app.automation_rules_loader import (
     load_settings_location,
 )
 from app.cron_schedule import fired_on_same_local_calendar_day
+from app.astronomical_schedule import uses_astronomical_schedule
 from app.presence_store import (
     UserLocationRecord,
     list_user_locations,
@@ -155,6 +156,16 @@ def build_rules_status(
             scheduled_detail = (
                 "Already fired today (next eligible after local midnight)"
             )
+        elif (
+            rule.trigger == "scheduled"
+            and uses_astronomical_schedule(rule)
+            and evaluator is not None
+        ):
+            effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)
+            if effective_cron is not None:
+                scheduled_detail = (
+                    f"Today's astronomical schedule: {effective_cron} (local)"
+                )
         rule_rows.append(
             RuleStatusSummaryOut(
                 condition_currently_true=evaluation.all_met,
