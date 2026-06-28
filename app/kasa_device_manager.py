@@ -261,11 +261,13 @@ class KasaDevice(SwitchDevice):
 
     async def turn_off(self) -> None:
         await self._kDevice.turn_off()
-        self.set_power(self._kDevice.is_on)
+        # Trust the commanded state. python-kasa often leaves ``is_on`` stale
+        # until the next ``update()``; Vizio/Sonos/Tailwind pin cache the same way.
+        self.set_power(False)
 
     async def turn_on(self) -> None:
         await self._kDevice.turn_on()
-        self.set_power(self._kDevice.is_on)
+        self.set_power(True)
 
 
 class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):

@@ -152,6 +152,34 @@ async def test_dispatch_rule_device_actions_turns_on_by_label() -> None:
     assert device.calls == ["on"]
 
 
+class _StaleCacheKasa(_FakeKasa):
+    """Kasa fake whose cache does not update after turn_on (like slow IoT polling)."""
+
+    async def turn_on(self) -> None:
+        self.calls.append("on")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rule_device_actions_uses_expected_state_when_cache_stale_after_success() -> None:
+    device = _StaleCacheKasa("192.168.1.30", "Basement leds", is_on=False)
+    state = _device_state(_kasa_mgr([device]))
+    result = await dispatch_rule_device_actions(
+        state,
+        [
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Basement leds",
+                action=RuleDeviceActionType.TURN_ON,
+            ),
+        ],
+    )
+    assert result.errors == ()
+    outcome = result.action_outcomes[0]
+    assert outcome.before_state == "off"
+    assert outcome.after_state == "on"
+    assert device.calls == ["on"]
+
+
 @pytest.mark.asyncio
 async def test_dispatch_rule_device_actions_collects_unknown_device_error() -> None:
     state = _device_state(_kasa_mgr([]))
