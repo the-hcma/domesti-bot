@@ -8,7 +8,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -27,6 +27,12 @@ from app.api.schemas import (
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
     normalized_rule_notification_emails,
+)
+from app.astronomical_schedule import (
+    materialize_astronomical_cron,
+    parse_schedule_materialized_for,
+    schedule_materialized_for_date,
+    uses_astronomical_schedule,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
 from app.cron_schedule import (
@@ -110,6 +116,7 @@ class GeofenceTransition:
 
 @dataclass(frozen=True)
 class RuleEvaluatorFireState:
+    effective_schedule_cron: str | None = None
     last_error: str | None = None
     last_fired_at: float | None = None
     next_evaluate_at: float | None = None
@@ -117,9 +124,11 @@ class RuleEvaluatorFireState:
 
 @dataclass
 class _RuleRuntimeState:
+    effective_schedule_cron: str | None = None
     last_error: str | None = None
     last_fired_at: float | None = None
     next_evaluate_at: float | None = None
+    schedule_materialized_for: date | None = None
 
 
 class RuleEvaluator:
@@ -148,6 +157,7 @@ class RuleEvaluator:
         self._geofence_presence_episode: dict[tuple[str, str], int] = {}
         self._geofence_was_inside: dict[tuple[str, str], bool] = {}
         self._last_run_at: float | None = None
+        self._last_astronomical_materialization_date: date | None = None
         self._next_sun_check_at: float | None = None
         self._process_lock = asyncio.Lock()
         self._rule_state: dict[str, _RuleRuntimeState] = {}
@@ -172,6 +182,7 @@ class RuleEvaluator:
         if state is None:
             return RuleEvaluatorFireState()
         return RuleEvaluatorFireState(
+            effective_schedule_cron=state.effective_schedule_cron,
             last_error=state.last_error,
             last_fired_at=state.last_fired_at,
             next_evaluate_at=state.next_evaluate_at,
@@ -198,6 +209,12 @@ class RuleEvaluator:
         if state is None:
             return None
         return state.next_evaluate_at
+
+    def effective_schedule_cron_for_rule(self, rule_id: str) -> str | None:
+        state = self._rule_state.get(rule_id)
+        if state is None:
+            return None
+        return state.effective_schedule_cron
 
     @property
     def next_sun_check_at(self) -> float | None:
@@ -330,7 +347,7 @@ class RuleEvaluator:
         *,
         timezone: ZoneInfo,
     ) -> None:
-        cron_expr = (rule.schedule_cron or "").strip()
+        cron_expr = self._resolve_schedule_cron(rule, timezone=timezone)
         if cron_expr == "":
             return
         runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -340,6 +357,8 @@ class RuleEvaluator:
             now,
             timezone,
         )
+        if uses_astronomical_schedule(rule):
+            self._persist_rule_schedule_state(rule.id)
 
     def _apply_persisted_geofence_state(self) -> None:
         """Load geofence transition maps from SQLite persistence."""
@@ -540,7 +559,7 @@ class RuleEvaluator:
         for rule in list_automation_rules():
             if not rule.enabled or rule.trigger != "scheduled":
                 continue
-            cron_expr = (rule.schedule_cron or "").strip()
+            cron_expr = self._resolve_schedule_cron(rule, timezone=timezone)
             if cron_expr == "":
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -850,8 +869,13 @@ class RuleEvaluator:
             return
         for record in list_rule_fire_states(cache_path).values():
             self._rule_state[record.rule_id] = _RuleRuntimeState(
+                effective_schedule_cron=record.effective_schedule_cron,
                 last_error=record.last_error,
                 last_fired_at=record.last_fired_at,
+                next_evaluate_at=record.next_evaluate_at,
+                schedule_materialized_for=parse_schedule_materialized_for(
+                    record.schedule_materialized_for,
+                ),
             )
 
     async def _periodic_loop(self) -> None:
@@ -868,6 +892,7 @@ class RuleEvaluator:
             self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
             try:
                 async with self._process_lock:
+                    self._refresh_astronomical_schedules_for_new_day()
                     await self._evaluate_scheduled_rules()
             except asyncio.CancelledError:
                 raise
@@ -886,6 +911,29 @@ class RuleEvaluator:
             last_error=state.last_error,
             last_fired_at=state.last_fired_at,
             rule_id=rule_id,
+        )
+
+    def _persist_rule_schedule_state(self, rule_id: str) -> None:
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        state = self._rule_state.get(rule_id)
+        if state is None:
+            return
+        materialized_for = (
+            schedule_materialized_for_date(state.schedule_materialized_for)
+            if state.schedule_materialized_for is not None
+            else None
+        )
+        upsert_rule_fire_state(
+            cache_path,
+            effective_schedule_cron=state.effective_schedule_cron,
+            last_error=state.last_error,
+            last_fired_at=state.last_fired_at,
+            next_evaluate_at=state.next_evaluate_at,
+            rule_id=rule_id,
+            schedule_materialized_for=materialized_for,
+            update_schedule_fields=True,
         )
 
     def _persist_geofence_transition_state(
@@ -1178,6 +1226,13 @@ class RuleEvaluator:
         for rule in list_automation_rules():
             if not rule.enabled or rule.trigger != "scheduled":
                 continue
+            if uses_astronomical_schedule(rule):
+                self._ensure_astronomical_schedule_materialized(
+                    rule,
+                    timezone=timezone,
+                    now=now,
+                )
+                continue
             cron_expr = (rule.schedule_cron or "").strip()
             if cron_expr == "":
                 continue
@@ -1189,6 +1244,87 @@ class RuleEvaluator:
                     timezone,
                     due_if_matching=True,
                 )
+
+    def _resolve_schedule_cron(
+        self,
+        rule: RuleOut,
+        *,
+        timezone: ZoneInfo,
+    ) -> str:
+        if uses_astronomical_schedule(rule):
+            now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+            materialized = self._ensure_astronomical_schedule_materialized(
+                rule,
+                timezone=timezone,
+                now=now,
+            )
+            return materialized or ""
+        return (rule.schedule_cron or "").strip()
+
+    def _ensure_astronomical_schedule_materialized(
+        self,
+        rule: RuleOut,
+        *,
+        timezone: ZoneInfo,
+        now: datetime,
+        force: bool = False,
+    ) -> str | None:
+        if not uses_astronomical_schedule(rule):
+            return None
+        runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+        local_date = local_calendar_date(now.timestamp(), timezone)
+        if (
+            not force
+            and runtime.schedule_materialized_for == local_date
+            and runtime.effective_schedule_cron is not None
+            and runtime.next_evaluate_at is not None
+        ):
+            return runtime.effective_schedule_cron
+        settings = load_settings_location()
+        sun = compute_rules_sun_out(settings, now=now)
+        cron_expr = materialize_astronomical_cron(
+            rule,
+            sun=sun,
+            timezone=timezone,
+        )
+        if cron_expr is None:
+            return None
+        runtime.effective_schedule_cron = cron_expr
+        runtime.schedule_materialized_for = local_date
+        runtime.next_evaluate_at = next_scheduled_evaluate_at(
+            cron_expr,
+            now,
+            timezone,
+            due_if_matching=True,
+        )
+        self._persist_rule_schedule_state(rule.id)
+        return cron_expr
+
+    def _refresh_astronomical_schedules_for_new_day(self) -> None:
+        settings = load_settings_location()
+        timezone = ZoneInfo(settings.timezone)
+        now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+        local_date = local_calendar_date(now.timestamp(), timezone)
+        if self._last_astronomical_materialization_date == local_date:
+            return
+        self._last_astronomical_materialization_date = local_date
+        for rule in list_automation_rules():
+            if not rule.enabled or not uses_astronomical_schedule(rule):
+                continue
+            runtime = self._rule_state.get(rule.id)
+            if (
+                runtime is not None
+                and runtime.schedule_materialized_for == local_date
+                and runtime.effective_schedule_cron is not None
+                and runtime.next_evaluate_at is not None
+            ):
+                continue
+            self._ensure_astronomical_schedule_materialized(
+                rule,
+                timezone=timezone,
+                now=now,
+                force=True,
+            )
 
     def _seed_scheduled_dwell_consumed_from_persisted_fire(self) -> None:
         """Reconstruct dwell episode consumption after restart for ongoing streaks."""

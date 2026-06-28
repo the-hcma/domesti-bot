@@ -25,6 +25,7 @@ def apply_legacy_column_migrations(engine: object) -> None:
         _apply_rule_user_location_metadata_migration(conn)
         _apply_rule_user_home_wifi_migration(conn)
         _apply_rule_user_tables_migration(conn)
+        _apply_automation_rule_state_schedule_migration(conn)
 
 
 def _apply_androidtv_friendly_name_migration(conn: Connection) -> None:
@@ -168,6 +169,23 @@ def _apply_rule_user_home_wifi_migration(conn: Connection) -> None:
     for name, sql_type in additions:
         if name not in cols:
             conn.execute(text(f"ALTER TABLE rule_users ADD COLUMN {name} {sql_type}"))
+
+
+def _apply_automation_rule_state_schedule_migration(conn: Connection) -> None:
+    inspector = inspect(conn)
+    if "automation_rule_state" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("automation_rule_state")}
+    additions: list[tuple[str, str]] = [
+        ("next_evaluate_at", "REAL"),
+        ("schedule_materialized_for", "TEXT"),
+        ("effective_schedule_cron", "TEXT"),
+    ]
+    for name, sql_type in additions:
+        if name not in cols:
+            conn.execute(
+                text(f"ALTER TABLE automation_rule_state ADD COLUMN {name} {sql_type}"),
+            )
 
 
 def _apply_rule_user_tables_migration(conn: Connection) -> None:
