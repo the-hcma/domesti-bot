@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
-from urllib.parse import urlparse
+from datetime import UTC, datetime
+from http import HTTPStatus
+from typing import Any, Literal
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -20,6 +22,7 @@ _LOGGER = mytracks_logger(__name__)
 
 _DOMESTI_BOT_CONFIG_PATH = "/api/admin/domesti-bot/config/"
 _DOMESTI_BOT_PAIR_PATH = "/api/admin/domesti-bot/pair/"
+_REQUEST_LOCATION_PATH = "/api/domesti-bot/users/{user_id}/request-location/"
 _USERS_WITH_DEVICES_PATH = "/api/admin/users-with-devices/"
 _WAYPOINTS_PATH = "/api/admin/waypoints/"
 _REQUEST_TIMEOUT_S = 30.0
@@ -32,10 +35,22 @@ class MyTracksSyncError(ValueError):
     """Raised when My Tracks export HTTP or payload parsing fails."""
 
 
+RequestLocationStatus = Literal["accepted", "cooldown", "disabled", "error"]
+
+
+@dataclass(frozen=True)
+class RequestLocationResult:
+    status: RequestLocationStatus
+    cooldown_until_epoch: float | None = None
+    cooldown_until_iso: str | None = None
+    detail: str | None = None
+
+
 @dataclass(frozen=True)
 class DomestiBotConfigFromMyTracks:
     domesti_base_url: str | None = None
     location_updates_enabled: bool | None = None
+    remote_request_location_enabled: bool | None = None
     user_location_test_url: str | None = None
     user_location_update_url: str | None = None
 
@@ -126,11 +141,16 @@ def fetch_mytracks_domesti_config(
     location_updates_enabled = (
         bool(enabled_raw) if enabled_raw is not None else None
     )
+    remote_raw = payload.get("remote_request_location_enabled")
+    remote_request_location_enabled = (
+        bool(remote_raw) if remote_raw is not None else None
+    )
     update_url = _optional_str(payload.get("user_location_update_url"))
     test_url = _optional_str(payload.get("user_location_test_url"))
     return DomestiBotConfigFromMyTracks(
         domesti_base_url=_optional_str(payload.get("domesti_base_url")),
         location_updates_enabled=location_updates_enabled,
+        remote_request_location_enabled=remote_request_location_enabled,
         user_location_test_url=test_url,
         user_location_update_url=update_url,
     )
@@ -223,7 +243,7 @@ def pair_with_my_tracks(
             ) from exc
     finally:
         client.close()
-    if response.status_code in {401, 403}:
+    if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
         message = (
             "My Tracks rejected the admin session during pairing (staff account required)"
         )
@@ -234,7 +254,7 @@ def pair_with_my_tracks(
             message,
         )
         raise MyTracksSyncError(message)
-    if response.status_code == 404:
+    if response.status_code == HTTPStatus.NOT_FOUND:
         message = (
             "My Tracks domesti-bot pair endpoint not found — upgrade my-tracks to a build "
             "with /api/admin/domesti-bot/pair/"
@@ -246,7 +266,7 @@ def pair_with_my_tracks(
             message,
         )
         raise MyTracksSyncError(message)
-    if response.status_code >= 400:
+    if response.status_code >= HTTPStatus.BAD_REQUEST:
         detail = _response_error_detail(response)
         message = f"My Tracks pair returned HTTP {response.status_code}: {detail}"
         _LOGGER.warning(
@@ -288,20 +308,167 @@ def patch_mytracks_location_updates(
             ) from exc
     finally:
         client.close()
-    if response.status_code in {401, 403}:
+    if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
         raise MyTracksSyncError(
             "My Tracks rejected the admin session during location-updates patch"
         )
-    if response.status_code == 404:
+    if response.status_code == HTTPStatus.NOT_FOUND:
         raise MyTracksSyncError(
             "My Tracks domesti-bot config endpoint not found — upgrade my-tracks to a build "
             "with /api/admin/domesti-bot/config/"
         )
-    if response.status_code >= 400:
+    if response.status_code >= HTTPStatus.BAD_REQUEST:
         detail = _response_error_detail(response)
         raise MyTracksSyncError(
             f"My Tracks location-updates patch returned HTTP {response.status_code}: {detail}"
         )
+
+
+def patch_mytracks_remote_request_location(
+    *,
+    base_url: str,
+    enabled: bool,
+    password: str,
+    username: str,
+) -> None:
+    """Enable or disable domesti-bot relay-key reportLocation requests on my-tracks."""
+    client = _login_client(base_url, username=username, password=password)
+    try:
+        csrf = _session_csrf_token(client)
+        try:
+            response = client.patch(
+                _DOMESTI_BOT_CONFIG_PATH,
+                json={"remote_request_location_enabled": enabled},
+                headers={"X-CSRFToken": csrf, "Referer": f"{base_url.rstrip('/')}/"},
+            )
+        except httpx.HTTPError as exc:
+            raise MyTracksSyncError(
+                f"My Tracks remote-request-location patch failed for {base_url}: {exc!r}"
+            ) from exc
+    finally:
+        client.close()
+    if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
+        raise MyTracksSyncError(
+            "My Tracks rejected the admin session during remote-request-location patch"
+        )
+    if response.status_code == HTTPStatus.NOT_FOUND:
+        raise MyTracksSyncError(
+            "My Tracks domesti-bot config endpoint not found — upgrade my-tracks to a build "
+            "with remote_request_location_enabled in /api/admin/domesti-bot/config/"
+        )
+    if response.status_code >= HTTPStatus.BAD_REQUEST:
+        detail = _response_error_detail(response)
+        raise MyTracksSyncError(
+            "My Tracks remote-request-location patch returned HTTP "
+            f"{response.status_code}: {detail}"
+        )
+
+
+async def request_user_location(
+    *,
+    base_url: str,
+    relay_api_key: str,
+    user_id: str,
+    reason: str,
+    rule_id: str | None = None,
+    geofence_id: str | None = None,
+) -> RequestLocationResult:
+    """Ask my-tracks to queue an OwnTracks reportLocation command for ``user_id``."""
+    trimmed_user = user_id.strip()
+    if trimmed_user == "":
+        return RequestLocationResult(
+            status="error",
+            detail="Expected user_id, got empty value",
+        )
+    if relay_api_key.strip() == "":
+        return RequestLocationResult(
+            status="error",
+            detail="Expected relay API key, got empty value",
+        )
+    payload: dict[str, str] = {"reason": reason.strip()}
+    if rule_id is not None and rule_id.strip() != "":
+        payload["rule_id"] = rule_id.strip()
+    if geofence_id is not None and geofence_id.strip() != "":
+        payload["geofence_id"] = geofence_id.strip()
+    path = _REQUEST_LOCATION_PATH.format(user_id=quote(trimmed_user, safe=""))
+    url = f"{base_url.rstrip('/')}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
+            response = await client.post(
+                url,
+                json=payload,
+                headers={"X-Domesti-Api-Key": relay_api_key.strip()},
+            )
+    except httpx.HTTPError as exc:
+        return RequestLocationResult(
+            status="error",
+            detail=f"My Tracks request-location failed for {mytracks_log_host(base_url)}: {exc!r}",
+        )
+    if response.status_code == HTTPStatus.ACCEPTED:
+        cooldown_until_epoch, cooldown_until_iso = _cooldown_from_accepted_response(response)
+        return RequestLocationResult(
+            status="accepted",
+            cooldown_until_epoch=cooldown_until_epoch,
+            cooldown_until_iso=cooldown_until_iso,
+        )
+    if response.status_code == HTTPStatus.CONFLICT:
+        cooldown_until_epoch, cooldown_until_iso = _cooldown_from_error_response(response)
+        return RequestLocationResult(
+            status="cooldown",
+            cooldown_until_epoch=cooldown_until_epoch,
+            cooldown_until_iso=cooldown_until_iso,
+            detail=_response_error_detail(response),
+        )
+    if response.status_code == HTTPStatus.FORBIDDEN:
+        detail = _response_error_detail(response)
+        if "disabled" in detail.lower():
+            return RequestLocationResult(status="disabled", detail=detail)
+        return RequestLocationResult(status="error", detail=detail)
+    if response.status_code >= HTTPStatus.BAD_REQUEST:
+        return RequestLocationResult(
+            status="error",
+            detail=(
+                f"My Tracks request-location returned HTTP {response.status_code}: "
+                f"{_response_error_detail(response)}"
+            ),
+        )
+    return RequestLocationResult(status="error", detail="Unexpected my-tracks response")
+
+
+def _cooldown_from_accepted_response(
+    response: httpx.Response,
+) -> tuple[float | None, str | None]:
+    content_type = response.headers.get("content-type", "")
+    if "json" not in content_type.lower():
+        return None, None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    raw = payload.get("cooldown_until")
+    if not isinstance(raw, str) or raw.strip() == "":
+        return None, None
+    return _parse_iso_timestamp_to_epoch(raw.strip()), raw.strip()
+
+
+def _cooldown_from_error_response(
+    response: httpx.Response,
+) -> tuple[float | None, str | None]:
+    content_type = response.headers.get("content-type", "")
+    if "json" not in content_type.lower():
+        return None, None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    raw = payload.get("cooldown_until")
+    if not isinstance(raw, str) or raw.strip() == "":
+        return None, None
+    return _parse_iso_timestamp_to_epoch(raw.strip()), raw.strip()
 
 
 def _extract_rows(payload: Any, *, key: str) -> list[dict[str, Any]]:
@@ -348,7 +515,7 @@ def _login_client(base_url: str, *, username: str, password: str) -> httpx.Clien
     )
     try:
         login_page = client.get("/login/")
-        if login_page.status_code >= 400:
+        if login_page.status_code >= HTTPStatus.BAD_REQUEST:
             client.close()
             raise MyTracksSyncError(
                 f"My Tracks login page returned HTTP {login_page.status_code} "
@@ -370,7 +537,7 @@ def _login_client(base_url: str, *, username: str, password: str) -> httpx.Clien
         )
         if client.cookies.get("sessionid") is None:
             client.close()
-            if response.status_code == 403:
+            if response.status_code == HTTPStatus.FORBIDDEN:
                 raise MyTracksSyncError(
                     "My Tracks rejected the login CSRF check — verify the domain URL "
                     "matches the server"
@@ -402,17 +569,17 @@ def _parse_export_response(
     base_url: str,
     export_path: str,
 ) -> Any:
-    if response.status_code in {401, 403}:
+    if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
         raise MyTracksSyncError(
             "My Tracks rejected the admin session (staff account required)"
         )
-    if response.status_code == 404:
+    if response.status_code == HTTPStatus.NOT_FOUND:
         raise MyTracksSyncError(
             f"My Tracks export endpoint not found at {export_path} — "
             "upgrade My Tracks to a build with /api/admin/users-with-devices/ "
             "and /api/admin/waypoints/ export routes"
         )
-    if response.status_code >= 400:
+    if response.status_code >= HTTPStatus.BAD_REQUEST:
         raise MyTracksSyncError(
             f"My Tracks export returned HTTP {response.status_code} for {base_url}{export_path}"
         )
@@ -454,6 +621,17 @@ def _parse_geofence(row: dict[str, Any]) -> ExportedGeofence:
         enabled=enabled,
         owntracks_rid=owntracks_rid if owntracks_rid else None,
     )
+
+
+def _parse_iso_timestamp_to_epoch(value: str) -> float | None:
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
 
 
 def _parse_latest_location(row: dict[str, Any]) -> ExportedUserLocation | None:

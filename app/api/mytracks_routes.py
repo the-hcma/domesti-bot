@@ -33,6 +33,7 @@ from app.db.secrets import (
 )
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.mytracks_service import (
+    DomestiBotConfigFromMyTracks,
     ExportedUser,
     MyTracksSyncError,
     build_location_update_webhook_urls,
@@ -55,6 +56,7 @@ from app.mytracks_store import (
     load_location_history_retention,
     load_mytracks_config,
     load_mytracks_pair_status,
+    load_remote_request_location_enabled,
     record_mytracks_geofences_sync,
     record_mytracks_users_sync,
     save_location_history_retention,
@@ -62,6 +64,7 @@ from app.mytracks_store import (
     save_mytracks_pairing,
     set_last_pair_error,
     set_location_updates_accepted,
+    set_remote_request_location_enabled,
 )
 from app.presence_store import (
     UserLocationRecord,
@@ -283,6 +286,20 @@ async def post_mytracks_pair(
             user_location_test_url=test_url,
         ),
     )
+    set_remote_request_location_enabled(cache_path, enabled=None)
+    try:
+        domesti_config = fetch_mytracks_domesti_config(
+            base_url=mytracks_base,
+            password=body.password,
+            username=username,
+        )
+    except MyTracksSyncError:
+        domesti_config = None
+    if domesti_config is not None:
+        set_remote_request_location_enabled(
+            cache_path,
+            enabled=domesti_config.remote_request_location_enabled,
+        )
     _LOGGER.info(
         "pairing complete for %s as %s (HTTP %d)",
         mytracks_log_host(mytracks_base),
@@ -470,26 +487,63 @@ async def post_mytracks_users_sync(
     )
 
 
-def _maybe_mytracks_location_updates_enabled(
+def _maybe_mytracks_domesti_config_from_admin(
     record: MyTracksPairStatusRecord,
     *,
     cache_path: Path,
     password: str | None,
-) -> bool | None:
+) -> DomestiBotConfigFromMyTracks | None:
     if record.paired_at is None:
         return None
     if password is None or password.strip() == "":
         return None
     base_url = normalize_mytracks_base_url(record.domain)
     try:
-        config = fetch_mytracks_domesti_config(
+        return fetch_mytracks_domesti_config(
             base_url=base_url,
             password=password,
             username=record.username,
         )
     except MyTracksSyncError:
         return None
+
+
+def _maybe_mytracks_location_updates_enabled(
+    record: MyTracksPairStatusRecord,
+    *,
+    cache_path: Path,
+    password: str | None,
+) -> bool | None:
+    config = _maybe_mytracks_domesti_config_from_admin(
+        record,
+        cache_path=cache_path,
+        password=password,
+    )
+    if config is None:
+        return None
     return config.location_updates_enabled
+
+
+def _maybe_mytracks_remote_request_location_enabled(
+    record: MyTracksPairStatusRecord,
+    *,
+    cache_path: Path,
+    password: str | None,
+) -> bool | None:
+    cached = load_remote_request_location_enabled(cache_path)
+    if cached is not None and (password is None or password.strip() == ""):
+        return cached
+    config = _maybe_mytracks_domesti_config_from_admin(
+        record,
+        cache_path=cache_path,
+        password=password,
+    )
+    if config is None:
+        return cached
+    remote_enabled = config.remote_request_location_enabled
+    if remote_enabled is not None:
+        set_remote_request_location_enabled(cache_path, enabled=remote_enabled)
+    return remote_enabled
 
 
 def _pair_status_to_schema(
@@ -514,6 +568,13 @@ def _pair_status_to_schema(
             record,
             cache_path=cache_path,
             password=password,
+        ),
+        mytracks_remote_request_location_enabled=(
+            _maybe_mytracks_remote_request_location_enabled(
+                record,
+                cache_path=cache_path,
+                password=password,
+            )
         ),
         last_verify_at=record.last_verify_at,
         last_verify_ok=record.last_verify_ok,

@@ -19,6 +19,7 @@ def apply_legacy_column_migrations(engine: object) -> None:
         _apply_androidtv_friendly_name_migration(conn)
         _apply_androidtv_uuid_model_migration(conn)
         _apply_mytracks_pairing_columns_migration(conn)
+        _apply_mytracks_remote_request_location_migration(conn)
         _apply_mytracks_user_nomenclature_migration(conn)
         _apply_rule_user_geofence_state_last_location_migration(conn)
         _apply_rule_user_location_connection_type_migration(conn)
@@ -70,6 +71,20 @@ def _apply_mytracks_pairing_columns_migration(conn: Connection) -> None:
     for name, sql_type in additions:
         if name not in cols:
             conn.execute(text(f"ALTER TABLE mytracks_settings ADD COLUMN {name} {sql_type}"))
+
+
+def _apply_mytracks_remote_request_location_migration(conn: Connection) -> None:
+    inspector = inspect(conn)
+    if "mytracks_settings" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("mytracks_settings")}
+    if "remote_request_location_enabled" not in cols:
+        conn.execute(
+            text(
+                "ALTER TABLE mytracks_settings "
+                "ADD COLUMN remote_request_location_enabled INTEGER"
+            )
+        )
 
 
 def _apply_mytracks_user_nomenclature_migration(conn: Connection) -> None:

@@ -353,3 +353,29 @@ async def test_accuracy_edge_grace_disabled_when_zero(
     _move_inside(db, clock, accuracy_m=20)
     await evaluator.on_location_update("henrique")
     assert device.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_deferred_edge_invokes_location_request_coordinator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock, db, device, evaluator = _setup_evaluator(
+        tmp_path,
+        monkeypatch,
+        accuracy_edge_grace_s=120,
+    )
+    maybe_request = MagicMock()
+    evaluator._location_request_coordinator.maybe_request = maybe_request
+
+    _move_inside(db, clock, accuracy_m=120)
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+    assert maybe_request.call_count == 1
+
+    clock["now"] += 10.0
+    _move_inside(db, clock, accuracy_m=120, delta_s=10.0)
+    await evaluator.on_location_update("henrique")
+    assert maybe_request.call_count == 2
+    context = maybe_request.call_args.kwargs["context"]
+    assert context.location.accuracy_m == 120

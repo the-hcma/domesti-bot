@@ -343,6 +343,7 @@ export interface MyTracksPairStatusOut {
   location_history_retention: LocationHistoryRetentionOut;
   location_updates_accepted: boolean;
   mytracks_location_updates_enabled: boolean | null;
+  mytracks_remote_request_location_enabled: boolean | null;
   paired_at: string | null;
   user_location_test_url: string | null;
   user_location_update_url: string | null;

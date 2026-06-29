@@ -91,9 +91,16 @@ function applyRetentionToForm(
 function renderPairStatus(statusEl: HTMLElement, status: MyTracksPairStatusOut | null): void {
   if (status?.paired_at) {
     statusEl.hidden = false;
+    const remoteRequests = status.mytracks_remote_request_location_enabled;
+    const remoteLabel = remoteRequests === true
+      ? "Remote location requests: enabled on my-tracks"
+      : remoteRequests === false
+        ? "Remote location requests: disabled on my-tracks"
+        : "Remote location requests: unknown (re-pair with admin password to refresh)";
     setAuditedTimestampLine(statusEl, {
       iso: status.paired_at,
       prefix: "Paired at ",
+      suffix: ` · ${remoteLabel}`,
     });
     return;
   }

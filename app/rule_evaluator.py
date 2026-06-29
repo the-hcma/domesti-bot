@@ -47,6 +47,11 @@ from app.geofence_transition_state_store import (
     upsert_geofence_transition_state,
 )
 from app.location_history_retention import LocationHistoryRetention
+from app.location_request_coordinator import (
+    DeferredAccuracyEdgeSnapshot,
+    LocationRequestContext,
+    LocationRequestCoordinator,
+)
 from app.mytracks_store import load_location_history_retention
 from app.presence_store import (
     UserLocationRecord,
@@ -161,6 +166,10 @@ class RuleEvaluator:
         self._next_sun_check_at: float | None = None
         self._process_lock = asyncio.Lock()
         self._rule_state: dict[str, _RuleRuntimeState] = {}
+        self._location_request_coordinator = LocationRequestCoordinator(
+            cache_path=cache_path,
+            now_fn=self._now_fn,
+        )
         self._scheduled_inside_dwell_consumed: dict[tuple[str, str, str], int] = {}
         self._scheduled_outside_dwell_consumed: dict[tuple[str, str, str], int] = {}
         self._stop = asyncio.Event()
@@ -176,6 +185,27 @@ class RuleEvaluator:
             self._tick_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._tick_task
+
+    def deferred_accuracy_edge_snapshots_for_user(
+        self,
+        user_id: str,
+    ) -> tuple[DeferredAccuracyEdgeSnapshot, ...]:
+        """Return pending deferred accuracy edges for ``user_id``."""
+        snapshots: list[DeferredAccuracyEdgeSnapshot] = []
+        for deferred in self._deferred_accuracy_edges.values():
+            if deferred.user_id != user_id:
+                continue
+            snapshots.append(
+                DeferredAccuracyEdgeSnapshot(
+                    event=deferred.event,
+                    expires_at=deferred.expires_at,
+                    geofence_id=deferred.geofence_id,
+                    observed_at=deferred.observed_at,
+                    rule_id=deferred.rule_id,
+                    user_id=deferred.user_id,
+                )
+            )
+        return tuple(snapshots)
 
     def fire_state_for_rule(self, rule_id: str) -> RuleEvaluatorFireState:
         state = self._rule_state.get(rule_id)
@@ -894,6 +924,7 @@ class RuleEvaluator:
                 async with self._process_lock:
                     self._refresh_astronomical_schedules_for_new_day()
                     await self._evaluate_scheduled_rules()
+                    await self._maybe_request_locations_for_deferred_edges()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1177,8 +1208,40 @@ class RuleEvaluator:
                 log_user_ids=user_id,
                 transitions=transitions,
             )
+        self._location_request_coordinator.maybe_request(
+            user_id,
+            context=LocationRequestContext(
+                deferred_edges=self.deferred_accuracy_edge_snapshots_for_user(user_id),
+                location=location,
+                now=now,
+            ),
+        )
         self._last_run_at = now
         self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
+
+    async def _maybe_request_locations_for_deferred_edges(self) -> None:
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        now = self._now_fn()
+        user_ids = {
+            deferred.user_id for deferred in self._deferred_accuracy_edges.values()
+        }
+        if not user_ids:
+            return
+        locations = list_user_locations(cache_path)
+        for user_id in sorted(user_ids):
+            location = locations.get(user_id)
+            if location is None:
+                continue
+            self._location_request_coordinator.maybe_request(
+                user_id,
+                context=LocationRequestContext(
+                    deferred_edges=self.deferred_accuracy_edge_snapshots_for_user(user_id),
+                    location=location,
+                    now=now,
+                ),
+            )
 
     def _seed_geofence_state(self) -> None:
         """Initialize geofence transition maps from SQLite with one-time history backfill."""

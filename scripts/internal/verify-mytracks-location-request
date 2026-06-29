@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Verify domesti-bot request-location against a live my-tracks deployment."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import getpass
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+_DEFAULT_CACHE_PATH = Path.home() / ".cache/rule-engine/device_discovery.sqlite"
+_DEFAULT_MYTRACKS_DOMAIN = "https://mytracks.hcma.info"
+_DEFAULT_USER_ID = "hcma"
+_VERIFY_STEPS = 4
+
+
+def _ensure_uv() -> None:
+    if os.environ.get("UV_ACTIVE") or "/.venv/" in (sys.executable or ""):
+        return
+    uv = shutil.which("uv")
+    if uv:
+        os.execv(uv, [uv, "run", sys.argv[0], *sys.argv[1:]])
+    print("Expected uv on PATH for verify-mytracks-location-request", file=sys.stderr)
+    raise SystemExit(2)
+
+
+_ensure_uv()
+
+from app.db.secrets import (  # noqa: E402
+    load_mytracks_admin_password_from_db,
+    load_mytracks_relay_api_key_from_db,
+    mytracks_admin_password_stored_in_db,
+)
+from app.mytracks_service import (  # noqa: E402
+    MyTracksSyncError,
+    fetch_mytracks_domesti_config,
+    normalize_mytracks_base_url,
+    patch_mytracks_remote_request_location,
+    request_user_location,
+)
+from app.mytracks_store import (  # noqa: E402
+    load_mytracks_pair_status,
+    load_remote_request_location_enabled,
+)
+
+
+def _log_detail(message: str) -> None:
+    print(f"  {message}")
+
+
+def _log_step(step: int, title: str) -> None:
+    print()
+    print(f"Step {step} of {_VERIFY_STEPS}: {title}")
+
+
+def _log_success(message: str) -> None:
+    print(f"  OK: {message}")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    option_specs: list[tuple[tuple[str, ...], dict[str, object]]] = [
+        (
+            ("--cache-path",),
+            {
+                "default": str(_DEFAULT_CACHE_PATH),
+                "help": f"domesti-bot discovery SQLite (default: {_DEFAULT_CACHE_PATH})",
+            },
+        ),
+        (
+            ("--enable-remote-requests",),
+            {
+                "action": "store_true",
+                "help": "PATCH my-tracks admin config to enable remote request-location",
+            },
+        ),
+        (
+            ("--mytracks-domain",),
+            {
+                "default": _DEFAULT_MYTRACKS_DOMAIN,
+                "help": f"My Tracks HTTPS origin (default: {_DEFAULT_MYTRACKS_DOMAIN})",
+            },
+        ),
+        (
+            ("--no-interactive",),
+            {
+                "action": "store_true",
+                "help": "Do not prompt for admin password when it is not in env or SQLite",
+            },
+        ),
+        (
+            ("--user-id",),
+            {
+                "default": _DEFAULT_USER_ID,
+                "help": f"Roster user id to request (default: {_DEFAULT_USER_ID})",
+            },
+        ),
+        (
+            ("--username",),
+            {
+                "default": os.environ.get("MYTRACKS_ADMIN_USERNAME", "house_meister"),
+                "help": "My Tracks admin username",
+            },
+        ),
+    ]
+    for option_strings, kwargs in sorted(option_specs, key=lambda spec: spec[0][0]):
+        parser.add_argument(*option_strings, **kwargs)
+    return parser.parse_args()
+
+
+def _resolve_admin_password(args: argparse.Namespace, cache_path: Path) -> str:
+    env_password = os.environ.get("MYTRACKS_ADMIN_PASSWORD", "").strip()
+    if env_password != "":
+        return env_password
+    stored = load_mytracks_admin_password_from_db(cache_path)
+    if stored is not None and stored != "":
+        return stored
+    if args.no_interactive or not sys.stdin.isatty():
+        print(
+            "Expected MYTRACKS_ADMIN_PASSWORD, SQLite admin password, or an interactive "
+            "terminal for admin config reads",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    password = getpass.getpass(f"My Tracks admin password ({args.username}): ").strip()
+    if password == "":
+        print("Expected My Tracks admin password, got empty value", file=sys.stderr)
+        raise SystemExit(2)
+    return password
+
+
+async def _request_once(
+    *,
+    base_url: str,
+    relay_key: str,
+    user_id: str,
+) -> dict[str, object]:
+    result = await request_user_location(
+        base_url=base_url,
+        relay_api_key=relay_key,
+        user_id=user_id,
+        reason="accuracy_streak",
+        rule_id="verify-mytracks-location-request",
+        geofence_id="house",
+    )
+    return {
+        "status": result.status,
+        "cooldown_until_iso": result.cooldown_until_iso,
+        "detail": result.detail,
+    }
+
+
+def main() -> int:
+    args = _parse_args()
+    cache_path = Path(args.cache_path).expanduser()
+    if not cache_path.is_file():
+        print(f"Expected discovery cache at {cache_path}", file=sys.stderr)
+        return 2
+
+    try:
+        mytracks_base = normalize_mytracks_base_url(str(args.mytracks_domain))
+    except MyTracksSyncError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    pair = load_mytracks_pair_status(cache_path)
+    if pair is None or pair.paired_at is None:
+        print("domesti-bot is not paired with my-tracks in the discovery cache", file=sys.stderr)
+        return 1
+    try:
+        paired_base = normalize_mytracks_base_url(pair.domain)
+    except MyTracksSyncError as exc:
+        print(f"Invalid paired my-tracks domain in discovery cache: {exc}", file=sys.stderr)
+        return 2
+    if paired_base != mytracks_base:
+        print(
+            f"Refusing to send relay key to {mytracks_base}; "
+            f"discovery cache is paired with {paired_base}",
+            file=sys.stderr,
+        )
+        return 2
+
+    relay_key = load_mytracks_relay_api_key_from_db(cache_path)
+    if relay_key is None or relay_key.strip() == "":
+        print("No my-tracks relay API key in the discovery cache", file=sys.stderr)
+        return 1
+
+    user_id = str(args.user_id).strip()
+    if user_id == "":
+        print("Expected user id, got empty value", file=sys.stderr)
+        return 2
+
+    print("domesti-bot ↔ my-tracks request-location verify")
+    _log_detail(f"my-tracks: {mytracks_base}")
+    _log_detail(f"paired domain: {pair.domain}")
+    _log_detail(f"user_id: {user_id}")
+    _log_detail("relay API key: (loaded from discovery cache; not printed)")
+
+    admin_password: str | None = None
+    env_admin_password_available = os.environ.get("MYTRACKS_ADMIN_PASSWORD", "").strip() != ""
+    if (
+        args.enable_remote_requests
+        or env_admin_password_available
+        or mytracks_admin_password_stored_in_db(cache_path)
+    ):
+        admin_password = _resolve_admin_password(args, cache_path)
+
+    _log_step(1, "Read my-tracks domesti-bot config")
+    if admin_password is None:
+        remote_enabled = load_remote_request_location_enabled(cache_path)
+        _log_detail(f"remote_request_location_enabled cached: {remote_enabled}")
+    else:
+        try:
+            config = fetch_mytracks_domesti_config(
+                base_url=mytracks_base,
+                password=admin_password,
+                username=str(args.username),
+            )
+        except MyTracksSyncError as exc:
+            print(f"  FAILED: {exc}", file=sys.stderr)
+            return 1
+        remote_enabled = config.remote_request_location_enabled
+        _log_detail(
+            f"remote_request_location_enabled: {remote_enabled}"
+            if remote_enabled is not None
+            else "remote_request_location_enabled: (not reported)"
+        )
+        _log_success("my-tracks domesti-bot config readable")
+
+    if args.enable_remote_requests:
+        if admin_password is None:
+            print("  FAILED: --enable-remote-requests requires an admin password", file=sys.stderr)
+            return 1
+        _log_step(2, "Enable remote request-location on my-tracks")
+        try:
+            patch_mytracks_remote_request_location(
+                base_url=mytracks_base,
+                enabled=True,
+                password=admin_password,
+                username=str(args.username),
+            )
+        except MyTracksSyncError as exc:
+            print(f"  FAILED: {exc}", file=sys.stderr)
+            return 1
+        remote_enabled = True
+        _log_success("remote_request_location_enabled patched to true")
+    elif remote_enabled is not True:
+        print()
+        print(
+            "Remote request-location is disabled or unknown. Enable it in the Admin Panel, "
+            "refresh the cached config, or re-run with --enable-remote-requests and an "
+            "admin password.",
+            file=sys.stderr,
+        )
+        return 1
+
+    step_accept = 2 if not args.enable_remote_requests else 3
+    _log_step(step_accept, "POST request-location (expect 202 accepted)")
+    first = asyncio.run(
+        _request_once(base_url=mytracks_base, relay_key=relay_key, user_id=user_id),
+    )
+    _log_detail(json.dumps(first, sort_keys=True))
+    if first["status"] != "accepted":
+        print("  FAILED: expected accepted on first request", file=sys.stderr)
+        return 1
+    if not isinstance(first.get("cooldown_until_iso"), str) or first["cooldown_until_iso"] == "":
+        print("  FAILED: expected cooldown_until in 202 response", file=sys.stderr)
+        return 1
+    _log_success("my-tracks accepted reportLocation request")
+
+    step_cooldown = step_accept + 1
+    _log_step(step_cooldown, "POST request-location again (expect 409 cooldown)")
+    second = asyncio.run(
+        _request_once(base_url=mytracks_base, relay_key=relay_key, user_id=user_id),
+    )
+    _log_detail(json.dumps(second, sort_keys=True))
+    if second["status"] != "cooldown":
+        print("  FAILED: expected cooldown on immediate second request", file=sys.stderr)
+        return 1
+    _log_success("my-tracks enforced per-user cooldown")
+
+    print()
+    print("All checks passed: request-location works against live my-tracks.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
