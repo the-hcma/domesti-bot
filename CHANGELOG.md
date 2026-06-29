@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.0](https://github.com/the-hcma/domesti-bot/compare/v1.8.0...v1.9.0) (2026-06-29)
+
+
+### Features
+
+* on-demand location requests via my-tracks for geofence accuracy ([#361](https://github.com/the-hcma/domesti-bot/issues/361)) ([e0353d9](https://github.com/the-hcma/domesti-bot/commit/e0353d94284d1f7539595a18715a703f27bec609))
+* simplify rule email device action summary ([#359](https://github.com/the-hcma/domesti-bot/issues/359)) ([4d96d71](https://github.com/the-hcma/domesti-bot/commit/4d96d71658ea8ac679b55bbb813473632fe996dc))
+
 ## [1.8.0](https://github.com/the-hcma/domesti-bot/compare/v1.7.0...v1.8.0) (2026-06-28)
 
 
