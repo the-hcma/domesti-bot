@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from http import HTTPStatus
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -16,6 +17,7 @@ from app.mytracks_service import (
     fetch_users_from_my_tracks,
     normalize_mytracks_base_url,
     pair_with_my_tracks,
+    request_user_location,
 )
 
 
@@ -249,6 +251,63 @@ def test_fetch_mytracks_domesti_config_prefers_user_location_url_keys(
     )
     assert config.user_location_update_url == "https://domesti.example.com/live"
     assert config.user_location_test_url == "https://domesti.example.com/test"
+    assert config.remote_request_location_enabled is None
+
+
+@pytest.mark.asyncio
+async def test_request_user_location_parses_accepted_and_cooldown() -> None:
+    class _FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            _ = args, kwargs
+
+        async def __aenter__(self) -> _FakeAsyncClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def post(self, url: str, **kwargs: object) -> httpx.Response:
+            _ = url, kwargs
+            return httpx.Response(
+                HTTPStatus.ACCEPTED,
+                json={
+                    "cooldown_until": "2026-06-28T12:05:00+00:00",
+                    "device_ids": ["henrique/pixel"],
+                    "reason": "deferred_edge",
+                    "requested_at": "2026-06-28T12:00:00+00:00",
+                    "user_cooldown_seconds": 30,
+                    "user_id": "henrique",
+                },
+                request=MagicMock(),
+            )
+
+    with patch("app.mytracks_service.httpx.AsyncClient", _FakeAsyncClient):
+        accepted = await request_user_location(
+            base_url="https://tracks.example.com",
+            relay_api_key="relay-secret",
+            user_id="henrique",
+            reason="deferred_edge",
+        )
+    assert accepted.status == "accepted"
+    assert accepted.cooldown_until_iso == "2026-06-28T12:05:00+00:00"
+
+    class _CooldownClient(_FakeAsyncClient):
+        async def post(self, url: str, **kwargs: object) -> httpx.Response:
+            _ = url, kwargs
+            return httpx.Response(
+                HTTPStatus.CONFLICT,
+                json={"detail": "Location request cooldown active", "cooldown_until": "2026-06-28T12:05:00+00:00"},
+                request=MagicMock(),
+            )
+
+    with patch("app.mytracks_service.httpx.AsyncClient", _CooldownClient):
+        cooldown = await request_user_location(
+            base_url="https://tracks.example.com",
+            relay_api_key="relay-secret",
+            user_id="henrique",
+            reason="deferred_edge",
+        )
+    assert cooldown.status == "cooldown"
 
 
 def test_pair_with_my_tracks_sends_user_location_url_keys(

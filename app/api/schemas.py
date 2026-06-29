@@ -440,6 +440,7 @@ class MyTracksPairStatusOut(BaseModel):
     location_history_retention: LocationHistoryRetentionOut
     location_updates_accepted: bool = True
     mytracks_location_updates_enabled: bool | None = None
+    mytracks_remote_request_location_enabled: bool | None = None
     paired_at: str | None = None
     user_location_test_url: str | None = None
     user_location_update_url: str | None = None

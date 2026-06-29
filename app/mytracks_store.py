@@ -52,9 +52,10 @@ class MyTracksPairStatusRecord:
     location_history_retention: LocationHistoryRetentionRecord
     location_updates_accepted: bool
     paired_at: str | None
+    relay_key_configured: bool
+    remote_request_location_enabled: bool | None
     user_location_test_url: str | None
     user_location_update_url: str | None
-    relay_key_configured: bool
     username: str
 
 
@@ -134,11 +135,23 @@ def load_mytracks_pair_status(path: Path) -> MyTracksPairStatusRecord | None:
             location_history_retention=_retention_record_from_row(row),
             location_updates_accepted=bool(row.location_updates_accepted),
             paired_at=_iso_from_epoch(row.paired_at),
+            relay_key_configured=mytracks_relay_api_key_stored_in_db(path),
+            remote_request_location_enabled=_bool_from_int(
+                row.remote_request_location_enabled,
+            ),
             user_location_test_url=row.user_location_test_url,
             user_location_update_url=row.user_location_update_url,
-            relay_key_configured=mytracks_relay_api_key_stored_in_db(path),
             username=row.username,
         )
+
+
+def load_remote_request_location_enabled(path: Path) -> bool | None:
+    """Return cached my-tracks remote request-location opt-in, if known."""
+    with discovery_session(path) as session:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None or row.remote_request_location_enabled is None:
+            return None
+        return bool(row.remote_request_location_enabled)
 
 
 def record_mytracks_geofences_sync(path: Path, *, count: int) -> MyTracksConfigRecord:
@@ -300,6 +313,20 @@ def set_location_updates_accepted(path: Path, *, accepted: bool) -> MyTracksPair
     if saved is None:
         raise RuntimeError("Expected My Tracks settings after location toggle, got None")
     return saved
+
+
+def set_remote_request_location_enabled(path: Path, *, enabled: bool | None) -> None:
+    """Persist my-tracks remote request-location opt-in from admin config reads."""
+    now = time.time()
+    with discovery_session(path) as session:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None:
+            return
+        if enabled is None:
+            row.remote_request_location_enabled = None
+        else:
+            row.remote_request_location_enabled = 1 if enabled else 0
+        row.updated_at = now
 
 
 def _retention_record_from_row(row: MyTracksSettings) -> LocationHistoryRetentionRecord:
