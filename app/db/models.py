@@ -71,6 +71,19 @@ class MyTracksSettings(Base):
     location_history_max_age_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     location_history_min_keep_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     location_history_unlimited: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    approach_monitoring_distance_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    location_request_device_cooldown_seconds: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    location_request_user_cooldown_by_reason_json: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+    )
+    location_request_user_cooldown_seconds: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
     location_updates_accepted: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     paired_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     remote_request_location_enabled: Mapped[int | None] = mapped_column(Integer, nullable=True)

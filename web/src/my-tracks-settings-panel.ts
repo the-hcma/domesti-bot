@@ -1,10 +1,11 @@
 // My Tracks connection settings (domain + default admin username).
 
-import { HttpError } from "./api.js";
+import { HttpError, api } from "./api.js";
 import { mountMyTracksPairingPanel } from "./my-tracks-pairing-panel.js";
 import { appendMyTracksInstanceText, myTracksHostLabel } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
+import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type { MyTracksSettingsIn } from "./types.js";
 
 function appendLabeledField(
@@ -89,7 +90,77 @@ export async function mountMyTracksSettingsPanel(
   );
   connectionSection.append(fieldsRow);
 
-  container.append(lead, status, connectionSection);
+  const monitoringSection = document.createElement("div");
+  monitoringSection.className = "mytracks-monitoring-section";
+
+  const monitoringHeading = document.createElement("h3");
+  monitoringHeading.className = "settings-dialog-subheading";
+  monitoringHeading.textContent = "Location monitoring";
+
+  const monitoringHelp = document.createElement("p");
+  monitoringHelp.className = "settings-dialog-help";
+  monitoringHelp.textContent =
+    "Start high-cadence location requests when a user is outside a geofence but within " +
+    "this distance of its edge (for geofences used by enabled arrival/departure rules).";
+
+  const approachDistanceInput = document.createElement("input");
+  approachDistanceInput.type = "number";
+  approachDistanceInput.min = "50";
+  approachDistanceInput.step = "1";
+  approachDistanceInput.required = true;
+  approachDistanceInput.value = "500";
+
+  const monitoringFieldsRow = document.createElement("div");
+  monitoringFieldsRow.className = "settings-dialog-field-row mytracks-settings-fields-row";
+  appendLabeledField(
+    monitoringFieldsRow,
+    createFieldLabel("Approach monitoring distance (m)"),
+    approachDistanceInput,
+  );
+
+  const saveMonitoringBtn = document.createElement("button");
+  saveMonitoringBtn.type = "button";
+  saveMonitoringBtn.className = "btn btn-secondary";
+  saveMonitoringBtn.textContent = "Save approach distance";
+
+  monitoringSection.append(
+    monitoringHeading,
+    monitoringHelp,
+    monitoringFieldsRow,
+    saveMonitoringBtn,
+  );
+
+  try {
+    const monitoring = await api.fetchMyTracksLocationMonitoring();
+    approachDistanceInput.value = String(monitoring.approach_distance_m);
+  } catch {
+    // Settings hub still loads when monitoring endpoint is unavailable.
+  }
+
+  saveMonitoringBtn.addEventListener("click", () => {
+    const distance = approachDistanceInput.valueAsNumber;
+    if (!Number.isInteger(distance) || distance < 50 || distance > 10_000) {
+      showErrorToast("Enter an approach monitoring distance between 50 and 10000 meters.");
+      return;
+    }
+    saveMonitoringBtn.disabled = true;
+    void api
+      .patchMyTracksLocationMonitoring({
+        approach_distance_m: distance,
+      })
+      .then((saved) => {
+        approachDistanceInput.value = String(saved.approach_distance_m);
+        showSuccessToast("Approach monitoring distance saved.");
+      })
+      .catch((err: unknown) => {
+        showErrorToast(formatError(err));
+      })
+      .finally(() => {
+        saveMonitoringBtn.disabled = false;
+      });
+  });
+
+  container.append(lead, status, connectionSection, monitoringSection);
 
   const pairingMount = document.createElement("div");
   pairingMount.className = "mytracks-pairing-mount";

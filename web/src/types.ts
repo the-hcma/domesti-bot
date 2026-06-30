@@ -334,6 +334,21 @@ export interface MyTracksRelayKeySettingsOut {
   stored_relay_key: string | null;
 }
 
+export interface LocationRequestRateLimitsOut {
+  device_cooldown_seconds: number;
+  user_cooldown_seconds: number;
+  user_cooldown_seconds_by_reason?: Record<string, number> | null;
+}
+
+export interface MyTracksLocationMonitoringIn {
+  approach_distance_m: number;
+}
+
+export interface MyTracksLocationMonitoringOut {
+  approach_distance_m: number;
+  approach_request_interval_s: number;
+}
+
 export interface MyTracksPairStatusOut {
   domain: string;
   domesti_public_base_url: string | null;
@@ -343,6 +358,7 @@ export interface MyTracksPairStatusOut {
   location_history_retention: LocationHistoryRetentionOut;
   location_updates_accepted: boolean;
   mytracks_location_updates_enabled: boolean | null;
+  mytracks_location_request_rate_limits: LocationRequestRateLimitsOut | null;
   mytracks_remote_request_location_enabled: boolean | null;
   paired_at: string | null;
   user_location_test_url: string | null;

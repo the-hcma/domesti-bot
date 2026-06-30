@@ -17,8 +17,14 @@ from app.location_history_retention import (
     default_location_history_retention,
     location_history_retention_from_settings,
 )
+from app.location_request_rate_limits import (
+    LocationRequestRateLimits,
+    serialize_user_cooldown_by_reason,
+    user_cooldown_by_reason_from_json,
+)
 
 _MYTRACKS_SETTINGS_ID = 1
+DEFAULT_APPROACH_MONITORING_DISTANCE_M = 500
 
 
 @dataclass(frozen=True)
@@ -71,6 +77,8 @@ class MyTracksPairingSave:
 def clear_mytracks_pairing(path: Path) -> None:
     """Clear pairing metadata and delete the stored relay API key."""
     delete_app_secret(path, key="mytracks_relay_api_key")
+    set_location_request_rate_limits(path, limits=None)
+    set_remote_request_location_enabled(path, enabled=None)
     now = time.time()
     with discovery_session(path) as session:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
@@ -91,6 +99,35 @@ def delete_mytracks_settings(path: Path) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is not None:
             session.delete(row)
+
+
+def load_approach_monitoring_distance_m(path: Path) -> int:
+    """Return configured geofence approach corridor distance in meters."""
+    with discovery_session(path) as session:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None or row.approach_monitoring_distance_m is None:
+            return DEFAULT_APPROACH_MONITORING_DISTANCE_M
+        return int(row.approach_monitoring_distance_m)
+
+
+def load_location_request_rate_limits(path: Path) -> LocationRequestRateLimits | None:
+    """Return cached my-tracks location-request rate limits, if known."""
+    with discovery_session(path) as session:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None:
+            return None
+        if (
+            row.location_request_user_cooldown_seconds is None
+            or row.location_request_device_cooldown_seconds is None
+        ):
+            return None
+        return LocationRequestRateLimits(
+            device_cooldown_seconds=int(row.location_request_device_cooldown_seconds),
+            user_cooldown_seconds=int(row.location_request_user_cooldown_seconds),
+            user_cooldown_seconds_by_reason=user_cooldown_by_reason_from_json(
+                row.location_request_user_cooldown_by_reason_json,
+            ),
+        )
 
 
 def load_mytracks_config(path: Path) -> MyTracksConfigRecord | None:
@@ -297,6 +334,46 @@ def set_last_pair_error(path: Path, error: str | None) -> None:
         if row is None:
             return
         row.last_pair_error = error
+        row.updated_at = now
+
+
+def save_approach_monitoring_distance_m(path: Path, *, distance_m: int) -> int:
+    """Persist geofence approach corridor distance in meters."""
+    now = time.time()
+    with discovery_session(path) as session:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None:
+            raise RuntimeError(
+                "Expected My Tracks settings before approach distance save, got None",
+            )
+        row.approach_monitoring_distance_m = distance_m
+        row.updated_at = now
+    return load_approach_monitoring_distance_m(path)
+
+
+def set_location_request_rate_limits(
+    path: Path,
+    *,
+    limits: LocationRequestRateLimits | None,
+) -> None:
+    """Persist my-tracks location-request rate limits from admin config reads."""
+    now = time.time()
+    with discovery_session(path) as session:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None:
+            return
+        if limits is None:
+            row.location_request_user_cooldown_seconds = None
+            row.location_request_device_cooldown_seconds = None
+            row.location_request_user_cooldown_by_reason_json = None
+        else:
+            row.location_request_user_cooldown_seconds = limits.user_cooldown_seconds
+            row.location_request_device_cooldown_seconds = limits.device_cooldown_seconds
+            row.location_request_user_cooldown_by_reason_json = (
+                serialize_user_cooldown_by_reason(
+                    limits.user_cooldown_seconds_by_reason,
+                )
+            )
         row.updated_at = now
 
 

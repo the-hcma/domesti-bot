@@ -206,3 +206,31 @@ def test_post_mytracks_sync_rejects_empty_password(tmp_path: Path) -> None:
         json={"username": "admin", "password": ""},
     )
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_get_location_monitoring_returns_defaults(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    response = client.get("/v1/settings/my-tracks/location-monitoring")
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["approach_distance_m"] == 500
+    assert body["approach_request_interval_s"] == 5.0
+
+
+def test_patch_location_monitoring_persists_distance(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    client.put(
+        "/v1/settings/my-tracks",
+        json={
+            "domain": "https://tracks.example.com",
+            "username": "admin",
+        },
+    )
+    response = client.patch(
+        "/v1/settings/my-tracks/location-monitoring",
+        json={"approach_distance_m": 750},
+    )
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["approach_distance_m"] == 750

@@ -11,6 +11,10 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from app.location_request_rate_limits import (
+    LocationRequestRateLimits,
+    location_request_rate_limits_from_payload,
+)
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.user_names import (
     default_display_name,
@@ -49,10 +53,18 @@ class RequestLocationResult:
 @dataclass(frozen=True)
 class DomestiBotConfigFromMyTracks:
     domesti_base_url: str | None = None
+    location_request_rate_limits: LocationRequestRateLimits | None = None
     location_updates_enabled: bool | None = None
     remote_request_location_enabled: bool | None = None
     user_location_test_url: str | None = None
     user_location_update_url: str | None = None
+
+
+@dataclass(frozen=True)
+class MyTracksPairResult:
+    location_request_rate_limits: LocationRequestRateLimits | None = None
+    remote_request_location_enabled: bool | None = None
+    status_code: int = HTTPStatus.OK
 
 
 @dataclass(frozen=True)
@@ -149,6 +161,7 @@ def fetch_mytracks_domesti_config(
     test_url = _optional_str(payload.get("user_location_test_url"))
     return DomestiBotConfigFromMyTracks(
         domesti_base_url=_optional_str(payload.get("domesti_base_url")),
+        location_request_rate_limits=location_request_rate_limits_from_payload(payload),
         location_updates_enabled=location_updates_enabled,
         remote_request_location_enabled=remote_request_location_enabled,
         user_location_test_url=test_url,
@@ -210,11 +223,8 @@ def pair_with_my_tracks(
     user_location_update_url: str,
     password: str,
     username: str,
-) -> int:
-    """Register domesti-bot webhook URLs and relay secret on my-tracks.
-
-    Returns the HTTP status code on success (typically ``200``).
-    """
+) -> MyTracksPairResult:
+    """Register domesti-bot webhook URLs and relay secret on my-tracks."""
     if api_key.strip() == "":
         raise MyTracksSyncError("Expected relay API key, got empty value")
     _LOGGER.info(
@@ -282,7 +292,22 @@ def pair_with_my_tracks(
         username,
         response.status_code,
     )
-    return response.status_code
+    payload: dict[str, Any] | None = None
+    try:
+        parsed = response.json()
+        if isinstance(parsed, dict):
+            payload = parsed
+    except ValueError:
+        payload = None
+    remote_raw = payload.get("remote_request_location_enabled") if payload else None
+    remote_enabled = bool(remote_raw) if remote_raw is not None else None
+    return MyTracksPairResult(
+        status_code=response.status_code,
+        location_request_rate_limits=(
+            location_request_rate_limits_from_payload(payload) if payload else None
+        ),
+        remote_request_location_enabled=remote_enabled,
+    )
 
 
 def patch_mytracks_location_updates(

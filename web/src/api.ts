@@ -17,6 +17,8 @@ import type {
   LocationHistoryRetentionOut,
   MetaOut,
   MyTracksGeofencesSyncOut,
+  MyTracksLocationMonitoringIn,
+  MyTracksLocationMonitoringOut,
   MyTracksPairIn,
   MyTracksPairStatusOut,
   MyTracksRelayKeySettingsOut,
@@ -236,6 +238,9 @@ export const api = {
   fetchMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut> {
     return call<MyTracksGeofencesSyncOut>("GET", "/v1/rules/geofences/sync-status");
   },
+  fetchMyTracksLocationMonitoring(): Promise<MyTracksLocationMonitoringOut> {
+    return call<MyTracksLocationMonitoringOut>("GET", "/v1/settings/my-tracks/location-monitoring");
+  },
   fetchMyTracksPairStatus(): Promise<MyTracksPairStatusOut | null> {
     return callNullableJson<MyTracksPairStatusOut>("GET", "/v1/settings/my-tracks/pair-status");
   },
@@ -254,6 +259,15 @@ export const api = {
     return call<LocationHistoryRetentionOut>(
       "PATCH",
       "/v1/settings/my-tracks/location-history-retention",
+      body,
+    );
+  },
+  patchMyTracksLocationMonitoring(
+    body: MyTracksLocationMonitoringIn,
+  ): Promise<MyTracksLocationMonitoringOut> {
+    return call<MyTracksLocationMonitoringOut>(
+      "PATCH",
+      "/v1/settings/my-tracks/location-monitoring",
       body,
     );
   },

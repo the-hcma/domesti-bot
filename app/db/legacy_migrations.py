@@ -20,6 +20,7 @@ def apply_legacy_column_migrations(engine: object) -> None:
         _apply_androidtv_uuid_model_migration(conn)
         _apply_mytracks_pairing_columns_migration(conn)
         _apply_mytracks_remote_request_location_migration(conn)
+        _apply_mytracks_location_monitoring_migration(conn)
         _apply_mytracks_user_nomenclature_migration(conn)
         _apply_rule_user_geofence_state_last_location_migration(conn)
         _apply_rule_user_location_connection_type_migration(conn)
@@ -85,6 +86,22 @@ def _apply_mytracks_remote_request_location_migration(conn: Connection) -> None:
                 "ADD COLUMN remote_request_location_enabled INTEGER"
             )
         )
+
+
+def _apply_mytracks_location_monitoring_migration(conn: Connection) -> None:
+    inspector = inspect(conn)
+    if "mytracks_settings" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("mytracks_settings")}
+    additions: list[tuple[str, str]] = [
+        ("approach_monitoring_distance_m", "INTEGER"),
+        ("location_request_device_cooldown_seconds", "INTEGER"),
+        ("location_request_user_cooldown_by_reason_json", "TEXT"),
+        ("location_request_user_cooldown_seconds", "INTEGER"),
+    ]
+    for name, sql_type in additions:
+        if name not in cols:
+            conn.execute(text(f"ALTER TABLE mytracks_settings ADD COLUMN {name} {sql_type}"))
 
 
 def _apply_mytracks_user_nomenclature_migration(conn: Connection) -> None:
