@@ -17,21 +17,11 @@ rh="${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}"
 
 Configure `~/.config/agent-review.env` from `${rh}/etc/agent-review.env.example` (`AGENT_REVIEW_REPORT_TO`, SMTP).
 
-Full loop (exit codes, triage, quota fallback, Bugbot): `${rh}/.cursor/rules/pr-ship-and-review.mdc`.
+Full loop (exit codes, quota fallback, Bugbot): `${rh}/.cursor/rules/pr-ship-and-review.mdc`.
 
 ## 1. Local quality gates (all must pass before submit)
 
-From the stack worktree, after `uv sync --group dev`:
-
-```bash
-uv run pyright
-uv run pytest -m "not integration and not browser" -n auto
-uv run pytest -m browser                    # when web/HTML/layout changed
-shellcheck $(git ls-files scripts | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$')
-cd web && pnpm install --frozen-lockfile && pnpm run check   # when web/ changed
-```
-
-Fix failures before committing. Do not skip hooks or push with failing gates.
+Run this repository's quality gates from the stack worktree (tests, linters, etc.).
 
 ## 2. Commit and submit
 
@@ -50,6 +40,8 @@ Patch title/body if stale: `gh pr edit <n> --title … --body …`
 
 ## 3. Agent review loop
 
+> **Reply before resolve (required):** For every valid agent review thread (Copilot, Bugbot, CodeRabbit, …), post an **on-thread human reply** as the authenticated operator **before** resolving. Exit code **3** means threads **lack a human reply** — resolving without replying is non-compliant.
+
 **Prerequisites:** `gh auth` must be set up for the operator running the loop. Copy
 `${rh}/etc/agent-review.env.example` to `~/.config/agent-review.env` with
 `AGENT_REVIEW_REPORT_TO` and SMTP before `complete`. `complete_ready: true` is
@@ -62,7 +54,22 @@ Prefer the built-in loop:
 "${rh}/scripts/wait-for-agent-review" loop --pr <n>
 ```
 
-When `loop` exits **3**, triage agent threads, push fixes, re-run CI, and start the next iteration.
+When `loop` exits **3**, triage each unaddressed agent thread:
+
+1. Fix in the worktree when actionable (or skip with a brief on-thread reason).
+2. **Reply on-thread** as the authenticated human:
+   ```bash
+   "${rh}/scripts/wait-for-agent-review" reply-thread --thread-id <PRRT_…> --body 'Fixed in abc1234: …'
+   ```
+3. **Resolve only after step 2:**
+   ```bash
+   "${rh}/scripts/wait-for-agent-review" resolve-thread --thread-id <PRRT_…>
+   ```
+   Or batch: `"${rh}/scripts/wait-for-agent-review" resolve-addressed --pr <n>` (requires an existing human reply per thread).
+
+**Never** resolve via raw GraphQL/API without an on-thread human reply first.
+
+Then push fixes, re-run `"${rh}/scripts/dev/post-pr-submission-checks" --pr <n>`, and start the next loop iteration.
 
 When `check` reports `complete_ready: true`:
 
