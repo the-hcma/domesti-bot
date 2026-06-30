@@ -205,7 +205,8 @@ def _apply_rule_user_location_report_times_migration(conn: Connection) -> None:
             conn.execute(
                 text(
                     f"UPDATE {table} "
-                    "SET fix_at = received_at, reported_at = received_at "
+                    "SET fix_at = COALESCE(fix_at, received_at), "
+                    "reported_at = COALESCE(reported_at, received_at) "
                     "WHERE fix_at IS NULL OR reported_at IS NULL"
                 )
             )
