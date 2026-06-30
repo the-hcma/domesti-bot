@@ -242,8 +242,8 @@ class LocationRequestCoordinator:
                     "location request accepted user=%s reason=%s rule_id=%s geofence_id=%s host=%s",
                     trimmed,
                     resolved_reason,
-                    resolved_rule_id or "",
-                    resolved_geofence_id or "",
+                    _location_request_context_log_value(resolved_rule_id),
+                    _location_request_context_log_value(resolved_geofence_id),
                     mytracks_log_host(pair_status.domain),
                 )
                 return
@@ -525,6 +525,13 @@ def _first_edge_rule_for_geofence(
         if geofence_id in collect_rule_geofence_ids(rule):
             return rule.id
     return None
+
+
+def _location_request_context_log_value(value: str | None) -> str:
+    """Format optional my-tracks request context for operator logs."""
+    if value is None or value.strip() == "":
+        return "<not applicable>"
+    return value.strip()
 
 
 def _location_accuracy_passes(
