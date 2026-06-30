@@ -13,14 +13,43 @@ from app.api.schemas import (
     RuleConditionsOut,
     RuleOut,
     RulesSunOut,
+    SettingsLocationOut,
 )
 from app.astronomical_schedule import (
     astronomical_anchor_datetime,
     cron_expression_for_local_datetime,
     extract_astronomical_anchor,
     materialize_astronomical_cron,
+    next_astronomical_repeat_evaluate_at,
+    uses_astronomical_repeat_schedule,
     uses_astronomical_schedule,
 )
+from app.rule_conditions import compute_rules_sun_out
+
+
+def _before_sunrise_rule(*, schedule_cron: str | None) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                BeforeSunriseCondition(
+                    type="before_sunrise",
+                    offset_minutes=0,
+                    window_start="midnight",
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        fire_once_per_local_day=True,
+        id="morning-anchor",
+        label="Morning anchor",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        schedule_cron=schedule_cron,
+        trigger="scheduled",
+    )
 
 
 def _scheduled_rule(*, schedule_cron: str | None) -> RuleOut:
@@ -59,8 +88,18 @@ def test_uses_astronomical_schedule_when_anchor_without_cron() -> None:
     assert uses_astronomical_schedule(_scheduled_rule(schedule_cron=None)) is True
 
 
-def test_uses_astronomical_schedule_false_when_polling_cron_present() -> None:
-    assert uses_astronomical_schedule(_scheduled_rule(schedule_cron="*/10 * * * *")) is False
+def test_uses_astronomical_schedule_when_anchor_with_repeat_cron() -> None:
+    assert uses_astronomical_schedule(_scheduled_rule(schedule_cron="*/10 * * * *")) is True
+
+
+def test_uses_astronomical_repeat_schedule_when_anchor_with_repeat_cron() -> None:
+    assert uses_astronomical_repeat_schedule(
+        _scheduled_rule(schedule_cron="*/10 * * * *"),
+    ) is True
+
+
+def test_uses_astronomical_repeat_schedule_false_without_cron() -> None:
+    assert uses_astronomical_repeat_schedule(_scheduled_rule(schedule_cron=None)) is False
 
 
 def test_astronomical_anchor_datetime_applies_offset_before_sunset() -> None:
@@ -95,6 +134,114 @@ def test_materialize_astronomical_cron_builds_daily_cron_expression() -> None:
         minutes=15,
     )
     assert cron == cron_expression_for_local_datetime(anchor_dt)
+
+
+def test_materialize_astronomical_cron_returns_repeat_cron_when_present() -> None:
+    tz = ZoneInfo("America/New_York")
+    sun = RulesSunOut(
+        is_dark=False,
+        sunrise_at="2023-11-14T11:30:00Z",
+        sunset_at="2023-11-14T22:30:00Z",
+    )
+    cron = materialize_astronomical_cron(
+        _scheduled_rule(schedule_cron="*/10 * * * *"),
+        sun=sun,
+        timezone=tz,
+    )
+    assert cron == "*/10 * * * *"
+
+
+def test_next_astronomical_repeat_evaluate_at_waits_for_anchor_before_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tz = ZoneInfo("America/New_York")
+    settings = SettingsLocationOut(
+        lat=41.194072,
+        lon=-73.8883254,
+        timezone="America/New_York",
+        home_label="Home",
+    )
+    sun = RulesSunOut(
+        is_dark=False,
+        sunrise_at="2023-11-14T11:30:00Z",
+        sunset_at="2023-11-14T22:30:00Z",
+    )
+    monkeypatch.setattr(
+        "app.rule_conditions.compute_rules_sun_out",
+        lambda *args, **kwargs: sun,
+    )
+    anchor = extract_astronomical_anchor(_scheduled_rule(schedule_cron="*/10 * * * *"))
+    assert anchor is not None
+    anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
+    before_anchor = anchor_dt - timedelta(minutes=5)
+    next_at = next_astronomical_repeat_evaluate_at(
+        _scheduled_rule(schedule_cron="*/10 * * * *"),
+        settings=settings,
+        timezone=tz,
+        now=before_anchor,
+    )
+    assert next_at == anchor_dt.timestamp()
+
+
+def test_next_astronomical_repeat_evaluate_at_after_before_sunrise_window_returns_midnight(
+) -> None:
+    tz = ZoneInfo("America/New_York")
+    settings = SettingsLocationOut(
+        lat=41.194072,
+        lon=-73.8883254,
+        timezone="America/New_York",
+        home_label="Home",
+    )
+    rule = _before_sunrise_rule(schedule_cron="*/10 * * * *")
+    anchor = extract_astronomical_anchor(rule)
+    assert anchor is not None
+    local_noon = datetime(2023, 11, 14, 12, 0, tzinfo=tz)
+    sun = compute_rules_sun_out(settings, now=local_noon)
+    anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
+    after_window = anchor_dt + timedelta(minutes=15)
+    next_at = next_astronomical_repeat_evaluate_at(
+        rule,
+        settings=settings,
+        timezone=tz,
+        now=after_window,
+    )
+    expected_midnight = datetime.combine(
+        after_window.date() + timedelta(days=1),
+        datetime.min.time(),
+        tzinfo=tz,
+    )
+    assert next_at == expected_midnight.timestamp()
+
+
+def test_next_astronomical_repeat_evaluate_at_polls_after_anchor() -> None:
+    tz = ZoneInfo("America/New_York")
+    settings = SettingsLocationOut(
+        lat=41.194072,
+        lon=-73.8883254,
+        timezone="America/New_York",
+        home_label="Home",
+    )
+    sun = RulesSunOut(
+        is_dark=False,
+        sunrise_at="2023-11-14T11:30:00Z",
+        sunset_at="2023-11-14T22:30:00Z",
+    )
+    anchor = extract_astronomical_anchor(_scheduled_rule(schedule_cron="*/10 * * * *"))
+    assert anchor is not None
+    anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
+    after_anchor = anchor_dt + timedelta(minutes=3)
+    next_at = next_astronomical_repeat_evaluate_at(
+        _scheduled_rule(schedule_cron="*/10 * * * *"),
+        settings=settings,
+        timezone=tz,
+        now=after_anchor,
+    )
+    from croniter import croniter
+
+    expected = croniter("*/10 * * * *", anchor_dt).get_next(datetime)
+    if expected.tzinfo is None:
+        expected = expected.replace(tzinfo=tz)
+    assert next_at == expected.timestamp()
 
 
 def test_rule_out_allows_astronomical_schedule_without_cron() -> None:
