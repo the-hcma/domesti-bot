@@ -57,15 +57,10 @@ _APPROACH_REQUEST_INTERVAL_S = _env_float(
     5.0,
     minimum=0.0,
 )
-_STALE_CHECK_INTERVAL_S = _env_float(
-    "DOMESTI_LOCATION_STALE_CHECK_INTERVAL_S",
-    60.0,
-    minimum=0.001,
-)
 _STALE_INTERVAL_S = _env_float(
     "DOMESTI_LOCATION_STALE_INTERVAL_S",
     1800.0,
-    minimum=0.0,
+    minimum=1.0,
 )
 ApproachExitReason = Literal["beyond_corridor", "inside_accurate", "no_rules"]
 
@@ -315,7 +310,7 @@ class LocationMonitoringPolicy:
     async def _stale_watchdog_loop(self) -> None:
         while not self._stop.is_set():
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=_STALE_CHECK_INTERVAL_S)
+                await asyncio.wait_for(self._stop.wait(), timeout=_STALE_INTERVAL_S)
                 break
             except TimeoutError:
                 pass
