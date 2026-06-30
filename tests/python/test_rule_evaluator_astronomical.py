@@ -269,3 +269,137 @@ async def test_astronomical_schedule_persists_and_restores_on_restart(
     )
     assert restarted.next_evaluate_at_for_rule("evening-anchor") == next_at
     assert restarted.effective_schedule_cron_for_rule("evening-anchor") == cron
+
+
+def _evening_anchor_repeat_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterSunsetCondition(
+                    type="after_sunset",
+                    offset_minutes=-15,
+                    window_end="midnight",
+                ),
+                AnyConditionsCondition(
+                    type="any",
+                    conditions=[
+                        UsersInsideGeofenceCondition(
+                            type="users_inside_geofence",
+                            geofence_id="house",
+                            user_ids=["henrique"],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Garage",
+                action=RuleDeviceActionType.TURN_ON,
+            ),
+        ],
+        enabled=True,
+        fire_once_per_local_day=True,
+        id="evening-anchor-repeat",
+        label="Evening anchor repeat",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        schedule_cron="*/10 * * * *",
+        trigger="scheduled",
+    )
+
+
+@pytest.mark.asyncio
+async def test_astronomical_repeat_rule_fires_after_anchor_when_home_arrives_later(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _evening_anchor_repeat_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    monkeypatch.setattr(
+        "app.rule_evaluator.compute_rules_sun_out",
+        lambda *args, **kwargs: _mock_sun_for_nov_14_2023(),
+    )
+
+    tz = ZoneInfo("America/New_York")
+    anchor_local = datetime.fromisoformat("2023-11-14T22:30:00Z").astimezone(
+        tz,
+    ) - timedelta(minutes=15)
+    clock = {"now": anchor_local.timestamp()}
+
+    from app.presence_store import UserLocationRecord, upsert_user_location
+    from app.location_history_retention import default_location_history_retention
+    from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
+
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Test",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    device = _FakeKasa("192.168.1.10", "Garage")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    await evaluator._evaluate_scheduled_rules()
+    assert device.calls == []
+
+    from croniter import croniter
+
+    next_tick = croniter("*/10 * * * *", anchor_local).get_next(datetime)
+    if next_tick.tzinfo is None:
+        next_tick = next_tick.replace(tzinfo=tz)
+    clock["now"] = next_tick.timestamp()
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            received_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+
+    await evaluator._evaluate_scheduled_rules()
+    assert device.calls == ["on"]

@@ -27,7 +27,12 @@ from app.automation_rules_loader import (
     load_settings_location,
 )
 from app.cron_schedule import fired_on_same_local_calendar_day
-from app.astronomical_schedule import uses_astronomical_schedule
+from app.astronomical_schedule import (
+    astronomical_anchor_datetime,
+    extract_astronomical_anchor,
+    uses_astronomical_repeat_schedule,
+    uses_astronomical_schedule,
+)
 from app.presence_store import (
     UserLocationRecord,
     list_user_locations,
@@ -156,6 +161,29 @@ def build_rules_status(
             scheduled_detail = (
                 "Already fired today (next eligible after local midnight)"
             )
+        elif (
+            rule.trigger == "scheduled"
+            and uses_astronomical_repeat_schedule(rule)
+            and evaluator is not None
+        ):
+            effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)
+            anchor = extract_astronomical_anchor(rule)
+            if effective_cron is not None and anchor is not None:
+                anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
+                display_hour = anchor_dt.hour % 12 or 12
+                suffix = "AM" if anchor_dt.hour < 12 else "PM"
+                anchor_label = f"{display_hour}:{anchor_dt.minute:02d} {suffix}"
+                if anchor.condition_type == "after_sunset":
+                    window_label = "local midnight"
+                    scheduled_detail = (
+                        f"Evaluates every {effective_cron} from {anchor_label} until "
+                        f"{window_label}"
+                    )
+                else:
+                    scheduled_detail = (
+                        f"Evaluates every {effective_cron} from local midnight until "
+                        f"{anchor_label}"
+                    )
         elif (
             rule.trigger == "scheduled"
             and uses_astronomical_schedule(rule)

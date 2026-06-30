@@ -29,9 +29,12 @@ from app.api.schemas import (
     normalized_rule_notification_emails,
 )
 from app.astronomical_schedule import (
+    astronomical_repeat_cron,
     materialize_astronomical_cron,
+    next_astronomical_repeat_evaluate_at,
     parse_schedule_materialized_for,
     schedule_materialized_for_date,
+    uses_astronomical_repeat_schedule,
     uses_astronomical_schedule,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
@@ -389,11 +392,21 @@ class RuleEvaluator:
         *,
         timezone: ZoneInfo,
     ) -> None:
+        runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+        now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+        if uses_astronomical_repeat_schedule(rule):
+            settings = load_settings_location()
+            runtime.next_evaluate_at = next_astronomical_repeat_evaluate_at(
+                rule,
+                settings=settings,
+                timezone=timezone,
+                now=now,
+            )
+            self._persist_rule_schedule_state(rule.id)
+            return
         cron_expr = self._resolve_schedule_cron(rule, timezone=timezone)
         if cron_expr == "":
             return
-        runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
-        now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
         runtime.next_evaluate_at = next_scheduled_evaluate_at(
             cron_expr,
             now,
@@ -606,12 +619,21 @@ class RuleEvaluator:
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
             if runtime.next_evaluate_at is None:
-                runtime.next_evaluate_at = next_scheduled_evaluate_at(
-                    cron_expr,
-                    now,
-                    timezone,
-                    due_if_matching=True,
-                )
+                if uses_astronomical_repeat_schedule(rule):
+                    runtime.next_evaluate_at = next_astronomical_repeat_evaluate_at(
+                        rule,
+                        settings=settings,
+                        timezone=timezone,
+                        now=now,
+                        due_if_inside_window=True,
+                    )
+                else:
+                    runtime.next_evaluate_at = next_scheduled_evaluate_at(
+                        cron_expr,
+                        now,
+                        timezone,
+                        due_if_matching=True,
+                    )
             if runtime.next_evaluate_at > now_epoch:
                 continue
             log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
@@ -1331,6 +1353,9 @@ class RuleEvaluator:
         *,
         timezone: ZoneInfo,
     ) -> str:
+        repeat_cron = astronomical_repeat_cron(rule)
+        if uses_astronomical_schedule(rule) and repeat_cron is not None:
+            return repeat_cron
         if uses_astronomical_schedule(rule):
             now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
             materialized = self._ensure_astronomical_schedule_materialized(
@@ -1371,12 +1396,21 @@ class RuleEvaluator:
             return None
         runtime.effective_schedule_cron = cron_expr
         runtime.schedule_materialized_for = local_date
-        runtime.next_evaluate_at = next_scheduled_evaluate_at(
-            cron_expr,
-            now,
-            timezone,
-            due_if_matching=True,
-        )
+        if uses_astronomical_repeat_schedule(rule):
+            runtime.next_evaluate_at = next_astronomical_repeat_evaluate_at(
+                rule,
+                settings=settings,
+                timezone=timezone,
+                now=now,
+                due_if_inside_window=True,
+            )
+        else:
+            runtime.next_evaluate_at = next_scheduled_evaluate_at(
+                cron_expr,
+                now,
+                timezone,
+                due_if_matching=True,
+            )
         self._persist_rule_schedule_state(rule.id)
         return cron_expr
 
