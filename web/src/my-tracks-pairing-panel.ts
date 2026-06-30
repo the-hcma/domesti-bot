@@ -88,20 +88,64 @@ function applyRetentionToForm(
   });
 }
 
-function renderPairStatus(statusEl: HTMLElement, status: MyTracksPairStatusOut | null): void {
+function effectiveUserCooldownSeconds(
+  limits: MyTracksPairStatusOut["mytracks_location_request_rate_limits"],
+  reason: string,
+): number | null {
+  if (limits === null) {
+    return null;
+  }
+  const tiered = limits.user_cooldown_seconds_by_reason?.[reason];
+  return tiered ?? limits.user_cooldown_seconds;
+}
+
+function renderPairStatus(
+  statusEl: HTMLElement,
+  status: MyTracksPairStatusOut | null,
+  approachRequestIntervalS: number | null,
+): void {
   if (status?.paired_at) {
     statusEl.hidden = false;
+    statusEl.replaceChildren();
     const remoteRequests = status.mytracks_remote_request_location_enabled;
     const remoteLabel = remoteRequests === true
       ? "Remote location requests: enabled on my-tracks"
       : remoteRequests === false
         ? "Remote location requests: disabled on my-tracks"
         : "Remote location requests: unknown (re-pair with admin password to refresh)";
-    setAuditedTimestampLine(statusEl, {
+    const pairedLine = document.createElement("span");
+    setAuditedTimestampLine(pairedLine, {
       iso: status.paired_at,
       prefix: "Paired at ",
       suffix: ` · ${remoteLabel}`,
     });
+    statusEl.append(pairedLine);
+    const rateLimits = status.mytracks_location_request_rate_limits;
+    const limitsLine = document.createElement("span");
+    limitsLine.className = "settings-dialog-help";
+    if (rateLimits === null) {
+      limitsLine.textContent =
+        "Location request cooldowns (my-tracks): unknown (re-pair with admin password to refresh)";
+    } else {
+      limitsLine.textContent =
+        `Location request cooldowns (my-tracks): per-user ${String(rateLimits.user_cooldown_seconds)} s · ` +
+        `per-device ${String(rateLimits.device_cooldown_seconds)} s`;
+    }
+    statusEl.append(document.createElement("br"), limitsLine);
+    if (approachRequestIntervalS !== null && rateLimits !== null) {
+      const approachCooldown = effectiveUserCooldownSeconds(rateLimits, "approach_monitoring");
+      if (
+        approachCooldown !== null
+        && approachRequestIntervalS < approachCooldown
+      ) {
+        const warn = document.createElement("span");
+        warn.className = "settings-dialog-help";
+        warn.textContent =
+          `Approach monitoring is configured for ${String(approachRequestIntervalS)} s requests, ` +
+          `but my-tracks allows at most one per-user request every ${String(approachCooldown)} s.`;
+        statusEl.append(document.createElement("br"), warn);
+      }
+    }
     return;
   }
   if (status?.last_pair_error) {
@@ -366,6 +410,7 @@ export async function mountMyTracksPairingPanel(
   container.append(section);
 
   let pairStatus: MyTracksPairStatusOut | null = null;
+  let approachRequestIntervalS: number | null = null;
   let savedRetention: LocationHistoryRetentionIn | null = null;
   let storedConnection: MyTracksSettingsOut | null = null;
   let storedRelayKey: string | null = null;
@@ -430,17 +475,19 @@ export async function mountMyTracksPairingPanel(
 
   async function refreshStatus(): Promise<void> {
     try {
-      const [nextPairStatus, nextConnection] = await Promise.all([
+      const [nextPairStatus, nextConnection, monitoring] = await Promise.all([
         api.fetchMyTracksPairStatus(),
         api.fetchMyTracksSettings(),
+        api.fetchMyTracksLocationMonitoring().catch(() => null),
       ]);
       pairStatus = nextPairStatus;
       storedConnection = nextConnection;
+      approachRequestIntervalS = monitoring?.approach_request_interval_s ?? null;
       if (pairStatus?.location_history_retention) {
         savedRetention = { ...pairStatus.location_history_retention };
         applyRetentionToForm(pairStatus.location_history_retention, retentionControls);
       }
-      renderPairStatus(status, pairStatus);
+      renderPairStatus(status, pairStatus, approachRequestIntervalS);
       updatePairButtonLabel(pairBtn, pairStatus);
       if (pairStatus?.paired_at) {
         const relaySettings = await api.fetchMyTracksRelayKeySettings();
@@ -488,7 +535,7 @@ export async function mountMyTracksPairingPanel(
         pairStatus = await api.postMyTracksPair(payload);
         storedConnection = savedConnection;
         savedRetention = { ...pairStatus.location_history_retention };
-        renderPairStatus(status, pairStatus);
+        renderPairStatus(status, pairStatus, approachRequestIntervalS);
         updatePairButtonLabel(pairBtn, pairStatus);
         const relaySettings = await api.fetchMyTracksRelayKeySettings();
         storedRelayKey = relaySettings.stored_relay_key;
@@ -541,7 +588,7 @@ export async function mountMyTracksPairingPanel(
           storedConnection = null;
           storedRelayKey = null;
           savedRetention = null;
-          renderPairStatus(status, pairStatus);
+          renderPairStatus(status, pairStatus, approachRequestIntervalS);
           updatePairButtonLabel(pairBtn, pairStatus);
           applyRelayKeyDisplay();
           applyRetentionToForm(

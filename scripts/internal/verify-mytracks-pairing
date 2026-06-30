@@ -359,7 +359,7 @@ def main() -> int:
     except Exception as exc:
         print(f"  FAILED: unexpected pairing error: {exc}", file=sys.stderr)
         return 1
-    _log_success(f"my-tracks accepted pairing (HTTP {pair_status})")
+    _log_success(f"my-tracks accepted pairing (HTTP {pair_status.status_code})")
 
     _log_step(2, "Confirm my-tracks stored configuration")
     try:

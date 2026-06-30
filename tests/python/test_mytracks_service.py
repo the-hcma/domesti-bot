@@ -11,6 +11,7 @@ import pytest
 from app.mytracks_service import (
     ExportedGeofence,
     ExportedUser,
+    MyTracksPairResult,
     MyTracksSyncError,
     fetch_geofences_from_my_tracks,
     fetch_mytracks_domesti_config,
@@ -353,7 +354,7 @@ def test_pair_with_my_tracks_sends_user_location_url_keys(
         password="secret",
         username="admin",
     )
-    assert status == 200
+    assert status.status_code == HTTPStatus.OK
     assert posted_json["user_location_update_url"] == (
         "https://domesti.example.com/v1/webhooks/location_update"
     )

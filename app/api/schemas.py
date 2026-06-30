@@ -383,6 +383,27 @@ class LocationHistoryRetentionOut(BaseModel):
     unlimited: bool
 
 
+class LocationRequestRateLimitsOut(BaseModel):
+    """my-tracks location-request cooldowns cached after pair/re-pair."""
+
+    device_cooldown_seconds: int
+    user_cooldown_seconds: int
+    user_cooldown_seconds_by_reason: dict[str, int] | None = None
+
+
+class MyTracksLocationMonitoringIn(BaseModel):
+    """Body for updating proactive location monitoring settings."""
+
+    approach_distance_m: int = Field(ge=50, le=10_000)
+
+
+class MyTracksLocationMonitoringOut(BaseModel):
+    """Proactive location monitoring settings for my-tracks integration."""
+
+    approach_distance_m: int
+    approach_request_interval_s: float
+
+
 class MyTracksGeofencesSyncOut(BaseModel):
     """Result of a geofence sync pull from My Tracks."""
 
@@ -440,6 +461,7 @@ class MyTracksPairStatusOut(BaseModel):
     location_history_retention: LocationHistoryRetentionOut
     location_updates_accepted: bool = True
     mytracks_location_updates_enabled: bool | None = None
+    mytracks_location_request_rate_limits: LocationRequestRateLimitsOut | None = None
     mytracks_remote_request_location_enabled: bool | None = None
     paired_at: str | None = None
     user_location_test_url: str | None = None

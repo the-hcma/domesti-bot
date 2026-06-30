@@ -18,9 +18,12 @@ from app.db.secrets import (
     load_mytracks_relay_api_key_from_db,
     save_mytracks_relay_api_key_to_db,
 )
+from app.mytracks_service import MyTracksPairResult
 from app.mytracks_store import load_mytracks_pair_status
 from app.presence_store import list_user_locations
 from app.rules_store import UserRecord, replace_users
+
+_PAIR_OK = MyTracksPairResult(status_code=HTTPStatus.OK)
 
 _LOCATION_UPDATE_PAYLOAD = {
     "user_id": "henrique",
@@ -341,7 +344,10 @@ def test_location_update_test_webhook_accepts_unknown_user(
     assert list_user_locations(db) == {}
 
 
-@patch("app.api.mytracks_routes.pair_with_my_tracks")
+@patch(
+    "app.api.mytracks_routes.pair_with_my_tracks",
+    return_value=_PAIR_OK,
+)
 def test_post_mytracks_pair_persists_relay_key_and_status(
     pair_mock: object,
     tmp_path: Path,
@@ -386,7 +392,7 @@ def test_patch_location_updates_returns_dedicated_response(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    with patch("app.api.mytracks_routes.pair_with_my_tracks"):
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
         client.post(
             "/v1/settings/my-tracks/pair",
             json={
@@ -413,7 +419,7 @@ def test_location_update_webhook_returns_503_when_emergency_switch_off(
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
     _seed_user(db)
-    with patch("app.api.mytracks_routes.pair_with_my_tracks"):
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
         client.post(
             "/v1/settings/my-tracks/pair",
             json={
@@ -443,7 +449,7 @@ def test_patch_location_history_retention_updates_policy(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=200):
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
         client.post(
             "/v1/settings/my-tracks/pair",
             json={
@@ -493,7 +499,7 @@ def test_location_update_test_webhook_works_when_emergency_switch_off(
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
     _seed_user(db)
-    with patch("app.api.mytracks_routes.pair_with_my_tracks"):
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
         client.post(
             "/v1/settings/my-tracks/pair",
             json={
@@ -520,7 +526,7 @@ def test_post_mytracks_pair_uses_forwarded_public_url(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=200):
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
         response = client.post(
             "/v1/settings/my-tracks/pair",
             headers={
@@ -547,7 +553,7 @@ def test_get_mytracks_relay_key_returns_stored_secret(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=200):
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
         client.post(
             "/v1/settings/my-tracks/pair",
             json={
@@ -571,7 +577,7 @@ def test_delete_mytracks_pair_clears_relay_key(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=200):
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
         client.post(
             "/v1/settings/my-tracks/pair",
             json={

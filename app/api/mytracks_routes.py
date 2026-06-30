@@ -11,7 +11,10 @@ from fastapi import APIRouter, HTTPException, Request
 from app.api.schemas import (
     LocationHistoryRetentionIn,
     LocationHistoryRetentionOut,
+    LocationRequestRateLimitsOut,
     MyTracksGeofencesSyncOut,
+    MyTracksLocationMonitoringIn,
+    MyTracksLocationMonitoringOut,
     MyTracksLocationUpdatesIn,
     MyTracksLocationUpdatesOut,
     MyTracksPairIn,
@@ -31,6 +34,8 @@ from app.db.secrets import (
     save_mytracks_relay_api_key_to_db,
     secrets_key_configured,
 )
+from app.location_monitoring_policy import approach_request_interval_s
+from app.location_request_rate_limits import LocationRequestRateLimits
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.mytracks_service import (
     DomestiBotConfigFromMyTracks,
@@ -40,6 +45,7 @@ from app.mytracks_service import (
     fetch_geofences_from_my_tracks,
     fetch_mytracks_domesti_config,
     fetch_users_from_my_tracks,
+    MyTracksPairResult,
     normalize_mytracks_base_url,
     normalize_public_base_url,
     pair_with_my_tracks,
@@ -53,16 +59,20 @@ from app.mytracks_store import (
     MyTracksPairingSave,
     clear_mytracks_pairing,
     delete_mytracks_settings,
+    load_approach_monitoring_distance_m,
     load_location_history_retention,
+    load_location_request_rate_limits,
     load_mytracks_config,
     load_mytracks_pair_status,
     load_remote_request_location_enabled,
     record_mytracks_geofences_sync,
     record_mytracks_users_sync,
+    save_approach_monitoring_distance_m,
     save_location_history_retention,
     save_mytracks_config,
     save_mytracks_pairing,
     set_last_pair_error,
+    set_location_request_rate_limits,
     set_location_updates_accepted,
     set_remote_request_location_enabled,
 )
@@ -144,6 +154,42 @@ async def get_mytracks_relay_key_settings(request: Request) -> MyTracksRelayKeyS
     except SecretsDecryptError:
         relay_key = None
     return MyTracksRelayKeySettingsOut(configured=True, stored_relay_key=relay_key)
+
+
+@settings_router.get(
+    "/my-tracks/location-monitoring",
+    response_model=MyTracksLocationMonitoringOut,
+)
+async def get_mytracks_location_monitoring(
+    request: Request,
+) -> MyTracksLocationMonitoringOut:
+    """Return proactive location monitoring settings."""
+    cache_path = _require_discovery_cache(request)
+    return MyTracksLocationMonitoringOut(
+        approach_distance_m=load_approach_monitoring_distance_m(cache_path),
+        approach_request_interval_s=approach_request_interval_s(),
+    )
+
+
+@settings_router.patch(
+    "/my-tracks/location-monitoring",
+    response_model=MyTracksLocationMonitoringOut,
+)
+async def patch_mytracks_location_monitoring_route(
+    body: MyTracksLocationMonitoringIn,
+    request: Request,
+) -> MyTracksLocationMonitoringOut:
+    """Update geofence approach monitoring distance."""
+    cache_path = _require_discovery_cache(request)
+    _require_mytracks_config(request)
+    saved_distance_m = save_approach_monitoring_distance_m(
+        cache_path,
+        distance_m=body.approach_distance_m,
+    )
+    return MyTracksLocationMonitoringOut(
+        approach_distance_m=saved_distance_m,
+        approach_request_interval_s=approach_request_interval_s(),
+    )
 
 
 @settings_router.patch(
@@ -251,7 +297,7 @@ async def post_mytracks_pair(
             detail=str(exc),
         ) from exc
     try:
-        pair_status = pair_with_my_tracks(
+        pair_result = pair_with_my_tracks(
             api_key=relay_key,
             base_url=mytracks_base,
             domesti_base_url=domesti_public,
@@ -287,6 +333,7 @@ async def post_mytracks_pair(
         ),
     )
     set_remote_request_location_enabled(cache_path, enabled=None)
+    set_location_request_rate_limits(cache_path, limits=None)
     try:
         domesti_config = fetch_mytracks_domesti_config(
             base_url=mytracks_base,
@@ -295,16 +342,16 @@ async def post_mytracks_pair(
         )
     except MyTracksSyncError:
         domesti_config = None
-    if domesti_config is not None:
-        set_remote_request_location_enabled(
-            cache_path,
-            enabled=domesti_config.remote_request_location_enabled,
-        )
+    _cache_domesti_admin_config(
+        cache_path,
+        domesti_config=domesti_config,
+        pair_result=pair_result,
+    )
     _LOGGER.info(
         "pairing complete for %s as %s (HTTP %d)",
         mytracks_log_host(mytracks_base),
         username,
-        pair_status,
+        pair_result.status_code,
     )
     return _pair_status_to_schema(saved, cache_path=cache_path)
 
@@ -487,6 +534,32 @@ async def post_mytracks_users_sync(
     )
 
 
+def _cache_domesti_admin_config(
+    cache_path: Path,
+    *,
+    domesti_config: DomestiBotConfigFromMyTracks | None,
+    pair_result: MyTracksPairResult | None = None,
+) -> None:
+    limits: LocationRequestRateLimits | None = None
+    remote_enabled: bool | None = None
+    if domesti_config is not None:
+        limits = domesti_config.location_request_rate_limits
+        remote_enabled = domesti_config.remote_request_location_enabled
+    if pair_result is not None:
+        if pair_result.location_request_rate_limits is not None:
+            limits = pair_result.location_request_rate_limits
+        if pair_result.remote_request_location_enabled is not None:
+            remote_enabled = pair_result.remote_request_location_enabled
+    if remote_enabled is not None:
+        set_remote_request_location_enabled(cache_path, enabled=remote_enabled)
+    if limits is not None:
+        set_location_request_rate_limits(cache_path, limits=limits)
+
+
+def _cached_rate_limits_out(cache_path: Path) -> LocationRequestRateLimitsOut | None:
+    return _rate_limits_out(load_location_request_rate_limits(cache_path))
+
+
 def _maybe_mytracks_domesti_config_from_admin(
     record: MyTracksPairStatusRecord,
     *,
@@ -543,6 +616,11 @@ def _maybe_mytracks_remote_request_location_enabled(
     remote_enabled = config.remote_request_location_enabled
     if remote_enabled is not None:
         set_remote_request_location_enabled(cache_path, enabled=remote_enabled)
+    if config.location_request_rate_limits is not None:
+        set_location_request_rate_limits(
+            cache_path,
+            limits=config.location_request_rate_limits,
+        )
     return remote_enabled
 
 
@@ -552,6 +630,11 @@ def _pair_status_to_schema(
     cache_path: Path,
     password: str | None = None,
 ) -> MyTracksPairStatusOut:
+    remote_request_enabled = _maybe_mytracks_remote_request_location_enabled(
+        record,
+        cache_path=cache_path,
+        password=password,
+    )
     return MyTracksPairStatusOut(
         paired_at=record.paired_at,
         domain=record.domain,
@@ -569,13 +652,8 @@ def _pair_status_to_schema(
             cache_path=cache_path,
             password=password,
         ),
-        mytracks_remote_request_location_enabled=(
-            _maybe_mytracks_remote_request_location_enabled(
-                record,
-                cache_path=cache_path,
-                password=password,
-            )
-        ),
+        mytracks_location_request_rate_limits=_cached_rate_limits_out(cache_path),
+        mytracks_remote_request_location_enabled=remote_request_enabled,
         last_verify_at=record.last_verify_at,
         last_verify_ok=record.last_verify_ok,
         last_pair_error=record.last_pair_error,
@@ -661,6 +739,18 @@ def _require_secrets_key_for_pairing() -> None:
                 "DOMESTI_BOT_SECRETS_KEY"
             ),
         )
+
+
+def _rate_limits_out(
+    limits: LocationRequestRateLimits | None,
+) -> LocationRequestRateLimitsOut | None:
+    if limits is None:
+        return None
+    return LocationRequestRateLimitsOut(
+        device_cooldown_seconds=limits.device_cooldown_seconds,
+        user_cooldown_seconds=limits.user_cooldown_seconds,
+        user_cooldown_seconds_by_reason=limits.user_cooldown_seconds_by_reason,
+    )
 
 
 def _retention_record_to_schema(

@@ -16,6 +16,7 @@ from app.db.secrets import SecretsDecryptError, load_mytracks_relay_api_key_from
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.mytracks_service import request_user_location
 from app.mytracks_store import (
+    MyTracksPairStatusRecord,
     load_mytracks_pair_status,
     load_remote_request_location_enabled,
     set_remote_request_location_enabled,
@@ -34,8 +35,10 @@ from app.wifi_home_presence import wifi_home_geofence_ids
 _LOGGER = mytracks_logger(__name__)
 _LOCATION_REQUEST_REASON = Literal[
     "accuracy_streak",
+    "approach_monitoring",
     "boundary_proximity",
     "deferred_edge",
+    "stale_watchdog",
 ]
 DeferredGeofenceEvent = Literal["entered", "left"]
 
@@ -76,11 +79,19 @@ class LocationRequestCoordinator:
         *,
         cache_path: Path | None,
         now_fn: Callable[[], float] | None = None,
+        on_location_request_throttled: (
+            Callable[
+                [str, _LOCATION_REQUEST_REASON, float, str | None],
+                None,
+            ]
+            | None
+        ) = None,
     ) -> None:
         self._cache_path = cache_path
         self._cooldown_until_by_user: dict[str, float] = {}
         self._in_flight_user_ids: set[str] = set()
         self._now_fn = now_fn or time.time
+        self._on_location_request_throttled = on_location_request_throttled
 
     def _accuracy_streak_trigger(
         self,
@@ -178,6 +189,10 @@ class LocationRequestCoordinator:
         user_id: str,
         *,
         context: LocationRequestContext,
+        geofence_id: str | None = None,
+        reason: _LOCATION_REQUEST_REASON | None = None,
+        require_edge_rules: bool = True,
+        rule_id: str | None = None,
     ) -> None:
         cache_path = self._cache_path
         if cache_path is None:
@@ -189,79 +204,46 @@ class LocationRequestCoordinator:
             return
         self._in_flight_user_ids.add(trimmed)
         try:
-            edge_rules = _enabled_edge_rules_for_user(trimmed)
-            if not edge_rules:
-                return
-            if _user_confidently_inside_via_home_wifi(
-                cache_path,
-                trimmed,
-                context.location,
-            ):
-                _LOGGER.debug(
-                    "location request skipped user=%s reason=wifi_home_bssid",
-                    trimmed,
-                )
-                return
-            remote_enabled = load_remote_request_location_enabled(cache_path)
-            if remote_enabled is not True:
-                _LOGGER.debug(
-                    "location request skipped user=%s reason=remote_request_disabled",
-                    trimmed,
-                )
-                return
-            if not load_mytracks_pair_status(cache_path):
-                return
-            if self._user_in_local_cooldown(trimmed, now=context.now):
-                _LOGGER.debug(
-                    "location request skipped user=%s reason=local_cooldown",
-                    trimmed,
-                )
-                return
-            trigger = self._select_trigger(
+            prepared = self._prepare_location_request(
                 trimmed,
                 context=context,
-                edge_rules=edge_rules,
+                geofence_id=geofence_id,
+                reason=reason,
+                require_edge_rules=require_edge_rules,
+                rule_id=rule_id,
+                log_skips=True,
+                check_in_flight=False,
             )
-            if trigger is None:
+            if prepared is None:
                 return
-            rule_id, geofence_id, reason = trigger
-            try:
-                relay_key = load_mytracks_relay_api_key_from_db(cache_path)
-            except SecretsDecryptError as exc:
-                _LOGGER.warning(
-                    "location request skipped user=%s reason=relay_key_decrypt_failed detail=%s",
-                    trimmed,
-                    exc,
-                )
-                return
-            if relay_key is None or relay_key.strip() == "":
-                _LOGGER.debug(
-                    "location request skipped user=%s reason=relay_key_missing",
-                    trimmed,
-                )
-                return
-            pair_status = load_mytracks_pair_status(cache_path)
-            if pair_status is None or pair_status.paired_at is None:
-                return
+            resolved_reason, resolved_rule_id, resolved_geofence_id, pair_status, relay_key = (
+                prepared
+            )
             result = await request_user_location(
                 base_url=pair_status.domain,
                 relay_api_key=relay_key,
                 user_id=trimmed,
-                reason=reason,
-                rule_id=rule_id,
-                geofence_id=geofence_id,
+                reason=resolved_reason,
+                rule_id=resolved_rule_id,
+                geofence_id=resolved_geofence_id,
             )
             if result.status == "accepted":
                 self._cooldown_until_by_user[trimmed] = _cooldown_until_from_result(
                     now=context.now,
                     cooldown_until_epoch=result.cooldown_until_epoch,
                 )
+                self._notify_location_request_throttled(
+                    trimmed,
+                    resolved_reason,
+                    context.now,
+                    resolved_geofence_id,
+                )
                 _LOGGER.info(
                     "location request accepted user=%s reason=%s rule_id=%s geofence_id=%s host=%s",
                     trimmed,
-                    reason,
-                    rule_id or "",
-                    geofence_id or "",
+                    resolved_reason,
+                    resolved_rule_id or "",
+                    resolved_geofence_id or "",
                     mytracks_log_host(pair_status.domain),
                 )
                 return
@@ -270,10 +252,16 @@ class LocationRequestCoordinator:
                     now=context.now,
                     cooldown_until_epoch=result.cooldown_until_epoch,
                 )
+                self._notify_location_request_throttled(
+                    trimmed,
+                    resolved_reason,
+                    context.now,
+                    resolved_geofence_id,
+                )
                 _LOGGER.debug(
                     "location request cooldown user=%s reason=%s until=%s",
                     trimmed,
-                    reason,
+                    resolved_reason,
                     result.cooldown_until_iso or "",
                 )
                 return
@@ -287,11 +275,117 @@ class LocationRequestCoordinator:
             _LOGGER.warning(
                 "location request failed user=%s reason=%s detail=%s",
                 trimmed,
-                reason,
+                resolved_reason,
                 result.detail or "",
             )
         finally:
             self._in_flight_user_ids.discard(trimmed)
+
+    def _notify_location_request_throttled(
+        self,
+        user_id: str,
+        reason: _LOCATION_REQUEST_REASON,
+        now: float,
+        geofence_id: str | None,
+    ) -> None:
+        if self._on_location_request_throttled is not None:
+            self._on_location_request_throttled(user_id, reason, now, geofence_id)
+
+    def _prepare_location_request(
+        self,
+        user_id: str,
+        *,
+        context: LocationRequestContext,
+        geofence_id: str | None,
+        reason: _LOCATION_REQUEST_REASON | None,
+        require_edge_rules: bool,
+        rule_id: str | None,
+        log_skips: bool,
+        check_in_flight: bool = True,
+    ) -> tuple[
+        _LOCATION_REQUEST_REASON,
+        str | None,
+        str | None,
+        MyTracksPairStatusRecord,
+        str,
+    ] | None:
+        cache_path = self._cache_path
+        if cache_path is None:
+            return None
+        trimmed = user_id.strip()
+        if trimmed == "":
+            return None
+        if check_in_flight and trimmed in self._in_flight_user_ids:
+            return None
+        edge_rules = _enabled_edge_rules_for_user(trimmed)
+        if require_edge_rules and not edge_rules:
+            return None
+        if not require_edge_rules and trimmed not in _monitored_user_ids():
+            return None
+        location = context.location
+        if _user_confidently_inside_via_home_wifi(cache_path, trimmed, location):
+            if log_skips:
+                _LOGGER.debug(
+                    "location request skipped user=%s reason=wifi_home_bssid",
+                    trimmed,
+                )
+            return None
+        remote_enabled = load_remote_request_location_enabled(cache_path)
+        if remote_enabled is not True:
+            if log_skips:
+                _LOGGER.debug(
+                    "location request skipped user=%s reason=remote_request_disabled",
+                    trimmed,
+                )
+            return None
+        if not load_mytracks_pair_status(cache_path):
+            return None
+        if self._user_in_local_cooldown(trimmed, now=context.now):
+            if log_skips:
+                _LOGGER.debug(
+                    "location request skipped user=%s reason=local_cooldown",
+                    trimmed,
+                )
+            return None
+        resolved_reason = reason
+        resolved_rule_id = rule_id
+        resolved_geofence_id = geofence_id
+        if resolved_reason is None:
+            trigger = self._select_trigger(
+                trimmed,
+                context=context,
+                edge_rules=edge_rules,
+            )
+            if trigger is None:
+                return None
+            resolved_rule_id, resolved_geofence_id, resolved_reason = trigger
+        try:
+            relay_key = load_mytracks_relay_api_key_from_db(cache_path)
+        except SecretsDecryptError as exc:
+            if log_skips:
+                _LOGGER.warning(
+                    "location request skipped user=%s reason=relay_key_decrypt_failed detail=%s",
+                    trimmed,
+                    exc,
+                )
+            return None
+        if relay_key is None or relay_key.strip() == "":
+            if log_skips:
+                _LOGGER.debug(
+                    "location request skipped user=%s reason=relay_key_missing",
+                    trimmed,
+                )
+            return None
+        pair_status = load_mytracks_pair_status(cache_path)
+        if pair_status is None or pair_status.paired_at is None:
+            return None
+        return (
+            resolved_reason,
+            resolved_rule_id,
+            resolved_geofence_id,
+            pair_status,
+            relay_key,
+        )
 
     def _select_trigger(
         self,
@@ -342,18 +436,56 @@ class LocationRequestCoordinator:
         context: LocationRequestContext,
     ) -> None:
         """Schedule an async location request when triggers match; never blocks callers."""
-        cache_path = self._cache_path
-        if cache_path is None:
-            return
+        self.schedule_request_with_reason(
+            user_id,
+            reason=None,
+            context=context,
+            geofence_id=None,
+            require_edge_rules=True,
+            rule_id=None,
+        )
+
+    def schedule_request_with_reason(
+        self,
+        user_id: str,
+        *,
+        reason: _LOCATION_REQUEST_REASON | None,
+        context: LocationRequestContext,
+        geofence_id: str | None,
+        require_edge_rules: bool,
+        rule_id: str | None,
+    ) -> bool:
+        """Schedule a location request with an explicit or reactive reason."""
+        if self._cache_path is None:
+            return False
+        trimmed = user_id.strip()
+        if self._prepare_location_request(
+            trimmed,
+            context=context,
+            geofence_id=geofence_id,
+            reason=reason,
+            require_edge_rules=require_edge_rules,
+            rule_id=rule_id,
+            log_skips=False,
+        ) is None:
+            return False
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return
+            return False
         task = loop.create_task(
-            self._maybe_request_async(user_id, context=context),
+            self._maybe_request_async(
+                user_id,
+                context=context,
+                geofence_id=geofence_id,
+                reason=reason,
+                require_edge_rules=require_edge_rules,
+                rule_id=rule_id,
+            ),
             name=f"location-request-{user_id}",
         )
         task.add_done_callback(_log_location_request_task)
+        return True
 
 
 def _cooldown_until_from_result(
@@ -374,6 +506,15 @@ def _enabled_edge_rules_for_user(user_id: str) -> list[RuleOut]:
         and rule.trigger == "edge_true"
         and user_id in collect_rule_user_ids(rule)
     ]
+
+
+def _monitored_user_ids() -> set[str]:
+    user_ids: set[str] = set()
+    for rule in list_automation_rules():
+        if not rule.enabled:
+            continue
+        user_ids.update(collect_rule_user_ids(rule))
+    return user_ids
 
 
 def _first_edge_rule_for_geofence(

@@ -47,6 +47,7 @@ from app.geofence_transition_state_store import (
     upsert_geofence_transition_state,
 )
 from app.location_history_retention import LocationHistoryRetention
+from app.location_monitoring_policy import LocationMonitoringPolicy
 from app.location_request_coordinator import (
     DeferredAccuracyEdgeSnapshot,
     LocationRequestContext,
@@ -170,6 +171,15 @@ class RuleEvaluator:
             cache_path=cache_path,
             now_fn=self._now_fn,
         )
+        self._location_monitoring = LocationMonitoringPolicy(
+            cache_path=cache_path,
+            coordinator=self._location_request_coordinator,
+            deferred_edges_for_user=self.deferred_accuracy_edge_snapshots_for_user,
+            now_fn=self._now_fn,
+        )
+        self._location_request_coordinator._on_location_request_throttled = (
+            self._location_monitoring.record_approach_request_throttled
+        )
         self._scheduled_inside_dwell_consumed: dict[tuple[str, str, str], int] = {}
         self._scheduled_outside_dwell_consumed: dict[tuple[str, str, str], int] = {}
         self._stop = asyncio.Event()
@@ -181,6 +191,7 @@ class RuleEvaluator:
 
     async def close(self) -> None:
         self._stop.set()
+        await self._location_monitoring.close()
         if self._tick_task is not None and not self._tick_task.done():
             self._tick_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -280,6 +291,7 @@ class RuleEvaluator:
             self._periodic_loop(),
             name="rule-evaluator-tick",
         )
+        self._location_monitoring.start_background_loops()
 
     async def _build_evaluation_context(
         self,
@@ -1215,6 +1227,11 @@ class RuleEvaluator:
                 location=location,
                 now=now,
             ),
+        )
+        self._location_monitoring.on_location_updated(
+            user_id,
+            location=location,
+            now=now,
         )
         self._last_run_at = now
         self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
