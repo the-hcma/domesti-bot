@@ -1,6 +1,10 @@
 // Unified Leaflet map for user locations + geofence overlays.
 
 import L from "leaflet";
+import {
+  formatFixAgeNote,
+  locationFixAgeSeconds,
+} from "./location-report.js";
 import { formatLocalTimestamp, formatUtcTimestampTitle } from "./format-timestamp.js";
 import { userMarkerColor } from "./map-device-colors.js";
 import { haversineM } from "./rules-mock-fixtures.js";
@@ -281,10 +285,18 @@ export function formatUserTooltipHtml(
     lines.push(
       `${location.lat.toFixed(5)}, ${location.lon.toFixed(5)} · ${escapeHtml(accuracy)}`,
     );
-    lines.push(
-      `Location at <span title="${escapeHtml(formatUtcTimestampTitle(location.received_at))}">`
-        + `${escapeHtml(formatLocalTimestamp(location.received_at))}</span>`,
+    const fixAgeSeconds = locationFixAgeSeconds(location);
+    const fixAgeNote = formatFixAgeNote(
+      fixAgeSeconds,
+      formatLocalTimestamp(location.fix_at),
     );
+    lines.push(
+      `Last heard <span title="${escapeHtml(formatUtcTimestampTitle(location.reported_at))}">`
+        + `${escapeHtml(formatLocalTimestamp(location.reported_at))}</span>`,
+    );
+    if (fixAgeNote !== null) {
+      lines.push(escapeHtml(fixAgeNote));
+    }
     if (
       location.accuracy_m !== null
       && location.accuracy_m > DEFAULT_MIN_LOCATION_ACCURACY_M

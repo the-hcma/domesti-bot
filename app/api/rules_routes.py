@@ -28,6 +28,7 @@ from app.automation_rules_loader import (
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.server_runtime import runtime
+from app.location_report import location_epoch_to_iso_z
 from app.presence_store import (
     UserLocationRecord,
     list_observed_wifi_networks_for_user,
@@ -246,12 +247,6 @@ def _epoch_to_iso_z(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, tz=UTC).isoformat().replace("+00:00", "Z")
 
 
-def _location_received_at_iso(location: UserLocationRecord) -> str:
-    return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
-        "+00:00", "Z"
-    )
-
-
 def _user_to_schema(record: UserRecord) -> UserOut:
     return UserOut(
         display_name=record.display_name,
@@ -283,21 +278,23 @@ def _users_status(cache_path: Path) -> list[UserStatusOut]:
         age_seconds: int | None = None
         inside_geofence_ids: list[str] = []
         if location is not None:
-            received_at = _location_received_at_iso(location)
+            fix_at = location_epoch_to_iso_z(location.fix_at)
+            reported_at = location_epoch_to_iso_z(location.reported_at)
             last_location = UserLocationOut(
                 accuracy_m=location.accuracy_m,
                 battery_level=location.battery_level,
                 connection_type=location.connection_type,
+                fix_at=fix_at,
                 fix_source=location.fix_source,
                 lat=location.lat,
                 lon=location.lon,
-                received_at=received_at,
+                reported_at=reported_at,
                 source=location.source,
                 trigger=location.trigger,
                 wifi_bssid=location.wifi_bssid,
                 wifi_ssid=location.wifi_ssid,
             )
-            age_seconds = max(0, int(now - location.received_at))
+            age_seconds = max(0, int(now - location.reported_at))
             inside_geofence_ids = effective_geofence_ids_containing_location(
                 location,
                 geofences,

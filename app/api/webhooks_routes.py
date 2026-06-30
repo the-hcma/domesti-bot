@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from http import HTTPStatus
 from typing import Annotated
 
@@ -28,7 +29,8 @@ async def post_location_update_test_webhook(
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
         return Response(status_code=HTTPStatus.UNAUTHORIZED)
-    apply_location_update_webhook(
+    await asyncio.to_thread(
+        apply_location_update_webhook,
         cache_path,
         body,
         check_emergency_switch=False,
@@ -47,7 +49,8 @@ async def post_location_update_webhook(
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
         return Response(status_code=HTTPStatus.UNAUTHORIZED)
-    apply_location_update_webhook(
+    await asyncio.to_thread(
+        apply_location_update_webhook,
         cache_path,
         body,
         after_persist=runtime.schedule_rule_location_evaluation,

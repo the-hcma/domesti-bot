@@ -669,7 +669,8 @@ def _user_location_from_export(row: ExportedUser) -> UserLocationRecord:
         lat=location.lat,
         lon=location.lon,
         accuracy_m=location.accuracy_m,
-        received_at=parse_iso_timestamp_to_epoch(location.received_at),
+        fix_at=parse_iso_timestamp_to_epoch(location.fix_at),
+        reported_at=parse_iso_timestamp_to_epoch(location.reported_at),
         source="my-tracks",
     )
 

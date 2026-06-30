@@ -222,7 +222,7 @@ export class MockRulesDataSource implements RulesDataSource {
       const age_seconds =
         reading === null
           ? null
-          : Math.max(0, Math.floor((now - Date.parse(reading.received_at)) / 1000));
+          : Math.max(0, Math.floor((now - Date.parse(reading.reported_at)) / 1000));
       const inside_geofence_ids = this.store.geofences
         .filter((geofence) => userInsideGeofence(reading, geofence))
         .map((geofence) => geofence.geofence_id);

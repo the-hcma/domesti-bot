@@ -95,7 +95,7 @@ def test_build_rules_status_user_inside_geofence_ids_include_wifi_home(
             lon=-73.8882358,
             accuracy_m=97,
             connection_type="w",
-            received_at=1_700_000_000.0,
+            fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
             source="test",
         ),
         retention=default_location_history_retention(),

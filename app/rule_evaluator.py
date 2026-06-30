@@ -50,6 +50,7 @@ from app.geofence_transition_state_store import (
     upsert_geofence_transition_state,
 )
 from app.location_history_retention import LocationHistoryRetention
+from app.location_report import location_epoch_to_iso_z
 from app.location_monitoring_policy import LocationMonitoringPolicy
 from app.location_request_coordinator import (
     DeferredAccuracyEdgeSnapshot,
@@ -337,9 +338,10 @@ class RuleEvaluator:
                     battery_level=location.battery_level,
                     connection_type=location.connection_type,
                     fix_source=location.fix_source,
+                    fix_at=_location_fix_at_iso(location),
                     lat=location.lat,
                     lon=location.lon,
-                    received_at=_location_received_at_iso(location),
+                    reported_at=_location_reported_at_iso(location),
                     source=location.source,
                     trigger=location.trigger,
                     wifi_bssid=location.wifi_bssid,
@@ -352,9 +354,10 @@ class RuleEvaluator:
                         battery_level=row.battery_level,
                         connection_type=row.connection_type,
                         fix_source=row.fix_source,
+                        fix_at=_location_fix_at_iso(row),
                         lat=row.lat,
                         lon=row.lon,
-                        received_at=_location_received_at_iso(row),
+                        reported_at=_location_reported_at_iso(row),
                         source=row.source,
                         trigger=row.trigger,
                         wifi_bssid=row.wifi_bssid,
@@ -566,7 +569,7 @@ class RuleEvaluator:
                 self._geofence_was_inside[key] = edge_inside
                 seeded = True
             if dwell_inside and dwell_accuracy_limit_m is not None:
-                self._geofence_inside_since[key] = location.received_at
+                self._geofence_inside_since[key] = location.reported_at
                 seeded = True
                 if wifi_home_presence_applies(
                     settings,
@@ -587,13 +590,13 @@ class RuleEvaluator:
                         threshold_m=dwell_accuracy_limit_m,
                     )
             elif dwell_inside is False and dwell_accuracy_limit_m is not None:
-                self._geofence_outside_since[key] = location.received_at
+                self._geofence_outside_since[key] = location.reported_at
                 seeded = True
             if seeded:
                 self._persist_geofence_transition_state(
                     user_id,
                     geofence_id,
-                    last_location_received_at=location.received_at,
+                    last_location_received_at=location.reported_at,
                 )
 
     def _bump_geofence_presence_episode(self, user_id: str, geofence_id: str) -> int:
@@ -1045,7 +1048,7 @@ class RuleEvaluator:
                 event=event,
                 expires_at=now + grace_s,
                 geofence_id=geofence_id,
-                observed_at=location.received_at,
+                observed_at=location.reported_at,
                 rule_id=rule.id,
                 user_id=user_id,
             )
@@ -1108,7 +1111,7 @@ class RuleEvaluator:
             self._persist_geofence_transition_state(
                 user_id,
                 geofence_id,
-                last_location_received_at=location.received_at,
+                last_location_received_at=location.reported_at,
             )
 
     async def _process_location_update(self, user_id: str) -> None:
@@ -1135,7 +1138,7 @@ class RuleEvaluator:
             location,
             geofences,
             dwell_accuracy_limit_m=dwell_accuracy_limit_m,
-            observed_at=location.received_at,
+            observed_at=location.reported_at,
         )
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         now = self._now_fn()
@@ -1502,7 +1505,7 @@ class RuleEvaluator:
             retention = load_location_history_retention(self._cache_path)
             history_since = _geofence_seed_history_since_epoch(
                 rules,
-                now=location.received_at,
+                now=location.reported_at,
                 retention=retention,
             )
             self._reconcile_geofence_outside_since_from_history(
@@ -1516,7 +1519,7 @@ class RuleEvaluator:
             user_id,
             geofences,
             inside_ids,
-            observed_at=location.received_at,
+            observed_at=location.reported_at,
             dwell_accuracy_limit_m=dwell_accuracy_limit_m,
             location=location,
             mutate_state=mutate_state,
@@ -1981,7 +1984,7 @@ def _geofence_seed_history_since_epoch(
     now: float,
     retention: LocationHistoryRetention,
 ) -> float:
-    """Return the oldest ``received_at`` to load when seeding geofence streak state."""
+    """Return the oldest ``reported_at`` to load when seeding geofence streak state."""
     lookback_s = _MIN_GEOFENCE_OUTSIDE_DWELL_S
     lookback_s = max(lookback_s, _max_dwell_min_inside_s(rules))
     for rule in rules:
@@ -2034,11 +2037,14 @@ def _location_accuracy_passes(
     return location.accuracy_m <= limit_m
 
 
-def _location_received_at_iso(location: UserLocationRecord) -> str:
-    """Format ``location.received_at`` as a UTC ISO-8601 string with a ``Z`` suffix."""
-    return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
-        "+00:00", "Z"
-    )
+def _location_fix_at_iso(location: UserLocationRecord) -> str:
+    """Format ``location.fix_at`` as a UTC ISO-8601 string with a ``Z`` suffix."""
+    return location_epoch_to_iso_z(location.fix_at)
+
+
+def _location_reported_at_iso(location: UserLocationRecord) -> str:
+    """Format ``location.reported_at`` as a UTC ISO-8601 string with a ``Z`` suffix."""
+    return location_epoch_to_iso_z(location.reported_at)
 
 
 def _max_dwell_min_inside_s(rules: list[RuleOut]) -> float:
@@ -2089,7 +2095,7 @@ def _persisted_geofence_state_covers_location(
     """Return whether a persisted row already reflects the latest location reading."""
     if record.last_location_received_at is None:
         return False
-    if record.last_location_received_at < location.received_at:
+    if record.last_location_received_at < location.reported_at:
         return False
     inside_ids = set(geofence_ids_containing_location(location, [geofence]))
     now_inside = geofence.geofence_id in inside_ids
@@ -2139,7 +2145,7 @@ def _reconstruct_geofence_seed_from_history(
                 continue
             if inside:
                 break
-            streak_start = row.received_at
+            streak_start = row.reported_at
         if streak_start is not None:
             outside_since = streak_start
     inside_since: float | None = None
@@ -2173,7 +2179,7 @@ def _reconstruct_geofence_seed_from_history(
                     continue
                 if not inside:
                     break
-                streak_start = row.received_at
+                streak_start = row.reported_at
                 if wifi_home_presence_applies(
                     settings,
                     geofence.geofence_id,
@@ -2191,7 +2197,7 @@ def _reconstruct_geofence_seed_from_history(
             if (
                 user_id is not None
                 and streak_wifi_row is not None
-                and inside_since == streak_wifi_row.received_at
+                and inside_since == streak_wifi_row.reported_at
             ):
                 _log_wifi_home_presence_overrode_low_accuracy(
                     user_id=user_id,

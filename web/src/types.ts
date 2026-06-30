@@ -429,8 +429,9 @@ export interface UserLocationOut {
   accuracy_m: number | null;
   battery_level?: number | null;
   connection_type?: string | null;
+  fix_at: string;
   fix_source?: string | null;
-  received_at: string;
+  reported_at: string;
   source: string | null;
   trigger?: string | null;
   wifi_bssid?: string | null;

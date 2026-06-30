@@ -97,8 +97,10 @@ def _seed_presence_db(
     user_id: str,
     lat: float,
     lon: float,
-    received_at: float,
+    reported_at: float,
+    fix_at: float | None = None,
 ) -> None:
+    fix_epoch = reported_at if fix_at is None else fix_at
     replace_users(
         cache_path,
         [
@@ -133,7 +135,7 @@ def _seed_presence_db(
             lat=lat,
             lon=lon,
             accuracy_m=20,
-            received_at=received_at,
+            fix_at=fix_epoch, reported_at=reported_at,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -213,7 +215,7 @@ def _setup_arrive_home_evaluator(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     state = DeviceManagersState(
@@ -255,7 +257,7 @@ def _setup_dwell_home_evaluator(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"],
+        fix_at=clock["now"], reported_at=clock["now"],
     )
     evaluator = RuleEvaluator(
         cache_path=db,
@@ -279,7 +281,7 @@ def _move_henrique_inside_house(fixture: _ArriveHomeFixture) -> None:
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=fixture.clock["now"],
+            fix_at=fixture.clock["now"], reported_at=fixture.clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -344,7 +346,7 @@ async def test_rule_evaluator_records_error_when_notification_email_fails(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
     )
     evaluator = RuleEvaluator(
         cache_path=db,
@@ -359,7 +361,7 @@ async def test_rule_evaluator_records_error_when_notification_email_fails(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -422,7 +424,7 @@ def _seed_henrique_inside_house(fixture: _ArriveHomeFixture) -> None:
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=fixture.clock["now"],
+            fix_at=fixture.clock["now"], reported_at=fixture.clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -438,7 +440,7 @@ def _move_henrique_outside_house(fixture: _ArriveHomeFixture) -> None:
             lat=44.0,
             lon=-73.0,
             accuracy_m=20,
-            received_at=fixture.clock["now"],
+            fix_at=fixture.clock["now"], reported_at=fixture.clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -483,7 +485,7 @@ async def test_rule_evaluator_suppresses_geofence_reenter_within_dwell_window(
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        received_at=fixture.clock["now"],
+        fix_at=fixture.clock["now"], reported_at=fixture.clock["now"],
     )
     fixture.evaluator = RuleEvaluator(
         cache_path=fixture.db,
@@ -573,21 +575,21 @@ async def test_rule_evaluator_seeds_geofence_inside_since_on_boot(
     )
     _write_bundle(bundle, dwell_rule)
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-    received_at = 1_700_000_000.0
+    reported_at = 1_700_000_000.0
     _seed_presence_db(
         db,
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        received_at=received_at,
+        fix_at=reported_at, reported_at=reported_at,
     )
     evaluator = RuleEvaluator(
         cache_path=db,
         device_state_getter=lambda: None,
-        now_fn=lambda: received_at,
+        now_fn=lambda: reported_at,
     )
     assert evaluator.geofence_inside_since_snapshot() == {
-        ("henrique", "house"): received_at,
+        ("henrique", "house"): reported_at,
     }
 
 
@@ -659,7 +661,7 @@ async def test_rule_evaluator_seeds_inside_since_from_history_streak_start(
                 lat=41.194085,
                 lon=-73.888365,
                 accuracy_m=20,
-                received_at=base + offset,
+                fix_at=base + offset, reported_at=base + offset,
                 source="test",
             ),
             retention=default_location_history_retention(),
@@ -694,7 +696,7 @@ async def test_rule_evaluator_seeds_outside_since_from_history_and_fires_enter_a
                 lat=44.0,
                 lon=-73.0,
                 accuracy_m=20,
-                received_at=outside_start + offset,
+                fix_at=outside_start + offset, reported_at=outside_start + offset,
                 source="test",
             ),
             retention=default_location_history_retention(),
@@ -728,7 +730,7 @@ async def test_rule_evaluator_seeds_outside_since_from_history_and_fires_enter_a
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=fixture.clock["now"],
+            fix_at=fixture.clock["now"], reported_at=fixture.clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -757,7 +759,7 @@ async def test_rule_evaluator_reconciles_outside_since_after_location_gap(
                 lat=44.0,
                 lon=-73.0,
                 accuracy_m=20,
-                received_at=outside_start + offset,
+                fix_at=outside_start + offset, reported_at=outside_start + offset,
                 source="test",
             ),
             retention=default_location_history_retention(),
@@ -790,7 +792,7 @@ async def test_rule_evaluator_reconciles_outside_since_after_location_gap(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=fixture.clock["now"],
+            fix_at=fixture.clock["now"], reported_at=fixture.clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -850,7 +852,7 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
     )
     _write_bundle(bundle, edge_rule, dwell_rule)
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-    received_at = 1_700_000_000.0
+    reported_at = 1_700_000_000.0
     replace_users(
         db,
         [
@@ -885,7 +887,7 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=120,
-            received_at=received_at,
+            fix_at=reported_at, reported_at=reported_at,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -893,10 +895,10 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
     evaluator = RuleEvaluator(
         cache_path=db,
         device_state_getter=lambda: None,
-        now_fn=lambda: received_at,
+        now_fn=lambda: reported_at,
     )
     assert evaluator.geofence_inside_since_snapshot() == {
-        ("henrique", "house"): received_at,
+        ("henrique", "house"): reported_at,
     }
     assert ("henrique", "house") not in evaluator._geofence_was_inside
 
@@ -952,7 +954,7 @@ async def test_rule_evaluator_seeds_outside_since_when_dwell_accuracy_passes_edg
     )
     _write_bundle(bundle, edge_rule, dwell_rule)
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-    received_at = 1_700_000_000.0
+    reported_at = 1_700_000_000.0
     replace_users(
         db,
         [
@@ -987,7 +989,7 @@ async def test_rule_evaluator_seeds_outside_since_when_dwell_accuracy_passes_edg
             lat=44.0,
             lon=-73.0,
             accuracy_m=120,
-            received_at=received_at,
+            fix_at=reported_at, reported_at=reported_at,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -995,10 +997,10 @@ async def test_rule_evaluator_seeds_outside_since_when_dwell_accuracy_passes_edg
     evaluator = RuleEvaluator(
         cache_path=db,
         device_state_getter=lambda: None,
-        now_fn=lambda: received_at,
+        now_fn=lambda: reported_at,
     )
     assert evaluator.geofence_outside_since_snapshot() == {
-        ("henrique", "house"): received_at,
+        ("henrique", "house"): reported_at,
     }
 
 
@@ -1084,7 +1086,7 @@ async def test_rule_evaluator_sets_inside_since_on_debounced_reenter(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=fixture.clock["now"],
+            fix_at=fixture.clock["now"], reported_at=fixture.clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -1105,18 +1107,18 @@ async def test_rule_evaluator_skips_inside_since_seed_when_no_dwell_rules(
     db = tmp_path / "discovery.sqlite"
     _write_bundle(bundle, _arrive_home_rule(cooldown_s=0))
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-    received_at = 1_700_000_000.0
+    reported_at = 1_700_000_000.0
     _seed_presence_db(
         db,
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        received_at=received_at,
+        fix_at=reported_at, reported_at=reported_at,
     )
     evaluator = RuleEvaluator(
         cache_path=db,
         device_state_getter=lambda: None,
-        now_fn=lambda: received_at,
+        now_fn=lambda: reported_at,
     )
     assert evaluator.geofence_inside_since_snapshot() == {}
 
@@ -1186,7 +1188,7 @@ async def test_rule_evaluator_skips_inside_since_seed_when_dwell_rule_rejects_ac
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=120,
-            received_at=1_700_000_000.0,
+            fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -1250,7 +1252,7 @@ def _setup_scheduled_evaluator(
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        received_at=clock["now"],
+        fix_at=clock["now"], reported_at=clock["now"],
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     state = DeviceManagersState(
@@ -1328,7 +1330,7 @@ async def test_scheduled_rule_advances_next_evaluate_at_when_conditions_unmet(
             lat=44.0,
             lon=-73.0,
             accuracy_m=20,
-            received_at=fixture.clock["now"],
+            fix_at=fixture.clock["now"], reported_at=fixture.clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -1456,7 +1458,7 @@ async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
     )
     evaluator = RuleEvaluator(
         cache_path=db,
@@ -1479,7 +1481,7 @@ async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -1578,7 +1580,7 @@ def _setup_away_shutdown_evaluator(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"],
+        fix_at=clock["now"], reported_at=clock["now"],
     )
     device = _FakeKasa("192.168.1.10", "Garage", is_on=True)
     state = DeviceManagersState(

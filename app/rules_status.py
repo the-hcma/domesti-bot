@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
+from app.location_report import location_epoch_to_iso_z
+
 if TYPE_CHECKING:
     from app.domesti_bot_cli import DeviceManagersState
 
@@ -318,21 +320,23 @@ def _load_users_status(cache_path: Path | None) -> list[UserStatusOut]:
         age_seconds: int | None = None
         inside_geofence_ids: list[str] = []
         if location is not None:
-            received_at = _location_received_at_iso(location)
+            fix_at = location_epoch_to_iso_z(location.fix_at)
+            reported_at = location_epoch_to_iso_z(location.reported_at)
             last_location = UserLocationOut(
                 accuracy_m=location.accuracy_m,
                 battery_level=location.battery_level,
                 connection_type=location.connection_type,
+                fix_at=fix_at,
                 fix_source=location.fix_source,
                 lat=location.lat,
                 lon=location.lon,
-                received_at=received_at,
+                reported_at=reported_at,
                 source=location.source,
                 trigger=location.trigger,
                 wifi_bssid=location.wifi_bssid,
                 wifi_ssid=location.wifi_ssid,
             )
-            age_seconds = max(0, int(now - location.received_at))
+            age_seconds = max(0, int(now - location.reported_at))
             inside_geofence_ids = effective_geofence_ids_containing_location(
                 location,
                 geofences,
@@ -354,12 +358,6 @@ def _load_users_status(cache_path: Path | None) -> list[UserStatusOut]:
             )
         )
     return rows
-
-
-def _location_received_at_iso(location: UserLocationRecord) -> str:
-    return datetime.fromtimestamp(location.received_at, tz=UTC).isoformat().replace(
-        "+00:00", "Z"
-    )
 
 
 def _to_iso_z(dt: datetime) -> str:

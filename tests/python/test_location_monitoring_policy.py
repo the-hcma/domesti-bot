@@ -129,7 +129,7 @@ def _location_outside_in_corridor() -> UserLocationRecord:
         lat=41.196769,
         lon=-73.888325,
         accuracy_m=80,
-        received_at=1_700_000_000.0,
+        fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
         source="test",
     )
 
@@ -151,7 +151,7 @@ def test_is_not_in_approach_corridor_when_inside_geofence() -> None:
         lat=41.194072,
         lon=-73.888325,
         accuracy_m=12,
-        received_at=1_700_000_000.0,
+        fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
         source="test",
     )
     assert not _is_in_approach_corridor(
@@ -311,7 +311,7 @@ async def test_stale_watchdog_schedules_request_without_edge_rules(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=12,
-            received_at=1_700_000_000.0,
+            fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
             source="test",
         ),
         retention=default_location_history_retention(),

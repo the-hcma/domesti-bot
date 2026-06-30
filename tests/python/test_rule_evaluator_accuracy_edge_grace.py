@@ -64,9 +64,11 @@ def _seed_presence_db(
     user_id: str,
     lat: float,
     lon: float,
-    received_at: float,
+    reported_at: float,
     accuracy_m: int | None = 20,
+    fix_at: float | None = None,
 ) -> None:
+    fix_epoch = reported_at if fix_at is None else fix_at
     replace_users(
         cache_path,
         [
@@ -101,7 +103,7 @@ def _seed_presence_db(
             lat=lat,
             lon=lon,
             accuracy_m=accuracy_m,
-            received_at=received_at,
+            fix_at=fix_epoch, reported_at=reported_at,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -155,7 +157,7 @@ def _setup_evaluator(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     evaluator = RuleEvaluator(
@@ -209,7 +211,7 @@ def _move_inside(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=accuracy_m,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -251,7 +253,7 @@ async def test_accuracy_edge_grace_does_not_register_without_geofence_transition
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
         accuracy_m=20,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
@@ -276,7 +278,7 @@ async def test_accuracy_edge_grace_does_not_register_without_geofence_transition
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -293,7 +295,7 @@ async def test_accuracy_edge_grace_does_not_register_without_geofence_transition
                 lat=41.194085,
                 lon=-73.888365,
                 accuracy_m=120,
-                received_at=clock["now"],
+                fix_at=clock["now"], reported_at=clock["now"],
                 source="test",
             ),
             retention=default_location_history_retention(),

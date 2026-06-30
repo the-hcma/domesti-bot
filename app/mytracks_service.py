@@ -92,9 +92,10 @@ class ExportedUser:
 @dataclass(frozen=True)
 class ExportedUserLocation:
     accuracy_m: int | None
+    fix_at: str
     lat: float
     lon: float
-    received_at: str
+    reported_at: str
 
 
 def build_location_update_webhook_urls(domesti_public_base_url: str) -> tuple[str, str]:
@@ -670,22 +671,33 @@ def _parse_latest_location(row: dict[str, Any]) -> ExportedUserLocation | None:
     try:
         lat = float(raw["lat"])
         lon = float(raw["lon"])
-        received_at = str(raw["timestamp"]).strip()
+        fix_at = str(raw["timestamp"]).strip()
+        reported_raw = raw.get("reported_at")
+        reported_at = (
+            str(reported_raw).strip()
+            if reported_raw is not None
+            else fix_at
+        )
         accuracy_raw = raw.get("accuracy_m")
         accuracy_m = int(accuracy_raw) if accuracy_raw is not None else None
     except (KeyError, TypeError, ValueError) as exc:
         raise MyTracksSyncError(
             f"Expected latest_location export object, got {raw!r}"
         ) from exc
-    if received_at == "":
+    if fix_at == "":
         raise MyTracksSyncError(
             f"Expected non-empty latest_location.timestamp, got {raw!r}"
+        )
+    if reported_at == "":
+        raise MyTracksSyncError(
+            f"Expected non-empty latest_location.reported_at, got {raw!r}"
         )
     return ExportedUserLocation(
         lat=lat,
         lon=lon,
         accuracy_m=accuracy_m,
-        received_at=received_at,
+        fix_at=fix_at,
+        reported_at=reported_at,
     )
 
 

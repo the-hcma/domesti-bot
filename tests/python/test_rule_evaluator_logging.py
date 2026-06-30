@@ -108,8 +108,10 @@ def _seed_presence_db(
     user_id: str,
     lat: float,
     lon: float,
-    received_at: float,
+    reported_at: float,
+    fix_at: float | None = None,
 ) -> None:
+    fix_epoch = reported_at if fix_at is None else fix_at
     replace_users(
         cache_path,
         [
@@ -144,7 +146,7 @@ def _seed_presence_db(
             lat=lat,
             lon=lon,
             accuracy_m=20,
-            received_at=received_at,
+            fix_at=fix_epoch, reported_at=reported_at,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -216,7 +218,7 @@ async def test_fired_log_includes_user_transitions_and_conditions(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     evaluator = RuleEvaluator(
@@ -241,7 +243,7 @@ async def test_fired_log_includes_user_transitions_and_conditions(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -276,7 +278,7 @@ async def test_debounced_geofence_enter_logs_suppressed_at_info(
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        received_at=clock["now"],
+        fix_at=clock["now"], reported_at=clock["now"],
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     evaluator = RuleEvaluator(
@@ -301,7 +303,7 @@ async def test_debounced_geofence_enter_logs_suppressed_at_info(
             lat=44.0,
             lon=-73.0,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -316,7 +318,7 @@ async def test_debounced_geofence_enter_logs_suppressed_at_info(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -373,7 +375,7 @@ async def test_conditions_not_met_logs_skip_reason(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        received_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     evaluator = RuleEvaluator(
@@ -398,7 +400,7 @@ async def test_conditions_not_met_logs_skip_reason(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -469,7 +471,7 @@ async def test_scheduled_fire_logs_presence_user_ids_and_email_outcome(
             lat=44.0,
             lon=-73.0,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -481,7 +483,7 @@ async def test_scheduled_fire_logs_presence_user_ids_and_email_outcome(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            received_at=clock["now"],
+            fix_at=clock["now"], reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),

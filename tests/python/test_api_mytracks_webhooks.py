@@ -164,6 +164,94 @@ def test_location_update_webhook_stores_location_for_known_user(
     assert locations["henrique"].lat == 41.194085
 
 
+def test_location_update_webhook_ping_with_old_fix_updates_location(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    """A ping whose GPS fix predates the report still updates last location."""
+    from app.presence_store import parse_iso_timestamp_to_epoch
+
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    fresh_payload = {
+        **_LOCATION_UPDATE_PAYLOAD,
+        "timestamp": "2026-06-30T12:09:00+00:00",
+        "reported_at": "2026-06-30T12:09:00+00:00",
+        "lat": 41.1,
+    }
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=fresh_payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    ping_payload = {
+        **_LOCATION_UPDATE_PAYLOAD,
+        "timestamp": "2026-06-30T10:00:00+00:00",
+        "reported_at": "2026-06-30T14:01:00+00:00",
+        "trigger": "p",
+        "lat": 41.2,
+    }
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=ping_payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    stored = list_user_locations(db)["henrique"]
+    assert stored.lat == 41.2
+    assert stored.reported_at == parse_iso_timestamp_to_epoch(
+        "2026-06-30T14:01:00+00:00"
+    )
+    assert stored.fix_at == parse_iso_timestamp_to_epoch("2026-06-30T10:00:00+00:00")
+
+
+def test_location_update_webhook_drops_stale_report(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    """Older report times do not replace a newer stored location."""
+    from app.presence_store import parse_iso_timestamp_to_epoch
+
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    newer_payload = {
+        **_LOCATION_UPDATE_PAYLOAD,
+        "timestamp": "2026-06-30T14:01:00+00:00",
+        "reported_at": "2026-06-30T14:01:00+00:00",
+        "lat": 41.2,
+    }
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=newer_payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    stale_payload = {
+        **_LOCATION_UPDATE_PAYLOAD,
+        "timestamp": "2026-06-30T15:00:00+00:00",
+        "reported_at": "2026-06-30T12:00:00+00:00",
+        "lat": 41.9,
+    }
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=stale_payload,
+        headers={"X-Domesti-Api-Key": relay_key},
+    )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    stored = list_user_locations(db)["henrique"]
+    assert stored.lat == 41.2
+    assert stored.reported_at == parse_iso_timestamp_to_epoch(
+        "2026-06-30T14:01:00+00:00"
+    )
+
+
 def test_location_update_webhook_stores_connection_type(
     tmp_path: Path,
     fernet_key: str,
