@@ -179,9 +179,9 @@ export function mountRuleInspectorPanel(
   appendDefinitionRow(meta, "Trigger", rule.trigger);
   if (rule.trigger === "scheduled") {
     appendDefinitionRow(meta, "Schedule (cron)", rule.schedule_cron);
-    if (rule.fire_once_per_local_day === true) {
-      appendDefinitionRow(meta, "Fire once per local day", "Yes");
-    }
+  }
+  if (rule.fire_once_per_local_day === true) {
+    appendDefinitionRow(meta, "Fire once per local day", "Yes");
   }
   appendDefinitionRow(meta, "Cooldown", `${rule.cooldown_s} s`);
   appendDefinitionRow(

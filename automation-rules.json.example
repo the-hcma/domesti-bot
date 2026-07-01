@@ -9,7 +9,7 @@
     "SMTP must be configured under Automations → Mail for notification emails to send.",
     "Rule 1 fires when Henrique OR Kristen enters house after sunset (arrival edge, not merely present at sunset).",
     "Rule 2 (evening-lights-off-both-home) runs every 10 min after sunset: when both have been home 10+ min and either arrival light is still on, turn both off.",
-    "Rule 3 (evening-interior-lights-on-anyone-home) evaluates from 25 min before sunset every 10 min until midnight when henrique OR kristen is home; turn on interior lamps once per local day.",
+    "Rule 3 (evening-interior-lights-on-anyone-home) arms from 25 min before sunset until midnight; fires on home geofence enter (not poll) when Henrique OR Kristen arrives, once per local day. Overlaps evening-arrival-home-lights after sunset (exterior vs interior lamps).",
     "Rule 4 (away-shutdown-everyone-outside-20m) runs every 10 min: when Henrique AND Kristen have been outside house 20+ min and any listed light/media device is still on, turn them off (garage doors are not closed).",
     "Rule 5 (away-garage-open-alert) runs every 10 min: when both have been outside house 20+ min and any garage door is open, email hcma@hcma.info and kristen@kristenmather.com."
   ],
@@ -127,13 +127,13 @@
     },
     {
       "id": "evening-interior-lights-on-anyone-home",
-      "label": "Turn on interior lamps when anyone home from 25 min before sunset to midnight (once per day)",
+      "label": "Turn on interior lamps on evening home arrival (25 min before sunset to midnight, once per day)",
       "enabled": true,
-      "trigger": "scheduled",
-      "schedule_cron": "*/10 * * * *",
+      "trigger": "edge_true",
       "fire_once_per_local_day": true,
       "cooldown_s": 300,
       "min_location_accuracy_m": 50,
+      "accuracy_edge_grace_s": 120,
       "notify_on_fire": false,
       "conditions": {
         "all": [
