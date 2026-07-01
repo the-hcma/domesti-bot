@@ -25,7 +25,8 @@ def _geofence_ids_containing_point(
         lat=lat,
         lon=lon,
         accuracy_m=None,
-        received_at=0.0,
+        fix_at=0.0,
+        reported_at=0.0,
         source=None,
     )
     inside: list[str] = []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from http import HTTPStatus
 from pathlib import Path
@@ -10,12 +11,12 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from app.api.schemas import LocationUpdateWebhookIn
-from app.mytracks_store import load_location_history_retention, load_mytracks_pair_status
-from app.presence_store import (
-    UserLocationRecord,
-    parse_iso_timestamp_to_epoch,
-    upsert_user_location,
+from app.location_report import (
+    location_fix_at_epoch_from_webhook,
+    location_reported_at_epoch_from_webhook,
 )
+from app.mytracks_store import load_location_history_retention, load_mytracks_pair_status
+from app.presence_store import UserLocationRecord, upsert_user_location
 from app.rules_store import user_exists
 
 _LOGGER = logging.getLogger("location")
@@ -45,8 +46,13 @@ def apply_location_update_webhook(
             status_code=HTTPStatus.NOT_FOUND,
             detail=f"Unknown user_id {user_id!r}",
         )
+    ingest_at = time.time()
     try:
-        received_at = parse_iso_timestamp_to_epoch(body.timestamp)
+        fix_at = location_fix_at_epoch_from_webhook(body)
+        reported_at = location_reported_at_epoch_from_webhook(
+            body,
+            ingest_at=ingest_at,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -55,7 +61,12 @@ def apply_location_update_webhook(
     retention = load_location_history_retention(cache_path)
     stored = upsert_user_location(
         cache_path,
-        user_location_record_from_webhook(body, user_id=user_id, received_at=received_at),
+        user_location_record_from_webhook(
+            body,
+            user_id=user_id,
+            fix_at=fix_at,
+            reported_at=reported_at,
+        ),
         retention=retention,
     )
     if stored and after_persist is not None:
@@ -65,8 +76,9 @@ def apply_location_update_webhook(
 def user_location_record_from_webhook(
     body: LocationUpdateWebhookIn,
     *,
+    fix_at: float,
+    reported_at: float,
     user_id: str,
-    received_at: float,
 ) -> UserLocationRecord:
     """Build a ``UserLocationRecord`` from a validated webhook body."""
     return UserLocationRecord(
@@ -76,8 +88,9 @@ def user_location_record_from_webhook(
         accuracy_m=body.accuracy_m,
         battery_level=body.battery_level,
         connection_type=body.connection_type,
+        fix_at=fix_at,
         fix_source=body.fix_source,
-        received_at=received_at,
+        reported_at=reported_at,
         source=body.source or "my-tracks",
         trigger=body.trigger,
         wifi_bssid=body.wifi_bssid,

@@ -25,6 +25,7 @@ def apply_legacy_column_migrations(engine: object) -> None:
         _apply_rule_user_geofence_state_last_location_migration(conn)
         _apply_rule_user_location_connection_type_migration(conn)
         _apply_rule_user_location_metadata_migration(conn)
+        _apply_rule_user_location_report_times_migration(conn)
         _apply_rule_user_home_wifi_migration(conn)
         _apply_rule_user_tables_migration(conn)
         _apply_automation_rule_state_schedule_migration(conn)
@@ -189,6 +190,28 @@ def _apply_rule_user_location_metadata_migration(conn: Connection) -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
 
 
+def _apply_rule_user_location_report_times_migration(conn: Connection) -> None:
+    inspector = inspect(conn)
+    for table in ("rule_user_last_location", "rule_user_location_history"):
+        if table not in inspector.get_table_names():
+            continue
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        if "fix_at" not in cols:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN fix_at REAL"))
+        if "reported_at" not in cols:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN reported_at REAL"))
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        if "received_at" in cols:
+            conn.execute(
+                text(
+                    f"UPDATE {table} "
+                    "SET fix_at = COALESCE(fix_at, received_at), "
+                    "reported_at = COALESCE(reported_at, received_at) "
+                    "WHERE fix_at IS NULL OR reported_at IS NULL"
+                )
+            )
+
+
 def _apply_rule_user_home_wifi_migration(conn: Connection) -> None:
     inspector = inspect(conn)
     if "rule_users" not in inspector.get_table_names():
@@ -273,8 +296,8 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
             conn.execute(
                 text(
                     "INSERT INTO rule_user_last_location "
-                    "(user_id, lat, lon, accuracy_m, received_at, source, updated_at) "
-                    "VALUES (:user_id, :lat, :lon, :accuracy_m, :received_at, :source, "
+                    "(user_id, lat, lon, accuracy_m, fix_at, reported_at, source, updated_at) "
+                    "VALUES (:user_id, :lat, :lon, :accuracy_m, :fix_at, :reported_at, :source, "
                     ":updated_at)"
                 ),
                 {
@@ -282,7 +305,8 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
                     "lat": row.lat,
                     "lon": row.lon,
                     "accuracy_m": row.accuracy_m,
-                    "received_at": row.received_at,
+                    "fix_at": row.received_at,
+                    "reported_at": row.received_at,
                     "source": row.source,
                     "updated_at": now,
                 },
@@ -302,8 +326,8 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
             conn.execute(
                 text(
                     "INSERT INTO rule_user_location_history "
-                    "(user_id, lat, lon, accuracy_m, received_at, source, updated_at) "
-                    "VALUES (:user_id, :lat, :lon, :accuracy_m, :received_at, :source, "
+                    "(user_id, lat, lon, accuracy_m, fix_at, reported_at, source, updated_at) "
+                    "VALUES (:user_id, :lat, :lon, :accuracy_m, :fix_at, :reported_at, :source, "
                     ":updated_at)"
                 ),
                 {
@@ -311,7 +335,8 @@ def _apply_rule_user_tables_migration(conn: Connection) -> None:
                     "lat": row.lat,
                     "lon": row.lon,
                     "accuracy_m": row.accuracy_m,
-                    "received_at": row.received_at,
+                    "fix_at": row.received_at,
+                    "reported_at": row.received_at,
                     "source": row.source,
                     "updated_at": now,
                 },

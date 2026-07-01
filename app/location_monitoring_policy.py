@@ -277,7 +277,7 @@ class LocationMonitoringPolicy:
         locations = list_user_locations(cache_path)
         for user_id in sorted(monitored_user_ids()):
             location = locations.get(user_id)
-            if location is not None and (now - location.received_at) <= _STALE_INTERVAL_S:
+            if location is not None and (now - location.reported_at) <= _STALE_INTERVAL_S:
                 continue
             context = LocationRequestContext(
                 deferred_edges=self._deferred_edges_for_user(user_id),
@@ -477,9 +477,10 @@ def _synthetic_stale_location(user_id: str, now: float) -> UserLocationRecord:
         battery_level=None,
         connection_type=None,
         fix_source=None,
+        fix_at=0.0,
         lat=0.0,
         lon=0.0,
-        received_at=0.0,
+        reported_at=0.0,
         source="stale_watchdog",
         trigger=None,
         user_id=user_id,

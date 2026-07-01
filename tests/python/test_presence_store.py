@@ -26,7 +26,7 @@ def test_replace_and_list_user_locations(tmp_path: Path) -> None:
                 lat=41.194072,
                 lon=-73.888325,
                 accuracy_m=12,
-                received_at=1_700_000_000.0,
+                fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
                 source="my-tracks",
             ),
         ],
@@ -58,7 +58,7 @@ def test_geofence_ids_containing_location(tmp_path: Path) -> None:
         lat=41.194085,
         lon=-73.888365,
         accuracy_m=12,
-        received_at=1_700_000_000.0,
+        fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
         source="my-tracks",
     )
     inside = geofence_ids_containing_location(location, list_geofences(db))
@@ -72,7 +72,7 @@ def test_upsert_user_location_log_includes_accuracy_m(tmp_path: Path) -> None:
         lat=41.20665,
         lon=-73.89559,
         accuracy_m=35,
-        received_at=1_718_377_050.0,
+        fix_at=1_718_377_050.0, reported_at=1_718_377_050.0,
         source="my-tracks",
     )
     with patch("app.presence_store._LOCATION_LOGGER.info") as info_mock:
@@ -96,7 +96,7 @@ def test_upsert_user_location_log_includes_connection_type(tmp_path: Path) -> No
         lat=41.19405,
         lon=-73.88826,
         accuracy_m=11,
-        received_at=1_718_377_050.0,
+        fix_at=1_718_377_050.0, reported_at=1_718_377_050.0,
         source="my-tracks",
         connection_type="w",
     )
@@ -121,7 +121,7 @@ def test_upsert_user_location_log_shows_unknown_when_accuracy_missing(
         lat=41.20665,
         lon=-73.89559,
         accuracy_m=None,
-        received_at=1_718_377_050.0,
+        fix_at=1_718_377_050.0, reported_at=1_718_377_050.0,
         source="my-tracks",
     )
     with patch("app.presence_store._LOCATION_LOGGER.info") as info_mock:
@@ -135,6 +135,59 @@ def test_upsert_user_location_log_shows_unknown_when_accuracy_missing(
     assert "connection_type=unknown" in message
 
 
+def test_upsert_user_location_log_includes_report_and_fix_times(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    location = UserLocationRecord(
+        user_id="hcma",
+        lat=41.19405,
+        lon=-73.88826,
+        accuracy_m=11,
+        fix_at=1_718_993_280.0,
+        reported_at=1_719_000_000.0,
+        source="my-tracks",
+        trigger="p",
+    )
+    with patch("app.presence_store._LOCATION_LOGGER.info") as info_mock:
+        upsert_user_location(
+            db,
+            location,
+            retention=default_location_history_retention(),
+        )
+
+    message = info_mock.call_args[0][0] % info_mock.call_args[0][1:]
+    assert "report_at=" in message
+    assert "fix_at=" in message
+    assert "fix_was=" in message
+
+
+def test_upsert_user_location_rejects_stale_report(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    newer = UserLocationRecord(
+        user_id="hcma",
+        lat=41.1,
+        lon=-73.8,
+        accuracy_m=12,
+        fix_at=1_719_000_000.0,
+        reported_at=1_719_000_000.0,
+        source="my-tracks",
+    )
+    older = UserLocationRecord(
+        user_id="hcma",
+        lat=41.9,
+        lon=-73.9,
+        accuracy_m=12,
+        fix_at=1_719_010_000.0,
+        reported_at=1_718_000_000.0,
+        source="my-tracks",
+    )
+    upsert_user_location(db, newer, retention=default_location_history_retention())
+    stored = upsert_user_location(db, older, retention=default_location_history_retention())
+    assert stored is False
+    assert list_user_locations(db)["hcma"].lat == 41.1
+
+
 def test_upsert_user_location_persists_wifi_metadata(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     location = UserLocationRecord(
@@ -142,7 +195,7 @@ def test_upsert_user_location_persists_wifi_metadata(tmp_path: Path) -> None:
         lat=41.19405,
         lon=-73.88826,
         accuracy_m=11,
-        received_at=1_718_377_050.0,
+        fix_at=1_718_377_050.0, reported_at=1_718_377_050.0,
         source="my-tracks",
         connection_type="w",
         fix_source="w",
@@ -171,7 +224,7 @@ def test_upsert_user_location_log_includes_wifi_metadata(tmp_path: Path) -> None
         lat=41.19405,
         lon=-73.88826,
         accuracy_m=11,
-        received_at=1_718_377_050.0,
+        fix_at=1_718_377_050.0, reported_at=1_718_377_050.0,
         source="my-tracks",
         connection_type="w",
         fix_source="w",

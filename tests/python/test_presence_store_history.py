@@ -16,14 +16,14 @@ from app.presence_store import (
 from app.rules_store import UserRecord, replace_users
 
 
-def _location_record(user_id: str, received_at: float) -> UserLocationRecord:
+def _location_record(user_id: str, reported_at: float) -> UserLocationRecord:
     """Build a test fixture location near the house geofence."""
     return UserLocationRecord(
         user_id=user_id,
         lat=41.194085,
         lon=-73.888365,
         accuracy_m=12,
-        received_at=received_at,
+        fix_at=reported_at, reported_at=reported_at,
         source="test",
     )
 
@@ -93,7 +93,7 @@ def test_list_user_location_history_for_user_filters_since(tmp_path: Path) -> No
         "henrique",
         since=base - 2_000.0,
     )
-    assert [row.received_at for row in rows] == [base - 1_000.0, base]
+    assert [row.reported_at for row in rows] == [base - 1_000.0, base]
 
 
 def test_list_user_location_history_for_walkback_newest_first_within_window(
@@ -129,7 +129,7 @@ def test_list_user_location_history_for_walkback_newest_first_within_window(
         walkback_max_s=walkback_max_s,
         limit=10,
     )
-    assert [row.received_at for row in rows] == [now - 30.0, now - 300.0]
+    assert [row.reported_at for row in rows] == [now - 30.0, now - 300.0]
 
 
 def test_list_user_location_history_for_walkback_returns_all_rows_in_window_by_default(
@@ -164,7 +164,7 @@ def test_list_user_location_history_for_walkback_returns_all_rows_in_window_by_d
         now_epoch=now,
         walkback_max_s=walkback_max_s,
     )
-    assert [row.received_at for row in rows] == [
+    assert [row.reported_at for row in rows] == [
         now - 30.0,
         now - 300.0,
         now - 590.0,
@@ -215,5 +215,5 @@ def test_list_user_location_history_for_walkback_by_user_loads_all_users_once(
         now_epoch=now,
         walkback_max_s=walkback_max_s,
     )
-    assert [row.received_at for row in rows_by_user["henrique"]] == [now - 30.0]
-    assert [row.received_at for row in rows_by_user["kristen"]] == [now - 45.0]
+    assert [row.reported_at for row in rows_by_user["henrique"]] == [now - 30.0]
+    assert [row.reported_at for row in rows_by_user["kristen"]] == [now - 45.0]

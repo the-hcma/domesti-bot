@@ -217,7 +217,7 @@ def _henrique_inside_location() -> UserLocationOut:
         accuracy_m=20,
         lat=41.1941,
         lon=-73.8883,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
 
@@ -268,14 +268,14 @@ def test_effective_location_for_rule_ignores_usable_location_older_than_ten_minu
         accuracy_m=120,
         lat=41.19,
         lon=-73.88,
-        received_at="2026-06-25T21:20:00Z",
+        fix_at="2026-06-25T21:20:00Z", reported_at="2026-06-25T21:20:00Z",
         source="my-tracks",
     )
     old_good = UserLocationOut(
         accuracy_m=8,
         lat=41.19283,
         lon=-73.88230,
-        received_at="2026-06-25T21:03:36Z",
+        fix_at="2026-06-25T21:03:36Z", reported_at="2026-06-25T21:03:36Z",
         source="my-tracks",
     )
     assert (
@@ -295,7 +295,7 @@ def test_effective_location_for_rule_returns_latest_when_usable() -> None:
         accuracy_m=8,
         lat=41.19283,
         lon=-73.88230,
-        received_at="2026-06-25T21:04:00Z",
+        fix_at="2026-06-25T21:04:00Z", reported_at="2026-06-25T21:04:00Z",
         source="my-tracks",
     )
     assert (
@@ -315,14 +315,14 @@ def test_effective_location_for_rule_walks_back_within_ten_minutes() -> None:
         accuracy_m=83,
         lat=41.19336,
         lon=-73.87992,
-        received_at="2026-06-25T21:10:00Z",
+        fix_at="2026-06-25T21:10:00Z", reported_at="2026-06-25T21:10:00Z",
         source="my-tracks",
     )
     good = UserLocationOut(
         accuracy_m=8,
         lat=41.19283,
         lon=-73.88230,
-        received_at="2026-06-25T21:03:36Z",
+        fix_at="2026-06-25T21:03:36Z", reported_at="2026-06-25T21:03:36Z",
         source="my-tracks",
     )
     assert (
@@ -351,7 +351,7 @@ def test_users_inside_geofence_met_with_location() -> None:
         accuracy_m=20,
         lat=41.1941,
         lon=-73.8883,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
     result = evaluate_rule(
@@ -378,14 +378,14 @@ def test_presence_user_ids_for_rule_returns_only_users_inside_any_branch() -> No
         accuracy_m=20,
         lat=41.1941,
         lon=-73.8883,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
     henrique_location = UserLocationOut(
         accuracy_m=20,
         lat=44.0,
         lon=-73.0,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
     ctx = _ctx(
@@ -444,7 +444,7 @@ def test_users_inside_geofence_ignores_low_accuracy() -> None:
         accuracy_m=120,
         lat=41.1941,
         lon=-73.8883,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
     result = evaluate_rule(
@@ -470,14 +470,14 @@ def test_edge_true_any_presence_reports_inside_outside_not_met() -> None:
         accuracy_m=20,
         lat=41.1941,
         lon=-73.8883,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
     kristen_outside = UserLocationOut(
         accuracy_m=20,
         lat=44.417597,
         lon=-72.023842,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
     result = evaluate_rule(
@@ -600,7 +600,7 @@ def _henrique_outside_location() -> UserLocationOut:
         accuracy_m=20,
         lat=44.417597,
         lon=-72.023842,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
 
@@ -697,7 +697,7 @@ def test_users_outside_geofence_for_s_met_with_outside_dwell_timer_despite_low_a
         connection_type="mobile",
         lat=41.19336,
         lon=-73.87992,
-        received_at="2026-06-25T21:20:33Z",
+        fix_at="2026-06-25T21:20:33Z", reported_at="2026-06-25T21:20:33Z",
         source="my-tracks",
     )
     henrique_good_history = UserLocationOut(
@@ -705,7 +705,7 @@ def test_users_outside_geofence_for_s_met_with_outside_dwell_timer_despite_low_a
         connection_type="mobile",
         lat=41.19283,
         lon=-73.88230,
-        received_at="2026-06-25T21:15:36Z",
+        fix_at="2026-06-25T21:15:36Z", reported_at="2026-06-25T21:15:36Z",
         source="my-tracks",
     )
     rule = RuleOut(
@@ -757,7 +757,7 @@ def test_users_outside_geofence_for_s_vetoed_when_walkback_shows_accurate_inside
         connection_type="mobile",
         lat=41.19336,
         lon=-73.87992,
-        received_at="2026-06-25T21:20:33Z",
+        fix_at="2026-06-25T21:20:33Z", reported_at="2026-06-25T21:20:33Z",
         source="my-tracks",
     )
     henrique_inside_history = UserLocationOut(
@@ -765,7 +765,7 @@ def test_users_outside_geofence_for_s_vetoed_when_walkback_shows_accurate_inside
         connection_type="mobile",
         lat=41.19425,
         lon=-73.88863,
-        received_at="2026-06-25T21:15:36Z",
+        fix_at="2026-06-25T21:15:36Z", reported_at="2026-06-25T21:15:36Z",
         source="my-tracks",
     )
     result = evaluate_rule(
@@ -802,7 +802,7 @@ def test_users_inside_geofence_for_s_met_with_wifi_home_presence_low_accuracy(
         connection_type="w",
         lat=41.1941344,
         lon=-73.8882358,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="my-tracks",
     )
     rule = RuleOut(
@@ -855,7 +855,7 @@ def test_users_inside_geofence_for_s_met_with_inside_dwell_timer_despite_low_acc
         connection_type="m",
         lat=41.1941344,
         lon=-73.8882358,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="my-tracks",
     )
     rule = RuleOut(
@@ -952,7 +952,7 @@ def _jun22_kristen_low_accuracy_location(
         connection_type=connection_type,
         lat=41.1941344,
         lon=-73.8882358,
-        received_at="2026-06-23T01:45:00Z",
+        fix_at="2026-06-23T01:45:00Z", reported_at="2026-06-23T01:45:00Z",
         source="my-tracks",
     )
 
@@ -1170,7 +1170,7 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
         accuracy_m=20,
         lat=44.417597,
         lon=-72.023842,
-        received_at="2026-06-09T23:00:00Z",
+        fix_at="2026-06-09T23:00:00Z", reported_at="2026-06-09T23:00:00Z",
         source="owntracks",
     )
     rule = RuleOut(

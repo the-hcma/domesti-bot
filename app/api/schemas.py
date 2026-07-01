@@ -570,10 +570,11 @@ class UserLocationOut(BaseModel):
     accuracy_m: int | None
     battery_level: int | None = None
     connection_type: str | None = None
+    fix_at: str
     fix_source: str | None = None
     lat: float
     lon: float
-    received_at: str
+    reported_at: str
     source: str | None = None
     trigger: str | None = None
     wifi_bssid: str | None = None
@@ -608,6 +609,7 @@ class LocationUpdateWebhookIn(BaseModel):
     owntracks_created_at: str | None = None
     owntracks_message_id: str | None = None
     received_at: str | None = None
+    reported_at: str | None = None
     source: str | None = None
     timestamp: str = Field(..., min_length=1)
     tracker_id: str | None = None

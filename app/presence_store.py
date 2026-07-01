@@ -6,7 +6,6 @@ import logging
 import math
 import time
 from dataclasses import dataclass, replace
-from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import delete, select
@@ -17,7 +16,11 @@ from app.location_history_retention import (
     LocationHistoryRetention,
     retained_history_row_ids,
 )
-from app.logging_config import format_log_timestamp
+from app.location_report import (
+    location_report_log_fragment,
+    location_report_log_stale_suffix,
+    parse_iso_timestamp_to_epoch,
+)
 from app.presence_connection_type import (
     connection_type_label_for_log,
     normalize_presence_connection_type,
@@ -38,9 +41,10 @@ class ObservedWifiNetwork:
 @dataclass(frozen=True)
 class UserLocationRecord:
     accuracy_m: int | None
+    fix_at: float
     lat: float
     lon: float
-    received_at: float
+    reported_at: float
     source: str | None
     user_id: str
     battery_level: int | None = None
@@ -98,7 +102,7 @@ def list_observed_wifi_networks_for_user(
             .where(RuleUserLocationHistory.wifi_bssid.is_not(None))
             .where(RuleUserLocationHistory.wifi_ssid.is_not(None))
             .order_by(
-                RuleUserLocationHistory.received_at.desc(),
+                RuleUserLocationHistory.reported_at.desc(),
                 RuleUserLocationHistory.id.desc(),
             )
         ).all()
@@ -113,7 +117,7 @@ def list_observed_wifi_networks_for_user(
         latest_by_bssid[bssid] = ObservedWifiNetwork(
             wifi_ssid=ssid,
             wifi_bssid=bssid,
-            last_seen_at=row.received_at,
+            last_seen_at=row.reported_at,
         )
         if len(latest_by_bssid) >= limit:
             break
@@ -132,17 +136,17 @@ def list_user_location_history_for_user(
 ) -> list[UserLocationRecord]:
     """Return location history for ``user_id`` oldest-first.
 
-    When ``since`` is set, only rows with ``received_at >= since`` are returned.
+    When ``since`` is set, only rows with ``reported_at >= since`` are returned.
     """
     with discovery_session(path) as session:
         query = select(RuleUserLocationHistory).where(
             RuleUserLocationHistory.user_id == user_id
         )
         if since is not None:
-            query = query.where(RuleUserLocationHistory.received_at >= since)
+            query = query.where(RuleUserLocationHistory.reported_at >= since)
         rows = session.scalars(
             query.order_by(
-                RuleUserLocationHistory.received_at.asc(),
+                RuleUserLocationHistory.reported_at.asc(),
                 RuleUserLocationHistory.id.asc(),
             )
         ).all()
@@ -195,9 +199,9 @@ def list_user_location_history_for_walkback_by_user(
         rows = session.scalars(
             select(RuleUserLocationHistory)
             .where(RuleUserLocationHistory.user_id.in_(unique_user_ids))
-            .where(RuleUserLocationHistory.received_at >= since)
+            .where(RuleUserLocationHistory.reported_at >= since)
             .order_by(
-                RuleUserLocationHistory.received_at.desc(),
+                RuleUserLocationHistory.reported_at.desc(),
                 RuleUserLocationHistory.id.desc(),
             )
         ).all()
@@ -222,17 +226,6 @@ def list_user_locations(path: Path) -> dict[str, UserLocationRecord]:
     with discovery_session(path) as session:
         rows = session.scalars(select(RuleUserLastLocation)).all()
         return {row.user_id: _location_to_record(row) for row in rows}
-
-
-def parse_iso_timestamp_to_epoch(raw: str) -> float:
-    """Parse an ISO-8601 timestamp from My Tracks export JSON."""
-    normalized = raw.strip()
-    if normalized.endswith("Z"):
-        normalized = f"{normalized[:-1]}+00:00"
-    try:
-        return datetime.fromisoformat(normalized).timestamp()
-    except ValueError as exc:
-        raise ValueError(f"Expected ISO-8601 timestamp, got {raw!r}") from exc
 
 
 def prune_all_user_location_history(
@@ -268,14 +261,14 @@ def prune_user_location_history(
             select(RuleUserLocationHistory)
             .where(RuleUserLocationHistory.user_id == user_id)
             .order_by(
-                RuleUserLocationHistory.received_at.desc(),
+                RuleUserLocationHistory.reported_at.desc(),
                 RuleUserLocationHistory.id.desc(),
             )
         ).all()
         if not rows:
             return 0
         keep_ids = retained_history_row_ids(
-            [(row.id, row.received_at) for row in rows],
+            [(row.id, row.reported_at) for row in rows],
             now=now,
             retention=retention,
         )
@@ -317,8 +310,9 @@ def replace_user_locations(
                     accuracy_m=stored_location.accuracy_m,
                     battery_level=stored_location.battery_level,
                     connection_type=stored_location.connection_type,
+                    fix_at=stored_location.fix_at,
                     fix_source=stored_location.fix_source,
-                    received_at=stored_location.received_at,
+                    reported_at=stored_location.reported_at,
                     source=stored_location.source,
                     trigger=stored_location.trigger,
                     updated_at=now,
@@ -334,8 +328,9 @@ def replace_user_locations(
                     accuracy_m=stored_location.accuracy_m,
                     battery_level=stored_location.battery_level,
                     connection_type=stored_location.connection_type,
+                    fix_at=stored_location.fix_at,
                     fix_source=stored_location.fix_source,
-                    received_at=stored_location.received_at,
+                    reported_at=stored_location.reported_at,
                     source=stored_location.source,
                     trigger=stored_location.trigger,
                     updated_at=now,
@@ -364,7 +359,16 @@ def upsert_user_location(
     stored = False
     with discovery_session(path) as session:
         row = session.get(RuleUserLastLocation, location.user_id)
-        if row is not None and row.received_at > location.received_at:
+        if row is not None and row.reported_at > location.reported_at:
+            if _LOCATION_LOGGER.isEnabledFor(logging.DEBUG):
+                _LOCATION_LOGGER.debug(
+                    "skipped stale location for %s%s",
+                    location.user_id,
+                    location_report_log_fragment(
+                        reported_at=location.reported_at,
+                        fix_at=location.fix_at,
+                    ),
+                )
             return False
         if row is None:
             session.add(
@@ -375,8 +379,9 @@ def upsert_user_location(
                     accuracy_m=location.accuracy_m,
                     battery_level=location.battery_level,
                     connection_type=location.connection_type,
+                    fix_at=location.fix_at,
                     fix_source=location.fix_source,
-                    received_at=location.received_at,
+                    reported_at=location.reported_at,
                     source=location.source,
                     trigger=location.trigger,
                     updated_at=now,
@@ -390,8 +395,9 @@ def upsert_user_location(
             row.accuracy_m = location.accuracy_m
             row.battery_level = location.battery_level
             row.connection_type = location.connection_type
+            row.fix_at = location.fix_at
             row.fix_source = location.fix_source
-            row.received_at = location.received_at
+            row.reported_at = location.reported_at
             row.source = location.source
             row.trigger = location.trigger
             row.updated_at = now
@@ -405,8 +411,9 @@ def upsert_user_location(
                 accuracy_m=location.accuracy_m,
                 battery_level=location.battery_level,
                 connection_type=location.connection_type,
+                fix_at=location.fix_at,
                 fix_source=location.fix_source,
-                received_at=location.received_at,
+                reported_at=location.reported_at,
                 source=location.source,
                 trigger=location.trigger,
                 updated_at=now,
@@ -423,15 +430,25 @@ def upsert_user_location(
         )
         connection_label = connection_type_label_for_log(location.connection_type)
         metadata_suffix = _location_log_metadata_suffix(location)
+        report_fragment = location_report_log_fragment(
+            reported_at=location.reported_at,
+            fix_at=location.fix_at,
+        )
+        stale_suffix = location_report_log_stale_suffix(
+            reported_at=location.reported_at,
+            fix_at=location.fix_at,
+            trigger=location.trigger,
+        )
         _LOCATION_LOGGER.info(
-            "stored location for %s (%.5f, %.5f) accuracy_m=%s connection_type=%s%s at %s",
+            "stored location for %s (%.5f, %.5f) accuracy_m=%s connection_type=%s%s%s%s",
             location.user_id,
             location.lat,
             location.lon,
             accuracy_label,
             connection_label,
             metadata_suffix,
-            format_log_timestamp(location.received_at),
+            report_fragment,
+            stale_suffix,
         )
         prune_user_location_history(
             path,
@@ -464,8 +481,9 @@ def _history_to_record(row: RuleUserLocationHistory) -> UserLocationRecord:
         accuracy_m=row.accuracy_m,
         battery_level=row.battery_level,
         connection_type=row.connection_type,
+        fix_at=row.fix_at,
         fix_source=row.fix_source,
-        received_at=row.received_at,
+        reported_at=row.reported_at,
         source=row.source,
         trigger=row.trigger,
         wifi_bssid=row.wifi_bssid,
@@ -499,8 +517,9 @@ def _location_to_record(row: RuleUserLastLocation) -> UserLocationRecord:
         accuracy_m=row.accuracy_m,
         battery_level=row.battery_level,
         connection_type=row.connection_type,
+        fix_at=row.fix_at,
         fix_source=row.fix_source,
-        received_at=row.received_at,
+        reported_at=row.reported_at,
         source=row.source,
         trigger=row.trigger,
         wifi_bssid=row.wifi_bssid,

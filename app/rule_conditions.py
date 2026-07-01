@@ -393,7 +393,7 @@ def _effective_location_for_rule(
         return latest
     cutoff = now_epoch - walkback_max_s
     for row in history:
-        if _location_received_at_epoch(row) < cutoff:
+        if _location_reported_at_epoch(row) < cutoff:
             break
         if _location_usable_for_rule(row, min_accuracy_m):
             return row
@@ -1284,9 +1284,9 @@ def _format_window_display(start_hhmm: str, end_hhmm: str) -> str:
     )
 
 
-def _location_received_at_epoch(location: UserLocationOut) -> float:
+def _location_reported_at_epoch(location: UserLocationOut) -> float:
     return datetime.fromisoformat(
-        location.received_at.replace("Z", "+00:00"),
+        location.reported_at.replace("Z", "+00:00"),
     ).timestamp()
 
 
