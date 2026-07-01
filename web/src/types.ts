@@ -273,7 +273,8 @@ export type RuleOut =
   | (RuleOutShared & {
       trigger: "edge_true";
       schedule_cron?: null;
-      fire_once_per_local_day?: false;
+      /** At most one fire per local calendar day (home timezone). */
+      fire_once_per_local_day?: boolean;
     });
 
 export interface SmtpConfigIn {

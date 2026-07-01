@@ -34,7 +34,8 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
         if rule.id == "evening-interior-lights-on-anyone-home"
     )
     assert interior.fire_once_per_local_day is True
-    assert interior.schedule_cron == "*/10 * * * *"
+    assert interior.trigger == "edge_true"
+    assert interior.schedule_cron is None
     assert automation_rules_source() == "operator"
 
 

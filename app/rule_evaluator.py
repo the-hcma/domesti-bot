@@ -664,21 +664,14 @@ class RuleEvaluator:
                 evaluation.all_met,
             )
             if evaluation.all_met:
-                if rule.fire_once_per_local_day and fired_on_same_local_calendar_day(
-                    runtime.last_fired_at,
-                    now_epoch,
-                    timezone,
+                if self._skip_if_daily_cap(
+                    log_user_ids=log_user_ids,
+                    now_epoch=now_epoch,
+                    rule=rule,
+                    runtime=runtime,
+                    timezone=timezone,
                 ):
-                    fired_date = local_calendar_date(
-                        runtime.last_fired_at or now_epoch,
-                        timezone,
-                    )
-                    _log_rule_skipped(
-                        rule.id,
-                        log_user_ids,
-                        reason="daily_cap",
-                        detail=f"last_fired_local_date={fired_date.isoformat()}",
-                    )
+                    pass
                 elif scheduled_dwell_episode_blocks_scheduled_fire(rule, ctx):
                     _log_rule_skipped(
                         rule.id,
@@ -762,6 +755,14 @@ class RuleEvaluator:
                 )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+            if self._skip_if_daily_cap(
+                log_user_ids=user_id,
+                now_epoch=now,
+                rule=rule,
+                runtime=runtime,
+                timezone=ctx.timezone,
+            ):
+                continue
             if not self._cooldown_elapsed(rule, runtime):
                 remaining_s = rule.cooldown_s - (
                     now - (runtime.last_fired_at or 0.0)
@@ -1246,6 +1247,14 @@ class RuleEvaluator:
                 )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+            if self._skip_if_daily_cap(
+                log_user_ids=user_id,
+                now_epoch=now,
+                rule=rule,
+                runtime=runtime,
+                timezone=ctx.timezone,
+            ):
+                continue
             if not self._cooldown_elapsed(rule, runtime):
                 remaining_s = rule.cooldown_s - (now - (runtime.last_fired_at or 0.0))
                 _log_rule_skipped(
@@ -1500,6 +1509,35 @@ class RuleEvaluator:
                         consumed[(rule.id, roster_user_id, condition.geofence_id)] = (
                             episode
                         )
+
+    def _skip_if_daily_cap(
+        self,
+        *,
+        log_user_ids: str,
+        now_epoch: float,
+        rule: RuleOut,
+        runtime: _RuleRuntimeState,
+        timezone: ZoneInfo,
+    ) -> bool:
+        if not rule.fire_once_per_local_day:
+            return False
+        if not fired_on_same_local_calendar_day(
+            runtime.last_fired_at,
+            now_epoch,
+            timezone,
+        ):
+            return False
+        fired_date = local_calendar_date(
+            runtime.last_fired_at or now_epoch,
+            timezone,
+        )
+        _log_rule_skipped(
+            rule.id,
+            log_user_ids,
+            reason="daily_cap",
+            detail=f"last_fired_local_date={fired_date.isoformat()}",
+        )
+        return True
 
     def _update_geofence_transitions(
         self,

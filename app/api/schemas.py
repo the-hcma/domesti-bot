@@ -826,7 +826,7 @@ class RuleOut(BaseModel):
     fire_once_per_local_day: bool = Field(
         default=False,
         description=(
-            "When true on a scheduled rule, fire at most once per local calendar day "
+            "When true, fire at most once per local calendar day "
             "(timezone from settings_location)."
         ),
     )
@@ -903,10 +903,6 @@ class RuleOut(BaseModel):
                 "schedule_cron is only allowed when trigger is scheduled"
             )
         self.schedule_cron = None
-        if self.fire_once_per_local_day:
-            raise ValueError(
-                "fire_once_per_local_day is only allowed when trigger is scheduled"
-            )
         return self
 
 

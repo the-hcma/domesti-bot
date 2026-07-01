@@ -151,8 +151,7 @@ def build_rules_status(
             if scheduled_at is not None:
                 next_evaluate_at = _epoch_to_iso_z(scheduled_at)
         if (
-            rule.trigger == "scheduled"
-            and rule.fire_once_per_local_day
+            rule.fire_once_per_local_day
             and fire_state.last_fired_at is not None
             and fired_on_same_local_calendar_day(
                 fire_state.last_fired_at,
