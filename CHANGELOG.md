@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.10.0](https://github.com/the-hcma/domesti-bot/compare/v1.9.0...v1.10.0) (2026-07-01)
+
+
+### Features
+
+* evening interior lights on geofence enter with daily cap ([#375](https://github.com/the-hcma/domesti-bot/issues/375)) ([9d24028](https://github.com/the-hcma/domesti-bot/commit/9d24028ec484cf697c832d536663a4c42fc8a9fe))
+* proactive location monitoring — stale watchdog + geofence approach mode ([#363](https://github.com/the-hcma/domesti-bot/issues/363)) ([073642b](https://github.com/the-hcma/domesti-bot/commit/073642be1a0d96b350ad510f28eac5421f6e92db))
+* separate fix_at from reported_at for presence locations ([#371](https://github.com/the-hcma/domesti-bot/issues/371)) ([727bfa8](https://github.com/the-hcma/domesti-bot/commit/727bfa8c479034057b2c5ca0115cd663dea82933))
+* windowed astronomical repeat schedule for evening interior lights ([#364](https://github.com/the-hcma/domesti-bot/issues/364)) ([c8ee721](https://github.com/the-hcma/domesti-bot/commit/c8ee7211049ba4184d2f387a6f7f9b92b297a5b9))
+
+
+### Bug Fixes
+
+* log &lt;not applicable&gt; for missing location-request context ([#367](https://github.com/the-hcma/domesti-bot/issues/367)) ([607d552](https://github.com/the-hcma/domesti-bot/commit/607d55210f1f7abab8235bb6b787d6d20aff7c35))
+* run stale location watchdog every 30 minutes ([#366](https://github.com/the-hcma/domesti-bot/issues/366)) ([39edd54](https://github.com/the-hcma/domesti-bot/commit/39edd54b52cfd8ffa36b29a7819f4f391d2ae781))
+* schedule rule evaluation from webhook worker threads ([#373](https://github.com/the-hcma/domesti-bot/issues/373)) ([a9e649c](https://github.com/the-hcma/domesti-bot/commit/a9e649c3ce4579f6a46b0cfe9e3eb79164e481e4))
+
 ## [1.9.0](https://github.com/the-hcma/domesti-bot/compare/v1.8.0...v1.9.0) (2026-06-29)
 
 
