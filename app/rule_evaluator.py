@@ -160,6 +160,7 @@ class RuleEvaluator:
             tuple[str, str, str, str],
             _DeferredAccuracyEdge,
         ] = {}
+        self._event_loop: asyncio.AbstractEventLoop | None = None
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_geo_outside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_inside_since: dict[tuple[str, str], float] = {}
@@ -279,18 +280,34 @@ class RuleEvaluator:
 
     def schedule_location_update(self, user_id: str) -> None:
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
+            event_loop = self._event_loop
+            if event_loop is None:
+                _LOGGER.warning(
+                    "[rules] dropped location update for user_id=%s: "
+                    "no event loop registered yet",
+                    user_id,
+                )
+                return
+            try:
+                event_loop.call_soon_threadsafe(
+                    self._schedule_location_update_task,
+                    user_id,
+                )
+            except RuntimeError:
+                _LOGGER.warning(
+                    "[rules] dropped location update for user_id=%s: "
+                    "event loop is closed",
+                    user_id,
+                )
             return
-        task = loop.create_task(
-            self.on_location_update(user_id),
-            name=f"rule-eval-location-{user_id}",
-        )
-        task.add_done_callback(_log_location_evaluation_task)
+        self._schedule_location_update_task(user_id)
 
     def start_periodic_tick(self) -> None:
         if self._tick_task is not None:
             return
+        self._event_loop = asyncio.get_running_loop()
         self._tick_task = asyncio.create_task(
             self._periodic_loop(),
             name="rule-evaluator-tick",
@@ -1368,6 +1385,14 @@ class RuleEvaluator:
             )
             return materialized or ""
         return (rule.schedule_cron or "").strip()
+
+    def _schedule_location_update_task(self, user_id: str) -> None:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(
+            self.on_location_update(user_id),
+            name=f"rule-eval-location-{user_id}",
+        )
+        task.add_done_callback(_log_location_evaluation_task)
 
     def _ensure_astronomical_schedule_materialized(
         self,
