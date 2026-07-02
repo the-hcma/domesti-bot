@@ -1,8 +1,9 @@
 """SQLite persistence for LAN device discovery (all backends share one cache file).
 
-Schema changes are **additive** only: tables are created via SQLAlchemy
-:func:`app.db.schema.ensure_schema` (no Alembic-style data migrations).
-Reads call :func:`ensure_schema` so older on-disk files gain new tables automatically.
+Schema changes are **additive** only: tables and columns are created or synced via
+:func:`app.db.schema.bootstrap_schema` from the SQLAlchemy ORM models.
+Reads call :func:`ensure_schema_if_exists` so older on-disk files gain new tables and
+columns automatically.
 
 The ``androidtv_discovered_hosts`` table name is historical: rows store **Cast** ``(host, port,
 friendly_name)`` hints from PyChromecast (typically port **8009**), not ADB.

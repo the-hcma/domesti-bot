@@ -207,7 +207,7 @@ def build_rules_status(
             if anchor is not None:
                 anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
                 scheduled_detail = (
-                    f"Evaluates once when armed at "
+                    "Evaluates once when armed at "
                     f"{_format_astronomical_anchor_label(anchor_dt)} if anyone is home; "
                     "also on geofence enter until local midnight"
                 )
