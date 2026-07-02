@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.cron_schedule import validate_schedule_cron_expression
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.presence_connection_type import normalize_presence_connection_type
 from app.presence_wifi import normalize_wifi_bssid
 
@@ -875,7 +875,7 @@ class RuleOut(BaseModel):
         from app.astronomical_schedule import extract_astronomical_anchor
 
         cron = (self.schedule_cron or "").strip()
-        if self.trigger == "scheduled":
+        if self.trigger == RuleTrigger.SCHEDULED:
             anchor = extract_astronomical_anchor(self)
             astronomical_count = sum(
                 1

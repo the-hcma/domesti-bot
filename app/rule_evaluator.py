@@ -7,7 +7,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
@@ -34,6 +34,7 @@ from app.astronomical_schedule import (
     next_astronomical_repeat_evaluate_at,
     parse_schedule_materialized_for,
     schedule_materialized_for_date,
+    uses_astronomical_edge_window_open_schedule,
     uses_astronomical_repeat_schedule,
     uses_astronomical_schedule,
 )
@@ -43,6 +44,7 @@ from app.cron_schedule import (
     local_calendar_date,
     next_scheduled_evaluate_at,
 )
+from app.device_enums import RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.geofence_transition_state_store import (
     GeofenceTransitionStateRecord,
@@ -632,7 +634,7 @@ class RuleEvaluator:
         now = datetime.fromtimestamp(now_epoch, tz=timezone)
         ctx = await self._build_evaluation_context(now=now)
         for rule in list_automation_rules():
-            if not rule.enabled or rule.trigger != "scheduled":
+            if not rule.enabled or not _rule_uses_scheduled_evaluation_tick(rule):
                 continue
             cron_expr = self._resolve_schedule_cron(rule, timezone=timezone)
             if cron_expr == "":
@@ -657,7 +659,10 @@ class RuleEvaluator:
             if runtime.next_evaluate_at > now_epoch:
                 continue
             log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
-            evaluation = evaluate_rule(rule, ctx)
+            evaluation_ctx = ctx
+            if rule.trigger == RuleTrigger.EDGE_TRUE:
+                evaluation_ctx = replace(ctx, presence_as_steady=True)
+            evaluation = evaluate_rule(rule, evaluation_ctx)
             _LOGGER.info(
                 "[rules] scheduled evaluate rule_id=%s met=%s",
                 rule.id,
@@ -727,7 +732,7 @@ class RuleEvaluator:
             if deferred is None or now > deferred.expires_at:
                 continue
             rule = _automation_rule_by_id(deferred.rule_id)
-            if rule is None or not rule.enabled or rule.trigger != "edge_true":
+            if rule is None or not rule.enabled or rule.trigger != RuleTrigger.EDGE_TRUE:
                 self._deferred_accuracy_edges.pop(key, None)
                 continue
             if not _accuracy_passes(rule, location):
@@ -1183,7 +1188,7 @@ class RuleEvaluator:
             now=now,
         )
         for rule in rules:
-            if not rule.enabled or rule.trigger != "edge_true":
+            if not rule.enabled or rule.trigger != RuleTrigger.EDGE_TRUE:
                 continue
             if rule.id in deferred_fired_rule_ids:
                 continue
@@ -1355,7 +1360,7 @@ class RuleEvaluator:
         timezone = ZoneInfo(settings.timezone)
         now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
         for rule in list_automation_rules():
-            if not rule.enabled or rule.trigger != "scheduled":
+            if not rule.enabled or not _rule_uses_scheduled_evaluation_tick(rule):
                 continue
             if uses_astronomical_schedule(rule):
                 self._ensure_astronomical_schedule_materialized(
@@ -1484,7 +1489,7 @@ class RuleEvaluator:
             return
         roster_user_ids = {row.user_id for row in list_users(cache_path)}
         for rule in list_automation_rules():
-            if rule.trigger != "scheduled" or not _rule_has_dwell_condition(rule):
+            if rule.trigger != RuleTrigger.SCHEDULED or not _rule_has_dwell_condition(rule):
                 continue
             runtime = self._rule_state.get(rule.id)
             if runtime is None or runtime.last_fired_at is None:
@@ -1939,7 +1944,7 @@ def _format_rule_conditions_for_log(
 ) -> str:
     parts: list[str] = []
     for row in evaluation.conditions:
-        if rule.trigger == "edge_true" and isinstance(
+        if rule.trigger == RuleTrigger.EDGE_TRUE and isinstance(
             row.condition,
             (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
         ):
@@ -2034,7 +2039,7 @@ def _geofence_edge_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
     limits = [
         rule.min_location_accuracy_m
         for rule in rules
-        if rule.enabled and rule.trigger == "edge_true"
+        if rule.enabled and rule.trigger == RuleTrigger.EDGE_TRUE
     ]
     if not limits:
         return None
@@ -2451,6 +2456,12 @@ def _log_rule_skipped(
 
 def _rule_has_dwell_condition(rule: RuleOut) -> bool:
     return any(_condition_has_dwell(condition) for condition in rule.conditions.all)
+
+
+def _rule_uses_scheduled_evaluation_tick(rule: RuleOut) -> bool:
+    if rule.trigger == RuleTrigger.SCHEDULED:
+        return True
+    return uses_astronomical_edge_window_open_schedule(rule)
 
 
 def _scheduled_rule_user_ids_for_log(

@@ -1,0 +1,24 @@
+---
+description: Use StrEnum for closed string sets in Python (not raw literals)
+alwaysApply: true
+---
+
+# Closed sets use StrEnum
+
+When a value is drawn from a **fixed, known set** of strings (API enums, device families, rule triggers, action types), define a `StrEnum` in `app/` (typically `app/device_enums.py` or a domain module) and compare against enum members — not bare string literals.
+
+```python
+# Good
+from app.device_enums import RuleTrigger
+
+if rule.trigger == RuleTrigger.EDGE_TRUE:
+    ...
+
+# Avoid in library code
+if rule.trigger == "edge_true":
+    ...
+```
+
+Pydantic models may use the enum as the field type; JSON wire values stay the same (`"edge_true"`, etc.).
+
+**Exceptions:** one-off user-facing error messages, test fixture JSON dicts, and third-party literals required for interoperability.

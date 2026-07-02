@@ -54,3 +54,10 @@ class RuleDeviceActionType(StrEnum):
                 return "turn off"
             case RuleDeviceActionType.TURN_ON:
                 return "turn on"
+
+
+class RuleTrigger(StrEnum):
+    """How a rule is armed in automation-rules.json (API field ``trigger``)."""
+
+    EDGE_TRUE = "edge_true"
+    SCHEDULED = "scheduled"

@@ -41,7 +41,7 @@ from app.api.schemas import (
     SettingsLocationOut,
 )
 from app.automation_rules_loader import load_settings_location
-from app.device_enums import DeviceFamilyId
+from app.device_enums import DeviceFamilyId, RuleTrigger
 from app.rule_actions import (
     cached_kasa_is_on,
     cached_sonos_is_playing,
@@ -97,6 +97,10 @@ class RuleEvaluationContext:
         default_factory=dict,
     )
     walkback_max_s: float = LOCATION_HISTORY_WALKBACK_MAX_S
+    # Window-open arm for edge_true rules: evaluate presence geofences as steady
+    # state (anyone inside) instead of enter-only edges. Not the rule JSON
+    # ``trigger`` field — that stays ``edge_true``; this is per-evaluation mode.
+    presence_as_steady: bool = False
 
     def resolve_user_id(self, reference: str) -> str | None:
         return resolve_roster_user_id(reference, self.roster_user_id_lookup)
@@ -169,7 +173,7 @@ def evaluate_rule(
         _evaluate_condition(condition, rule, ctx)
         for condition in rule.conditions.all
     ]
-    if rule.trigger == "edge_true":
+    if rule.trigger == RuleTrigger.EDGE_TRUE and not ctx.presence_as_steady:
         steady_rows = [
             row
             for row, condition in zip(conditions, rule.conditions.all, strict=True)
@@ -473,8 +477,10 @@ def _evaluate_any(
     children = [
         _evaluate_condition(child, rule, ctx) for child in condition.conditions
     ]
-    if rule.trigger == "edge_true" and _conditions_are_presence_only(
-        condition.conditions
+    if (
+        rule.trigger == RuleTrigger.EDGE_TRUE
+        and not ctx.presence_as_steady
+        and _conditions_are_presence_only(condition.conditions)
     ):
         met = False
         presence_details = [child.detail for child in children if child.detail]
@@ -912,7 +918,7 @@ def _evaluate_users_geofence(
             continue
         selected_names.append(_user_display_name(ctx, roster_user_id))
     who = _join_names(selected_names)
-    if rule.trigger == "edge_true":
+    if rule.trigger == RuleTrigger.EDGE_TRUE and not ctx.presence_as_steady:
         label = (
             f"Presence at {fence_label} ({who})"
             if want_inside
@@ -1842,7 +1848,7 @@ def scheduled_dwell_episode_blocks_scheduled_fire(
     ctx: RuleEvaluationContext,
 ) -> bool:
     """Return True when every dwell user already fired for the current presence episode."""
-    if rule.trigger != "scheduled":
+    if rule.trigger != RuleTrigger.SCHEDULED:
         return False
     dwell_conditions = _iter_dwell_for_s_conditions(rule.conditions.all)
     if not dwell_conditions:
