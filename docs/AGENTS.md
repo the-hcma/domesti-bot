@@ -130,7 +130,7 @@ domesti-bot/
 
 ## Code Style
 
-- **Sorted methods and module-level functions** — enforced by `.cursor/rules/python-sorted-methods.mdc`. Within each `class`, define methods and `@property` getters in ASCII alphabetical order by name (the name after `def`). Treat `async def` like `def`. Same rule for module-level functions. Dunder methods (`__init__`, `__str__`, …) participate in the same sort. **Insert** new APIs in sorted position rather than appending at the bottom.
+- **Lexicographic code organization** — enforced by `.cursor/rules/python-sorted-methods.mdc`. **Public** module-level names and class members first (constants, classes, functions, properties) sorted ASCII lexicographically within that block; **private** (`_`-prefixed) module helpers and class members second, sorted within that block. Do not append new APIs at the bottom — insert in sorted position. Dunder methods sit in the public class block. Same public-then-private lexicographic principle applies broadly when organizing code.
 - **Imports must be at module level.** No lazy / local imports inside functions or methods. `TYPE_CHECKING` guards are acceptable (they are module-level by nature).
 - **Import order** follows PEP 8 (standard library, third-party, local) and matches what already exists in the repo.
 - **Empty lines must contain no whitespace** (no trailing spaces/tabs).
@@ -591,7 +591,7 @@ Before every commit (mirrors the CI gates above; `uv sync --group dev` when deps
 - [ ] If any `app/api/static/icons/compact/*.svg` changed: `./scripts/internal/generate-compact-icon-preview` and attach `$HOME/scratch/domesti-bot/tmp/build/review.html` (or a screenshot) to the PR
 - [ ] No trailing whitespace; empty lines have no whitespace
 - [ ] Imports sorted; all imports at module level
-- [ ] New methods / module-level functions inserted in **alphabetical** position
+- [ ] New methods / module-level functions inserted in **lexicographic** position (public block, then private block — see `python-sorted-methods.mdc`)
 - [ ] No `print()` in library code (use `logging`)
 - [ ] No hardcoded credentials or well-known ports in tests
 - [ ] Commit message follows Conventional Commits and is GPG-signed

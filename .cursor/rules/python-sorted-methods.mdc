@@ -1,24 +1,56 @@
 ---
-description: Alphabetical ordering for methods and module-level functions in Python
+description: Lexicographic code organization — public block, then private block
 globs: "**/*.py"
 alwaysApply: true
 ---
 
-# Sorted functions / methods
+# Lexicographic code organization (Python)
 
-Within each `class`, define **methods and `@property` getters in ASCII alphabetical order by name** (the name after `def`). Treat `async def` like `def` for ordering.
+**Default:** sort **ASCII lexicographically by name** whenever possible. **Insert** new definitions in sorted position — do not append at the bottom of a block.
 
-Do the same for **module-level functions** (including `async def`). Keep `import` blocks at the top unchanged.
+Keep `import` / `from … import` blocks at the top of the module (PEP 8); they are not part of the public/private sorts below.
 
-When adding APIs, **insert** definitions in sorted position instead of appending at the bottom.
+## Module level
 
-Dunder methods participate in the same sort (`__init__`, `__str__`, …).
+Two blocks, in order:
+
+1. **Public** — module-level names **without** a leading `_`: constants (`ALL_CAPS`), classes, module-level functions (`def` / `async def`), and other public bindings. Sort **within this block** by name (ASCII).
+2. **Private** — module-level names **with** a leading `_` (helpers, module-private constants, etc.). Sort **within this block** by name (ASCII).
+
+Public names are **not** interleaved with private names by strict global ASCII (`build_foo` stays in the public block even though `_` sorts before `b`).
 
 ```python
-# Example: member order under strict names
-class Example:
-    def __init__(self) -> None: ...
-    def __str__(self) -> str: ...
-    async def close(self) -> None: ...
-    def fetch(self) -> None: ...
+# public block (sorted)
+DEFAULT_TIMEOUT_S = 30
+class Widget: ...
+def build_status() -> None: ...
+
+# private block (sorted)
+def _epoch_to_iso_z(epoch: float) -> str: ...
+def _format_label(dt: datetime) -> str: ...
 ```
+
+When adding a new `_helper`, insert it among the other `_` names — not after the public APIs and not at the end of the file unless it sorts last in the private block.
+
+## Inside a `class`
+
+Two blocks, in order:
+
+1. **Public** — methods and `@property` getters whose names do **not** start with `_`. Treat `async def` like `def`. Dunder methods (`__init__`, `__str__`, …) live in this block and participate in the same lexicographic sort.
+2. **Private** — methods and `@property` getters whose names start with `_` (single leading underscore). Sort lexicographically within this block.
+
+```python
+class Example:
+  def __init__(self) -> None: ...
+  def __str__(self) -> str: ...
+  def close(self) -> None: ...
+  def fetch(self) -> None: ...
+
+  def _validate(self) -> None: ...
+```
+
+## General
+
+Apply the same **public-then-private, lexicographic within each block** idea elsewhere when organizing code (e.g. grouped `const` / `enum` members in TypeScript, export blocks in TS modules) unless a file already documents a different stable layout.
+
+Whole-file reorders of legacy modules are optional drive-by refactors; **new and moved APIs must follow this rule in the block they belong to.**
