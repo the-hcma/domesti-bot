@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/the-hcma/domesti-bot/compare/v1.10.0...v1.11.0) (2026-07-02)
+
+
+### Features
+
+* evaluate evening-interior rule at window arm and on arrival ([#379](https://github.com/the-hcma/domesti-bot/issues/379)) ([#380](https://github.com/the-hcma/domesti-bot/issues/380)) ([940c278](https://github.com/the-hcma/domesti-bot/commit/940c278d157e91937246ac70ce31280f3f74d076))
+
 ## [1.10.0](https://github.com/the-hcma/domesti-bot/compare/v1.9.0...v1.10.0) (2026-07-01)
 
 
