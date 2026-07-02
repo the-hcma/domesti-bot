@@ -302,13 +302,19 @@ export function ruleStatusHeadline(rule: {
   last_fired_at: string | null;
   triggers: RuleTrigger[];
 }): string {
+  const hasDeviceState = rule.triggers.includes("device_state");
   const hasEdge = rule.triggers.includes("edge_true");
   const hasScheduled = rule.triggers.includes("scheduled");
-  if (hasEdge && !hasScheduled) {
+  if (hasEdge && !hasScheduled && !hasDeviceState) {
     if (rule.condition_currently_true) {
       return "Armed — fires on enter/leave";
     }
     return "Waiting — outside active window";
+  }
+  if (hasDeviceState && !hasScheduled) {
+    return rule.condition_currently_true
+      ? "Ready — conditions currently met"
+      : "Armed — fires on device state change";
   }
   if (hasScheduled) {
     return rule.condition_currently_true

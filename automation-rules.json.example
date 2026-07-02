@@ -11,7 +11,7 @@
     "Rule 2 (evening-lights-off-both-home) runs every 10 min after sunset: when both have been home 10+ min and either arrival light is still on, turn both off.",
     "Rule 3 (evening-interior-lights-on-anyone-home) uses triggers [edge_true, scheduled] and arms from 25 min before sunset until midnight: at the window open it evaluates once — if Henrique OR Kristen is already home, interior lamps turn on; otherwise the next home geofence enter by either person fires the rule (once per local day). Not a periodic poll.",
     "Rule 4 (away-shutdown-everyone-outside-20m) runs every 10 min: when Henrique AND Kristen have been outside house 20+ min and any listed light/media device is still on, turn them off (garage doors are not closed).",
-    "Rule 5 (away-garage-open-alert) runs every 10 min: when both have been outside house 20+ min and any garage door is open, email hcma@hcma.info and kristen@kristenmather.com."
+    "Rule 5 (away-garage-open-alert) uses device_state trigger: when both have been outside house 20+ min and a watched garage door opens, email hcma@hcma.info and kristen@kristenmather.com (state poll ~10s)."
   ],
   "settings_location": {
     "lat": 41.194072,
@@ -228,8 +228,7 @@
       "id": "away-garage-open-alert",
       "label": "Email when a garage door is open and everyone away 20+ min",
       "enabled": true,
-      "triggers": ["scheduled"],
-      "schedule_cron": "*/10 * * * *",
+      "triggers": ["device_state"],
       "cooldown_s": 1800,
       "min_location_accuracy_m": 50,
       "notify_on_fire": true,

@@ -39,6 +39,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import Final
 
+from app.device_enums import DeviceFamilyId
+from app.device_state_change import DeviceStateChangeDetector
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
@@ -94,8 +96,10 @@ class KasaPollingWatcher(DeviceStateWatcher):
         self,
         mgr: KasaDeviceManager,
         *,
+        change_detector: DeviceStateChangeDetector | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
+        self._change_detector = change_detector
         self._mgr = mgr
         self._interval_s = interval_s
 
@@ -106,6 +110,13 @@ class KasaPollingWatcher(DeviceStateWatcher):
                 await self._mgr.is_on(kd.identifier)
             except Exception as exc:
                 _log_watcher_refresh_failure(backend="kasa", device_id=host, exc=exc)
+                continue
+            if self._change_detector is not None:
+                self._change_detector.note_bool_state(
+                    DeviceFamilyId.KASA,
+                    kd.identifier,
+                    kd.is_on,
+                )
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -134,8 +145,10 @@ class SonosPollingWatcher(DeviceStateWatcher):
         self,
         mgr: SonosDeviceManager,
         *,
+        change_detector: DeviceStateChangeDetector | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
+        self._change_detector = change_detector
         self._mgr = mgr
         self._interval_s = interval_s
 
@@ -148,6 +161,13 @@ class SonosPollingWatcher(DeviceStateWatcher):
                     backend="sonos",
                     device_id=sp.identifier,
                     exc=exc,
+                )
+                continue
+            if self._change_detector is not None:
+                self._change_detector.note_bool_state(
+                    DeviceFamilyId.SONOS,
+                    sp.identifier,
+                    sp.is_playing,
                 )
 
     async def run(self, *, stop: asyncio.Event) -> None:
@@ -173,8 +193,10 @@ class TailwindPollingWatcher(DeviceStateWatcher):
         self,
         mgr: GotailwindDeviceManager,
         *,
+        change_detector: DeviceStateChangeDetector | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
+        self._change_detector = change_detector
         self._mgr = mgr
         self._interval_s = interval_s
 
@@ -187,6 +209,13 @@ class TailwindPollingWatcher(DeviceStateWatcher):
                     backend="tailwind",
                     device_id=gd.identifier,
                     exc=exc,
+                )
+                continue
+            if self._change_detector is not None:
+                self._change_detector.note_bool_state(
+                    DeviceFamilyId.TAILWIND,
+                    gd.identifier,
+                    gd.is_open,
                 )
 
     async def run(self, *, stop: asyncio.Event) -> None:
@@ -210,8 +239,10 @@ class VizioPollingWatcher(DeviceStateWatcher):
         self,
         mgr: VizioDeviceManager,
         *,
+        change_detector: DeviceStateChangeDetector | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
+        self._change_detector = change_detector
         self._mgr = mgr
         self._interval_s = interval_s
 
@@ -235,6 +266,13 @@ class VizioPollingWatcher(DeviceStateWatcher):
                     device_id=tv.identifier,
                     exc=exc,
                 )
+            else:
+                if self._change_detector is not None:
+                    self._change_detector.note_bool_state(
+                        DeviceFamilyId.VIZIO,
+                        tv.identifier,
+                        tv.is_on,
+                    )
 
         await asyncio.gather(*(_refresh_tv(tv) for tv in self._mgr.tvs))
 
@@ -311,6 +349,7 @@ def _root_os_error(exc: BaseException) -> OSError | None:
 def build_default_watchers(
     state: DeviceManagersState,
     *,
+    change_detector: DeviceStateChangeDetector | None = None,
     interval_s: float,
 ) -> list[DeviceStateWatcher]:
     """Return the default watcher list for a finished discovery state.
@@ -321,19 +360,35 @@ def build_default_watchers(
     """
 
     watchers: list[DeviceStateWatcher] = [
-        KasaPollingWatcher(state.kasa_mgr, interval_s=interval_s),
+        KasaPollingWatcher(
+            state.kasa_mgr,
+            change_detector=change_detector,
+            interval_s=interval_s,
+        ),
     ]
     if state.sonos_mgr is not None:
         watchers.append(
-            SonosPollingWatcher(state.sonos_mgr, interval_s=interval_s)
+            SonosPollingWatcher(
+                state.sonos_mgr,
+                change_detector=change_detector,
+                interval_s=interval_s,
+            )
         )
     if state.tailwind_mgr is not None:
         watchers.append(
-            TailwindPollingWatcher(state.tailwind_mgr, interval_s=interval_s)
+            TailwindPollingWatcher(
+                state.tailwind_mgr,
+                change_detector=change_detector,
+                interval_s=interval_s,
+            )
         )
     if state.vizio_mgr is not None:
         watchers.append(
-            VizioPollingWatcher(state.vizio_mgr, interval_s=interval_s)
+            VizioPollingWatcher(
+                state.vizio_mgr,
+                change_detector=change_detector,
+                interval_s=interval_s,
+            )
         )
     return watchers
 

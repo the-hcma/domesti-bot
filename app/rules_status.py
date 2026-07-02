@@ -29,6 +29,7 @@ from app.automation_rules_loader import (
     list_automation_rules,
     load_settings_location,
 )
+from app.device_state_watcher import poll_interval_from_env
 from app.cron_schedule import fired_on_same_local_calendar_day
 from app.device_enums import RuleEvaluationCause, RuleTrigger
 from app.astronomical_schedule import (
@@ -216,6 +217,21 @@ def build_rules_status(
             if effective_cron is not None:
                 scheduled_detail = (
                     f"Today's astronomical schedule: {effective_cron} (local)"
+                )
+        elif RuleTrigger.DEVICE_STATE in rule.triggers:
+            try:
+                poll_interval_s = poll_interval_from_env()
+            except ValueError:
+                poll_interval_s = None
+            if poll_interval_s is not None:
+                scheduled_detail = (
+                    "Evaluates when a watched device changes state "
+                    f"(background state poll every {poll_interval_s:g}s)"
+                )
+            else:
+                scheduled_detail = (
+                    "Evaluates when a watched device changes state "
+                    "(background state poll interval misconfigured)"
                 )
         rule_rows.append(
             RuleStatusSummaryOut(

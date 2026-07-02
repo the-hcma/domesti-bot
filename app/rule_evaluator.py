@@ -43,7 +43,7 @@ from app.cron_schedule import (
     local_calendar_date,
     next_scheduled_evaluate_at,
 )
-from app.device_enums import RuleEvaluationCause, RuleTrigger
+from app.device_enums import DeviceFamilyId, RuleEvaluationCause, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.geofence_transition_state_store import (
     GeofenceTransitionStateRecord,
@@ -90,6 +90,7 @@ from app.rule_validation import (
     build_roster_user_id_lookup,
     collect_rule_user_ids,
     rule_references_user_id,
+    rule_watches_backend_device,
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.presence_connection_type import connection_type_is_wifi
@@ -106,7 +107,7 @@ _GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
 _MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
 _RULE_EVALUATOR_TICK_S = 60.0
 DeferredGeofenceEvent = Literal["entered", "left"]
-RuleFireSource = Literal["deferred", "immediate", "scheduled"]
+RuleFireSource = Literal["deferred", "device_state", "immediate", "scheduled"]
 
 
 @dataclass(frozen=True)
@@ -304,6 +305,52 @@ class RuleEvaluator:
                 )
             return
         self._schedule_location_update_task(user_id)
+
+    async def on_device_state_change(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+    ) -> None:
+        if self._cache_path is None:
+            return
+        trimmed = device_id.strip()
+        if trimmed == "":
+            return
+        async with self._process_lock:
+            await self._process_device_state_change(family_id, trimmed)
+
+    def schedule_device_state_change(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+    ) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            event_loop = self._event_loop
+            if event_loop is None:
+                _LOGGER.warning(
+                    "[rules] dropped device-state update for %s/%s: "
+                    "no event loop registered yet",
+                    family_id.value,
+                    device_id,
+                )
+                return
+            try:
+                event_loop.call_soon_threadsafe(
+                    self._schedule_device_state_change_task,
+                    family_id,
+                    device_id,
+                )
+            except RuntimeError:
+                _LOGGER.warning(
+                    "[rules] dropped device-state update for %s/%s: "
+                    "event loop is closed",
+                    family_id.value,
+                    device_id,
+                )
+            return
+        self._schedule_device_state_change_task(family_id, device_id)
 
     def start_periodic_tick(self) -> None:
         if self._tick_task is not None:
@@ -902,7 +949,10 @@ class RuleEvaluator:
                 runtime.last_error,
             )
         runtime.last_fired_at = self._now_fn()
-        if fire_source == "scheduled" and _rule_has_dwell_condition(rule):
+        if (
+            fire_source in ("device_state", "scheduled")
+            and _rule_has_dwell_condition(rule)
+        ):
             consume_scheduled_dwell_episodes_for_fire(
                 rule,
                 await self._build_evaluation_context(
@@ -1415,6 +1465,111 @@ class RuleEvaluator:
             name=f"rule-eval-location-{user_id}",
         )
         task.add_done_callback(_log_location_evaluation_task)
+
+    def _schedule_device_state_change_task(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+    ) -> None:
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(
+            self.on_device_state_change(family_id, device_id),
+            name=f"rule-eval-device-{family_id.value}-{device_id}",
+        )
+        task.add_done_callback(_log_device_state_evaluation_task)
+
+    async def _process_device_state_change(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+    ) -> None:
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        now_epoch = self._now_fn()
+        timezone = ZoneInfo(load_settings_location().timezone)
+        now = datetime.fromtimestamp(now_epoch, tz=timezone)
+        ctx = await self._build_evaluation_context(now=now)
+        evaluation_ctx = replace(
+            ctx,
+            triggered_by=RuleEvaluationCause.DEVICE_STATE,
+        )
+        device_state = self._device_state_getter()
+        if device_state is None:
+            return
+        matched_rules = [
+            rule
+            for rule in list_automation_rules()
+            if rule.enabled
+            and RuleTrigger.DEVICE_STATE in rule.triggers
+            and rule_watches_backend_device(
+                rule,
+                device_state,
+                family_id=family_id,
+                backend_device_id=device_id,
+            )
+        ]
+        if not matched_rules:
+            return
+        _LOGGER.info(
+            "[rules] evaluating device-state change family_id=%s device_id=%s "
+            "rule_count=%d",
+            family_id.value,
+            device_id,
+            len(matched_rules),
+        )
+        transitions: dict[str, GeofenceTransition] = {}
+        for rule in matched_rules:
+            log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
+            evaluation = evaluate_rule(rule, evaluation_ctx)
+            _LOGGER.info(
+                "[rules] device-state evaluate rule_id=%s met=%s",
+                rule.id,
+                evaluation.all_met,
+            )
+            if not evaluation.all_met:
+                _log_rule_skipped(
+                    rule.id,
+                    log_user_ids,
+                    reason="conditions_not_met",
+                    detail=_format_unmet_conditions_for_log(evaluation),
+                )
+                continue
+            runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+            if self._skip_if_daily_cap(
+                log_user_ids=log_user_ids,
+                now_epoch=now_epoch,
+                rule=rule,
+                runtime=runtime,
+                timezone=timezone,
+            ):
+                continue
+            if scheduled_dwell_episode_blocks_scheduled_fire(rule, ctx):
+                _log_rule_skipped(
+                    rule.id,
+                    log_user_ids,
+                    reason="dwell_episode_consumed",
+                    detail="dwell already fired this away/inside episode",
+                )
+                continue
+            if not self._cooldown_elapsed(rule, runtime):
+                remaining_s = rule.cooldown_s - (
+                    now_epoch - (runtime.last_fired_at or 0.0)
+                )
+                _log_rule_skipped(
+                    rule.id,
+                    log_user_ids,
+                    reason="cooldown",
+                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                )
+                continue
+            await self._execute_rule(
+                rule,
+                evaluation=evaluation,
+                fire_source="device_state",
+                log_user_ids=log_user_ids,
+                transitions=transitions,
+            )
 
     def _ensure_astronomical_schedule_materialized(
         self,
@@ -1958,7 +2113,7 @@ def _format_rule_conditions_for_log(
     parts: list[str] = []
     for row in evaluation.conditions:
         if (
-            fire_source != "scheduled"
+            fire_source not in ("device_state", "scheduled")
             and RuleTrigger.EDGE_TRUE in rule.triggers
             and isinstance(
             row.condition,
@@ -2420,6 +2575,17 @@ def _log_location_evaluation_task(task: asyncio.Task[object]) -> None:
     if exc is not None:
         _LOGGER.exception(
             "[rules] location evaluation task failed",
+            exc_info=exc,
+        )
+
+
+def _log_device_state_evaluation_task(task: asyncio.Task[object]) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        _LOGGER.exception(
+            "[rules] device-state evaluation task failed",
             exc_info=exc,
         )
 

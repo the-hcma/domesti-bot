@@ -268,7 +268,11 @@ def create_app(args: Any) -> FastAPI:
                 return
             if generation != runtime.lifespan_generation:
                 return
-            watchers = build_default_watchers(state, interval_s=poll_interval_s)
+            watchers = build_default_watchers(
+                state,
+                change_detector=runtime.build_device_state_change_detector(),
+                interval_s=poll_interval_s,
+            )
             runtime.watcher_task = asyncio.create_task(
                 run_device_state_watchers(watchers, stop=watcher_stop),
                 name="device-state-watcher",

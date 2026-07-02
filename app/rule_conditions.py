@@ -1857,7 +1857,10 @@ def scheduled_dwell_episode_blocks_scheduled_fire(
     ctx: RuleEvaluationContext,
 ) -> bool:
     """Return True when every dwell user already fired for the current presence episode."""
-    if RuleTrigger.SCHEDULED not in rule.triggers:
+    if (
+        RuleTrigger.SCHEDULED not in rule.triggers
+        and RuleTrigger.DEVICE_STATE not in rule.triggers
+    ):
         return False
     dwell_conditions = _iter_dwell_for_s_conditions(rule.conditions.all)
     if not dwell_conditions:

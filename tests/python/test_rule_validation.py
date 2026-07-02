@@ -357,6 +357,59 @@ def test_rule_out_coerces_whitespace_only_schedule_cron_to_none_for_edge_true() 
     assert rule.schedule_cron is None
 
 
+def test_rule_out_accepts_device_state_trigger_with_device_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyOpenCondition(
+                    type="devices_any_open",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Left",
+                            family_id=DeviceFamilyId.TAILWIND,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="garage-open",
+        label="Garage open",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=True,
+        triggers=[RuleTrigger.DEVICE_STATE],
+    )
+    assert rule.triggers == [RuleTrigger.DEVICE_STATE]
+    assert rule.schedule_cron is None
+
+
+def test_rule_out_requires_device_ref_for_device_state_trigger() -> None:
+    with pytest.raises(ValidationError, match="device_state rules must reference"):
+        RuleOut(
+            conditions=RuleConditionsOut(
+                all=[
+                    UsersOutsideGeofenceCondition(
+                        type="users_outside_geofence",
+                        geofence_id="house",
+                        user_ids=["henrique"],
+                    ),
+                ],
+            ),
+            cooldown_s=300,
+            device_actions=[],
+            enabled=True,
+            id="away-no-device",
+            label="Away no device",
+            min_location_accuracy_m=50,
+            notification_emails=[],
+            notify_on_fire=False,
+            triggers=[RuleTrigger.DEVICE_STATE],
+        )
+
+
 def test_rule_out_coerces_null_accuracy_edge_grace_s_to_zero() -> None:
     rule = RuleOut.model_validate(
         {

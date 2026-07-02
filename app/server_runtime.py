@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from app.device_enums import DeviceFamilyId
+from app.device_state_change import DeviceStateChangeDetector
 from app.device_state_watcher import (
     build_default_watchers,
     poll_interval_from_env,
@@ -98,6 +100,18 @@ class DomestiServerRuntime:
         if evaluator is not None:
             evaluator.schedule_location_update(user_id)
 
+    def schedule_rule_device_state_evaluation(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+    ) -> None:
+        evaluator = self.rule_evaluator
+        if evaluator is not None:
+            evaluator.schedule_device_state_change(family_id, device_id)
+
+    def build_device_state_change_detector(self) -> DeviceStateChangeDetector:
+        return DeviceStateChangeDetector(self.schedule_rule_device_state_evaluation)
+
     async def restart_device_state_watchers(self) -> None:
         """Rebuild background polling after a hot-reloaded device manager."""
         state = self.device_state
@@ -118,7 +132,11 @@ class DomestiServerRuntime:
             )
             return
         self.watcher_stop = asyncio.Event()
-        watchers = build_default_watchers(state, interval_s=poll_interval_s)
+        watchers = build_default_watchers(
+            state,
+            change_detector=self.build_device_state_change_detector(),
+            interval_s=poll_interval_s,
+        )
         self.watcher_task = asyncio.create_task(
             run_device_state_watchers(watchers, stop=self.watcher_stop),
             name="device-state-watcher",
