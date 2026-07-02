@@ -539,7 +539,7 @@ requires-dist = [
     { name = "watchfiles", specifier = "==1.2.0" },
     { name = "wcwidth", specifier = ">=0.8.1" },
     { name = "yarl", specifier = "==1.24.2" },
-    { name = "zeroconf", specifier = ">=0.149.17" },
+    { name = "zeroconf", specifier = ">=0.150.0" },
 ]
 
 [package.metadata.requires-dev]
