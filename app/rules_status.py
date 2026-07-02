@@ -178,10 +178,9 @@ def build_rules_status(
             effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)
             anchor = extract_astronomical_anchor(rule)
             if effective_cron is not None and anchor is not None:
-                anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
-                display_hour = anchor_dt.hour % 12 or 12
-                suffix = "AM" if anchor_dt.hour < 12 else "PM"
-                anchor_label = f"{display_hour}:{anchor_dt.minute:02d} {suffix}"
+                anchor_label = _format_astronomical_anchor_label(
+                    astronomical_anchor_datetime(anchor, sun, tz),
+                )
                 if anchor.condition_type == "after_sunset":
                     window_label = "local midnight"
                     scheduled_detail = (
@@ -207,11 +206,9 @@ def build_rules_status(
             anchor = extract_astronomical_anchor(rule)
             if anchor is not None:
                 anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
-                display_hour = anchor_dt.hour % 12 or 12
-                suffix = "AM" if anchor_dt.hour < 12 else "PM"
-                anchor_label = f"{display_hour}:{anchor_dt.minute:02d} {suffix}"
                 scheduled_detail = (
-                    f"Evaluates once when armed at {anchor_label} if anyone is home; "
+                    f"Evaluates once when armed at "
+                    f"{_format_astronomical_anchor_label(anchor_dt)} if anyone is home; "
                     "also on geofence enter until local midnight"
                 )
         rule_rows.append(
@@ -298,6 +295,13 @@ def _fire_state_for_rule(
     if evaluator is None:
         return RuleEvaluatorFireState()
     return evaluator.fire_state_for_rule(rule_id)
+
+
+def _format_astronomical_anchor_label(anchor_dt: datetime) -> str:
+    """Return a 12-hour local clock label for an astronomical anchor instant."""
+    display_hour = anchor_dt.hour % 12 or 12
+    suffix = "AM" if anchor_dt.hour < 12 else "PM"
+    return f"{display_hour}:{anchor_dt.minute:02d} {suffix}"
 
 
 def _geofence_to_schema(record: GeofenceRecord) -> GeofenceOut:
