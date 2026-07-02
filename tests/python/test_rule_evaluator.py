@@ -22,7 +22,7 @@ from app.api.schemas import (
     UsersOutsideGeofenceForSCondition,
     DevicesAnyOnCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
@@ -167,7 +167,7 @@ def _arrive_home_rule(*, cooldown_s: int) -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
 
 
@@ -191,7 +191,7 @@ def _dwell_home_rule(*, cooldown_s: int) -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
 
@@ -570,7 +570,7 @@ async def test_rule_evaluator_seeds_geofence_inside_since_on_boot(
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     _write_bundle(bundle, dwell_rule)
@@ -620,7 +620,7 @@ async def test_rule_evaluator_seeds_inside_since_from_history_streak_start(
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     _write_bundle(bundle, dwell_rule)
@@ -826,7 +826,7 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     dwell_rule = RuleOut(
         conditions=RuleConditionsOut(
@@ -847,7 +847,7 @@ async def test_rule_evaluator_seeds_inside_since_when_dwell_accuracy_passes_edge
         min_location_accuracy_m=200,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     _write_bundle(bundle, edge_rule, dwell_rule)
@@ -928,7 +928,7 @@ async def test_rule_evaluator_seeds_outside_since_when_dwell_accuracy_passes_edg
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     dwell_rule = RuleOut(
         conditions=RuleConditionsOut(
@@ -949,7 +949,7 @@ async def test_rule_evaluator_seeds_outside_since_when_dwell_accuracy_passes_edg
         min_location_accuracy_m=200,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     _write_bundle(bundle, edge_rule, dwell_rule)
@@ -1149,7 +1149,7 @@ async def test_rule_evaluator_skips_inside_since_seed_when_dwell_rule_rejects_ac
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     _write_bundle(bundle, dwell_rule)
@@ -1224,7 +1224,7 @@ def _scheduled_inside_house_rule(
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron="* * * * *",
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
 
 
@@ -1559,7 +1559,7 @@ def _away_shutdown_rule(*, cooldown_s: int) -> RuleOut:
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron="*/10 * * * *",
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
 
 

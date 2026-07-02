@@ -300,15 +300,17 @@ export function resolveRosterUser<T extends { user_id: string }>(
 export function ruleStatusHeadline(rule: {
   condition_currently_true: boolean;
   last_fired_at: string | null;
-  trigger: RuleTrigger;
+  triggers: RuleTrigger[];
 }): string {
-  if (rule.trigger === "edge_true") {
+  const hasEdge = rule.triggers.includes("edge_true");
+  const hasScheduled = rule.triggers.includes("scheduled");
+  if (hasEdge && !hasScheduled) {
     if (rule.condition_currently_true) {
       return "Armed — fires on enter/leave";
     }
     return "Waiting — outside active window";
   }
-  if (rule.trigger === "scheduled") {
+  if (hasScheduled) {
     return rule.condition_currently_true
       ? "Ready — conditions currently met"
       : "Waiting — conditions not met yet";
@@ -318,8 +320,8 @@ export function ruleStatusHeadline(rule: {
     : "Waiting — conditions not met yet";
 }
 
-export function ruleLastMetLabel(trigger: RuleTrigger): string {
-  if (trigger === "edge_true") {
+export function ruleLastMetLabel(triggers: RuleTrigger[]): string {
+  if (triggers.includes("edge_true") && !triggers.includes("scheduled")) {
     return "Last met ";
   }
   return "Last fired ";
@@ -331,19 +333,19 @@ export function appendRuleLastMetLine(
     last_fired_at: string | null;
     next_evaluate_at: string | null;
     scheduled_detail: string | null;
-    trigger: RuleTrigger;
+    triggers: RuleTrigger[];
   },
 ): void {
   const fired = document.createElement("p");
   fired.className = "rules-card-meta";
-  fired.append(document.createTextNode(ruleLastMetLabel(rule.trigger)));
+  fired.append(document.createTextNode(ruleLastMetLabel(rule.triggers)));
   if (rule.last_fired_at !== null) {
     fired.append(createAuditedTimeElement(rule.last_fired_at));
   } else {
     fired.append("Never");
   }
   parent.append(fired);
-  if (rule.trigger === "scheduled" && rule.next_evaluate_at != null) {
+  if (rule.triggers.includes("scheduled") && rule.next_evaluate_at != null) {
     const next = document.createElement("p");
     next.className = "rules-card-meta";
     next.append(document.createTextNode("Next evaluate "));

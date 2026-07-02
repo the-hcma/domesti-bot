@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -27,7 +28,7 @@ from app.api.schemas import (
     RuleOut,
     SettingsLocationOut,
 )
-from app.device_enums import DeviceFamilyId
+from app.device_enums import DeviceFamilyId, RuleEvaluationCause, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
@@ -79,7 +80,7 @@ def _evening_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
 
 
@@ -117,7 +118,36 @@ def _evening_arrival_any_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
+    )
+
+
+def _evening_window_open_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterSunsetCondition(
+                    type="after_sunset",
+                    offset_minutes=0,
+                    window_end="midnight",
+                ),
+                UsersInsideGeofenceCondition(
+                    type="users_inside_geofence",
+                    geofence_id="house",
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        fire_once_per_local_day=True,
+        id="evening-window-open",
+        label="Evening window open",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.EDGE_TRUE, RuleTrigger.SCHEDULED],
     )
 
 
@@ -222,6 +252,29 @@ def _henrique_inside_location() -> UserLocationOut:
     )
 
 
+def test_evaluate_rule_uses_triggered_by_for_dual_trigger_rule() -> None:
+    now = datetime(2026, 6, 9, 23, 15, tzinfo=_TZ)
+    geofence = _house_geofence()
+    ctx = _ctx(
+        now=now,
+        geofences=(geofence,),
+        user_locations={"henrique": _henrique_inside_location()},
+    )
+    rule = _evening_window_open_rule()
+    edge_eval = evaluate_rule(
+        rule,
+        replace(ctx, triggered_by=RuleEvaluationCause.EDGE),
+    )
+    scheduled_eval = evaluate_rule(
+        rule,
+        replace(ctx, triggered_by=RuleEvaluationCause.SCHEDULED),
+    )
+    assert edge_eval.all_met is True
+    assert scheduled_eval.all_met is True
+    assert edge_eval.conditions[1].met is False
+    assert scheduled_eval.conditions[1].met is True
+
+
 def _dwell_rule() -> RuleOut:
     return RuleOut(
         conditions=RuleConditionsOut(
@@ -242,7 +295,7 @@ def _dwell_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
 
@@ -590,7 +643,7 @@ def _outside_dwell_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
 
@@ -661,7 +714,7 @@ def test_scheduled_dwell_episode_does_not_block_when_one_user_episode_unconsumed
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
     ctx = _ctx(
@@ -727,7 +780,7 @@ def test_users_outside_geofence_for_s_met_with_outside_dwell_timer_despite_low_a
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
     result = evaluate_rule(
@@ -824,7 +877,7 @@ def test_users_inside_geofence_for_s_met_with_wifi_home_presence_low_accuracy(
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
     result = evaluate_rule(
@@ -877,7 +930,7 @@ def test_users_inside_geofence_for_s_met_with_inside_dwell_timer_despite_low_acc
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
     result = evaluate_rule(
@@ -938,7 +991,7 @@ def _jun22_evening_lights_off_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
 
@@ -1092,7 +1145,7 @@ def test_users_inside_geofence_for_s_formats_subminute_dwell_in_seconds() -> Non
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
     inside_since = now.timestamp() - 35.0
@@ -1131,7 +1184,7 @@ def test_users_inside_geofence_for_s_formats_non_minute_aligned_need() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
     inside_since = now.timestamp() - 65.0
@@ -1192,7 +1245,7 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
     inside_since = now.timestamp() - 900.0
@@ -1233,7 +1286,7 @@ def _device_state_rule(
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
 

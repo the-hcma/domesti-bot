@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.api.schemas import RuleConditionsOut, RuleOut
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.mytracks_store import MyTracksPairingSave, save_mytracks_pairing
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_notification import (
@@ -31,7 +31,7 @@ def _sample_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=["ops@example.com"],
         notify_on_fire=True,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
 
 

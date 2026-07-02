@@ -15,6 +15,7 @@ from app.api.schemas import (
     RulesSunOut,
     SettingsLocationOut,
 )
+from app.device_enums import RuleTrigger
 from app.astronomical_schedule import (
     astronomical_anchor_datetime,
     cron_expression_for_local_datetime,
@@ -49,7 +50,7 @@ def _before_sunrise_rule(*, schedule_cron: str | None) -> RuleOut:
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron=schedule_cron,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
 
 
@@ -73,7 +74,7 @@ def _edge_window_open_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE, RuleTrigger.SCHEDULED],
     )
 
 
@@ -98,7 +99,7 @@ def _scheduled_rule(*, schedule_cron: str | None) -> RuleOut:
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron=schedule_cron,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
 
 
@@ -127,13 +128,17 @@ def test_uses_astronomical_repeat_schedule_false_without_cron() -> None:
     assert uses_astronomical_repeat_schedule(_scheduled_rule(schedule_cron=None)) is False
 
 
+def test_uses_astronomical_schedule_for_edge_and_scheduled_window_open_rule() -> None:
+    assert uses_astronomical_schedule(_edge_window_open_rule()) is True
+
+
 def test_uses_astronomical_edge_window_open_schedule_when_opted_in() -> None:
     assert uses_astronomical_edge_window_open_schedule(_edge_window_open_rule()) is True
 
 
 def test_uses_astronomical_edge_window_open_schedule_false_for_enter_only_evening(
 ) -> None:
-    enter_only = _edge_window_open_rule().model_copy(update={"fire_once_per_local_day": False})
+    enter_only = _edge_window_open_rule().model_copy(update={"triggers": [RuleTrigger.EDGE_TRUE]})
     assert uses_astronomical_edge_window_open_schedule(enter_only) is False
 
 
@@ -142,6 +147,38 @@ def test_uses_astronomical_edge_window_open_schedule_false_with_repeat_cron() ->
         update={"schedule_cron": "*/10 * * * *"},
     )
     assert uses_astronomical_edge_window_open_schedule(with_repeat) is False
+
+
+def test_uses_astronomical_schedule_false_when_scheduled_trigger_missing(
+) -> None:
+    enter_only = _edge_window_open_rule().model_copy(update={"triggers": [RuleTrigger.EDGE_TRUE]})
+    assert uses_astronomical_schedule(enter_only) is False
+
+
+def test_rule_out_rejects_repeat_cron_with_dual_edge_and_scheduled_triggers() -> None:
+    with pytest.raises(ValueError, match="do not allow schedule_cron"):
+        RuleOut(
+            conditions=RuleConditionsOut(
+                all=[
+                    AfterSunsetCondition(
+                        type="after_sunset",
+                        offset_minutes=-25,
+                        window_end="midnight",
+                    ),
+                ],
+            ),
+            cooldown_s=0,
+            device_actions=[],
+            enabled=True,
+            fire_once_per_local_day=True,
+            id="dual-trigger-repeat",
+            label="Dual trigger repeat",
+            min_location_accuracy_m=50,
+            notification_emails=[],
+            notify_on_fire=False,
+            schedule_cron="*/10 * * * *",
+            triggers=[RuleTrigger.EDGE_TRUE, RuleTrigger.SCHEDULED],
+        )
 
 
 def test_astronomical_anchor_datetime_applies_offset_before_sunset() -> None:
@@ -316,5 +353,5 @@ def test_rule_out_rejects_multiple_top_level_astronomical_conditions() -> None:
             min_location_accuracy_m=50,
             notification_emails=[],
             notify_on_fire=False,
-            trigger="scheduled",
+            triggers=[RuleTrigger.SCHEDULED],
         )

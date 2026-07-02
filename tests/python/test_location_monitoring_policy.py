@@ -14,7 +14,7 @@ from app.api.schemas import (
     RuleOut,
     UsersInsideGeofenceCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.location_monitoring_policy import (
     LocationMonitoringPolicy,
     _effective_approach_request_interval_s,
@@ -58,7 +58,7 @@ def _write_edge_rule(path: Path) -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     payload = {
         "version": 1,
@@ -94,7 +94,7 @@ def _write_scheduled_rule_for_user(path: Path, user_id: str) -> None:
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron="0 8 * * *",
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
     payload = {
         "version": 1,

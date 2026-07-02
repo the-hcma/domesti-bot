@@ -26,7 +26,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     lights_off = next(
         rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home"
     )
-    assert lights_off.trigger == "scheduled"
+    assert lights_off.triggers == ["scheduled"]
     assert lights_off.schedule_cron == "*/10 * * * *"
     interior = next(
         rule
@@ -34,7 +34,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
         if rule.id == "evening-interior-lights-on-anyone-home"
     )
     assert interior.fire_once_per_local_day is True
-    assert interior.trigger == "edge_true"
+    assert interior.triggers == ["edge_true", "scheduled"]
     assert interior.schedule_cron is None
     assert automation_rules_source() == "operator"
 

@@ -71,10 +71,10 @@ function appendConditionTree(
 }
 
 function isEdgePresenceStatusRow(
-  trigger: RuleStatusSummaryOut["trigger"],
+  triggers: RuleStatusSummaryOut["triggers"],
   cond: RuleConditionStatusOut,
 ): boolean {
-  if (trigger !== "edge_true") {
+  if (!triggers.includes("edge_true") || triggers.includes("scheduled")) {
     return false;
   }
   if (
@@ -129,7 +129,7 @@ function appendLiveStatusSection(
   condList.className = "rules-condition-list";
   for (const cond of liveStatus.conditions) {
     const li = document.createElement("li");
-    const presenceOnly = isEdgePresenceStatusRow(liveStatus.trigger, cond);
+    const presenceOnly = isEdgePresenceStatusRow(liveStatus.triggers, cond);
     if (presenceOnly) {
       li.className = "rules-condition-presence";
       li.textContent = `${cond.label} — ${cond.detail}`;
@@ -176,9 +176,9 @@ export function mountRuleInspectorPanel(
   meta.className = "rules-inspector-meta";
   appendDefinitionRow(meta, "Rule id", rule.id);
   appendDefinitionRow(meta, "Enabled", rule.enabled ? "Yes" : "No");
-  appendDefinitionRow(meta, "Trigger", rule.trigger);
-  if (rule.trigger === "scheduled") {
-    appendDefinitionRow(meta, "Schedule (cron)", rule.schedule_cron);
+  appendDefinitionRow(meta, "Triggers", rule.triggers.join(", "));
+  if (rule.triggers.includes("scheduled")) {
+    appendDefinitionRow(meta, "Schedule (cron)", rule.schedule_cron ?? "(none)");
   }
   if (rule.fire_once_per_local_day === true) {
     appendDefinitionRow(meta, "Fire once per local day", "Yes");

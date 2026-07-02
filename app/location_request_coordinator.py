@@ -504,7 +504,7 @@ def _enabled_edge_rules_for_user(user_id: str) -> list[RuleOut]:
         rule
         for rule in list_automation_rules()
         if rule.enabled
-        and rule.trigger == RuleTrigger.EDGE_TRUE
+        and RuleTrigger.EDGE_TRUE in rule.triggers
         and user_id in collect_rule_user_ids(rule)
     ]
 

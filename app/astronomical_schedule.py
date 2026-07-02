@@ -68,14 +68,14 @@ def extract_astronomical_anchor(rule: RuleOut) -> AstronomicalAnchor | None:
 
 
 def uses_astronomical_edge_window_open_schedule(rule: RuleOut) -> bool:
-    """True when an edge rule arms with a one-shot presence eval at window start.
+    """True when an edge rule also arms with a one-shot presence eval at window start.
 
-    Opt-in: ``edge_true`` + top-level astronomical anchor + ``fire_once_per_local_day``
-    and no repeat ``schedule_cron``. Excludes enter-only evening rules such as
-    ``evening-arrival-home-lights``.
+    Opt-in via ``triggers: [edge_true, scheduled]`` with a top-level astronomical
+    anchor, ``fire_once_per_local_day``, and no repeat ``schedule_cron``.
     """
     return (
-        rule.trigger == RuleTrigger.EDGE_TRUE
+        RuleTrigger.EDGE_TRUE in rule.triggers
+        and RuleTrigger.SCHEDULED in rule.triggers
         and rule.fire_once_per_local_day
         and extract_astronomical_anchor(rule) is not None
         and astronomical_repeat_cron(rule) is None
@@ -85,7 +85,7 @@ def uses_astronomical_edge_window_open_schedule(rule: RuleOut) -> bool:
 def uses_astronomical_repeat_schedule(rule: RuleOut) -> bool:
     """True when a scheduled rule anchors on sun events and repeats on ``schedule_cron``."""
     return (
-        rule.trigger == RuleTrigger.SCHEDULED
+        RuleTrigger.SCHEDULED in rule.triggers
         and extract_astronomical_anchor(rule) is not None
         and astronomical_repeat_cron(rule) is not None
     )
@@ -95,9 +95,7 @@ def uses_astronomical_schedule(rule: RuleOut) -> bool:
     """True when a rule includes a top-level sunrise/sunset evaluation schedule."""
     if extract_astronomical_anchor(rule) is None:
         return False
-    if rule.trigger == RuleTrigger.SCHEDULED:
-        return True
-    return uses_astronomical_edge_window_open_schedule(rule)
+    return RuleTrigger.SCHEDULED in rule.triggers
 
 
 def astronomical_anchor_datetime(

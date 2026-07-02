@@ -21,7 +21,7 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
 )
 from app.astronomical_schedule import schedule_materialized_for_date
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_evaluator import RuleEvaluator
@@ -97,7 +97,7 @@ def _evening_anchor_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
 
 
@@ -308,7 +308,7 @@ def _evening_anchor_repeat_rule() -> RuleOut:
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron="*/10 * * * *",
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
 
 
