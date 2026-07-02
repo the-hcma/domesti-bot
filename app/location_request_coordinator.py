@@ -12,6 +12,7 @@ from typing import Literal
 
 from app.api.schemas import RuleOut
 from app.automation_rules_loader import list_automation_rules, load_settings_location
+from app.device_enums import RuleTrigger
 from app.db.secrets import SecretsDecryptError, load_mytracks_relay_api_key_from_db
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.mytracks_service import request_user_location
@@ -503,7 +504,7 @@ def _enabled_edge_rules_for_user(user_id: str) -> list[RuleOut]:
         rule
         for rule in list_automation_rules()
         if rule.enabled
-        and rule.trigger == "edge_true"
+        and rule.trigger == RuleTrigger.EDGE_TRUE
         and user_id in collect_rule_user_ids(rule)
     ]
 

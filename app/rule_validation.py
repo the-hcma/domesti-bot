@@ -23,7 +23,7 @@ from app.api.schemas import (
     UsersOutsideGeofenceForSCondition,
     normalized_rule_notification_emails,
 )
-from app.device_enums import DeviceFamilyId
+from app.device_enums import DeviceFamilyId, RuleTrigger
 from app.rule_actions import (
     RuleActionDispatchError,
     resolve_kasa_host_by_label,
@@ -315,7 +315,7 @@ def _validate_device_conditions(
 
 
 def _validate_geofence_edge_grace(rule: RuleOut) -> list[RuleReferenceIssueOut]:
-    if rule.trigger != "edge_true":
+    if rule.trigger != RuleTrigger.EDGE_TRUE:
         return []
     if not collect_rule_geofence_ids(rule):
         return []

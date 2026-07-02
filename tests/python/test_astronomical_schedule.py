@@ -21,6 +21,7 @@ from app.astronomical_schedule import (
     extract_astronomical_anchor,
     materialize_astronomical_cron,
     next_astronomical_repeat_evaluate_at,
+    uses_astronomical_edge_window_open_schedule,
     uses_astronomical_repeat_schedule,
     uses_astronomical_schedule,
 )
@@ -49,6 +50,30 @@ def _before_sunrise_rule(*, schedule_cron: str | None) -> RuleOut:
         notify_on_fire=False,
         schedule_cron=schedule_cron,
         trigger="scheduled",
+    )
+
+
+def _edge_window_open_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterSunsetCondition(
+                    type="after_sunset",
+                    offset_minutes=-25,
+                    window_end="midnight",
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        fire_once_per_local_day=True,
+        id="evening-interior",
+        label="Evening interior",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="edge_true",
     )
 
 
@@ -100,6 +125,23 @@ def test_uses_astronomical_repeat_schedule_when_anchor_with_repeat_cron() -> Non
 
 def test_uses_astronomical_repeat_schedule_false_without_cron() -> None:
     assert uses_astronomical_repeat_schedule(_scheduled_rule(schedule_cron=None)) is False
+
+
+def test_uses_astronomical_edge_window_open_schedule_when_opted_in() -> None:
+    assert uses_astronomical_edge_window_open_schedule(_edge_window_open_rule()) is True
+
+
+def test_uses_astronomical_edge_window_open_schedule_false_for_enter_only_evening(
+) -> None:
+    enter_only = _edge_window_open_rule().model_copy(update={"fire_once_per_local_day": False})
+    assert uses_astronomical_edge_window_open_schedule(enter_only) is False
+
+
+def test_uses_astronomical_edge_window_open_schedule_false_with_repeat_cron() -> None:
+    with_repeat = _edge_window_open_rule().model_copy(
+        update={"schedule_cron": "*/10 * * * *"},
+    )
+    assert uses_astronomical_edge_window_open_schedule(with_repeat) is False
 
 
 def test_astronomical_anchor_datetime_applies_offset_before_sunset() -> None:

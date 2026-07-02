@@ -25,6 +25,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
+from app.astronomical_schedule import uses_astronomical_edge_window_open_schedule
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
@@ -74,6 +75,45 @@ def _evening_interior_edge_rule() -> RuleOut:
         fire_once_per_local_day=True,
         id="evening-interior",
         label="Evening interior",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        trigger="edge_true",
+    )
+
+
+def _evening_arrival_edge_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterSunsetCondition(
+                    type="after_sunset",
+                    offset_minutes=0,
+                    window_end="midnight",
+                ),
+                AnyConditionsCondition(
+                    type="any",
+                    conditions=[
+                        UsersInsideGeofenceCondition(
+                            type="users_inside_geofence",
+                            geofence_id="house",
+                            user_ids=["henrique"],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Front door lights",
+                action=RuleDeviceActionType.TURN_ON,
+            ),
+        ],
+        enabled=True,
+        id="evening-arrival",
+        label="Evening arrival",
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
@@ -228,6 +268,259 @@ async def test_edge_rule_armed_during_evening_window_fires_on_enter(
     assert isinstance(device, _FakeKasa)
     await evaluator.on_location_update("henrique")
     assert device.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_edge_rule_fires_at_window_open_when_home_before_arm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Jul 1 case: enter before arm, then fire once when the window opens."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _evening_interior_edge_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    monkeypatch.setattr(
+        "app.rule_evaluator.compute_rules_sun_out",
+        lambda *args, **kwargs: _mock_sun_for_nov_14_2023(),
+    )
+
+    tz = ZoneInfo("America/New_York")
+    anchor_local = datetime.fromisoformat("2023-11-14T22:30:00Z").astimezone(
+        tz,
+    ) - timedelta(minutes=25)
+    clock = {"now": (anchor_local - timedelta(minutes=11)).timestamp()}
+
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Test",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=44.0,
+            lon=-73.0,
+            accuracy_m=20,
+            fix_at=clock["now"] - 400.0,
+            reported_at=clock["now"] - 400.0,
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    device = _FakeKasa("192.168.1.10", "Kitchen lamp")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    _move_henrique_inside_house({"clock": clock, "db": db})
+    await evaluator.on_location_update("henrique")
+    assert device.calls == []
+
+    clock["now"] = anchor_local.timestamp()
+    await evaluator._evaluate_scheduled_rules()
+    assert device.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_edge_rule_window_open_skipped_when_nobody_home_at_arm(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _evening_interior_edge_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    monkeypatch.setattr(
+        "app.rule_evaluator.compute_rules_sun_out",
+        lambda *args, **kwargs: _mock_sun_for_nov_14_2023(),
+    )
+
+    tz = ZoneInfo("America/New_York")
+    anchor_local = datetime.fromisoformat("2023-11-14T22:30:00Z").astimezone(
+        tz,
+    ) - timedelta(minutes=25)
+    clock = {"now": anchor_local.timestamp()}
+
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Test",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=44.0,
+            lon=-73.0,
+            accuracy_m=20,
+            fix_at=clock["now"] - 400.0,
+            reported_at=clock["now"] - 400.0,
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    device = _FakeKasa("192.168.1.10", "Kitchen lamp")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    await evaluator._evaluate_scheduled_rules()
+    assert device.calls == []
+
+    _move_henrique_inside_house({"clock": clock, "db": db})
+    await evaluator.on_location_update("henrique")
+    assert device.calls == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_evening_arrival_shaped_rule_has_no_window_open_schedule(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enter-only evening arrival rules must not opt into window-open scheduling."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    rule = _evening_arrival_edge_rule()
+    _write_bundle(bundle, rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    assert uses_astronomical_edge_window_open_schedule(rule) is False
+
+    monkeypatch.setattr(
+        "app.rule_evaluator.compute_rules_sun_out",
+        lambda *args, **kwargs: _mock_sun_for_nov_14_2023(),
+    )
+
+    tz = ZoneInfo("America/New_York")
+    sunset_local = datetime.fromisoformat("2023-11-14T22:30:00Z").astimezone(tz)
+    clock = {"now": sunset_local.timestamp()}
+
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Test",
+                tracking_device_label="Phone",
+                enabled=True,
+            ),
+        ],
+    )
+    replace_geofences(
+        db,
+        [
+            GeofenceRecord(
+                geofence_id="house",
+                label="House",
+                center_lat=41.194072,
+                center_lon=-73.888325,
+                radius_m=250,
+                enabled=True,
+                owntracks_rid=None,
+            ),
+        ],
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            fix_at=clock["now"] - 60.0,
+            reported_at=clock["now"] - 60.0,
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    device = _FakeKasa("192.168.1.10", "Front door lights")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    assert evaluator.next_evaluate_at_for_rule("evening-arrival") is None
+
+    await evaluator._evaluate_scheduled_rules()
+    assert device.calls == []
 
 
 @pytest.mark.asyncio
