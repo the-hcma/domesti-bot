@@ -19,7 +19,7 @@ from app.api.schemas import (
     RulesSunOut,
     UsersInsideGeofenceCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
@@ -98,7 +98,7 @@ def _scheduled_anyone_home_rule(*, cooldown_s: int) -> RuleOut:
         notification_emails=["ops@example.com"],
         notify_on_fire=True,
         schedule_cron="* * * * *",
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
 
 
@@ -178,7 +178,7 @@ def _arrive_home_rule(*, cooldown_s: int) -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
 
 

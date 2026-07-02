@@ -56,8 +56,15 @@ class RuleDeviceActionType(StrEnum):
                 return "turn on"
 
 
+class RuleEvaluationCause(StrEnum):
+    """Why a rule evaluation pass is executing."""
+
+    EDGE = "edge"
+    SCHEDULED = "scheduled"
+
+
 class RuleTrigger(StrEnum):
-    """How a rule is armed in automation-rules.json (API field ``trigger``)."""
+    """How a rule can be armed in automation-rules.json (``triggers`` entries)."""
 
     EDGE_TRUE = "edge_true"
     SCHEDULED = "scheduled"

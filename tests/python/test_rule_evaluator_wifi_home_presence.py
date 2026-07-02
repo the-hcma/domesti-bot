@@ -17,7 +17,7 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
@@ -64,7 +64,7 @@ def _arrive_home_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
 
 
@@ -346,7 +346,7 @@ async def test_wifi_home_seeds_dwell_inside_since_for_low_accuracy_wifi(
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="* * * * *",
     )
     _write_bundle(bundle, _arrive_home_rule(), dwell_rule)
@@ -438,7 +438,7 @@ async def test_wifi_home_reconcile_runs_for_dwell_only_bundle(
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
     )
     _write_bundle(bundle, dwell_rule)

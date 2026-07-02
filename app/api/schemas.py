@@ -11,8 +11,6 @@ from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.presence_connection_type import normalize_presence_connection_type
 from app.presence_wifi import normalize_wifi_bssid
 
-RuleTriggerOut = Literal["edge_true", "scheduled"]
-
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
 VizioAuthSourceOut = Literal["cli", "env", "database", "none"]
@@ -842,10 +840,11 @@ class RuleOut(BaseModel):
         default=None,
         description=(
             "5-field cron expression (minute hour day month weekday). "
-            "Required when trigger is scheduled; timezone from settings_location."
+            "Required when ``triggers`` includes ``scheduled`` unless an "
+            "astronomical anchor is configured; timezone from settings_location."
         ),
     )
-    trigger: RuleTriggerOut
+    triggers: list[RuleTrigger] = Field(min_length=1)
 
     @field_validator("accuracy_edge_grace_s", mode="before")
     @classmethod
@@ -870,40 +869,74 @@ class RuleOut(BaseModel):
         migrated.pop("notification_email", None)
         return migrated
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_trigger_field(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "trigger" in data:
+            raise ValueError(
+                "Expected triggers list, got legacy trigger field",
+            )
+        return data
+
     @model_validator(mode="after")
     def _validate_trigger_fields(self) -> Self:
         from app.astronomical_schedule import extract_astronomical_anchor
 
+        trigger_set = set(self.triggers)
+        has_edge_true = RuleTrigger.EDGE_TRUE in trigger_set
+        has_scheduled = RuleTrigger.SCHEDULED in trigger_set
         cron = (self.schedule_cron or "").strip()
-        if self.trigger == RuleTrigger.SCHEDULED:
-            anchor = extract_astronomical_anchor(self)
-            astronomical_count = sum(
-                1
-                for condition in self.conditions.all
-                if condition.type in ("after_sunset", "before_sunrise")
+        if not has_scheduled and cron != "":
+            raise ValueError(
+                "schedule_cron is only allowed when triggers includes scheduled"
             )
-            if astronomical_count > 1:
+        if not has_scheduled:
+            self.schedule_cron = None
+            return self
+
+        anchor = extract_astronomical_anchor(self)
+        astronomical_count = sum(
+            1
+            for condition in self.conditions.all
+            if condition.type in ("after_sunset", "before_sunrise")
+        )
+        if astronomical_count > 1:
+            raise ValueError(
+                "scheduled rules may include at most one top-level "
+                "after_sunset or before_sunrise condition"
+            )
+        if has_edge_true:
+            if not self.fire_once_per_local_day:
                 raise ValueError(
-                    "scheduled rules may include at most one top-level "
-                    "after_sunset or before_sunrise condition"
+                    "rules with both edge_true and scheduled triggers must set "
+                    "fire_once_per_local_day=true"
+                )
+            if anchor is None:
+                raise ValueError(
+                    "rules with both edge_true and scheduled triggers require a "
+                    "top-level after_sunset or before_sunrise condition"
                 )
             if cron != "":
-                validate_schedule_cron_expression(cron)
-                self.schedule_cron = cron
-                return self
-            if anchor is not None:
-                self.schedule_cron = None
-                return self
-            raise ValueError(
-                "scheduled rules require schedule_cron or a top-level "
-                "after_sunset / before_sunrise condition"
-            )
+                raise ValueError(
+                    "rules with both edge_true and scheduled triggers do not allow "
+                    "schedule_cron"
+                )
+            self.schedule_cron = None
+            return self
+
         if cron != "":
-            raise ValueError(
-                "schedule_cron is only allowed when trigger is scheduled"
-            )
-        self.schedule_cron = None
-        return self
+            validate_schedule_cron_expression(cron)
+            self.schedule_cron = cron
+            return self
+        if anchor is not None:
+            self.schedule_cron = None
+            return self
+        raise ValueError(
+            "scheduled rules require schedule_cron or a top-level "
+            "after_sunset / before_sunrise condition"
+        )
 
 
 def normalized_rule_notification_emails(rule: RuleOut) -> list[str]:
@@ -948,7 +981,7 @@ class RuleStatusSummaryOut(BaseModel):
     next_evaluate_at: str | None = None
     reference_issues: list[RuleReferenceIssueOut] = Field(default_factory=list)
     scheduled_detail: str | None = None
-    trigger: RuleTriggerOut
+    triggers: list[RuleTrigger]
 
 
 class RulesValidationOut(BaseModel):

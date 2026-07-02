@@ -30,7 +30,7 @@ def _write_bundle(path: Path) -> None:
                 "id": "evening-lights-off-both-home",
                 "label": "Lights off",
                 "enabled": True,
-                "trigger": "scheduled",
+                "triggers": ["scheduled"],
                 "schedule_cron": "*/10 * * * *",
                 "cooldown_s": 300,
                 "min_location_accuracy_m": 50,

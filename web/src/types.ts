@@ -260,22 +260,14 @@ interface RuleOutShared {
   notification_emails: string[];
   conditions: RuleConditionsOut;
   device_actions: RuleDeviceActionOut[];
+  /** 5-field cron (minute hour day month weekday); home timezone from settings. */
+  schedule_cron: string | null;
+  triggers: RuleTrigger[];
+  /** At most one fire per local calendar day (home timezone). */
+  fire_once_per_local_day?: boolean;
 }
 
-export type RuleOut =
-  | (RuleOutShared & {
-      trigger: "scheduled";
-      /** 5-field cron (minute hour day month weekday); home timezone from settings. */
-      schedule_cron: string;
-      /** At most one fire per local calendar day (home timezone). */
-      fire_once_per_local_day?: boolean;
-    })
-  | (RuleOutShared & {
-      trigger: "edge_true";
-      schedule_cron?: null;
-      /** At most one fire per local calendar day (home timezone). */
-      fire_once_per_local_day?: boolean;
-    });
+export type RuleOut = RuleOutShared;
 
 export interface SmtpConfigIn {
   host: string;
@@ -482,7 +474,7 @@ export interface RuleStatusSummaryOut {
   next_evaluate_at: string | null;
   scheduled_detail: string | null;
   reference_issues: RuleReferenceIssueOut[];
-  trigger: RuleTrigger;
+  triggers: RuleTrigger[];
 }
 
 export interface RulesEvaluatorOut {

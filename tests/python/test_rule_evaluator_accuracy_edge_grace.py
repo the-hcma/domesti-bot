@@ -16,7 +16,7 @@ from app.api.schemas import (
     RuleOut,
     UsersInsideGeofenceCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
@@ -136,7 +136,7 @@ def _arrive_home_rule(*, accuracy_edge_grace_s: int = 120) -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
 
 

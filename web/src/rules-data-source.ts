@@ -141,7 +141,7 @@ export class MockRulesDataSource implements RulesDataSource {
         next_evaluate_at: null,
         scheduled_detail: null,
         reference_issues: [],
-        trigger: rule.trigger,
+        triggers: rule.triggers,
       })),
       sun: mockSunRow(),
       evaluator: {

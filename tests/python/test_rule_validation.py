@@ -20,7 +20,7 @@ from app.api.schemas import (
 )
 from unittest.mock import MagicMock, patch
 
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.rule_validation import (
     RosterUserRow,
     RuleValidationContext,
@@ -53,7 +53,7 @@ def _arrival_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
 
 
@@ -265,7 +265,7 @@ def test_rule_out_allows_astronomical_schedule_without_cron() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
     assert rule.schedule_cron is None
 
@@ -282,12 +282,15 @@ def test_rule_out_requires_schedule_cron_for_scheduled_trigger() -> None:
             min_location_accuracy_m=50,
             notification_emails=[],
             notify_on_fire=False,
-            trigger="scheduled",
+            triggers=[RuleTrigger.SCHEDULED],
         )
 
 
 def test_rule_out_rejects_schedule_cron_on_edge_true_trigger() -> None:
-    with pytest.raises(ValidationError, match="only allowed when trigger is scheduled"):
+    with pytest.raises(
+        ValidationError,
+        match="only allowed when triggers includes scheduled",
+    ):
         RuleOut(
             conditions=RuleConditionsOut(all=[]),
             cooldown_s=60,
@@ -299,7 +302,7 @@ def test_rule_out_rejects_schedule_cron_on_edge_true_trigger() -> None:
             notification_emails=[],
             notify_on_fire=False,
             schedule_cron="* * * * *",
-            trigger="edge_true",
+            triggers=[RuleTrigger.EDGE_TRUE],
         )
 
 
@@ -316,7 +319,7 @@ def test_rule_out_rejects_invalid_schedule_cron() -> None:
             notification_emails=[],
             notify_on_fire=False,
             schedule_cron="not-a-cron",
-            trigger="scheduled",
+            triggers=[RuleTrigger.SCHEDULED],
         )
 
 
@@ -332,7 +335,7 @@ def test_rule_out_normalizes_schedule_cron_whitespace() -> None:
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron="  */15 * * * *  ",
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
     assert rule.schedule_cron == "*/15 * * * *"
 
@@ -349,7 +352,7 @@ def test_rule_out_coerces_whitespace_only_schedule_cron_to_none_for_edge_true() 
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron="   ",
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     assert rule.schedule_cron is None
 
@@ -367,10 +370,28 @@ def test_rule_out_coerces_null_accuracy_edge_grace_s_to_zero() -> None:
             "min_location_accuracy_m": 50,
             "notification_emails": [],
             "notify_on_fire": False,
-            "trigger": "edge_true",
+            "triggers": ["edge_true"],
         },
     )
     assert rule.accuracy_edge_grace_s == 0
+
+
+def test_rule_out_rejects_legacy_trigger_field() -> None:
+    with pytest.raises(ValidationError, match="legacy trigger field"):
+        RuleOut.model_validate(
+            {
+                "conditions": {"all": []},
+                "cooldown_s": 60,
+                "device_actions": [],
+                "enabled": True,
+                "id": "legacy-trigger",
+                "label": "Legacy trigger",
+                "min_location_accuracy_m": 50,
+                "notification_emails": [],
+                "notify_on_fire": False,
+                "trigger": "edge_true",
+            },
+        )
 
 
 def test_devices_any_off_condition_rejects_empty_devices() -> None:
@@ -406,7 +427,7 @@ def test_validate_rule_accepts_kasa_devices_any_off_condition() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     ctx = RuleValidationContext(
@@ -447,7 +468,7 @@ def test_validate_rule_flags_unknown_kasa_devices_any_off_condition() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     ctx = RuleValidationContext(
@@ -490,7 +511,7 @@ def test_validate_rule_accepts_tailwind_devices_any_open_condition() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     ctx = RuleValidationContext(
@@ -531,7 +552,7 @@ def test_validate_rule_flags_unknown_tailwind_devices_any_open_condition() -> No
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     ctx = RuleValidationContext(
@@ -574,7 +595,7 @@ def test_validate_rule_accepts_sonos_device_condition_when_zone_exists() -> None
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     ctx = RuleValidationContext(
@@ -615,7 +636,7 @@ def test_validate_rule_flags_androidtv_device_condition() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     ctx = RuleValidationContext(
@@ -654,7 +675,7 @@ def test_validate_rule_flags_unknown_sonos_device_condition() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     ctx = RuleValidationContext(
@@ -697,7 +718,7 @@ def test_validate_rule_flags_blank_device_condition_ref() -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/15 * * * *",
     )
     ctx = RuleValidationContext(
@@ -725,7 +746,7 @@ def test_rule_out_accepts_fire_once_per_local_day_on_edge_true_trigger() -> None
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     assert rule.fire_once_per_local_day is True
 
@@ -743,6 +764,6 @@ def test_rule_out_accepts_fire_once_per_local_day_on_scheduled_trigger() -> None
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron="*/15 * * * *",
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
     assert rule.fire_once_per_local_day is True

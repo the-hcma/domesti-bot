@@ -20,12 +20,11 @@ from app.api.schemas import (
     RulesSunOut,
     UsersInsideGeofenceCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
-from app.astronomical_schedule import uses_astronomical_edge_window_open_schedule
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
@@ -78,7 +77,7 @@ def _evening_interior_edge_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE, RuleTrigger.SCHEDULED],
     )
 
 
@@ -117,7 +116,7 @@ def _evening_arrival_edge_rule() -> RuleOut:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
 
 
@@ -451,7 +450,7 @@ async def test_evening_arrival_shaped_rule_has_no_window_open_schedule(
     rule = _evening_arrival_edge_rule()
     _write_bundle(bundle, rule)
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-    assert uses_astronomical_edge_window_open_schedule(rule) is False
+    assert "scheduled" not in rule.triggers
 
     monkeypatch.setattr(
         "app.rule_evaluator.compute_rules_sun_out",

@@ -41,7 +41,11 @@ from app.api.schemas import (
     SettingsLocationOut,
 )
 from app.automation_rules_loader import load_settings_location
-from app.device_enums import DeviceFamilyId, RuleTrigger
+from app.device_enums import (
+    DeviceFamilyId,
+    RuleEvaluationCause,
+    RuleTrigger,
+)
 from app.rule_actions import (
     cached_kasa_is_on,
     cached_sonos_is_playing,
@@ -97,10 +101,9 @@ class RuleEvaluationContext:
         default_factory=dict,
     )
     walkback_max_s: float = LOCATION_HISTORY_WALKBACK_MAX_S
-    # Window-open arm for edge_true rules: evaluate presence geofences as steady
-    # state (anyone inside) instead of enter-only edges. Not the rule JSON
-    # ``trigger`` field — that stays ``edge_true``; this is per-evaluation mode.
-    presence_as_steady: bool = False
+    # Why this pass is running; edge-triggered passes evaluate geofence rows as
+    # enter/leave edges, while scheduled passes treat them as steady state.
+    triggered_by: RuleEvaluationCause = RuleEvaluationCause.EDGE
 
     def resolve_user_id(self, reference: str) -> str | None:
         return resolve_roster_user_id(reference, self.roster_user_id_lookup)
@@ -173,7 +176,10 @@ def evaluate_rule(
         _evaluate_condition(condition, rule, ctx)
         for condition in rule.conditions.all
     ]
-    if rule.trigger == RuleTrigger.EDGE_TRUE and not ctx.presence_as_steady:
+    if (
+        RuleTrigger.EDGE_TRUE in rule.triggers
+        and ctx.triggered_by == RuleEvaluationCause.EDGE
+    ):
         steady_rows = [
             row
             for row, condition in zip(conditions, rule.conditions.all, strict=True)
@@ -478,8 +484,8 @@ def _evaluate_any(
         _evaluate_condition(child, rule, ctx) for child in condition.conditions
     ]
     if (
-        rule.trigger == RuleTrigger.EDGE_TRUE
-        and not ctx.presence_as_steady
+        RuleTrigger.EDGE_TRUE in rule.triggers
+        and ctx.triggered_by == RuleEvaluationCause.EDGE
         and _conditions_are_presence_only(condition.conditions)
     ):
         met = False
@@ -918,7 +924,10 @@ def _evaluate_users_geofence(
             continue
         selected_names.append(_user_display_name(ctx, roster_user_id))
     who = _join_names(selected_names)
-    if rule.trigger == RuleTrigger.EDGE_TRUE and not ctx.presence_as_steady:
+    if (
+        RuleTrigger.EDGE_TRUE in rule.triggers
+        and ctx.triggered_by == RuleEvaluationCause.EDGE
+    ):
         label = (
             f"Presence at {fence_label} ({who})"
             if want_inside
@@ -1848,7 +1857,7 @@ def scheduled_dwell_episode_blocks_scheduled_fire(
     ctx: RuleEvaluationContext,
 ) -> bool:
     """Return True when every dwell user already fired for the current presence episode."""
-    if rule.trigger != RuleTrigger.SCHEDULED:
+    if RuleTrigger.SCHEDULED not in rule.triggers:
         return False
     dwell_conditions = _iter_dwell_for_s_conditions(rule.conditions.all)
     if not dwell_conditions:

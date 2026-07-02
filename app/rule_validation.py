@@ -315,7 +315,7 @@ def _validate_device_conditions(
 
 
 def _validate_geofence_edge_grace(rule: RuleOut) -> list[RuleReferenceIssueOut]:
-    if rule.trigger != RuleTrigger.EDGE_TRUE:
+    if RuleTrigger.EDGE_TRUE not in rule.triggers:
         return []
     if not collect_rule_geofence_ids(rule):
         return []

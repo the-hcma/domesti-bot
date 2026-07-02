@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.api.schemas import RuleConditionsOut, RuleDeviceActionOut, RuleOut
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_actions import (
@@ -355,7 +355,7 @@ def test_send_rule_notification_email_logs_error_when_recipient_missing(
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=True,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     with (
         patch("app.rule_actions._LOGGER.error") as error_mock,
@@ -379,7 +379,7 @@ def test_send_rule_notification_email_returns_disabled_outcome_when_notify_off(
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     outcome = send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
     assert outcome == RuleNotificationEmailOutcome.disabled()
@@ -400,7 +400,7 @@ def test_send_rule_notification_email_clears_operator_alert_on_success(
         min_location_accuracy_m=50,
         notification_emails=["ops@example.com"],
         notify_on_fire=True,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     smtp_config = SmtpConfigRecord(
         from_address="bot@example.com",
@@ -443,7 +443,7 @@ def test_send_rule_notification_email_records_operator_alert_on_smtp_failure(
         min_location_accuracy_m=50,
         notification_emails=["ops@example.com"],
         notify_on_fire=True,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     smtp_config = SmtpConfigRecord(
         from_address="bot@example.com",
@@ -485,7 +485,7 @@ def test_send_rule_notification_email_sends_to_all_recipients(
         min_location_accuracy_m=50,
         notification_emails=["ops@example.com", "alerts@example.com"],
         notify_on_fire=True,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     smtp_config = SmtpConfigRecord(
         from_address="bot@example.com",
@@ -535,7 +535,7 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
         min_location_accuracy_m=50,
         notification_emails=["ops@example.com"],
         notify_on_fire=True,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     smtp_config = SmtpConfigRecord(
         from_address="bot@example.com",

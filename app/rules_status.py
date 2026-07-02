@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,7 +30,7 @@ from app.automation_rules_loader import (
     load_settings_location,
 )
 from app.cron_schedule import fired_on_same_local_calendar_day
-from app.device_enums import RuleTrigger
+from app.device_enums import RuleEvaluationCause, RuleTrigger
 from app.astronomical_schedule import (
     astronomical_anchor_datetime,
     extract_astronomical_anchor,
@@ -144,14 +145,19 @@ def build_rules_status(
     rules = list_automation_rules()
     rule_rows: list[RuleStatusSummaryOut] = []
     for rule in rules:
-        evaluation = evaluate_rule(rule, eval_ctx)
+        rule_ctx = eval_ctx
+        if uses_astronomical_edge_window_open_schedule(rule):
+            rule_ctx = replace(
+                eval_ctx,
+                triggered_by=RuleEvaluationCause.SCHEDULED,
+            )
+        evaluation = evaluate_rule(rule, rule_ctx)
         fire_state = _fire_state_for_rule(evaluator, rule.id)
         next_evaluate_at: str | None = None
         scheduled_detail: str | None = None
         if (
             (
-                rule.trigger == RuleTrigger.SCHEDULED
-                or uses_astronomical_edge_window_open_schedule(rule)
+                RuleTrigger.SCHEDULED in rule.triggers
             )
             and rule.enabled
             and evaluator is not None
@@ -192,16 +198,6 @@ def build_rules_status(
                         f"Evaluates every {effective_cron} from local midnight until "
                         f"{anchor_label}"
                     )
-        elif (
-            rule.trigger == RuleTrigger.SCHEDULED
-            and uses_astronomical_schedule(rule)
-            and evaluator is not None
-        ):
-            effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)
-            if effective_cron is not None:
-                scheduled_detail = (
-                    f"Today's astronomical schedule: {effective_cron} (local)"
-                )
         elif uses_astronomical_edge_window_open_schedule(rule) and evaluator is not None:
             anchor = extract_astronomical_anchor(rule)
             if anchor is not None:
@@ -210,6 +206,16 @@ def build_rules_status(
                     "Evaluates once when armed at "
                     f"{_format_astronomical_anchor_label(anchor_dt)} if anyone is home; "
                     "also on geofence enter until local midnight"
+                )
+        elif (
+            RuleTrigger.SCHEDULED in rule.triggers
+            and uses_astronomical_schedule(rule)
+            and evaluator is not None
+        ):
+            effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)
+            if effective_cron is not None:
+                scheduled_detail = (
+                    f"Today's astronomical schedule: {effective_cron} (local)"
                 )
         rule_rows.append(
             RuleStatusSummaryOut(
@@ -227,7 +233,7 @@ def build_rules_status(
                 next_evaluate_at=next_evaluate_at,
                 reference_issues=validate_rule(rule, validation_ctx),
                 scheduled_detail=scheduled_detail,
-                trigger=rule.trigger,
+                triggers=rule.triggers,
             )
         )
 

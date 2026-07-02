@@ -15,7 +15,7 @@ from app.api.schemas import (
     RuleOut,
     UsersInsideGeofenceCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.db.secrets import save_mytracks_relay_api_key_to_db
 from app.location_history_retention import default_location_history_retention
 from app.location_request_coordinator import (
@@ -118,7 +118,7 @@ def _write_edge_rule(path: Path) -> None:
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
-        trigger="edge_true",
+        triggers=[RuleTrigger.EDGE_TRUE],
     )
     payload = {
         "version": 1,
@@ -154,7 +154,7 @@ def _write_scheduled_rule_for_stale_watchdog(path: Path) -> None:
         notification_emails=[],
         notify_on_fire=False,
         schedule_cron="0 8 * * *",
-        trigger="scheduled",
+        triggers=[RuleTrigger.SCHEDULED],
     )
     payload = {
         "version": 1,
