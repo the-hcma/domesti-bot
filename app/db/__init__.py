@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from app.db.engine import dispose_engine, get_engine
-from app.db.legacy_migrations import apply_legacy_column_migrations
 from app.db.schema import bootstrap_schema, ensure_schema_if_exists
 from app.db.secrets import (
     delete_app_secret,
@@ -20,7 +19,6 @@ from app.db.secrets_key import (
 )
 
 __all__ = [
-    "apply_legacy_column_migrations",
     "delete_app_secret",
     "dispose_engine",
     "bootstrap_schema",
