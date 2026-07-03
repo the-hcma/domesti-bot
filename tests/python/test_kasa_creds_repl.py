@@ -19,19 +19,22 @@ from __future__ import annotations
 
 import io
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from cryptography.fernet import Fernet
 
 from kasa.credentials import Credentials
 from kasa.exceptions import AuthenticationError, _ConnectionError
 
-from app.kasa_device_manager import KasaDeviceManager
+from app.db.secrets import load_kasa_credentials_from_db
 from app.domesti_bot_cli import (
     _Theme,
     _maybe_print_kasa_auth_notice,
     _repl_cmd_kasa_creds,
 )
+from app.kasa_device_manager import KasaDeviceManager
 
 
 def _kdev_auth_fail(host: str) -> MagicMock:
@@ -140,6 +143,107 @@ async def test_fetch_records_skipped_auth_hosts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_keeps_klap_flag_when_credential_retry_fails_non_auth() -> None:
+    """Anonymous AuthenticationError still marks KLAP if the credential retry times out.
+
+    Without OR-accumulating auth_failure, a non-auth failure on the credential
+    attempt would clear the KLAP flag and drop the host from Settings/cache.
+    """
+
+    from kasa.deviceconfig import (
+        DeviceConfig,
+        DeviceConnectionParameters,
+        DeviceEncryptionType,
+        DeviceFamily,
+    )
+
+    host = "192.168.86.218"
+    klap = _kdev_auth_fail(host)
+    klap.config = DeviceConfig(
+        host=host,
+        connection_type=DeviceConnectionParameters(
+            DeviceFamily.SmartTapoPlug,
+            DeviceEncryptionType.Klap,
+        ),
+    )
+    klap.config.to_dict_control_credentials = MagicMock(
+        return_value={"host": host, "timeout": 5}
+    )
+
+    mgr = KasaDeviceManager()
+    mgr.set_credentials(username="a@b.com", password="hunter2")
+    with patch(
+        "app.kasa_device_manager.Discover.discover",
+        AsyncMock(return_value={host: klap}),
+    ), patch(
+        "app.kasa_device_manager._connect_smart_plain_http",
+        AsyncMock(side_effect=AuthenticationError("klap")),
+    ), patch(
+        "app.kasa_device_manager._connect_legacy_xor",
+        AsyncMock(side_effect=ConnectionRefusedError("…")),
+    ), patch(
+        "app.kasa_device_manager.KDevice.connect",
+        AsyncMock(side_effect=RuntimeError("handshake timed out")),
+    ):
+        await mgr.fetch()
+
+    assert mgr.skipped_auth_hosts == (host,)
+    assert mgr.hosts_requiring_klap_auth == (host,)
+
+
+@pytest.mark.asyncio
+async def test_known_klap_ingest_tracks_non_auth_credential_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Known KLAP hosts must be skip-tracked when credential connect times out.
+
+    Cache reconnect already warns and tracks; UDP ingest must do the same so
+    Settings still lists the host and the failure is not silent.
+    """
+
+    from kasa.deviceconfig import (
+        DeviceConfig,
+        DeviceConnectionParameters,
+        DeviceEncryptionType,
+        DeviceFamily,
+    )
+
+    host = "192.168.86.219"
+    klap = _kdev_ok(host, alias="Tapo")
+    klap.config = DeviceConfig(
+        host=host,
+        connection_type=DeviceConnectionParameters(
+            DeviceFamily.SmartTapoPlug,
+            DeviceEncryptionType.Klap,
+        ),
+    )
+    klap.config.to_dict_control_credentials = MagicMock(
+        return_value={"host": host, "timeout": 5}
+    )
+
+    mgr = KasaDeviceManager()
+    mgr.set_credentials(username="a@b.com", password="hunter2")
+    mgr._hosts_requiring_klap_auth.add(host)
+
+    with (
+        caplog.at_level("WARNING"),
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={host: klap}),
+        ),
+        patch(
+            "app.kasa_device_manager.KDevice.connect",
+            AsyncMock(side_effect=RuntimeError("handshake timed out")),
+        ),
+    ):
+        await mgr.fetch()
+
+    assert mgr.skipped_auth_hosts == (host,)
+    assert mgr.hosts_requiring_klap_auth == (host,)
+    assert any("skipped device" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_fetch_clears_skipped_auth_hosts_after_success() -> None:
     """A subsequent rediscover with credentials clears stale skip markers."""
 
@@ -194,6 +298,32 @@ async def test_repl_cmd_kasa_creds_sets_credentials_and_rediscovers() -> None:
     assert mgr._discovery_credentials is not None
     assert mgr._discovery_credentials.username == "alice@example.com"
     assert mgr._discovery_credentials.password == "hunter2"
+    assert "no discovery cache" in out_buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_repl_cmd_kasa_creds_persists_to_encrypted_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "discovery.sqlite"
+    mgr = KasaDeviceManager()
+    rediscover = AsyncMock()
+    with patch.object(KasaDeviceManager, "rediscover", rediscover):
+        out_buf = io.StringIO()
+        with redirect_stdout(out_buf), redirect_stderr(io.StringIO()):
+            await _repl_cmd_kasa_creds(
+                mgr,
+                prompt_fn=_make_prompt(
+                    {"email": "alice@example.com", "password": "hunter2"}
+                ),
+                theme=_Theme(enabled=False),
+                cache_path=db,
+            )
+
+    assert load_kasa_credentials_from_db(db) == ("alice@example.com", "hunter2")
+    assert "encrypted discovery database" in out_buf.getvalue()
 
 
 @pytest.mark.asyncio

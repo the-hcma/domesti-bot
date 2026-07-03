@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +147,26 @@ class DomestiServerRuntime:
             poll_interval_s,
             len(watchers),
         )
+
+    @contextlib.contextmanager
+    def temporary_device_state(
+        self,
+        state: DeviceManagersState,
+    ) -> Iterator[DeviceManagersState]:
+        """Install ``state`` (and its CLI args) for the block, then restore priors.
+
+        Prefer this over hand-rolled ``try`` / ``finally`` in tests and one-shot
+        hot-reload helpers that need a live ``device_state`` snapshot.
+        """
+        previous_args = self.cli_args
+        previous_state = self.device_state
+        self.bind_cli_args(state.args)
+        self.device_state = state
+        try:
+            yield state
+        finally:
+            self.device_state = previous_state
+            self.cli_args = previous_args
 
     def _cancel_background_tasks(self) -> None:
         if self.watcher_stop is not None:

@@ -112,8 +112,14 @@ def load_androidtv_known_devices(
         return out
 
 
-def load_cached_configs(path: Path) -> list[tuple[str, dict[str, Any]]]:
-    """Return ``(host, config_dict)`` rows ordered by host. Missing file → empty list."""
+def load_cached_configs(
+    path: Path,
+) -> list[tuple[str, str | None, dict[str, Any], bool]]:
+    """Return ``(host, alias, config_dict, requires_klap_auth)`` rows ordered by host.
+
+    Missing file → empty list. Pre-column rows default ``requires_klap_auth`` to
+    ``False`` (anonymous LAN) until a fetch learns otherwise.
+    """
     path = path.expanduser().resolve()
     if not path.is_file():
         return []
@@ -122,7 +128,15 @@ def load_cached_configs(path: Path) -> list[tuple[str, dict[str, Any]]]:
         rows = session.scalars(
             select(KasaDiscoveredDevice).order_by(KasaDiscoveredDevice.host)
         ).all()
-        return [(row.host, json.loads(row.config_json)) for row in rows]
+        return [
+            (
+                row.host,
+                row.alias,
+                json.loads(row.config_json),
+                bool(getattr(row, "requires_klap_auth", 0)),
+            )
+            for row in rows
+        ]
 
 
 def save_androidtv_hosts(
@@ -180,18 +194,19 @@ def _nonblank_str(value: object) -> str | None:
 
 def save_configs(
     path: Path,
-    rows: list[tuple[str, str | None, dict[str, Any]]],
+    rows: list[tuple[str, str | None, dict[str, Any], bool]],
 ) -> None:
-    """Replace all rows with ``(host, alias, config_dict)`` snapshots."""
+    """Replace all rows with ``(host, alias, config_dict, requires_klap_auth)``."""
     now = time.time()
     with discovery_session(path) as session:
         session.execute(delete(KasaDiscoveredDevice))
-        for h, a, d in rows:
+        for h, a, d, requires_klap_auth in rows:
             session.add(
                 KasaDiscoveredDevice(
                     host=h,
                     alias=a,
                     config_json=json.dumps(d),
+                    requires_klap_auth=1 if requires_klap_auth else 0,
                     updated_at=now,
                 )
             )

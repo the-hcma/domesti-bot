@@ -37,6 +37,8 @@ import type {
   SmtpConfigOut,
   SmtpTestEmailIn,
   SmtpTestEmailOut,
+  KasaCredentialsSetOut,
+  KasaCredentialsSettingsOut,
   TailwindTokenSetOut,
   TailwindTokenSettingsOut,
   VizioAuthTokenSetOut,
@@ -205,6 +207,9 @@ export const api = {
       {},
     );
   },
+  clearKasaCredentials(): Promise<KasaCredentialsSettingsOut> {
+    return call<KasaCredentialsSettingsOut>("DELETE", "/v1/settings/kasa-credentials");
+  },
   clearSmtpConfig(): Promise<void> {
     return callNoContent("DELETE", "/v1/settings/smtp");
   },
@@ -312,6 +317,9 @@ export const api = {
       STATE_FETCH_TIMEOUT_MS,
     );
   },
+  fetchKasaCredentialsSettings(): Promise<KasaCredentialsSettingsOut> {
+    return call<KasaCredentialsSettingsOut>("GET", "/v1/settings/kasa-credentials");
+  },
   fetchTailwindTokenSettings(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("GET", "/v1/settings/tailwind-token");
   },
@@ -350,6 +358,15 @@ export const api = {
       `/v1/rules/users/${encodeURIComponent(userId)}/home-wifi`,
       body,
     );
+  },
+  putKasaCredentials(
+    username: string,
+    password: string,
+  ): Promise<KasaCredentialsSetOut> {
+    return call<KasaCredentialsSetOut>("PUT", "/v1/settings/kasa-credentials", {
+      username,
+      password,
+    });
   },
   putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
     return call<TailwindTokenSetOut>("PUT", "/v1/settings/tailwind-token", { token });

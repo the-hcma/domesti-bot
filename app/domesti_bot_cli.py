@@ -77,11 +77,13 @@ from app.androidtv_device_manager import (
     _merge_androidtv_host_specs,
 )
 from app.build_info import format_cli_version_line
+from app.db.secrets import SecretsConfigurationError, save_kasa_credentials_to_db
+from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
 from app.device_manager import NotInitializedError
 from app.gotailwind_device_manager import GotailwindDeviceManager
+from app.kasa_credentials import resolve_kasa_credentials
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
-from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
 from app.tailwind_credentials import resolve_tailwind_token
 from app.vizio_device_manager import (
     VizioDeviceManager,
@@ -129,7 +131,8 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("is-open", "Print whether a Tailwind door reads fully open."),
     (
         "kasa-creds",
-        "Prompt for Kasa/Tapo account email + password (password hidden) and rediscover.",
+        "Prompt for Kasa/Tapo account email + password (password hidden), "
+        "persist to encrypted storage when configured, and rediscover.",
     ),
     ("open-door", "Tell Tailwind to fully open a door."),
     ("pause", "Pause playback on a Sonos zone."),
@@ -439,7 +442,7 @@ def _maybe_print_kasa_auth_notice(
         f"{theme.dim('to enter your Kasa/Tapo email/password (hidden) and rediscover,')}"
     )
     print(
-        f"  {theme.dim('or set KASA_USERNAME + KASA_PASSWORD env vars before restart.')}"
+        f"  {theme.dim('or open Settings → Kasa, or set KASA_USERNAME + KASA_PASSWORD before restart.')}"
     )
 
 
@@ -448,6 +451,7 @@ async def _repl_cmd_kasa_creds(
     *,
     prompt_fn: Callable[[str, bool], Awaitable[str]],
     theme: _Theme,
+    cache_path: Path | None = None,
 ) -> None:
     """Interactive Kasa credential entry + rediscover (driven by ``prompt_fn``).
 
@@ -457,15 +461,14 @@ async def _repl_cmd_kasa_creds(
     canned-answer function so this helper stays exercisable without
     prompt_toolkit's terminal layer.
 
-    Credentials are stored only in memory on the manager — to persist
-    across restarts the user still needs to set ``KASA_USERNAME`` and
-    ``KASA_PASSWORD`` in their environment (or the systemd
-    ``EnvironmentFile=``).
+    When ``cache_path`` is set and a Fernet secrets key is configured,
+    credentials are also written to encrypted ``app_secrets`` so they
+    survive process restart (same store as Settings → Kasa).
     """
 
     print(
         f"{theme.header('Kasa credentials')} "
-        f"{theme.dim('(password hidden — to persist, set KASA_USERNAME / KASA_PASSWORD env vars before restart)')}"
+        f"{theme.dim('(password hidden — persisted to encrypted storage when secrets key is configured)')}"
     )
     try:
         username = await prompt_fn("  Kasa account email: ", False)
@@ -478,6 +481,29 @@ async def _repl_cmd_kasa_creds(
     except ValueError as ex:
         print(theme.err(f"kasa-creds: {ex}"), file=sys.stderr)
         return
+    if cache_path is not None:
+        try:
+            save_kasa_credentials_to_db(
+                cache_path,
+                username=username,
+                password=password,
+            )
+            print(theme.dim("kasa-creds: saved to encrypted discovery database"))
+        except SecretsConfigurationError as ex:
+            print(theme.warn(f"kasa-creds: not persisted ({ex})"))
+            print(
+                f"  {theme.dim('Run')} {theme.cmd('setup-secrets')} "
+                f"{theme.dim('or set DOMESTI_BOT_SECRETS_KEY to persist across restarts.')}"
+            )
+        except ValueError as ex:
+            print(theme.err(f"kasa-creds: {ex}"), file=sys.stderr)
+            return
+    else:
+        print(
+            theme.warn(
+                "kasa-creds: no discovery cache — credentials are in-memory only"
+            )
+        )
     print(theme.dim("kasa-creds: rediscovering Kasa devices…"))
     try:
         await kasa_mgr.rediscover()
@@ -1653,7 +1679,10 @@ async def dispatch_repl_action(
             return await session.prompt_async(message, is_password=is_password)
 
         await _repl_cmd_kasa_creds(
-            kasa_mgr, prompt_fn=_toolkit_prompt, theme=theme
+            kasa_mgr,
+            prompt_fn=_toolkit_prompt,
+            theme=theme,
+            cache_path=cache_path,
         )
         return
 
@@ -2265,7 +2294,7 @@ async def bootstrap_device_managers(
     """Create managers, run parallel discovery, and return state (or exit if nothing works)."""
 
     cache_path = Path(args.discovery_cache).expanduser().resolve() if args.discovery_cache else None
-    creds = KasaDeviceManager.credentials_from_env()
+    creds, _kasa_creds_source = resolve_kasa_credentials(cache_path=cache_path)
 
     kasa_mgr = KasaDeviceManager(
         discovery_target=args.discovery_target,
