@@ -17,6 +17,7 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
+    UsersOutsideGeofenceForSCondition,
 )
 from unittest.mock import MagicMock, patch
 
@@ -386,6 +387,32 @@ def test_rule_out_accepts_device_state_trigger_with_device_condition() -> None:
     assert rule.schedule_cron is None
 
 
+def test_rule_out_accepts_dwell_satisfied_trigger_with_dwell_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersOutsideGeofenceForSCondition(
+                    type="users_outside_geofence_for_s",
+                    geofence_id="house",
+                    min_outside_s=600,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="away-dwell",
+        label="Away dwell",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=True,
+        triggers=[RuleTrigger.DWELL_SATISFIED],
+    )
+    assert rule.triggers == [RuleTrigger.DWELL_SATISFIED]
+    assert rule.schedule_cron is None
+
+
 def test_rule_out_requires_device_ref_for_device_state_trigger() -> None:
     with pytest.raises(ValidationError, match="device_state rules must reference"):
         RuleOut(
@@ -407,6 +434,30 @@ def test_rule_out_requires_device_ref_for_device_state_trigger() -> None:
             notification_emails=[],
             notify_on_fire=False,
             triggers=[RuleTrigger.DEVICE_STATE],
+        )
+
+
+def test_rule_out_requires_dwell_condition_for_dwell_satisfied_trigger() -> None:
+    with pytest.raises(ValidationError, match="dwell_satisfied rules must include"):
+        RuleOut(
+            conditions=RuleConditionsOut(
+                all=[
+                    UsersOutsideGeofenceCondition(
+                        type="users_outside_geofence",
+                        geofence_id="house",
+                        user_ids=["henrique"],
+                    ),
+                ],
+            ),
+            cooldown_s=300,
+            device_actions=[],
+            enabled=True,
+            id="away-no-dwell",
+            label="Away no dwell",
+            min_location_accuracy_m=50,
+            notification_emails=[],
+            notify_on_fire=False,
+            triggers=[RuleTrigger.DWELL_SATISFIED],
         )
 
 

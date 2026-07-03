@@ -151,7 +151,7 @@ def consume_scheduled_dwell_episodes_for_fire(
     consumed_outside: dict[tuple[str, str, str], int],
 ) -> None:
     """Record the current geofence presence episode for each dwell condition user."""
-    for condition in _iter_dwell_for_s_conditions(rule.conditions.all):
+    for condition in iter_dwell_for_s_conditions(rule.conditions.all):
         if isinstance(condition, UsersOutsideGeofenceForSCondition):
             target = consumed_outside
         else:
@@ -1349,7 +1349,7 @@ def _is_in_before_sunrise_window(
     return now_minutes >= 0 and now_minutes < end
 
 
-def _iter_dwell_for_s_conditions(
+def iter_dwell_for_s_conditions(
     conditions: list[RuleConditionOut],
 ) -> list[UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition]:
     found: list[
@@ -1362,9 +1362,9 @@ def _iter_dwell_for_s_conditions(
         ):
             found.append(condition)
         elif isinstance(condition, AllConditionsCondition):
-            found.extend(_iter_dwell_for_s_conditions(condition.conditions))
+            found.extend(iter_dwell_for_s_conditions(condition.conditions))
         elif isinstance(condition, AnyConditionsCondition):
-            found.extend(_iter_dwell_for_s_conditions(condition.conditions))
+            found.extend(iter_dwell_for_s_conditions(condition.conditions))
     return found
 
 
@@ -1852,17 +1852,18 @@ def presence_user_ids_for_rule(
     return tuple(sorted(ids))
 
 
-def scheduled_dwell_episode_blocks_scheduled_fire(
+def dwell_episode_blocks_fire(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> bool:
     """Return True when every dwell user already fired for the current presence episode."""
     if (
-        RuleTrigger.SCHEDULED not in rule.triggers
-        and RuleTrigger.DEVICE_STATE not in rule.triggers
+        RuleTrigger.DEVICE_STATE not in rule.triggers
+        and RuleTrigger.DWELL_SATISFIED not in rule.triggers
+        and RuleTrigger.SCHEDULED not in rule.triggers
     ):
         return False
-    dwell_conditions = _iter_dwell_for_s_conditions(rule.conditions.all)
+    dwell_conditions = iter_dwell_for_s_conditions(rule.conditions.all)
     if not dwell_conditions:
         return False
     checked_any = False

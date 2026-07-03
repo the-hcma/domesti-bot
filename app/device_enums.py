@@ -60,6 +60,7 @@ class RuleEvaluationCause(StrEnum):
     """Why a rule evaluation pass is executing."""
 
     DEVICE_STATE = "device_state"
+    DWELL = "dwell"
     EDGE = "edge"
     SCHEDULED = "scheduled"
 
@@ -68,5 +69,6 @@ class RuleTrigger(StrEnum):
     """How a rule can be armed in automation-rules.json (``triggers`` entries)."""
 
     DEVICE_STATE = "device_state"
+    DWELL_SATISFIED = "dwell_satisfied"
     EDGE_TRUE = "edge_true"
     SCHEDULED = "scheduled"

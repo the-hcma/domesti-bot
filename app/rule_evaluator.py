@@ -45,6 +45,7 @@ from app.cron_schedule import (
 )
 from app.device_enums import DeviceFamilyId, RuleEvaluationCause, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
+from app.dwell_watch_index import DwellDirection, build_dwell_watch_index
 from app.geofence_transition_state_store import (
     GeofenceTransitionStateRecord,
     list_geofence_transition_states,
@@ -78,12 +79,12 @@ from app.rule_conditions import (
     RuleEvaluationContext,
     RuleEvaluationResult,
     _evaluate_condition,
-    _iter_dwell_for_s_conditions,
+    iter_dwell_for_s_conditions,
     compute_rules_sun_out,
     consume_scheduled_dwell_episodes_for_fire,
     evaluate_rule,
     presence_user_ids_for_rule,
-    scheduled_dwell_episode_blocks_scheduled_fire,
+    dwell_episode_blocks_fire,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
 from app.rule_validation import (
@@ -107,7 +108,13 @@ _GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
 _MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
 _RULE_EVALUATOR_TICK_S = 60.0
 DeferredGeofenceEvent = Literal["entered", "left"]
-RuleFireSource = Literal["deferred", "device_state", "immediate", "scheduled"]
+RuleFireSource = Literal[
+    "deferred",
+    "device_state",
+    "dwell_satisfied",
+    "immediate",
+    "scheduled",
+]
 
 
 @dataclass(frozen=True)
@@ -161,6 +168,13 @@ class RuleEvaluator:
         self._deferred_accuracy_edges: dict[
             tuple[str, str, str, str],
             _DeferredAccuracyEdge,
+        ] = {}
+        # Marks a geofence episode consumed when dwell elapsed ≥ min_s, before full
+        # rule conditions run — unlike device_state/scheduled, dwell_satisfied does not
+        # re-evaluate on later location updates in the same episode.
+        self._dwell_threshold_crossed_episode: dict[
+            tuple[str, str, DwellDirection, int],
+            int,
         ] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
@@ -665,10 +679,24 @@ class RuleEvaluator:
                 )
 
     def _bump_geofence_presence_episode(self, user_id: str, geofence_id: str) -> int:
+        self._clear_dwell_threshold_crossed_for_geofence(user_id, geofence_id)
         key = (user_id, geofence_id)
         episode = self._geofence_presence_episode.get(key, 0) + 1
         self._geofence_presence_episode[key] = episode
         return episode
+
+    def _clear_dwell_threshold_crossed_for_geofence(
+        self,
+        user_id: str,
+        geofence_id: str,
+    ) -> None:
+        stale = [
+            key
+            for key in self._dwell_threshold_crossed_episode
+            if key[0] == user_id and key[1] == geofence_id
+        ]
+        for key in stale:
+            del self._dwell_threshold_crossed_episode[key]
 
     async def _evaluate_scheduled_rules(self) -> None:
         cache_path = self._cache_path
@@ -724,7 +752,7 @@ class RuleEvaluator:
                     timezone=timezone,
                 ):
                     pass
-                elif scheduled_dwell_episode_blocks_scheduled_fire(rule, ctx):
+                elif dwell_episode_blocks_fire(rule, ctx):
                     _log_rule_skipped(
                         rule.id,
                         log_user_ids,
@@ -950,7 +978,7 @@ class RuleEvaluator:
             )
         runtime.last_fired_at = self._now_fn()
         if (
-            fire_source in ("device_state", "scheduled")
+            fire_source in ("device_state", "dwell_satisfied", "scheduled")
             and _rule_has_dwell_condition(rule)
         ):
             consume_scheduled_dwell_episodes_for_fire(
@@ -1347,6 +1375,7 @@ class RuleEvaluator:
             location=location,
             now=now,
         )
+        await self._maybe_process_dwell_satisfied(user_id)
         self._last_run_at = now
         self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
 
@@ -1478,6 +1507,54 @@ class RuleEvaluator:
         )
         task.add_done_callback(_log_device_state_evaluation_task)
 
+    async def _maybe_process_dwell_satisfied(self, roster_user_id: str) -> None:
+        rules = list_automation_rules()
+        index = build_dwell_watch_index(rules)
+        if not index.watches:
+            return
+        now_epoch = self._now_fn()
+        timezone = ZoneInfo(load_settings_location().timezone)
+        now = datetime.fromtimestamp(now_epoch, tz=timezone)
+        ctx = await self._build_evaluation_context(now=now)
+        crossed_rule_ids: set[str] = set()
+        for watch in index.watches_for_roster_user(
+            roster_user_id,
+            ctx.resolve_user_id,
+        ):
+            since = self._dwell_streak_since(
+                roster_user_id,
+                watch.geofence_id,
+                watch.direction,
+            )
+            if since is None:
+                continue
+            elapsed_s = now_epoch - since
+            if elapsed_s < watch.min_s:
+                continue
+            episode = self._geofence_presence_episode.get(
+                (roster_user_id, watch.geofence_id),
+                0,
+            )
+            cross_key = (
+                roster_user_id,
+                watch.geofence_id,
+                watch.direction,
+                watch.min_s,
+            )
+            if self._dwell_threshold_crossed_episode.get(cross_key) == episode:
+                continue
+            self._dwell_threshold_crossed_episode[cross_key] = episode
+            crossed_rule_ids.update(watch.rule_ids)
+        if not crossed_rule_ids:
+            return
+        await self._process_dwell_satisfied_rules(
+            crossed_rule_ids,
+            rules=rules,
+            ctx=ctx,
+            now_epoch=now_epoch,
+            timezone=timezone,
+        )
+
     async def _process_device_state_change(
         self,
         family_id: DeviceFamilyId,
@@ -1544,7 +1621,7 @@ class RuleEvaluator:
                 timezone=timezone,
             ):
                 continue
-            if scheduled_dwell_episode_blocks_scheduled_fire(rule, ctx):
+            if dwell_episode_blocks_fire(rule, ctx):
                 _log_rule_skipped(
                     rule.id,
                     log_user_ids,
@@ -1570,6 +1647,99 @@ class RuleEvaluator:
                 log_user_ids=log_user_ids,
                 transitions=transitions,
             )
+
+    async def _process_dwell_satisfied_rules(
+        self,
+        rule_ids: set[str],
+        *,
+        rules: list[RuleOut],
+        ctx: RuleEvaluationContext,
+        now_epoch: float,
+        timezone: ZoneInfo,
+    ) -> None:
+        rules_by_id = {
+            rule.id: rule
+            for rule in rules
+            if rule.enabled and RuleTrigger.DWELL_SATISFIED in rule.triggers
+        }
+        matched_rules = [
+            rules_by_id[rule_id]
+            for rule_id in sorted(rule_ids)
+            if rule_id in rules_by_id
+        ]
+        if not matched_rules:
+            return
+        _LOGGER.info(
+            "[rules] evaluating dwell-satisfied rule_count=%d",
+            len(matched_rules),
+        )
+        evaluation_ctx = replace(
+            ctx,
+            triggered_by=RuleEvaluationCause.DWELL,
+        )
+        transitions: dict[str, GeofenceTransition] = {}
+        for rule in matched_rules:
+            log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
+            evaluation = evaluate_rule(rule, evaluation_ctx)
+            _LOGGER.info(
+                "[rules] dwell-satisfied evaluate rule_id=%s met=%s",
+                rule.id,
+                evaluation.all_met,
+            )
+            if not evaluation.all_met:
+                _log_rule_skipped(
+                    rule.id,
+                    log_user_ids,
+                    reason="conditions_not_met",
+                    detail=_format_unmet_conditions_for_log(evaluation),
+                )
+                continue
+            runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+            if self._skip_if_daily_cap(
+                log_user_ids=log_user_ids,
+                now_epoch=now_epoch,
+                rule=rule,
+                runtime=runtime,
+                timezone=timezone,
+            ):
+                continue
+            if dwell_episode_blocks_fire(rule, ctx):
+                _log_rule_skipped(
+                    rule.id,
+                    log_user_ids,
+                    reason="dwell_episode_consumed",
+                    detail="dwell already fired this away/inside episode",
+                )
+                continue
+            if not self._cooldown_elapsed(rule, runtime):
+                remaining_s = rule.cooldown_s - (
+                    now_epoch - (runtime.last_fired_at or 0.0)
+                )
+                _log_rule_skipped(
+                    rule.id,
+                    log_user_ids,
+                    reason="cooldown",
+                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                )
+                continue
+            await self._execute_rule(
+                rule,
+                evaluation=evaluation,
+                fire_source="dwell_satisfied",
+                log_user_ids=log_user_ids,
+                transitions=transitions,
+            )
+
+    def _dwell_streak_since(
+        self,
+        roster_user_id: str,
+        geofence_id: str,
+        direction: DwellDirection,
+    ) -> float | None:
+        key = (roster_user_id, geofence_id)
+        if direction == DwellDirection.INSIDE:
+            return self._geofence_inside_since.get(key)
+        return self._geofence_outside_since.get(key)
 
     def _ensure_astronomical_schedule_materialized(
         self,
@@ -1652,15 +1822,18 @@ class RuleEvaluator:
             return
         roster_user_ids = {row.user_id for row in list_users(cache_path)}
         for rule in list_automation_rules():
+            if not _rule_has_dwell_condition(rule):
+                continue
             if (
-                RuleTrigger.SCHEDULED not in rule.triggers
-                or not _rule_has_dwell_condition(rule)
+                RuleTrigger.DEVICE_STATE not in rule.triggers
+                and RuleTrigger.DWELL_SATISFIED not in rule.triggers
+                and RuleTrigger.SCHEDULED not in rule.triggers
             ):
                 continue
             runtime = self._rule_state.get(rule.id)
             if runtime is None or runtime.last_fired_at is None:
                 continue
-            for condition in _iter_dwell_for_s_conditions(rule.conditions.all):
+            for condition in iter_dwell_for_s_conditions(rule.conditions.all):
                 if isinstance(condition, UsersOutsideGeofenceForSCondition):
                     consumed = self._scheduled_outside_dwell_consumed
                     streak_by_key = self._geofence_outside_since
@@ -2113,7 +2286,7 @@ def _format_rule_conditions_for_log(
     parts: list[str] = []
     for row in evaluation.conditions:
         if (
-            fire_source not in ("device_state", "scheduled")
+            fire_source not in ("device_state", "dwell_satisfied", "scheduled")
             and RuleTrigger.EDGE_TRUE in rule.triggers
             and isinstance(
             row.condition,

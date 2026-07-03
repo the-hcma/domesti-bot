@@ -42,7 +42,7 @@ from app.rule_conditions import (
     compute_rules_sun_out,
     evaluate_rule,
     presence_user_ids_for_rule,
-    scheduled_dwell_episode_blocks_scheduled_fire,
+    dwell_episode_blocks_fire,
 )
 from app.rule_validation import build_roster_user_id_lookup
 from app.rules_status import build_rules_status
@@ -675,7 +675,7 @@ def test_users_outside_geofence_for_s_met_after_dwell() -> None:
     assert result.all_met is True
 
 
-def test_scheduled_dwell_episode_blocks_scheduled_fire_when_consumed() -> None:
+def test_dwell_episode_blocks_fire_when_consumed() -> None:
     now = datetime(2026, 6, 9, 21, 12, tzinfo=_TZ)
     outside_since = now.timestamp() - 1300.0
     ctx = _ctx(
@@ -689,7 +689,7 @@ def test_scheduled_dwell_episode_blocks_scheduled_fire_when_consumed() -> None:
         user_locations={"henrique": _henrique_outside_location()},
     )
     assert evaluate_rule(_outside_dwell_rule(), ctx).all_met is True
-    assert scheduled_dwell_episode_blocks_scheduled_fire(_outside_dwell_rule(), ctx)
+    assert dwell_episode_blocks_fire(_outside_dwell_rule(), ctx)
 
 
 def test_scheduled_dwell_episode_does_not_block_when_one_user_episode_unconsumed() -> None:
@@ -737,7 +737,7 @@ def test_scheduled_dwell_episode_does_not_block_when_one_user_episode_unconsumed
             "kristen": _henrique_outside_location(),
         },
     )
-    assert scheduled_dwell_episode_blocks_scheduled_fire(rule, ctx) is False
+    assert dwell_episode_blocks_fire(rule, ctx) is False
 
 
 def test_users_outside_geofence_for_s_met_with_outside_dwell_timer_despite_low_accuracy_latest() -> (

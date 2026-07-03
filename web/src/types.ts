@@ -146,7 +146,7 @@ export interface VizioPairCompleteOut {
 
 // --- Rule engine (mirror planned ``app/api/schemas.py`` rule models) ---
 
-export type RuleTrigger = "device_state" | "edge_true" | "scheduled";
+export type RuleTrigger = "device_state" | "dwell_satisfied" | "edge_true" | "scheduled";
 
 export type RuleActionType =
   | "turn_on"
