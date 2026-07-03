@@ -34,8 +34,9 @@ from app.astronomical_schedule import (
     next_astronomical_repeat_evaluate_at,
     parse_schedule_materialized_for,
     schedule_materialized_for_date,
+    uses_astronomical_eligibility_wake,
+    uses_astronomical_materialized_schedule,
     uses_astronomical_repeat_schedule,
-    uses_astronomical_schedule,
 )
 from app.automation_rules_loader import list_automation_rules, load_settings_location
 from app.cron_schedule import (
@@ -112,6 +113,7 @@ RuleFireSource = Literal[
     "deferred",
     "device_state",
     "dwell_satisfied",
+    "eligibility",
     "immediate",
     "scheduled",
 ]
@@ -168,13 +170,6 @@ class RuleEvaluator:
         self._deferred_accuracy_edges: dict[
             tuple[str, str, str, str],
             _DeferredAccuracyEdge,
-        ] = {}
-        # Marks a geofence episode consumed when dwell elapsed ≥ min_s, before full
-        # rule conditions run — unlike device_state/scheduled, dwell_satisfied does not
-        # re-evaluate on later location updates in the same episode.
-        self._dwell_threshold_crossed_episode: dict[
-            tuple[str, str, DwellDirection, int],
-            int,
         ] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
@@ -494,7 +489,7 @@ class RuleEvaluator:
             now,
             timezone,
         )
-        if uses_astronomical_schedule(rule):
+        if uses_astronomical_materialized_schedule(rule):
             self._persist_rule_schedule_state(rule.id)
 
     def _apply_persisted_geofence_state(self) -> None:
@@ -679,24 +674,10 @@ class RuleEvaluator:
                 )
 
     def _bump_geofence_presence_episode(self, user_id: str, geofence_id: str) -> int:
-        self._clear_dwell_threshold_crossed_for_geofence(user_id, geofence_id)
         key = (user_id, geofence_id)
         episode = self._geofence_presence_episode.get(key, 0) + 1
         self._geofence_presence_episode[key] = episode
         return episode
-
-    def _clear_dwell_threshold_crossed_for_geofence(
-        self,
-        user_id: str,
-        geofence_id: str,
-    ) -> None:
-        stale = [
-            key
-            for key in self._dwell_threshold_crossed_episode
-            if key[0] == user_id and key[1] == geofence_id
-        ]
-        for key in stale:
-            del self._dwell_threshold_crossed_episode[key]
 
     async def _evaluate_scheduled_rules(self) -> None:
         cache_path = self._cache_path
@@ -732,14 +713,23 @@ class RuleEvaluator:
                     )
             if runtime.next_evaluate_at > now_epoch:
                 continue
+            eligibility_wake = uses_astronomical_eligibility_wake(rule)
+            fire_source: RuleFireSource = (
+                "eligibility" if eligibility_wake else "scheduled"
+            )
             log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
             evaluation_ctx = replace(
                 ctx,
-                triggered_by=RuleEvaluationCause.SCHEDULED,
+                triggered_by=(
+                    RuleEvaluationCause.ELIGIBILITY
+                    if eligibility_wake
+                    else RuleEvaluationCause.SCHEDULED
+                ),
             )
             evaluation = evaluate_rule(rule, evaluation_ctx)
             _LOGGER.info(
-                "[rules] scheduled evaluate rule_id=%s met=%s",
+                "[rules] %s evaluate rule_id=%s met=%s",
+                fire_source,
                 rule.id,
                 evaluation.all_met,
             )
@@ -757,13 +747,13 @@ class RuleEvaluator:
                         rule.id,
                         log_user_ids,
                         reason="dwell_episode_consumed",
-                        detail="scheduled dwell already fired this away/inside episode",
+                        detail="dwell already fired this away/inside episode",
                     )
                 elif self._cooldown_elapsed(rule, runtime):
                     await self._execute_rule(
                         rule,
                         evaluation=evaluation,
-                        fire_source="scheduled",
+                        fire_source=fire_source,
                         log_user_ids=log_user_ids,
                         transitions={},
                     )
@@ -978,7 +968,8 @@ class RuleEvaluator:
             )
         runtime.last_fired_at = self._now_fn()
         if (
-            fire_source in ("device_state", "dwell_satisfied", "scheduled")
+            fire_source
+            in ("device_state", "dwell_satisfied", "eligibility", "scheduled")
             and _rule_has_dwell_condition(rule)
         ):
             consume_scheduled_dwell_episodes_for_fire(
@@ -1449,7 +1440,7 @@ class RuleEvaluator:
         for rule in list_automation_rules():
             if not rule.enabled or not _rule_uses_scheduled_evaluation_tick(rule):
                 continue
-            if uses_astronomical_schedule(rule):
+            if uses_astronomical_materialized_schedule(rule):
                 self._ensure_astronomical_schedule_materialized(
                     rule,
                     timezone=timezone,
@@ -1475,9 +1466,9 @@ class RuleEvaluator:
         timezone: ZoneInfo,
     ) -> str:
         repeat_cron = astronomical_repeat_cron(rule)
-        if uses_astronomical_schedule(rule) and repeat_cron is not None:
+        if uses_astronomical_materialized_schedule(rule) and repeat_cron is not None:
             return repeat_cron
-        if uses_astronomical_schedule(rule):
+        if uses_astronomical_materialized_schedule(rule):
             now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
             materialized = self._ensure_astronomical_schedule_materialized(
                 rule,
@@ -1531,19 +1522,9 @@ class RuleEvaluator:
             elapsed_s = now_epoch - since
             if elapsed_s < watch.min_s:
                 continue
-            episode = self._geofence_presence_episode.get(
-                (roster_user_id, watch.geofence_id),
-                0,
-            )
-            cross_key = (
-                roster_user_id,
-                watch.geofence_id,
-                watch.direction,
-                watch.min_s,
-            )
-            if self._dwell_threshold_crossed_episode.get(cross_key) == episode:
-                continue
-            self._dwell_threshold_crossed_episode[cross_key] = episode
+            # Do not consume the episode here — only a successful fire does
+            # (dwell_episode_blocks_fire). Daytime dwell must not poison a later
+            # eligibility wake (e.g. after_sunset) in the same home episode.
             crossed_rule_ids.update(watch.rule_ids)
         if not crossed_rule_ids:
             return
@@ -1749,7 +1730,7 @@ class RuleEvaluator:
         now: datetime,
         force: bool = False,
     ) -> str | None:
-        if not uses_astronomical_schedule(rule):
+        if not uses_astronomical_materialized_schedule(rule):
             return None
         runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
         local_date = local_calendar_date(now.timestamp(), timezone)
@@ -1798,7 +1779,7 @@ class RuleEvaluator:
             return
         self._last_astronomical_materialization_date = local_date
         for rule in list_automation_rules():
-            if not rule.enabled or not uses_astronomical_schedule(rule):
+            if not rule.enabled or not uses_astronomical_materialized_schedule(rule):
                 continue
             runtime = self._rule_state.get(rule.id)
             if (
@@ -2286,7 +2267,8 @@ def _format_rule_conditions_for_log(
     parts: list[str] = []
     for row in evaluation.conditions:
         if (
-            fire_source not in ("device_state", "dwell_satisfied", "scheduled")
+            fire_source
+            not in ("device_state", "dwell_satisfied", "eligibility", "scheduled")
             and RuleTrigger.EDGE_TRUE in rule.triggers
             and isinstance(
             row.condition,
@@ -2815,7 +2797,10 @@ def _rule_has_dwell_condition(rule: RuleOut) -> bool:
 
 
 def _rule_uses_scheduled_evaluation_tick(rule: RuleOut) -> bool:
-    return RuleTrigger.SCHEDULED in rule.triggers
+    return (
+        RuleTrigger.SCHEDULED in rule.triggers
+        or uses_astronomical_eligibility_wake(rule)
+    )
 
 
 def _scheduled_rule_user_ids_for_log(

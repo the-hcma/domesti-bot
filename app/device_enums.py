@@ -62,6 +62,7 @@ class RuleEvaluationCause(StrEnum):
     DEVICE_STATE = "device_state"
     DWELL = "dwell"
     EDGE = "edge"
+    ELIGIBILITY = "eligibility"
     SCHEDULED = "scheduled"
 
 

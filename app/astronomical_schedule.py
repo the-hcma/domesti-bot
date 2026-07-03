@@ -82,6 +82,31 @@ def uses_astronomical_edge_window_open_schedule(rule: RuleOut) -> bool:
     )
 
 
+def uses_astronomical_eligibility_wake(rule: RuleOut) -> bool:
+    """True when dwell/device_state rules need a one-shot eval at sun-window open.
+
+    Implicit eligibility (no ``scheduled`` trigger, no repeat ``schedule_cron``): the
+    evaluator materializes today's astronomical anchor (e.g. sunset) and evaluates
+    once when that instant is due. Co-equal with ``dwell_satisfied`` and
+    ``device_state`` wake-ups — not a cron poll.
+    """
+    if RuleTrigger.SCHEDULED in rule.triggers:
+        return False
+    if extract_astronomical_anchor(rule) is None:
+        return False
+    if astronomical_repeat_cron(rule) is not None:
+        return False
+    return (
+        RuleTrigger.DEVICE_STATE in rule.triggers
+        or RuleTrigger.DWELL_SATISFIED in rule.triggers
+    )
+
+
+def uses_astronomical_materialized_schedule(rule: RuleOut) -> bool:
+    """True when the evaluator materializes a daily sun-anchor cron for ``rule``."""
+    return uses_astronomical_eligibility_wake(rule) or uses_astronomical_schedule(rule)
+
+
 def uses_astronomical_repeat_schedule(rule: RuleOut) -> bool:
     """True when a scheduled rule anchors on sun events and repeats on ``schedule_cron``."""
     return (

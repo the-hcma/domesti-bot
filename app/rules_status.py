@@ -36,6 +36,7 @@ from app.astronomical_schedule import (
     astronomical_anchor_datetime,
     extract_astronomical_anchor,
     uses_astronomical_edge_window_open_schedule,
+    uses_astronomical_eligibility_wake,
     uses_astronomical_repeat_schedule,
     uses_astronomical_schedule,
 )
@@ -159,6 +160,7 @@ def build_rules_status(
         if (
             (
                 RuleTrigger.SCHEDULED in rule.triggers
+                or uses_astronomical_eligibility_wake(rule)
             )
             and rule.enabled
             and evaluator is not None
@@ -207,6 +209,15 @@ def build_rules_status(
                     "Evaluates once when armed at "
                     f"{_format_astronomical_anchor_label(anchor_dt)} if anyone is home; "
                     "also on geofence enter until local midnight"
+                )
+        elif uses_astronomical_eligibility_wake(rule) and evaluator is not None:
+            anchor = extract_astronomical_anchor(rule)
+            if anchor is not None:
+                anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
+                scheduled_detail = (
+                    "Evaluates once when eligible at "
+                    f"{_format_astronomical_anchor_label(anchor_dt)}; "
+                    "also on dwell threshold and watched device changes"
                 )
         elif (
             RuleTrigger.SCHEDULED in rule.triggers
