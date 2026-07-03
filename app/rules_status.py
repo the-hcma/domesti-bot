@@ -218,6 +218,10 @@ def build_rules_status(
                 scheduled_detail = (
                     f"Today's astronomical schedule: {effective_cron} (local)"
                 )
+        elif RuleTrigger.DWELL_SATISFIED in rule.triggers:
+            scheduled_detail = (
+                "Evaluates when a referenced user/geofence dwell threshold is satisfied"
+            )
         elif RuleTrigger.DEVICE_STATE in rule.triggers:
             try:
                 poll_interval_s = poll_interval_from_env()

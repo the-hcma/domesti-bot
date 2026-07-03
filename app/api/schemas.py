@@ -883,16 +883,22 @@ class RuleOut(BaseModel):
     @model_validator(mode="after")
     def _validate_trigger_fields(self) -> Self:
         from app.astronomical_schedule import extract_astronomical_anchor
+        from app.rule_conditions import iter_dwell_for_s_conditions
         from app.rule_validation import collect_rule_device_refs
 
         trigger_set = set(self.triggers)
         has_device_state = RuleTrigger.DEVICE_STATE in trigger_set
+        has_dwell_satisfied = RuleTrigger.DWELL_SATISFIED in trigger_set
         has_edge_true = RuleTrigger.EDGE_TRUE in trigger_set
         has_scheduled = RuleTrigger.SCHEDULED in trigger_set
         cron = (self.schedule_cron or "").strip()
         if has_device_state and not collect_rule_device_refs(self):
             raise ValueError(
                 "device_state rules must reference at least one device in conditions"
+            )
+        if has_dwell_satisfied and not iter_dwell_for_s_conditions(self.conditions.all):
+            raise ValueError(
+                "dwell_satisfied rules must include a dwell geofence condition"
             )
         if not has_scheduled and cron != "":
             raise ValueError(
