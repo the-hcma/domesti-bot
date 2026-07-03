@@ -126,6 +126,15 @@ class VizioTvDevice(SwitchDevice):
         self.set_power(active)
 
     async def turn_off(self) -> None:
+        # Quick Start standby keeps SmartCast reachable. Sending power_off
+        # while already off can wake the display (seen on Kitchen TV when
+        # away-shutdown dispatched turn_off for every listed device).
+        if not self._power_unknown and not self._on:
+            _LOGGER.debug(
+                "Skipping power_off for %s; already off",
+                self.identifier,
+            )
+            return
         try:
             await self._client.power_off()
         except VizioSmartCastConnectionError:
@@ -137,6 +146,12 @@ class VizioTvDevice(SwitchDevice):
         self.set_power(False)
 
     async def turn_on(self) -> None:
+        if not self._power_unknown and self._on:
+            _LOGGER.debug(
+                "Skipping power_on for %s; already on",
+                self.identifier,
+            )
+            return
         await self._client.power_on()
         self._power_unknown = False
         self.set_power(True)
