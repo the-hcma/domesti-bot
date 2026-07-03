@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from app.api.schemas import (
     AllConditionsCondition,
@@ -24,6 +23,7 @@ from app.api.schemas import (
     normalized_rule_notification_emails,
 )
 from app.device_enums import DeviceFamilyId, RuleTrigger
+from app.domesti_bot_cli import DeviceManagersState
 from app.rule_actions import (
     RuleActionDispatchError,
     resolve_kasa_host_by_label,
@@ -31,10 +31,6 @@ from app.rule_actions import (
     resolve_tailwind_identifier_by_label,
     resolve_vizio_identifier_by_label,
 )
-
-if TYPE_CHECKING:
-    from app.domesti_bot_cli import DeviceManagersState
-
 
 @dataclass(frozen=True)
 class RosterUserRow:
@@ -105,6 +101,27 @@ def collect_rule_user_ids(rule: RuleOut) -> set[str]:
     for condition in rule.conditions.all:
         _walk_user_ids(condition, ids)
     return ids
+
+
+def rule_watches_backend_device(
+    rule: RuleOut,
+    state: DeviceManagersState,
+    *,
+    family_id: DeviceFamilyId,
+    backend_device_id: str,
+) -> bool:
+    """Return whether ``backend_device_id`` is referenced by a device condition."""
+    for ref_family, ref_device in collect_rule_device_refs(rule):
+        if ref_family != family_id:
+            continue
+        if _backend_device_id_matches_rule_ref(
+            state,
+            family_id=family_id,
+            backend_device_id=backend_device_id,
+            rule_device_ref=ref_device,
+        ):
+            return True
+    return False
 
 
 def resolve_roster_user_id(
@@ -207,6 +224,25 @@ def _device_reference_issue(
     )
 
 
+def _backend_device_id_matches_rule_ref(
+    state: DeviceManagersState,
+    *,
+    family_id: DeviceFamilyId,
+    backend_device_id: str,
+    rule_device_ref: str,
+) -> bool:
+    trimmed_backend = backend_device_id.strip()
+    trimmed_ref = rule_device_ref.strip()
+    if trimmed_ref == trimmed_backend:
+        return True
+    resolved = _resolve_device_ref_to_identifier(
+        state,
+        family_id=family_id,
+        device_ref=trimmed_ref,
+    )
+    return resolved is not None and resolved == trimmed_backend
+
+
 def _device_action_resolves(
     ctx: RuleValidationContext,
     action: RuleDeviceActionOut,
@@ -259,6 +295,28 @@ def _device_reference_resolves(
             )
         case _:
             return False
+
+
+def _resolve_device_ref_to_identifier(
+    state: DeviceManagersState,
+    *,
+    family_id: DeviceFamilyId,
+    device_ref: str,
+) -> str | None:
+    match family_id:
+        case DeviceFamilyId.KASA:
+            return resolve_kasa_host_by_label(state.kasa_mgr, device_ref)
+        case DeviceFamilyId.SONOS:
+            return resolve_sonos_identifier_by_label(state.sonos_mgr, device_ref)
+        case DeviceFamilyId.TAILWIND:
+            return resolve_tailwind_identifier_by_label(
+                state.tailwind_mgr,
+                device_ref,
+            )
+        case DeviceFamilyId.VIZIO:
+            return resolve_vizio_identifier_by_label(state.vizio_mgr, device_ref)
+        case _:
+            return None
 
 
 def _unknown_user_issue(
