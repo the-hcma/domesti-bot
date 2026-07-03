@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.12.0](https://github.com/the-hcma/domesti-bot/compare/v1.11.0...v1.12.0) (2026-07-03)
+
+
+### Features
+
+* arm dwell rules on time-window eligibility ([#394](https://github.com/the-hcma/domesti-bot/issues/394)) ([876c9b7](https://github.com/the-hcma/domesti-bot/commit/876c9b77eb3b46238ef1bff46dc2f714f36424a8))
+* device-state rule trigger (closes [#388](https://github.com/the-hcma/domesti-bot/issues/388)) ([#389](https://github.com/the-hcma/domesti-bot/issues/389)) ([c05e3b1](https://github.com/the-hcma/domesti-bot/commit/c05e3b161155912728c9baf88f43cd654d860990))
+* dwell_satisfied trigger with curated dwell watches ([#391](https://github.com/the-hcma/domesti-bot/issues/391)) ([4d8eaf1](https://github.com/the-hcma/domesti-bot/commit/4d8eaf154c905a5efd1a5a26cdc8b6aac40a50cd))
+
+
+### Bug Fixes
+
+* consolidate SQLite schema sync and fix bootstrap race ([#386](https://github.com/the-hcma/domesti-bot/issues/386)) ([69eb142](https://github.com/the-hcma/domesti-bot/commit/69eb142cd6aee22837474bed7f169a372ddf1d9b))
+* skip Vizio power keypress when already on or off ([#395](https://github.com/the-hcma/domesti-bot/issues/395)) ([9160e59](https://github.com/the-hcma/domesti-bot/commit/9160e596809cb8e258e95a6504952a7ecf01c7aa))
+
+
+### Documentation
+
+* spell out public-then-private lexicographic sort rule ([#384](https://github.com/the-hcma/domesti-bot/issues/384)) ([89ed697](https://github.com/the-hcma/domesti-bot/commit/89ed697bb9024ed38c3a498e2aeff067dc75d750))
+
 ## [1.11.0](https://github.com/the-hcma/domesti-bot/compare/v1.10.0...v1.11.0) (2026-07-02)
 
 
