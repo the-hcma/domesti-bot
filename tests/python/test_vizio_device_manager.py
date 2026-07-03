@@ -468,6 +468,27 @@ async def test_refresh_power_state_poll_forwards_flag_to_client() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_off_sends_when_power_unknown() -> None:
+    tv = _tv(is_on=False)
+    tv._power_unknown = True  # noqa: SLF001
+    tv._client.power_off = AsyncMock()  # noqa: SLF001
+    await tv.turn_off()
+    tv._client.power_off.assert_awaited_once_with()  # noqa: SLF001
+    assert tv.ui_power_state() == "off"
+    assert tv.is_on is False
+
+
+@pytest.mark.asyncio
+async def test_turn_off_skips_smartcast_when_already_off() -> None:
+    tv = _tv(is_on=False)
+    tv._client.power_off = AsyncMock()  # noqa: SLF001
+    await tv.turn_off()
+    tv._client.power_off.assert_not_awaited()  # noqa: SLF001
+    assert tv.ui_power_state() == "off"
+    assert tv.is_on is False
+
+
+@pytest.mark.asyncio
 async def test_turn_off_treats_unreachable_as_off() -> None:
     tv = _tv(is_on=True)
     tv._client.power_off = AsyncMock(  # noqa: SLF001
@@ -488,3 +509,13 @@ async def test_turn_on_propagates_connection_error_when_unreachable() -> None:
         await tv.turn_on()
     assert tv.ui_power_state() == "off"
     assert tv.is_on is False
+
+
+@pytest.mark.asyncio
+async def test_turn_on_skips_smartcast_when_already_on() -> None:
+    tv = _tv(is_on=True)
+    tv._client.power_on = AsyncMock()  # noqa: SLF001
+    await tv.turn_on()
+    tv._client.power_on.assert_not_awaited()  # noqa: SLF001
+    assert tv.ui_power_state() == "on"
+    assert tv.is_on is True
