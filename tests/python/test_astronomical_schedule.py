@@ -10,12 +10,15 @@ import pytest
 from app.api.schemas import (
     AfterSunsetCondition,
     BeforeSunriseCondition,
+    DevicesAnyOnCondition,
+    RuleConditionDeviceRefOut,
     RuleConditionsOut,
     RuleOut,
     RulesSunOut,
     SettingsLocationOut,
+    UsersInsideGeofenceForSCondition,
 )
-from app.device_enums import RuleTrigger
+from app.device_enums import DeviceFamilyId, RuleTrigger
 from app.astronomical_schedule import (
     astronomical_anchor_datetime,
     cron_expression_for_local_datetime,
@@ -23,6 +26,8 @@ from app.astronomical_schedule import (
     materialize_astronomical_cron,
     next_astronomical_repeat_evaluate_at,
     uses_astronomical_edge_window_open_schedule,
+    uses_astronomical_eligibility_wake,
+    uses_astronomical_materialized_schedule,
     uses_astronomical_repeat_schedule,
     uses_astronomical_schedule,
 )
@@ -75,6 +80,44 @@ def _edge_window_open_rule() -> RuleOut:
         notification_emails=[],
         notify_on_fire=False,
         triggers=[RuleTrigger.EDGE_TRUE, RuleTrigger.SCHEDULED],
+    )
+
+
+def _eligibility_wake_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterSunsetCondition(
+                    type="after_sunset",
+                    offset_minutes=0,
+                    window_end="midnight",
+                ),
+                UsersInsideGeofenceForSCondition(
+                    type="users_inside_geofence_for_s",
+                    geofence_id="house",
+                    min_inside_s=600,
+                    user_ids=["henrique"],
+                ),
+                DevicesAnyOnCondition(
+                    type="devices_any_on",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Front door lights",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="evening-lights-off",
+        label="Evening lights off",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.DEVICE_STATE, RuleTrigger.DWELL_SATISFIED],
     )
 
 
@@ -147,6 +190,31 @@ def test_uses_astronomical_edge_window_open_schedule_false_with_repeat_cron() ->
         update={"schedule_cron": "*/10 * * * *"},
     )
     assert uses_astronomical_edge_window_open_schedule(with_repeat) is False
+
+
+def test_uses_astronomical_eligibility_wake_false_when_scheduled_present() -> None:
+    with_scheduled = _eligibility_wake_rule().model_copy(
+        update={"triggers": [RuleTrigger.DWELL_SATISFIED, RuleTrigger.SCHEDULED]},
+    )
+    assert uses_astronomical_eligibility_wake(with_scheduled) is False
+
+
+def test_uses_astronomical_eligibility_wake_false_with_repeat_cron() -> None:
+    with_repeat = _eligibility_wake_rule().model_copy(
+        update={"schedule_cron": "*/10 * * * *"},
+    )
+    assert uses_astronomical_eligibility_wake(with_repeat) is False
+
+
+def test_uses_astronomical_eligibility_wake_for_dwell_and_device_state() -> None:
+    assert uses_astronomical_eligibility_wake(_eligibility_wake_rule()) is True
+
+
+def test_uses_astronomical_materialized_schedule_includes_eligibility_wake() -> None:
+    assert uses_astronomical_materialized_schedule(_eligibility_wake_rule()) is True
+    assert uses_astronomical_materialized_schedule(
+        _scheduled_rule(schedule_cron=None),
+    ) is True
 
 
 def test_uses_astronomical_schedule_false_when_scheduled_trigger_missing(
