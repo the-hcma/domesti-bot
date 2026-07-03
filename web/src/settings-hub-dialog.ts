@@ -1,16 +1,18 @@
-// Tabbed Settings hub (GoTailwind token + My Tracks connection).
+// Tabbed Settings hub (GoTailwind, Kasa, Vizio, My Tracks).
 
 import { createRulesDataSource } from "./rules-data-source.js";
+import { mountKasaSettingsPanel } from "./kasa-settings-panel.js";
 import { mountMyTracksSettingsPanel } from "./my-tracks-settings-panel.js";
 import { mountTailwindSettingsPanel } from "./tailwind-settings-panel.js";
 import { mountVizioSettingsPanel } from "./vizio-settings-panel.js";
 
-type SettingsTabId = "my-tracks" | "tailwind" | "vizio";
+type SettingsTabId = "kasa" | "my-tracks" | "tailwind" | "vizio";
 
 const SETTINGS_TABS: readonly [SettingsTabId, string][] = [
   ["tailwind", "GoTailwind"],
-  ["vizio", "Vizio TV"],
+  ["kasa", "Kasa"],
   ["my-tracks", "My Tracks"],
+  ["vizio", "Vizio TV"],
 ];
 
 export async function openSettingsHubDialog(options: {
@@ -88,6 +90,12 @@ export async function openSettingsHubDialog(options: {
     const mount = document.createElement("div");
     mount.className = "settings-hub-tab-mount";
     body.append(mount);
+    if (tabId === "kasa") {
+      await mountKasaSettingsPanel(mount, {
+        onDevicesChanged: options.onReloadDevices,
+      });
+      return;
+    }
     if (tabId === "my-tracks") {
       const dataSource = await createRulesDataSource();
       await mountMyTracksSettingsPanel(mount, dataSource);

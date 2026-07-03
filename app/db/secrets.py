@@ -13,9 +13,11 @@ from app.db.secrets_key import SecretsKeySource, load_secrets_key_material
 from app.db.session import discovery_session
 from app.vizio_mac import normalize_mac
 
-_SMTP_PASSWORD_KEY = "smtp_password"
+_KASA_PASSWORD_KEY = "kasa_password"
+_KASA_USERNAME_KEY = "kasa_username"
 _MYTRACKS_ADMIN_PASSWORD_KEY = "mytracks_admin_password"
 _MYTRACKS_RELAY_API_KEY = "mytracks_relay_api_key"
+_SMTP_PASSWORD_KEY = "smtp_password"
 _TAILWIND_SECRET_KEY = "tailwind_token"
 
 
@@ -35,9 +37,26 @@ def delete_app_secret(path: Path, *, key: str) -> None:
             session.delete(row)
 
 
-def load_smtp_password_from_db(path: Path) -> str | None:
-    """Return the decrypted SMTP password from the database, or ``None``."""
-    return _load_app_secret_plaintext(path, _SMTP_PASSWORD_KEY)
+def delete_kasa_credentials_from_db(path: Path) -> None:
+    """Remove encrypted Kasa account username and password rows atomically."""
+    with discovery_session(path) as session:
+        for key in (_KASA_PASSWORD_KEY, _KASA_USERNAME_KEY):
+            row = session.get(AppSecret, key)
+            if row is not None:
+                session.delete(row)
+
+
+def load_kasa_credentials_from_db(path: Path) -> tuple[str, str] | None:
+    """Return ``(username, password)`` when both encrypted rows decrypt, else ``None``."""
+    username = _load_app_secret_plaintext(path, _KASA_USERNAME_KEY)
+    password = _load_app_secret_plaintext(path, _KASA_PASSWORD_KEY)
+    if username is None or password is None:
+        return None
+    un = username.strip()
+    pw = password.strip()
+    if not un or not pw:
+        return None
+    return un, pw
 
 
 def load_mytracks_admin_password_from_db(path: Path) -> str | None:
@@ -48,6 +67,11 @@ def load_mytracks_admin_password_from_db(path: Path) -> str | None:
 def load_mytracks_relay_api_key_from_db(path: Path) -> str | None:
     """Return the decrypted my-tracks relay API key, or ``None``."""
     return _load_app_secret_plaintext(path, _MYTRACKS_RELAY_API_KEY)
+
+
+def load_smtp_password_from_db(path: Path) -> str | None:
+    """Return the decrypted SMTP password from the database, or ``None``."""
+    return _load_app_secret_plaintext(path, _SMTP_PASSWORD_KEY)
 
 
 def load_tailwind_token_from_db(path: Path) -> str | None:
@@ -95,9 +119,41 @@ def load_vizio_auth_token_from_db(
     return None
 
 
-def save_smtp_password_to_db(path: Path, password: str) -> None:
-    """Encrypt and persist the SMTP password."""
-    _save_app_secret_plaintext(path, _SMTP_PASSWORD_KEY, password)
+def save_kasa_credentials_to_db(
+    path: Path,
+    *,
+    username: str,
+    password: str,
+) -> None:
+    """Encrypt and persist Kasa/Tapo account email and password (both required).
+
+    Username and password are written in one ``discovery_session`` commit so a
+    crash cannot leave a single orphaned credential row.
+    """
+    un = username.strip()
+    pw = password.strip()
+    if not un or not pw:
+        raise ValueError(
+            "Expected non-empty Kasa account email and password, got "
+            f"username={un!r} password={'<set>' if pw else '<empty>'}"
+        )
+    fernet = _require_fernet()
+    now = time.time()
+    with discovery_session(path) as session:
+        for key, value in ((_KASA_PASSWORD_KEY, pw), (_KASA_USERNAME_KEY, un)):
+            ciphertext = fernet.encrypt(value.encode("utf-8"))
+            row = session.get(AppSecret, key)
+            if row is None:
+                session.add(
+                    AppSecret(
+                        key=key,
+                        ciphertext=ciphertext,
+                        updated_at=now,
+                    )
+                )
+            else:
+                row.ciphertext = ciphertext
+                row.updated_at = now
 
 
 def save_mytracks_admin_password_to_db(path: Path, password: str) -> None:
@@ -108,6 +164,11 @@ def save_mytracks_admin_password_to_db(path: Path, password: str) -> None:
 def save_mytracks_relay_api_key_to_db(path: Path, api_key: str) -> None:
     """Encrypt and persist the my-tracks relay API key."""
     _save_app_secret_plaintext(path, _MYTRACKS_RELAY_API_KEY, api_key.strip())
+
+
+def save_smtp_password_to_db(path: Path, password: str) -> None:
+    """Encrypt and persist the SMTP password."""
+    _save_app_secret_plaintext(path, _SMTP_PASSWORD_KEY, password)
 
 
 def save_tailwind_token_to_db(path: Path, token: str) -> None:
@@ -135,9 +196,12 @@ def save_vizio_auth_token_to_db(
     raise ValueError("Expected mac or host for Vizio auth token storage, got neither")
 
 
-def smtp_password_stored_in_db(path: Path) -> bool:
-    """True when an ``app_secrets`` row exists for the SMTP password."""
-    return _app_secret_stored_in_db(path, _SMTP_PASSWORD_KEY)
+def kasa_credentials_stored_in_db(path: Path) -> bool:
+    """True when both Kasa username and password rows exist."""
+    return _app_secret_stored_in_db(path, _KASA_USERNAME_KEY) and _app_secret_stored_in_db(
+        path,
+        _KASA_PASSWORD_KEY,
+    )
 
 
 def mytracks_admin_password_stored_in_db(path: Path) -> bool:
@@ -165,6 +229,11 @@ def secrets_key_source() -> SecretsKeySource:
     except (TypeError, ValueError):
         return "none"
     return source
+
+
+def smtp_password_stored_in_db(path: Path) -> bool:
+    """True when an ``app_secrets`` row exists for the SMTP password."""
+    return _app_secret_stored_in_db(path, _SMTP_PASSWORD_KEY)
 
 
 def tailwind_token_stored_in_db(path: Path) -> bool:

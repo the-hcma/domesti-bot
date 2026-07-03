@@ -19,20 +19,23 @@ answers **plain HTTP KLAP on port 80**. We reconnect with ``https=False``, clear
 
 Newer KLAP devices that were linked to the Kasa/Tapo cloud **require** your **account**
 email and password for the LAN KLAP handshake — there is no anonymous LAN mode for
-these devices. Pass ``username`` / ``password`` or ``credentials=``, or use
-:meth:`credentials_from_env` when **both** ``KASA_USERNAME`` and ``KASA_PASSWORD`` are
-set. Setting only one of them is treated as an error to avoid accidentally sending
-partial credentials to ``Discover``. Without credentials, these devices fail the
-initial handshake with :class:`AuthenticationError` and the recovery cascade
-exhausts (HTTP-only KLAP also auths; legacy XOR :9999 is closed on KLAP-only
-hardware); see :func:`_klap_auth_recovery_hint` for the user-facing message
-appended to the ``skipped device`` WARNING.
+these devices. Pass ``username`` / ``password`` or ``credentials=``, or resolve via
+:mod:`app.kasa_credentials`. Setting only one of username/password is an error.
+Credentials are applied **per host**: UDP discovery stays anonymous; only hosts
+marked ``requires_klap_auth`` (learned on first ``AuthenticationError`` and stored
+in the discovery cache) receive account credentials on reconnect/update. Legacy
+XOR / anonymous-KLAP devices never get credentials attached. When account
+credentials are **not** configured, KLAP-auth hosts are skipped quietly (DEBUG)
+and omitted from the device list — same as before credentials support — while
+anonymous devices continue to work. They remain listed on
+:attr:`hosts_requiring_klap_auth` / :attr:`skipped_auth_hosts` for Settings.
+When credentials **are** configured but handshake fails, a WARNING is logged
+(see :func:`_klap_auth_recovery_hint`).
 
 Optional SQLite persistence (see :mod:`app.device_discovery_store`): pass
 ``discovery_cache_path`` to skip UDP discovery when every cached host reconnects.
-Configs are saved without plaintext credentials (merge ``credentials`` /
-``KASA_USERNAME`` + ``KASA_PASSWORD`` on load). Use ``force_discovery=True`` to refresh
-the cache from the network.
+Configs are saved without plaintext credentials; ``requires_klap_auth`` is stored
+per host. Use ``force_discovery=True`` to refresh the cache from the network.
 
 Devices are tracked **by host** (the LAN address), not by alias: users routinely
 give multiple physical outlets the same name in the Kasa/Tapo app (e.g. two
@@ -300,10 +303,25 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self._last_discovery_source: str | None = None
         # Hosts skipped during the most recent ``_fetch_impl`` because the
         # initial failure was an :class:`AuthenticationError` and every
-        # recovery path exhausted. Read via :attr:`skipped_auth_hosts`;
-        # the REPL ``kasa-creds`` command surfaces this list to suggest
-        # rediscovery with account credentials.
+        # recovery path exhausted. Read via :attr:`skipped_auth_hosts`.
         self._last_skipped_auth_hosts: list[str] = []
+        # Hosts that need account credentials for KLAP (persisted in the
+        # discovery cache). Anonymous LAN devices are never listed here.
+        self._hosts_requiring_klap_auth: set[str] = set()
+        # Config snapshots for KLAP-auth hosts skipped this fetch (so we can
+        # persist requires_klap_auth even when the device never connected).
+        self._skipped_klap_auth_configs: dict[str, tuple[str | None, dict[str, Any]]] = {}
+        if self._discovery_cache_path is not None:
+            for (
+                host,
+                _alias,
+                _cfg,
+                requires_klap_auth,
+            ) in device_discovery_store.load_cached_configs(
+                self._discovery_cache_path,
+            ):
+                if requires_klap_auth:
+                    self._hosts_requiring_klap_auth.add(host)
 
         has_u = bool((username or "").strip())
         has_p = bool((password or "").strip())
@@ -351,6 +369,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             raise ValueError(f"Unknown device: {identifier!r}")
         return d
 
+    def clear_credentials(self) -> None:
+        """Drop in-memory account credentials (next fetch uses anonymous LAN only)."""
+        self._discovery_credentials = None
+
     async def disconnect(self) -> None:
         """Close TP-Link sessions and clear cached devices (call ``fetch`` to reconnect).
 
@@ -372,70 +394,230 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 await dev.disconnect()
 
     async def _ingest_discovered_device(
-        self, dev: KDevice, qtimeout: int
+        self,
+        dev: KDevice,
+        qtimeout: int,
+        *,
+        prefer_credentials: bool | None = None,
     ) -> KDevice | None:
-        """Run ``update()`` with the same SMART plain-HTTP / XOR recovery as discovery."""
-        try:
-            await dev.update()
-            return dev
-        except (AuthenticationError, _ConnectionError) as exc:
-            from kasa.smart.smartdevice import SmartDevice
+        """Run ``update()`` with SMART plain-HTTP / XOR recovery.
 
-            cfg_before = dev.config
-            host = dev.host
-            with contextlib.suppress(Exception):
-                await dev.disconnect()
+        Credentials are only attached for hosts known (or discovered) to need
+        KLAP account auth — anonymous devices stay credential-free.
+        """
+        host = (dev.host or "").strip()
+        known_needs_auth = host in self._hosts_requiring_klap_auth
+        use_creds = (
+            prefer_credentials
+            if prefer_credentials is not None
+            else known_needs_auth
+        )
+        creds_order: list[Credentials | None]
+        if use_creds and self._discovery_credentials is not None:
+            creds_order = [self._discovery_credentials]
+        elif self._discovery_credentials is not None:
+            # Unknown host: try anonymous first, then account credentials.
+            creds_order = [None, self._discovery_credentials]
+        else:
+            creds_order = [None]
 
-            last_exc: BaseException = exc
-            recovered = False
-            if isinstance(dev, SmartDevice):
-                try:
-                    dev = await _connect_smart_plain_http(
-                        cfg_before,
-                        credentials=self._discovery_credentials,
-                        timeout=qtimeout,
-                    )
-                    recovered = True
-                except Exception as ex:
-                    last_exc = ex
-            if not recovered:
-                try:
-                    dev = await _connect_legacy_xor(
-                        host,
-                        timeout=qtimeout,
-                        credentials=self._discovery_credentials,
-                    )
-                except Exception as ex:
-                    _LOGGER.warning(
-                        "Kasa: skipped device at %s (%s); recovery failed (%s)%s",
-                        host,
-                        type(last_exc).__name__,
-                        ex,
-                        _klap_auth_recovery_hint(
-                            initial_exc=exc,
-                            credentials=self._discovery_credentials,
-                        ),
-                    )
-                    if isinstance(exc, AuthenticationError):
-                        self._last_skipped_auth_hosts.append(host)
-                    return None
-            return dev
+        auth_failure = False
+        for index, creds in enumerate(creds_order):
+            is_last = index == len(creds_order) - 1
+            result, was_auth_failure = await self._try_ingest_with_credentials(
+                dev,
+                qtimeout,
+                credentials=creds,
+                log_failure=is_last,
+                # Suppress WARNING only for anonymous AuthenticationError when
+                # no account credentials are configured; connectivity failures
+                # still log at WARNING.
+                quiet_anonymous_auth=self._discovery_credentials is None,
+            )
+            if result is not None:
+                if creds is not None:
+                    self._hosts_requiring_klap_auth.add(host)
+                else:
+                    self._hosts_requiring_klap_auth.discard(host)
+                self._skipped_klap_auth_configs.pop(host, None)
+                return result
+            # Keep any AuthenticationError from an earlier attempt (e.g. anonymous
+            # KLAP reject) even when a later credential retry fails for a
+            # non-auth reason such as a timeout.
+            auth_failure = auth_failure or was_auth_failure
+        # Known KLAP hosts must be tracked even when the credential attempt
+        # fails for a non-auth reason (timeout, etc.) — same as cache reconnect.
+        if host and (auth_failure or known_needs_auth):
+            if host not in self._last_skipped_auth_hosts:
+                self._last_skipped_auth_hosts.append(host)
+            self._hosts_requiring_klap_auth.add(host)
+            try:
+                cfg_dict = dev.config.to_dict_control_credentials(
+                    exclude_credentials=True,
+                )
+            except Exception:
+                cfg_dict = {"host": host}
+            self._skipped_klap_auth_configs[host] = (getattr(dev, "alias", None), cfg_dict)
+            if self._discovery_credentials is None:
+                _LOGGER.debug(
+                    "Kasa: ignoring KLAP-auth host %s (no account credentials configured)",
+                    host,
+                )
+        return None
 
     def _persist_discovery_cache(self, alias_map: dict[str, KasaDevice]) -> None:
         if self._discovery_cache_path is None:
             return
-        rows: list[tuple[str, str | None, dict[str, Any]]] = []
-        seen: set[int] = set()
+        # Preserve KLAP-auth hosts that were skipped (e.g. no credentials) so a
+        # successful anonymous-only cache write does not forget them.
+        prior_by_host = {
+            host: (alias, cfg_dict, requires_klap_auth)
+            for host, alias, cfg_dict, requires_klap_auth in (
+                device_discovery_store.load_cached_configs(self._discovery_cache_path)
+            )
+        }
+        rows: list[tuple[str, str | None, dict[str, Any], bool]] = []
+        seen_hosts: set[str] = set()
+        seen_ids: set[int] = set()
         for kd in alias_map.values():
             did = id(kd)
-            if did in seen:
+            if did in seen_ids:
                 continue
-            seen.add(did)
+            seen_ids.add(did)
             dev = kd._kDevice
+            host = (dev.host or "").strip()
+            if not host:
+                continue
             cfg_dict = dev.config.to_dict_control_credentials(exclude_credentials=True)
-            rows.append((dev.host, dev.alias, cfg_dict))
+            rows.append(
+                (
+                    host,
+                    dev.alias,
+                    cfg_dict,
+                    host in self._hosts_requiring_klap_auth,
+                )
+            )
+            seen_hosts.add(host)
+        for host in sorted(self._hosts_requiring_klap_auth):
+            if host in seen_hosts:
+                continue
+            prior = prior_by_host.get(host)
+            if prior is not None:
+                alias, cfg_dict, _requires = prior
+                rows.append((host, alias, cfg_dict, True))
+                continue
+            skipped = self._skipped_klap_auth_configs.get(host)
+            if skipped is None:
+                continue
+            alias, cfg_dict = skipped
+            rows.append((host, alias, cfg_dict, True))
         rows.sort(key=lambda r: r[0])
         device_discovery_store.save_configs(self._discovery_cache_path, rows)
+
+    async def _try_ingest_with_credentials(
+        self,
+        dev: KDevice,
+        qtimeout: int,
+        *,
+        credentials: Credentials | None,
+        log_failure: bool,
+        quiet_anonymous_auth: bool = False,
+    ) -> tuple[KDevice | None, bool]:
+        """Attempt update/recovery for ``dev`` using optional account credentials.
+
+        Returns ``(device_or_none, auth_failure)`` where ``auth_failure`` is
+        True when the initial failure was :class:`AuthenticationError`.
+        When ``quiet_anonymous_auth`` is True, anonymous auth failures are not
+        logged at WARNING (expected when no account credentials are configured).
+        """
+        cfg_before = dev.config
+        host = dev.host
+        initial_exc: BaseException | None = None
+
+        if credentials is not None:
+            cfg_before = replace(cfg_before, credentials=credentials, timeout=qtimeout)
+            with contextlib.suppress(Exception):
+                await dev.disconnect()
+            connected: KDevice | None = None
+            try:
+                connected = await KDevice.connect(config=cfg_before)
+                await connected.update()
+                return connected, False
+            except (AuthenticationError, _ConnectionError) as exc:
+                initial_exc = exc
+                if connected is not None:
+                    with contextlib.suppress(Exception):
+                        await connected.disconnect()
+            except Exception as exc:
+                if connected is not None:
+                    with contextlib.suppress(Exception):
+                        await connected.disconnect()
+                if log_failure:
+                    _LOGGER.warning(
+                        "Kasa: skipped device at %s (%s)",
+                        host,
+                        type(exc).__name__,
+                    )
+                return None, False
+        else:
+            try:
+                await dev.update()
+                return dev, False
+            except (AuthenticationError, _ConnectionError) as exc:
+                initial_exc = exc
+                with contextlib.suppress(Exception):
+                    await dev.disconnect()
+            except Exception as exc:
+                if log_failure:
+                    _LOGGER.warning(
+                        "Kasa: skipped device at %s (%s)",
+                        host,
+                        type(exc).__name__,
+                    )
+                return None, False
+
+        assert initial_exc is not None
+        auth_failure = isinstance(initial_exc, AuthenticationError)
+        last_exc: BaseException = initial_exc
+        if cfg_before.connection_type.device_family.value.startswith("SMART"):
+            try:
+                return (
+                    await _connect_smart_plain_http(
+                        cfg_before,
+                        credentials=credentials,
+                        timeout=qtimeout,
+                    ),
+                    False,
+                )
+            except Exception as ex:
+                last_exc = ex
+        try:
+            return (
+                await _connect_legacy_xor(
+                    host,
+                    timeout=qtimeout,
+                    credentials=credentials,
+                ),
+                False,
+            )
+        except Exception as ex:
+            suppress_warning = (
+                quiet_anonymous_auth
+                and auth_failure
+                and credentials is None
+            )
+            if log_failure and not suppress_warning:
+                _LOGGER.warning(
+                    "Kasa: skipped device at %s (%s); recovery failed (%s)%s",
+                    host,
+                    type(last_exc).__name__,
+                    ex,
+                    _klap_auth_recovery_hint(
+                        initial_exc=initial_exc,
+                        credentials=credentials,
+                    ),
+                )
+            return None, auth_failure
 
     def _expand_kasa_lookup(self, devices: list[KasaDevice]) -> dict[str, KasaDevice]:
         """Build the multi-key lookup: host (always) + alias / display name (when unique).
@@ -486,6 +668,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         # stale auth-failure markers from a previous attempt that ran
         # without credentials.
         self._last_skipped_auth_hosts = []
+        self._skipped_klap_auth_configs = {}
 
         # Dedup by ``host`` (the LAN identifier, guaranteed unique by
         # virtue of being an IP address) rather than by ``alias`` —
@@ -498,22 +681,127 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
             if cached:
                 cache_ok = True
-                for _host, cfg_dict in cached:
+                for host, _alias, cfg_dict, requires_klap_auth in cached:
+                    if requires_klap_auth:
+                        self._hosts_requiring_klap_auth.add(host)
+                    else:
+                        self._hosts_requiring_klap_auth.discard(host)
+                    # Known KLAP-auth host and no credentials: skip quietly and
+                    # keep using the cache for anonymous devices.
+                    if requires_klap_auth and self._discovery_credentials is None:
+                        self._last_skipped_auth_hosts.append(host)
+                        _LOGGER.debug(
+                            "Kasa: ignoring KLAP-auth host %s "
+                            "(no account credentials configured)",
+                            host,
+                        )
+                        continue
                     cfg = DeviceConfig.from_dict(cfg_dict)
+                    # Only attach account credentials for hosts that need KLAP auth.
+                    creds = (
+                        self._discovery_credentials if requires_klap_auth else None
+                    )
                     dev = await _connect_from_saved_config(
                         cfg,
-                        credentials=self._discovery_credentials,
+                        credentials=creds,
                         timeout=qtimeout,
                     )
+                    if dev is None and requires_klap_auth is False:
+                        # Legacy row or mis-classified host: retry with credentials.
+                        if self._discovery_credentials is not None:
+                            dev = await _connect_from_saved_config(
+                                cfg,
+                                credentials=self._discovery_credentials,
+                                timeout=qtimeout,
+                            )
+                            if dev is not None:
+                                self._hosts_requiring_klap_auth.add(host)
                     if dev is None:
+                        if requires_klap_auth:
+                            # Credentials present but handshake failed — track and
+                            # continue with other cached hosts (do not invalidate cache).
+                            self._last_skipped_auth_hosts.append(host)
+                            self._hosts_requiring_klap_auth.add(host)
+                            _LOGGER.warning(
+                                "Kasa: skipped KLAP-auth host %s "
+                                "(credentials configured but handshake failed)",
+                                host,
+                            )
+                            continue
                         cache_ok = False
                         break
-                    finalized = await self._ingest_discovered_device(dev, qtimeout)
-                    if finalized is None:
-                        cache_ok = False
-                        break
-                    kd = KasaDevice(finalized.alias or finalized.host, finalized)
-                    devices_by_host[finalized.host] = kd
+                    # Device is already connected with the right credentials (or
+                    # anonymously). Run update + SMART plain-HTTP / XOR recovery
+                    # via the same path discovery ingest uses — bare update()
+                    # would invalidate the whole cache on a recoverable failure.
+                    ingested, was_auth_failure = await self._try_ingest_with_credentials(
+                        dev,
+                        qtimeout,
+                        credentials=None,
+                        log_failure=True,
+                        quiet_anonymous_auth=(
+                            not requires_klap_auth
+                            and self._discovery_credentials is None
+                        ),
+                    )
+                    if ingested is None and (
+                        not requires_klap_auth
+                        and was_auth_failure
+                        and self._discovery_credentials is not None
+                    ):
+                        # Mis-classified row: anonymous connect worked but update
+                        # needs KLAP account credentials.
+                        dev2 = await _connect_from_saved_config(
+                            cfg,
+                            credentials=self._discovery_credentials,
+                            timeout=qtimeout,
+                        )
+                        if dev2 is not None:
+                            with contextlib.suppress(Exception):
+                                await dev.disconnect()
+                            ingested, was_auth2 = await self._try_ingest_with_credentials(
+                                dev2,
+                                qtimeout,
+                                credentials=None,
+                                log_failure=True,
+                                quiet_anonymous_auth=False,
+                            )
+                            was_auth_failure = was_auth_failure or was_auth2
+                            if ingested is not None:
+                                self._hosts_requiring_klap_auth.add(host)
+                    if ingested is not None:
+                        kd = KasaDevice(ingested.alias or ingested.host, ingested)
+                        devices_by_host[ingested.host] = kd
+                        continue
+                    if requires_klap_auth or was_auth_failure:
+                        # KLAP (known or newly discovered): skip this host without
+                        # invalidating the rest of the cache.
+                        if host not in self._last_skipped_auth_hosts:
+                            self._last_skipped_auth_hosts.append(host)
+                        self._hosts_requiring_klap_auth.add(host)
+                        try:
+                            cfg_dict = dev.config.to_dict_control_credentials(
+                                exclude_credentials=True,
+                            )
+                        except Exception:
+                            cfg_dict = {"host": host}
+                        self._skipped_klap_auth_configs[host] = (
+                            getattr(dev, "alias", None),
+                            cfg_dict,
+                        )
+                        if requires_klap_auth:
+                            _LOGGER.warning(
+                                "Kasa: skipped KLAP-auth host %s "
+                                "(credentials configured but handshake failed)",
+                                host,
+                            )
+                        with contextlib.suppress(Exception):
+                            await dev.disconnect()
+                        continue
+                    cache_ok = False
+                    with contextlib.suppress(Exception):
+                        await dev.disconnect()
+                    break
                 if cache_ok:
                     self._finalize_kasa_lookup(devices_by_host)
                     self._persist_discovery_cache(self._device_name_to_device or {})
@@ -524,9 +812,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                         await kd._kDevice.disconnect()
                 devices_by_host = {}
 
+        # Always discover anonymously; attach credentials per-host during ingest.
         if (
             self._discovery_target is None
-            and self._discovery_credentials is None
             and self._query_timeout is None
             and self._discovery_timeout == 5
         ):
@@ -535,8 +823,6 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             discover_kw: dict[str, Any] = {"discovery_timeout": self._discovery_timeout}
             if self._discovery_target is not None:
                 discover_kw["target"] = self._discovery_target
-            if self._discovery_credentials is not None:
-                discover_kw["credentials"] = self._discovery_credentials
             if self._query_timeout is not None:
                 discover_kw["timeout"] = self._query_timeout
             devices = await Discover.discover(**discover_kw)
@@ -608,14 +894,26 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
     @property
     def has_credentials(self) -> bool:
-        """``True`` when account creds will be sent to ``Discover.discover``.
+        """``True`` when account credentials are available for KLAP-auth hosts.
 
         Driven by the constructor (``credentials=`` /
         ``username``+``password``) or by a subsequent
-        :meth:`set_credentials` call from the REPL.
+        :meth:`set_credentials` call. Credentials are only attached to
+        hosts in :attr:`hosts_requiring_klap_auth`, not to anonymous devices.
         """
 
         return self._discovery_credentials is not None
+
+    @property
+    def hosts_requiring_klap_auth(self) -> tuple[str, ...]:
+        """Hosts known to need account credentials for the KLAP handshake.
+
+        Learned during fetch (anonymous ``AuthenticationError`` then success
+        with credentials, or persistent failure without credentials) and
+        restored from the discovery cache. Sorted for stable UI/tests.
+        """
+
+        return tuple(sorted(self._hosts_requiring_klap_auth))
 
     async def is_off(self, identifier: str) -> bool:
         return not await self.is_on(identifier)
@@ -641,10 +939,19 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
         Cached configs are overwritten after a successful discovery, same as initial
         ``force_discovery=True`` startup behavior.
+
+        If the UDP sweep raises after ``disconnect()``, attempt a cache-first
+        reconnect so Settings hot-reload / REPL ``kasa-creds`` are not left with
+        an empty device map until process restart.
         """
 
         await self.disconnect()
-        await self._fetch_impl(force_discovery=True)
+        try:
+            await self._fetch_impl(force_discovery=True)
+        except Exception:
+            with contextlib.suppress(Exception):
+                await self._fetch_impl(force_discovery=False)
+            raise
 
     def set_credentials(
         self,
@@ -654,14 +961,13 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
     ) -> None:
         """Install Kasa/Tapo account credentials in memory for the next fetch.
 
-        Used by the REPL ``kasa-creds`` command to recover from
-        :class:`AuthenticationError` skips without restarting the
-        process. Validates the same shape as the constructor: both
-        ``username`` and ``password`` must be non-blank after strip,
-        else :class:`ValueError`. Credentials are **not** persisted
-        anywhere — to survive a restart, the user must set
-        ``KASA_USERNAME`` + ``KASA_PASSWORD`` in the environment (or
-        the systemd ``EnvironmentFile=``).
+        Used by the REPL ``kasa-creds`` command and Settings UI to
+        recover from :class:`AuthenticationError` skips without
+        restarting the process. Validates the same shape as the
+        constructor: both ``username`` and ``password`` must be
+        non-blank after strip, else :class:`ValueError`. Callers that
+        need credentials to survive a restart should also write
+        encrypted ``app_secrets`` (see :mod:`app.kasa_credentials`).
         """
 
         un = (username or "").strip()

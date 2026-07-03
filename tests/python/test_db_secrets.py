@@ -13,7 +13,11 @@ from app.db.secrets import (
     SecretsConfigurationError,
     SecretsDecryptError,
     delete_app_secret,
+    delete_kasa_credentials_from_db,
+    kasa_credentials_stored_in_db,
+    load_kasa_credentials_from_db,
     load_tailwind_token_from_db,
+    save_kasa_credentials_to_db,
     save_tailwind_token_to_db,
     secrets_key_configured,
     secrets_key_source,
@@ -25,6 +29,7 @@ from app.db.secrets_key import (
     secrets_json_path,
     write_secrets_json,
 )
+from app.kasa_credentials import resolve_kasa_credentials
 from app.tailwind_credentials import resolve_tailwind_token
 
 
@@ -108,6 +113,53 @@ def test_write_secrets_json_preserves_sonos_stream_favorites(tmp_path: Path) -> 
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["domesti_secrets_key"] == key
     assert payload["sonos_stream_favorites"][0]["name"] == "Alvorada"
+
+
+def test_resolve_kasa_credentials_precedence(
+    tmp_path: Path,
+    fernet_key: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = tmp_path / "secrets.sqlite"
+    save_kasa_credentials_to_db(db, username="db@example.com", password="db-pass")
+    creds, source = resolve_kasa_credentials(cache_path=db)
+    assert creds is not None
+    assert creds.username == "db@example.com"
+    assert source == "database"
+
+    monkeypatch.setenv("KASA_USERNAME", "env@example.com")
+    monkeypatch.setenv("KASA_PASSWORD", "env-pass")
+    creds, source = resolve_kasa_credentials(cache_path=db)
+    assert creds is not None
+    assert creds.username == "env@example.com"
+    assert source == "env"
+
+
+def test_resolve_kasa_credentials_treats_decrypt_error_as_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = tmp_path / "secrets.sqlite"
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    save_kasa_credentials_to_db(db, username="db@example.com", password="db-pass")
+    monkeypatch.delenv("KASA_USERNAME", raising=False)
+    monkeypatch.delenv("KASA_PASSWORD", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    creds, source = resolve_kasa_credentials(cache_path=db)
+    assert creds is None
+    assert source == "none"
+
+
+def test_save_and_load_kasa_credentials_roundtrip(
+    tmp_path: Path, fernet_key: str
+) -> None:
+    db = tmp_path / "secrets.sqlite"
+    save_kasa_credentials_to_db(db, username="alice@example.com", password="hunter2")
+    assert load_kasa_credentials_from_db(db) == ("alice@example.com", "hunter2")
+    assert kasa_credentials_stored_in_db(db) is True
+    delete_kasa_credentials_from_db(db)
+    assert load_kasa_credentials_from_db(db) is None
+    assert kasa_credentials_stored_in_db(db) is False
 
 
 def test_save_and_load_tailwind_token_roundtrip(

@@ -56,10 +56,10 @@ def test_roundtrip_save_and_load(tmp_path: Path) -> None:
     }
     device_discovery_store.save_configs(
         db,
-        [("192.168.1.50", "Desk lamp", cfg)],
+        [("192.168.1.50", "Desk lamp", cfg, False)],
     )
     rows = device_discovery_store.load_cached_configs(db)
-    assert rows == [("192.168.1.50", cfg)]
+    assert rows == [("192.168.1.50", "Desk lamp", cfg, False)]
 
     with contextlib.closing(device_discovery_store.open_db(db)) as conn:
         cur = conn.execute(
@@ -76,16 +76,16 @@ def test_save_replaces_previous_rows(tmp_path: Path) -> None:
     device_discovery_store.save_configs(
         db,
         [
-            ("10.0.0.1", "a", {"host": "10.0.0.1"}),
-            ("10.0.0.2", "b", {"host": "10.0.0.2"}),
+            ("10.0.0.1", "a", {"host": "10.0.0.1"}, False),
+            ("10.0.0.2", "b", {"host": "10.0.0.2"}, True),
         ],
     )
     device_discovery_store.save_configs(
         db,
-        [("10.0.0.3", "c", {"host": "10.0.0.3"})],
+        [("10.0.0.3", "c", {"host": "10.0.0.3"}, True)],
     )
     rows = device_discovery_store.load_cached_configs(db)
-    assert rows == [("10.0.0.3", {"host": "10.0.0.3"})]
+    assert rows == [("10.0.0.3", "c", {"host": "10.0.0.3"}, True)]
 
 
 def test_display_names_upsert_load_delete(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.presence_connection_type import normalize_presence_connection_type
 from app.presence_wifi import normalize_wifi_bssid
 
+KasaCredentialsSourceOut = Literal["env", "database", "none"]
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
 VizioAuthSourceOut = Literal["cli", "env", "database", "none"]
@@ -288,6 +289,87 @@ class SmtpTestEmailOut(BaseModel):
 
     message: str
     ok: bool
+
+
+class KasaCredentialsSetIn(BaseModel):
+    """Body for ``PUT /v1/settings/kasa-credentials`` (password is never returned)."""
+
+    password: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        description="Kasa/Tapo account password for KLAP LAN auth.",
+    )
+    username: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        description="Kasa/Tapo account email for KLAP LAN auth.",
+    )
+
+
+class KasaCredentialsSetOut(BaseModel):
+    """Confirmation after persisting encrypted Kasa credentials."""
+
+    configured: bool = Field(
+        ...,
+        description="True when credentials are now available (env or database).",
+    )
+    restart_required: bool = Field(
+        ...,
+        description=(
+            "True when the running server could not hot-reload Kasa discovery "
+            "after this change."
+        ),
+    )
+    source: KasaCredentialsSourceOut = Field(
+        ...,
+        description="Where active credentials are read from after this request.",
+    )
+
+
+class KasaCredentialsSettingsOut(BaseModel):
+    """Kasa credential status (password is never returned)."""
+
+    configured: bool = Field(
+        ...,
+        description="True when environment or encrypted database provides credentials.",
+    )
+    hosts_requiring_klap_auth: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Hosts known to need account credentials for KLAP (anonymous LAN "
+            "devices are omitted so credentials are not applied to them)."
+        ),
+    )
+    password_stored: bool = Field(
+        ...,
+        description="True when an encrypted password row exists (never returns the password).",
+    )
+    secrets_key_configured: bool = Field(
+        ...,
+        description="True when a valid Fernet key is available.",
+    )
+    secrets_key_source: SecretsKeySourceOut = Field(
+        ...,
+        description="``env`` → ``DOMESTI_BOT_SECRETS_KEY``; ``file`` → ``domesti-bot.config.json``.",
+    )
+    skipped_auth_hosts: list[str] = Field(
+        default_factory=list,
+        description="Hosts skipped on the last Kasa fetch due to KLAP AuthenticationError.",
+    )
+    source: KasaCredentialsSourceOut = Field(
+        ...,
+        description="Active source: ``env`` → ``KASA_USERNAME``/``KASA_PASSWORD``, ``database`` → encrypted SQLite.",
+    )
+    stored_in_database: bool = Field(
+        ...,
+        description="True when both encrypted username and password rows exist.",
+    )
+    stored_username: str | None = Field(
+        default=None,
+        description="Decrypted account email when stored in the database (password is never returned).",
+    )
 
 
 class TailwindTokenSetIn(BaseModel):

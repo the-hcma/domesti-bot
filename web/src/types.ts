@@ -88,9 +88,29 @@ export interface UIPreferenceOut {
   exclude_from_global: boolean;
 }
 
+export type KasaCredentialsSource = "env" | "database" | "none";
+
 export type SecretsKeySource = "env" | "file" | "none";
 
 export type TailwindTokenSource = "cli" | "env" | "database" | "none";
+
+export interface KasaCredentialsSetOut {
+  configured: boolean;
+  source: KasaCredentialsSource;
+  restart_required: boolean;
+}
+
+export interface KasaCredentialsSettingsOut {
+  configured: boolean;
+  source: KasaCredentialsSource;
+  secrets_key_configured: boolean;
+  secrets_key_source: SecretsKeySource;
+  stored_in_database: boolean;
+  stored_username: string | null;
+  password_stored: boolean;
+  hosts_requiring_klap_auth: string[];
+  skipped_auth_hosts: string[];
+}
 
 export interface TailwindTokenSettingsOut {
   configured: boolean;
