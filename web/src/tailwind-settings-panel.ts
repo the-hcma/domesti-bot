@@ -73,15 +73,27 @@ export async function mountTailwindSettingsPanel(
   saveBtn.type = "button";
   saveBtn.className = "btn";
   saveBtn.textContent = "Save";
+  const testBtn = document.createElement("button");
+  testBtn.type = "button";
+  testBtn.className = "btn btn-secondary";
+  testBtn.textContent = "Test";
+  testBtn.disabled = true;
   const clearBtn = document.createElement("button");
   clearBtn.type = "button";
   clearBtn.className = "btn btn-secondary";
   clearBtn.textContent = "Clear stored token";
-  actions.append(saveBtn, clearBtn);
+  actions.append(saveBtn, testBtn, clearBtn);
   form.append(status, label, actions);
   container.append(form);
 
+  let settingsConfigured = false;
+
+  const syncTestEnabled = (): void => {
+    testBtn.disabled = !(input.value.trim() !== "" || settingsConfigured);
+  };
+
   const applyTokenFieldsFromSettings = (s: TailwindTokenSettingsOut): void => {
+    settingsConfigured = s.configured;
     storedToken = s.stored_token;
     if (storedToken) {
       input.value = storedToken;
@@ -93,6 +105,7 @@ export async function mountTailwindSettingsPanel(
       input.required = true;
     }
     input.placeholder = storedToken ? "" : "Six-digit token";
+    syncTestEnabled();
   };
 
   const showStatusMessage = (message: string): void => {
@@ -169,15 +182,40 @@ export async function mountTailwindSettingsPanel(
     ev.preventDefault();
     saveToken();
   });
+  input.addEventListener("input", () => {
+    syncTestEnabled();
+  });
+
+  testBtn.addEventListener("click", () => {
+    void (async () => {
+      const token = input.value.trim();
+      testBtn.disabled = true;
+      showStatusMessage("Testing token…");
+      try {
+        const result = await api.testTailwindToken(
+          token !== "" ? { token } : {},
+        );
+        showStatusMessage(result.detail);
+      } catch (err) {
+        showStatusMessage(
+          err instanceof HttpError ? err.detail : "Test failed.",
+        );
+      } finally {
+        syncTestEnabled();
+      }
+    })();
+  });
 
   clearBtn.addEventListener("click", () => {
     void (async () => {
       try {
         await api.clearTailwindToken();
         storedToken = null;
+        settingsConfigured = false;
         input.value = "";
         input.required = true;
         setTokenRevealed(false);
+        syncTestEnabled();
         showSuccessToast("Stored token cleared.");
         await refreshStatus();
         await options.onDevicesChanged?.();

@@ -88,7 +88,80 @@ export async function mountMyTracksSettingsPanel(
     createFieldLabel("Default admin username"),
     usernameInput,
   );
+
+  const passwordInput = document.createElement("input");
+  passwordInput.type = "password";
+  passwordInput.name = "mytracks-test-password";
+  passwordInput.autocomplete = "current-password";
+  passwordInput.placeholder = "Required for Test (never stored)";
+  preventBrowserAutofill(passwordInput);
+
+  const connectionActions = document.createElement("div");
+  connectionActions.className = "settings-dialog-actions";
+  const testBtn = document.createElement("button");
+  testBtn.type = "button";
+  testBtn.className = "btn btn-secondary";
+  testBtn.textContent = "Test";
+  testBtn.disabled = true;
+  connectionActions.append(testBtn);
   connectionSection.append(fieldsRow);
+  appendLabeledField(
+    connectionSection,
+    createFieldLabel("Admin password", {
+      detail: "Used only for Test; never saved.",
+      example: "your My Tracks admin password",
+    }),
+    passwordInput,
+  );
+  connectionSection.append(connectionActions);
+
+  const syncTestEnabled = (): void => {
+    testBtn.disabled = !(
+      passwordInput.value !== "" &&
+      domainInput.value.trim() !== "" &&
+      usernameInput.value.trim() !== ""
+    );
+  };
+  domainInput.addEventListener("input", () => {
+    syncTestEnabled();
+  });
+  usernameInput.addEventListener("input", () => {
+    syncTestEnabled();
+  });
+  passwordInput.addEventListener("input", () => {
+    syncTestEnabled();
+  });
+  syncTestEnabled();
+
+  testBtn.addEventListener("click", () => {
+    const domain = domainInput.value.trim();
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if (password === "") {
+      status.hidden = false;
+      status.textContent = "Enter the admin password before testing.";
+      return;
+    }
+    if (domain === "" || username === "") {
+      status.hidden = false;
+      status.textContent = "Enter domain and username before testing.";
+      return;
+    }
+    testBtn.disabled = true;
+    status.hidden = false;
+    status.textContent = "Testing credentials…";
+    void api
+      .testMyTracksCredentials({ domain, username, password })
+      .then((result) => {
+        status.textContent = result.detail;
+      })
+      .catch((err: unknown) => {
+        status.textContent = formatError(err);
+      })
+      .finally(() => {
+        syncTestEnabled();
+      });
+  });
 
   const monitoringSection = document.createElement("div");
   monitoringSection.className = "mytracks-monitoring-section";
@@ -177,6 +250,8 @@ export async function mountMyTracksSettingsPanel(
   const clearConnectionFields = (): void => {
     domainInput.value = "";
     usernameInput.value = "";
+    passwordInput.value = "";
+    syncTestEnabled();
   };
 
   await mountMyTracksPairingPanel(pairingMount, {

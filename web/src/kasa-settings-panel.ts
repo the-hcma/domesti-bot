@@ -63,13 +63,26 @@ export async function mountKasaSettingsPanel(
   saveBtn.type = "button";
   saveBtn.className = "btn";
   saveBtn.textContent = "Save";
+  const testBtn = document.createElement("button");
+  testBtn.type = "button";
+  testBtn.className = "btn btn-secondary";
+  testBtn.textContent = "Test";
+  testBtn.disabled = true;
   const clearBtn = document.createElement("button");
   clearBtn.type = "button";
   clearBtn.className = "btn btn-secondary";
   clearBtn.textContent = "Clear stored credentials";
-  actions.append(saveBtn, clearBtn);
+  actions.append(saveBtn, testBtn, clearBtn);
   form.append(status, emailLabel, passwordLabel, actions);
   container.append(form);
+
+  let settingsConfigured = false;
+
+  const syncTestEnabled = (): void => {
+    const formReady =
+      emailInput.value.trim() !== "" && passwordInput.value !== "";
+    testBtn.disabled = !(formReady || settingsConfigured);
+  };
 
   const showStatusMessage = (message: string): void => {
     status.textContent = message;
@@ -82,6 +95,7 @@ export async function mountKasaSettingsPanel(
   };
 
   const applyFieldsFromSettings = (s: KasaCredentialsSettingsOut): void => {
+    settingsConfigured = s.configured;
     passwordStored = s.password_stored;
     if (s.stored_username) {
       emailInput.value = s.stored_username;
@@ -92,6 +106,7 @@ export async function mountKasaSettingsPanel(
     passwordInput.placeholder = passwordStored
       ? "Re-enter password to update"
       : "Account password";
+    syncTestEnabled();
   };
 
   const updateStatusHint = (s: KasaCredentialsSettingsOut): void => {
@@ -206,6 +221,34 @@ export async function mountKasaSettingsPanel(
     ev.preventDefault();
     saveCredentials();
   });
+  emailInput.addEventListener("input", () => {
+    syncTestEnabled();
+  });
+  passwordInput.addEventListener("input", () => {
+    syncTestEnabled();
+  });
+
+  testBtn.addEventListener("click", () => {
+    void (async () => {
+      const username = emailInput.value.trim();
+      const password = passwordInput.value;
+      const formReady = username !== "" && password !== "";
+      testBtn.disabled = true;
+      showStatusMessage("Testing credentials…");
+      try {
+        const result = await api.testKasaCredentials(
+          formReady ? { username, password } : {},
+        );
+        showStatusMessage(result.detail);
+      } catch (err) {
+        showStatusMessage(
+          err instanceof HttpError ? err.detail : "Test failed.",
+        );
+      } finally {
+        syncTestEnabled();
+      }
+    })();
+  });
 
   clearBtn.addEventListener("click", () => {
     void (async () => {
@@ -213,10 +256,12 @@ export async function mountKasaSettingsPanel(
         await api.clearKasaCredentials();
         emailInput.value = "";
         passwordInput.value = "";
+        settingsConfigured = false;
         passwordStored = false;
         passwordInput.required = true;
         passwordInput.placeholder = "Account password";
         passwordRow.setRevealed(false);
+        syncTestEnabled();
         showSuccessToast("Stored Kasa credentials cleared.");
         await refreshStatus();
         await options.onDevicesChanged?.();

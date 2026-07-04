@@ -73,3 +73,12 @@ class RuleTrigger(StrEnum):
     DWELL_SATISFIED = "dwell_satisfied"
     EDGE_TRUE = "edge_true"
     SCHEDULED = "scheduled"
+
+
+class SettingsCredentialsTestSource(StrEnum):
+    """Where credentials used by a Settings Test probe were resolved from."""
+
+    CLI = "cli"
+    DATABASE = "database"
+    ENV = "env"
+    FORM = "form"

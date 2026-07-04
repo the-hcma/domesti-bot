@@ -39,8 +39,13 @@ import type {
   SmtpTestEmailOut,
   KasaCredentialsSetOut,
   KasaCredentialsSettingsOut,
+  KasaCredentialsTestIn,
+  MyTracksCredentialsTestIn,
+  SettingsCredentialsTestOut,
   TailwindTokenSetOut,
   TailwindTokenSettingsOut,
+  TailwindTokenTestIn,
+  VizioAuthTestIn,
   VizioAuthTokenSetOut,
   VizioPairBeginOut,
   VizioPairCompleteOut,
@@ -398,6 +403,43 @@ export const api = {
   },
   sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut> {
     return call<SmtpTestEmailOut>("POST", "/v1/settings/smtp/test", input);
+  },
+  testKasaCredentials(
+    input: KasaCredentialsTestIn = {},
+  ): Promise<SettingsCredentialsTestOut> {
+    return call<SettingsCredentialsTestOut>(
+      "POST",
+      "/v1/settings/kasa-credentials/test",
+      input,
+    );
+  },
+  testMyTracksCredentials(
+    input: MyTracksCredentialsTestIn,
+  ): Promise<SettingsCredentialsTestOut> {
+    return call<SettingsCredentialsTestOut>(
+      "POST",
+      "/v1/settings/my-tracks/test",
+      input,
+    );
+  },
+  testTailwindToken(
+    input: TailwindTokenTestIn = {},
+  ): Promise<SettingsCredentialsTestOut> {
+    return call<SettingsCredentialsTestOut>(
+      "POST",
+      "/v1/settings/tailwind-token/test",
+      input,
+    );
+  },
+  testVizioAuth(
+    deviceId: string,
+    input: VizioAuthTestIn = {},
+  ): Promise<SettingsCredentialsTestOut> {
+    return call<SettingsCredentialsTestOut>(
+      "POST",
+      `/v1/settings/vizio/tvs/${encodeURIComponent(deviceId)}/auth/test`,
+      input,
+    );
   },
   syncMyTracksGeofences(credentials: MyTracksSyncIn): Promise<MyTracksGeofencesSyncOut> {
     return call<MyTracksGeofencesSyncOut>(

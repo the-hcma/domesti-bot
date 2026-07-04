@@ -167,18 +167,30 @@ export async function mountVizioSettingsPanel(
   saveBtn.type = "button";
   saveBtn.className = "btn";
   saveBtn.textContent = "Save token";
+  const testBtn = document.createElement("button");
+  testBtn.type = "button";
+  testBtn.className = "btn btn-secondary";
+  testBtn.textContent = "Test";
+  testBtn.disabled = true;
   const clearBtn = document.createElement("button");
   clearBtn.type = "button";
   clearBtn.className = "btn btn-secondary";
   clearBtn.textContent = "Clear stored token";
   clearBtn.disabled = true;
-  actions.append(saveBtn, clearBtn);
+  actions.append(saveBtn, testBtn, clearBtn);
 
   form.append(status, hostLabel, macLabel, tokenLabel, pairSection, actions);
   container.append(form);
 
   let pendingPair: VizioPairBeginOut | null = null;
   let paired = false;
+  let authConfigured = false;
+
+  const syncTestEnabled = (): void => {
+    testBtn.disabled = !(
+      tokenInput.value.trim() !== "" || authConfigured
+    );
+  };
 
   const showStatusMessage = (message: string): void => {
     status.textContent = message;
@@ -203,6 +215,7 @@ export async function mountVizioSettingsPanel(
   const applyTokenFieldsFromTv = (tv: VizioTvSettingsOut | undefined): void => {
     storedToken = tv?.stored_token ?? null;
     paired = tv?.auth_configured === true;
+    authConfigured = tv?.auth_configured === true;
     if (storedToken) {
       tokenInput.value = storedToken;
       tokenInput.placeholder = "";
@@ -220,6 +233,7 @@ export async function mountVizioSettingsPanel(
     saveBtn.hidden = paired;
     beginPairBtn.textContent = paired ? "Re-pair" : "Start pairing";
     clearBtn.disabled = !paired || tv?.auth_source !== "database";
+    syncTestEnabled();
   };
 
   const setPairingUiActive = (active: boolean): void => {
@@ -334,6 +348,45 @@ export async function mountVizioSettingsPanel(
     if (!saveBtn.hidden) {
       saveToken();
     }
+  });
+  tokenInput.addEventListener("input", () => {
+    syncTestEnabled();
+  });
+
+  testBtn.addEventListener("click", () => {
+    void (async () => {
+      const host = hostInput.value.trim();
+      if (!host) {
+        showStatusMessage("Enter the TV host before testing.");
+        return;
+      }
+      const token = tokenInput.value.trim();
+      let deviceId = vizioDeviceIdFromHostInput(host);
+      try {
+        const settings = await api.fetchVizioTvsSettings();
+        const tv = findTvRow(settings.tvs, host);
+        if (tv !== undefined) {
+          deviceId = tv.device_id;
+        }
+      } catch {
+        // Fall back to host-based id when status cannot be loaded.
+      }
+      testBtn.disabled = true;
+      showStatusMessage("Testing auth…");
+      try {
+        const result = await api.testVizioAuth(
+          deviceId,
+          token !== "" ? { token } : {},
+        );
+        showStatusMessage(result.detail);
+      } catch (err) {
+        showStatusMessage(
+          err instanceof HttpError ? err.detail : "Test failed.",
+        );
+      } finally {
+        syncTestEnabled();
+      }
+    })();
   });
 
   beginPairBtn.addEventListener("click", () => {
