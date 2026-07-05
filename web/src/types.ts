@@ -112,6 +112,23 @@ export interface KasaCredentialsSettingsOut {
   skipped_auth_hosts: string[];
 }
 
+export interface KasaCredentialsTestIn {
+  password?: string | null;
+  username?: string | null;
+}
+
+export type SettingsCredentialsTestSource =
+  | "cli"
+  | "database"
+  | "env"
+  | "form";
+
+export interface SettingsCredentialsTestOut {
+  detail: string;
+  ok: boolean;
+  source?: SettingsCredentialsTestSource | null;
+}
+
 export interface TailwindTokenSettingsOut {
   configured: boolean;
   source: TailwindTokenSource;
@@ -127,7 +144,16 @@ export interface TailwindTokenSetOut {
   restart_required: boolean;
 }
 
+export interface TailwindTokenTestIn {
+  host?: string | null;
+  token?: string | null;
+}
+
 export type VizioAuthSource = "cli" | "env" | "database" | "none";
+
+export interface VizioAuthTestIn {
+  token?: string | null;
+}
 
 export interface VizioTvSettingsOut {
   device_id: string;
@@ -393,6 +419,12 @@ export interface MyTracksSettingsOut {
 export interface MyTracksSyncIn {
   password: string;
   username?: string;
+}
+
+export interface MyTracksCredentialsTestIn {
+  domain?: string | null;
+  password: string;
+  username?: string | null;
 }
 
 export interface SmtpTestEmailIn extends SmtpConfigIn {

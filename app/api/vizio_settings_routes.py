@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app import device_discovery_store
 from app.api.schemas import (
+    SettingsCredentialsTestOut,
+    VizioAuthTestIn,
     VizioAuthTokenSetIn,
     VizioAuthTokenSetOut,
     VizioPairBeginIn,
@@ -34,6 +36,10 @@ from app.db.secrets import (
 )
 from app.domesti_bot_cli import DeviceManagersState
 from app.server_runtime import runtime
+from app.settings_credentials_test import (
+    CredentialsTestUnavailableError,
+    probe_vizio_auth,
+)
 from app.vizio_credentials import (
     resolve_vizio_auth_token,
     vizio_auth_secret_key_for_host,
@@ -204,6 +210,39 @@ async def complete_vizio_pairing(
         configured=vizio_auth_token_stored_in_db(cache_path, mac=mac, host=host),
         device_id=canonical_id,
         restart_required=not reload_ok,
+    )
+
+
+@router.post(
+    "/tvs/{device_id}/auth/test",
+    response_model=SettingsCredentialsTestOut,
+)
+async def post_vizio_auth_test(
+    device_id: str,
+    body: VizioAuthTestIn,
+    request: Request,
+) -> SettingsCredentialsTestOut:
+    """Probe SmartCast auth for one TV with an ephemeral client."""
+    cache_path = discovery_cache_path_from_request(request)
+    host, port, mac = _resolve_tv_endpoint(device_id, cache_path)
+    try:
+        result = await probe_vizio_auth(
+            host=host,
+            port=port,
+            mac=mac,
+            cache_path=cache_path,
+            cli_token=_cli_vizio_token(),
+            token=body.token,
+        )
+    except CredentialsTestUnavailableError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return SettingsCredentialsTestOut(
+        ok=result.ok,
+        detail=result.detail,
+        source=result.source,
     )
 
 

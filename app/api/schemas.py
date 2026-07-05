@@ -7,7 +7,12 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.cron_schedule import validate_schedule_cron_expression
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
+from app.device_enums import (
+    DeviceFamilyId,
+    RuleDeviceActionType,
+    RuleTrigger,
+    SettingsCredentialsTestSource,
+)
 from app.presence_connection_type import normalize_presence_connection_type
 from app.presence_wifi import normalize_wifi_bssid
 
@@ -372,6 +377,21 @@ class KasaCredentialsSettingsOut(BaseModel):
     )
 
 
+class KasaCredentialsTestIn(BaseModel):
+    """Optional form overrides for ``POST /v1/settings/kasa-credentials/test``."""
+
+    password: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Account password override; both username and password must be set to use form credentials.",
+    )
+    username: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Account email override; both username and password must be set to use form credentials.",
+    )
+
+
 class TailwindTokenSetIn(BaseModel):
     """Body for ``PUT /v1/settings/tailwind-token`` (token is never returned)."""
 
@@ -435,6 +455,21 @@ class TailwindTokenSettingsOut(BaseModel):
     )
 
 
+class TailwindTokenTestIn(BaseModel):
+    """Optional form overrides for ``POST /v1/settings/tailwind-token/test``."""
+
+    host: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Controller host override; when omitted, cache / env / mDNS is used.",
+    )
+    token: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Local Control Key override; when omitted, CLI / env / database is used.",
+    )
+
+
 class GeofenceOut(BaseModel):
     """Automation geofence definition."""
 
@@ -469,6 +504,27 @@ class LocationRequestRateLimitsOut(BaseModel):
     device_cooldown_seconds: int
     user_cooldown_seconds: int
     user_cooldown_seconds_by_reason: dict[str, int] | None = None
+
+
+class MyTracksCredentialsTestIn(BaseModel):
+    """Body for ``POST /v1/settings/my-tracks/test`` (password is never stored)."""
+
+    domain: str | None = Field(
+        default=None,
+        max_length=512,
+        description="My Tracks domain override; when omitted, stored settings are used.",
+    )
+    password: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        description="Admin password for a one-shot authenticated read (never stored).",
+    )
+    username: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Admin username override; when omitted, stored settings are used.",
+    )
 
 
 class MyTracksLocationMonitoringIn(BaseModel):
@@ -1118,6 +1174,16 @@ class RulesSunOut(BaseModel):
     sunset_at: str
 
 
+class VizioAuthTestIn(BaseModel):
+    """Optional form override for ``POST /v1/settings/vizio/tvs/{device_id}/auth/test``."""
+
+    token: str | None = Field(
+        default=None,
+        max_length=256,
+        description="SmartCast auth token override; when omitted, CLI / env / database is used.",
+    )
+
+
 class VizioAuthTokenSetIn(BaseModel):
     """Body for ``PUT /v1/settings/vizio/tvs/{device_id}/auth``."""
 
@@ -1230,6 +1296,14 @@ class VizioTvsSettingsOut(BaseModel):
         description="``env`` → ``DOMESTI_BOT_SECRETS_KEY``; ``file`` → ``domesti-bot.config.json``.",
     )
     tvs: list[VizioTvSettingsOut] = Field(default_factory=list)
+
+
+class SettingsCredentialsTestOut(BaseModel):
+    """Result of a read-only Settings credential probe."""
+
+    detail: str
+    ok: bool
+    source: SettingsCredentialsTestSource | None = None
 
 
 class SettingsLocationOut(BaseModel):

@@ -11,9 +11,12 @@ from app.api.schemas import (
     KasaCredentialsSetIn,
     KasaCredentialsSetOut,
     KasaCredentialsSettingsOut,
+    KasaCredentialsTestIn,
+    SettingsCredentialsTestOut,
     TailwindTokenSetIn,
     TailwindTokenSetOut,
     TailwindTokenSettingsOut,
+    TailwindTokenTestIn,
 )
 from app.db.secrets import (
     SecretsConfigurationError,
@@ -32,6 +35,11 @@ from app.db.secrets import (
 from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _Theme
 from app.kasa_credentials import resolve_kasa_credentials
 from app.server_runtime import runtime
+from app.settings_credentials_test import (
+    CredentialsTestUnavailableError,
+    probe_kasa_credentials,
+    probe_tailwind_token,
+)
 from app.tailwind_credentials import resolve_tailwind_token
 
 router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -71,6 +79,32 @@ async def clear_kasa_credentials(request: Request) -> KasaCredentialsSettingsOut
 async def get_kasa_credentials_settings(request: Request) -> KasaCredentialsSettingsOut:
     """Return Kasa credential status (password is never returned)."""
     return _kasa_settings_response(request)
+
+
+@router.post("/kasa-credentials/test", response_model=SettingsCredentialsTestOut)
+async def post_kasa_credentials_test(
+    body: KasaCredentialsTestIn,
+    request: Request,
+) -> SettingsCredentialsTestOut:
+    """Probe KLAP auth on known hosts without touching the live manager."""
+    del request
+    cache_path = runtime.discovery_cache_path()
+    try:
+        result = await probe_kasa_credentials(
+            cache_path=cache_path,
+            username=body.username,
+            password=body.password,
+        )
+    except CredentialsTestUnavailableError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return SettingsCredentialsTestOut(
+        ok=result.ok,
+        detail=result.detail,
+        source=result.source,
+    )
 
 
 @router.put("/kasa-credentials", response_model=KasaCredentialsSetOut)
@@ -136,6 +170,32 @@ async def clear_tailwind_token(request: Request) -> TailwindTokenSettingsOut:
 async def get_tailwind_token_settings(request: Request) -> TailwindTokenSettingsOut:
     """Return Tailwind credential status (includes stored DB token when present)."""
     return _tailwind_settings_response(request)
+
+
+@router.post("/tailwind-token/test", response_model=SettingsCredentialsTestOut)
+async def post_tailwind_token_test(
+    body: TailwindTokenTestIn,
+    request: Request,
+) -> SettingsCredentialsTestOut:
+    """Probe the Local Control Key with an ephemeral Tailwind client."""
+    cache_path = discovery_cache_path_from_request(request)
+    try:
+        result = await probe_tailwind_token(
+            cache_path=cache_path,
+            cli_token=_cli_tailwind_token(),
+            token=body.token,
+            host=body.host,
+        )
+    except CredentialsTestUnavailableError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return SettingsCredentialsTestOut(
+        ok=result.ok,
+        detail=result.detail,
+        source=result.source,
+    )
 
 
 @router.put("/tailwind-token", response_model=TailwindTokenSetOut)

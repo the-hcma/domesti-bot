@@ -12,6 +12,7 @@ from app.api.schemas import (
     LocationHistoryRetentionIn,
     LocationHistoryRetentionOut,
     LocationRequestRateLimitsOut,
+    MyTracksCredentialsTestIn,
     MyTracksGeofencesSyncOut,
     MyTracksLocationMonitoringIn,
     MyTracksLocationMonitoringOut,
@@ -24,6 +25,7 @@ from app.api.schemas import (
     MyTracksSettingsIn,
     MyTracksSettingsOut,
     MyTracksSyncIn,
+    SettingsCredentialsTestOut,
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.db.secrets import (
@@ -89,6 +91,10 @@ from app.rules_store import (
     count_users,
     replace_geofences,
     replace_users,
+)
+from app.settings_credentials_test import (
+    CredentialsTestUnavailableError,
+    probe_mytracks_credentials,
 )
 
 settings_router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -244,6 +250,32 @@ async def patch_mytracks_location_updates_route(
     return MyTracksLocationUpdatesOut(
         accepted=updated.location_updates_accepted,
         mytracks_location_updates_enabled=mytracks_enabled,
+    )
+
+
+@settings_router.post("/my-tracks/test", response_model=SettingsCredentialsTestOut)
+async def post_mytracks_credentials_test(
+    body: MyTracksCredentialsTestIn,
+    request: Request,
+) -> SettingsCredentialsTestOut:
+    """Probe My Tracks admin credentials with a read-only roster fetch."""
+    cache_path = discovery_cache_path_from_request(request)
+    try:
+        result = await probe_mytracks_credentials(
+            cache_path=cache_path,
+            password=body.password,
+            domain=body.domain,
+            username=body.username,
+        )
+    except CredentialsTestUnavailableError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return SettingsCredentialsTestOut(
+        ok=result.ok,
+        detail=result.detail,
+        source=result.source,
     )
 
 
