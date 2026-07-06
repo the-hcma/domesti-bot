@@ -146,6 +146,11 @@ def _plain_http_device_config(
     )
 
 
+def _config_uses_klap(cfg: DeviceConfig) -> bool:
+    """True when the saved/discovered profile is KLAP (not legacy XOR)."""
+    return cfg.connection_type.encryption_type is DeviceEncryptionType.Klap
+
+
 async def _connect_smart_plain_http(
     cfg: DeviceConfig,
     *,
@@ -207,8 +212,14 @@ async def _connect_from_saved_config(
     *,
     credentials: Credentials | None,
     timeout: int,
+    raise_auth_failure: bool = False,
 ) -> KDevice | None:
-    """Connect using a stored ``DeviceConfig``, mirroring discovery recovery paths."""
+    """Connect using a stored ``DeviceConfig``, mirroring discovery recovery paths.
+
+    When ``raise_auth_failure`` is True and the initial failure was
+    :class:`AuthenticationError`, re-raise instead of logging and returning
+    ``None`` (used by Settings credential probes).
+    """
     cfg = replace(cfg, timeout=timeout)
     if credentials is not None:
         cfg = replace(cfg, credentials=credentials)
@@ -228,6 +239,26 @@ async def _connect_from_saved_config(
                 )
             except Exception as ex:
                 last_exc = ex
+        if _config_uses_klap(cfg):
+            if raise_auth_failure and (
+                isinstance(exc, AuthenticationError)
+                or isinstance(last_exc, AuthenticationError)
+            ):
+                auth_exc = (
+                    last_exc
+                    if isinstance(last_exc, AuthenticationError)
+                    else exc
+                )
+                raise AuthenticationError(
+                    f"KLAP authentication failed for {cfg.host}"
+                ) from auth_exc
+            _LOGGER.warning(
+                "Kasa: skipped device at %s (%s)%s",
+                cfg.host,
+                type(last_exc).__name__,
+                _klap_auth_recovery_hint(initial_exc=exc, credentials=credentials),
+            )
+            return None
         try:
             return await _connect_legacy_xor(
                 cfg.host,
@@ -373,8 +404,11 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         """Drop in-memory account credentials (next fetch uses anonymous LAN only)."""
         self._discovery_credentials = None
 
-    async def disconnect(self) -> None:
-        """Close TP-Link sessions and clear cached devices (call ``fetch`` to reconnect).
+    async def disconnect(self, *, clear_map: bool = True) -> None:
+        """Close TP-Link sessions and optionally clear cached devices.
+
+        ``clear_map=False`` keeps the lookup map populated so UI polls and state
+        watchers stay usable while :meth:`rediscover` runs a long UDP sweep.
 
         Clears the alias map even if closing a device fails, so the manager never stays
         half-initialized.
@@ -382,7 +416,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         if self._device_name_to_device is None:
             return
         cached = self._device_name_to_device
-        self._device_name_to_device = None
+        if clear_map:
+            self._device_name_to_device = None
         seen: set[int] = set()
         for kd in cached.values():
             dev = kd._kDevice
@@ -591,6 +626,23 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 )
             except Exception as ex:
                 last_exc = ex
+        if _config_uses_klap(cfg_before):
+            suppress_warning = (
+                quiet_anonymous_auth
+                and auth_failure
+                and credentials is None
+            )
+            if log_failure and not suppress_warning:
+                _LOGGER.warning(
+                    "Kasa: skipped device at %s (%s)%s",
+                    host,
+                    type(last_exc).__name__,
+                    _klap_auth_recovery_hint(
+                        initial_exc=initial_exc,
+                        credentials=credentials,
+                    ),
+                )
+            return None, auth_failure
         try:
             return (
                 await _connect_legacy_xor(
@@ -945,13 +997,16 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         an empty device map until process restart.
         """
 
-        await self.disconnect()
+        await self.disconnect(clear_map=False)
         try:
             await self._fetch_impl(force_discovery=True)
-        except Exception:
-            with contextlib.suppress(Exception):
+        except Exception as udp_exc:
+            try:
                 await self._fetch_impl(force_discovery=False)
-            raise
+            except Exception:
+                self._device_name_to_device = None
+                raise udp_exc from None
+            raise udp_exc
 
     def set_credentials(
         self,

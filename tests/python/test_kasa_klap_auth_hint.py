@@ -3,9 +3,9 @@
 When the initial ``dev.update()`` / saved-config connect fails with
 :class:`AuthenticationError` we know auth (not network) is the root
 cause — newer KLAP-encrypted Tapo/Kasa devices linked to the cloud need
-the account email/password even on the LAN. The recovery WARNING gets
-a self-diagnosing suffix so the operator doesn't have to puzzle out the
-``Errno 61`` on the legacy XOR fallback port.
+the account email/password even on the LAN. KLAP profiles must not fall
+back to legacy XOR (port 9999); the recovery WARNING gets a
+self-diagnosing suffix instead.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from kasa.exceptions import AuthenticationError, _ConnectionError
 
 from app.kasa_device_manager import (
     KasaDeviceManager,
+    _connect_from_saved_config,
     _klap_auth_recovery_hint,
 )
 
@@ -94,6 +95,9 @@ async def test_fetch_warning_surfaces_klap_hint_for_auth_failures(
 
     # Without credentials: KLAP-auth hosts are ignored quietly (no per-device WARNING).
     mgr = KasaDeviceManager()
+    legacy_xor = AsyncMock(
+        side_effect=AssertionError("KLAP recovery must not try legacy XOR")
+    )
     with patch(
         "app.kasa_device_manager.Discover.discover",
         AsyncMock(return_value=discovered),
@@ -102,14 +106,12 @@ async def test_fetch_warning_surfaces_klap_hint_for_auth_failures(
         AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
     ), patch(
         "app.kasa_device_manager._connect_legacy_xor",
-        AsyncMock(
-            side_effect=ConnectionRefusedError(
-                "Unable to connect to the device: 192.168.86.216:9999"
-            )
-        ),
+        legacy_xor,
     ):
         with caplog.at_level(logging.WARNING, logger="app.kasa_device_manager"):
             await mgr.fetch()
+
+    legacy_xor.assert_not_awaited()
 
     assert len(mgr.switches) == 0
     assert mgr.skipped_auth_hosts == ("192.168.86.216",)
@@ -128,6 +130,9 @@ async def test_fetch_warning_surfaces_klap_hint_for_auth_failures(
     mgr_with_creds = KasaDeviceManager(
         credentials=Credentials(username="a@b.com", password="x"),
     )
+    legacy_xor = AsyncMock(
+        side_effect=AssertionError("KLAP recovery must not try legacy XOR")
+    )
     with patch(
         "app.kasa_device_manager.Discover.discover",
         AsyncMock(return_value={bad.host: _bad_kdev("192.168.86.216")}),
@@ -139,14 +144,12 @@ async def test_fetch_warning_surfaces_klap_hint_for_auth_failures(
         AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
     ), patch(
         "app.kasa_device_manager._connect_legacy_xor",
-        AsyncMock(
-            side_effect=ConnectionRefusedError(
-                "Unable to connect to the device: 192.168.86.216:9999"
-            )
-        ),
+        legacy_xor,
     ):
         with caplog.at_level(logging.WARNING, logger="app.kasa_device_manager"):
             await mgr_with_creds.fetch()
+
+    legacy_xor.assert_not_awaited()
 
     warning_messages = [
         r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
@@ -156,3 +159,39 @@ async def test_fetch_warning_surfaces_klap_hint_for_auth_failures(
     msg = matching[0]
     assert "AuthenticationError" in msg
     assert "KASA_USERNAME" in msg or "credential" in msg.lower()
+    assert "recovery failed" not in msg
+
+
+@pytest.mark.asyncio
+async def test_klap_saved_config_auth_failure_skips_legacy_xor() -> None:
+    """KLAP cache profiles must not fall back to XOR on port 9999."""
+
+    host = "192.168.86.234"
+    cfg = DeviceConfig(
+        host=host,
+        connection_type=DeviceConnectionParameters(
+            DeviceFamily.SmartTapoPlug,
+            DeviceEncryptionType.Klap,
+        ),
+    )
+    legacy_xor = AsyncMock(
+        side_effect=AssertionError("KLAP saved config must not try legacy XOR")
+    )
+    with patch(
+        "app.kasa_device_manager.KDevice.connect",
+        AsyncMock(side_effect=AuthenticationError("klap")),
+    ), patch(
+        "app.kasa_device_manager._connect_smart_plain_http",
+        AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
+    ), patch(
+        "app.kasa_device_manager._connect_legacy_xor",
+        legacy_xor,
+    ):
+        result = await _connect_from_saved_config(
+            cfg,
+            credentials=Credentials(username="a@b.com", password="x"),
+            timeout=5,
+        )
+
+    legacy_xor.assert_not_awaited()
+    assert result is None

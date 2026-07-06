@@ -172,6 +172,9 @@ async def test_fetch_keeps_klap_flag_when_credential_retry_fails_non_auth() -> N
 
     mgr = KasaDeviceManager()
     mgr.set_credentials(username="a@b.com", password="hunter2")
+    legacy_xor = AsyncMock(
+        side_effect=AssertionError("KLAP recovery must not try legacy XOR")
+    )
     with patch(
         "app.kasa_device_manager.Discover.discover",
         AsyncMock(return_value={host: klap}),
@@ -180,12 +183,14 @@ async def test_fetch_keeps_klap_flag_when_credential_retry_fails_non_auth() -> N
         AsyncMock(side_effect=AuthenticationError("klap")),
     ), patch(
         "app.kasa_device_manager._connect_legacy_xor",
-        AsyncMock(side_effect=ConnectionRefusedError("…")),
+        legacy_xor,
     ), patch(
         "app.kasa_device_manager.KDevice.connect",
         AsyncMock(side_effect=RuntimeError("handshake timed out")),
     ):
         await mgr.fetch()
+
+    legacy_xor.assert_not_awaited()
 
     assert mgr.skipped_auth_hosts == (host,)
     assert mgr.hosts_requiring_klap_auth == (host,)

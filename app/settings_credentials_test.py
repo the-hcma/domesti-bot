@@ -16,7 +16,7 @@ from gotailwind import Tailwind
 from kasa import Device as KDevice
 from kasa.credentials import Credentials
 from kasa.deviceconfig import DeviceConfig
-from kasa.exceptions import AuthenticationError
+from kasa.exceptions import AuthenticationError, _ConnectionError
 
 from app import device_discovery_store
 from app.device_enums import SettingsCredentialsTestSource
@@ -73,10 +73,26 @@ async def probe_kasa_credentials(
         raise CredentialsTestUnavailableError(
             "No known KLAP hosts to probe; discover Kasa devices first"
         )
+    probeable: list[tuple[str, dict[str, Any]]] = []
+    missing_profile: list[str] = []
+    for host, cfg_dict in hosts:
+        if cfg_dict is None:
+            missing_profile.append(host)
+            continue
+        probeable.append((host, cfg_dict))
+    if not probeable:
+        raise CredentialsTestUnavailableError(
+            "No cached KLAP connection profile for "
+            f"{', '.join(missing_profile)}; run device discovery first"
+        )
     successes: list[str] = []
     failures: list[str] = []
     auth_failures = 0
-    for host, cfg_dict in hosts:
+    for host in missing_profile:
+        failures.append(
+            f"{host}: no cached KLAP connection profile (run device discovery first)"
+        )
+    for host, cfg_dict in probeable:
         try:
             state_label = await _probe_one_kasa_host(
                 host,
@@ -290,26 +306,22 @@ def _klap_hosts_for_probe(
 async def _probe_one_kasa_host(
     host: str,
     *,
-    cfg_dict: dict[str, Any] | None,
+    cfg_dict: dict[str, Any],
     credentials: Credentials,
 ) -> str:
     """Connect, update, and disconnect one KLAP host; return ``on`` / ``off``."""
     dev: KDevice | None = None
     try:
-        if cfg_dict is not None:
-            cfg = DeviceConfig.from_dict(cfg_dict)
-            dev = await _connect_from_saved_config(
-                cfg,
-                credentials=credentials,
-                timeout=_KASA_PROBE_TIMEOUT_S,
-            )
+        cfg = DeviceConfig.from_dict(cfg_dict)
+        dev = await _connect_from_saved_config(
+            cfg,
+            credentials=credentials,
+            timeout=_KASA_PROBE_TIMEOUT_S,
+            raise_auth_failure=True,
+        )
         if dev is None:
-            dev = await KDevice.connect(
-                config=DeviceConfig(
-                    host=host,
-                    credentials=credentials,
-                    timeout=_KASA_PROBE_TIMEOUT_S,
-                ),
+            raise _ConnectionError(
+                f"Could not reach KLAP host {host} using cached profile"
             )
         await dev.update()
         is_on = getattr(dev, "is_on", None)
