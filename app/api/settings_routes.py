@@ -77,7 +77,7 @@ async def clear_kasa_credentials(request: Request) -> KasaCredentialsSettingsOut
 
 @router.get("/kasa-credentials", response_model=KasaCredentialsSettingsOut)
 async def get_kasa_credentials_settings(request: Request) -> KasaCredentialsSettingsOut:
-    """Return Kasa credential status (password is never returned)."""
+    """Return Kasa credential status (stored password returned when in database)."""
     return _kasa_settings_response(request)
 
 
@@ -255,6 +255,7 @@ def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:
     stored = (
         kasa_credentials_stored_in_db(cache_path) if cache_path is not None else False
     )
+    stored_password: str | None = None
     stored_username: str | None = None
     # Row existence (not decryptability) drives "password stored" UI state.
     password_stored = stored
@@ -264,7 +265,7 @@ def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:
         except SecretsDecryptError:
             pair = None
         if pair is not None:
-            stored_username, _password = pair
+            stored_username, stored_password = pair
     skipped: list[str] = []
     klap_hosts: list[str] = []
     state = runtime.device_state
@@ -277,6 +278,7 @@ def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:
         secrets_key_configured=secrets_key_configured(),
         secrets_key_source=secrets_key_source(),
         stored_in_database=stored,
+        stored_password=stored_password if stored and source != "env" else None,
         stored_username=stored_username if stored else None,
         password_stored=password_stored,
         skipped_auth_hosts=skipped,

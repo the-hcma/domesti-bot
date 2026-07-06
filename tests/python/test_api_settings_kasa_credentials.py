@@ -45,10 +45,10 @@ def test_get_kasa_credentials_reports_env_source(
     assert body["configured"] is True
     assert body["source"] == "env"
     assert body["stored_in_database"] is False
-    assert "password" not in body or body.get("password") is None
+    assert body["stored_password"] is None
 
 
-def test_put_kasa_credentials_persists_and_never_returns_password(
+def test_put_kasa_credentials_persists_and_returns_stored_password_on_get(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -71,9 +71,30 @@ def test_put_kasa_credentials_persists_and_never_returns_password(
     get_body = get_r.json()
     assert get_body["stored_in_database"] is True
     assert get_body["stored_username"] == "alice@example.com"
+    assert get_body["stored_password"] == "hunter2"
     assert get_body["password_stored"] is True
     assert "password" not in get_body
     assert load_kasa_credentials_from_db(db) == ("alice@example.com", "hunter2")
+
+
+def test_get_kasa_credentials_decrypt_error_returns_null_stored_password(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("KASA_USERNAME", raising=False)
+    monkeypatch.delenv("KASA_PASSWORD", raising=False)
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", key)
+    db = tmp_path / "ui.sqlite"
+    save_kasa_credentials_to_db(db, username="alice@example.com", password="hunter2")
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    client, _app = _client(cache_path=db)
+    r = client.get("/v1/settings/kasa-credentials")
+    assert r.status_code == HTTPStatus.OK
+    body = r.json()
+    assert body["password_stored"] is True
+    assert body["stored_password"] is None
+    assert body["stored_username"] is None
 
 
 def test_put_kasa_credentials_without_secrets_key_returns_503(

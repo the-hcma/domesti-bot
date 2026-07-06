@@ -334,7 +334,7 @@ class KasaCredentialsSetOut(BaseModel):
 
 
 class KasaCredentialsSettingsOut(BaseModel):
-    """Kasa credential status (password is never returned)."""
+    """Kasa credential status (password returned when stored in the database)."""
 
     configured: bool = Field(
         ...,
@@ -349,7 +349,7 @@ class KasaCredentialsSettingsOut(BaseModel):
     )
     password_stored: bool = Field(
         ...,
-        description="True when an encrypted password row exists (never returns the password).",
+        description="True when an encrypted password row exists.",
     )
     secrets_key_configured: bool = Field(
         ...,
@@ -371,9 +371,16 @@ class KasaCredentialsSettingsOut(BaseModel):
         ...,
         description="True when both encrypted username and password rows exist.",
     )
+    stored_password: str | None = Field(
+        default=None,
+        description=(
+            "Decrypted password from the database row when present; ``None`` when "
+            "nothing is stored, decryption is unavailable, or env overrides credentials."
+        ),
+    )
     stored_username: str | None = Field(
         default=None,
-        description="Decrypted account email when stored in the database (password is never returned).",
+        description="Decrypted account email when stored in the database.",
     )
 
 
