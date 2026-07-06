@@ -9,6 +9,7 @@ from kasa.deviceconfig import DeviceConfig
 from kasa.exceptions import _ConnectionError
 
 from app import device_discovery_store
+from app.device_manager import NotInitializedError
 from app.kasa_device_manager import KasaDeviceManager
 
 
@@ -320,3 +321,110 @@ async def test_cache_skips_klap_hosts_quietly_without_credentials(tmp_path) -> N
     cached = device_discovery_store.load_cached_configs(db)
     hosts = {row[0]: row[3] for row in cached}
     assert hosts == {"192.168.1.10": False, "192.168.1.20": True}
+
+
+@pytest.mark.asyncio
+async def test_rediscover_keeps_switches_visible_during_udp_sweep(tmp_path) -> None:
+    """``rediscover`` must not empty ``switches`` while UDP discovery is in flight."""
+
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Desk lamp", cfg, False)],
+    )
+
+    mock_dev = MagicMock()
+    mock_dev.host = "192.168.1.50"
+    mock_dev.alias = "Desk lamp"
+    mock_dev.is_on = False
+    mock_dev.config = DeviceConfig.from_dict(cfg)
+    mock_dev.config.to_dict_control_credentials = MagicMock(return_value=cfg)
+    mock_dev.update = AsyncMock()
+    mock_dev.disconnect = AsyncMock()
+
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with patch(
+        "app.kasa_device_manager._connect_from_saved_config",
+        AsyncMock(return_value=mock_dev),
+    ), patch(
+        "app.kasa_device_manager.Discover.discover",
+        AsyncMock(return_value={}),
+    ):
+        await mgr.fetch()
+
+    assert len(mgr.switches) == 1
+
+    async def _discover_and_assert_prior_devices(*_args, **_kwargs):
+        assert len(mgr.switches) == 1
+        return {}
+
+    with patch(
+        "app.kasa_device_manager.Discover.discover",
+        AsyncMock(side_effect=_discover_and_assert_prior_devices),
+    ):
+        await mgr.rediscover()
+
+    assert mgr.switches == ()
+
+
+@pytest.mark.asyncio
+async def test_rediscover_clears_map_when_udp_and_cache_both_fail(tmp_path) -> None:
+    """Failed rediscover must not leave disconnected devices in the lookup map."""
+
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Desk lamp", cfg, False)],
+    )
+
+    mock_dev = MagicMock()
+    mock_dev.host = "192.168.1.50"
+    mock_dev.alias = "Desk lamp"
+    mock_dev.is_on = False
+    mock_dev.config = DeviceConfig.from_dict(cfg)
+    mock_dev.config.to_dict_control_credentials = MagicMock(return_value=cfg)
+    mock_dev.update = AsyncMock()
+    mock_dev.disconnect = AsyncMock()
+
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with patch(
+        "app.kasa_device_manager._connect_from_saved_config",
+        AsyncMock(return_value=mock_dev),
+    ), patch(
+        "app.kasa_device_manager.Discover.discover",
+        AsyncMock(return_value={}),
+    ):
+        await mgr.fetch()
+
+    assert len(mgr.switches) == 1
+
+    with patch(
+        "app.kasa_device_manager.Discover.discover",
+        AsyncMock(side_effect=RuntimeError("udp down")),
+    ), patch(
+        "app.kasa_device_manager._connect_from_saved_config",
+        AsyncMock(side_effect=RuntimeError("cache down")),
+    ):
+        with pytest.raises(RuntimeError, match="udp down"):
+            await mgr.rediscover()
+
+    with pytest.raises(NotInitializedError):
+        _ = mgr.switches

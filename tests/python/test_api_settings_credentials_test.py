@@ -165,6 +165,236 @@ def test_post_kasa_credentials_test_no_klap_hosts(
     assert "No known KLAP hosts" in response.json()["detail"]
 
 
+@pytest.mark.asyncio
+async def test_probe_kasa_credentials_auth_failure_when_connect_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Connect exhaustion on a KLAP host must count as auth failure, not unreachable."""
+
+    from kasa.credentials import Credentials
+    from kasa.exceptions import AuthenticationError
+
+    from app.settings_credentials_test import probe_kasa_credentials
+
+    monkeypatch.setenv("KASA_USERNAME", "alice@example.com")
+    monkeypatch.setenv("KASA_PASSWORD", "hunter2")
+    klap_cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    with (
+        patch(
+            "app.settings_credentials_test._klap_hosts_for_probe",
+            return_value=[("192.168.1.20", klap_cfg)],
+        ),
+        patch(
+            "app.settings_credentials_test._connect_from_saved_config",
+            new_callable=AsyncMock,
+            side_effect=AuthenticationError("KLAP authentication failed for 192.168.1.20"),
+        ),
+        patch(
+            "app.settings_credentials_test._resolve_kasa_probe_credentials",
+            return_value=(
+                Credentials(username="alice@example.com", password="hunter2"),
+                SettingsCredentialsTestSource.ENV,
+            ),
+        ),
+    ):
+        result = await probe_kasa_credentials(cache_path=tmp_path / "ui.sqlite")
+
+    assert result.ok is False
+    assert "KLAP authentication failed" in result.detail
+    assert "192.168.1.20" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_probe_kasa_credentials_unreachable_when_connect_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Network-style connect exhaustion must not be labeled as KLAP auth failure."""
+
+    from kasa.credentials import Credentials
+    from kasa.exceptions import _ConnectionError
+
+    from app.settings_credentials_test import probe_kasa_credentials
+
+    monkeypatch.setenv("KASA_USERNAME", "alice@example.com")
+    monkeypatch.setenv("KASA_PASSWORD", "hunter2")
+    klap_cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    with (
+        patch(
+            "app.settings_credentials_test._klap_hosts_for_probe",
+            return_value=[("192.168.1.20", klap_cfg)],
+        ),
+        patch(
+            "app.settings_credentials_test._connect_from_saved_config",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.settings_credentials_test._resolve_kasa_probe_credentials",
+            return_value=(
+                Credentials(username="alice@example.com", password="hunter2"),
+                SettingsCredentialsTestSource.ENV,
+            ),
+        ),
+    ):
+        result = await probe_kasa_credentials(cache_path=tmp_path / "ui.sqlite")
+
+    assert result.ok is False
+    assert "Could not reach KLAP hosts" in result.detail
+    assert "authentication failed" not in result.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_probe_kasa_credentials_auth_failure_after_plain_http_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Auth failure on the plain-HTTP retry must count as KLAP auth failure."""
+
+    from kasa.credentials import Credentials
+    from kasa.exceptions import AuthenticationError, _ConnectionError
+
+    from app.settings_credentials_test import probe_kasa_credentials
+
+    monkeypatch.setenv("KASA_USERNAME", "alice@example.com")
+    monkeypatch.setenv("KASA_PASSWORD", "hunter2")
+    klap_cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+
+    async def _connect_saved(cfg, *, credentials, timeout, raise_auth_failure=False):
+        del cfg, credentials, timeout
+        if raise_auth_failure:
+            raise AuthenticationError("KLAP authentication failed for 192.168.1.20")
+        return None
+
+    with (
+        patch(
+            "app.settings_credentials_test._klap_hosts_for_probe",
+            return_value=[("192.168.1.20", klap_cfg)],
+        ),
+        patch(
+            "app.settings_credentials_test._connect_from_saved_config",
+            side_effect=_connect_saved,
+        ),
+        patch(
+            "app.settings_credentials_test._resolve_kasa_probe_credentials",
+            return_value=(
+                Credentials(username="alice@example.com", password="hunter2"),
+                SettingsCredentialsTestSource.ENV,
+            ),
+        ),
+    ):
+        result = await probe_kasa_credentials(cache_path=tmp_path / "ui.sqlite")
+
+    assert result.ok is False
+    assert "KLAP authentication failed" in result.detail
+    assert "192.168.1.20" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_probe_kasa_credentials_missing_profile_propagates_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kasa.credentials import Credentials
+
+    from app.settings_credentials_test import (
+        CredentialsTestUnavailableError,
+        probe_kasa_credentials,
+    )
+
+    monkeypatch.setenv("KASA_USERNAME", "alice@example.com")
+    monkeypatch.setenv("KASA_PASSWORD", "hunter2")
+    with (
+        patch(
+            "app.settings_credentials_test._klap_hosts_for_probe",
+            return_value=[("192.168.1.20", None)],
+        ),
+        patch(
+            "app.settings_credentials_test._resolve_kasa_probe_credentials",
+            return_value=(
+                Credentials(username="alice@example.com", password="hunter2"),
+                SettingsCredentialsTestSource.ENV,
+            ),
+        ),
+    ):
+        with pytest.raises(CredentialsTestUnavailableError, match="discovery first"):
+            await probe_kasa_credentials(cache_path=tmp_path / "ui.sqlite")
+
+
+@pytest.mark.asyncio
+async def test_probe_kasa_credentials_partial_when_one_host_lacks_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from kasa.credentials import Credentials
+
+    from app.settings_credentials_test import probe_kasa_credentials
+
+    monkeypatch.setenv("KASA_USERNAME", "alice@example.com")
+    monkeypatch.setenv("KASA_PASSWORD", "hunter2")
+    klap_cfg = {
+        "host": "192.168.1.10",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    with (
+        patch(
+            "app.settings_credentials_test._klap_hosts_for_probe",
+            return_value=[
+                ("192.168.1.10", klap_cfg),
+                ("192.168.1.20", None),
+            ],
+        ),
+        patch(
+            "app.settings_credentials_test._probe_one_kasa_host",
+            new_callable=AsyncMock,
+            return_value="on",
+        ),
+        patch(
+            "app.settings_credentials_test._resolve_kasa_probe_credentials",
+            return_value=(
+                Credentials(username="alice@example.com", password="hunter2"),
+                SettingsCredentialsTestSource.ENV,
+            ),
+        ),
+    ):
+        result = await probe_kasa_credentials(cache_path=tmp_path / "ui.sqlite")
+
+    assert result.ok is False
+    assert "192.168.1.10=on" in result.detail
+    assert "192.168.1.20" in result.detail
+    assert "no cached KLAP connection profile" in result.detail
+
+
 def test_post_mytracks_credentials_test_ok(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

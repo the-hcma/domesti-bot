@@ -61,7 +61,10 @@ dependencies = [
     "pychromecast>=14.0.10",
     "pyproj",
     "pyright==1.1.411",
-    "python-kasa",
+    # TEMPORARY: pin python-kasa to PR #1692 (IOT KLAP v2 transport selection).
+    # Revert to a PyPI ``python-kasa`` release once
+    # https://github.com/python-kasa/python-kasa/pull/1692 merges and ships.
+    "python-kasa @ git+https://github.com/python-kasa/python-kasa.git@refs/pull/1692/head",
     "requests>=2.34.2",
     "soco>=0.31.1",
     "sqlalchemy>=2.0.51",
@@ -82,6 +85,9 @@ domesti-bot-server = "config.serve:main"
 Homepage = "https://github.com/the-hcma/domesti-bot"
 Repository = "https://github.com/the-hcma/domesti-bot"
 Issues = "https://github.com/the-hcma/domesti-bot/issues"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["app", "config"]
