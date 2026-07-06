@@ -106,6 +106,7 @@ export interface KasaCredentialsSettingsOut {
   secrets_key_configured: boolean;
   secrets_key_source: SecretsKeySource;
   stored_in_database: boolean;
+  stored_password: string | null;
   stored_username: string | null;
   password_stored: boolean;
   hosts_requiring_klap_auth: string[];

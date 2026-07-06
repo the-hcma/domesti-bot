@@ -54,7 +54,16 @@ export async function mountKasaSettingsPanel(
   const passwordInput = passwordRow.input;
   passwordInput.name = "password";
   passwordInput.placeholder = "Account password";
-  let passwordStored = false;
+  let storedPassword: string | null = null;
+  let passwordRevealed = false;
+  const setPasswordRevealed = (revealed: boolean): void => {
+    passwordRevealed = revealed;
+    if (revealed && !passwordInput.value && storedPassword) {
+      passwordInput.value = storedPassword;
+    }
+    passwordRow.setRevealed(revealed);
+  };
+  setPasswordRevealed(false);
   passwordLabel.append(passwordText, passwordRow.row);
 
   const actions = document.createElement("div");
@@ -96,16 +105,21 @@ export async function mountKasaSettingsPanel(
 
   const applyFieldsFromSettings = (s: KasaCredentialsSettingsOut): void => {
     settingsConfigured = s.configured;
-    passwordStored = s.password_stored;
+    storedPassword = s.stored_password;
     if (s.stored_username) {
       emailInput.value = s.stored_username;
     }
-    passwordInput.value = "";
-    // Password is never returned from the API, so every save must include it.
-    passwordInput.required = true;
-    passwordInput.placeholder = passwordStored
-      ? "Re-enter password to update"
-      : "Account password";
+    if (storedPassword) {
+      passwordInput.value = storedPassword;
+      passwordInput.required = false;
+      if (!passwordRevealed) {
+        passwordInput.type = "password";
+      }
+    } else {
+      passwordInput.value = "";
+      passwordInput.required = true;
+    }
+    passwordInput.placeholder = storedPassword ? "" : "Account password";
     syncTestEnabled();
   };
 
@@ -178,34 +192,23 @@ export async function mountKasaSettingsPanel(
         return;
       }
       if (!password) {
-        showStatusMessage(
-          passwordStored
-            ? "Re-enter the password to update stored credentials (password is never returned)."
-            : "Enter the account password before saving.",
-        );
+        showStatusMessage("Enter the account password before saving.");
         return;
       }
       saveBtn.disabled = true;
       try {
         const out = await api.putKasaCredentials(username, password);
         showSuccessToast("Kasa credentials saved.");
-        passwordRow.setRevealed(false);
-        passwordInput.value = "";
+        setPasswordRevealed(false);
+        const s = await api.fetchKasaCredentialsSettings();
+        applyFieldsFromSettings(s);
         if (out.restart_required) {
           showStatusMessage(
             "Credentials saved. Restart domesti-bot (or remove KASA_USERNAME / KASA_PASSWORD) so devices use them.",
           );
         } else {
+          updateStatusHint(s);
           await options.onDevicesChanged?.();
-        }
-        try {
-          const s = await api.fetchKasaCredentialsSettings();
-          applyFieldsFromSettings(s);
-          if (!out.restart_required) {
-            updateStatusHint(s);
-          }
-        } catch {
-          // Save already succeeded; a status-refresh failure is not a save failure.
         }
       } catch (err) {
         showStatusMessage(
@@ -255,12 +258,12 @@ export async function mountKasaSettingsPanel(
       try {
         await api.clearKasaCredentials();
         emailInput.value = "";
-        passwordInput.value = "";
+        storedPassword = null;
         settingsConfigured = false;
-        passwordStored = false;
+        passwordInput.value = "";
         passwordInput.required = true;
         passwordInput.placeholder = "Account password";
-        passwordRow.setRevealed(false);
+        setPasswordRevealed(false);
         syncTestEnabled();
         showSuccessToast("Stored Kasa credentials cleared.");
         await refreshStatus();
