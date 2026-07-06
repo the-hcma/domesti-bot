@@ -413,6 +413,28 @@ def test_poll_interval_from_env_rejects_value_below_floor(
 
 
 @pytest.mark.asyncio
+async def test_kasa_watcher_stops_mid_refresh_without_polling_remaining_devices() -> None:
+    mgr = _fake_kasa_mgr(["host-a", "host-b", "host-c"])
+    first_poll_started = asyncio.Event()
+
+    async def slow_is_on(identifier: str) -> bool:
+        if identifier == "host-a":
+            first_poll_started.set()
+            await asyncio.sleep(3600.0)
+        return True
+
+    cast(AsyncMock, mgr.is_on).side_effect = slow_is_on
+    watcher = KasaPollingWatcher(mgr, interval_s=10.0)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await asyncio.wait_for(first_poll_started.wait(), timeout=1.0)
+    stop.set()
+    await asyncio.wait_for(task, timeout=0.5)
+
+    assert cast(AsyncMock, mgr.is_on).await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_run_device_state_watchers_returns_immediately_for_empty_list() -> None:
     stop = asyncio.Event()
     stop.set()

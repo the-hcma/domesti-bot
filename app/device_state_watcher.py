@@ -32,12 +32,13 @@ Configuration: ``DOMESTI_STATE_POLL_INTERVAL_S`` overrides
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import errno
 import logging
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from typing import Final
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
+from typing import Any, Final
 
 from app.device_enums import DeviceFamilyId
 from app.device_state_change import DeviceStateChangeDetector
@@ -45,7 +46,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
-from app.vizio_device_manager import VizioDeviceManager, VizioTvDevice
+from app.vizio_device_manager import VizioDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,11 +104,17 @@ class KasaPollingWatcher(DeviceStateWatcher):
         self._mgr = mgr
         self._interval_s = interval_s
 
-    async def _refresh_once(self) -> None:
+    async def _refresh_once(self, *, stop: asyncio.Event) -> None:
         for kd in self._mgr.switches:
+            if stop.is_set():
+                return
             host = (kd._kDevice.host or "").strip() or "?"
             try:
-                await self._mgr.is_on(kd.identifier)
+                if not await _await_with_stop(
+                    stop,
+                    lambda: self._mgr.is_on(kd.identifier),
+                ):
+                    return
             except Exception as exc:
                 _log_watcher_refresh_failure(backend="kasa", device_id=host, exc=exc)
                 continue
@@ -120,7 +127,7 @@ class KasaPollingWatcher(DeviceStateWatcher):
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
-            await self._refresh_once()
+            await self._refresh_once(stop=stop)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=self._interval_s)
             except asyncio.TimeoutError:
@@ -152,10 +159,16 @@ class SonosPollingWatcher(DeviceStateWatcher):
         self._mgr = mgr
         self._interval_s = interval_s
 
-    async def _refresh_once(self) -> None:
+    async def _refresh_once(self, *, stop: asyncio.Event) -> None:
         for sp in self._mgr.players:
+            if stop.is_set():
+                return
             try:
-                await self._mgr.is_playing(sp.identifier)
+                if not await _await_with_stop(
+                    stop,
+                    lambda: self._mgr.is_playing(sp.identifier),
+                ):
+                    return
             except Exception as exc:
                 _log_watcher_refresh_failure(
                     backend="sonos",
@@ -172,7 +185,7 @@ class SonosPollingWatcher(DeviceStateWatcher):
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
-            await self._refresh_once()
+            await self._refresh_once(stop=stop)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=self._interval_s)
             except asyncio.TimeoutError:
@@ -200,10 +213,16 @@ class TailwindPollingWatcher(DeviceStateWatcher):
         self._mgr = mgr
         self._interval_s = interval_s
 
-    async def _refresh_once(self) -> None:
+    async def _refresh_once(self, *, stop: asyncio.Event) -> None:
         for gd in self._mgr.doors:
+            if stop.is_set():
+                return
             try:
-                await self._mgr.is_open(gd.identifier)
+                if not await _await_with_stop(
+                    stop,
+                    lambda: self._mgr.is_open(gd.identifier),
+                ):
+                    return
             except Exception as exc:
                 _log_watcher_refresh_failure(
                     backend="tailwind",
@@ -220,7 +239,7 @@ class TailwindPollingWatcher(DeviceStateWatcher):
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
-            await self._refresh_once()
+            await self._refresh_once(stop=stop)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=self._interval_s)
             except asyncio.TimeoutError:
@@ -246,13 +265,20 @@ class VizioPollingWatcher(DeviceStateWatcher):
         self._mgr = mgr
         self._interval_s = interval_s
 
-    async def _refresh_once(self) -> None:
-        async def _refresh_tv(tv: VizioTvDevice) -> None:
-            try:
+    async def _refresh_once(self, *, stop: asyncio.Event) -> None:
+        for tv in self._mgr.tvs:
+            if stop.is_set():
+                return
+
+            async def _refresh_tv() -> None:
                 await asyncio.wait_for(
                     tv.refresh_power_state(poll=True),
                     timeout=_VIZIO_WATCHER_REFRESH_TIMEOUT_S,
                 )
+
+            try:
+                if not await _await_with_stop(stop, _refresh_tv):
+                    return
             except asyncio.TimeoutError:
                 _LOGGER.warning(
                     "[state-watcher vizio] %s update timed out after %.1fs; "
@@ -274,11 +300,9 @@ class VizioPollingWatcher(DeviceStateWatcher):
                         tv.is_on,
                     )
 
-        await asyncio.gather(*(_refresh_tv(tv) for tv in self._mgr.tvs))
-
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
-            await self._refresh_once()
+            await self._refresh_once(stop=stop)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=self._interval_s)
             except asyncio.TimeoutError:
@@ -458,3 +482,48 @@ async def run_device_state_watchers(
                     t.get_name(),
                     result,
                 )
+
+
+@contextlib.asynccontextmanager
+async def _cancel_pending_tasks_on_exit(
+    *tasks: asyncio.Task[object],
+) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        for pending in tasks:
+            if not pending.done():
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await pending
+
+
+async def _await_with_stop(
+    stop: asyncio.Event,
+    awaitable_factory: Callable[[], Coroutine[Any, Any, object]],
+) -> bool:
+    """Run ``awaitable_factory()`` unless ``stop`` is already set.
+
+    Returns ``True`` when the awaitable finished normally, ``False`` when shutdown
+    was requested first (the in-flight task is cancelled).
+    """
+
+    if stop.is_set():
+        return False
+    task = asyncio.create_task(awaitable_factory())
+    stop_task = asyncio.create_task(stop.wait())
+    async with _cancel_pending_tasks_on_exit(task, stop_task):
+        done, _pending = await asyncio.wait(
+            {task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_task in done:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            return False
+        stop_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stop_task
+        await task
+        return True

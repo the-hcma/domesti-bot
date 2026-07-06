@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import httpx
 import io
 import logging
@@ -2631,16 +2632,64 @@ async def bootstrap_device_managers(
     )
 
 
+_SHUTDOWN_DISCONNECT_TIMEOUT_S = 15.0
+
+
+async def _disconnect_backend_on_shutdown(
+    backend: str,
+    disconnect: Awaitable[None],
+) -> None:
+    try:
+        await asyncio.wait_for(disconnect, timeout=_SHUTDOWN_DISCONNECT_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        _LOGGER.warning(
+            "[shutdown] %s disconnect timed out after %.1fs",
+            backend,
+            _SHUTDOWN_DISCONNECT_TIMEOUT_S,
+        )
+    except Exception:
+        _LOGGER.warning("[shutdown] %s disconnect failed", backend, exc_info=True)
+
+
 async def shutdown_device_managers(state: DeviceManagersState) -> None:
+    disconnect_tasks: list[asyncio.Task[None]] = []
     if state.androidtv_mgr is not None:
-        await state.androidtv_mgr.disconnect()
-    await state.kasa_mgr.disconnect()
+        disconnect_tasks.append(
+            asyncio.create_task(
+                _disconnect_backend_on_shutdown(
+                    "androidtv",
+                    state.androidtv_mgr.disconnect(),
+                )
+            )
+        )
+    disconnect_tasks.append(
+        asyncio.create_task(
+            _disconnect_backend_on_shutdown("kasa", state.kasa_mgr.disconnect())
+        )
+    )
     if state.sonos_mgr is not None:
-        await state.sonos_mgr.disconnect()
+        disconnect_tasks.append(
+            asyncio.create_task(
+                _disconnect_backend_on_shutdown("sonos", state.sonos_mgr.disconnect())
+            )
+        )
     if state.tailwind_mgr is not None:
-        await state.tailwind_mgr.disconnect()
+        disconnect_tasks.append(
+            asyncio.create_task(
+                _disconnect_backend_on_shutdown(
+                    "tailwind",
+                    state.tailwind_mgr.disconnect(),
+                )
+            )
+        )
     if state.vizio_mgr is not None:
-        await state.vizio_mgr.disconnect()
+        disconnect_tasks.append(
+            asyncio.create_task(
+                _disconnect_backend_on_shutdown("vizio", state.vizio_mgr.disconnect())
+            )
+        )
+    if disconnect_tasks:
+        await asyncio.gather(*disconnect_tasks)
 
 
 async def _async_main(args: argparse.Namespace) -> None:
