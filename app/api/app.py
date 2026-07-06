@@ -252,6 +252,9 @@ def create_app(args: Any) -> FastAPI:
                 return
             if generation != runtime.lifespan_generation:
                 return
+            if runtime.is_shutdown_requested():
+                await shutdown_device_managers(state)
+                return
             runtime.device_state = state
             runtime.discovery_completed_at = time.monotonic()
             _LOGGER.info(
@@ -267,6 +270,8 @@ def create_app(args: Any) -> FastAPI:
                 )
                 return
             if generation != runtime.lifespan_generation:
+                return
+            if runtime.is_shutdown_requested():
                 return
             watchers = build_default_watchers(
                 state,
@@ -291,21 +296,42 @@ def create_app(args: Any) -> FastAPI:
         try:
             yield
         finally:
+            shutdown_started = time.monotonic()
+            runtime.signal_shutdown()
             if discovery_task is not None and not discovery_task.done():
+                _LOGGER.info("[shutdown] cancelling device discovery")
                 discovery_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
+                try:
                     await discovery_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    _LOGGER.warning("[shutdown] discovery task raised", exc_info=True)
             # Stop the state watcher *before* tearing down managers so we
             # don't poll a half-disconnected backend during shutdown.
-            watcher_stop.set()
+            _LOGGER.info("[shutdown] stopping state watchers")
             watcher_task = runtime.watcher_task
             if watcher_task is not None and not watcher_task.done():
-                with contextlib.suppress(asyncio.CancelledError, Exception):
+                try:
                     await watcher_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    _LOGGER.warning("[shutdown] watcher task raised", exc_info=True)
+            _LOGGER.info(
+                "[shutdown] state watchers stopped in %.3fs",
+                time.monotonic() - shutdown_started,
+            )
+            _LOGGER.info("[shutdown] closing rule evaluator")
             await runtime.close_rule_evaluator()
             state = runtime.device_state
             if state is not None:
+                _LOGGER.info("[shutdown] disconnecting device managers")
                 await shutdown_device_managers(state)
+            _LOGGER.info(
+                "[shutdown] complete in %.3fs",
+                time.monotonic() - shutdown_started,
+            )
 
     app = FastAPI(
         title="domesti-bot",

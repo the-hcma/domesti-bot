@@ -42,6 +42,7 @@ class DomestiServerRuntime:
     discovery_task: asyncio.Task[None] | None
     lifespan_generation: int
     rule_evaluator: RuleEvaluator | None
+    shutdown_requested: asyncio.Event | None
     watcher_stop: asyncio.Event | None
     watcher_task: asyncio.Task[None] | None
 
@@ -59,6 +60,7 @@ class DomestiServerRuntime:
         self.discovery_error = None
         self.discovery_started_at = time.monotonic()
         self.discovery_completed_at = None
+        self.shutdown_requested = asyncio.Event()
         self.watcher_stop = asyncio.Event()
         self.watcher_task = None
         self.discovery_task = None
@@ -82,6 +84,10 @@ class DomestiServerRuntime:
             return None
         return discovery_cache_path_from_cli_args(self.cli_args)
 
+    def is_shutdown_requested(self) -> bool:
+        event = self.shutdown_requested
+        return event is not None and event.is_set()
+
     def reset(self) -> None:
         if hasattr(self, "watcher_stop"):
             self._cancel_background_tasks()
@@ -93,8 +99,12 @@ class DomestiServerRuntime:
         self.discovery_task = None
         self.lifespan_generation = 0
         self.rule_evaluator = None
+        self.shutdown_requested = None
         self.watcher_stop = None
         self.watcher_task = None
+
+    def build_device_state_change_detector(self) -> DeviceStateChangeDetector:
+        return DeviceStateChangeDetector(self.schedule_rule_device_state_evaluation)
 
     def schedule_rule_location_evaluation(self, user_id: str) -> None:
         evaluator = self.rule_evaluator
@@ -110,11 +120,20 @@ class DomestiServerRuntime:
         if evaluator is not None:
             evaluator.schedule_device_state_change(family_id, device_id)
 
-    def build_device_state_change_detector(self) -> DeviceStateChangeDetector:
-        return DeviceStateChangeDetector(self.schedule_rule_device_state_evaluation)
+    def signal_shutdown(self) -> None:
+        """Tell every background loop to stop starting new work."""
+        if self.shutdown_requested is not None:
+            self.shutdown_requested.set()
+        if self.watcher_stop is not None:
+            self.watcher_stop.set()
+        evaluator = self.rule_evaluator
+        if evaluator is not None:
+            evaluator.request_shutdown()
 
     async def restart_device_state_watchers(self) -> None:
         """Rebuild background polling after a hot-reloaded device manager."""
+        if self.is_shutdown_requested():
+            return
         state = self.device_state
         if state is None:
             return
@@ -131,6 +150,8 @@ class DomestiServerRuntime:
                 "[state-watcher] hot reload skipped — bad DOMESTI_STATE_POLL_INTERVAL_S: %s",
                 exc,
             )
+            return
+        if self.is_shutdown_requested():
             return
         self.watcher_stop = asyncio.Event()
         watchers = build_default_watchers(
