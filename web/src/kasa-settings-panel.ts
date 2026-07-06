@@ -200,15 +200,21 @@ export async function mountKasaSettingsPanel(
         const out = await api.putKasaCredentials(username, password);
         showSuccessToast("Kasa credentials saved.");
         setPasswordRevealed(false);
-        const s = await api.fetchKasaCredentialsSettings();
-        applyFieldsFromSettings(s);
         if (out.restart_required) {
           showStatusMessage(
             "Credentials saved. Restart domesti-bot (or remove KASA_USERNAME / KASA_PASSWORD) so devices use them.",
           );
         } else {
-          updateStatusHint(s);
           await options.onDevicesChanged?.();
+        }
+        try {
+          const s = await api.fetchKasaCredentialsSettings();
+          applyFieldsFromSettings(s);
+          if (!out.restart_required) {
+            updateStatusHint(s);
+          }
+        } catch {
+          // Save already succeeded; a status-refresh failure is not a save failure.
         }
       } catch (err) {
         showStatusMessage(
