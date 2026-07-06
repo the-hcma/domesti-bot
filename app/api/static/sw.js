@@ -2,7 +2,7 @@
 // the HTML shell and JS bundle so deploys refresh installed PWAs. Icons and
 // manifest stay cache-first (they change rarely).
 
-const VERSION = "domesti-bot-pwa-v20";
+const VERSION = "domesti-bot-pwa-v21";
 
 const PRECACHE = [
   "/",

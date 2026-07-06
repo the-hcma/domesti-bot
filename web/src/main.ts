@@ -104,6 +104,12 @@ class DomestiBotController {
   private state: UIStateOut | null = null;
   private connected = false;
   private devicesReady = false;
+  // Monotonic ids so stale /health probes cannot overwrite a fresher
+  // /v1/ui/state success (common on mobile after a device action).
+  private healthProbeSeq = 0;
+  private stateSuccessSeq = 0;
+  private lastRenderedConnected = false;
+  private lastRenderedDevicesReady = false;
   private refreshInFlight = false;
   private pollTimer: number | null = null;
   // The recoverable-action toast lives outside ``#app`` so it
@@ -178,13 +184,25 @@ class DomestiBotController {
   private beginHealthProbe(): void {
     // Decoupled from /v1/ui/state so the 3s health timeout can update
     // connection chrome without waiting for the slower state poll.
+    const probeSeq = ++this.healthProbeSeq;
+    const stateSuccessSeqAtStart = this.stateSuccessSeq;
     void api.fetchHealth().then(
       (health) => {
+        if (
+          !this.shouldApplyHealthProbeResult(probeSeq, stateSuccessSeqAtStart)
+        ) {
+          return;
+        }
         this.connected = health.status === "ok";
         this.devicesReady = health.ready;
         this.syncConnectionChrome();
       },
       () => {
+        if (
+          !this.shouldApplyHealthProbeResult(probeSeq, stateSuccessSeqAtStart)
+        ) {
+          return;
+        }
         this.connected = false;
         this.devicesReady = false;
         this.syncConnectionChrome();
@@ -192,9 +210,27 @@ class DomestiBotController {
     );
   }
 
+  private shouldApplyHealthProbeResult(
+    probeSeq: number,
+    stateSuccessSeqAtStart: number,
+  ): boolean {
+    if (probeSeq !== this.healthProbeSeq) {
+      return false;
+    }
+    // A /v1/ui/state fetch that finished after this probe started is a
+    // stronger signal than a slow or aborted /health on mobile Wi‑Fi.
+    if (this.stateSuccessSeq > stateSuccessSeqAtStart) {
+      return false;
+    }
+    return true;
+  }
+
   private syncConnectionChrome(): void {
     this.root.dataset["connected"] = this.connected ? "true" : "false";
-    if (this.state !== null) {
+    const chromeChanged =
+      this.connected !== this.lastRenderedConnected ||
+      this.devicesReady !== this.lastRenderedDevicesReady;
+    if (chromeChanged && this.state !== null) {
       this.render();
     }
   }
@@ -202,6 +238,7 @@ class DomestiBotController {
   private markBackendReadyFromState(): void {
     // A successful /v1/ui/state implies the backend answered and discovery
     // finished — do not leave the UI offline when /health alone timed out.
+    this.stateSuccessSeq += 1;
     this.connected = true;
     this.devicesReady = true;
   }
@@ -624,6 +661,8 @@ class DomestiBotController {
     blurFocusedElementInApp(this.root);
     this.root.replaceChildren();
     this.root.dataset["connected"] = this.connected ? "true" : "false";
+    this.lastRenderedConnected = this.connected;
+    this.lastRenderedDevicesReady = this.devicesReady;
     this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
     this.renderOperatorAlert(state.operator_alert);
     if (state.families.length > 0) {
