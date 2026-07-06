@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.13.0](https://github.com/the-hcma/domesti-bot/compare/v1.12.0...v1.13.0) (2026-07-06)
+
+
+### Features
+
+* Kasa KLAP credentials in Settings and encrypted CLI ([#397](https://github.com/the-hcma/domesti-bot/issues/397)) ([3526b46](https://github.com/the-hcma/domesti-bot/commit/3526b46fef1debd4193f38a0fa97ef896c3f1651))
+* reveal stored Kasa password in Settings (closes [#400](https://github.com/the-hcma/domesti-bot/issues/400)) ([#405](https://github.com/the-hcma/domesti-bot/issues/405)) ([d6f35a2](https://github.com/the-hcma/domesti-bot/commit/d6f35a2eaa261c4c286d41b7f54fbe6372daf15e))
+* Test button on Settings auth cards ([#402](https://github.com/the-hcma/domesti-bot/issues/402)) ([7f42636](https://github.com/the-hcma/domesti-bot/commit/7f42636dccbf19514281a379297dda5785f7725d))
+
 ## [1.12.0](https://github.com/the-hcma/domesti-bot/compare/v1.11.0...v1.12.0) (2026-07-03)
 
 
