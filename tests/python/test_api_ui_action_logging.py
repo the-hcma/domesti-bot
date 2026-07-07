@@ -13,6 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
+from app.api.ui_action_logging import _action_log_parts, _format_device
+from app.device_enums import UiActionType
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.server_runtime import runtime
@@ -55,6 +57,29 @@ def _state(kasa_devices: list[_FakeKasa]) -> DeviceManagersState:
     )
 
 
+def test_action_log_parts_toggle_power() -> None:
+    assert _action_log_parts(UiActionType.TOGGLE, "on=False") == ("turn off", None)
+    assert _action_log_parts(UiActionType.TOGGLE, "on=True") == ("turn on", None)
+
+
+def test_action_log_parts_toggle_playback() -> None:
+    assert _action_log_parts(UiActionType.TOGGLE, "playing=False") == ("pause", None)
+    assert _action_log_parts(UiActionType.TOGGLE, "playing=True") == ("resume", None)
+
+
+def test_action_log_parts_bulk_off_keeps_counts() -> None:
+    assert _action_log_parts(
+        UiActionType.BULK_OFF,
+        "affected=1 skipped=1",
+    ) == ("turn off all", "affected=1 skipped=1")
+
+
+def test_format_device_includes_canonical_id_when_label_differs() -> None:
+    assert _format_device("10.0.0.1", "Desk") == "Desk (10.0.0.1)"
+    assert _format_device("10.0.0.1", "10.0.0.1") == "10.0.0.1"
+    assert _format_device("10.0.0.1", None) == "10.0.0.1"
+
+
 def test_kasa_toggle_emits_ui_action_log(caplog: pytest.LogCaptureFixture) -> None:
     fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
     client = _client()
@@ -70,11 +95,11 @@ def test_kasa_toggle_emits_ui_action_log(caplog: pytest.LogCaptureFixture) -> No
     assert response.status_code == HTTPStatus.OK
     assert len(caplog.records) == 1
     message = caplog.records[0].getMessage()
-    assert message.startswith("[ui-action] toggle ")
+    assert message.startswith("[ui-action] turn off ")
     assert "client=testclient" in message
     assert "family=kasa" in message
-    assert "device=10.0.0.1" in message
-    assert "on=False" in message
+    assert "device=Desk (10.0.0.1)" in message
+    assert "on=False" not in message
 
 
 def test_global_bulk_off_emits_ui_action_log(
@@ -107,7 +132,7 @@ def test_global_bulk_off_emits_ui_action_log(
     assert response.status_code == HTTPStatus.OK
     assert len(caplog.records) == 1
     message = caplog.records[0].getMessage()
-    assert message.startswith("[ui-action] bulk_off ")
+    assert message.startswith("[ui-action] turn off all ")
     assert "family=global" in message
     assert "affected=1" in message
     assert "skipped=1" in message

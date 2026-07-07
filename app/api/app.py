@@ -527,6 +527,7 @@ def create_app(args: Any) -> FastAPI:
             action=UiActionType.TOGGLE,
             family_id=DeviceFamilyId.KASA.value,
             device_id=device_id,
+            device_label=kd.preferred_label,
             detail=f"on={body.on}",
         )
         if body.on:
@@ -667,6 +668,7 @@ def create_app(args: Any) -> FastAPI:
             action=UiActionType.TOGGLE,
             family_id=DeviceFamilyId.SONOS.value,
             device_id=device_id,
+            device_label=sp.preferred_label,
             detail=f"playing={body.playing}",
         )
         try:
@@ -750,6 +752,7 @@ def create_app(args: Any) -> FastAPI:
             action=UiActionType.CLOSE,
             family_id=DeviceFamilyId.TAILWIND.value,
             device_id=device_id,
+            device_label=gd.preferred_label,
         )
         await gd.close()
         return UIDeviceActionOut(
@@ -791,6 +794,7 @@ def create_app(args: Any) -> FastAPI:
             action=UiActionType.OPEN,
             family_id=DeviceFamilyId.TAILWIND.value,
             device_id=device_id,
+            device_label=gd.preferred_label,
         )
         await gd.open()
         return UIDeviceActionOut(
@@ -850,6 +854,7 @@ def create_app(args: Any) -> FastAPI:
             action=UiActionType.TOGGLE,
             family_id=DeviceFamilyId.VIZIO.value,
             device_id=device_id,
+            device_label=tv.preferred_label,
             detail=f"on={body.on}",
         )
         if body.on:
