@@ -19,7 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, HTMLResponse, Response
 
 from app import device_discovery_store
-from app.device_enums import DeviceFamilyId
+from app.device_enums import DeviceFamilyId, UiActionType
 from app.logging_config import TRACE_LEVEL
 from app.api.schemas import (
     CompletionAliasesOut,
@@ -44,6 +44,7 @@ from app.api.location_update_routes import router as location_update_router
 from app.api.rules_routes import router as rules_router
 from app.api.webhooks_routes import router as webhooks_router
 from app.api.smtp_routes import router as smtp_router
+from app.api.ui_action_logging import log_ui_action
 from app.api.ui_state import (
     build_kasa_device_view,
     build_sonos_device_view,
@@ -457,12 +458,21 @@ def create_app(args: Any) -> FastAPI:
         "/v1/ui/global/bulk-off",
         dependencies=[Depends(_verify_api_key)],
     )
-    async def global_bulk_off(state: DeviceState) -> UIGlobalBulkActionOut:
+    async def global_bulk_off(
+        request: Request,
+        state: DeviceState,
+    ) -> UIGlobalBulkActionOut:
         # Global "turn off / close everything" — kasa devices get
         # ``turn_off``, tailwind doors get ``close``. ``exclude_from_global=True``
         # rows are honored (they appear in ``skipped``).
         affected, skipped = await bulk_off_global_apply(
             state, cache_path=state.cache_path
+        )
+        log_ui_action(
+            request,
+            action=UiActionType.BULK_OFF,
+            family_id="global",
+            detail=f"affected={len(affected)} skipped={len(skipped)}",
         )
         return UIGlobalBulkActionOut(
             affected=[
@@ -479,10 +489,19 @@ def create_app(args: Any) -> FastAPI:
         "/v1/ui/kasa/bulk-off",
         dependencies=[Depends(_verify_api_key)],
     )
-    async def kasa_bulk_off(state: DeviceState) -> UIBulkActionOut:
+    async def kasa_bulk_off(
+        request: Request,
+        state: DeviceState,
+    ) -> UIBulkActionOut:
         # Family-level bulk: ``exclude_from_global`` is intentionally
         # **not** consulted (the user explicitly clicked "all kasa off").
         affected, skipped = await bulk_off_kasa_apply(state)
+        log_ui_action(
+            request,
+            action=UiActionType.BULK_OFF,
+            family_id=DeviceFamilyId.KASA.value,
+            detail=f"affected={len(affected)} skipped={len(skipped)}",
+        )
         return UIBulkActionOut(affected=affected, skipped=skipped)
 
     @app.post(
@@ -492,6 +511,7 @@ def create_app(args: Any) -> FastAPI:
     async def kasa_set_power(
         device_id: str,
         body: UIPowerSetIn,
+        request: Request,
         state: DeviceState,
     ) -> UIDeviceActionOut:
         kd = find_kasa_by_host(state.kasa_mgr, device_id)
@@ -502,6 +522,13 @@ def create_app(args: Any) -> FastAPI:
                     f"Unknown {DeviceFamilyId.KASA.display_name()} device: {device_id}"
                 ),
             )
+        log_ui_action(
+            request,
+            action=UiActionType.TOGGLE,
+            family_id=DeviceFamilyId.KASA.value,
+            device_id=device_id,
+            detail=f"on={body.on}",
+        )
         if body.on:
             await kd.turn_on()
         else:
@@ -590,13 +617,22 @@ def create_app(args: Any) -> FastAPI:
         "/v1/ui/sonos/pause-all",
         dependencies=[Depends(_verify_api_key)],
     )
-    async def sonos_pause_all(state: DeviceState) -> UIBulkActionOut:
+    async def sonos_pause_all(
+        request: Request,
+        state: DeviceState,
+    ) -> UIBulkActionOut:
         # Family-level bulk: ignores per-device ``exclude_from_global``.
         # When the Sonos manager is absent (``--no-sonos`` or empty
         # discovery) returns an empty result rather than 404 so the UI
         # can call this unconditionally; the family won't be visible
         # anyway. Already-paused zones drop out without LAN traffic.
         affected, skipped = await bulk_pause_sonos_apply(state)
+        log_ui_action(
+            request,
+            action=UiActionType.PAUSE_ALL,
+            family_id=DeviceFamilyId.SONOS.value,
+            detail=f"affected={len(affected)} skipped={len(skipped)}",
+        )
         return UIBulkActionOut(affected=affected, skipped=skipped)
 
     @app.post(
@@ -606,6 +642,7 @@ def create_app(args: Any) -> FastAPI:
     async def sonos_set_playback(
         device_id: str,
         body: UISonosSetIn,
+        request: Request,
         state: DeviceState,
     ) -> UIDeviceActionOut:
         if state.sonos_mgr is None:
@@ -625,6 +662,13 @@ def create_app(args: Any) -> FastAPI:
                     f"{device_id}"
                 ),
             )
+        log_ui_action(
+            request,
+            action=UiActionType.TOGGLE,
+            family_id=DeviceFamilyId.SONOS.value,
+            device_id=device_id,
+            detail=f"playing={body.playing}",
+        )
         try:
             if body.playing:
                 await sp.resume(favorite_index=body.favorite_index)
@@ -658,12 +702,21 @@ def create_app(args: Any) -> FastAPI:
         "/v1/ui/tailwind/close-all",
         dependencies=[Depends(_verify_api_key)],
     )
-    async def tailwind_close_all(state: DeviceState) -> UIBulkActionOut:
+    async def tailwind_close_all(
+        request: Request,
+        state: DeviceState,
+    ) -> UIBulkActionOut:
         # Family-level bulk: ignores per-device ``exclude_from_global``.
         # When the tailwind manager is absent (``--no-tailwind``) returns
         # an empty result rather than 404 so the UI can call this
         # unconditionally; the family won't be visible anyway.
         affected, skipped = await bulk_close_tailwind_apply(state)
+        log_ui_action(
+            request,
+            action=UiActionType.CLOSE_ALL,
+            family_id=DeviceFamilyId.TAILWIND.value,
+            detail=f"affected={len(affected)} skipped={len(skipped)}",
+        )
         return UIBulkActionOut(affected=affected, skipped=skipped)
 
     @app.post(
@@ -672,6 +725,7 @@ def create_app(args: Any) -> FastAPI:
     )
     async def tailwind_close_door(
         device_id: str,
+        request: Request,
         state: DeviceState,
     ) -> UIDeviceActionOut:
         if state.tailwind_mgr is None:
@@ -691,6 +745,12 @@ def create_app(args: Any) -> FastAPI:
                     f"{device_id}"
                 ),
             )
+        log_ui_action(
+            request,
+            action=UiActionType.CLOSE,
+            family_id=DeviceFamilyId.TAILWIND.value,
+            device_id=device_id,
+        )
         await gd.close()
         return UIDeviceActionOut(
             device=build_tailwind_device_view(
@@ -706,6 +766,7 @@ def create_app(args: Any) -> FastAPI:
     )
     async def tailwind_open_door(
         device_id: str,
+        request: Request,
         state: DeviceState,
     ) -> UIDeviceActionOut:
         if state.tailwind_mgr is None:
@@ -725,6 +786,12 @@ def create_app(args: Any) -> FastAPI:
                     f"{device_id}"
                 ),
             )
+        log_ui_action(
+            request,
+            action=UiActionType.OPEN,
+            family_id=DeviceFamilyId.TAILWIND.value,
+            device_id=device_id,
+        )
         await gd.open()
         return UIDeviceActionOut(
             device=build_tailwind_device_view(
@@ -738,8 +805,17 @@ def create_app(args: Any) -> FastAPI:
         "/v1/ui/vizio/bulk-off",
         dependencies=[Depends(_verify_api_key)],
     )
-    async def vizio_bulk_off(state: DeviceState) -> UIBulkActionOut:
+    async def vizio_bulk_off(
+        request: Request,
+        state: DeviceState,
+    ) -> UIBulkActionOut:
         affected, skipped = await bulk_off_vizio_apply(state)
+        log_ui_action(
+            request,
+            action=UiActionType.BULK_OFF,
+            family_id=DeviceFamilyId.VIZIO.value,
+            detail=f"affected={len(affected)} skipped={len(skipped)}",
+        )
         return UIBulkActionOut(affected=affected, skipped=skipped)
 
     @app.post(
@@ -749,6 +825,7 @@ def create_app(args: Any) -> FastAPI:
     async def vizio_set_power(
         device_id: str,
         body: UIPowerSetIn,
+        request: Request,
         state: DeviceState,
     ) -> UIDeviceActionOut:
         if state.vizio_mgr is None:
@@ -768,6 +845,13 @@ def create_app(args: Any) -> FastAPI:
                     f"{device_id}"
                 ),
             )
+        log_ui_action(
+            request,
+            action=UiActionType.TOGGLE,
+            family_id=DeviceFamilyId.VIZIO.value,
+            device_id=device_id,
+            detail=f"on={body.on}",
+        )
         if body.on:
             await tv.turn_on()
         else:

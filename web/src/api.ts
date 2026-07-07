@@ -497,4 +497,19 @@ export const api = {
   },
 };
 
-export { HttpError };
+function isBackendTransportFailure(err: unknown): boolean {
+  // Any HTTP status means the TCP/HTTP stack reached the server — that is
+  // not "can't connect", even for 401/503/500.
+  if (err instanceof HttpError) {
+    return false;
+  }
+  if (err instanceof DOMException) {
+    return err.name === "AbortError";
+  }
+  if (err instanceof TypeError) {
+    return true;
+  }
+  return false;
+}
+
+export { HttpError, isBackendTransportFailure };

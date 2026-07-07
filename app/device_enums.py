@@ -82,3 +82,14 @@ class SettingsCredentialsTestSource(StrEnum):
     DATABASE = "database"
     ENV = "env"
     FORM = "form"
+
+
+class UiActionType(StrEnum):
+    """Web UI device command logged via ``[ui-action]`` lines."""
+
+    BULK_OFF = "bulk_off"
+    CLOSE = "close"
+    CLOSE_ALL = "close_all"
+    OPEN = "open"
+    PAUSE_ALL = "pause_all"
+    TOGGLE = "toggle"
