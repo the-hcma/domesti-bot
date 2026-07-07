@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.14.0](https://github.com/the-hcma/domesti-bot/compare/v1.13.0...v1.14.0) (2026-07-07)
+
+
+### Features
+
+* add daylight astronomical rule condition ([#421](https://github.com/the-hcma/domesti-bot/issues/421)) ([ea43e55](https://github.com/the-hcma/domesti-bot/commit/ea43e55184383793452857ebd4902be2f3fff919))
+* human-friendly ui-action log messages ([#420](https://github.com/the-hcma/domesti-bot/issues/420)) ([1bdeef4](https://github.com/the-hcma/domesti-bot/commit/1bdeef4408de656e02f07dc0fba0d26d666217d0))
+* log UI device actions and tighten offline detection ([#414](https://github.com/the-hcma/domesti-bot/issues/414)) ([7f2de37](https://github.com/the-hcma/domesti-bot/commit/7f2de37258a2cf35e3a5209312a729cf5533f597))
+* poll devices concurrently within each state watcher family ([#416](https://github.com/the-hcma/domesti-bot/issues/416)) ([f238c48](https://github.com/the-hcma/domesti-bot/commit/f238c48095a38dd85c1366d927042224fa0f1595))
+
+
+### Bug Fixes
+
+* improve KLAP recovery and keep Kasa tiles during rediscover (closes [#410](https://github.com/the-hcma/domesti-bot/issues/410)) ([#411](https://github.com/the-hcma/domesti-bot/issues/411)) ([dbd226d](https://github.com/the-hcma/domesti-bot/commit/dbd226d6664b5707af20d3c261fbc4132b4378a9))
+* propagate shutdown through watchers and manager teardown ([#413](https://github.com/the-hcma/domesti-bot/issues/413)) ([3516351](https://github.com/the-hcma/domesti-bot/commit/351635147911e5fb43db303d378b811d56976921))
+* suppress stale health probes that falsely mark UI offline (closes [#407](https://github.com/the-hcma/domesti-bot/issues/407)) ([#408](https://github.com/the-hcma/domesti-bot/issues/408)) ([497d9ee](https://github.com/the-hcma/domesti-bot/commit/497d9ee1fefdb720d730b12711fbeac25ea80378))
+
 ## [1.13.0](https://github.com/the-hcma/domesti-bot/compare/v1.12.0...v1.13.0) (2026-07-06)
 
 
