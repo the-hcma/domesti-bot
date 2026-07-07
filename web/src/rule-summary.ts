@@ -277,6 +277,8 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
           : "until sunrise";
       return `After midnight ${end}`;
     }
+    case "daylight":
+      return "During daylight (sunrise to sunset)";
     case "after_local_time":
       return `After ${formatLocalTime(condition.time_hhmm)}`;
     case "before_local_time":

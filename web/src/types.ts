@@ -252,6 +252,7 @@ export type RuleConditionOut =
       /** Default ``midnight`` — morning window starts at local midnight. */
       window_start?: "midnight";
     }
+  | { type: "daylight" }
   | { type: "after_local_time"; time_hhmm: string }
   | { type: "before_local_time"; time_hhmm: string }
   | { type: "local_time_window"; start_hhmm: string; end_hhmm: string }

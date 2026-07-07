@@ -1,0 +1,30 @@
+---
+description: Committed examples and fixtures use @example.com only — never operator emails
+alwaysApply: true
+---
+
+# Example email addresses
+
+**Never commit real operator, household, or org notification addresses** in tracked files.
+
+Use RFC 2606 placeholder domains only:
+
+- `operator@example.com`, `resident@example.com`, `automation@example.com`, `alerts@example.com`
+- `noreply@example.com` for SMTP from-address examples in tests
+
+## Applies to
+
+- `automation-rules.json.example` (`notification_emails`, `_notes`)
+- `*.example` JSON/YAML bundles, committed test fixtures, and docs that ship example rule/mail config
+- Hermetic tests that need a recipient string (prefer `ops@example.com` — already used in many rule tests)
+
+## Do not use
+
+- Personal or household inboxes (`@hcma.info`, `@kristenmather.com`, GitHub notification aliases tied to a real person, etc.)
+
+## Exceptions
+
+- **Gitignored operator data** (`automation-rules.json`, env files, systemd `EnvironmentFile=`) — real addresses belong only there.
+- **Redaction tests** may mention a fake-looking address only to assert it is scrubbed from logs (not as a recommended pattern).
+
+When editing an example file that still has legacy real addresses, replace them with `@example.com` placeholders in the same change.
