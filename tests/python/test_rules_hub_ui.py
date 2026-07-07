@@ -31,6 +31,10 @@ _HENRIQUE_AT_HOME_LON = -73.888365
 _KRISTEN_OUTSIDE_LAT = 44.417597
 _KRISTEN_OUTSIDE_LON = -72.023842
 
+_BROWSER_BOOT_TIMEOUT_MS = 15_000
+_BROWSER_GOTO_TIMEOUT_MS = 30_000
+_BROWSER_INTERACTION_TIMEOUT_MS = 5_000
+
 
 def _seed_rules_hub_browser_db(cache_path: Path) -> None:
     """Presence rows aligned with ``web/src/rules-mock-fixtures.ts`` coordinates."""
@@ -94,6 +98,31 @@ def _seed_rules_hub_browser_db(cache_path: Path) -> None:
         ),
         retention=default_location_history_retention(),
     )
+
+
+def _switch_to_users_tab(page: Any) -> None:
+    """Open Users tab and wait until its presence map has mounted."""
+
+    page.locator('.rules-tab[data-tab="users"]').click()
+    page.wait_for_function(
+        """() => {
+          if (document.querySelector('.rules-tab[data-tab="users"].rules-tab-active') === null) {
+            return false;
+          }
+          return document.querySelectorAll('.rules-dialog-body .rules-presence-map-shell').length === 1;
+        }""",
+        timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
+    )
+
+
+def _users_presence_map(page: Any) -> Any:
+    return page.locator(".rules-dialog-body .rules-presence-map-shell").first.locator(
+        ".rules-presence-map",
+    )
+
+
+def _users_presence_map_shell(page: Any) -> Any:
+    return page.locator(".rules-dialog-body .rules-presence-map-shell").first
 
 
 def test_index_html_includes_rules_hub_css() -> None:
@@ -216,8 +245,8 @@ def test_rules_menu_hidden_on_compact_viewport(
     context = chromium_browser.new_context(viewport={"width": 390, "height": 844})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
-        page.wait_for_selector("#app", timeout=15_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
+        page.wait_for_selector("#app", timeout=_BROWSER_BOOT_TIMEOUT_MS)
         assert page.locator(".app-menu").count() == 0
     finally:
         context.close()
@@ -233,14 +262,14 @@ def test_status_rule_card_title_cases_user_display_names(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
         dialog = page.locator("dialog.rules-dialog")
-        dialog.wait_for(state="visible", timeout=10_000)
+        dialog.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         dialog.locator(".rules-rule-presence-summary").first.wait_for(
             state="visible",
-            timeout=10_000,
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
         )
         text = dialog.inner_text()
         assert "Henrique:" in text
@@ -260,21 +289,21 @@ def test_status_rule_click_opens_rules_tab_inspector(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator("dialog.rules-dialog").wait_for(state="visible", timeout=10_000)
+        page.locator("dialog.rules-dialog").wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         status_rule = page.locator(
             ".rules-status-rule-card .rules-card-title-btn",
         ).first
-        status_rule.wait_for(state="visible", timeout=10_000)
+        status_rule.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         status_rule.click()
         page.locator('.rules-tab[data-tab="rules"].rules-tab-active').wait_for(
             state="visible",
-            timeout=10_000,
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
         )
         inspector = page.locator(".rules-inspector-panel")
-        inspector.wait_for(state="visible", timeout=10_000)
+        inspector.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         assert inspector.locator(".rules-condition-list").count() >= 1
         assert page.locator(".rules-status-rule-card .rules-condition-list").count() == 0
     finally:
@@ -291,25 +320,25 @@ def test_rules_hub_opens_with_file_backed_rules(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
-        page.wait_for_selector(".app-menu", timeout=15_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
+        page.wait_for_selector(".app-menu", timeout=_BROWSER_BOOT_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
         dialog = page.locator("dialog.rules-dialog")
-        dialog.wait_for(state="visible", timeout=10_000)
+        dialog.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         source_pill = page.locator(".rules-source-pill")
-        source_pill.wait_for(state="visible", timeout=10_000)
+        source_pill.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         assert "automation-rules.json" in source_pill.inner_text().lower()
         assert "Automations" in dialog.inner_text()
         assert "Evening arrival" in dialog.inner_text()
         page.locator('.rules-tab[data-tab="rules"]').click()
         page.get_by_text("Rules are loaded from automation-rules.json").wait_for(
             state="visible",
-            timeout=10_000,
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
         )
         assert page.get_by_role("button", name="Add rule").count() == 0
         rules_card = page.locator(".rules-card").first
-        rules_card.wait_for(state="visible", timeout=10_000)
+        rules_card.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         card_text = rules_card.inner_text()
         assert "Front door lights" in card_text
         assert "192.168.1.42" not in card_text
@@ -327,35 +356,41 @@ def test_user_presence_map_renders_osm_tiles_with_filters(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
         dialog = page.locator("dialog.rules-dialog")
-        dialog.wait_for(state="visible", timeout=10_000)
-        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        dialog.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
+        page.locator(".rules-presence-map-filters").first.wait_for(
+            state="visible",
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
+        )
         page.wait_for_function(
             """() => {
               const map = document.querySelector('.rules-presence-map.leaflet-container');
               return map !== null && map.querySelectorAll('img.leaflet-tile').length > 0;
             }""",
-            timeout=15_000,
+            timeout=_BROWSER_BOOT_TIMEOUT_MS,
         )
         assert page.locator(".rules-presence-map-filter").count() >= 2
         assert page.locator(".leaflet-control-zoom").count() >= 1
 
-        page.locator('.rules-tab[data-tab="users"]').click()
-        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        _switch_to_users_tab(page)
+        page.locator(".rules-presence-map-filters").first.wait_for(
+            state="visible",
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
+        )
         page.wait_for_function(
             """() => {
               const map = document.querySelector('.rules-presence-map.leaflet-container');
               return map !== null && map.querySelectorAll('img.leaflet-tile').length > 0;
             }""",
-            timeout=15_000,
+            timeout=_BROWSER_BOOT_TIMEOUT_MS,
         )
         marker = page.locator(".rules-presence-user-marker").first
         marker.hover()
         tooltip = page.locator(".rules-presence-map-hover-tooltip")
-        tooltip.wait_for(state="visible", timeout=5_000)
+        tooltip.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         box = tooltip.bounding_box()
         assert box is not None
         assert box["width"] >= 120
@@ -375,11 +410,10 @@ def test_users_tab_osm_tiles_are_visible(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator('.rules-tab[data-tab="users"]').click()
-        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        _switch_to_users_tab(page)
         page.wait_for_function(
             """() => {
               const tile = document.querySelector('.rules-presence-map img.leaflet-tile');
@@ -387,7 +421,7 @@ def test_users_tab_osm_tiles_are_visible(
               const rect = tile.getBoundingClientRect();
               return rect.width > 0 && rect.height > 0;
             }""",
-            timeout=15_000,
+            timeout=_BROWSER_BOOT_TIMEOUT_MS,
         )
     finally:
         context.close()
@@ -403,12 +437,15 @@ def test_user_presence_map_shows_color_legend(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        page.locator(".rules-presence-map-filters").first.wait_for(
+            state="visible",
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
+        )
         legend = page.locator(".rules-presence-map-legend")
-        legend.wait_for(state="visible", timeout=10_000)
+        legend.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         assert legend.locator(".rules-presence-map-legend-item").count() >= 2
         assert "Henrique" in legend.inner_text()
         assert page.locator(".rules-presence-map-filter-swatch").count() >= 2
@@ -426,10 +463,13 @@ def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        page.locator(".rules-presence-map-filters").first.wait_for(
+            state="visible",
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
+        )
         body = page.locator(".rules-dialog-body")
         before = body.evaluate(
             """(el) => ({
@@ -442,7 +482,7 @@ def test_status_map_hover_tooltip_does_not_expand_dialog_scroll(
         marker = page.locator(".rules-presence-user-marker").first
         marker.hover()
         tooltip = page.locator(".rules-presence-map-hover-tooltip")
-        tooltip.wait_for(state="visible", timeout=5_000)
+        tooltip.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         box = tooltip.bounding_box()
         assert box is not None
         assert box["width"] >= 120
@@ -470,26 +510,23 @@ def test_users_tab_tooltip_not_clipped_at_map_edge(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator('.rules-tab[data-tab="users"]').click()
-        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
-        page.wait_for_function(
-            """() => {
-              const map = document.querySelector('.rules-presence-map.leaflet-container');
-              return map !== null && map.querySelectorAll('img.leaflet-tile').length > 0;
-            }""",
-            timeout=15_000,
+        _switch_to_users_tab(page)
+        users_map = _users_presence_map(page)
+        users_map.locator("img.leaflet-tile").first.wait_for(
+            state="visible",
+            timeout=_BROWSER_BOOT_TIMEOUT_MS,
         )
-        overflow = page.locator(".rules-presence-map").evaluate(
+        overflow = users_map.evaluate(
             "(el) => getComputedStyle(el).overflow",
         )
         assert overflow == "hidden"
 
         top_marker_y = float("inf")
         top_marker = None
-        for marker in page.locator(".rules-presence-user-marker").all():
+        for marker in users_map.locator(".rules-presence-user-marker").all():
             box = marker.bounding_box()
             if box is None:
                 continue
@@ -498,27 +535,26 @@ def test_users_tab_tooltip_not_clipped_at_map_edge(
                 top_marker = marker
         assert top_marker is not None
         top_marker.hover()
-        tooltip = page.locator(".rules-presence-map-hover-tooltip")
-        tooltip.wait_for(state="visible", timeout=5_000)
-        hosted_on_shell = page.evaluate(
-            """() => {
-              const tooltip = document.querySelector('.rules-presence-map-hover-tooltip');
-              const map = document.querySelector('.rules-presence-map.leaflet-container');
-              if (tooltip === null || map === null) return false;
-              if (map.contains(tooltip)) return false;
-              return tooltip.closest('.rules-presence-map-shell') !== null;
+        tooltip = _users_presence_map_shell(page).locator(
+            ".rules-presence-map-hover-tooltip.is-visible",
+        )
+        tooltip.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
+        hosted_on_shell = tooltip.evaluate(
+            """(el) => {
+              const map = el.closest('.rules-presence-map-shell')?.querySelector('.rules-presence-map');
+              if (map === null || map === undefined) return false;
+              return !map.contains(el);
             }""",
         )
         assert hosted_on_shell
         box = tooltip.bounding_box()
         assert box is not None
         assert box["width"] >= 120
-        away_from_origin = page.evaluate(
-            """() => {
-              const tooltip = document.querySelector('.rules-presence-map-hover-tooltip.is-visible');
-              const shell = document.querySelector('.rules-presence-map-shell');
-              if (tooltip === null || shell === null) return false;
-              const t = tooltip.getBoundingClientRect();
+        away_from_origin = tooltip.evaluate(
+            """(el) => {
+              const shell = el.closest('.rules-presence-map-shell');
+              if (shell === null) return false;
+              const t = el.getBoundingClientRect();
               const s = shell.getBoundingClientRect();
               return t.left > s.left + 24 || t.top > s.top + 24;
             }""",
@@ -538,24 +574,30 @@ def test_user_tooltip_hides_when_pointer_leaves_marker(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator('.rules-tab[data-tab="users"]').click()
-        page.locator(".rules-presence-map-filters").wait_for(state="visible", timeout=10_000)
+        _switch_to_users_tab(page)
         page.wait_for_function(
             """() => {
               const tooltip = document.querySelector('.rules-presence-map-hover-tooltip');
               return tooltip !== null && !tooltip.classList.contains('is-visible');
             }""",
-            timeout=10_000,
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
         )
         marker = page.locator(".rules-presence-user-marker").first
         marker.hover()
         tooltip = page.locator(".rules-presence-map-hover-tooltip.is-visible")
-        tooltip.wait_for(state="visible", timeout=5_000)
+        tooltip.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
 
-        map_box = page.locator(".rules-presence-map").bounding_box()
+        map_box = marker.evaluate(
+            """(el) => {
+              const map = el.closest('.rules-presence-map');
+              if (map === null) return null;
+              const rect = map.getBoundingClientRect();
+              return {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
+            }""",
+        )
         assert map_box is not None
         page.mouse.move(map_box["x"] + 12, map_box["y"] + 12)
         page.wait_for_function(
@@ -563,7 +605,7 @@ def test_user_tooltip_hides_when_pointer_leaves_marker(
               const tooltip = document.querySelector('.rules-presence-map-hover-tooltip');
               return tooltip !== null && !tooltip.classList.contains('is-visible');
             }""",
-            timeout=5_000,
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
         )
     finally:
         context.close()
@@ -579,19 +621,30 @@ def test_conditions_tab_shows_astronomical_dynamic_cards(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
+        page.locator("dialog.rules-dialog").wait_for(
+            state="visible",
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
+        )
         page.locator('.rules-tab[data-tab="conditions"]').click()
-        for label in (
-            "Before sunrise (dynamic)",
-            "Daylight (dynamic)",
-            "After sunset (dynamic)",
-        ):
-            page.locator(".rules-dynamic-badge", has_text=label).wait_for(
-                state="visible",
-                timeout=5_000,
-            )
+        page.wait_for_function(
+            """() => {
+              if (document.querySelector('.rules-tab[data-tab="conditions"].rules-tab-active') === null) {
+                return false;
+              }
+              const labels = new Set(
+                [...document.querySelectorAll('.rules-dialog-body .rules-dynamic-badge')].map(
+                  (el) => el.textContent?.trim() ?? '',
+                ),
+              );
+              return labels.has('Before sunrise (dynamic)')
+                && labels.has('Daylight (dynamic)')
+                && labels.has('After sunset (dynamic)');
+            }""",
+            timeout=_BROWSER_INTERACTION_TIMEOUT_MS,
+        )
     finally:
         context.close()
 
@@ -606,15 +659,15 @@ def test_conditions_home_location_link_opens_geofences_tab(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
         page.locator('.rules-tab[data-tab="conditions"]').click()
-        page.locator(".rules-inline-link").first.wait_for(state="visible", timeout=10_000)
+        page.locator(".rules-inline-link").first.wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         assert page.locator(".rules-inline-link").first.inner_text() == "House"
         page.locator(".rules-inline-link").first.click()
-        page.locator("#rules-geofence-map").wait_for(state="visible", timeout=10_000)
-        page.locator("tr.rules-geofence-row-focused").wait_for(state="visible", timeout=10_000)
+        page.locator("#rules-geofence-map").wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
+        page.locator("tr.rules-geofence-row-focused").wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         assert page.locator('.rules-tab[data-tab="geofences"]').evaluate(
             "(el) => el.classList.contains('rules-tab-active')",
         )
@@ -632,10 +685,10 @@ def test_mail_tab_loads_smtp_settings_from_api(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
-        page.locator("dialog.rules-dialog").wait_for(state="visible", timeout=10_000)
+        page.locator("dialog.rules-dialog").wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         with page.expect_request(
             lambda req: req.url.endswith("/v1/settings/smtp") and req.method == "GET",
         ) as smtp_get:
@@ -643,7 +696,7 @@ def test_mail_tab_loads_smtp_settings_from_api(
         response = smtp_get.value.response()
         assert response is not None
         assert response.status == 200
-        page.locator(".rules-mail-form").wait_for(state="visible", timeout=10_000)
+        page.locator(".rules-mail-form").wait_for(state="visible", timeout=_BROWSER_INTERACTION_TIMEOUT_MS)
         host_input = page.locator(".rules-mail-form input").first
         assert host_input.input_value() == "localhost"
     finally:
@@ -660,11 +713,11 @@ def test_geofence_draw_mode_adds_crosshair_class(
     context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
     try:
-        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_BROWSER_GOTO_TIMEOUT_MS)
         page.locator(".btn-menu").click()
         page.get_by_role("menuitem", name="Automations").click()
         page.locator('.rules-tab[data-tab="geofences"]').click()
-        page.locator("#rules-geofence-map").wait_for(state="visible", timeout=15_000)
+        page.locator("#rules-geofence-map").wait_for(state="visible", timeout=_BROWSER_BOOT_TIMEOUT_MS)
         page.get_by_role("button", name="Draw geofence").click()
         map_el = page.locator("#rules-geofence-map")
         assert "rules-geofence-draw-mode" in (map_el.get_attribute("class") or "")
