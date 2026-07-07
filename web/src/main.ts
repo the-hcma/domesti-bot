@@ -4,7 +4,7 @@
 // with the tile UI: one family-section per device family, one tile per
 // device, plus per-family and global bulk actions.
 
-import { api, HttpError } from "./api.js";
+import { api, HttpError, isBackendTransportFailure } from "./api.js";
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
 import type {
@@ -104,12 +104,10 @@ class DomestiBotController {
   private state: UIStateOut | null = null;
   private connected = false;
   private devicesReady = false;
-  // Monotonic ids so stale /health probes cannot overwrite a fresher
-  // /v1/ui/state success (common on mobile after a device action).
-  private healthProbeSeq = 0;
-  private stateSuccessSeq = 0;
-  private lastRenderedConnected = false;
-  private lastRenderedDevicesReady = false;
+  // Consecutive transport failures (no HTTP response) on /v1/ui/state before
+  // we probe /health and possibly mark the UI offline.
+  private pollTransportFailureStreak = 0;
+  private static readonly POLL_TRANSPORT_FAILURES_BEFORE_VERIFY = 2;
   private refreshInFlight = false;
   private pollTimer: number | null = null;
   // The recoverable-action toast lives outside ``#app`` so it
@@ -153,7 +151,6 @@ class DomestiBotController {
     const deadline =
       performance.now() + DomestiBotController.BOOTSTRAP_DEADLINE_MS;
     while (true) {
-      this.beginHealthProbe();
       try {
         this.state = await api.fetchState();
         this.markBackendReadyFromState();
@@ -181,66 +178,55 @@ class DomestiBotController {
     }
   }
 
-  private beginHealthProbe(): void {
-    // Decoupled from /v1/ui/state so the 3s health timeout can update
-    // connection chrome without waiting for the slower state poll.
-    const probeSeq = ++this.healthProbeSeq;
-    const stateSuccessSeqAtStart = this.stateSuccessSeq;
-    void api.fetchHealth().then(
-      (health) => {
-        if (
-          !this.shouldApplyHealthProbeResult(probeSeq, stateSuccessSeqAtStart)
-        ) {
-          return;
-        }
-        this.connected = health.status === "ok";
-        this.devicesReady = health.ready;
-        this.syncConnectionChrome();
-      },
-      () => {
-        if (
-          !this.shouldApplyHealthProbeResult(probeSeq, stateSuccessSeqAtStart)
-        ) {
-          return;
-        }
-        this.connected = false;
-        this.devicesReady = false;
-        this.syncConnectionChrome();
-      },
-    );
-  }
-
-  private shouldApplyHealthProbeResult(
-    probeSeq: number,
-    stateSuccessSeqAtStart: number,
-  ): boolean {
-    if (probeSeq !== this.healthProbeSeq) {
-      return false;
-    }
-    // A /v1/ui/state fetch that finished after this probe started is a
-    // stronger signal than a slow or aborted /health on mobile Wi‑Fi.
-    if (this.stateSuccessSeq > stateSuccessSeqAtStart) {
-      return false;
-    }
-    return true;
-  }
-
-  private syncConnectionChrome(): void {
-    this.root.dataset["connected"] = this.connected ? "true" : "false";
-    const chromeChanged =
-      this.connected !== this.lastRenderedConnected ||
-      this.devicesReady !== this.lastRenderedDevicesReady;
-    if (chromeChanged && this.state !== null) {
-      this.render();
-    }
-  }
-
   private markBackendReadyFromState(): void {
     // A successful /v1/ui/state implies the backend answered and discovery
-    // finished — do not leave the UI offline when /health alone timed out.
-    this.stateSuccessSeq += 1;
+    // finished.
+    this.pollTransportFailureStreak = 0;
     this.connected = true;
     this.devicesReady = true;
+  }
+
+  private async handlePollFailure(err: unknown): Promise<void> {
+    // Any HTTP response means the server is reachable — keep showing cached
+    // tiles even when /v1/ui/state is slow, auth fails, or discovery hiccups.
+    if (err instanceof HttpError) {
+      this.pollTransportFailureStreak = 0;
+      return;
+    }
+    if (!isBackendTransportFailure(err)) {
+      this.pollTransportFailureStreak = 0;
+      return;
+    }
+    this.pollTransportFailureStreak += 1;
+    if (
+      this.pollTransportFailureStreak
+      < DomestiBotController.POLL_TRANSPORT_FAILURES_BEFORE_VERIFY
+    ) {
+      return;
+    }
+    if (!(await this.verifyBackendUnreachable())) {
+      return;
+    }
+    this.connected = false;
+    this.devicesReady = false;
+  }
+
+  private async verifyBackendUnreachable(): Promise<boolean> {
+    try {
+      await api.fetchHealth();
+      this.pollTransportFailureStreak = 0;
+      return false;
+    } catch (probeErr) {
+      if (probeErr instanceof HttpError) {
+        this.pollTransportFailureStreak = 0;
+        return false;
+      }
+      if (isBackendTransportFailure(probeErr)) {
+        return true;
+      }
+      this.pollTransportFailureStreak = 0;
+      return false;
+    }
   }
 
   private controlsEnabled(): boolean {
@@ -594,7 +580,6 @@ class DomestiBotController {
       return;
     }
     this.refreshInFlight = true;
-    this.beginHealthProbe();
     try {
       const state = await api.fetchState();
       this.markBackendReadyFromState();
@@ -602,8 +587,9 @@ class DomestiBotController {
       this.applyPendingPredictionsTo(this.state);
       warmCompactTileIcons(this.state);
       this.render();
-    } catch {
+    } catch (err) {
       if (this.state) {
+        await this.handlePollFailure(err);
         this.render();
       }
     } finally {
@@ -661,8 +647,6 @@ class DomestiBotController {
     blurFocusedElementInApp(this.root);
     this.root.replaceChildren();
     this.root.dataset["connected"] = this.connected ? "true" : "false";
-    this.lastRenderedConnected = this.connected;
-    this.lastRenderedDevicesReady = this.devicesReady;
     this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
     this.renderOperatorAlert(state.operator_alert);
     if (state.families.length > 0) {
