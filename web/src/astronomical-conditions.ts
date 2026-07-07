@@ -10,6 +10,8 @@ export const AFTER_SUNSET_WINDOW_DESCRIPTION =
   "Evening window: local sunset through midnight.";
 export const BEFORE_SUNRISE_WINDOW_DESCRIPTION =
   "Morning window: local midnight through sunrise.";
+export const DAYLIGHT_WINDOW_DESCRIPTION =
+  "Daylight window: local sunrise through sunset.";
 
 export function localMinutesFromIso(iso: string): number {
   const d = new Date(iso);
@@ -107,6 +109,22 @@ export function beforeSunriseStatusMessage(sun: RulesSunOut): {
   return {
     dynamicLabel: "Before sunrise (dynamic)",
     primary: `Outside morning window — sunrise was ${formatLocalTime(sun.sunrise_at)}`,
+  };
+}
+
+export function daylightStatusMessage(sun: RulesSunOut): {
+  dynamicLabel: string;
+  primary: string;
+} {
+  if (!sun.is_dark) {
+    return {
+      dynamicLabel: "Daylight (dynamic)",
+      primary: `Daylight active — sunrise ${formatLocalTime(sun.sunrise_at)}, sunset ${formatLocalTime(sun.sunset_at)}`,
+    };
+  }
+  return {
+    dynamicLabel: "Daylight (dynamic)",
+    primary: `Outside daylight — sunrise ${formatLocalTime(sun.sunrise_at)}, sunset ${formatLocalTime(sun.sunset_at)}`,
   };
 }
 

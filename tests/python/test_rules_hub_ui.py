@@ -570,6 +570,33 @@ def test_user_tooltip_hides_when_pointer_leaves_marker(
 
 
 @pytest.mark.browser
+def test_conditions_tab_shows_astronomical_dynamic_cards(
+    chromium_browser: Any,
+    landing_base_url: str,
+) -> None:
+    """Conditions tab lists sunrise, daylight, and sunset astronomical cards."""
+
+    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800})
+    page = context.new_page()
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=30_000)
+        page.locator(".btn-menu").click()
+        page.get_by_role("menuitem", name="Automations").click()
+        page.locator('.rules-tab[data-tab="conditions"]').click()
+        for label in (
+            "Before sunrise (dynamic)",
+            "Daylight (dynamic)",
+            "After sunset (dynamic)",
+        ):
+            page.locator(".rules-dynamic-badge", has_text=label).wait_for(
+                state="visible",
+                timeout=5_000,
+            )
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
 def test_conditions_home_location_link_opens_geofences_tab(
     chromium_browser: Any,
     landing_base_url: str,
