@@ -16,6 +16,11 @@ when a backend gains a push surface, swap in a subscription-based
 implementation of :class:`DeviceStateWatcher` and the lifespan keeps
 working unchanged.
 
+Watchers run **one asyncio task per backend** (families in parallel).
+Within each family, every device in that sweep is refreshed **concurrently**
+via :func:`_refresh_all_devices_concurrently` so a slow zone or plug does
+not block the rest of the family.
+
 Lifecycle (see ``app.api.app``):
 
 1. lifespan begins discovery in the background.
@@ -105,25 +110,34 @@ class KasaPollingWatcher(DeviceStateWatcher):
         self._interval_s = interval_s
 
     async def _refresh_once(self, *, stop: asyncio.Event) -> None:
+        refreshes: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = []
         for kd in self._mgr.switches:
-            if stop.is_set():
-                return
-            host = (kd._kDevice.host or "").strip() or "?"
-            try:
-                if not await _await_with_stop(
-                    stop,
-                    lambda: self._mgr.is_on(kd.identifier),
-                ):
+            task_name = f"state-watcher-{DeviceFamilyId.KASA.value}-{kd.identifier}"
+
+            async def _refresh_switch(device: Any = kd) -> None:
+                host = (device._kDevice.host or "").strip() or "?"
+                try:
+                    if not await _await_with_stop(
+                        stop,
+                        lambda ident=device.identifier: self._mgr.is_on(ident),
+                    ):
+                        return
+                except Exception as exc:
+                    _log_watcher_refresh_failure(
+                        backend="kasa",
+                        device_id=host,
+                        exc=exc,
+                    )
                     return
-            except Exception as exc:
-                _log_watcher_refresh_failure(backend="kasa", device_id=host, exc=exc)
-                continue
-            if self._change_detector is not None:
-                self._change_detector.note_bool_state(
-                    DeviceFamilyId.KASA,
-                    kd.identifier,
-                    kd.is_on,
-                )
+                if self._change_detector is not None:
+                    self._change_detector.note_bool_state(
+                        DeviceFamilyId.KASA,
+                        device.identifier,
+                        device.is_on,
+                    )
+
+            refreshes.append((task_name, _refresh_switch))
+        await _refresh_all_devices_concurrently(stop=stop, device_refreshes=refreshes)
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -160,28 +174,33 @@ class SonosPollingWatcher(DeviceStateWatcher):
         self._interval_s = interval_s
 
     async def _refresh_once(self, *, stop: asyncio.Event) -> None:
+        refreshes: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = []
         for sp in self._mgr.players:
-            if stop.is_set():
-                return
-            try:
-                if not await _await_with_stop(
-                    stop,
-                    lambda: self._mgr.is_playing(sp.identifier),
-                ):
+            task_name = f"state-watcher-{DeviceFamilyId.SONOS.value}-{sp.identifier}"
+
+            async def _refresh_player(device: Any = sp) -> None:
+                try:
+                    if not await _await_with_stop(
+                        stop,
+                        lambda ident=device.identifier: self._mgr.is_playing(ident),
+                    ):
+                        return
+                except Exception as exc:
+                    _log_watcher_refresh_failure(
+                        backend="sonos",
+                        device_id=device.identifier,
+                        exc=exc,
+                    )
                     return
-            except Exception as exc:
-                _log_watcher_refresh_failure(
-                    backend="sonos",
-                    device_id=sp.identifier,
-                    exc=exc,
-                )
-                continue
-            if self._change_detector is not None:
-                self._change_detector.note_bool_state(
-                    DeviceFamilyId.SONOS,
-                    sp.identifier,
-                    sp.is_playing,
-                )
+                if self._change_detector is not None:
+                    self._change_detector.note_bool_state(
+                        DeviceFamilyId.SONOS,
+                        device.identifier,
+                        device.is_playing,
+                    )
+
+            refreshes.append((task_name, _refresh_player))
+        await _refresh_all_devices_concurrently(stop=stop, device_refreshes=refreshes)
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -214,28 +233,33 @@ class TailwindPollingWatcher(DeviceStateWatcher):
         self._interval_s = interval_s
 
     async def _refresh_once(self, *, stop: asyncio.Event) -> None:
+        refreshes: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = []
         for gd in self._mgr.doors:
-            if stop.is_set():
-                return
-            try:
-                if not await _await_with_stop(
-                    stop,
-                    lambda: self._mgr.is_open(gd.identifier),
-                ):
+            task_name = f"state-watcher-{DeviceFamilyId.TAILWIND.value}-{gd.identifier}"
+
+            async def _refresh_door(device: Any = gd) -> None:
+                try:
+                    if not await _await_with_stop(
+                        stop,
+                        lambda ident=device.identifier: self._mgr.is_open(ident),
+                    ):
+                        return
+                except Exception as exc:
+                    _log_watcher_refresh_failure(
+                        backend="tailwind",
+                        device_id=device.identifier,
+                        exc=exc,
+                    )
                     return
-            except Exception as exc:
-                _log_watcher_refresh_failure(
-                    backend="tailwind",
-                    device_id=gd.identifier,
-                    exc=exc,
-                )
-                continue
-            if self._change_detector is not None:
-                self._change_detector.note_bool_state(
-                    DeviceFamilyId.TAILWIND,
-                    gd.identifier,
-                    gd.is_open,
-                )
+                if self._change_detector is not None:
+                    self._change_detector.note_bool_state(
+                        DeviceFamilyId.TAILWIND,
+                        device.identifier,
+                        device.is_open,
+                    )
+
+            refreshes.append((task_name, _refresh_door))
+        await _refresh_all_devices_concurrently(stop=stop, device_refreshes=refreshes)
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -266,39 +290,43 @@ class VizioPollingWatcher(DeviceStateWatcher):
         self._interval_s = interval_s
 
     async def _refresh_once(self, *, stop: asyncio.Event) -> None:
+        refreshes: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = []
         for tv in self._mgr.tvs:
-            if stop.is_set():
-                return
+            task_name = f"state-watcher-{DeviceFamilyId.VIZIO.value}-{tv.identifier}"
 
-            async def _refresh_tv() -> None:
-                await asyncio.wait_for(
-                    tv.refresh_power_state(poll=True),
-                    timeout=_VIZIO_WATCHER_REFRESH_TIMEOUT_S,
-                )
-
-            try:
-                if not await _await_with_stop(stop, _refresh_tv):
-                    return
-            except asyncio.TimeoutError:
-                _LOGGER.warning(
-                    "[state-watcher vizio] %s update timed out after %.1fs; "
-                    "keeping last known state",
-                    tv.identifier,
-                    _VIZIO_WATCHER_REFRESH_TIMEOUT_S,
-                )
-            except Exception as exc:
-                _log_watcher_refresh_failure(
-                    backend="vizio",
-                    device_id=tv.identifier,
-                    exc=exc,
-                )
-            else:
-                if self._change_detector is not None:
-                    self._change_detector.note_bool_state(
-                        DeviceFamilyId.VIZIO,
-                        tv.identifier,
-                        tv.is_on,
+            async def _refresh_tv_device(device: Any = tv) -> None:
+                async def _refresh_tv() -> None:
+                    await asyncio.wait_for(
+                        device.refresh_power_state(poll=True),
+                        timeout=_VIZIO_WATCHER_REFRESH_TIMEOUT_S,
                     )
+
+                try:
+                    if not await _await_with_stop(stop, _refresh_tv):
+                        return
+                except asyncio.TimeoutError:
+                    _LOGGER.warning(
+                        "[state-watcher vizio] %s update timed out after %.1fs; "
+                        "keeping last known state",
+                        device.identifier,
+                        _VIZIO_WATCHER_REFRESH_TIMEOUT_S,
+                    )
+                except Exception as exc:
+                    _log_watcher_refresh_failure(
+                        backend="vizio",
+                        device_id=device.identifier,
+                        exc=exc,
+                    )
+                else:
+                    if self._change_detector is not None:
+                        self._change_detector.note_bool_state(
+                            DeviceFamilyId.VIZIO,
+                            device.identifier,
+                            device.is_on,
+                        )
+
+            refreshes.append((task_name, _refresh_tv_device))
+        await _refresh_all_devices_concurrently(stop=stop, device_refreshes=refreshes)
 
     async def run(self, *, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -484,20 +512,6 @@ async def run_device_state_watchers(
                 )
 
 
-@contextlib.asynccontextmanager
-async def _cancel_pending_tasks_on_exit(
-    *tasks: asyncio.Task[object],
-) -> AsyncIterator[None]:
-    try:
-        yield
-    finally:
-        for pending in tasks:
-            if not pending.done():
-                pending.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await pending
-
-
 async def _await_with_stop(
     stop: asyncio.Event,
     awaitable_factory: Callable[[], Coroutine[Any, Any, object]],
@@ -527,3 +541,69 @@ async def _await_with_stop(
             await stop_task
         await task
         return True
+
+
+@contextlib.asynccontextmanager
+async def _cancel_pending_tasks_on_exit(
+    *tasks: asyncio.Task[object],
+) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        for pending in tasks:
+            if not pending.done():
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await pending
+
+
+async def _refresh_all_devices_concurrently(
+    *,
+    stop: asyncio.Event,
+    device_refreshes: Iterable[tuple[str, Callable[[], Coroutine[Any, Any, None]]]],
+) -> None:
+    """Run per-device refresh coroutines in parallel for one poll cycle."""
+    if stop.is_set():
+        return
+    materialised = list(device_refreshes)
+    if not materialised:
+        return
+    device_tasks = [
+        asyncio.create_task(refresh(), name=task_name)
+        for task_name, refresh in materialised
+    ]
+
+    async def _gather_device_results() -> list[BaseException | None]:
+        return await asyncio.gather(*device_tasks, return_exceptions=True)
+
+    gather_task = asyncio.create_task(
+        _gather_device_results(),
+        name="state-watcher-gather",
+    )
+    stop_task = asyncio.create_task(stop.wait(), name="state-watcher-stop-wait")
+    async with _cancel_pending_tasks_on_exit(gather_task, stop_task):
+        done, _pending = await asyncio.wait(
+            {gather_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_task in done:
+            for device_task in device_tasks:
+                if not device_task.done():
+                    device_task.cancel()
+            gather_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await gather_task
+            return
+        stop_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stop_task
+        results = await gather_task
+    for (task_name, _refresh), result in zip(materialised, results, strict=True):
+        if isinstance(result, BaseException) and not isinstance(
+            result, asyncio.CancelledError
+        ):
+            _LOGGER.warning(
+                "[state-watcher] %s failed unexpectedly; keeping last known state",
+                task_name,
+                exc_info=result,
+            )
