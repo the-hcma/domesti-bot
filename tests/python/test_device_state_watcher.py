@@ -34,6 +34,7 @@ from app.device_state_watcher import (
     SonosPollingWatcher,
     TailwindPollingWatcher,
     VizioPollingWatcher,
+    _refresh_all_devices_concurrently,
     build_default_watchers,
     poll_interval_from_env,
     run_device_state_watchers,
@@ -441,6 +442,56 @@ def test_poll_interval_from_env_rejects_value_below_floor(
     monkeypatch.setenv("DOMESTI_STATE_POLL_INTERVAL_S", "0.1")
     with pytest.raises(ValueError, match=">= 1.0"):
         poll_interval_from_env()
+
+
+@pytest.mark.asyncio
+async def test_refresh_all_devices_concurrently_cancels_in_flight_on_stop() -> None:
+    a_started = asyncio.Event()
+    b_started = asyncio.Event()
+    stop = asyncio.Event()
+
+    async def refresh_a() -> None:
+        a_started.set()
+        await asyncio.sleep(3600.0)
+
+    async def refresh_b() -> None:
+        b_started.set()
+        await asyncio.sleep(3600.0)
+
+    task = asyncio.create_task(
+        _refresh_all_devices_concurrently(
+            stop=stop,
+            device_refreshes=[
+                ("state-watcher-kasa-host-a", refresh_a),
+                ("state-watcher-kasa-host-b", refresh_b),
+            ],
+        )
+    )
+    await asyncio.wait_for(
+        asyncio.gather(a_started.wait(), b_started.wait()),
+        timeout=1.0,
+    )
+    stop.set()
+    await asyncio.wait_for(task, timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_refresh_all_devices_concurrently_logs_unexpected_exception() -> None:
+    async def boom() -> None:
+        raise RuntimeError("post-poll bookkeeping failed")
+
+    with patch("app.device_state_watcher._LOGGER.warning") as warning_mock:
+        await _refresh_all_devices_concurrently(
+            stop=asyncio.Event(),
+            device_refreshes=[("state-watcher-kasa-host-a", boom)],
+        )
+
+    warning_mock.assert_called_once()
+    assert warning_mock.call_args.args == (
+        "[state-watcher] %s failed unexpectedly; keeping last known state",
+        "state-watcher-kasa-host-a",
+    )
+    assert warning_mock.call_args.kwargs.get("exc_info") is not None
 
 
 @pytest.mark.asyncio

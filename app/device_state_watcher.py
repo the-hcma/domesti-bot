@@ -568,8 +568,42 @@ async def _refresh_all_devices_concurrently(
     materialised = list(device_refreshes)
     if not materialised:
         return
-    tasks = [
+    device_tasks = [
         asyncio.create_task(refresh(), name=task_name)
         for task_name, refresh in materialised
     ]
-    await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _gather_device_results() -> list[BaseException | None]:
+        return await asyncio.gather(*device_tasks, return_exceptions=True)
+
+    gather_task = asyncio.create_task(
+        _gather_device_results(),
+        name="state-watcher-gather",
+    )
+    stop_task = asyncio.create_task(stop.wait(), name="state-watcher-stop-wait")
+    async with _cancel_pending_tasks_on_exit(gather_task, stop_task):
+        done, _pending = await asyncio.wait(
+            {gather_task, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if stop_task in done:
+            for device_task in device_tasks:
+                if not device_task.done():
+                    device_task.cancel()
+            gather_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await gather_task
+            return
+        stop_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stop_task
+        results = await gather_task
+    for (task_name, _refresh), result in zip(materialised, results, strict=True):
+        if isinstance(result, BaseException) and not isinstance(
+            result, asyncio.CancelledError
+        ):
+            _LOGGER.warning(
+                "[state-watcher] %s failed unexpectedly; keeping last known state",
+                task_name,
+                exc_info=result,
+            )
