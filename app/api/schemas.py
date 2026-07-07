@@ -850,6 +850,10 @@ class DaysOfWeekCondition(BaseModel):
     days: list[int]
 
 
+class DaylightCondition(BaseModel):
+    type: Literal["daylight"]
+
+
 class RuleConditionDeviceRefOut(BaseModel):
     """One device reference inside a device-state rule condition."""
 
@@ -916,6 +920,7 @@ RuleConditionOut = Annotated[
     | AnyConditionsCondition
     | BeforeLocalTimeCondition
     | BeforeSunriseCondition
+    | DaylightCondition
     | DaysOfWeekCondition
     | DevicesAllOnCondition
     | DevicesAnyOffCondition

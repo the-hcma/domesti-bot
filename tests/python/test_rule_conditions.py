@@ -14,6 +14,7 @@ import pytest
 from app.api.schemas import (
     AfterSunsetCondition,
     AnyConditionsCondition,
+    DaylightCondition,
     DevicesAllOnCondition,
     DevicesAnyOffCondition,
     DevicesAnyOnCondition,
@@ -313,6 +314,36 @@ def test_after_sunset_not_met_midday() -> None:
     result = evaluate_rule(_evening_rule(), _ctx(now=now))
     assert result.conditions[0].met is False
     assert "Outside sunset" in result.conditions[0].detail
+
+
+def _daylight_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(all=[DaylightCondition(type="daylight")]),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="daylight-only",
+        label="Daylight only",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.SCHEDULED],
+        schedule_cron="0 12 * * *",
+    )
+
+
+def test_daylight_met_between_sunrise_and_sunset() -> None:
+    now = datetime(2026, 6, 9, 12, 0, tzinfo=_TZ)
+    result = evaluate_rule(_daylight_rule(), _ctx(now=now))
+    assert result.conditions[0].met is True
+    assert "Daylight active" in result.conditions[0].detail
+
+
+def test_daylight_not_met_at_night() -> None:
+    now = datetime(2026, 6, 9, 22, 0, tzinfo=_TZ)
+    result = evaluate_rule(_daylight_rule(), _ctx(now=now))
+    assert result.conditions[0].met is False
+    assert "Outside daylight hours" in result.conditions[0].detail
 
 
 def test_effective_location_for_rule_ignores_usable_location_older_than_ten_minutes() -> None:
@@ -1769,6 +1800,6 @@ def test_build_rules_status_from_example_bundle(
     example = repo_root / "automation-rules.json.example"
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     status = build_rules_status(cache_path=tmp_path / "unused.sqlite")
-    assert len(status.rules) == 7
+    assert len(status.rules) == 9
     assert status.sun.sunset_at.endswith("Z")
     assert status.evaluator.last_run_at is not None

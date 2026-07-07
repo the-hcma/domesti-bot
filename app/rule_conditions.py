@@ -21,6 +21,7 @@ from app.api.schemas import (
     AnyConditionsCondition,
     BeforeLocalTimeCondition,
     BeforeSunriseCondition,
+    DaylightCondition,
     DaysOfWeekCondition,
     DevicesAllOnCondition,
     DevicesAnyOffCondition,
@@ -575,6 +576,8 @@ def _evaluate_condition(
         return _evaluate_before_local_time(condition, rule, ctx)
     if isinstance(condition, BeforeSunriseCondition):
         return _evaluate_before_sunrise(condition, rule, ctx)
+    if isinstance(condition, DaylightCondition):
+        return _evaluate_daylight(condition, rule, ctx)
     if isinstance(condition, DaysOfWeekCondition):
         return _evaluate_days_of_week(condition, rule, ctx)
     if isinstance(condition, DevicesAllOnCondition):
@@ -600,6 +603,31 @@ def _evaluate_condition(
         detail="Unsupported condition type for status display",
         label="Condition",
         met=False,
+    )
+
+
+def _evaluate_daylight(
+    condition: DaylightCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    met = not ctx.sun.is_dark
+    sunrise_label = _format_iso_local_time(ctx.sun.sunrise_at, ctx.timezone)
+    sunset_label = _format_iso_local_time(ctx.sun.sunset_at, ctx.timezone)
+    if met:
+        detail = (
+            f"Daylight active (sunrise {sunrise_label} to sunset {sunset_label})"
+        )
+    else:
+        detail = (
+            f"Outside daylight hours (sunrise {sunrise_label}, "
+            f"sunset {sunset_label})"
+        )
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="Daylight",
+        met=met,
     )
 
 

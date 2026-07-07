@@ -74,11 +74,13 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     expected_ids = {
         "away-garage-open-alert",
         "away-shutdown-everyone-outside-20m",
+        "daylight-master-bedroom-fan-on-alert",
         "evening-arrival-home-lights",
         "evening-interior-lights-on-anyone-home",
         "evening-lights-off-both-home",
         "kristen-west-point-arrive",
         "kristen-west-point-leave",
+        "morning-master-bedroom-fan-off",
     }
     assert ids == expected_ids
 
