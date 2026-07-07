@@ -1,0 +1,30 @@
+---
+description: New device families must use async state polling with concurrent per-device refreshes
+globs: app/**/*device_manager*.py,app/device_state_watcher.py
+alwaysApply: false
+---
+
+# Device family state polling (async + concurrent)
+
+When adding or extending a **device family** (`*DeviceManager`, `*PollingWatcher`):
+
+## Manager refresh paths must be non-blocking
+
+- Expose state refresh as **`async def`** on the manager (e.g. `is_on`, `is_playing`, `is_open`, `refresh_power_state`).
+- **Never** call blocking LAN/UPnP/HTTP libraries directly on the asyncio event loop.
+- Wrap synchronous third-party calls in **`asyncio.to_thread(...)`** (see Sonos/Vizio managers).
+- Prefer native async clients (e.g. python-kasa `await dev.update()`) when available.
+
+## Watcher must poll devices concurrently within the family
+
+- Register a `*PollingWatcher` in `build_default_watchers` when the family ships UI/rules state.
+- Each poll cycle must refresh **all devices in parallel** via `_refresh_all_devices_concurrently` in `app/device_state_watcher.py` — not a sequential `for` + `await`.
+- Per-device exceptions are logged and swallowed; one bad device must not stop the sweep.
+- Use `_await_with_stop` so shutdown cancels in-flight per-device tasks.
+
+## Checklist for a new family PR
+
+1. `async def` refresh API on `*DeviceManager` (blocking I/O off the loop).
+2. `*PollingWatcher` subclass using `_refresh_all_devices_concurrently`.
+3. Entry in `build_default_watchers` (skip when manager is `None`).
+4. Hermetic tests in `tests/python/test_device_state_watcher.py` (per-device calls + concurrent in-flight).

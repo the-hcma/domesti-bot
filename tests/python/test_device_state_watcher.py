@@ -4,9 +4,9 @@ The watcher's contract is "keep cached device state fresh, forever,
 without taking the rest of the app down". These tests pin down:
 
 * :class:`KasaPollingWatcher` / :class:`TailwindPollingWatcher` call
-  the corresponding ``is_on`` / ``is_open`` per device per cycle and
-  swallow per-device exceptions so one bad device doesn't stop the
-  poll;
+  the corresponding ``is_on`` / ``is_open`` per device per cycle (devices
+  within a family concurrently), swallow per-device exceptions so one bad
+  device doesn't stop the poll;
 * the loop exits *promptly* when the stop event is set (no hanging on
   the inter-poll sleep);
 * :func:`build_default_watchers` picks the right backends based on
@@ -338,6 +338,37 @@ async def test_vizio_watcher_calls_refresh_power_state_with_poll_flag() -> None:
         assert refresh.await_args_list[0].kwargs == {"poll": True}
 
 
+@pytest.mark.asyncio
+async def test_vizio_watcher_polls_devices_concurrently() -> None:
+    mgr = _fake_vizio_mgr(["tv-a", "tv-b"])
+    a_started = asyncio.Event()
+    b_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def refresh_a(*, poll: bool) -> None:
+        assert poll is True
+        a_started.set()
+        await release.wait()
+
+    async def refresh_b(*, poll: bool) -> None:
+        assert poll is True
+        b_started.set()
+        await release.wait()
+
+    cast(AsyncMock, mgr.tvs[0].refresh_power_state).side_effect = refresh_a
+    cast(AsyncMock, mgr.tvs[1].refresh_power_state).side_effect = refresh_b
+    watcher = VizioPollingWatcher(mgr, interval_s=10.0)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await asyncio.wait_for(
+        asyncio.gather(a_started.wait(), b_started.wait()),
+        timeout=1.0,
+    )
+    release.set()
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+
 def test_build_default_watchers_omits_optional_when_managers_are_none() -> None:
     kasa = _fake_kasa_mgr(["host-a"])
     state = MagicMock(spec=DeviceManagersState)
@@ -413,7 +444,36 @@ def test_poll_interval_from_env_rejects_value_below_floor(
 
 
 @pytest.mark.asyncio
-async def test_kasa_watcher_stops_mid_refresh_without_polling_remaining_devices() -> None:
+async def test_kasa_watcher_polls_devices_concurrently() -> None:
+    mgr = _fake_kasa_mgr(["host-a", "host-b"])
+    a_started = asyncio.Event()
+    b_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_is_on(identifier: str) -> bool:
+        if identifier == "host-a":
+            a_started.set()
+        else:
+            b_started.set()
+        await release.wait()
+        return True
+
+    cast(AsyncMock, mgr.is_on).side_effect = slow_is_on
+    watcher = KasaPollingWatcher(mgr, interval_s=10.0)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await asyncio.wait_for(
+        asyncio.gather(a_started.wait(), b_started.wait()),
+        timeout=1.0,
+    )
+    assert cast(AsyncMock, mgr.is_on).await_count == 2
+    release.set()
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+
+
+@pytest.mark.asyncio
+async def test_kasa_watcher_stops_mid_refresh_and_cancels_in_flight_polls() -> None:
     mgr = _fake_kasa_mgr(["host-a", "host-b", "host-c"])
     first_poll_started = asyncio.Event()
 
@@ -431,7 +491,8 @@ async def test_kasa_watcher_stops_mid_refresh_without_polling_remaining_devices(
     stop.set()
     await asyncio.wait_for(task, timeout=0.5)
 
-    assert cast(AsyncMock, mgr.is_on).await_count == 1
+    # Concurrent sweep starts every device at once; shutdown cancels them.
+    assert cast(AsyncMock, mgr.is_on).await_count == 3
 
 
 @pytest.mark.asyncio
