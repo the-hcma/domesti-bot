@@ -1020,9 +1020,9 @@ class RulesHubController {
     const templates = await this.dataSource.listTimeConditionTemplates();
     const settings = await this.dataSource.getSettingsLocation();
     const homeGeofence = resolveHomeGeofence(status.geofences, settings);
-    const sunsetMsg = afterSunsetStatusMessage(status.sun);
     const sunriseMsg = beforeSunriseStatusMessage(status.sun);
     const daylightMsg = daylightStatusMessage(status.sun);
+    const sunsetMsg = afterSunsetStatusMessage(status.sun);
     const openHomeGeofence = (geofenceId: string | null): void => {
       this.pendingGeofenceFocusId = geofenceId;
       void this.setTab("geofences");
@@ -1032,15 +1032,6 @@ class RulesHubController {
     dynamicHeading.className = "rules-section-title";
     dynamicHeading.textContent = "Astronomical (dynamic)";
 
-    const sunsetCard = appendAstronomicalConditionCard(
-      sunsetMsg.dynamicLabel,
-      sunsetMsg.primary,
-      "After sunset",
-      AFTER_SUNSET_WINDOW_DESCRIPTION,
-      homeGeofence,
-      settings,
-      openHomeGeofence,
-    );
     const sunriseCard = appendAstronomicalConditionCard(
       sunriseMsg.dynamicLabel,
       sunriseMsg.primary,
@@ -1055,6 +1046,15 @@ class RulesHubController {
       daylightMsg.primary,
       "Daylight",
       DAYLIGHT_WINDOW_DESCRIPTION,
+      homeGeofence,
+      settings,
+      openHomeGeofence,
+    );
+    const sunsetCard = appendAstronomicalConditionCard(
+      sunsetMsg.dynamicLabel,
+      sunsetMsg.primary,
+      "After sunset",
+      AFTER_SUNSET_WINDOW_DESCRIPTION,
       homeGeofence,
       settings,
       openHomeGeofence,
