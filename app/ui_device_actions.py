@@ -45,7 +45,10 @@ async def flip_ui_device(
     label = _device_label(state, family, device_id)
     try:
         log_detail = await _flip_device(state, family, device_id)
-    except ValueError as exc:
+    except (KeyError, ValueError) as exc:
+        lookup_error = _flip_lookup_error(exc, family, device_id)
+        if lookup_error is not None:
+            raise lookup_error from exc
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(exc),
@@ -54,11 +57,6 @@ async def flip_ui_device(
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,
             detail=str(exc),
-        ) from exc
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.NOT_FOUND,
-            detail=f"Unknown {family.display_name()} device: {device_id}",
         ) from exc
     return UiDeviceFlipResult(
         device=_build_device_view(state, family, device_id),
@@ -78,23 +76,20 @@ def _build_device_view(
                 state.kasa_mgr, host=device_id, cache_path=state.cache_path
             )
         case DeviceFamilyId.SONOS:
-            assert state.sonos_mgr is not None
             return build_sonos_device_view(
-                state.sonos_mgr,
+                _require_sonos_mgr(state, family),
                 device_id=device_id,
                 cache_path=state.cache_path,
             )
         case DeviceFamilyId.TAILWIND:
-            assert state.tailwind_mgr is not None
             return build_tailwind_device_view(
-                state.tailwind_mgr,
+                _require_tailwind_mgr(state, family),
                 device_id=device_id,
                 cache_path=state.cache_path,
             )
         case DeviceFamilyId.VIZIO:
-            assert state.vizio_mgr is not None
             return build_vizio_device_view(
-                state.vizio_mgr,
+                _require_vizio_mgr(state, family),
                 device_id=device_id,
                 cache_path=state.cache_path,
             )
@@ -193,27 +188,43 @@ async def _flip_device(
 ) -> str:
     match family:
         case DeviceFamilyId.KASA:
-            try:
-                return await state.kasa_mgr.flip(device_id)
-            except ValueError as exc:
-                raise KeyError(device_id) from exc
+            return await state.kasa_mgr.flip(device_id)
         case DeviceFamilyId.SONOS:
-            assert state.sonos_mgr is not None
-            return await state.sonos_mgr.flip(
+            return await _require_sonos_mgr(state, family).flip(
                 device_id,
                 favorite_index=_DEFAULT_SONOS_FAVORITE_INDEX,
             )
         case DeviceFamilyId.TAILWIND:
-            assert state.tailwind_mgr is not None
-            return await state.tailwind_mgr.flip(device_id)
+            return await _require_tailwind_mgr(state, family).flip(device_id)
         case DeviceFamilyId.VIZIO:
-            assert state.vizio_mgr is not None
-            return await state.vizio_mgr.flip(device_id)
+            return await _require_vizio_mgr(state, family).flip(device_id)
         case DeviceFamilyId.ANDROIDTV:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail=f"Unknown family_id: {family.value}",
             )
+
+
+def _flip_lookup_error(
+    exc: BaseException,
+    family: DeviceFamilyId,
+    device_id: str,
+) -> HTTPException | None:
+    if isinstance(exc, KeyError):
+        return HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown {family.display_name()} device: {device_id}",
+        )
+    if isinstance(exc, ValueError) and "Unknown device" in str(exc):
+        return HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown {family.display_name()} device: {device_id}",
+        )
+    return None
+
+
+def _manager_missing_detail(family: DeviceFamilyId) -> str:
+    return f"{family.display_name()} manager is not configured on this server"
 
 
 def _parse_family_id(family_id: str) -> DeviceFamilyId:
@@ -224,3 +235,39 @@ def _parse_family_id(family_id: str) -> DeviceFamilyId:
             status_code=HTTPStatus.BAD_REQUEST,
             detail=f"Unknown family_id: {family_id}",
         ) from exc
+
+
+def _require_sonos_mgr(
+    state: DeviceManagersState,
+    family: DeviceFamilyId,
+):
+    if state.sonos_mgr is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=_manager_missing_detail(family),
+        )
+    return state.sonos_mgr
+
+
+def _require_tailwind_mgr(
+    state: DeviceManagersState,
+    family: DeviceFamilyId,
+):
+    if state.tailwind_mgr is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=_manager_missing_detail(family),
+        )
+    return state.tailwind_mgr
+
+
+def _require_vizio_mgr(
+    state: DeviceManagersState,
+    family: DeviceFamilyId,
+):
+    if state.vizio_mgr is None:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=_manager_missing_detail(family),
+        )
+    return state.vizio_mgr
