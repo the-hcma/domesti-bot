@@ -98,7 +98,10 @@ class DomestiBotController {
   // After a successful poll, keep family frames green through brief client-side
   // transport blips (phone waking, Wi‑Fi handoff, stale socket) while polls
   // and /health probes retry in the background.
-  private static readonly CONNECTION_RECONNECT_GRACE_MS = 3000;
+  // Must exceed POLL_MS * POLL_TRANSPORT_FAILURES_BEFORE_VERIFY (currently
+  // 3000 * 2 = 6000 ms) so the grace is still active when handlePollFailure
+  // reaches the connectionReconnectGraceActive() check.
+  private static readonly CONNECTION_RECONNECT_GRACE_MS = 10000;
 
   // How long a recoverable action error (e.g. Sonos 409 "queue is
   // empty") stays visible before auto-dismissing. Long enough to
@@ -265,6 +268,7 @@ class DomestiBotController {
     }
     if (!isBackendTransportFailure(err)) {
       this.pollTransportFailureStreak = 0;
+      this.endConnectionAssessingAndFlush();
       return;
     }
     this.pollTransportFailureStreak += 1;
@@ -445,6 +449,7 @@ class DomestiBotController {
           `Failed to update preference for ${device.label}`,
           err,
         );
+        await this.refresh();
       }
     });
   }
