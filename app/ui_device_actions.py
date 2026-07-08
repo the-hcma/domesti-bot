@@ -13,12 +13,9 @@ from app.api.ui_state import (
     build_sonos_device_view,
     build_tailwind_device_view,
     build_vizio_device_view,
-    find_kasa_by_host,
-    find_sonos_by_identifier,
-    find_tailwind_by_identifier,
-    find_vizio_by_id,
 )
 from app.device_enums import DeviceFamilyId
+from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
@@ -44,9 +41,8 @@ async def flip_ui_device(
 ) -> UiDeviceFlipResult:
     """Read cached state, flip the device, return a refreshed tile view."""
     family = _parse_family_id(family_id)
-    label = _device_label(state, family, device_id)
     try:
-        log_detail = await _flip_device(state, family, device_id)
+        label, log_detail = await _flip_tile(state, family, device_id)
     except (KeyError, ValueError) as exc:
         lookup_error = _flip_lookup_error(exc, family, device_id)
         if lookup_error is not None:
@@ -54,6 +50,11 @@ async def flip_ui_device(
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(exc),
+        ) from exc
+    except NotInitializedError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=_manager_missing_detail(family),
         ) from exc
     except SonosTransitionUnavailableError as exc:
         raise HTTPException(
@@ -102,104 +103,23 @@ def _build_device_view(
             )
 
 
-def _device_label(
+async def _flip_tile(
     state: DeviceManagersState,
     family: DeviceFamilyId,
     device_id: str,
-) -> str:
+) -> tuple[str, str]:
     match family:
         case DeviceFamilyId.KASA:
-            kd = find_kasa_by_host(state.kasa_mgr, device_id)
-            if kd is None:
-                raise HTTPException(
-                    status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"Unknown {DeviceFamilyId.KASA.display_name()} device: "
-                        f"{device_id}"
-                    ),
-                )
-            return kd.preferred_label
+            return await state.kasa_mgr.flip_tile(device_id)
         case DeviceFamilyId.SONOS:
-            if state.sonos_mgr is None:
-                raise HTTPException(
-                    status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"{DeviceFamilyId.SONOS.display_name()} manager is not "
-                        "configured on this server"
-                    ),
-                )
-            sp = find_sonos_by_identifier(state.sonos_mgr, device_id)
-            if sp is None:
-                raise HTTPException(
-                    status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"Unknown {DeviceFamilyId.SONOS.display_name()} device: "
-                        f"{device_id}"
-                    ),
-                )
-            return sp.preferred_label
-        case DeviceFamilyId.TAILWIND:
-            if state.tailwind_mgr is None:
-                raise HTTPException(
-                    status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"{DeviceFamilyId.TAILWIND.display_name()} manager is not "
-                        "configured on this server"
-                    ),
-                )
-            gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
-            if gd is None:
-                raise HTTPException(
-                    status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: "
-                        f"{device_id}"
-                    ),
-                )
-            return gd.preferred_label
-        case DeviceFamilyId.VIZIO:
-            if state.vizio_mgr is None:
-                raise HTTPException(
-                    status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"{DeviceFamilyId.VIZIO.display_name()} manager is not "
-                        "configured on this server"
-                    ),
-                )
-            tv = find_vizio_by_id(state.vizio_mgr, device_id)
-            if tv is None:
-                raise HTTPException(
-                    status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"Unknown {DeviceFamilyId.VIZIO.display_name()} device: "
-                        f"{device_id}"
-                    ),
-                )
-            return tv.preferred_label
-        case DeviceFamilyId.ANDROIDTV:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail=f"Unknown family_id: {family.value}",
-            )
-
-
-async def _flip_device(
-    state: DeviceManagersState,
-    family: DeviceFamilyId,
-    device_id: str,
-) -> str:
-    match family:
-        case DeviceFamilyId.KASA:
-            return await state.kasa_mgr.flip(device_id)
-        case DeviceFamilyId.SONOS:
-            return await _require_sonos_mgr(state, family).flip(
+            return await _require_sonos_mgr(state, family).flip_tile(
                 device_id,
                 favorite_index=_DEFAULT_SONOS_FAVORITE_INDEX,
             )
         case DeviceFamilyId.TAILWIND:
-            return await _require_tailwind_mgr(state, family).flip(device_id)
+            return await _require_tailwind_mgr(state, family).flip_tile(device_id)
         case DeviceFamilyId.VIZIO:
-            return await _require_vizio_mgr(state, family).flip(device_id)
+            return await _require_vizio_mgr(state, family).flip_tile(device_id)
         case DeviceFamilyId.ANDROIDTV:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
@@ -217,7 +137,7 @@ def _flip_lookup_error(
             status_code=HTTPStatus.NOT_FOUND,
             detail=f"Unknown {family.display_name()} device: {device_id}",
         )
-    if isinstance(exc, ValueError) and str(exc).startswith("Unknown"):
+    if isinstance(exc, ValueError) and "Unknown" in str(exc):
         return HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=f"Unknown {family.display_name()} device: {device_id}",

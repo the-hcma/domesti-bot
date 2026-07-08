@@ -326,16 +326,13 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         await tv.turn_off()
 
     async def turn_on(self, identifier: str) -> None:
-        tv = self.get_device_by_id(identifier)
-        if tv is None:
-            raise KeyError(identifier)
-        await tv.turn_on()
+        await self._device_for(identifier).turn_on()
 
-    async def _flip_device(self, identifier: str) -> str:
+    def _device_for(self, identifier: str) -> VizioTvDevice:
         tv = self.get_device_by_id(identifier)
         if tv is None:
             raise KeyError(identifier)
-        return await tv.flip()
+        return tv
 
     async def _connect_endpoint(
         self,

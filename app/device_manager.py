@@ -64,9 +64,20 @@ class DoorDeviceManager(DeviceManager[DoorT], ABC):
     async def close(self, identifier: str) -> None:
         """Fully close the door (or equivalent)."""
 
+    def device_label(self, identifier: str) -> str:
+        """Return the display label for *identifier* (raises on unknown id)."""
+        return self._device_for(identifier).preferred_label
+
     async def flip(self, identifier: str) -> str:
         """Flip from cached door state; return ``[ui-action]`` detail."""
-        return await self._flip_device(identifier)
+        _label, detail = await self.flip_tile(identifier)
+        return detail
+
+    async def flip_tile(self, identifier: str) -> tuple[str, str]:
+        """Flip one door with a single lookup; return ``(label, log_detail)``."""
+        device = self._device_for(identifier)
+        detail = await device.flip()
+        return device.preferred_label, detail
 
     @abstractmethod
     async def is_closed(self, identifier: str) -> bool:
@@ -81,12 +92,16 @@ class DoorDeviceManager(DeviceManager[DoorT], ABC):
         """Fully open the door (or equivalent)."""
 
     @abstractmethod
-    async def _flip_device(self, identifier: str) -> str:
-        """Resolve *identifier* and call :meth:`DoorDevice.flip`."""
+    def _device_for(self, identifier: str) -> DoorT:
+        """Resolve *identifier* to a live door device."""
 
 
 class SpeakerDeviceManager(DeviceManager[SpeakerT], ABC):
     """Speakers / zones: *pause* / *resume* playback."""
+
+    def device_label(self, identifier: str) -> str:
+        """Return the display label for *identifier* (raises on unknown id)."""
+        return self._device_for(identifier).preferred_label
 
     async def flip(
         self,
@@ -95,7 +110,22 @@ class SpeakerDeviceManager(DeviceManager[SpeakerT], ABC):
         favorite_index: int = 0,
     ) -> str:
         """Flip from cached playback state; return ``[ui-action]`` detail."""
-        return await self._flip_device(identifier, favorite_index=favorite_index)
+        _label, detail = await self.flip_tile(
+            identifier,
+            favorite_index=favorite_index,
+        )
+        return detail
+
+    async def flip_tile(
+        self,
+        identifier: str,
+        *,
+        favorite_index: int = 0,
+    ) -> tuple[str, str]:
+        """Flip one zone with a single lookup; return ``(label, log_detail)``."""
+        device = self._device_for(identifier)
+        detail = await device.flip(favorite_index=favorite_index)
+        return device.preferred_label, detail
 
     @abstractmethod
     async def pause(self, identifier: str) -> None:
@@ -106,21 +136,27 @@ class SpeakerDeviceManager(DeviceManager[SpeakerT], ABC):
         """Resume playback on the resolved zone."""
 
     @abstractmethod
-    async def _flip_device(
-        self,
-        identifier: str,
-        *,
-        favorite_index: int = 0,
-    ) -> str:
-        """Resolve *identifier* and call :meth:`SpeakerDevice.flip`."""
+    def _device_for(self, identifier: str) -> SpeakerT:
+        """Resolve *identifier* to a live speaker device."""
 
 
 class SwitchDeviceManager(DeviceManager[SwitchT], ABC):
     """Plugs, bulbs, relays: *off* / *on* power semantics."""
 
+    def device_label(self, identifier: str) -> str:
+        """Return the display label for *identifier* (raises on unknown id)."""
+        return self._device_for(identifier).preferred_label
+
     async def flip(self, identifier: str) -> str:
         """Flip from cached on/off; return ``[ui-action]`` detail."""
-        return await self._flip_device(identifier)
+        _label, detail = await self.flip_tile(identifier)
+        return detail
+
+    async def flip_tile(self, identifier: str) -> tuple[str, str]:
+        """Flip one switch with a single lookup; return ``(label, log_detail)``."""
+        device = self._device_for(identifier)
+        detail = await device.flip()
+        return device.preferred_label, detail
 
     @abstractmethod
     async def is_off(self, identifier: str) -> bool:
@@ -139,5 +175,5 @@ class SwitchDeviceManager(DeviceManager[SwitchT], ABC):
         """Turn power on."""
 
     @abstractmethod
-    async def _flip_device(self, identifier: str) -> str:
-        """Resolve *identifier* and call :meth:`SwitchDevice.flip`."""
+    def _device_for(self, identifier: str) -> SwitchT:
+        """Resolve *identifier* to a live switch device."""

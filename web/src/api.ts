@@ -458,7 +458,6 @@ export const api = {
     return call<UIDeviceActionOut>(
       "POST",
       `/v1/ui/devices/${encodeURIComponent(familyId)}/${encodeURIComponent(deviceId)}/toggle`,
-      {},
     );
   },
 };

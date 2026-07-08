@@ -168,7 +168,15 @@ def _kasa_mgr(devices: list[_FakeKasa]) -> KasaDeviceManager:
             raise ValueError(f"Unknown device: {identifier!r}")
         return await device.flip()
 
+    async def flip_tile(identifier: str) -> tuple[str, str]:
+        device = host_to_device.get(identifier)
+        if device is None:
+            raise ValueError(f"Unknown device: {identifier!r}")
+        detail = await device.flip()
+        return device.preferred_label, detail
+
     mgr.flip = flip
+    mgr.flip_tile = flip_tile
     return cast(KasaDeviceManager, mgr)
 
 
@@ -183,7 +191,19 @@ def _sonos_mgr(zones: list[_FakeSonosZone]) -> SonosDeviceManager:
             raise ValueError(f"Unknown device: {identifier!r}")
         return await zone.flip(favorite_index=favorite_index)
 
+    async def flip_tile(
+        identifier: str,
+        *,
+        favorite_index: int = 0,
+    ) -> tuple[str, str]:
+        zone = id_to_zone.get(identifier)
+        if zone is None:
+            raise ValueError(f"Unknown device: {identifier!r}")
+        detail = await zone.flip(favorite_index=favorite_index)
+        return zone.preferred_label, detail
+
     mgr.flip = flip
+    mgr.flip_tile = flip_tile
     return cast(SonosDeviceManager, mgr)
 
 
@@ -198,7 +218,15 @@ def _tailwind_mgr(doors: list[_FakeDoor]) -> GotailwindDeviceManager:
             raise ValueError(f"Unknown device: {identifier!r}")
         return await door.flip()
 
+    async def flip_tile(identifier: str) -> tuple[str, str]:
+        door = id_to_door.get(identifier)
+        if door is None:
+            raise ValueError(f"Unknown device: {identifier!r}")
+        detail = await door.flip()
+        return door.preferred_label, detail
+
     mgr.flip = flip
+    mgr.flip_tile = flip_tile
     return cast(GotailwindDeviceManager, mgr)
 
 
@@ -213,7 +241,15 @@ def _vizio_mgr(tvs: list[_FakeVizioTv]) -> VizioDeviceManager:
             raise KeyError(identifier)
         return await tv.flip()
 
+    async def flip_tile(identifier: str) -> tuple[str, str]:
+        tv = id_to_tv.get(identifier)
+        if tv is None:
+            raise KeyError(identifier)
+        detail = await tv.flip()
+        return tv.preferred_label, detail
+
     mgr.flip = flip
+    mgr.flip_tile = flip_tile
     return cast(VizioDeviceManager, mgr)
 
 
