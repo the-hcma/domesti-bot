@@ -20,7 +20,9 @@ from app.api.ui_state import (
 )
 from app.device_enums import DeviceFamilyId
 from app.domesti_bot_cli import DeviceManagersState
-from app.sonos_device_manager import SonosTransitionUnavailableError
+from app.gotailwind_device_manager import GotailwindDeviceManager
+from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
+from app.vizio_device_manager import VizioDeviceManager
 
 _DEFAULT_SONOS_FAVORITE_INDEX = 0
 
@@ -215,7 +217,7 @@ def _flip_lookup_error(
             status_code=HTTPStatus.NOT_FOUND,
             detail=f"Unknown {family.display_name()} device: {device_id}",
         )
-    if isinstance(exc, ValueError) and "Unknown device" in str(exc):
+    if isinstance(exc, ValueError) and str(exc).startswith("Unknown"):
         return HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
             detail=f"Unknown {family.display_name()} device: {device_id}",
@@ -240,7 +242,7 @@ def _parse_family_id(family_id: str) -> DeviceFamilyId:
 def _require_sonos_mgr(
     state: DeviceManagersState,
     family: DeviceFamilyId,
-):
+) -> SonosDeviceManager:
     if state.sonos_mgr is None:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
@@ -252,7 +254,7 @@ def _require_sonos_mgr(
 def _require_tailwind_mgr(
     state: DeviceManagersState,
     family: DeviceFamilyId,
-):
+) -> GotailwindDeviceManager:
     if state.tailwind_mgr is None:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
@@ -264,7 +266,7 @@ def _require_tailwind_mgr(
 def _require_vizio_mgr(
     state: DeviceManagersState,
     family: DeviceFamilyId,
-):
+) -> VizioDeviceManager:
     if state.vizio_mgr is None:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
