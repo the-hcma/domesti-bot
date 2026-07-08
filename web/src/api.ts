@@ -53,6 +53,8 @@ import type {
   VizioTvSettingsOut,
   UIBulkActionOut,
   UIDeviceActionOut,
+  UIDeviceOut,
+  UIDeviceState,
   UIGlobalBulkActionOut,
   UIPreferenceOut,
   UIStateOut,
@@ -467,6 +469,50 @@ export const api = {
       `/v1/ui/preferences/${encodeURIComponent(familyId)}/${encodeURIComponent(deviceId)}`,
       { exclude_from_global: excludeFromGlobal },
     );
+  },
+  toggleDeviceTile(
+    device: UIDeviceOut,
+    nextState: UIDeviceState,
+  ): Promise<UIDeviceActionOut> {
+    switch (device.family_id) {
+      case "kasa":
+        return call<UIDeviceActionOut>(
+          "POST",
+          `/v1/ui/kasa/devices/${encodeURIComponent(device.id)}/toggle`,
+          { on: nextState === "on" },
+        );
+      case "sonos":
+        return call<UIDeviceActionOut>(
+          "POST",
+          `/v1/ui/sonos/zones/${encodeURIComponent(device.id)}/toggle`,
+          nextState === "playing"
+            ? { playing: true, favorite_index: 0 }
+            : { playing: false },
+        );
+      case "tailwind":
+        if (nextState === "open") {
+          return call<UIDeviceActionOut>(
+            "POST",
+            `/v1/ui/tailwind/doors/${encodeURIComponent(device.id)}/open`,
+            {},
+          );
+        }
+        return call<UIDeviceActionOut>(
+          "POST",
+          `/v1/ui/tailwind/doors/${encodeURIComponent(device.id)}/close`,
+          {},
+        );
+      case "vizio":
+        return call<UIDeviceActionOut>(
+          "POST",
+          `/v1/ui/vizio/tvs/${encodeURIComponent(device.id)}/toggle`,
+          { on: nextState === "on" },
+        );
+      default:
+        throw new Error(
+          `Expected a known family_id, got ${device.family_id}`,
+        );
+    }
   },
   toggleKasa(deviceId: string, on: boolean): Promise<UIDeviceActionOut> {
     return call<UIDeviceActionOut>(

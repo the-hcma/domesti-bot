@@ -485,70 +485,21 @@ class DomestiBotController {
   }
 
   private async onToggleDevice(device: UIDeviceOut): Promise<void> {
-    switch (device.family_id) {
-      case "kasa": {
-        const nextOn = device.state !== "on";
-        await this.runOptimisticTileAction(
-          device,
-          nextOn ? "on" : "off",
-          async () => {
-            await api.toggleKasa(device.id, nextOn);
-          },
-        );
-        return;
-      }
-      case "sonos": {
-        // ``unknown`` defaults to resume; 409 means empty queue / mid-transition.
-        const nextPlaying = device.state !== "playing";
-        await this.runOptimisticTileAction(
-          device,
-          nextPlaying ? "playing" : "paused",
-          async () => {
-            await api.toggleSonos(device.id, nextPlaying, 0);
-          },
-          (err) => {
+    const nextState = nextStateAfterTileToggle(device);
+    await this.runOptimisticTileAction(
+      device,
+      nextState,
+      () => api.toggleDeviceTile(device, nextState),
+      device.kind === "speaker"
+        ? (err) => {
             if (err instanceof HttpError && err.status === 409) {
               this.renderActionError(err.detail);
             } else {
               console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
             }
-          },
-        );
-        return;
-      }
-      case "tailwind": {
-        // ``unknown`` (OPENING/CLOSING) defaults to close — same as backend.
-        const wantOpen = device.state === "closed";
-        await this.runOptimisticTileAction(
-          device,
-          wantOpen ? "open" : "closed",
-          async () => {
-            if (wantOpen) {
-              await api.openTailwindDoor(device.id);
-            } else {
-              await api.closeTailwindDoor(device.id);
-            }
-          },
-          (err) => {
-            console.warn(`[domesti-bot] operate ${device.label} failed`, err);
-          },
-        );
-        return;
-      }
-      case "vizio": {
-        const nextOn = device.state === "off";
-        await this.runOptimisticTileAction(
-          device,
-          nextOn ? "on" : "off",
-          async () => {
-            await api.toggleVizio(device.id, nextOn);
-          },
-        );
-        return;
-      }
-      default:
-        return;
-    }
+          }
+        : undefined,
+    );
   }
 
   private operatorAlertStorageKey(alert: UIOperatorAlertOut): string {
@@ -1223,6 +1174,20 @@ function bulkOffSuccessMessage(
     return `${base} ${String(skippedCount)} excluded ${skipWord} not changed.`;
   }
   return base;
+}
+
+function nextStateAfterTileToggle(device: UIDeviceOut): UIDeviceState {
+  // Matches ``compactTileAriaLabel`` — kind drives the next action, not
+  // family_id. ``unknown`` follows the same default as the aria hint
+  // (switch/speaker: not off/playing → activate; door: close).
+  switch (device.kind) {
+    case "switch":
+      return device.state === "off" ? "on" : "off";
+    case "speaker":
+      return device.state === "playing" ? "paused" : "playing";
+    case "door":
+      return device.state === "closed" ? "open" : "closed";
+  }
 }
 
 /** Robot mascot: About entry on mobile; decorative on desktop (use ☰ → About). */
