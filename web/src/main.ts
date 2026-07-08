@@ -80,6 +80,9 @@ class DomestiBotController {
   // user click resets only that tile's grace window.
   private static readonly OPTIMISTIC_GRACE_MS = 8000;
 
+  // Cap queued device/bulk actions while the client re-establishes transport.
+  private static readonly ACTION_BUFFER_MAX = 32;
+
   // Bootstrap retry cadence + deadline used while ``/v1/ui/state``
   // is still answering 503 "Device discovery still in progress".
   // Matches the server's ``Retry-After: 2`` hint so we don't poll
@@ -92,6 +95,11 @@ class DomestiBotController {
   private static readonly BOOTSTRAP_RETRY_MS = 2000;
   private static readonly BOOTSTRAP_DEADLINE_MS = 90000;
 
+  // After a successful poll, keep family frames green through brief client-side
+  // transport blips (phone waking, Wi‑Fi handoff, stale socket) while polls
+  // and /health probes retry in the background.
+  private static readonly CONNECTION_RECONNECT_GRACE_MS = 3000;
+
   // How long a recoverable action error (e.g. Sonos 409 "queue is
   // empty") stays visible before auto-dismissing. Long enough to
   // read a one-sentence hint, short enough not to overstay if the
@@ -102,8 +110,14 @@ class DomestiBotController {
 
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
+  private bufferedActions: Array<() => Promise<void>> = [];
+  private bufferFlushInFlight = false;
   private connected = false;
+  // True while the client re-establishes transport after a prior successful
+  // poll — UI stays connected and user actions are queued for flush.
+  private connectionAssessing = false;
   private devicesReady = false;
+  private lastSuccessfulPollAt: number | null = null;
   // Consecutive transport failures (no HTTP response) on /v1/ui/state before
   // we probe /health and possibly mark the UI offline.
   private pollTransportFailureStreak = 0;
@@ -178,12 +192,67 @@ class DomestiBotController {
     }
   }
 
-  private markBackendReadyFromState(): void {
-    // A successful /v1/ui/state implies the backend answered and discovery
-    // finished.
-    this.pollTransportFailureStreak = 0;
-    this.connected = true;
-    this.devicesReady = true;
+  private beginConnectionAssessing(): void {
+    if (!this.state || this.lastSuccessfulPollAt === null) {
+      return;
+    }
+    this.connectionAssessing = true;
+  }
+
+  private bufferAction(execute: () => Promise<void>): void {
+    if (
+      this.bufferedActions.length
+      >= DomestiBotController.ACTION_BUFFER_MAX
+    ) {
+      console.warn("[domesti-bot] action buffer full, dropping oldest");
+      this.bufferedActions.shift();
+    }
+    this.bufferedActions.push(execute);
+  }
+
+  private clearBufferedActions(reason: string): void {
+    const dropped = this.bufferedActions.length;
+    if (dropped === 0) {
+      return;
+    }
+    this.bufferedActions = [];
+    console.warn(
+      `[domesti-bot] dropped ${dropped} buffered action(s) — ${reason}`,
+    );
+  }
+
+  private connectionReconnectGraceActive(): boolean {
+    const lastSuccess = this.lastSuccessfulPollAt;
+    return (
+      lastSuccess !== null &&
+      performance.now() - lastSuccess
+        < DomestiBotController.CONNECTION_RECONNECT_GRACE_MS
+    );
+  }
+
+  private endConnectionAssessingAndFlush(): void {
+    this.connectionAssessing = false;
+    if (this.bufferedActions.length > 0) {
+      void this.flushBufferedActions();
+    }
+  }
+
+  private async flushBufferedActions(): Promise<void> {
+    if (this.bufferFlushInFlight || this.bufferedActions.length === 0) {
+      return;
+    }
+    this.bufferFlushInFlight = true;
+    const queue = this.bufferedActions.splice(0);
+    try {
+      for (const action of queue) {
+        await action();
+      }
+    } finally {
+      this.bufferFlushInFlight = false;
+      if (this.bufferedActions.length > 0) {
+        void this.flushBufferedActions();
+      }
+    }
   }
 
   private async handlePollFailure(err: unknown): Promise<void> {
@@ -191,6 +260,7 @@ class DomestiBotController {
     // tiles even when /v1/ui/state is slow, auth fails, or discovery hiccups.
     if (err instanceof HttpError) {
       this.pollTransportFailureStreak = 0;
+      this.endConnectionAssessingAndFlush();
       return;
     }
     if (!isBackendTransportFailure(err)) {
@@ -198,17 +268,52 @@ class DomestiBotController {
       return;
     }
     this.pollTransportFailureStreak += 1;
+    this.beginConnectionAssessing();
     if (
       this.pollTransportFailureStreak
       < DomestiBotController.POLL_TRANSPORT_FAILURES_BEFORE_VERIFY
     ) {
       return;
     }
-    if (!(await this.verifyBackendUnreachable())) {
+    if (this.connectionReconnectGraceActive()) {
       return;
     }
+    if (!(await this.verifyBackendUnreachable())) {
+      this.endConnectionAssessingAndFlush();
+      return;
+    }
+    this.markBackendOffline();
+  }
+
+  private markBackendOffline(): void {
     this.connected = false;
     this.devicesReady = false;
+    this.connectionAssessing = false;
+    this.clearBufferedActions("backend offline");
+  }
+
+  private markBackendReadyFromState(): void {
+    // A successful /v1/ui/state implies the backend answered and discovery
+    // finished.
+    this.pollTransportFailureStreak = 0;
+    this.connected = true;
+    this.devicesReady = true;
+    this.lastSuccessfulPollAt = performance.now();
+    this.endConnectionAssessingAndFlush();
+  }
+
+  private async runActionNowOrBuffer(
+    execute: () => Promise<void>,
+  ): Promise<void> {
+    if (this.shouldBufferActions()) {
+      this.bufferAction(execute);
+      return;
+    }
+    await execute();
+  }
+
+  private shouldBufferActions(): boolean {
+    return this.connectionAssessing;
   }
 
   private async verifyBackendUnreachable(): Promise<boolean> {
@@ -262,34 +367,38 @@ class DomestiBotController {
     // the server's view — stale predictions made the pre-check skip the
     // API while tiles still looked active.
     this.clearAllPendingPredictions();
-    await this.refresh();
+    if (!this.shouldBufferActions()) {
+      await this.refresh();
+    }
     if (!this.state) {
       return;
     }
     this.predictBulkOffForFamily(familyId);
     this.render();
-    try {
-      let result: UIBulkActionOut;
-      if (familyId === "kasa") {
-        result = await api.bulkOffKasa();
-      } else if (familyId === "sonos") {
-        result = await api.pauseAllSonos();
-      } else if (familyId === "vizio") {
-        result = await api.bulkOffVizio();
-      } else {
-        result = await api.closeAllTailwind();
+    await this.runActionNowOrBuffer(async () => {
+      try {
+        let result: UIBulkActionOut;
+        if (familyId === "kasa") {
+          result = await api.bulkOffKasa();
+        } else if (familyId === "sonos") {
+          result = await api.pauseAllSonos();
+        } else if (familyId === "vizio") {
+          result = await api.bulkOffVizio();
+        } else {
+          result = await api.closeAllTailwind();
+        }
+        await this.refresh();
+        this.renderBulkActionFeedback(
+          familyId,
+          result.affected.length,
+          0,
+          this.state,
+        );
+      } catch (err) {
+        this.clearPendingPredictionsForFamily(familyId);
+        this.renderError(`Failed to bulk action on ${familyId}`, err);
       }
-      await this.refresh();
-      this.renderBulkActionFeedback(
-        familyId,
-        result.affected.length,
-        0,
-        this.state,
-      );
-    } catch (err) {
-      this.clearPendingPredictionsForFamily(familyId);
-      this.renderError(`Failed to bulk action on ${familyId}`, err);
-    }
+    });
   }
 
   private async onBulkOffGlobal(): Promise<void> {
@@ -297,40 +406,47 @@ class DomestiBotController {
       return;
     }
     this.clearAllPendingPredictions();
-    await this.refresh();
+    if (!this.shouldBufferActions()) {
+      await this.refresh();
+    }
     if (!this.state) {
       return;
     }
     this.predictBulkOffGlobal();
     this.render();
-    try {
-      const result = await api.bulkOffGlobal();
-      await this.refresh();
-      this.renderBulkActionFeedback(
-        "global",
-        result.affected.length,
-        result.skipped.length,
-        this.state,
-      );
-    } catch (err) {
-      this.clearAllPendingPredictions();
-      this.renderError("Failed to run global all-off", err);
-    }
+    await this.runActionNowOrBuffer(async () => {
+      try {
+        const result = await api.bulkOffGlobal();
+        await this.refresh();
+        this.renderBulkActionFeedback(
+          "global",
+          result.affected.length,
+          result.skipped.length,
+          this.state,
+        );
+      } catch (err) {
+        this.clearAllPendingPredictions();
+        this.renderError("Failed to run global all-off", err);
+      }
+    });
   }
 
   private async onSetExclude(
     device: UIDeviceOut,
     excludeFromGlobal: boolean,
   ): Promise<void> {
-    try {
-      await api.setExclude(device.family_id, device.id, excludeFromGlobal);
-      await this.refresh();
-    } catch (err) {
-      this.renderError(
-        `Failed to update preference for ${device.label}`,
-        err,
-      );
-    }
+    device.exclude_from_global = excludeFromGlobal;
+    await this.runActionNowOrBuffer(async () => {
+      try {
+        await api.setExclude(device.family_id, device.id, excludeFromGlobal);
+        await this.refresh();
+      } catch (err) {
+        this.renderError(
+          `Failed to update preference for ${device.label}`,
+          err,
+        );
+      }
+    });
   }
 
   private async onOperateTailwind(device: UIDeviceOut): Promise<void> {
@@ -341,19 +457,19 @@ class DomestiBotController {
     const nextState = wantOpen ? "open" : "closed";
     this.predictDeviceState(device.family_id, device.id, nextState);
     this.render();
-    try {
-      if (wantOpen) {
-        await api.openTailwindDoor(device.id);
-      } else {
-        await api.closeTailwindDoor(device.id);
+    await this.runActionNowOrBuffer(async () => {
+      try {
+        if (wantOpen) {
+          await api.openTailwindDoor(device.id);
+        } else {
+          await api.closeTailwindDoor(device.id);
+        }
+      } catch (err) {
+        this.clearPendingPrediction(device.family_id, device.id);
+        console.warn(`[domesti-bot] operate ${device.label} failed`, err);
+        await this.refresh();
       }
-    } catch (err) {
-      // Action failed → prediction is provably wrong, drop the grace
-      // window for this device so the next refresh shows reality.
-      this.clearPendingPrediction(device.family_id, device.id);
-      console.warn(`[domesti-bot] operate ${device.label} failed`, err);
-      await this.refresh();
-    }
+    });
   }
 
   private async onToggleKasa(device: UIDeviceOut): Promise<void> {
@@ -367,13 +483,15 @@ class DomestiBotController {
     const nextOn = device.state !== "on";
     this.predictDeviceState(device.family_id, device.id, nextOn ? "on" : "off");
     this.render();
-    try {
-      await api.toggleKasa(device.id, nextOn);
-    } catch (err) {
-      this.clearPendingPrediction(device.family_id, device.id);
-      console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
-      await this.refresh();
-    }
+    await this.runActionNowOrBuffer(async () => {
+      try {
+        await api.toggleKasa(device.id, nextOn);
+      } catch (err) {
+        this.clearPendingPrediction(device.family_id, device.id);
+        console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+        await this.refresh();
+      }
+    });
   }
 
   private async onToggleSonos(device: UIDeviceOut): Promise<void> {
@@ -400,34 +518,36 @@ class DomestiBotController {
       nextPlaying ? "playing" : "paused",
     );
     this.render();
-    try {
-      // Resume requests always use favorite_index 0 (first entry in
-      // domesti-secrets.json → sonos_stream_favorites for this zone).
-      const favoriteIndex =
-        nextPlaying && device.stream_favorites.length > 0 ? 0 : 0;
-      await api.toggleSonos(device.id, nextPlaying, favoriteIndex);
-    } catch (err) {
-      this.clearPendingPrediction(device.family_id, device.id);
-      if (err instanceof HttpError && err.status === 409) {
-        this.renderActionError(err.detail);
-      } else {
-        console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+    await this.runActionNowOrBuffer(async () => {
+      try {
+        const favoriteIndex =
+          nextPlaying && device.stream_favorites.length > 0 ? 0 : 0;
+        await api.toggleSonos(device.id, nextPlaying, favoriteIndex);
+      } catch (err) {
+        this.clearPendingPrediction(device.family_id, device.id);
+        if (err instanceof HttpError && err.status === 409) {
+          this.renderActionError(err.detail);
+        } else {
+          console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+        }
+        await this.refresh();
       }
-      await this.refresh();
-    }
+    });
   }
 
   private async onToggleVizio(device: UIDeviceOut): Promise<void> {
     const nextOn = device.state === "off";
     this.predictDeviceState(device.family_id, device.id, nextOn ? "on" : "off");
     this.render();
-    try {
-      await api.toggleVizio(device.id, nextOn);
-    } catch (err) {
-      this.clearPendingPrediction(device.family_id, device.id);
-      console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
-      await this.refresh();
-    }
+    await this.runActionNowOrBuffer(async () => {
+      try {
+        await api.toggleVizio(device.id, nextOn);
+      } catch (err) {
+        this.clearPendingPrediction(device.family_id, device.id);
+        console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+        await this.refresh();
+      }
+    });
   }
 
   private operatorAlertStorageKey(alert: UIOperatorAlertOut): string {
@@ -609,12 +729,13 @@ class DomestiBotController {
   }
 
   private registerVisibilityPollBoost(): void {
-    // When the user returns from another app, catch up immediately instead
-    // of waiting for the next interval tick.
+    // When the user returns from another app, assume the LAN link is still
+    // healthy and queue any taps while we catch up with a fresh poll.
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState !== "visible") {
         return;
       }
+      this.beginConnectionAssessing();
       void this.refresh();
     });
   }
