@@ -80,6 +80,7 @@ from app.domesti_bot_cli import (
 )
 from app.server_runtime import runtime
 from app.sonos_device_manager import SonosTransitionUnavailableError
+from app.ui_device_actions import flip_ui_device
 
 
 _LOGGER = logging.getLogger("app.api")
@@ -503,6 +504,31 @@ def create_app(args: Any) -> FastAPI:
             detail=f"affected={len(affected)} skipped={len(skipped)}",
         )
         return UIBulkActionOut(affected=affected, skipped=skipped)
+
+    @app.post(
+        "/v1/ui/devices/{family_id}/{device_id}/toggle",
+        dependencies=[Depends(_verify_api_key)],
+    )
+    async def ui_device_toggle(
+        family_id: str,
+        device_id: str,
+        request: Request,
+        state: DeviceState,
+    ) -> UIDeviceActionOut:
+        result = await flip_ui_device(
+            state,
+            family_id=family_id,
+            device_id=device_id,
+        )
+        log_ui_action(
+            request,
+            action=UiActionType.TOGGLE,
+            family_id=family_id,
+            device_id=device_id,
+            device_label=result.device_label,
+            detail=result.log_detail,
+        )
+        return UIDeviceActionOut(device=result.device)
 
     @app.post(
         "/v1/ui/kasa/devices/{device_id}/toggle",
