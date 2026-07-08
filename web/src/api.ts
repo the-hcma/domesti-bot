@@ -207,13 +207,6 @@ export const api = {
   closeAllTailwind(): Promise<UIBulkActionOut> {
     return call<UIBulkActionOut>("POST", "/v1/ui/tailwind/close-all", {});
   },
-  closeTailwindDoor(deviceId: string): Promise<UIDeviceActionOut> {
-    return call<UIDeviceActionOut>(
-      "POST",
-      `/v1/ui/tailwind/doors/${encodeURIComponent(deviceId)}/close`,
-      {},
-    );
-  },
   clearKasaCredentials(): Promise<KasaCredentialsSettingsOut> {
     return call<KasaCredentialsSettingsOut>("DELETE", "/v1/settings/kasa-credentials");
   },
@@ -332,13 +325,6 @@ export const api = {
   },
   fetchVizioTvsSettings(): Promise<VizioTvsSettingsOut> {
     return call<VizioTvsSettingsOut>("GET", "/v1/settings/vizio/tvs");
-  },
-  openTailwindDoor(deviceId: string): Promise<UIDeviceActionOut> {
-    return call<UIDeviceActionOut>(
-      "POST",
-      `/v1/ui/tailwind/doors/${encodeURIComponent(deviceId)}/open`,
-      {},
-    );
   },
   pauseAllSonos(): Promise<UIBulkActionOut> {
     return call<UIBulkActionOut>("POST", "/v1/ui/sonos/pause-all", {});
@@ -486,6 +472,7 @@ export const api = {
           "POST",
           `/v1/ui/sonos/zones/${encodeURIComponent(device.id)}/toggle`,
           nextState === "playing"
+            // Tile tap always resumes with favourite_index 0 (first stream).
             ? { playing: true, favorite_index: 0 }
             : { playing: false },
         );
@@ -513,33 +500,6 @@ export const api = {
           `Expected a known family_id, got ${device.family_id}`,
         );
     }
-  },
-  toggleKasa(deviceId: string, on: boolean): Promise<UIDeviceActionOut> {
-    return call<UIDeviceActionOut>(
-      "POST",
-      `/v1/ui/kasa/devices/${encodeURIComponent(deviceId)}/toggle`,
-      { on },
-    );
-  },
-  toggleSonos(
-    deviceId: string,
-    playing: boolean,
-    favoriteIndex = 0,
-  ): Promise<UIDeviceActionOut> {
-    return call<UIDeviceActionOut>(
-      "POST",
-      `/v1/ui/sonos/zones/${encodeURIComponent(deviceId)}/toggle`,
-      playing
-        ? { playing: true, favorite_index: favoriteIndex }
-        : { playing: false },
-    );
-  },
-  toggleVizio(deviceId: string, on: boolean): Promise<UIDeviceActionOut> {
-    return call<UIDeviceActionOut>(
-      "POST",
-      `/v1/ui/vizio/tvs/${encodeURIComponent(deviceId)}/toggle`,
-      { on },
-    );
   },
 };
 

@@ -484,21 +484,28 @@ class DomestiBotController {
     });
   }
 
+  private onSpeakerTileActionFailure(
+    device: UIDeviceOut,
+    err: unknown,
+  ): void {
+    if (err instanceof HttpError && err.status === 409) {
+      this.renderActionError(err.detail);
+    } else {
+      console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+    }
+  }
+
   private async onToggleDevice(device: UIDeviceOut): Promise<void> {
     const nextState = nextStateAfterTileToggle(device);
+    const onFailure =
+      device.kind === "speaker"
+        ? (err: unknown) => this.onSpeakerTileActionFailure(device, err)
+        : undefined;
     await this.runOptimisticTileAction(
       device,
       nextState,
       () => api.toggleDeviceTile(device, nextState),
-      device.kind === "speaker"
-        ? (err) => {
-            if (err instanceof HttpError && err.status === 409) {
-              this.renderActionError(err.detail);
-            } else {
-              console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
-            }
-          }
-        : undefined,
+      onFailure,
     );
   }
 
