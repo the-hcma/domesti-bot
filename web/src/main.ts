@@ -95,13 +95,11 @@ class DomestiBotController {
   private static readonly BOOTSTRAP_RETRY_MS = 2000;
   private static readonly BOOTSTRAP_DEADLINE_MS = 90000;
 
-  // After a successful poll, keep family frames green through brief client-side
-  // transport blips (phone waking, Wi‑Fi handoff, stale socket) while polls
-  // and /health probes retry in the background.
-  // Must exceed POLL_MS * POLL_TRANSPORT_FAILURES_BEFORE_VERIFY (currently
-  // 3000 * 2 = 6000 ms) so the grace is still active when handlePollFailure
-  // reaches the connectionReconnectGraceActive() check.
-  private static readonly CONNECTION_RECONNECT_GRACE_MS = 10000;
+  // While the client re-establishes transport after foreground return, keep
+  // frames green and buffer actions for this window before probing /health.
+  // Anchored to assessing start (not last poll success) so a phone returning
+  // from background gets a fresh grace even when the last poll was minutes ago.
+  private static readonly CONNECTION_RECONNECT_GRACE_MS = 3000;
 
   // How long a recoverable action error (e.g. Sonos 409 "queue is
   // empty") stays visible before auto-dismissing. Long enough to
@@ -119,12 +117,13 @@ class DomestiBotController {
   // True while the client re-establishes transport after a prior successful
   // poll — UI stays connected and user actions are queued for flush.
   private connectionAssessing = false;
+  private connectionAssessingStartedAt: number | null = null;
   private devicesReady = false;
   private lastSuccessfulPollAt: number | null = null;
   // Consecutive transport failures (no HTTP response) on /v1/ui/state before
   // we probe /health and possibly mark the UI offline.
   private pollTransportFailureStreak = 0;
-  private static readonly POLL_TRANSPORT_FAILURES_BEFORE_VERIFY = 2;
+  private static readonly POLL_TRANSPORT_FAILURES_BEFORE_VERIFY = 1;
   private refreshInFlight = false;
   private pollTimer: number | null = null;
   // The recoverable-action toast lives outside ``#app`` so it
@@ -199,6 +198,9 @@ class DomestiBotController {
     if (!this.state || this.lastSuccessfulPollAt === null) {
       return;
     }
+    if (!this.connectionAssessing) {
+      this.connectionAssessingStartedAt = performance.now();
+    }
     this.connectionAssessing = true;
   }
 
@@ -225,16 +227,17 @@ class DomestiBotController {
   }
 
   private connectionReconnectGraceActive(): boolean {
-    const lastSuccess = this.lastSuccessfulPollAt;
+    const startedAt = this.connectionAssessingStartedAt;
     return (
-      lastSuccess !== null &&
-      performance.now() - lastSuccess
+      startedAt !== null &&
+      performance.now() - startedAt
         < DomestiBotController.CONNECTION_RECONNECT_GRACE_MS
     );
   }
 
   private endConnectionAssessingAndFlush(): void {
     this.connectionAssessing = false;
+    this.connectionAssessingStartedAt = null;
     if (this.bufferedActions.length > 0) {
       void this.flushBufferedActions();
     }
@@ -293,6 +296,7 @@ class DomestiBotController {
     this.connected = false;
     this.devicesReady = false;
     this.connectionAssessing = false;
+    this.connectionAssessingStartedAt = null;
     this.clearBufferedActions("backend offline");
   }
 
