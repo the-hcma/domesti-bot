@@ -265,6 +265,9 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
     async def close(self, identifier: str) -> None:
         await self._device_for(identifier).close()
 
+    async def _flip_device(self, identifier: str) -> str:
+        return await self._device_for(identifier).flip()
+
     async def disconnect(self) -> None:
         """Close the HTTP session; call ``fetch`` again to reuse the manager."""
         if self._tailwind is not None:

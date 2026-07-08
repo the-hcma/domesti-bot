@@ -679,6 +679,9 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
     async def turn_on(self, identifier: str) -> None:
         await self._device_for(identifier).turn_on()
 
+    async def _flip_device(self, identifier: str) -> str:
+        return await self._device_for(identifier).flip()
+
     @property
     def zeroconf_discovery(self) -> bool:
         return self._zeroconf_discovery

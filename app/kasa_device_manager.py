@@ -1052,6 +1052,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
     async def turn_on(self, identifier: str) -> None:
         await self._device_for(identifier).turn_on()
 
+    async def _flip_device(self, identifier: str) -> str:
+        return await self._device_for(identifier).flip()
+
     @property
     def switches(self) -> tuple[KasaDevice, ...]:
         """Discovered devices sorted by :meth:`~rule_engine.Device.preferred_label`."""

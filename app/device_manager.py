@@ -64,6 +64,10 @@ class DoorDeviceManager(DeviceManager[DoorT], ABC):
     async def close(self, identifier: str) -> None:
         """Fully close the door (or equivalent)."""
 
+    async def flip(self, identifier: str) -> str:
+        """Flip from cached door state; return ``[ui-action]`` detail."""
+        return await self._flip_device(identifier)
+
     @abstractmethod
     async def is_closed(self, identifier: str) -> bool:
         """``True`` when the door reports fully closed."""
@@ -76,9 +80,22 @@ class DoorDeviceManager(DeviceManager[DoorT], ABC):
     async def open(self, identifier: str) -> None:
         """Fully open the door (or equivalent)."""
 
+    @abstractmethod
+    async def _flip_device(self, identifier: str) -> str:
+        """Resolve *identifier* and call :meth:`DoorDevice.flip`."""
+
 
 class SpeakerDeviceManager(DeviceManager[SpeakerT], ABC):
     """Speakers / zones: *pause* / *resume* playback."""
+
+    async def flip(
+        self,
+        identifier: str,
+        *,
+        favorite_index: int = 0,
+    ) -> str:
+        """Flip from cached playback state; return ``[ui-action]`` detail."""
+        return await self._flip_device(identifier, favorite_index=favorite_index)
 
     @abstractmethod
     async def pause(self, identifier: str) -> None:
@@ -88,9 +105,22 @@ class SpeakerDeviceManager(DeviceManager[SpeakerT], ABC):
     async def resume(self, identifier: str, *, favorite_index: int = 0) -> None:
         """Resume playback on the resolved zone."""
 
+    @abstractmethod
+    async def _flip_device(
+        self,
+        identifier: str,
+        *,
+        favorite_index: int = 0,
+    ) -> str:
+        """Resolve *identifier* and call :meth:`SpeakerDevice.flip`."""
+
 
 class SwitchDeviceManager(DeviceManager[SwitchT], ABC):
     """Plugs, bulbs, relays: *off* / *on* power semantics."""
+
+    async def flip(self, identifier: str) -> str:
+        """Flip from cached on/off; return ``[ui-action]`` detail."""
+        return await self._flip_device(identifier)
 
     @abstractmethod
     async def is_off(self, identifier: str) -> bool:
@@ -107,3 +137,7 @@ class SwitchDeviceManager(DeviceManager[SwitchT], ABC):
     @abstractmethod
     async def turn_on(self, identifier: str) -> None:
         """Turn power on."""
+
+    @abstractmethod
+    async def _flip_device(self, identifier: str) -> str:
+        """Resolve *identifier* and call :meth:`SwitchDevice.flip`."""

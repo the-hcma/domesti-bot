@@ -421,6 +421,16 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
     async def pause(self, identifier: str) -> None:
         await self._device_for(identifier).pause()
 
+    async def _flip_device(
+        self,
+        identifier: str,
+        *,
+        favorite_index: int = 0,
+    ) -> str:
+        return await self._device_for(identifier).flip(
+            favorite_index=favorite_index,
+        )
+
     @property
     def players(self) -> tuple[SonosSpeakerDevice, ...]:
         if self._alias_to_device is None:

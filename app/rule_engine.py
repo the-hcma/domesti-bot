@@ -133,6 +133,14 @@ class DoorDevice(Device, ABC):
     async def close(self) -> None:
         """Fully close."""
 
+    async def flip(self) -> str:
+        """Flip from cached door state; return ``[ui-action]`` detail."""
+        if self.is_closed and not self.is_open:
+            await self.open()
+            return "state=open"
+        await self.close()
+        return "state=closed"
+
     @property
     def door_state(self) -> DoorPosition:
         """Cached fully-open vs fully-closed."""
@@ -162,6 +170,19 @@ class SpeakerDevice(Device, ABC):
         self, identifier: str, *, display_name: str | None = None
     ) -> None:
         super().__init__(identifier, display_name=display_name)
+
+    @property
+    @abstractmethod
+    def is_playing(self) -> bool | None:
+        """Cached playback state, or ``None`` before the first poll."""
+
+    async def flip(self, *, favorite_index: int = 0) -> str:
+        """Flip from cached playback state; return ``[ui-action]`` detail."""
+        if self.is_playing is True:
+            await self.pause()
+            return "playing=False"
+        await self.resume(favorite_index=favorite_index)
+        return "playing=True"
 
     @abstractmethod
     async def pause(self) -> None:
@@ -199,6 +220,14 @@ class SwitchDevice(Device, ABC):
     def set_power(self, on: bool) -> None:
         """Update cached on/off (hardware subclasses refresh after I/O)."""
         self._on = on
+
+    async def flip(self) -> str:
+        """Flip from cached on/off; return ``[ui-action]`` detail."""
+        if self.is_on:
+            await self.turn_off()
+            return "on=False"
+        await self.turn_on()
+        return "on=True"
 
     @abstractmethod
     async def turn_off(self) -> None:

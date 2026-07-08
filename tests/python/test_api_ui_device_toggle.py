@@ -42,6 +42,13 @@ class _FakeDoor:
         self.is_open = True
         self.is_closed = False
 
+    async def flip(self) -> str:
+        if self.is_closed and not self.is_open:
+            await self.open()
+            return "state=open"
+        await self.close()
+        return "state=closed"
+
 
 class _FakeKasa:
     def __init__(self, host: str, label: str, *, is_on: bool) -> None:
@@ -58,6 +65,13 @@ class _FakeKasa:
     async def turn_on(self) -> None:
         self.calls.append("on")
         self.is_on = True
+
+    async def flip(self) -> str:
+        if self.is_on:
+            await self.turn_off()
+            return "on=False"
+        await self.turn_on()
+        return "on=True"
 
 
 class _FakeSonosZone:
@@ -94,6 +108,13 @@ class _FakeSonosZone:
             )
         self.is_playing = True
 
+    async def flip(self, *, favorite_index: int = 0) -> str:
+        if self.is_playing is True:
+            await self.pause()
+            return "playing=False"
+        await self.resume(favorite_index=favorite_index)
+        return "playing=True"
+
 
 class _FakeVizioTv:
     def __init__(
@@ -119,6 +140,17 @@ class _FakeVizioTv:
         self.calls.append("on")
         self._power_state = "on"
 
+    async def flip(self) -> str:
+        state = self.ui_power_state()
+        if state == "on":
+            await self.turn_off()
+            return "on=False"
+        if state == "off":
+            await self.turn_on()
+            return "on=True"
+        await self.turn_off()
+        return "on=False"
+
 
 def _client() -> tuple[TestClient, FastAPI]:
     app = create_app(argparse.Namespace())
@@ -128,24 +160,60 @@ def _client() -> tuple[TestClient, FastAPI]:
 def _kasa_mgr(devices: list[_FakeKasa]) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(devices)
+    host_to_device = {device._kDevice.host: device for device in devices}
+
+    async def flip(identifier: str) -> str:
+        device = host_to_device.get(identifier)
+        if device is None:
+            raise ValueError(f"Unknown device: {identifier!r}")
+        return await device.flip()
+
+    mgr.flip = flip
     return cast(KasaDeviceManager, mgr)
 
 
 def _sonos_mgr(zones: list[_FakeSonosZone]) -> SonosDeviceManager:
     mgr = MagicMock(spec=SonosDeviceManager)
     mgr.players = tuple(zones)
+    id_to_zone = {zone.identifier: zone for zone in zones}
+
+    async def flip(identifier: str, *, favorite_index: int = 0) -> str:
+        zone = id_to_zone.get(identifier)
+        if zone is None:
+            raise ValueError(f"Unknown device: {identifier!r}")
+        return await zone.flip(favorite_index=favorite_index)
+
+    mgr.flip = flip
     return cast(SonosDeviceManager, mgr)
 
 
 def _tailwind_mgr(doors: list[_FakeDoor]) -> GotailwindDeviceManager:
     mgr = MagicMock(spec=GotailwindDeviceManager)
     mgr.doors = tuple(doors)
+    id_to_door = {door.identifier: door for door in doors}
+
+    async def flip(identifier: str) -> str:
+        door = id_to_door.get(identifier)
+        if door is None:
+            raise ValueError(f"Unknown device: {identifier!r}")
+        return await door.flip()
+
+    mgr.flip = flip
     return cast(GotailwindDeviceManager, mgr)
 
 
 def _vizio_mgr(tvs: list[_FakeVizioTv]) -> VizioDeviceManager:
     mgr = MagicMock(spec=VizioDeviceManager)
     mgr.tvs = tuple(tvs)
+    id_to_tv = {tv.identifier: tv for tv in tvs}
+
+    async def flip(identifier: str) -> str:
+        tv = id_to_tv.get(identifier)
+        if tv is None:
+            raise KeyError(identifier)
+        return await tv.flip()
+
+    mgr.flip = flip
     return cast(VizioDeviceManager, mgr)
 
 

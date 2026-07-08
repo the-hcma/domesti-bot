@@ -156,6 +156,17 @@ class VizioTvDevice(SwitchDevice):
         self._power_unknown = False
         self.set_power(True)
 
+    async def flip(self) -> str:
+        state = self.ui_power_state()
+        if state == "on":
+            await self.turn_off()
+            return "on=False"
+        if state == "off":
+            await self.turn_on()
+            return "on=True"
+        await self.turn_off()
+        return "on=False"
+
     def ui_power_state(self) -> str:
         """Cached on/off/unknown for the web UI and REPL listings."""
         if self._power_unknown:
@@ -319,6 +330,12 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         if tv is None:
             raise KeyError(identifier)
         await tv.turn_on()
+
+    async def _flip_device(self, identifier: str) -> str:
+        tv = self.get_device_by_id(identifier)
+        if tv is None:
+            raise KeyError(identifier)
+        return await tv.flip()
 
     async def _connect_endpoint(
         self,
