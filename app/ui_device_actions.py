@@ -137,11 +137,6 @@ def _flip_lookup_error(
             status_code=HTTPStatus.NOT_FOUND,
             detail=f"Unknown {family.display_name()} device: {device_id}",
         )
-    if isinstance(exc, ValueError) and "Unknown" in str(exc):
-        return HTTPException(
-            status_code=HTTPStatus.NOT_FOUND,
-            detail=f"Unknown {family.display_name()} device: {device_id}",
-        )
     return None
 
 

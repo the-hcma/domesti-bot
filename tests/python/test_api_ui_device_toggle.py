@@ -171,7 +171,7 @@ def _kasa_mgr(devices: list[_FakeKasa]) -> KasaDeviceManager:
     async def flip_tile(identifier: str) -> tuple[str, str]:
         device = host_to_device.get(identifier)
         if device is None:
-            raise ValueError(f"Unknown device: {identifier!r}")
+            raise KeyError(identifier)
         detail = await device.flip()
         return device.preferred_label, detail
 
@@ -198,7 +198,7 @@ def _sonos_mgr(zones: list[_FakeSonosZone]) -> SonosDeviceManager:
     ) -> tuple[str, str]:
         zone = id_to_zone.get(identifier)
         if zone is None:
-            raise ValueError(f"Unknown device: {identifier!r}")
+            raise KeyError(identifier)
         detail = await zone.flip(favorite_index=favorite_index)
         return zone.preferred_label, detail
 
@@ -221,7 +221,7 @@ def _tailwind_mgr(doors: list[_FakeDoor]) -> GotailwindDeviceManager:
     async def flip_tile(identifier: str) -> tuple[str, str]:
         door = id_to_door.get(identifier)
         if door is None:
-            raise ValueError(f"Unknown device: {identifier!r}")
+            raise KeyError(identifier)
         detail = await door.flip()
         return door.preferred_label, detail
 

@@ -75,7 +75,10 @@ class DoorDeviceManager(DeviceManager[DoorT], ABC):
 
     async def flip_tile(self, identifier: str) -> tuple[str, str]:
         """Flip one door with a single lookup; return ``(label, log_detail)``."""
-        device = self._device_for(identifier)
+        try:
+            device = self._device_for(identifier)
+        except ValueError as exc:
+            raise KeyError(identifier) from exc
         detail = await device.flip()
         return device.preferred_label, detail
 
@@ -123,7 +126,10 @@ class SpeakerDeviceManager(DeviceManager[SpeakerT], ABC):
         favorite_index: int = 0,
     ) -> tuple[str, str]:
         """Flip one zone with a single lookup; return ``(label, log_detail)``."""
-        device = self._device_for(identifier)
+        try:
+            device = self._device_for(identifier)
+        except ValueError as exc:
+            raise KeyError(identifier) from exc
         detail = await device.flip(favorite_index=favorite_index)
         return device.preferred_label, detail
 
@@ -154,7 +160,10 @@ class SwitchDeviceManager(DeviceManager[SwitchT], ABC):
 
     async def flip_tile(self, identifier: str) -> tuple[str, str]:
         """Flip one switch with a single lookup; return ``(label, log_detail)``."""
-        device = self._device_for(identifier)
+        try:
+            device = self._device_for(identifier)
+        except ValueError as exc:
+            raise KeyError(identifier) from exc
         detail = await device.flip()
         return device.preferred_label, detail
 
