@@ -320,6 +320,32 @@ class DomestiBotController {
     await execute();
   }
 
+  // Shared optimistic tile action: predict next state, render, then run the
+  // HTTP call (or queue it during reconnect assessing). On failure, drop the
+  // prediction and refresh so the tile shows server truth.
+  private async runOptimisticTileAction(
+    device: UIDeviceOut,
+    nextState: UIDeviceState,
+    execute: () => Promise<unknown>,
+    onFailure?: (err: unknown) => void | Promise<void>,
+  ): Promise<void> {
+    this.predictDeviceState(device.family_id, device.id, nextState);
+    this.render();
+    await this.runActionNowOrBuffer(async () => {
+      try {
+        await execute();
+      } catch (err) {
+        this.clearPendingPrediction(device.family_id, device.id);
+        if (onFailure !== undefined) {
+          await onFailure(err);
+        } else {
+          console.warn(`[domesti-bot] action on ${device.label} failed`, err);
+        }
+        await this.refresh();
+      }
+    });
+  }
+
   private shouldBufferActions(): boolean {
     return this.connectionAssessing;
   }
@@ -458,105 +484,71 @@ class DomestiBotController {
     });
   }
 
-  private async onOperateTailwind(device: UIDeviceOut): Promise<void> {
-    // ``unknown`` (transient OPENING/CLOSING) defaults to closing — same
-    // safer-default the backend applies. The optimistic prediction
-    // matches the action we'll actually send.
-    const wantOpen = device.state === "closed";
-    const nextState = wantOpen ? "open" : "closed";
-    this.predictDeviceState(device.family_id, device.id, nextState);
-    this.render();
-    await this.runActionNowOrBuffer(async () => {
-      try {
-        if (wantOpen) {
-          await api.openTailwindDoor(device.id);
-        } else {
-          await api.closeTailwindDoor(device.id);
-        }
-      } catch (err) {
-        this.clearPendingPrediction(device.family_id, device.id);
-        console.warn(`[domesti-bot] operate ${device.label} failed`, err);
-        await this.refresh();
+  private async onToggleDevice(device: UIDeviceOut): Promise<void> {
+    switch (device.family_id) {
+      case "kasa": {
+        const nextOn = device.state !== "on";
+        await this.runOptimisticTileAction(
+          device,
+          nextOn ? "on" : "off",
+          async () => {
+            await api.toggleKasa(device.id, nextOn);
+          },
+        );
+        return;
       }
-    });
-  }
-
-  private async onToggleKasa(device: UIDeviceOut): Promise<void> {
-    // Optimistic update: predict the post-action state and re-render
-    // immediately so the button label flips to the *next* action
-    // without waiting for the round-trip. The pending prediction
-    // (see ``predictDeviceState``) also holds across polls during a
-    // grace window so a transient backend disagreement doesn't
-    // flicker the label back. On action failure we drop the grace
-    // window and refresh so the user sees what really happened.
-    const nextOn = device.state !== "on";
-    this.predictDeviceState(device.family_id, device.id, nextOn ? "on" : "off");
-    this.render();
-    await this.runActionNowOrBuffer(async () => {
-      try {
-        await api.toggleKasa(device.id, nextOn);
-      } catch (err) {
-        this.clearPendingPrediction(device.family_id, device.id);
-        console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
-        await this.refresh();
+      case "sonos": {
+        // ``unknown`` defaults to resume; 409 means empty queue / mid-transition.
+        const nextPlaying = device.state !== "playing";
+        await this.runOptimisticTileAction(
+          device,
+          nextPlaying ? "playing" : "paused",
+          async () => {
+            await api.toggleSonos(device.id, nextPlaying, 0);
+          },
+          (err) => {
+            if (err instanceof HttpError && err.status === 409) {
+              this.renderActionError(err.detail);
+            } else {
+              console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
+            }
+          },
+        );
+        return;
       }
-    });
-  }
-
-  private async onToggleSonos(device: UIDeviceOut): Promise<void> {
-    // Symmetric to ``onToggleKasa`` but for Sonos zones. ``unknown``
-    // (zone we haven't polled yet, or a stopped queue) defaults to
-    // ``Resume it`` so the click is meaningful; if the zone is
-    // actually stopped, the SoCo ``play`` call is a no-op rather than
-    // an error. Optimistic prediction follows the action: ``paused``
-    // → predict ``playing``, anything else → predict ``paused``.
-    //
-    // 409 Conflict from the server means Sonos refused the
-    // transition (UPnP 701 — typically an empty queue: there's
-    // nothing to resume). The server has already refreshed the
-    // zone's cached ``is_playing`` from a live UPnP read before the
-    // 409 escaped, so a follow-up ``refresh()`` will show the tile
-    // in its real state. Beyond that, the user clicked something
-    // that didn't work — surface the server-side detail in the
-    // action-error toast so they understand *why* (and what to do
-    // about it: "Pick something to play from the Sonos app first").
-    const nextPlaying = device.state !== "playing";
-    this.predictDeviceState(
-      device.family_id,
-      device.id,
-      nextPlaying ? "playing" : "paused",
-    );
-    this.render();
-    await this.runActionNowOrBuffer(async () => {
-      try {
-        const favoriteIndex =
-          nextPlaying && device.stream_favorites.length > 0 ? 0 : 0;
-        await api.toggleSonos(device.id, nextPlaying, favoriteIndex);
-      } catch (err) {
-        this.clearPendingPrediction(device.family_id, device.id);
-        if (err instanceof HttpError && err.status === 409) {
-          this.renderActionError(err.detail);
-        } else {
-          console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
-        }
-        await this.refresh();
+      case "tailwind": {
+        // ``unknown`` (OPENING/CLOSING) defaults to close — same as backend.
+        const wantOpen = device.state === "closed";
+        await this.runOptimisticTileAction(
+          device,
+          wantOpen ? "open" : "closed",
+          async () => {
+            if (wantOpen) {
+              await api.openTailwindDoor(device.id);
+            } else {
+              await api.closeTailwindDoor(device.id);
+            }
+          },
+          (err) => {
+            console.warn(`[domesti-bot] operate ${device.label} failed`, err);
+          },
+        );
+        return;
       }
-    });
-  }
-
-  private async onToggleVizio(device: UIDeviceOut): Promise<void> {
-    const nextOn = device.state === "off";
-    this.predictDeviceState(device.family_id, device.id, nextOn ? "on" : "off");
-    this.render();
-    await this.runActionNowOrBuffer(async () => {
-      try {
-        await api.toggleVizio(device.id, nextOn);
-      } catch (err) {
-        this.clearPendingPrediction(device.family_id, device.id);
-        console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
-        await this.refresh();
+      case "vizio": {
+        const nextOn = device.state === "off";
+        await this.runOptimisticTileAction(
+          device,
+          nextOn ? "on" : "off",
+          async () => {
+            await api.toggleVizio(device.id, nextOn);
+          },
+        );
+        return;
       }
-    });
+      default:
+        return;
+    }
   }
 
   private operatorAlertStorageKey(alert: UIOperatorAlertOut): string {
@@ -1042,20 +1034,8 @@ class DomestiBotController {
     });
   }
 
-  toggleKasaTile(device: UIDeviceOut): void {
-    void this.onToggleKasa(device);
-  }
-
-  toggleVizioTile(device: UIDeviceOut): void {
-    void this.onToggleVizio(device);
-  }
-
-  toggleSonosTile(device: UIDeviceOut): void {
-    void this.onToggleSonos(device);
-  }
-
-  operateTailwindTile(device: UIDeviceOut): void {
-    void this.onOperateTailwind(device);
+  toggleDeviceTile(device: UIDeviceOut): void {
+    void this.onToggleDevice(device);
   }
 
   bulkActionFamilyTile(familyId: string): void {
@@ -1903,23 +1883,9 @@ function attachTileHitListeners(
   device: UIDeviceOut,
   controller: DomestiBotController,
 ): void {
-  if (device.kind === "switch" && device.family_id === "vizio") {
-    hit.addEventListener("click", () => {
-      controller.toggleVizioTile(device);
-    });
-  } else if (device.kind === "switch") {
-    hit.addEventListener("click", () => {
-      controller.toggleKasaTile(device);
-    });
-  } else if (device.kind === "speaker") {
-    hit.addEventListener("click", () => {
-      controller.toggleSonosTile(device);
-    });
-  } else {
-    hit.addEventListener("click", () => {
-      controller.operateTailwindTile(device);
-    });
-  }
+  hit.addEventListener("click", () => {
+    controller.toggleDeviceTile(device);
+  });
 }
 
 function compactTileAriaLabel(device: UIDeviceOut): string {
