@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.15.0](https://github.com/the-hcma/domesti-bot/compare/v1.14.0...v1.15.0) (2026-07-08)
+
+
+### Features
+
+* unified body-less POST /v1/ui/devices/{family_id}/{device_id}/toggle ([#431](https://github.com/the-hcma/domesti-bot/issues/431)) ([5842d60](https://github.com/the-hcma/domesti-bot/commit/5842d6043b81610a3f1590875b89d19731ae3bac))
+
+
+### Bug Fixes
+
+* harden daily CVE check against editable project and flakes ([#426](https://github.com/the-hcma/domesti-bot/issues/426)) ([34bb15c](https://github.com/the-hcma/domesti-bot/commit/34bb15cc25f40dabe942aead5b031d9466f75390))
+* optimistic client reconnect with action buffering ([#427](https://github.com/the-hcma/domesti-bot/issues/427)) ([9df536c](https://github.com/the-hcma/domesti-bot/commit/9df536cab56a7ed038d0fca90001bb94bccf7598))
+* show daylight card on Automations Conditions tab ([#422](https://github.com/the-hcma/domesti-bot/issues/422)) ([afdf8f3](https://github.com/the-hcma/domesti-bot/commit/afdf8f3048d7aae3d6a10296714e365ec0f0c23b))
+
 ## [1.14.0](https://github.com/the-hcma/domesti-bot/compare/v1.13.0...v1.14.0) (2026-07-07)
 
 
