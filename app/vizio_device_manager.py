@@ -12,7 +12,7 @@ import aiohttp
 
 from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
-from app.rule_engine import SwitchDevice
+from app.rule_engine import SwitchDevice, SwitchPowerState
 from app.vizio_credentials import (
     migrate_vizio_auth_token_host_to_mac,
     resolve_vizio_auth_token,
@@ -155,6 +155,16 @@ class VizioTvDevice(SwitchDevice):
         await self._client.power_on()
         self._power_unknown = False
         self.set_power(True)
+
+    async def flip(self) -> str:
+        if self._power_unknown:
+            await self.turn_off()
+            return "on=False"
+        if self.power_state == SwitchPowerState.ON:
+            await self.turn_off()
+            return "on=False"
+        await self.turn_on()
+        return "on=True"
 
     def ui_power_state(self) -> str:
         """Cached on/off/unknown for the web UI and REPL listings."""
@@ -315,10 +325,13 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         await tv.turn_off()
 
     async def turn_on(self, identifier: str) -> None:
+        await self._device_for(identifier).turn_on()
+
+    def _device_for(self, identifier: str) -> VizioTvDevice:
         tv = self.get_device_by_id(identifier)
         if tv is None:
             raise KeyError(identifier)
-        await tv.turn_on()
+        return tv
 
     async def _connect_endpoint(
         self,

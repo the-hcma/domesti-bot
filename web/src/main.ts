@@ -504,7 +504,7 @@ class DomestiBotController {
     await this.runOptimisticTileAction(
       device,
       nextState,
-      () => api.toggleDeviceTile(device, nextState),
+      () => api.toggleDevice(device.family_id, device.id),
       onFailure,
     );
   }
