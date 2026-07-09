@@ -202,6 +202,9 @@ class DomestiBotController {
       this.connectionAssessingStartedAt = performance.now();
     }
     this.connectionAssessing = true;
+    // After a real outage the UI may still be red even though the LAN link
+    // is back — show cached tiles as reachable while we re-poll /v1/ui/state.
+    this.markBackendReachableFromCachedSession();
   }
 
   private bufferAction(execute: () => Promise<void>): void {
@@ -266,11 +269,13 @@ class DomestiBotController {
     // tiles even when /v1/ui/state is slow, auth fails, or discovery hiccups.
     if (err instanceof HttpError) {
       this.pollTransportFailureStreak = 0;
+      this.markBackendReachableFromCachedSession();
       this.endConnectionAssessingAndFlush();
       return;
     }
     if (!isBackendTransportFailure(err)) {
       this.pollTransportFailureStreak = 0;
+      this.markBackendReachableFromCachedSession();
       this.endConnectionAssessingAndFlush();
       return;
     }
@@ -286,6 +291,7 @@ class DomestiBotController {
       return;
     }
     if (!(await this.verifyBackendUnreachable())) {
+      this.markBackendReachableFromCachedSession();
       this.endConnectionAssessingAndFlush();
       return;
     }
@@ -298,6 +304,14 @@ class DomestiBotController {
     this.connectionAssessing = false;
     this.connectionAssessingStartedAt = null;
     this.clearBufferedActions("backend offline");
+  }
+
+  private markBackendReachableFromCachedSession(): void {
+    if (!this.state || this.lastSuccessfulPollAt === null) {
+      return;
+    }
+    this.connected = true;
+    this.devicesReady = true;
   }
 
   private markBackendReadyFromState(): void {
@@ -695,6 +709,9 @@ class DomestiBotController {
         return;
       }
       this.beginConnectionAssessing();
+      if (this.state !== null) {
+        this.render();
+      }
       void this.refresh();
     });
   }
