@@ -171,6 +171,17 @@ class RuleEvaluator:
             tuple[str, str, str, str],
             _DeferredAccuracyEdge,
         ] = {}
+        # Ephemeral per-rule ``since`` epoch already evaluated for
+        # ``dwell_satisfied`` this streak — avoids re-running full rule checks on
+        # every location ping. Cleared when the geofence streak side resets (enter,
+        # leave, or a newer location retargets ``inside_since`` / ``outside_since``).
+        # After restart, ``_seed_dwell_satisfied_eval_debounce`` warms slots for
+        # episodes already fired or consumed; other debounce state is rebuilt on
+        # the next location ingest.
+        self._dwell_satisfied_evaluated_since: dict[
+            tuple[str, str, str, DwellDirection, int],
+            float,
+        ] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_geo_outside_streak_since: dict[tuple[str, str], float] = {}
@@ -203,6 +214,7 @@ class RuleEvaluator:
         self._load_persisted_rule_state()
         self._seed_geofence_state()
         self._seed_scheduled_dwell_consumed_from_persisted_fire()
+        self._seed_dwell_satisfied_eval_debounce()
         self._seed_scheduled_evaluate_times()
 
     async def close(self) -> None:
@@ -501,9 +513,9 @@ class RuleEvaluator:
             key = (record.user_id, record.geofence_id)
             self._geofence_was_inside[key] = record.was_inside
             if record.outside_since is not None:
-                self._geofence_outside_since[key] = record.outside_since
+                self._set_geofence_outside_since(key, record.outside_since)
             if record.inside_since is not None:
-                self._geofence_inside_since[key] = record.inside_since
+                self._set_geofence_inside_since(key, record.inside_since)
 
     def _apply_wifi_home_presence(
         self,
@@ -555,7 +567,7 @@ class RuleEvaluator:
             was_inside = self._geofence_was_inside.get(key, False)
             if not was_inside:
                 self._geofence_was_inside[key] = True
-                self._geofence_outside_since.pop(key, None)
+                self._drop_geofence_outside_since(key)
                 self._bump_geofence_presence_episode(user_id, geofence_id)
                 _log_wifi_home_presence_reconciled(
                     user_id=user_id,
@@ -566,7 +578,7 @@ class RuleEvaluator:
                 dwell_accuracy_limit_m is not None
                 and key not in self._geofence_inside_since
             ):
-                self._geofence_inside_since[key] = observed_at
+                self._set_geofence_inside_since(key, observed_at)
             self._persist_geofence_transition_state(
                 user_id,
                 geofence_id,
@@ -590,8 +602,8 @@ class RuleEvaluator:
         geofence_id = geofence.geofence_id
         key = (user_id, geofence_id)
         self._geofence_was_inside.pop(key, None)
-        self._geofence_outside_since.pop(key, None)
-        self._geofence_inside_since.pop(key, None)
+        self._drop_geofence_outside_since(key)
+        self._drop_geofence_inside_since(key)
         history = list_user_location_history_for_user(
             cache_path,
             user_id,
@@ -618,9 +630,9 @@ class RuleEvaluator:
                 self._geofence_was_inside[key] = was_inside
                 seeded = True
                 if not was_inside and outside_since is not None:
-                    self._geofence_outside_since[key] = outside_since
+                    self._set_geofence_outside_since(key, outside_since)
             if inside_since is not None:
-                self._geofence_inside_since[key] = inside_since
+                self._set_geofence_inside_since(key, inside_since)
                 seeded = True
         if not seeded:
             edge_inside = history_row_geofence_inside(
@@ -643,7 +655,7 @@ class RuleEvaluator:
                 self._geofence_was_inside[key] = edge_inside
                 seeded = True
             if dwell_inside and dwell_accuracy_limit_m is not None:
-                self._geofence_inside_since[key] = location.reported_at
+                self._set_geofence_inside_since(key, location.reported_at)
                 seeded = True
                 if wifi_home_presence_applies(
                     settings,
@@ -664,7 +676,7 @@ class RuleEvaluator:
                         threshold_m=dwell_accuracy_limit_m,
                     )
             elif dwell_inside is False and dwell_accuracy_limit_m is not None:
-                self._geofence_outside_since[key] = location.reported_at
+                self._set_geofence_outside_since(key, location.reported_at)
                 seeded = True
             if seeded:
                 self._persist_geofence_transition_state(
@@ -1207,7 +1219,7 @@ class RuleEvaluator:
             if current is not None and history_outside_since >= current:
                 continue
             self._geofence_was_inside[key] = False
-            self._geofence_outside_since[key] = history_outside_since
+            self._set_geofence_outside_since(key, history_outside_since)
             self._persist_geofence_transition_state(
                 user_id,
                 geofence_id,
@@ -1508,6 +1520,10 @@ class RuleEvaluator:
         now = datetime.fromtimestamp(now_epoch, tz=timezone)
         ctx = await self._build_evaluation_context(now=now)
         crossed_rule_ids: set[str] = set()
+        newly_evaluated_rules: list[
+            tuple[tuple[str, str, str, DwellDirection, int], float]
+        ] = []
+        rules_by_id = {rule.id: rule for rule in rules}
         for watch in index.watches_for_roster_user(
             roster_user_id,
             ctx.resolve_user_id,
@@ -1518,14 +1534,37 @@ class RuleEvaluator:
                 watch.direction,
             )
             if since is None:
+                self._clear_dwell_satisfied_eval_for_watch(
+                    roster_user_id,
+                    watch.geofence_id,
+                    watch.direction,
+                    watch.min_s,
+                )
                 continue
             elapsed_s = now_epoch - since
             if elapsed_s < watch.min_s:
+                self._clear_dwell_satisfied_eval_for_watch(
+                    roster_user_id,
+                    watch.geofence_id,
+                    watch.direction,
+                    watch.min_s,
+                )
                 continue
-            # Do not consume the episode here — only a successful fire does
-            # (dwell_episode_blocks_fire). Daytime dwell must not poison a later
-            # eligibility wake (e.g. after_sunset) in the same home episode.
-            crossed_rule_ids.update(watch.rule_ids)
+            for rule_id in sorted(watch.rule_ids):
+                rule_key = (
+                    rule_id,
+                    roster_user_id,
+                    watch.geofence_id,
+                    watch.direction,
+                    watch.min_s,
+                )
+                if self._dwell_satisfied_evaluated_since.get(rule_key) == since:
+                    continue
+                # Do not consume the episode here — only a successful fire does
+                # (dwell_episode_blocks_fire). Daytime dwell must not poison a later
+                # eligibility wake (e.g. after_sunset) in the same home episode.
+                crossed_rule_ids.add(rule_id)
+                newly_evaluated_rules.append((rule_key, since))
         if not crossed_rule_ids:
             return
         await self._process_dwell_satisfied_rules(
@@ -1535,6 +1574,18 @@ class RuleEvaluator:
             now_epoch=now_epoch,
             timezone=timezone,
         )
+        for rule_key, since in newly_evaluated_rules:
+            rule_id = rule_key[0]
+            rule = rules_by_id.get(rule_id)
+            if rule is None:
+                continue
+            runtime = self._rule_state.get(rule_id)
+            if dwell_episode_blocks_fire(rule, ctx):
+                self._dwell_satisfied_evaluated_since[rule_key] = since
+                continue
+            if runtime is not None and not self._cooldown_elapsed(rule, runtime):
+                continue
+            self._dwell_satisfied_evaluated_since[rule_key] = since
 
     async def _process_device_state_change(
         self,
@@ -1721,6 +1772,138 @@ class RuleEvaluator:
         if direction == DwellDirection.INSIDE:
             return self._geofence_inside_since.get(key)
         return self._geofence_outside_since.get(key)
+
+    def _clear_dwell_satisfied_eval_for_geofence_direction(
+        self,
+        roster_user_id: str,
+        geofence_id: str,
+        direction: DwellDirection,
+    ) -> None:
+        to_drop = [
+            key
+            for key in self._dwell_satisfied_evaluated_since
+            if key[1] == roster_user_id
+            and key[2] == geofence_id
+            and key[3] == direction
+        ]
+        for key in to_drop:
+            del self._dwell_satisfied_evaluated_since[key]
+
+    def _clear_dwell_satisfied_eval_for_watch(
+        self,
+        roster_user_id: str,
+        geofence_id: str,
+        direction: DwellDirection,
+        min_s: int,
+    ) -> None:
+        suffix = (roster_user_id, geofence_id, direction, min_s)
+        to_drop = [
+            key
+            for key in self._dwell_satisfied_evaluated_since
+            if key[1:] == suffix
+        ]
+        for key in to_drop:
+            del self._dwell_satisfied_evaluated_since[key]
+
+    def _drop_geofence_inside_since(self, key: tuple[str, str]) -> None:
+        self._clear_dwell_satisfied_eval_for_geofence_direction(
+            key[0],
+            key[1],
+            DwellDirection.INSIDE,
+        )
+        self._geofence_inside_since.pop(key, None)
+
+    def _drop_geofence_outside_since(self, key: tuple[str, str]) -> None:
+        self._clear_dwell_satisfied_eval_for_geofence_direction(
+            key[0],
+            key[1],
+            DwellDirection.OUTSIDE,
+        )
+        self._geofence_outside_since.pop(key, None)
+
+    def _set_geofence_inside_since(self, key: tuple[str, str], since: float) -> None:
+        self._clear_dwell_satisfied_eval_for_geofence_direction(
+            key[0],
+            key[1],
+            DwellDirection.INSIDE,
+        )
+        self._geofence_inside_since[key] = since
+
+    def _set_geofence_outside_since(self, key: tuple[str, str], since: float) -> None:
+        self._clear_dwell_satisfied_eval_for_geofence_direction(
+            key[0],
+            key[1],
+            DwellDirection.OUTSIDE,
+        )
+        self._geofence_outside_since[key] = since
+
+    def _setdefault_geofence_inside_since(
+        self,
+        key: tuple[str, str],
+        since: float,
+    ) -> float:
+        existing = self._geofence_inside_since.get(key)
+        if existing is not None:
+            return existing
+        self._set_geofence_inside_since(key, since)
+        return since
+
+    def _setdefault_geofence_outside_since(
+        self,
+        key: tuple[str, str],
+        since: float,
+    ) -> float:
+        existing = self._geofence_outside_since.get(key)
+        if existing is not None:
+            return existing
+        self._set_geofence_outside_since(key, since)
+        return since
+
+    def _seed_dwell_satisfied_eval_debounce(self) -> None:
+        """Warm debounce slots after restart for ongoing fired/consumed dwell episodes."""
+        rules = list_automation_rules()
+        index = build_dwell_watch_index(rules)
+        now_epoch = self._now_fn()
+        rules_by_id = {rule.id: rule for rule in rules}
+        for watch in index.watches:
+            roster_user_id = watch.rule_user_id
+            since = self._dwell_streak_since(
+                roster_user_id,
+                watch.geofence_id,
+                watch.direction,
+            )
+            if since is None or now_epoch - since < watch.min_s:
+                continue
+            presence_key = (roster_user_id, watch.geofence_id)
+            episode = self._geofence_presence_episode.get(presence_key, 0)
+            if watch.direction == DwellDirection.OUTSIDE:
+                consumed = self._scheduled_outside_dwell_consumed
+            else:
+                consumed = self._scheduled_inside_dwell_consumed
+            for rule_id in watch.rule_ids:
+                rule = rules_by_id.get(rule_id)
+                if rule is None:
+                    continue
+                runtime = self._rule_state.get(rule_id)
+                fired_on_streak = (
+                    runtime is not None
+                    and runtime.last_fired_at is not None
+                    and runtime.last_fired_at >= since
+                )
+                episode_consumed = (
+                    consumed.get((rule_id, roster_user_id, watch.geofence_id))
+                    == episode
+                )
+                if not fired_on_streak and not episode_consumed:
+                    continue
+                debounce_key = (
+                    rule_id,
+                    roster_user_id,
+                    watch.geofence_id,
+                    watch.direction,
+                    watch.min_s,
+                )
+                self._dwell_satisfied_evaluated_since[debounce_key] = since
 
     def _ensure_astronomical_schedule_materialized(
         self,
@@ -1980,10 +2163,10 @@ class RuleEvaluator:
                         if not was_inside:
                             self._bump_geofence_presence_episode(user_id, geofence_id)
                         self._geofence_was_inside[key] = True
-                        self._geofence_outside_since.pop(key, None)
+                        self._drop_geofence_outside_since(key)
                         was_inside = True
                         if track_dwell:
-                            self._geofence_inside_since.setdefault(key, streak_since)
+                            self._setdefault_geofence_inside_since(key, streak_since)
                         self._clear_deferred_accuracy_edges_for_geofence(
                             user_id,
                             geofence_id,
@@ -2022,8 +2205,8 @@ class RuleEvaluator:
                         self._geofence_was_inside[key] = False
                         was_inside = False
                         if track_dwell:
-                            self._geofence_inside_since.pop(key, None)
-                        self._geofence_outside_since[key] = outside_streak_since
+                            self._drop_geofence_inside_since(key)
+                        self._set_geofence_outside_since(key, outside_streak_since)
                         self._clear_deferred_accuracy_edges_for_geofence(
                             user_id,
                             geofence_id,
@@ -2044,9 +2227,9 @@ class RuleEvaluator:
                     if not was_inside:
                         self._bump_geofence_presence_episode(user_id, geofence_id)
                     self._geofence_was_inside[key] = True
-                    self._geofence_outside_since.pop(key, None)
+                    self._drop_geofence_outside_since(key)
                     if track_dwell:
-                        self._geofence_inside_since[key] = observed_at
+                        self._set_geofence_inside_since(key, observed_at)
                     if dwell_elapsed:
                         transition = GeofenceTransition(entered=True)
                     elif outside_since is not None:
@@ -2064,23 +2247,23 @@ class RuleEvaluator:
                         self._bump_geofence_presence_episode(user_id, geofence_id)
                     self._geofence_was_inside[key] = False
                     if track_dwell:
-                        self._geofence_inside_since.pop(key, None)
+                        self._drop_geofence_inside_since(key)
                     transition = GeofenceTransition(left=True)
                 if track_dwell:
                     if leaving_from_inside:
-                        self._geofence_outside_since[key] = observed_at
+                        self._set_geofence_outside_since(key, observed_at)
                     else:
-                        self._geofence_outside_since.setdefault(key, observed_at)
-                    self._geofence_inside_since.pop(key, None)
+                        self._setdefault_geofence_outside_since(key, observed_at)
+                    self._drop_geofence_inside_since(key)
             elif now_inside_for_dwell:
                 was_outside = not self._geofence_was_inside.get(key, False)
                 if mutate_state or wifi_dwell_inside:
                     if was_outside:
                         self._bump_geofence_presence_episode(user_id, geofence_id)
                     self._geofence_was_inside[key] = True
-                    self._geofence_outside_since.pop(key, None)
+                    self._drop_geofence_outside_since(key)
                 if track_dwell and key not in self._geofence_inside_since:
-                    self._geofence_inside_since[key] = observed_at
+                    self._set_geofence_inside_since(key, observed_at)
                     if wifi_dwell_inside:
                         _log_wifi_home_presence_overrode_low_accuracy(
                             user_id=user_id,
@@ -2092,8 +2275,8 @@ class RuleEvaluator:
                 if mutate_state:
                     self._geofence_was_inside[key] = False
                 if track_dwell:
-                    self._geofence_outside_since.setdefault(key, observed_at)
-                    self._geofence_inside_since.pop(key, None)
+                    self._setdefault_geofence_outside_since(key, observed_at)
+                    self._drop_geofence_inside_since(key)
             if transition.entered or transition.left:
                 transitions[geofence_id] = transition
                 _log_geofence_transition(
