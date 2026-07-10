@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.orm import Session
 from sqlalchemy import delete, func, select
 
 from app.db.models import (
@@ -31,7 +32,7 @@ from app.db.models import (
     VizioKnownTv,
 )
 from app.db.schema import bootstrap_schema, ensure_schema_if_exists
-from app.db.session import discovery_session
+from app.db.session import discovery_session, discovery_write
 from app.vizio_credentials import vizio_device_id_from_parts
 from app.vizio_mac import (
     device_id_for_vizio,
@@ -170,7 +171,7 @@ def save_androidtv_hosts(
         uid = _nonblank_str(seq[3]) if len(seq) > 3 else None
         model = _nonblank_str(seq[4]) if len(seq) > 4 else None
         records.append((h, p, fn, uid, model))
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         session.execute(delete(AndroidTvDiscoveredHost))
         for h, p, fn, uid, model in records:
             session.add(
@@ -183,6 +184,9 @@ def save_androidtv_hosts(
                     model_name=model,
                 )
             )
+
+
+    discovery_write(path, _write)
 
 
 def _nonblank_str(value: object) -> str | None:
@@ -198,7 +202,7 @@ def save_configs(
 ) -> None:
     """Replace all rows with ``(host, alias, config_dict, requires_klap_auth)``."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         session.execute(delete(KasaDiscoveredDevice))
         for h, a, d, requires_klap_auth in rows:
             session.add(
@@ -210,6 +214,9 @@ def save_configs(
                     updated_at=now,
                 )
             )
+
+
+    discovery_write(path, _write)
 
 
 def save_sonos_zones(
@@ -233,7 +240,7 @@ def save_sonos_zones(
             stripped = str(r[2]).strip()
             name = stripped if stripped else None
         triples.append((uid, host, name))
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         session.execute(delete(SonosKnownZone))
         for u, h, n in triples:
             session.add(
@@ -241,16 +248,22 @@ def save_sonos_zones(
             )
 
 
+    discovery_write(path, _write)
+
+
 def save_tailwind_host(path: Path, host: str) -> None:
     """Remember the last reachable Tailwind controller address (token still comes from env / CLI)."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(TailwindLastHost, 1)
         if row is None:
             session.add(TailwindLastHost(id=1, host=host.strip(), updated_at=now))
         else:
             row.host = host.strip()
             row.updated_at = now
+
+
+    discovery_write(path, _write)
 
 
 def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None]]:
@@ -328,13 +341,17 @@ def migrate_vizio_ui_preference_key(
     new = new_key.strip()
     if not old or not new or old == new:
         return
-    exclude = False
-    with discovery_session(path) as session:
+    def _write(session: Session) -> bool | None:
         row = session.get(UiPreference, ("vizio", old))
         if row is None:
-            return
+            return None
         exclude = bool(row.exclude_from_global)
         session.delete(row)
+        return exclude
+
+    exclude = discovery_write(path, _write)
+    if exclude is None:
+        return
     upsert_ui_preference(
         path,
         backend="vizio",
@@ -408,7 +425,7 @@ def upsert_display_name(
     display_name: str,
 ) -> None:
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         b = backend.strip()
         k = canonical_key.strip()
         row = session.get(DeviceDisplayName, (b, k))
@@ -424,6 +441,9 @@ def upsert_display_name(
         else:
             row.display_name = display_name.strip()
             row.updated_at = now
+
+
+    discovery_write(path, _write)
 
 
 def upsert_vizio_tv(
@@ -445,7 +465,7 @@ def upsert_vizio_tv(
             mac_s = normalize_mac(mac.strip())
         except ValueError:
             mac_s = None
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         if mac_s is not None:
             existing = session.scalar(
                 select(VizioKnownTv).where(VizioKnownTv.mac == mac_s)
@@ -478,6 +498,8 @@ def upsert_vizio_tv(
             if diid_s is not None:
                 row.diid = diid_s
             row.updated_at = now
+
+    discovery_write(path, _write)
     if mac_s is not None:
         canonical = vizio_device_id_from_parts(mac=mac_s, host=h, port=port)
         for old in {device_id_for(h, port), h}:
@@ -498,7 +520,7 @@ def upsert_ui_preference(
     :func:`load_ui_preferences` reader converts back to :class:`bool`.
     """
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         b = backend.strip()
         k = canonical_key.strip()
         row = session.get(UiPreference, (b, k))
@@ -516,13 +538,19 @@ def upsert_ui_preference(
             row.updated_at = now
 
 
+    discovery_write(path, _write)
+
+
 def delete_display_name(path: Path, *, backend: str, canonical_key: str) -> None:
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(
             DeviceDisplayName, (backend.strip(), canonical_key.strip())
         )
         if row is not None:
             session.delete(row)
+
+
+    discovery_write(path, _write)
 
 
 def delete_ui_preference(path: Path, *, backend: str, canonical_key: str) -> None:
@@ -532,7 +560,9 @@ def delete_ui_preference(path: Path, *, backend: str, canonical_key: str) -> Non
     Used by future tile-management endpoints; not exercised by the current
     landing page.
     """
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(UiPreference, (backend.strip(), canonical_key.strip()))
         if row is not None:
             session.delete(row)
+
+    discovery_write(path, _write)

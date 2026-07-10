@@ -8,10 +8,11 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from sqlalchemy.orm import Session
 from sqlalchemy import delete, select
 
 from app.db.models import RuleUserLastLocation, RuleUserLocationHistory
-from app.db.session import discovery_session
+from app.db.session import discovery_session, discovery_write
 from app.location_history_retention import (
     LocationHistoryRetention,
     retained_history_row_ids,
@@ -256,7 +257,7 @@ def prune_user_location_history(
 ) -> int:
     """Delete history rows for ``user_id`` outside ``retention``."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> int:
         rows = session.scalars(
             select(RuleUserLocationHistory)
             .where(RuleUserLocationHistory.user_id == user_id)
@@ -290,6 +291,9 @@ def prune_user_location_history(
         return len(delete_ids)
 
 
+    return discovery_write(path, _write)
+
+
 def replace_user_locations(
     path: Path,
     locations: list[UserLocationRecord],
@@ -298,7 +302,7 @@ def replace_user_locations(
 ) -> int:
     """Replace all stored user locations with ``locations`` and append history."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         session.execute(delete(RuleUserLastLocation))
         for location in locations:
             stored_location = _location_with_normalized_fields(location)
@@ -338,6 +342,8 @@ def replace_user_locations(
                     wifi_ssid=stored_location.wifi_ssid,
                 )
             )
+
+    discovery_write(path, _write)
     for location in locations:
         prune_user_location_history(
             path,
@@ -356,8 +362,8 @@ def upsert_user_location(
     """Upsert one user location and append history; return False when stale."""
     location = _location_with_normalized_fields(location)
     now = time.time()
-    stored = False
-    with discovery_session(path) as session:
+
+    def _write(session: Session) -> bool:
         row = session.get(RuleUserLastLocation, location.user_id)
         if row is not None and row.reported_at > location.reported_at:
             if _LOCATION_LOGGER.isEnabledFor(logging.DEBUG):
@@ -421,7 +427,9 @@ def upsert_user_location(
                 wifi_ssid=location.wifi_ssid,
             )
         )
-        stored = True
+        return True
+
+    stored = discovery_write(path, _write)
     if stored:
         accuracy_label = (
             "unknown"
