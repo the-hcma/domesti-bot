@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.db.models import AutomationRuleState
-from app.db.session import discovery_session
+from app.db.session import discovery_session, discovery_write
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,8 @@ def upsert_rule_fire_state(
     unchanged on existing rows (fire-only updates).
     """
     now = time.time()
-    with discovery_session(path) as session:
+
+    def _write(session: Session) -> None:
         row = session.get(AutomationRuleState, rule_id)
         if row is None:
             session.add(
@@ -78,3 +80,5 @@ def upsert_rule_fire_state(
             row.effective_schedule_cron = effective_schedule_cron
             row.next_evaluate_at = next_evaluate_at
             row.schedule_materialized_for = schedule_materialized_for
+
+    discovery_write(path, _write)

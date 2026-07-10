@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy.orm import Session
+
 from app.db.models import MyTracksSettings
 from app.db.secrets import delete_app_secret, mytracks_relay_api_key_stored_in_db
-from app.db.session import discovery_session
+from app.db.session import discovery_session, discovery_write
 from app.location_history_retention import (
     DEFAULT_LOCATION_HISTORY_MAX_AGE_S,
     DEFAULT_LOCATION_HISTORY_MIN_KEEP_COUNT,
@@ -80,7 +82,7 @@ def clear_mytracks_pairing(path: Path) -> None:
     set_location_request_rate_limits(path, limits=None)
     set_remote_request_location_enabled(path, enabled=None)
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             return
@@ -91,14 +93,19 @@ def clear_mytracks_pairing(path: Path) -> None:
         row.user_location_update_url = None
         row.updated_at = now
 
+    discovery_write(path, _write)
+
 
 def delete_mytracks_settings(path: Path) -> None:
     """Remove My Tracks settings."""
     clear_mytracks_pairing(path)
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is not None:
             session.delete(row)
+
+
+    discovery_write(path, _write)
 
 
 def load_approach_monitoring_distance_m(path: Path) -> int:
@@ -195,12 +202,14 @@ def record_mytracks_geofences_sync(path: Path, *, count: int) -> MyTracksConfigR
     """Persist geofence sync metadata and return the updated settings row."""
     _ = count
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             raise RuntimeError("Expected My Tracks settings before geofence sync, got None")
         row.last_geofences_sync_at = now
         row.updated_at = now
+
+    discovery_write(path, _write)
     saved = load_mytracks_config(path)
     if saved is None:
         raise RuntimeError("Expected My Tracks settings after geofence sync, got None")
@@ -211,12 +220,14 @@ def record_mytracks_users_sync(path: Path, *, count: int) -> MyTracksConfigRecor
     """Persist user roster sync metadata and return the updated settings row."""
     _ = count
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             raise RuntimeError("Expected My Tracks settings before user sync, got None")
         row.last_users_sync_at = now
         row.updated_at = now
+
+    discovery_write(path, _write)
     saved = load_mytracks_config(path)
     if saved is None:
         raise RuntimeError("Expected My Tracks settings after user sync, got None")
@@ -226,7 +237,7 @@ def record_mytracks_users_sync(path: Path, *, count: int) -> MyTracksConfigRecor
 def save_mytracks_config(path: Path, config: MyTracksConfigSave) -> MyTracksConfigRecord:
     """Upsert My Tracks domain and default admin username."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             row = MyTracksSettings(
@@ -246,6 +257,8 @@ def save_mytracks_config(path: Path, config: MyTracksConfigSave) -> MyTracksConf
             row.domain = config.domain.strip()
             row.username = config.username.strip()
             row.updated_at = now
+
+    discovery_write(path, _write)
     saved = load_mytracks_config(path)
     if saved is None:
         raise RuntimeError("Expected My Tracks settings after save, got None")
@@ -262,7 +275,8 @@ def save_location_history_retention(
     """Persist location-history retention settings."""
     now = time.time()
     max_age_s = max_age_hours * 3600.0
-    with discovery_session(path) as session:
+
+    def _write(session: Session) -> LocationHistoryRetentionRecord:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             row = MyTracksSettings(
@@ -283,13 +297,15 @@ def save_location_history_retention(
             row.location_history_min_keep_count = min_keep_count
             row.location_history_unlimited = 1 if unlimited else 0
             row.updated_at = now
-    return _retention_record_from_row(row)
+        return _retention_record_from_row(row)
+
+    return discovery_write(path, _write)
 
 
 def save_mytracks_pairing(path: Path, pairing: MyTracksPairingSave) -> MyTracksPairStatusRecord:
     """Persist successful pairing metadata."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             row = MyTracksSettings(
@@ -320,6 +336,8 @@ def save_mytracks_pairing(path: Path, pairing: MyTracksPairingSave) -> MyTracksP
             row.last_pair_error = None
             row.location_updates_accepted = 1
             row.updated_at = now
+
+    discovery_write(path, _write)
     saved = load_mytracks_pair_status(path)
     if saved is None:
         raise RuntimeError("Expected My Tracks settings after pairing, got None")
@@ -329,18 +347,20 @@ def save_mytracks_pairing(path: Path, pairing: MyTracksPairingSave) -> MyTracksP
 def set_last_pair_error(path: Path, error: str | None) -> None:
     """Record the latest pairing failure message."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             return
         row.last_pair_error = error
         row.updated_at = now
 
+    discovery_write(path, _write)
+
 
 def save_approach_monitoring_distance_m(path: Path, *, distance_m: int) -> int:
     """Persist geofence approach corridor distance in meters."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             raise RuntimeError(
@@ -348,6 +368,8 @@ def save_approach_monitoring_distance_m(path: Path, *, distance_m: int) -> int:
             )
         row.approach_monitoring_distance_m = distance_m
         row.updated_at = now
+
+    discovery_write(path, _write)
     return load_approach_monitoring_distance_m(path)
 
 
@@ -358,7 +380,7 @@ def set_location_request_rate_limits(
 ) -> None:
     """Persist my-tracks location-request rate limits from admin config reads."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             return
@@ -376,16 +398,20 @@ def set_location_request_rate_limits(
             )
         row.updated_at = now
 
+    discovery_write(path, _write)
+
 
 def set_location_updates_accepted(path: Path, *, accepted: bool) -> MyTracksPairStatusRecord:
     """Update the local emergency switch for live location-update ingest."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             raise RuntimeError("Expected My Tracks settings before location toggle, got None")
         row.location_updates_accepted = 1 if accepted else 0
         row.updated_at = now
+
+    discovery_write(path, _write)
     saved = load_mytracks_pair_status(path)
     if saved is None:
         raise RuntimeError("Expected My Tracks settings after location toggle, got None")
@@ -395,7 +421,7 @@ def set_location_updates_accepted(path: Path, *, accepted: bool) -> MyTracksPair
 def set_remote_request_location_enabled(path: Path, *, enabled: bool | None) -> None:
     """Persist my-tracks remote request-location opt-in from admin config reads."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             return
@@ -404,6 +430,8 @@ def set_remote_request_location_enabled(path: Path, *, enabled: bool | None) -> 
         else:
             row.remote_request_location_enabled = 1 if enabled else 0
         row.updated_at = now
+
+    discovery_write(path, _write)
 
 
 def _retention_record_from_row(row: MyTracksSettings) -> LocationHistoryRetentionRecord:

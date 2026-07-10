@@ -6,11 +6,12 @@ import time
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.db.models import AppSecret
 from app.db.secrets_key import SecretsKeySource, load_secrets_key_material
-from app.db.session import discovery_session
+from app.db.session import discovery_session, discovery_write
 from app.vizio_mac import normalize_mac
 
 _KASA_PASSWORD_KEY = "kasa_password"
@@ -31,19 +32,25 @@ class SecretsDecryptError(ValueError):
 
 def delete_app_secret(path: Path, *, key: str) -> None:
     """Remove one secret row if present."""
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(AppSecret, key.strip())
         if row is not None:
             session.delete(row)
 
 
+    discovery_write(path, _write)
+
+
 def delete_kasa_credentials_from_db(path: Path) -> None:
     """Remove encrypted Kasa account username and password rows atomically."""
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         for key in (_KASA_PASSWORD_KEY, _KASA_USERNAME_KEY):
             row = session.get(AppSecret, key)
             if row is not None:
                 session.delete(row)
+
+
+    discovery_write(path, _write)
 
 
 def load_kasa_credentials_from_db(path: Path) -> tuple[str, str] | None:
@@ -127,7 +134,7 @@ def save_kasa_credentials_to_db(
 ) -> None:
     """Encrypt and persist Kasa/Tapo account email and password (both required).
 
-    Username and password are written in one ``discovery_session`` commit so a
+    Username and password are written in one ``discovery_write`` commit so a
     crash cannot leave a single orphaned credential row.
     """
     un = username.strip()
@@ -139,7 +146,7 @@ def save_kasa_credentials_to_db(
         )
     fernet = _require_fernet()
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         for key, value in ((_KASA_PASSWORD_KEY, pw), (_KASA_USERNAME_KEY, un)):
             ciphertext = fernet.encrypt(value.encode("utf-8"))
             row = session.get(AppSecret, key)
@@ -154,6 +161,9 @@ def save_kasa_credentials_to_db(
             else:
                 row.ciphertext = ciphertext
                 row.updated_at = now
+
+
+    discovery_write(path, _write)
 
 
 def save_mytracks_admin_password_to_db(path: Path, password: str) -> None:
@@ -312,7 +322,7 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
     fernet = _require_fernet()
     ciphertext = fernet.encrypt(value.encode("utf-8"))
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(AppSecret, key)
         if row is None:
             session.add(
@@ -325,6 +335,9 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
         else:
             row.ciphertext = ciphertext
             row.updated_at = now
+
+
+    discovery_write(path, _write)
 
 
 def _vizio_auth_secret_key_host(host: str) -> str:

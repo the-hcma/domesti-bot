@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.db.models import RuleUserGeofenceState
-from app.db.session import discovery_session
+from app.db.session import discovery_session, discovery_write
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,8 @@ def upsert_geofence_transition_state(
 ) -> None:
     """Upsert transition state for one ``(user_id, geofence_id)`` pair."""
     now = time.time()
-    with discovery_session(path) as session:
+
+    def _write(session: Session) -> None:
         row = session.get(
             RuleUserGeofenceState,
             {"user_id": user_id, "geofence_id": geofence_id},
@@ -78,3 +80,5 @@ def upsert_geofence_transition_state(
         row.outside_since = outside_since
         row.updated_at = now
         row.was_inside = 1 if was_inside else 0
+
+    discovery_write(path, _write)

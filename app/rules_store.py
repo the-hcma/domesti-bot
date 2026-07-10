@@ -6,10 +6,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy.orm import Session
 from sqlalchemy import delete, select
 
 from app.db.models import RuleGeofence, RuleUser
-from app.db.session import discovery_session
+from app.db.session import discovery_session, discovery_write
 from app.presence_wifi import normalize_wifi_bssid
 from app.user_names import default_display_name, format_person_display_name, parse_person_name
 
@@ -48,10 +49,13 @@ def count_users(path: Path) -> int:
 
 
 def delete_geofence(path: Path, geofence_id: str) -> None:
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(RuleGeofence, geofence_id)
         if row is not None:
             session.delete(row)
+
+
+    discovery_write(path, _write)
 
 
 def list_geofences(path: Path) -> list[GeofenceRecord]:
@@ -68,7 +72,7 @@ def list_users(path: Path) -> list[UserRecord]:
 
 def replace_geofences(path: Path, geofences: list[GeofenceRecord]) -> int:
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         session.execute(delete(RuleGeofence))
         for geofence in geofences:
             session.add(
@@ -83,13 +87,15 @@ def replace_geofences(path: Path, geofences: list[GeofenceRecord]) -> int:
                     updated_at=now,
                 )
             )
+
+    discovery_write(path, _write)
     return len(geofences)
 
 
 def replace_users(path: Path, users: list[UserRecord]) -> int:
     """Replace the full user roster, preserving ``user_id`` values from the export."""
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         preserved_home_wifi: dict[str, tuple[str | None, str | None]] = {
             row.user_id: (row.home_wifi_ssid, row.home_wifi_bssid)
             for row in session.scalars(select(RuleUser)).all()
@@ -116,6 +122,8 @@ def replace_users(path: Path, users: list[UserRecord]) -> int:
                     updated_at=now,
                 )
             )
+
+    discovery_write(path, _write)
     return len(users)
 
 
@@ -135,7 +143,7 @@ def set_user_home_wifi(
     elif trimmed_ssid is None:
         raise ValueError("Expected wifi_ssid when wifi_bssid is set, got None")
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> UserRecord:
         row = session.get(RuleUser, trimmed_user_id)
         if row is None:
             raise KeyError(trimmed_user_id)
@@ -145,9 +153,12 @@ def set_user_home_wifi(
         return _user_to_record(row)
 
 
+    return discovery_write(path, _write)
+
+
 def save_geofence(path: Path, geofence: GeofenceRecord) -> GeofenceRecord:
     now = time.time()
-    with discovery_session(path) as session:
+    def _write(session: Session) -> None:
         row = session.get(RuleGeofence, geofence.geofence_id)
         if row is None:
             row = RuleGeofence(
@@ -169,6 +180,8 @@ def save_geofence(path: Path, geofence: GeofenceRecord) -> GeofenceRecord:
             row.enabled = 1 if geofence.enabled else 0
             row.owntracks_rid = geofence.owntracks_rid
             row.updated_at = now
+
+    discovery_write(path, _write)
     return geofence
 
 
