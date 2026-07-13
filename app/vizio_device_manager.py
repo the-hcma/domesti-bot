@@ -11,8 +11,9 @@ from pathlib import Path
 import aiohttp
 
 from app import device_discovery_store
+from app.device_enums import DeviceConditionState
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
-from app.rule_engine import SwitchDevice, SwitchPowerState
+from app.rule_engine import SwitchDevice
 from app.vizio_credentials import (
     migrate_vizio_auth_token_host_to_mac,
     resolve_vizio_auth_token,
@@ -160,7 +161,7 @@ class VizioTvDevice(SwitchDevice):
         if self._power_unknown:
             await self.turn_off()
             return "on=False"
-        if self.power_state == SwitchPowerState.ON:
+        if self.power_state == DeviceConditionState.ON:
             await self.turn_off()
             return "on=False"
         await self.turn_on()

@@ -17,13 +17,13 @@ from app.api.ui_state import (
     find_tailwind_by_identifier,
     find_vizio_by_id,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.operator_alerts import operator_alert_store
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
-from app.rule_engine import DoorPosition, SpeakerPlaybackState, SwitchPowerState, expected_state_for_action_type
+from app.rule_engine import expected_state_for_action_type
 from app.rule_notification import build_rule_notification_bodies
 from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult, smtp_friendly_error
 from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
@@ -449,7 +449,7 @@ async def dispatch_rule_device_actions(
     )
 
 
-def expected_state_after_action(action: RuleDeviceActionOut) -> str:
+def expected_state_after_action(action: RuleDeviceActionOut) -> DeviceConditionState:
     """Return the nominal end state after a successful device action."""
     return expected_state_for_action_type(action.action)
 
@@ -642,7 +642,7 @@ def send_rule_notification_email(
 def snapshot_device_action_state(
     state: DeviceManagersState,
     action: RuleDeviceActionOut,
-) -> str | None:
+) -> DeviceConditionState | None:
     """Return a human-readable cached device state label before/after dispatch."""
     match action.family_id:
         case DeviceFamilyId.KASA | DeviceFamilyId.VIZIO:
@@ -651,20 +651,20 @@ def snapshot_device_action_state(
             ) else cached_vizio_is_on(state, action.device_id)
             if is_on is None:
                 return None
-            return SwitchPowerState.ON if is_on else SwitchPowerState.OFF
+            return DeviceConditionState.ON if is_on else DeviceConditionState.OFF
         case DeviceFamilyId.SONOS:
             is_playing = cached_sonos_is_playing(state, action.device_id)
             if is_playing is None:
                 return None
             return (
-                SpeakerPlaybackState.PLAYING
+                DeviceConditionState.PLAYING
                 if is_playing
-                else SpeakerPlaybackState.PAUSED
+                else DeviceConditionState.PAUSED
             )
         case DeviceFamilyId.TAILWIND:
             is_open = cached_tailwind_is_open(state, action.device_id)
             if is_open is None:
                 return None
-            return DoorPosition.OPEN if is_open else DoorPosition.CLOSED
+            return DeviceConditionState.OPEN if is_open else DeviceConditionState.CLOSED
         case _:
             return None

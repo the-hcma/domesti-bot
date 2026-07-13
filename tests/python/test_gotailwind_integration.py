@@ -33,9 +33,9 @@ import os
 
 import pytest
 
+from app.device_enums import DeviceConditionState
 from app.device_manager import NotInitializedError
 from app.gotailwind_device_manager import GotailwindDeviceManager
-from app.rule_engine import DoorPosition
 
 
 def _print_discovered_devices(mgr: GotailwindDeviceManager) -> None:
@@ -89,7 +89,7 @@ async def test_gotailwind_fetch_exposes_doors_and_status_string() -> None:
         for door in doors:
             assert f"door {door.door_index}" in summary
             assert door.identifier in summary
-            assert door.door_state in (DoorPosition.OPEN, DoorPosition.CLOSED)
+            assert door.door_state in (DeviceConditionState.OPEN, DeviceConditionState.CLOSED)
 
 
 @pytest.mark.integration
@@ -125,5 +125,5 @@ async def test_gotailwind_live_state_matches_cached_door_state() -> None:
             live_open = await mgr.is_open(alias)
             live_closed = await mgr.is_closed(alias)
             assert live_open != live_closed
-            assert live_open == (door.door_state == DoorPosition.OPEN)
-            assert live_closed == (door.door_state == DoorPosition.CLOSED)
+            assert live_open == (door.door_state == DeviceConditionState.OPEN)
+            assert live_closed == (door.door_state == DeviceConditionState.CLOSED)

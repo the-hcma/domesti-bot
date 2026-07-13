@@ -35,9 +35,9 @@ import os
 
 import pytest
 
+from app.device_enums import DeviceConditionState
 from app.device_manager import NotInitializedError
 from app.kasa_device_manager import KasaDeviceManager
-from app.rule_engine import SwitchPowerState
 
 
 def _kasa_discovery_target_optional() -> str | None:
@@ -93,7 +93,7 @@ async def test_kasa_fetch_exposes_switches_and_status_string() -> None:
         assert summary.startswith("KasaDeviceManager:")
         for sw in switches:
             assert sw.identifier in summary
-            assert sw.power_state in (SwitchPowerState.ON, SwitchPowerState.OFF)
+            assert sw.power_state in (DeviceConditionState.ON, DeviceConditionState.OFF)
 
 
 @pytest.mark.integration
@@ -126,5 +126,5 @@ async def test_kasa_live_power_matches_cached_switch_state() -> None:
             live_on = await mgr.is_on(alias)
             live_off = await mgr.is_off(alias)
             assert live_off == (not live_on)
-            assert live_on == (sw.power_state == SwitchPowerState.ON)
-            assert live_off == (sw.power_state == SwitchPowerState.OFF)
+            assert live_on == (sw.power_state == DeviceConditionState.ON)
+            assert live_off == (sw.power_state == DeviceConditionState.OFF)

@@ -2,55 +2,33 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
-from enum import StrEnum
 from math import sqrt
 from typing import Any, Generic, TypeVar, assert_never
 
 from pyproj import Transformer
 
-from app.device_enums import RuleDeviceActionType
+from app.device_enums import DeviceConditionState, RuleDeviceActionType
 
 # Transform to UTM (a standard meters-based coordinate system)
 
 UTM_TRANSFORMER = Transformer.from_crs("EPSG:4326", "EPSG:32618")  # WGS84 → UTM zone 18N
 
 
-class DoorPosition(StrEnum):
-    """Fully-open vs fully-closed door (cached view)."""
-
-    CLOSED = "closed"
-    OPEN = "open"
-
-
-class SpeakerPlaybackState(StrEnum):
-    """Sonos zone transport view."""
-
-    PAUSED = "paused"
-    PLAYING = "playing"
-
-
-class SwitchPowerState(StrEnum):
-    """Relay / outlet power view."""
-
-    OFF = "off"
-    ON = "on"
-
-
-def expected_state_for_action_type(action: RuleDeviceActionType) -> str:
+def expected_state_for_action_type(action: RuleDeviceActionType) -> DeviceConditionState:
     """Return the nominal end state label after a successful device action."""
     match action:
         case RuleDeviceActionType.TURN_ON:
-            return SwitchPowerState.ON
+            return DeviceConditionState.ON
         case RuleDeviceActionType.TURN_OFF:
-            return SwitchPowerState.OFF
+            return DeviceConditionState.OFF
         case RuleDeviceActionType.PAUSE:
-            return SpeakerPlaybackState.PAUSED
+            return DeviceConditionState.PAUSED
         case RuleDeviceActionType.RESUME:
-            return SpeakerPlaybackState.PLAYING
+            return DeviceConditionState.PLAYING
         case RuleDeviceActionType.OPEN:
-            return DoorPosition.OPEN
+            return DeviceConditionState.OPEN
         case RuleDeviceActionType.CLOSE:
-            return DoorPosition.CLOSED
+            return DeviceConditionState.CLOSED
         case _ as unreachable:
             assert_never(unreachable)
 
@@ -142,9 +120,9 @@ class DoorDevice(Device, ABC):
         return "state=closed"
 
     @property
-    def door_state(self) -> DoorPosition:
+    def door_state(self) -> DeviceConditionState:
         """Cached fully-open vs fully-closed."""
-        return DoorPosition.OPEN if self.is_open else DoorPosition.CLOSED
+        return DeviceConditionState.OPEN if self.is_open else DeviceConditionState.CLOSED
 
     @property
     @abstractmethod
@@ -213,9 +191,9 @@ class SwitchDevice(Device, ABC):
         return self._on
 
     @property
-    def power_state(self) -> SwitchPowerState:
+    def power_state(self) -> DeviceConditionState:
         """Cached on/off."""
-        return SwitchPowerState.ON if self._on else SwitchPowerState.OFF
+        return DeviceConditionState.ON if self._on else DeviceConditionState.OFF
 
     def set_power(self, on: bool) -> None:
         """Update cached on/off (hardware subclasses refresh after I/O)."""

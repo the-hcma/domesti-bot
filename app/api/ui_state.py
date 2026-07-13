@@ -29,11 +29,11 @@ from pathlib import Path
 
 from app import device_discovery_store
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIOperatorAlertOut, UISonosStreamFavoriteOut, UIStateOut
+from app.device_enums import DeviceConditionState
 from app.domesti_bot_cli import DeviceManagersState
 from app.operator_alerts import operator_alert_store
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
-from app.rule_engine import DoorPosition, SpeakerPlaybackState, SwitchPowerState
 from app.sonos_device_manager import (
     SonosDeviceManager,
     SonosSpeakerDevice,
@@ -200,9 +200,9 @@ def _compact_icon_for_device(
 
 def _door_state(is_open: bool, is_closed: bool) -> str:
     if is_open:
-        return DoorPosition.OPEN.value
+        return DeviceConditionState.OPEN.value
     if is_closed:
-        return DoorPosition.CLOSED.value
+        return DeviceConditionState.CLOSED.value
     return "unknown"
 
 
@@ -303,14 +303,14 @@ def _sonos_stream_favorites_out(
 
 def _sonos_state(is_playing: bool | None) -> str:
     if is_playing is True:
-        return SpeakerPlaybackState.PLAYING
+        return DeviceConditionState.PLAYING
     if is_playing is False:
-        return SpeakerPlaybackState.PAUSED
+        return DeviceConditionState.PAUSED
     return "unknown"
 
 
 def _switch_state(is_on: bool) -> str:
-    return SwitchPowerState.ON.value if is_on else SwitchPowerState.OFF.value
+    return DeviceConditionState.ON.value if is_on else DeviceConditionState.OFF.value
 
 
 def _vizio_switch_state(tv: VizioTvDevice) -> str:

@@ -6,7 +6,14 @@ from enum import StrEnum
 
 
 class DeviceConditionState(StrEnum):
-    """Target cached state for ``devices_any_in_state_for_s`` dwell conditions."""
+    """Canonical cached device state vocabulary (rules, actions, device views).
+
+    Wire values are shared across dwell conditions, action expected-state
+    helpers, and per-device ``power_state`` / ``door_state`` properties.
+
+    The web UI may also report ``\"unknown\"`` for transient readings; that
+    value is UI-only and is not a member of this enum.
+    """
 
     CLOSED = "closed"
     OFF = "off"
