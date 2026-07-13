@@ -5,6 +5,39 @@ from __future__ import annotations
 from enum import StrEnum
 
 
+class DeviceConditionState(StrEnum):
+    """Target cached state for ``devices_any_in_state_for_s`` dwell conditions."""
+
+    CLOSED = "closed"
+    OFF = "off"
+    ON = "on"
+    OPEN = "open"
+    PAUSED = "paused"
+    PLAYING = "playing"
+
+    def desired_bool(self) -> bool:
+        """Return the natural cached bool that means this state is currently true."""
+        return self in (
+            DeviceConditionState.ON,
+            DeviceConditionState.OPEN,
+            DeviceConditionState.PLAYING,
+        )
+
+    def supported_by_family(self, family_id: DeviceFamilyId) -> bool:
+        """Return whether ``family_id`` can report this state from cached readings."""
+        match self:
+            case DeviceConditionState.OPEN | DeviceConditionState.CLOSED:
+                return family_id == DeviceFamilyId.TAILWIND
+            case DeviceConditionState.PLAYING | DeviceConditionState.PAUSED:
+                return family_id == DeviceFamilyId.SONOS
+            case DeviceConditionState.ON | DeviceConditionState.OFF:
+                return family_id in (
+                    DeviceFamilyId.KASA,
+                    DeviceFamilyId.SONOS,
+                    DeviceFamilyId.VIZIO,
+                )
+
+
 class DeviceFamilyId(StrEnum):
     """Stable slug for a device manager family (UI tiles and rule actions)."""
 

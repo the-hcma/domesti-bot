@@ -266,6 +266,12 @@ export type RuleConditionOut =
       devices: RuleConditionDeviceRefOut[];
     }
   | {
+      type: "devices_any_in_state_for_s";
+      devices: RuleConditionDeviceRefOut[];
+      min_duration_s: number;
+      state: "closed" | "off" | "on" | "open" | "paused" | "playing";
+    }
+  | {
       type: "devices_any_off";
       devices: RuleConditionDeviceRefOut[];
     }

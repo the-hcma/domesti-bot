@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
+    DevicesAnyInStateForSCondition,
     DevicesAnyOpenCondition,
     GeofenceOut,
     RuleConditionOut,
@@ -44,9 +45,19 @@ from app.cron_schedule import (
     local_calendar_date,
     next_scheduled_evaluate_at,
 )
-from app.device_enums import DeviceFamilyId, RuleEvaluationCause, RuleTrigger
+from app.device_enums import (
+    DeviceConditionState,
+    DeviceFamilyId,
+    RuleEvaluationCause,
+    RuleTrigger,
+)
 from app.domesti_bot_cli import DeviceManagersState
-from app.dwell_watch_index import DwellDirection, build_dwell_watch_index
+from app.dwell_watch_index import (
+    DeviceDwellWatch,
+    DwellDirection,
+    build_device_dwell_watch_index,
+    build_dwell_watch_index,
+)
 from app.geofence_transition_state_store import (
     GeofenceTransitionStateRecord,
     list_geofence_transition_states,
@@ -80,17 +91,20 @@ from app.rule_conditions import (
     RuleEvaluationContext,
     RuleEvaluationResult,
     _evaluate_condition,
-    iter_dwell_for_s_conditions,
     compute_rules_sun_out,
     consume_scheduled_dwell_episodes_for_fire,
-    evaluate_rule,
-    presence_user_ids_for_rule,
+    desired_bool_for_device_condition_state,
     dwell_episode_blocks_fire,
+    evaluate_rule,
+    iter_dwell_for_s_conditions,
+    natural_bool_for_device_family,
+    presence_user_ids_for_rule,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
 from app.rule_validation import (
     build_roster_user_id_lookup,
     collect_rule_user_ids,
+    resolve_device_ref_to_backend_id,
     rule_references_user_id,
     rule_watches_backend_device,
 )
@@ -171,6 +185,15 @@ class RuleEvaluator:
             tuple[str, str, str, str],
             _DeferredAccuracyEdge,
         ] = {}
+        # Natural bool streak per backend device (on/open/playing vs off/closed/paused).
+        self._device_bool_since: dict[tuple[DeviceFamilyId, str], float] = {}
+        self._device_bool_value: dict[tuple[DeviceFamilyId, str], bool] = {}
+        # Ephemeral per-rule ``since`` epoch already evaluated for device-state
+        # ``dwell_satisfied`` this streak — cleared when the device bool flips.
+        self._device_dwell_satisfied_evaluated_since: dict[
+            tuple[str, DeviceFamilyId, str, DeviceConditionState, int],
+            float,
+        ] = {}
         # Ephemeral per-rule ``since`` epoch already evaluated for
         # ``dwell_satisfied`` this streak — avoids re-running full rule checks on
         # every location ping. Cleared when the geofence streak side resets (enter,
@@ -245,6 +268,14 @@ class RuleEvaluator:
                 )
             )
         return tuple(snapshots)
+
+    def device_bool_since_snapshot(self) -> dict[tuple[DeviceFamilyId, str], float]:
+        """Return a copy of device natural-bool streak start times."""
+        return dict(self._device_bool_since)
+
+    def device_bool_value_snapshot(self) -> dict[tuple[DeviceFamilyId, str], bool]:
+        """Return a copy of device natural-bool streak values."""
+        return dict(self._device_bool_value)
 
     def fire_state_for_rule(self, rule_id: str) -> RuleEvaluatorFireState:
         state = self._rule_state.get(rule_id)
@@ -461,6 +492,8 @@ class RuleEvaluator:
             user_display_names=user_display_names,
             user_home_wifi_bssid=user_home_wifi_bssid,
             user_locations=user_locations,
+            device_bool_since=self.device_bool_since_snapshot(),
+            device_bool_value=self.device_bool_value_snapshot(),
             device_state=self._device_state_getter(),
             geofence_inside_since=self.geofence_inside_since_snapshot(),
             geofence_outside_since=self.geofence_outside_since_snapshot(),
@@ -1073,6 +1106,12 @@ class RuleEvaluator:
                 async with self._process_lock:
                     self._refresh_astronomical_schedules_for_new_day()
                     await self._evaluate_scheduled_rules()
+                    timezone = ZoneInfo(load_settings_location().timezone)
+                    ctx = await self._build_evaluation_context(
+                        now=datetime.fromtimestamp(self._now_fn(), tz=timezone),
+                    )
+                    self._sync_all_device_dwell_streaks(ctx, self._now_fn())
+                    await self._maybe_process_device_dwell_satisfied()
                     await self._maybe_request_locations_for_deferred_edges()
             except asyncio.CancelledError:
                 raise
@@ -1510,6 +1549,114 @@ class RuleEvaluator:
         )
         task.add_done_callback(_log_device_state_evaluation_task)
 
+    async def _maybe_process_device_dwell_satisfied(
+        self,
+        family_id: DeviceFamilyId | None = None,
+        backend_device_id: str | None = None,
+    ) -> None:
+        rules = list_automation_rules()
+        index = build_device_dwell_watch_index(rules)
+        if not index.watches:
+            return
+        now_epoch = self._now_fn()
+        timezone = ZoneInfo(load_settings_location().timezone)
+        now = datetime.fromtimestamp(now_epoch, tz=timezone)
+        ctx = await self._build_evaluation_context(now=now)
+        device_state = ctx.device_state
+        if device_state is None:
+            return
+        watches: tuple[DeviceDwellWatch, ...]
+        if family_id is not None and backend_device_id is not None:
+            watches = index.watches_for_backend_device(
+                family_id=family_id,
+                backend_device_id=backend_device_id,
+                matches_ref=lambda fid, bid, ref: (
+                    resolve_device_ref_to_backend_id(
+                        device_state,
+                        family_id=fid,
+                        device_ref=ref,
+                    )
+                    == bid
+                    or ref.strip() == bid.strip()
+                ),
+            )
+        else:
+            watches = index.watches
+        crossed_rule_ids: set[str] = set()
+        newly_evaluated_rules: list[
+            tuple[
+                tuple[str, DeviceFamilyId, str, DeviceConditionState, int],
+                float,
+            ]
+        ] = []
+        rules_by_id = {rule.id: rule for rule in rules}
+        for watch in watches:
+            if family_id is not None and backend_device_id is not None:
+                streak_backend_id = backend_device_id
+            else:
+                resolved = resolve_device_ref_to_backend_id(
+                    device_state,
+                    family_id=watch.family_id,
+                    device_ref=watch.device_id,
+                )
+                if resolved is None:
+                    continue
+                streak_backend_id = resolved
+            streak_key = (watch.family_id, streak_backend_id)
+            since = self._device_bool_since.get(streak_key)
+            value = self._device_bool_value.get(streak_key)
+            desired = desired_bool_for_device_condition_state(watch.state)
+            if (
+                since is None
+                or value is None
+                or value != desired
+                or (now_epoch - since) < watch.min_duration_s
+            ):
+                to_drop = [
+                    key
+                    for key in self._device_dwell_satisfied_evaluated_since
+                    if key[1] == watch.family_id
+                    and key[2] == streak_backend_id
+                    and key[3] == watch.state
+                    and key[4] == watch.min_duration_s
+                ]
+                for key in to_drop:
+                    del self._device_dwell_satisfied_evaluated_since[key]
+                continue
+            for rule_id in sorted(watch.rule_ids):
+                rule_key = (
+                    rule_id,
+                    watch.family_id,
+                    streak_backend_id,
+                    watch.state,
+                    watch.min_duration_s,
+                )
+                if self._device_dwell_satisfied_evaluated_since.get(rule_key) == since:
+                    continue
+                crossed_rule_ids.add(rule_id)
+                newly_evaluated_rules.append((rule_key, since))
+        if not crossed_rule_ids:
+            return
+        await self._process_dwell_satisfied_rules(
+            crossed_rule_ids,
+            rules=rules,
+            ctx=ctx,
+            now_epoch=now_epoch,
+            timezone=timezone,
+        )
+        for rule_key, since in newly_evaluated_rules:
+            rule_id = rule_key[0]
+            rule = rules_by_id.get(rule_id)
+            if rule is None:
+                continue
+            runtime = self._rule_state.get(rule_id)
+            if dwell_episode_blocks_fire(rule, ctx):
+                self._device_dwell_satisfied_evaluated_since[rule_key] = since
+                continue
+            if runtime is not None and not self._cooldown_elapsed(rule, runtime):
+                continue
+            self._device_dwell_satisfied_evaluated_since[rule_key] = since
+
     async def _maybe_process_dwell_satisfied(self, roster_user_id: str) -> None:
         rules = list_automation_rules()
         index = build_dwell_watch_index(rules)
@@ -1599,86 +1746,92 @@ class RuleEvaluator:
         timezone = ZoneInfo(load_settings_location().timezone)
         now = datetime.fromtimestamp(now_epoch, tz=timezone)
         ctx = await self._build_evaluation_context(now=now)
+        self._sync_device_bool_streak(
+            family_id,
+            device_id,
+            now_epoch=now_epoch,
+            ctx=ctx,
+        )
         evaluation_ctx = replace(
             ctx,
             triggered_by=RuleEvaluationCause.DEVICE_STATE,
         )
         device_state = self._device_state_getter()
-        if device_state is None:
-            return
-        matched_rules = [
-            rule
-            for rule in list_automation_rules()
-            if rule.enabled
-            and RuleTrigger.DEVICE_STATE in rule.triggers
-            and rule_watches_backend_device(
-                rule,
-                device_state,
-                family_id=family_id,
-                backend_device_id=device_id,
-            )
-        ]
-        if not matched_rules:
-            return
-        _LOGGER.info(
-            "[rules] evaluating device-state change family_id=%s device_id=%s "
-            "rule_count=%d",
-            family_id.value,
-            device_id,
-            len(matched_rules),
-        )
-        transitions: dict[str, GeofenceTransition] = {}
-        for rule in matched_rules:
-            log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
-            evaluation = evaluate_rule(rule, evaluation_ctx)
+        matched_rules: list[RuleOut] = []
+        if device_state is not None:
+            matched_rules = [
+                rule
+                for rule in list_automation_rules()
+                if rule.enabled
+                and RuleTrigger.DEVICE_STATE in rule.triggers
+                and rule_watches_backend_device(
+                    rule,
+                    device_state,
+                    family_id=family_id,
+                    backend_device_id=device_id,
+                )
+            ]
+        if matched_rules:
             _LOGGER.info(
-                "[rules] device-state evaluate rule_id=%s met=%s",
-                rule.id,
-                evaluation.all_met,
+                "[rules] evaluating device-state change family_id=%s device_id=%s "
+                "rule_count=%d",
+                family_id.value,
+                device_id,
+                len(matched_rules),
             )
-            if not evaluation.all_met:
-                _log_rule_skipped(
+            transitions: dict[str, GeofenceTransition] = {}
+            for rule in matched_rules:
+                log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
+                evaluation = evaluate_rule(rule, evaluation_ctx)
+                _LOGGER.info(
+                    "[rules] device-state evaluate rule_id=%s met=%s",
                     rule.id,
-                    log_user_ids,
-                    reason="conditions_not_met",
-                    detail=_format_unmet_conditions_for_log(evaluation),
+                    evaluation.all_met,
                 )
-                continue
-            runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
-            if self._skip_if_daily_cap(
-                log_user_ids=log_user_ids,
-                now_epoch=now_epoch,
-                rule=rule,
-                runtime=runtime,
-                timezone=timezone,
-            ):
-                continue
-            if dwell_episode_blocks_fire(rule, ctx):
-                _log_rule_skipped(
-                    rule.id,
-                    log_user_ids,
-                    reason="dwell_episode_consumed",
-                    detail="dwell already fired this away/inside episode",
+                if not evaluation.all_met:
+                    _log_rule_skipped(
+                        rule.id,
+                        log_user_ids,
+                        reason="conditions_not_met",
+                        detail=_format_unmet_conditions_for_log(evaluation),
+                    )
+                    continue
+                runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+                if self._skip_if_daily_cap(
+                    log_user_ids=log_user_ids,
+                    now_epoch=now_epoch,
+                    rule=rule,
+                    runtime=runtime,
+                    timezone=timezone,
+                ):
+                    continue
+                if dwell_episode_blocks_fire(rule, ctx):
+                    _log_rule_skipped(
+                        rule.id,
+                        log_user_ids,
+                        reason="dwell_episode_consumed",
+                        detail="dwell already fired this away/inside episode",
+                    )
+                    continue
+                if not self._cooldown_elapsed(rule, runtime):
+                    remaining_s = rule.cooldown_s - (
+                        now_epoch - (runtime.last_fired_at or 0.0)
+                    )
+                    _log_rule_skipped(
+                        rule.id,
+                        log_user_ids,
+                        reason="cooldown",
+                        detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                    )
+                    continue
+                await self._execute_rule(
+                    rule,
+                    evaluation=evaluation,
+                    fire_source="device_state",
+                    log_user_ids=log_user_ids,
+                    transitions=transitions,
                 )
-                continue
-            if not self._cooldown_elapsed(rule, runtime):
-                remaining_s = rule.cooldown_s - (
-                    now_epoch - (runtime.last_fired_at or 0.0)
-                )
-                _log_rule_skipped(
-                    rule.id,
-                    log_user_ids,
-                    reason="cooldown",
-                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
-                )
-                continue
-            await self._execute_rule(
-                rule,
-                evaluation=evaluation,
-                fire_source="device_state",
-                log_user_ids=log_user_ids,
-                transitions=transitions,
-            )
+        await self._maybe_process_device_dwell_satisfied(family_id, device_id)
 
     async def _process_dwell_satisfied_rules(
         self,
@@ -1773,6 +1926,19 @@ class RuleEvaluator:
             return self._geofence_inside_since.get(key)
         return self._geofence_outside_since.get(key)
 
+    def _clear_device_dwell_satisfied_eval_for_device(
+        self,
+        family_id: DeviceFamilyId,
+        backend_device_id: str,
+    ) -> None:
+        to_drop = [
+            key
+            for key in self._device_dwell_satisfied_evaluated_since
+            if key[1] == family_id and key[2] == backend_device_id
+        ]
+        for key in to_drop:
+            del self._device_dwell_satisfied_evaluated_since[key]
+
     def _clear_dwell_satisfied_eval_for_geofence_direction(
         self,
         roster_user_id: str,
@@ -1805,6 +1971,11 @@ class RuleEvaluator:
         for key in to_drop:
             del self._dwell_satisfied_evaluated_since[key]
 
+    def _drop_device_bool_streak(self, key: tuple[DeviceFamilyId, str]) -> None:
+        self._device_bool_since.pop(key, None)
+        self._device_bool_value.pop(key, None)
+        self._clear_device_dwell_satisfied_eval_for_device(key[0], key[1])
+
     def _drop_geofence_inside_since(self, key: tuple[str, str]) -> None:
         self._clear_dwell_satisfied_eval_for_geofence_direction(
             key[0],
@@ -1820,6 +1991,18 @@ class RuleEvaluator:
             DwellDirection.OUTSIDE,
         )
         self._geofence_outside_since.pop(key, None)
+
+    def _set_device_bool_streak(
+        self,
+        key: tuple[DeviceFamilyId, str],
+        value: bool,
+        since: float,
+    ) -> None:
+        prior = self._device_bool_value.get(key)
+        self._device_bool_value[key] = value
+        self._device_bool_since[key] = since
+        if prior is not None and prior != value:
+            self._clear_device_dwell_satisfied_eval_for_device(key[0], key[1])
 
     def _set_geofence_inside_since(self, key: tuple[str, str], since: float) -> None:
         self._clear_dwell_satisfied_eval_for_geofence_direction(
@@ -1858,6 +2041,57 @@ class RuleEvaluator:
             return existing
         self._set_geofence_outside_since(key, since)
         return since
+
+    def _sync_all_device_dwell_streaks(
+        self,
+        ctx: RuleEvaluationContext,
+        now_epoch: float,
+    ) -> None:
+        device_state = ctx.device_state
+        if device_state is None:
+            return
+        index = build_device_dwell_watch_index(list_automation_rules())
+        seen: set[tuple[DeviceFamilyId, str]] = set()
+        for watch in index.watches:
+            backend_id = resolve_device_ref_to_backend_id(
+                device_state,
+                family_id=watch.family_id,
+                device_ref=watch.device_id,
+            )
+            if backend_id is None:
+                continue
+            key = (watch.family_id, backend_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            self._sync_device_bool_streak(
+                watch.family_id,
+                backend_id,
+                now_epoch=now_epoch,
+                ctx=ctx,
+            )
+
+    def _sync_device_bool_streak(
+        self,
+        family_id: DeviceFamilyId,
+        backend_device_id: str,
+        *,
+        now_epoch: float,
+        ctx: RuleEvaluationContext,
+    ) -> None:
+        key = (family_id, backend_device_id)
+        current = natural_bool_for_device_family(
+            ctx,
+            family_id=family_id,
+            device_id=backend_device_id,
+        )
+        if current is None:
+            self._drop_device_bool_streak(key)
+            return
+        prior = self._device_bool_value.get(key)
+        since = self._device_bool_since.get(key)
+        if prior is None or since is None or prior != current:
+            self._set_device_bool_streak(key, current, now_epoch)
 
     def _seed_dwell_satisfied_eval_debounce(self) -> None:
         """Warm debounce slots after restart for ongoing fired/consumed dwell episodes."""
@@ -2363,7 +2597,9 @@ def _condition_geofence_edge_intents(
 def _condition_has_dwell(condition: RuleConditionOut) -> bool:
     if isinstance(
         condition,
-        UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition,
+        DevicesAnyInStateForSCondition
+        | UsersInsideGeofenceForSCondition
+        | UsersOutsideGeofenceForSCondition,
     ):
         return True
     if isinstance(condition, AllConditionsCondition):

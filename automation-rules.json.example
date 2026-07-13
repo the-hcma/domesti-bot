@@ -11,7 +11,7 @@
     "Rule 2 (evening-lights-off-both-home) runs every 10 min after sunset: when both have been home 10+ min and either arrival light is still on, turn both off.",
     "Rule 3 (evening-interior-lights-on-anyone-home) uses triggers [edge_true, scheduled] and arms from 25 min before sunset until midnight: at the window open it evaluates once — if Henrique OR Kristen is already home, interior lamps turn on; otherwise the next home geofence enter by either person fires the rule (once per local day). Not a periodic poll.",
     "Rule 4 (away-shutdown-everyone-outside-20m) runs every 10 min: when Henrique AND Kristen have been outside house 20+ min and any listed light/media device is still on, turn them off (garage doors are not closed).",
-    "Rule 5 (away-garage-open-alert) uses device_state trigger: when both have been outside house 20+ min and a watched garage door opens, email operator@example.com and resident@example.com (state poll ~10s).",
+    "Rule 5 (away-garage-open-alert) uses dwell_satisfied: when both have been outside house 20+ min and a watched garage door has been open 20+ min, email operator@example.com and resident@example.com (once per away episode).",
     "Rule 6 (morning-master-bedroom-fan-off) runs daily at 7:30am: when Master Bedroom fan is on, turn it off and email operator@example.com.",
     "Rule 7 (daylight-master-bedroom-fan-on-alert) uses device_state trigger only: during astronomical daylight (sunrise to sunset), email operator@example.com when Master Bedroom fan turns on."
   ],
@@ -230,8 +230,8 @@
       "id": "away-garage-open-alert",
       "label": "Email when a garage door is open and everyone away 20+ min",
       "enabled": true,
-      "triggers": ["device_state"],
-      "cooldown_s": 1800,
+      "triggers": ["dwell_satisfied"],
+      "cooldown_s": 0,
       "min_location_accuracy_m": 50,
       "notify_on_fire": true,
       "notification_emails": [
@@ -247,7 +247,9 @@
             "min_outside_s": 1200
           },
           {
-            "type": "devices_any_open",
+            "type": "devices_any_in_state_for_s",
+            "state": "open",
+            "min_duration_s": 1200,
             "devices": [
               { "family_id": "tailwind", "device_id": "Left" },
               { "family_id": "tailwind", "device_id": "Right" }
