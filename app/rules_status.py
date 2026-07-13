@@ -126,6 +126,12 @@ def build_rules_status(
         else {}
     )
     eval_ctx = RuleEvaluationContext(
+        device_bool_since=(
+            evaluator.device_bool_since_snapshot() if evaluator is not None else {}
+        ),
+        device_bool_value=(
+            evaluator.device_bool_value_snapshot() if evaluator is not None else {}
+        ),
         device_state=device_state,
         geofence_inside_since=inside_since,
         geofence_outside_since=outside_since,

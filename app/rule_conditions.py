@@ -24,6 +24,7 @@ from app.api.schemas import (
     DaylightCondition,
     DaysOfWeekCondition,
     DevicesAllOnCondition,
+    DevicesAnyInStateForSCondition,
     DevicesAnyOffCondition,
     DevicesAnyOnCondition,
     DevicesAnyOpenCondition,
@@ -43,6 +44,7 @@ from app.api.schemas import (
 )
 from app.automation_rules_loader import load_settings_location
 from app.device_enums import (
+    DeviceConditionState,
     DeviceFamilyId,
     RuleEvaluationCause,
     RuleTrigger,
@@ -53,7 +55,7 @@ from app.rule_actions import (
     cached_tailwind_is_open,
     cached_vizio_is_on,
 )
-from app.rule_validation import resolve_roster_user_id
+from app.rule_validation import resolve_device_ref_to_backend_id, resolve_roster_user_id
 from app.wifi_home_presence import wifi_home_presence_applies
 
 if TYPE_CHECKING:
@@ -87,6 +89,12 @@ class RuleEvaluationContext:
     timezone: ZoneInfo
     user_display_names: dict[str, str]
     user_locations: dict[str, UserLocationOut]
+    device_bool_since: dict[tuple[DeviceFamilyId, str], float] = field(
+        default_factory=dict,
+    )
+    device_bool_value: dict[tuple[DeviceFamilyId, str], bool] = field(
+        default_factory=dict,
+    )
     device_state: DeviceManagersState | None = None
     geofence_inside_since: dict[tuple[str, str], float] = field(default_factory=dict)
     geofence_outside_since: dict[tuple[str, str], float] = field(default_factory=dict)
@@ -354,6 +362,48 @@ def _cached_device_is_open(
             return None
 
 
+def _cached_device_matches_state(
+    ctx: RuleEvaluationContext,
+    ref: RuleConditionDeviceRefOut,
+    state: DeviceConditionState,
+) -> bool | None:
+    """Return whether ``ref`` currently matches ``state``, or None when unknown."""
+    if not state.supported_by_family(ref.family_id):
+        return None
+    match state:
+        case DeviceConditionState.ON | DeviceConditionState.PLAYING:
+            return _cached_device_is_on(ctx, ref)
+        case DeviceConditionState.OFF | DeviceConditionState.PAUSED:
+            is_on = _cached_device_is_on(ctx, ref)
+            if is_on is None:
+                return None
+            return not is_on
+        case DeviceConditionState.OPEN:
+            return _cached_device_is_open(ctx, ref)
+        case DeviceConditionState.CLOSED:
+            is_open = _cached_device_is_open(ctx, ref)
+            if is_open is None:
+                return None
+            return not is_open
+
+
+def _device_bool_since_for_ref(
+    ctx: RuleEvaluationContext,
+    ref: RuleConditionDeviceRefOut,
+) -> float | None:
+    """Return streak start for ``ref`` using backend id when resolvable."""
+    backend_id = ref.device_id.strip()
+    if ctx.device_state is not None:
+        resolved = resolve_device_ref_to_backend_id(
+            ctx.device_state,
+            family_id=ref.family_id,
+            device_ref=backend_id,
+        )
+        if resolved is not None:
+            backend_id = resolved
+    return ctx.device_bool_since.get((ref.family_id, backend_id))
+
+
 def _device_condition_open_labels(
     devices: list[RuleConditionDeviceRefOut],
     ctx: RuleEvaluationContext,
@@ -582,6 +632,8 @@ def _evaluate_condition(
         return _evaluate_days_of_week(condition, rule, ctx)
     if isinstance(condition, DevicesAllOnCondition):
         return _evaluate_devices_all_on(condition, rule, ctx)
+    if isinstance(condition, DevicesAnyInStateForSCondition):
+        return _evaluate_devices_any_in_state_for_s(condition, rule, ctx)
     if isinstance(condition, DevicesAnyOffCondition):
         return _evaluate_devices_any_off(condition, rule, ctx)
     if isinstance(condition, DevicesAnyOnCondition):
@@ -687,6 +739,83 @@ def _evaluate_devices_all_on(
         condition=condition,
         detail=detail,
         label="All devices on",
+        met=met,
+    )
+
+
+def _evaluate_devices_any_in_state_for_s(
+    condition: DevicesAnyInStateForSCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    del rule  # unused; signature matches sibling evaluators
+    label = f"Any device {condition.state.value} {_format_dwell_need_s(condition.min_duration_s)}+"
+    if ctx.device_state is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="discovery not ready",
+            label=label,
+            met=False,
+        )
+    now_epoch = ctx.now.timestamp()
+    matched_labels: list[str] = []
+    pending_labels: list[str] = []
+    unmet_labels: list[str] = []
+    missing_labels: list[str] = []
+    for ref in condition.devices:
+        device_label = ref.device_id.strip()
+        matches = _cached_device_matches_state(ctx, ref, condition.state)
+        if matches is None:
+            if condition.state.supported_by_family(ref.family_id):
+                missing_labels.append(device_label)
+            else:
+                missing_labels.append(
+                    f"{device_label} (unsupported family {ref.family_id.value} "
+                    f"for state {condition.state.value})",
+                )
+            continue
+        if not matches:
+            unmet_labels.append(device_label)
+            continue
+        since = _device_bool_since_for_ref(ctx, ref)
+        if since is None:
+            pending_labels.append(f"{device_label} (dwell not started)")
+            continue
+        elapsed_s = now_epoch - since
+        elapsed_label = _format_dwell_elapsed_s(elapsed_s)
+        if elapsed_s >= condition.min_duration_s:
+            matched_labels.append(f"{device_label} {elapsed_label}")
+        else:
+            pending_labels.append(
+                f"{device_label} {elapsed_label} "
+                f"(need {_format_dwell_need_s(condition.min_duration_s)})",
+            )
+    if matched_labels:
+        detail = f"{condition.state.value.capitalize()}: {', '.join(matched_labels)}"
+        if pending_labels or unmet_labels or missing_labels:
+            extras: list[str] = []
+            if pending_labels:
+                extras.append(f"pending: {', '.join(pending_labels)}")
+            if unmet_labels:
+                extras.append(f"not {condition.state.value}: {', '.join(unmet_labels)}")
+            if missing_labels:
+                extras.append(f"not found: {', '.join(missing_labels)}")
+            detail = f"{detail} ({'; '.join(extras)})"
+        met = True
+    else:
+        met = False
+        parts: list[str] = []
+        if pending_labels:
+            parts.append(", ".join(pending_labels))
+        if unmet_labels:
+            parts.append(f"not {condition.state.value}: {', '.join(unmet_labels)}")
+        if missing_labels:
+            parts.append(f"not found: {', '.join(missing_labels)}")
+        detail = "; ".join(parts) if parts else f"No device {condition.state.value}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=label,
         met=met,
     )
 
@@ -1377,6 +1506,25 @@ def _is_in_before_sunrise_window(
     return now_minutes >= 0 and now_minutes < end
 
 
+def desired_bool_for_device_condition_state(state: DeviceConditionState) -> bool:
+    """Return the natural cached bool that means ``state`` is currently true."""
+    return state.desired_bool()
+
+
+def iter_device_dwell_for_s_conditions(
+    conditions: list[RuleConditionOut],
+) -> list[DevicesAnyInStateForSCondition]:
+    found: list[DevicesAnyInStateForSCondition] = []
+    for condition in conditions:
+        if isinstance(condition, DevicesAnyInStateForSCondition):
+            found.append(condition)
+        elif isinstance(condition, AllConditionsCondition):
+            found.extend(iter_device_dwell_for_s_conditions(condition.conditions))
+        elif isinstance(condition, AnyConditionsCondition):
+            found.extend(iter_device_dwell_for_s_conditions(condition.conditions))
+    return found
+
+
 def iter_dwell_for_s_conditions(
     conditions: list[RuleConditionOut],
 ) -> list[UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition]:
@@ -1394,6 +1542,23 @@ def iter_dwell_for_s_conditions(
         elif isinstance(condition, AnyConditionsCondition):
             found.extend(iter_dwell_for_s_conditions(condition.conditions))
     return found
+
+
+def natural_bool_for_device_family(
+    ctx: RuleEvaluationContext,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+) -> bool | None:
+    """Return the family's natural cached bool (on/open/playing) for ``device_id``."""
+    ref = RuleConditionDeviceRefOut(device_id=device_id, family_id=family_id)
+    match family_id:
+        case DeviceFamilyId.TAILWIND:
+            return _cached_device_is_open(ctx, ref)
+        case DeviceFamilyId.KASA | DeviceFamilyId.SONOS | DeviceFamilyId.VIZIO:
+            return _cached_device_is_on(ctx, ref)
+        case _:
+            return None
 
 
 def _is_in_local_time_window(
@@ -1508,6 +1673,7 @@ def _presence_user_ids_for_condition(
             BeforeSunriseCondition,
             DaysOfWeekCondition,
             DevicesAllOnCondition,
+            DevicesAnyInStateForSCondition,
             DevicesAnyOffCondition,
             DevicesAnyOnCondition,
             DevicesAnyOpenCondition,

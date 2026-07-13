@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import (
+    DeviceConditionState,
     DeviceFamilyId,
     RuleDeviceActionType,
     RuleTrigger,
@@ -866,6 +867,15 @@ class DevicesAllOnCondition(BaseModel):
     devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
 
 
+class DevicesAnyInStateForSCondition(BaseModel):
+    """True when any listed device has continuously matched ``state`` for N seconds."""
+
+    type: Literal["devices_any_in_state_for_s"]
+    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
+    min_duration_s: int = Field(ge=1)
+    state: DeviceConditionState
+
+
 class DevicesAnyOffCondition(BaseModel):
     type: Literal["devices_any_off"]
     devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
@@ -923,6 +933,7 @@ RuleConditionOut = Annotated[
     | DaylightCondition
     | DaysOfWeekCondition
     | DevicesAllOnCondition
+    | DevicesAnyInStateForSCondition
     | DevicesAnyOffCondition
     | DevicesAnyOnCondition
     | DevicesAnyOpenCondition
@@ -1033,7 +1044,10 @@ class RuleOut(BaseModel):
     @model_validator(mode="after")
     def _validate_trigger_fields(self) -> Self:
         from app.astronomical_schedule import extract_astronomical_anchor
-        from app.rule_conditions import iter_dwell_for_s_conditions
+        from app.rule_conditions import (
+            iter_device_dwell_for_s_conditions,
+            iter_dwell_for_s_conditions,
+        )
         from app.rule_validation import collect_rule_device_refs
 
         trigger_set = set(self.triggers)
@@ -1046,9 +1060,13 @@ class RuleOut(BaseModel):
             raise ValueError(
                 "device_state rules must reference at least one device in conditions"
             )
-        if has_dwell_satisfied and not iter_dwell_for_s_conditions(self.conditions.all):
+        if has_dwell_satisfied and not (
+            iter_dwell_for_s_conditions(self.conditions.all)
+            or iter_device_dwell_for_s_conditions(self.conditions.all)
+        ):
             raise ValueError(
-                "dwell_satisfied rules must include a dwell geofence condition"
+                "dwell_satisfied rules must include a geofence or device dwell "
+                "condition (*_for_s / devices_any_in_state_for_s)"
             )
         if not has_scheduled and cron != "":
             raise ValueError(

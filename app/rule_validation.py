@@ -8,6 +8,7 @@ from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
     DevicesAllOnCondition,
+    DevicesAnyInStateForSCondition,
     DevicesAnyOffCondition,
     DevicesAnyOnCondition,
     DevicesAnyOpenCondition,
@@ -122,6 +123,20 @@ def rule_watches_backend_device(
         ):
             return True
     return False
+
+
+def resolve_device_ref_to_backend_id(
+    state: DeviceManagersState,
+    *,
+    family_id: DeviceFamilyId,
+    device_ref: str,
+) -> str | None:
+    """Resolve a rule device label/id to the watcher backend identifier."""
+    return _resolve_device_ref_to_identifier(
+        state,
+        family_id=family_id,
+        device_ref=device_ref,
+    )
 
 
 def resolve_roster_user_id(
@@ -355,23 +370,6 @@ def _validate_device_actions(
     return issues
 
 
-def _validate_device_conditions(
-    rule: RuleOut,
-    ctx: RuleValidationContext,
-) -> list[RuleReferenceIssueOut]:
-    issues: list[RuleReferenceIssueOut] = []
-    for family_id, device_id in sorted(collect_rule_device_refs(rule)):
-        issue = _device_reference_issue(
-            ctx,
-            family_id=family_id,
-            device_id=device_id,
-            context_label="conditions",
-        )
-        if issue is not None:
-            issues.append(issue)
-    return issues
-
-
 def _validate_geofence_edge_grace(rule: RuleOut) -> list[RuleReferenceIssueOut]:
     if RuleTrigger.EDGE_TRUE not in rule.triggers:
         return []
@@ -457,6 +455,58 @@ def _validate_users(
     return issues
 
 
+def _validate_device_condition_states(rule: RuleOut) -> list[RuleReferenceIssueOut]:
+    """Flag family/state pairs that device dwell conditions cannot observe."""
+    issues: list[RuleReferenceIssueOut] = []
+    for condition in _iter_device_dwell_conditions(rule.conditions.all):
+        for ref in condition.devices:
+            if condition.state.supported_by_family(ref.family_id):
+                continue
+            issues.append(
+                RuleReferenceIssueOut(
+                    detail=(
+                        f'Device "{ref.device_id}" family {ref.family_id.value} '
+                        f"cannot report state {condition.state.value}"
+                    ),
+                    kind="unknown_device",
+                    reference=ref.device_id,
+                ),
+            )
+    return issues
+
+
+def _iter_device_dwell_conditions(
+    conditions: list[RuleConditionOut],
+) -> list[DevicesAnyInStateForSCondition]:
+    found: list[DevicesAnyInStateForSCondition] = []
+    for condition in conditions:
+        if isinstance(condition, DevicesAnyInStateForSCondition):
+            found.append(condition)
+        elif isinstance(condition, AllConditionsCondition):
+            found.extend(_iter_device_dwell_conditions(condition.conditions))
+        elif isinstance(condition, AnyConditionsCondition):
+            found.extend(_iter_device_dwell_conditions(condition.conditions))
+    return found
+
+
+def _validate_device_conditions(
+    rule: RuleOut,
+    ctx: RuleValidationContext,
+) -> list[RuleReferenceIssueOut]:
+    issues: list[RuleReferenceIssueOut] = []
+    for family_id, device_id in sorted(collect_rule_device_refs(rule)):
+        issue = _device_reference_issue(
+            ctx,
+            family_id=family_id,
+            device_id=device_id,
+            context_label="conditions",
+        )
+        if issue is not None:
+            issues.append(issue)
+    issues.extend(_validate_device_condition_states(rule))
+    return issues
+
+
 def _walk_device_refs(
     condition: RuleConditionOut,
     refs: set[tuple[DeviceFamilyId, str]],
@@ -464,6 +514,7 @@ def _walk_device_refs(
     if isinstance(
         condition,
         DevicesAllOnCondition
+        | DevicesAnyInStateForSCondition
         | DevicesAnyOffCondition
         | DevicesAnyOnCondition
         | DevicesAnyOpenCondition,
