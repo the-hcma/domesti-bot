@@ -7,7 +7,6 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import StrEnum
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -67,15 +66,6 @@ MINUTES_PER_DAY = 24 * 60
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 _DAY_NAMES = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
 LOCATION_HISTORY_WALKBACK_MAX_S = 600.0
-
-
-class DeviceOpenShortCircuitMatch(StrEnum):
-    OPEN = "open"
-
-
-class DevicePowerShortCircuitMatch(StrEnum):
-    OFF = "off"
-    ON = "on"
 
 
 @dataclass(frozen=True)
@@ -313,7 +303,7 @@ def _device_condition_power_labels(
     ctx: RuleEvaluationContext,
     *,
     fail_fast_unmet: bool = False,
-    short_circuit_match: DevicePowerShortCircuitMatch | None = None,
+    short_circuit_match: DeviceConditionState | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     on_labels: list[str] = []
     off_labels: list[str] = []
@@ -336,12 +326,12 @@ def _device_condition_power_labels(
                 break
         elif is_on:
             on_labels.append(label)
-            if short_circuit_match == DevicePowerShortCircuitMatch.ON:
+            if short_circuit_match == DeviceConditionState.ON:
                 break
         else:
             off_labels.append(label)
             if (
-                short_circuit_match == DevicePowerShortCircuitMatch.OFF
+                short_circuit_match == DeviceConditionState.OFF
                 or fail_fast_unmet
             ):
                 break
@@ -409,7 +399,7 @@ def _device_condition_open_labels(
     ctx: RuleEvaluationContext,
     *,
     fail_fast_unmet: bool = False,
-    short_circuit_match: DeviceOpenShortCircuitMatch | None = None,
+    short_circuit_match: DeviceConditionState | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     open_labels: list[str] = []
     closed_labels: list[str] = []
@@ -428,7 +418,7 @@ def _device_condition_open_labels(
                 break
         elif is_open:
             open_labels.append(label)
-            if short_circuit_match == DeviceOpenShortCircuitMatch.OPEN:
+            if short_circuit_match == DeviceConditionState.OPEN:
                 break
         else:
             closed_labels.append(label)
@@ -835,7 +825,7 @@ def _evaluate_devices_any_off(
     on_labels, off_labels, missing_labels = _device_condition_power_labels(
         condition.devices,
         ctx,
-        short_circuit_match=DevicePowerShortCircuitMatch.OFF,
+        short_circuit_match=DeviceConditionState.OFF,
     )
     if off_labels:
         met = True
@@ -879,7 +869,7 @@ def _evaluate_devices_any_on(
     on_labels, off_labels, missing_labels = _device_condition_power_labels(
         condition.devices,
         ctx,
-        short_circuit_match=DevicePowerShortCircuitMatch.ON,
+        short_circuit_match=DeviceConditionState.ON,
     )
     if on_labels:
         met = True
@@ -923,7 +913,7 @@ def _evaluate_devices_any_open(
     open_labels, closed_labels, missing_labels = _device_condition_open_labels(
         condition.devices,
         ctx,
-        short_circuit_match=DeviceOpenShortCircuitMatch.OPEN,
+        short_circuit_match=DeviceConditionState.OPEN,
     )
     if open_labels:
         met = True

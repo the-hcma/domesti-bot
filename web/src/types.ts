@@ -18,14 +18,21 @@ export interface HealthOut {
 
 export type UIDeviceKind = "switch" | "speaker" | "door";
 
-export type UIDeviceState =
-  | "on"
-  | "off"
-  | "playing"
-  | "paused"
-  | "open"
+/** Mirror of Python ``DeviceConditionState`` (rules / actions; no ``unknown``). */
+export type DeviceConditionState =
   | "closed"
-  | "unknown";
+  | "off"
+  | "on"
+  | "open"
+  | "paused"
+  | "playing";
+
+/**
+ * Tile state from ``GET /v1/ui/state``.
+ * UI-only superset of ``DeviceConditionState`` — ``unknown`` covers transient
+ * readings (Tailwind OPENING/CLOSING, Sonos pre-poll, Vizio auth gaps).
+ */
+export type UIDeviceState = DeviceConditionState | "unknown";
 
 export interface UISonosStreamFavoriteOut {
   name: string;
@@ -269,7 +276,7 @@ export type RuleConditionOut =
       type: "devices_any_in_state_for_s";
       devices: RuleConditionDeviceRefOut[];
       min_duration_s: number;
-      state: "closed" | "off" | "on" | "open" | "paused" | "playing";
+      state: DeviceConditionState;
     }
   | {
       type: "devices_any_off";
