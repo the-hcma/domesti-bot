@@ -14,7 +14,7 @@ import pytest
 
 from app.api.schemas import (
     AfterSunsetCondition,
-    DevicesAnyOnCondition,
+    DevicesAnyInStateCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
     RuleDeviceActionOut,
@@ -22,7 +22,7 @@ from app.api.schemas import (
     RulesSunOut,
     UsersInsideGeofenceForSCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
+from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
@@ -257,8 +257,9 @@ def _evening_lights_off_rule() -> RuleOut:
                     min_inside_s=600,
                     user_ids=["henrique", "kristen"],
                 ),
-                DevicesAnyOnCondition(
-                    type="devices_any_on",
+                DevicesAnyInStateCondition(
+                    type="devices_any_in_state",
+            state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Front door lights",

@@ -16,8 +16,9 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
+    DevicesAllInStateCondition,
+    DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
-    DevicesAnyOpenCondition,
     GeofenceOut,
     RuleConditionOut,
     RuleOut,
@@ -2728,7 +2729,10 @@ def _notification_detail_from_condition(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> str | None:
-    if isinstance(condition, DevicesAnyOpenCondition):
+    if isinstance(
+        condition,
+        (DevicesAllInStateCondition, DevicesAnyInStateCondition),
+    ) and condition.state == DeviceConditionState.OPEN:
         row = _evaluate_condition(condition, rule, ctx)
         if row.met:
             return row.detail

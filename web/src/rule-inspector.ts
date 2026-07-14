@@ -55,11 +55,9 @@ function appendConditionTree(
     ) {
       item.textContent = formatPresenceEventLabel(condition, context);
     } else if (
-      condition.type === "devices_all_on"
+      condition.type === "devices_all_in_state"
+      || condition.type === "devices_any_in_state"
       || condition.type === "devices_any_in_state_for_s"
-      || condition.type === "devices_any_off"
-      || condition.type === "devices_any_on"
-      || condition.type === "devices_any_open"
     ) {
       item.textContent = formatDeviceStateCondition(condition, context);
     } else {

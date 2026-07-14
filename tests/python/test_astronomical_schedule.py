@@ -10,7 +10,7 @@ import pytest
 from app.api.schemas import (
     AfterSunsetCondition,
     BeforeSunriseCondition,
-    DevicesAnyOnCondition,
+    DevicesAnyInStateCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
     RuleOut,
@@ -18,7 +18,7 @@ from app.api.schemas import (
     SettingsLocationOut,
     UsersInsideGeofenceForSCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleTrigger
+from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.astronomical_schedule import (
     astronomical_anchor_datetime,
     cron_expression_for_local_datetime,
@@ -98,8 +98,9 @@ def _eligibility_wake_rule() -> RuleOut:
                     min_inside_s=600,
                     user_ids=["henrique"],
                 ),
-                DevicesAnyOnCondition(
-                    type="devices_any_on",
+                DevicesAnyInStateCondition(
+                    type="devices_any_in_state",
+            state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Front door lights",

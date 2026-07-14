@@ -269,26 +269,20 @@ export type RuleConditionOut =
       days: number[];
     }
   | {
-      type: "devices_all_on";
+      type: "devices_all_in_state";
       devices: RuleConditionDeviceRefOut[];
+      state: DeviceConditionState;
+    }
+  | {
+      type: "devices_any_in_state";
+      devices: RuleConditionDeviceRefOut[];
+      state: DeviceConditionState;
     }
   | {
       type: "devices_any_in_state_for_s";
       devices: RuleConditionDeviceRefOut[];
       min_duration_s: number;
       state: DeviceConditionState;
-    }
-  | {
-      type: "devices_any_off";
-      devices: RuleConditionDeviceRefOut[];
-    }
-  | {
-      type: "devices_any_on";
-      devices: RuleConditionDeviceRefOut[];
-    }
-  | {
-      type: "devices_any_open";
-      devices: RuleConditionDeviceRefOut[];
     };
 
 export interface RuleConditionDeviceRefOut {

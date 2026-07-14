@@ -7,11 +7,9 @@ from dataclasses import dataclass
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
-    DevicesAllOnCondition,
+    DevicesAllInStateCondition,
+    DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
-    DevicesAnyOffCondition,
-    DevicesAnyOnCondition,
-    DevicesAnyOpenCondition,
     RuleConditionDeviceRefOut,
     RuleConditionOut,
     RuleDeviceActionOut,
@@ -23,7 +21,7 @@ from app.api.schemas import (
     UsersOutsideGeofenceForSCondition,
     normalized_rule_notification_emails,
 )
-from app.device_enums import DeviceFamilyId, RuleTrigger
+from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.rule_actions import (
     RuleActionDispatchError,
@@ -455,38 +453,46 @@ def _validate_users(
     return issues
 
 
+def _iter_device_state_condition_checks(
+    conditions: list[RuleConditionOut],
+) -> list[tuple[list[RuleConditionDeviceRefOut], DeviceConditionState]]:
+    """Yield (devices, state) for device-state conditions."""
+    found: list[tuple[list[RuleConditionDeviceRefOut], DeviceConditionState]] = []
+    for condition in conditions:
+        if isinstance(
+            condition,
+            (
+                DevicesAllInStateCondition,
+                DevicesAnyInStateCondition,
+                DevicesAnyInStateForSCondition,
+            ),
+        ):
+            found.append((condition.devices, condition.state))
+        elif isinstance(condition, AllConditionsCondition):
+            found.extend(_iter_device_state_condition_checks(condition.conditions))
+        elif isinstance(condition, AnyConditionsCondition):
+            found.extend(_iter_device_state_condition_checks(condition.conditions))
+    return found
+
+
 def _validate_device_condition_states(rule: RuleOut) -> list[RuleReferenceIssueOut]:
-    """Flag family/state pairs that device dwell conditions cannot observe."""
+    """Flag family/state pairs that device state conditions cannot observe."""
     issues: list[RuleReferenceIssueOut] = []
-    for condition in _iter_device_dwell_conditions(rule.conditions.all):
-        for ref in condition.devices:
-            if condition.state.supported_by_family(ref.family_id):
+    for devices, state in _iter_device_state_condition_checks(rule.conditions.all):
+        for ref in devices:
+            if state.supported_by_family(ref.family_id):
                 continue
             issues.append(
                 RuleReferenceIssueOut(
                     detail=(
                         f'Device "{ref.device_id}" family {ref.family_id.value} '
-                        f"cannot report state {condition.state.value}"
+                        f"cannot report state {state.value}"
                     ),
                     kind="unknown_device",
                     reference=ref.device_id,
                 ),
             )
     return issues
-
-
-def _iter_device_dwell_conditions(
-    conditions: list[RuleConditionOut],
-) -> list[DevicesAnyInStateForSCondition]:
-    found: list[DevicesAnyInStateForSCondition] = []
-    for condition in conditions:
-        if isinstance(condition, DevicesAnyInStateForSCondition):
-            found.append(condition)
-        elif isinstance(condition, AllConditionsCondition):
-            found.extend(_iter_device_dwell_conditions(condition.conditions))
-        elif isinstance(condition, AnyConditionsCondition):
-            found.extend(_iter_device_dwell_conditions(condition.conditions))
-    return found
 
 
 def _validate_device_conditions(
@@ -513,11 +519,9 @@ def _walk_device_refs(
 ) -> None:
     if isinstance(
         condition,
-        DevicesAllOnCondition
-        | DevicesAnyInStateForSCondition
-        | DevicesAnyOffCondition
-        | DevicesAnyOnCondition
-        | DevicesAnyOpenCondition,
+        DevicesAllInStateCondition
+        | DevicesAnyInStateCondition
+        | DevicesAnyInStateForSCondition,
     ):
         for ref in condition.devices:
             refs.add((ref.family_id, ref.device_id))
