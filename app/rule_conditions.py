@@ -22,11 +22,9 @@ from app.api.schemas import (
     BeforeSunriseCondition,
     DaylightCondition,
     DaysOfWeekCondition,
-    DevicesAllOnCondition,
+    DevicesAllInStateCondition,
+    DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
-    DevicesAnyOffCondition,
-    DevicesAnyOnCondition,
-    DevicesAnyOpenCondition,
     GeofenceOut,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
@@ -377,6 +375,23 @@ def _cached_device_matches_state(
             return not is_open
 
 
+def _complementary_device_state_label(state: DeviceConditionState) -> str:
+    """Return the opposite state label used in unmet any/all status details."""
+    match state:
+        case DeviceConditionState.CLOSED:
+            return DeviceConditionState.OPEN.value
+        case DeviceConditionState.OFF:
+            return DeviceConditionState.ON.value
+        case DeviceConditionState.ON:
+            return DeviceConditionState.OFF.value
+        case DeviceConditionState.OPEN:
+            return DeviceConditionState.CLOSED.value
+        case DeviceConditionState.PAUSED:
+            return DeviceConditionState.PLAYING.value
+        case DeviceConditionState.PLAYING:
+            return DeviceConditionState.PAUSED.value
+
+
 def _device_bool_since_for_ref(
     ctx: RuleEvaluationContext,
     ref: RuleConditionDeviceRefOut,
@@ -620,16 +635,12 @@ def _evaluate_condition(
         return _evaluate_daylight(condition, rule, ctx)
     if isinstance(condition, DaysOfWeekCondition):
         return _evaluate_days_of_week(condition, rule, ctx)
-    if isinstance(condition, DevicesAllOnCondition):
-        return _evaluate_devices_all_on(condition, rule, ctx)
+    if isinstance(condition, DevicesAllInStateCondition):
+        return _evaluate_devices_all_in_state(condition, rule, ctx)
+    if isinstance(condition, DevicesAnyInStateCondition):
+        return _evaluate_devices_any_in_state(condition, rule, ctx)
     if isinstance(condition, DevicesAnyInStateForSCondition):
         return _evaluate_devices_any_in_state_for_s(condition, rule, ctx)
-    if isinstance(condition, DevicesAnyOffCondition):
-        return _evaluate_devices_any_off(condition, rule, ctx)
-    if isinstance(condition, DevicesAnyOnCondition):
-        return _evaluate_devices_any_on(condition, rule, ctx)
-    if isinstance(condition, DevicesAnyOpenCondition):
-        return _evaluate_devices_any_open(condition, rule, ctx)
     if isinstance(condition, LocalTimeWindowCondition):
         return _evaluate_local_time_window(condition, rule, ctx)
     if isinstance(condition, UsersInsideGeofenceCondition):
@@ -699,37 +710,34 @@ def _evaluate_days_of_week(
     )
 
 
-def _evaluate_devices_all_on(
-    condition: DevicesAllOnCondition,
+def _evaluate_devices_all_in_state(
+    condition: DevicesAllInStateCondition,
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> RuleConditionStatusOut:
-    if ctx.device_state is None:
-        return RuleConditionStatusOut(
-            condition=condition,
-            detail="discovery not ready",
-            label="All devices on",
-            met=False,
-        )
-    on_labels, off_labels, missing_labels = _device_condition_power_labels(
-        condition.devices,
-        ctx,
-        fail_fast_unmet=True,
+    del rule  # unused; signature matches sibling evaluators
+    return _evaluate_devices_in_state(
+        condition,
+        devices=condition.devices,
+        state=condition.state,
+        ctx=ctx,
+        require_all=True,
     )
-    if missing_labels:
-        met = False
-        detail = f"Not found: {', '.join(missing_labels)}"
-    elif off_labels:
-        met = False
-        detail = f"Off: {', '.join(off_labels)}"
-    else:
-        met = True
-        detail = f"All on ({', '.join(on_labels)})"
-    return RuleConditionStatusOut(
-        condition=condition,
-        detail=detail,
-        label="All devices on",
-        met=met,
+
+
+
+def _evaluate_devices_any_in_state(
+    condition: DevicesAnyInStateCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    del rule  # unused; signature matches sibling evaluators
+    return _evaluate_devices_in_state(
+        condition,
+        devices=condition.devices,
+        state=condition.state,
+        ctx=ctx,
+        require_all=False,
     )
 
 
@@ -810,134 +818,84 @@ def _evaluate_devices_any_in_state_for_s(
     )
 
 
-def _evaluate_devices_any_off(
-    condition: DevicesAnyOffCondition,
-    rule: RuleOut,
+
+def _evaluate_devices_in_state(
+    condition: RuleConditionOut,
+    *,
+    devices: list[RuleConditionDeviceRefOut],
+    state: DeviceConditionState,
     ctx: RuleEvaluationContext,
+    require_all: bool,
 ) -> RuleConditionStatusOut:
+    """Shared instant device-state evaluator for any/all in-state conditions."""
+    label = (
+        f"All devices {state.value}" if require_all else f"Any device {state.value}"
+    )
     if ctx.device_state is None:
         return RuleConditionStatusOut(
             condition=condition,
             detail="discovery not ready",
-            label="Any device off",
+            label=label,
             met=False,
         )
-    on_labels, off_labels, missing_labels = _device_condition_power_labels(
-        condition.devices,
-        ctx,
-        short_circuit_match=DeviceConditionState.OFF,
-    )
-    if off_labels:
+    matched_labels: list[str] = []
+    unmet_labels: list[str] = []
+    missing_labels: list[str] = []
+    for ref in devices:
+        device_label = ref.device_id.strip()
+        matches = _cached_device_matches_state(ctx, ref, state)
+        if matches is None:
+            if state.supported_by_family(ref.family_id):
+                missing_labels.append(device_label)
+            else:
+                missing_labels.append(
+                    f"{device_label} (unsupported family {ref.family_id.value} "
+                    f"for state {state.value})",
+                )
+            if require_all:
+                break
+            continue
+        if matches:
+            matched_labels.append(device_label)
+            if not require_all:
+                break
+        else:
+            unmet_labels.append(device_label)
+            if require_all:
+                break
+    if require_all:
+        if missing_labels:
+            met = False
+            detail = f"Not found: {', '.join(missing_labels)}"
+        elif unmet_labels:
+            met = False
+            complement = _complementary_device_state_label(state)
+            detail = f"{complement.capitalize()}: {', '.join(unmet_labels)}"
+        else:
+            met = True
+            detail = f"All {state.value} ({', '.join(matched_labels)})"
+    elif matched_labels:
         met = True
-        detail = f"Off: {', '.join(off_labels)}"
+        detail = f"{state.value.capitalize()}: {', '.join(matched_labels)}"
         if missing_labels:
-            detail = (
-                f"{detail} (not found: {', '.join(missing_labels)})"
-            )
-    elif on_labels:
+            detail = f"{detail} (not found: {', '.join(missing_labels)})"
+    elif unmet_labels:
         met = False
+        complement = _complementary_device_state_label(state)
         if missing_labels:
             detail = (
-                f"All resolved devices on ({', '.join(on_labels)}); "
+                f"All resolved devices {complement} ({', '.join(unmet_labels)}); "
                 f"not found: {', '.join(missing_labels)}"
             )
         else:
-            detail = f"All on ({', '.join(on_labels)})"
+            detail = f"All {complement} ({', '.join(unmet_labels)})"
     else:
         met = False
         detail = f"Not found: {', '.join(missing_labels)}"
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
-        label="Any device off",
-        met=met,
-    )
-
-
-def _evaluate_devices_any_on(
-    condition: DevicesAnyOnCondition,
-    rule: RuleOut,
-    ctx: RuleEvaluationContext,
-) -> RuleConditionStatusOut:
-    if ctx.device_state is None:
-        return RuleConditionStatusOut(
-            condition=condition,
-            detail="discovery not ready",
-            label="Any device on",
-            met=False,
-        )
-    on_labels, off_labels, missing_labels = _device_condition_power_labels(
-        condition.devices,
-        ctx,
-        short_circuit_match=DeviceConditionState.ON,
-    )
-    if on_labels:
-        met = True
-        detail = f"On: {', '.join(on_labels)}"
-        if missing_labels:
-            detail = (
-                f"{detail} (not found: {', '.join(missing_labels)})"
-            )
-    elif off_labels:
-        met = False
-        if missing_labels:
-            detail = (
-                f"All resolved devices off ({', '.join(off_labels)}); "
-                f"not found: {', '.join(missing_labels)}"
-            )
-        else:
-            detail = f"All off ({', '.join(off_labels)})"
-    else:
-        met = False
-        detail = f"Not found: {', '.join(missing_labels)}"
-    return RuleConditionStatusOut(
-        condition=condition,
-        detail=detail,
-        label="Any device on",
-        met=met,
-    )
-
-
-def _evaluate_devices_any_open(
-    condition: DevicesAnyOpenCondition,
-    rule: RuleOut,
-    ctx: RuleEvaluationContext,
-) -> RuleConditionStatusOut:
-    if ctx.device_state is None:
-        return RuleConditionStatusOut(
-            condition=condition,
-            detail="discovery not ready",
-            label="Any device open",
-            met=False,
-        )
-    open_labels, closed_labels, missing_labels = _device_condition_open_labels(
-        condition.devices,
-        ctx,
-        short_circuit_match=DeviceConditionState.OPEN,
-    )
-    if open_labels:
-        met = True
-        detail = f"Open: {', '.join(open_labels)}"
-        if missing_labels:
-            detail = (
-                f"{detail} (not found: {', '.join(missing_labels)})"
-            )
-    elif closed_labels:
-        met = False
-        if missing_labels:
-            detail = (
-                f"All resolved devices closed ({', '.join(closed_labels)}); "
-                f"not found: {', '.join(missing_labels)}"
-            )
-        else:
-            detail = f"All closed ({', '.join(closed_labels)})"
-    else:
-        met = False
-        detail = f"Not found: {', '.join(missing_labels)}"
-    return RuleConditionStatusOut(
-        condition=condition,
-        detail=detail,
-        label="Any device open",
+        label=label,
         met=met,
     )
 
@@ -1662,11 +1620,9 @@ def _presence_user_ids_for_condition(
             BeforeLocalTimeCondition,
             BeforeSunriseCondition,
             DaysOfWeekCondition,
-            DevicesAllOnCondition,
+            DevicesAllInStateCondition,
+            DevicesAnyInStateCondition,
             DevicesAnyInStateForSCondition,
-            DevicesAnyOffCondition,
-            DevicesAnyOnCondition,
-            DevicesAnyOpenCondition,
             LocalTimeWindowCondition,
         ),
     ):

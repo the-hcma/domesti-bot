@@ -862,9 +862,20 @@ class RuleConditionDeviceRefOut(BaseModel):
     family_id: DeviceFamilyId
 
 
-class DevicesAllOnCondition(BaseModel):
-    type: Literal["devices_all_on"]
+class DevicesAllInStateCondition(BaseModel):
+    """True when every listed device currently matches ``state``."""
+
+    type: Literal["devices_all_in_state"]
     devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
+    state: DeviceConditionState
+
+
+class DevicesAnyInStateCondition(BaseModel):
+    """True when any listed device currently matches ``state``."""
+
+    type: Literal["devices_any_in_state"]
+    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
+    state: DeviceConditionState
 
 
 class DevicesAnyInStateForSCondition(BaseModel):
@@ -874,21 +885,6 @@ class DevicesAnyInStateForSCondition(BaseModel):
     devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
     min_duration_s: int = Field(ge=1)
     state: DeviceConditionState
-
-
-class DevicesAnyOffCondition(BaseModel):
-    type: Literal["devices_any_off"]
-    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
-
-
-class DevicesAnyOnCondition(BaseModel):
-    type: Literal["devices_any_on"]
-    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
-
-
-class DevicesAnyOpenCondition(BaseModel):
-    type: Literal["devices_any_open"]
-    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
 
 
 class LocalTimeWindowCondition(BaseModel):
@@ -923,6 +919,36 @@ class UsersOutsideGeofenceForSCondition(BaseModel):
     user_ids: list[str] = Field(min_length=1)
 
 
+_LEGACY_DEVICE_CONDITION_TYPE_TO_IN_STATE: dict[str, tuple[str, DeviceConditionState]] = {
+    "devices_all_on": ("devices_all_in_state", DeviceConditionState.ON),
+    "devices_any_off": ("devices_any_in_state", DeviceConditionState.OFF),
+    "devices_any_on": ("devices_any_in_state", DeviceConditionState.ON),
+    "devices_any_open": ("devices_any_in_state", DeviceConditionState.OPEN),
+}
+
+
+def _rewrite_legacy_device_condition_dicts(node: Any) -> Any:
+    """Rewrite retired ``devices_any_on`` / ``*_off`` / ``*_open`` / ``devices_all_on`` JSON."""
+    if isinstance(node, list):
+        return [_rewrite_legacy_device_condition_dicts(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    condition_type = node.get("type")
+    if condition_type in _LEGACY_DEVICE_CONDITION_TYPE_TO_IN_STATE:
+        new_type, state = _LEGACY_DEVICE_CONDITION_TYPE_TO_IN_STATE[condition_type]
+        rewritten = dict(node)
+        rewritten["type"] = new_type
+        rewritten["state"] = state.value
+        return rewritten
+    if condition_type in ("all", "any"):
+        children = node.get("conditions")
+        if isinstance(children, list):
+            rewritten = dict(node)
+            rewritten["conditions"] = _rewrite_legacy_device_condition_dicts(children)
+            return rewritten
+    return node
+
+
 RuleConditionOut = Annotated[
     AfterLocalTimeCondition
     | AfterSunsetCondition
@@ -932,11 +958,9 @@ RuleConditionOut = Annotated[
     | BeforeSunriseCondition
     | DaylightCondition
     | DaysOfWeekCondition
-    | DevicesAllOnCondition
+    | DevicesAllInStateCondition
+    | DevicesAnyInStateCondition
     | DevicesAnyInStateForSCondition
-    | DevicesAnyOffCondition
-    | DevicesAnyOnCondition
-    | DevicesAnyOpenCondition
     | LocalTimeWindowCondition
     | UsersInsideGeofenceCondition
     | UsersInsideGeofenceForSCondition
@@ -948,6 +972,18 @@ RuleConditionOut = Annotated[
 
 class RuleConditionsOut(BaseModel):
     all: list[RuleConditionOut]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_device_condition_types(cls, data: Any) -> Any:
+        """Load-time aliases for retired devices_any_on / off / open and devices_all_on."""
+        if not isinstance(data, dict):
+            return data
+        rewritten = dict(data)
+        conditions = rewritten.get("all")
+        if conditions is not None:
+            rewritten["all"] = _rewrite_legacy_device_condition_dicts(conditions)
+        return rewritten
 
 
 class RuleConditionStatusOut(BaseModel):

@@ -20,9 +20,9 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceForSCondition,
-    DevicesAnyOnCondition,
+    DevicesAnyInStateCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
+from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
@@ -1533,8 +1533,9 @@ def _away_shutdown_rule(*, cooldown_s: int) -> RuleOut:
                     min_outside_s=1200,
                     user_ids=["henrique"],
                 ),
-                DevicesAnyOnCondition(
-                    type="devices_any_on",
+                DevicesAnyInStateCondition(
+                    type="devices_any_in_state",
+            state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Garage",

@@ -15,10 +15,8 @@ from app.api.schemas import (
     AfterSunsetCondition,
     AnyConditionsCondition,
     DaylightCondition,
-    DevicesAllOnCondition,
-    DevicesAnyOffCondition,
-    DevicesAnyOnCondition,
-    DevicesAnyOpenCondition,
+    DevicesAllInStateCondition,
+    DevicesAnyInStateCondition,
     GeofenceOut,
     RuleConditionDeviceRefOut,
     UserLocationOut,
@@ -29,7 +27,7 @@ from app.api.schemas import (
     RuleOut,
     SettingsLocationOut,
 )
-from app.device_enums import DeviceFamilyId, RuleEvaluationCause, RuleTrigger
+from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleEvaluationCause, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
@@ -497,8 +495,9 @@ def test_presence_user_ids_for_condition_ignores_non_presence_types() -> None:
     )
     assert (
         _presence_user_ids_for_condition(
-            DevicesAnyOnCondition(
-                type="devices_any_on",
+            DevicesAnyInStateCondition(
+                type="devices_any_in_state",
+            state=DeviceConditionState.ON,
                 devices=[
                     RuleConditionDeviceRefOut(
                         device_id="Garage",
@@ -999,8 +998,9 @@ def _jun22_evening_lights_off_rule() -> RuleOut:
                     min_inside_s=600,
                     user_ids=["henrique", "kristen"],
                 ),
-                DevicesAnyOnCondition(
-                    type="devices_any_on",
+                DevicesAnyInStateCondition(
+                    type="devices_any_in_state",
+            state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Front door lights",
@@ -1301,10 +1301,8 @@ def test_users_inside_geofence_for_s_reports_user_outside() -> None:
 
 def _device_state_rule(
     condition: (
-        DevicesAllOnCondition
-        | DevicesAnyOffCondition
-        | DevicesAnyOnCondition
-        | DevicesAnyOpenCondition
+        DevicesAllInStateCondition
+        | DevicesAnyInStateCondition
     ),
 ) -> RuleOut:
     return RuleOut(
@@ -1372,8 +1370,9 @@ def test_devices_any_open_reports_open_tailwind_door() -> None:
         _FakeTailwindDoor("door-right", "Right", is_open=False),
     )
     rule = _device_state_rule(
-        DevicesAnyOpenCondition(
-            type="devices_any_open",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.OPEN,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Left",
@@ -1399,8 +1398,9 @@ def test_devices_any_on_met_when_one_switch_on() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
     )
     rule = _device_state_rule(
-        DevicesAnyOnCondition(
-            type="devices_any_on",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1425,8 +1425,9 @@ def test_devices_any_on_met_when_one_on_and_another_missing() -> None:
         _FakeKasaSwitch("192.168.1.10", "Front door lights", is_on=True),
     )
     rule = _device_state_rule(
-        DevicesAnyOnCondition(
-            type="devices_any_on",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1452,8 +1453,9 @@ def test_devices_any_on_short_circuits_after_first_on_device() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
     )
     rule = _device_state_rule(
-        DevicesAnyOnCondition(
-            type="devices_any_on",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1493,8 +1495,9 @@ def test_devices_any_on_unmet_when_all_off() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
     )
     rule = _device_state_rule(
-        DevicesAnyOnCondition(
-            type="devices_any_on",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1511,8 +1514,9 @@ def test_devices_any_on_unmet_when_all_off() -> None:
 def test_devices_any_on_unmet_when_discovery_not_ready() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     rule = _device_state_rule(
-        DevicesAnyOnCondition(
-            type="devices_any_on",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1535,8 +1539,9 @@ def test_devices_any_on_met_when_sonos_zone_playing() -> None:
         ),
     )
     rule = _device_state_rule(
-        DevicesAnyOnCondition(
-            type="devices_any_on",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Kitchen",
@@ -1561,8 +1566,9 @@ def test_devices_any_on_met_when_vizio_tv_on() -> None:
         vizio_tvs=(_FakeVizioTv("192.168.1.10", "Kitchen TV", power="on"),),
     )
     rule = _device_state_rule(
-        DevicesAnyOnCondition(
-            type="devices_any_on",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Kitchen TV",
@@ -1584,8 +1590,9 @@ def test_devices_any_off_met_when_one_switch_off() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
     )
     rule = _device_state_rule(
-        DevicesAnyOffCondition(
-            type="devices_any_off",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.OFF,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1610,8 +1617,9 @@ def test_devices_any_off_met_when_one_off_and_another_missing() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
     )
     rule = _device_state_rule(
-        DevicesAnyOffCondition(
-            type="devices_any_off",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.OFF,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1637,8 +1645,9 @@ def test_devices_any_off_short_circuits_after_first_off_device() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
     )
     rule = _device_state_rule(
-        DevicesAnyOffCondition(
-            type="devices_any_off",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.OFF,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1678,8 +1687,9 @@ def test_devices_any_off_unmet_when_all_on() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=True),
     )
     rule = _device_state_rule(
-        DevicesAnyOffCondition(
-            type="devices_any_off",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.OFF,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1696,8 +1706,9 @@ def test_devices_any_off_unmet_when_all_on() -> None:
 def test_devices_any_off_unmet_when_discovery_not_ready() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     rule = _device_state_rule(
-        DevicesAnyOffCondition(
-            type="devices_any_off",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.OFF,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1720,8 +1731,9 @@ def test_devices_any_off_met_when_sonos_zone_paused() -> None:
         ),
     )
     rule = _device_state_rule(
-        DevicesAnyOffCondition(
-            type="devices_any_off",
+        DevicesAnyInStateCondition(
+            type="devices_any_in_state",
+            state=DeviceConditionState.OFF,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Kitchen",
@@ -1747,8 +1759,9 @@ def test_devices_all_on_met_when_every_switch_on() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=True),
     )
     rule = _device_state_rule(
-        DevicesAllOnCondition(
-            type="devices_all_on",
+        DevicesAllInStateCondition(
+            type="devices_all_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",
@@ -1773,8 +1786,9 @@ def test_devices_all_on_unmet_when_one_switch_off() -> None:
         _FakeKasaSwitch("192.168.1.11", "Garage outside lights", is_on=False),
     )
     rule = _device_state_rule(
-        DevicesAllOnCondition(
-            type="devices_all_on",
+        DevicesAllInStateCondition(
+            type="devices_all_in_state",
+            state=DeviceConditionState.ON,
             devices=[
                 RuleConditionDeviceRefOut(
                     device_id="Front door lights",

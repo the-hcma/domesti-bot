@@ -100,7 +100,8 @@
             "min_inside_s": 600
           },
           {
-            "type": "devices_any_on",
+            "type": "devices_any_in_state",
+            "state": "on",
             "devices": [
               {
                 "family_id": "kasa",
@@ -197,7 +198,8 @@
             "min_outside_s": 1200
           },
           {
-            "type": "devices_any_on",
+            "type": "devices_any_in_state",
+            "state": "on",
             "devices": [
               { "family_id": "kasa", "device_id": "Front door lights" },
               { "family_id": "kasa", "device_id": "Garage" },
@@ -312,7 +314,8 @@
       "conditions": {
         "all": [
           {
-            "type": "devices_any_on",
+            "type": "devices_any_in_state",
+            "state": "on",
             "devices": [
               { "family_id": "kasa", "device_id": "Master Bedroom fan" }
             ]
@@ -340,7 +343,8 @@
         "all": [
           { "type": "daylight" },
           {
-            "type": "devices_any_on",
+            "type": "devices_any_in_state",
+            "state": "on",
             "devices": [
               { "family_id": "kasa", "device_id": "Master Bedroom fan" }
             ]

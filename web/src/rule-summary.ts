@@ -253,11 +253,9 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case "users_inside_geofence_for_s":
     case "users_outside_geofence":
     case "users_outside_geofence_for_s":
-    case "devices_all_on":
+    case "devices_all_in_state":
+    case "devices_any_in_state":
     case "devices_any_in_state_for_s":
-    case "devices_any_off":
-    case "devices_any_on":
-    case "devices_any_open":
       return null;
     case "all":
     case "any":
@@ -296,11 +294,9 @@ export function formatDeviceStateCondition(
     RuleConditionOut,
     {
       type:
-        | "devices_all_on"
-        | "devices_any_in_state_for_s"
-        | "devices_any_off"
-        | "devices_any_on"
-        | "devices_any_open";
+        | "devices_all_in_state"
+        | "devices_any_in_state"
+        | "devices_any_in_state_for_s";
     }
   >,
   context: RuleSummaryContext,
@@ -309,20 +305,14 @@ export function formatDeviceStateCondition(
     resolveDeviceLabel(entry.family_id, entry.device_id, context),
   );
   const joined = joinNames(labels);
-  if (condition.type === "devices_any_off") {
-    return `Any of ${joined} is off`;
+  if (condition.type === "devices_any_in_state") {
+    return `Any of ${joined} is ${condition.state}`;
   }
-  if (condition.type === "devices_any_on") {
-    return `Any of ${joined} is on`;
+  if (condition.type === "devices_all_in_state") {
+    return `All of ${joined} are ${condition.state}`;
   }
-  if (condition.type === "devices_any_open") {
-    return `Any of ${joined} is open`;
-  }
-  if (condition.type === "devices_any_in_state_for_s") {
-    const need = formatDwellDuration(condition.min_duration_s);
-    return `Any of ${joined} ${condition.state} for ${need}+`;
-  }
-  return `All of ${joined} are on`;
+  const need = formatDwellDuration(condition.min_duration_s);
+  return `Any of ${joined} ${condition.state} for ${need}+`;
 }
 
 export function formatDeviceActionPhrase(
@@ -381,11 +371,9 @@ export function summarizeRule(
       return;
     }
     if (
-      condition.type === "devices_all_on"
+      condition.type === "devices_all_in_state"
+      || condition.type === "devices_any_in_state"
       || condition.type === "devices_any_in_state_for_s"
-      || condition.type === "devices_any_off"
-      || condition.type === "devices_any_on"
-      || condition.type === "devices_any_open"
     ) {
       devices.push(formatDeviceStateCondition(condition, context));
       return;
