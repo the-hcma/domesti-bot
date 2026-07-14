@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import (
@@ -1372,13 +1378,38 @@ class SettingsCredentialsTestOut(BaseModel):
     source: SettingsCredentialsTestSource | None = None
 
 
-class SettingsLocationOut(BaseModel):
-    """Home coordinates for astronomical conditions."""
+class SettingsLocationIn(BaseModel):
+    """Writable home coordinates for ``PUT /v1/rules/settings/location``."""
 
-    home_label: str | None = None
-    lat: float
-    lon: float
-    timezone: str
+    home_label: str | None = Field(
+        default=None,
+        description="Optional display label for home (map tooltip / status).",
+    )
+    lat: float = Field(
+        ...,
+        ge=-90.0,
+        le=90.0,
+        description=(
+            "Home latitude. Together with ``lon``, this is the origin for haversine "
+            "distance features. ``lat=0`` and ``lon=0`` together mean home is not "
+            "configured."
+        ),
+    )
+    lon: float = Field(
+        ...,
+        ge=-180.0,
+        le=180.0,
+        description=(
+            "Home longitude. Together with ``lat``, this is the origin for haversine "
+            "distance features. ``lat=0`` and ``lon=0`` together mean home is not "
+            "configured."
+        ),
+    )
+    timezone: str = Field(
+        ...,
+        min_length=1,
+        description="IANA timezone for schedules and astronomical windows at home.",
+    )
     wifi_home_geofence_id: str | None = Field(
         default=None,
         description=(
@@ -1395,6 +1426,21 @@ class SettingsLocationOut(BaseModel):
             "sync inside state without low-accuracy GPS enter/leave edges."
         ),
     )
+
+
+class SettingsLocationOut(SettingsLocationIn):
+    """Configured **home** point for astronomy, maps, and distance-based features.
+
+    ``lat`` / ``lon`` are the house coordinates (not a geofence center). Vacation mode
+    and min-distance conditions must use :func:`app.home_location.resolve_home_location`.
+    Both coordinates exactly ``0.0`` is the unconfigured sentinel (fail closed).
+    """
+
+    @computed_field
+    @property
+    def home_configured(self) -> bool:
+        """True when lat/lon are not the ``0.0``/``0.0`` unconfigured sentinel."""
+        return not (self.lat == 0.0 and self.lon == 0.0)
 
 
 AllConditionsCondition.model_rebuild()

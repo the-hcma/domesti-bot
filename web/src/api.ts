@@ -301,6 +301,10 @@ export const api = {
   fetchRulesSettingsLocation(): Promise<SettingsLocationOut> {
     return call<SettingsLocationOut>("GET", "/v1/rules/settings/location");
   },
+  putRulesSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut> {
+    const { home_configured: _homeConfigured, ...body } = location;
+    return call<SettingsLocationOut>("PUT", "/v1/rules/settings/location", body);
+  },
   fetchRulesStatus(): Promise<RulesStatusOut> {
     return call<RulesStatusOut>("GET", "/v1/rules/status");
   },

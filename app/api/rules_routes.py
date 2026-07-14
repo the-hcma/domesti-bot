@@ -15,6 +15,7 @@ from app.api.schemas import (
     RuleOut,
     RulesStatusOut,
     RulesValidationOut,
+    SettingsLocationIn,
     SettingsLocationOut,
     UserHomeWifiIn,
     UserLocationOut,
@@ -25,6 +26,7 @@ from app.automation_rules_loader import (
     AutomationRulesLoadError,
     list_automation_rules,
     load_settings_location,
+    save_settings_location,
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.server_runtime import runtime
@@ -149,8 +151,20 @@ async def get_users_status(request: Request) -> list[UserStatusOut]:
 
 @router.get("/settings/location", response_model=SettingsLocationOut)
 async def get_rules_settings_location() -> SettingsLocationOut:
-    """Return home coordinates from the automation rule bundle."""
+    """Return configured home coordinates (distance / astronomy origin).
+
+    ``home_configured`` is false when lat/lon are the ``0.0``/``0.0`` sentinel.
+    """
     return _load_settings_location_or_http_error()
+
+
+@router.put("/settings/location", response_model=SettingsLocationOut)
+async def put_rules_settings_location(body: SettingsLocationIn) -> SettingsLocationOut:
+    """Update home coordinates in the operator ``automation-rules.json`` bundle."""
+    try:
+        return save_settings_location(body)
+    except AutomationRulesLoadError as exc:
+        raise _automation_rules_http_error(exc) from exc
 
 
 @router.get("/status", response_model=RulesStatusOut)

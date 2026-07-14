@@ -552,10 +552,13 @@ export interface RulesStatusOut {
 }
 
 export interface SettingsLocationOut {
+  home_configured: boolean;
+  home_label: string | null;
   lat: number;
   lon: number;
   timezone: string;
-  home_label: string | null;
+  wifi_home_geofence_id?: string | null;
+  wifi_home_presence_enabled?: boolean;
 }
 
 export interface RuleActionDeviceOut {

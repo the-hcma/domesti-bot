@@ -91,6 +91,7 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     location = client.get("/v1/rules/settings/location")
     assert location.status_code == HTTPStatus.OK
     assert location.json()["timezone"] == "America/New_York"
+    assert location.json()["home_configured"] is True
 
     status = client.get("/v1/rules/status")
     assert status.status_code == HTTPStatus.OK
@@ -215,3 +216,31 @@ def test_put_and_delete_geofence(tmp_path: Path) -> None:
     assert delete.status_code == HTTPStatus.NO_CONTENT
     listed = client.get("/v1/rules/geofences")
     assert listed.json() == []
+
+
+def test_put_rules_settings_location_updates_operator_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "automation-rules.json"
+    path.write_text(_EXAMPLE_BUNDLE.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(path))
+    client = _client(tmp_path / "unused.sqlite")
+
+    put = client.put(
+        "/v1/rules/settings/location",
+        json={
+            "lat": 41.2,
+            "lon": -73.9,
+            "timezone": "America/New_York",
+            "home_label": "Updated Home",
+        },
+    )
+    assert put.status_code == HTTPStatus.OK
+    assert put.json()["home_label"] == "Updated Home"
+    assert put.json()["home_configured"] is True
+    assert put.json()["lat"] == 41.2
+
+    listed = client.get("/v1/rules/settings/location")
+    assert listed.status_code == HTTPStatus.OK
+    assert listed.json()["home_label"] == "Updated Home"

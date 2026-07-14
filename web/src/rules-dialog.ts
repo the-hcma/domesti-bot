@@ -1408,6 +1408,7 @@ class RulesHubController {
     const settings = await this.dataSource.getMyTracksSettings();
     const mapUsers = await this.dataSource.listUserStatus();
     const rosterUsers = await this.dataSource.listUsers();
+    const homeLocation = await this.dataSource.getSettingsLocation();
 
     const lead = document.createElement("p");
     lead.className = "settings-dialog-lead";
@@ -1439,6 +1440,8 @@ class RulesHubController {
     });
     syncRow.append(syncMeta, syncBtn);
 
+    const homeLocationSection = this.createHomeLocationSection(homeLocation, mapUsers);
+
     const homeWifiHeading = document.createElement("h3");
     homeWifiHeading.className = "rules-section-title";
     homeWifiHeading.textContent = "Home WiFi";
@@ -1455,7 +1458,15 @@ class RulesHubController {
     const mapSection = document.createElement("section");
     mapSection.className = "rules-users-section";
 
-    this.body.append(lead, syncRow, homeWifiHeading, homeWifiLead, homeWifiList, mapSection);
+    this.body.append(
+      lead,
+      syncRow,
+      homeLocationSection,
+      homeWifiHeading,
+      homeWifiLead,
+      homeWifiList,
+      mapSection,
+    );
     this.mountUserPresenceMap(
       mapSection,
       geofences,
@@ -1466,6 +1477,176 @@ class RulesHubController {
         showTextDetails: false,
       },
     );
+  }
+
+  private createHomeLocationSection(
+    initial: SettingsLocationOut,
+    mapUsers: UserStatusOut[],
+  ): HTMLElement {
+    const section = document.createElement("section");
+    section.className = "rules-users-section";
+    const heading = document.createElement("h3");
+    heading.className = "rules-section-title";
+    heading.textContent = "Home location";
+    const lead = document.createElement("p");
+    lead.className = "rules-card-meta";
+    lead.textContent =
+      "Lat/lon used for astronomy, maps, and distance features (vacation mode). "
+      + "0,0 means home is not configured.";
+    const status = document.createElement("p");
+    status.className = "rules-card-meta";
+    const form = document.createElement("form");
+    form.className = "rules-home-location-form";
+    form.setAttribute("autocomplete", "off");
+
+    const labelInput = document.createElement("input");
+    labelInput.type = "text";
+    labelInput.value = initial.home_label ?? "";
+    preventBrowserAutofill(labelInput);
+    appendLabeledField(form, createFieldLabel("Label"), labelInput);
+
+    const latInput = document.createElement("input");
+    latInput.type = "number";
+    latInput.step = "any";
+    latInput.min = "-90";
+    latInput.max = "90";
+    latInput.required = true;
+    latInput.value = String(initial.lat);
+    preventBrowserAutofill(latInput);
+    appendLabeledField(form, createFieldLabel("Latitude"), latInput);
+
+    const lonInput = document.createElement("input");
+    lonInput.type = "number";
+    lonInput.step = "any";
+    lonInput.min = "-180";
+    lonInput.max = "180";
+    lonInput.required = true;
+    lonInput.value = String(initial.lon);
+    preventBrowserAutofill(lonInput);
+    appendLabeledField(form, createFieldLabel("Longitude"), lonInput);
+
+    const tzInput = document.createElement("input");
+    tzInput.type = "text";
+    tzInput.required = true;
+    tzInput.value = initial.timezone;
+    preventBrowserAutofill(tzInput);
+    appendLabeledField(form, createFieldLabel("Timezone (IANA)"), tzInput);
+
+    const actions = document.createElement("div");
+    actions.className = "rules-home-location-actions";
+    const browserBtn = document.createElement("button");
+    browserBtn.type = "button";
+    browserBtn.className = "btn btn-secondary";
+    browserBtn.textContent = "Adopt browser location";
+    const adoptSelect = document.createElement("select");
+    adoptSelect.className = "rules-select";
+    adoptSelect.setAttribute("aria-label", "Adopt home location from user");
+    const adoptPlaceholder = document.createElement("option");
+    adoptPlaceholder.value = "";
+    adoptPlaceholder.textContent = "Adopt from user…";
+    adoptSelect.append(adoptPlaceholder);
+    for (const user of mapUsers) {
+      if (user.last_location === null) {
+        continue;
+      }
+      const option = document.createElement("option");
+      option.value = user.user_id;
+      option.textContent = userDisplayLabel(user.user_id, user.display_name);
+      adoptSelect.append(option);
+    }
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "submit";
+    saveBtn.className = "btn";
+    saveBtn.textContent = "Save home location";
+    actions.append(browserBtn, adoptSelect, saveBtn);
+    form.append(actions);
+
+    const refreshStatus = (location: SettingsLocationOut): void => {
+      status.textContent = location.home_configured
+        ? `Configured · ${location.lat.toFixed(5)}, ${location.lon.toFixed(5)}`
+        : "Not configured (0, 0 sentinel)";
+    };
+    refreshStatus(initial);
+
+    browserBtn.addEventListener("click", () => {
+      if (!("geolocation" in navigator)) {
+        showErrorToast("Browser geolocation is not available in this environment.");
+        return;
+      }
+      browserBtn.disabled = true;
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latInput.value = String(position.coords.latitude);
+          lonInput.value = String(position.coords.longitude);
+          browserBtn.disabled = false;
+        },
+        (err) => {
+          browserBtn.disabled = false;
+          showErrorToast(
+            `Could not read browser location: ${err.message || "permission denied"}`,
+          );
+        },
+        { enableHighAccuracy: true, timeout: 15_000 },
+      );
+    });
+
+    adoptSelect.addEventListener("change", () => {
+      const userId = adoptSelect.value;
+      if (userId === "") {
+        return;
+      }
+      const user = mapUsers.find((row) => row.user_id === userId);
+      const location = user?.last_location ?? null;
+      if (location === null) {
+        showErrorToast(`Expected a last location for user ${userId}, got none`);
+        adoptSelect.value = "";
+        return;
+      }
+      latInput.value = String(location.lat);
+      lonInput.value = String(location.lon);
+      adoptSelect.value = "";
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const lat = Number(latInput.value);
+      const lon = Number(lonInput.value);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        showErrorToast("Expected finite latitude and longitude.");
+        return;
+      }
+      const timezone = tzInput.value.trim();
+      if (timezone === "") {
+        showErrorToast("Expected a non-empty IANA timezone.");
+        return;
+      }
+      const labelRaw = labelInput.value.trim();
+      saveBtn.disabled = true;
+      void this.dataSource
+        .saveSettingsLocation({
+          home_configured: !(lat === 0 && lon === 0),
+          home_label: labelRaw === "" ? null : labelRaw,
+          lat,
+          lon,
+          timezone,
+          wifi_home_geofence_id: initial.wifi_home_geofence_id ?? null,
+          wifi_home_presence_enabled: initial.wifi_home_presence_enabled ?? true,
+        })
+        .then((saved) => {
+          refreshStatus(saved);
+          void this.refresh();
+        })
+        .catch((err: unknown) => {
+          const detail = err instanceof Error ? err.message : String(err);
+          showErrorToast(`Failed to save home location: ${detail}`);
+        })
+        .finally(() => {
+          saveBtn.disabled = false;
+        });
+    });
+
+    section.append(heading, lead, status, form);
+    return section;
   }
 
   private async createHomeWifiRow(user: UserOut): Promise<HTMLElement> {
