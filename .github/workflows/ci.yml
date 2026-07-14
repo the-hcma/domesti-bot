@@ -176,6 +176,11 @@ jobs:
         with:
           node-version: "20"
 
+      # Corepack from web/packageManager + pnpm store cache (repository-helpers#362).
+      - uses: the-hcma/repository-helpers/actions/setup-pnpm-corepack@cde3063aa1e030fcac59bbf215131a3bd25d7908
+        with:
+          working-directory: web
+
       - name: Web (typecheck + build)
         run: bash .github/ci/web-build
 

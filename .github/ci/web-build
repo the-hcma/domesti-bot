@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
+# pnpm is activated by setup-pnpm-corepack in the calling workflow.
 set -euo pipefail
-corepack enable pnpm
 cd web
 pnpm install --frozen-lockfile
 pnpm run typecheck
