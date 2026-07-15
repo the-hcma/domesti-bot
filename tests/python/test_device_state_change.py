@@ -20,4 +20,9 @@ def test_device_state_change_detector_notifies_on_transition() -> None:
     detector = DeviceStateChangeDetector(on_change)
     detector.note_bool_state(DeviceFamilyId.TAILWIND, "Left", False)
     detector.note_bool_state(DeviceFamilyId.TAILWIND, "Left", True)
-    on_change.assert_called_once_with(DeviceFamilyId.TAILWIND, "Left")
+    on_change.assert_called_once_with(
+        DeviceFamilyId.TAILWIND,
+        "Left",
+        False,
+        True,
+    )

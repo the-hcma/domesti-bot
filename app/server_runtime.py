@@ -19,6 +19,7 @@ from app.device_state_watcher import (
 )
 from app.domesti_bot_cli import DeviceManagersState
 from app.rule_evaluator import RuleEvaluator
+from app.vacation_mode import handle_vacation_device_anomaly
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,11 +101,12 @@ class DomestiServerRuntime:
         self.lifespan_generation = 0
         self.rule_evaluator = None
         self.shutdown_requested = None
+        self._vacation_anomaly_tasks = set()
         self.watcher_stop = None
         self.watcher_task = None
 
     def build_device_state_change_detector(self) -> DeviceStateChangeDetector:
-        return DeviceStateChangeDetector(self.schedule_rule_device_state_evaluation)
+        return DeviceStateChangeDetector(self._on_device_bool_transition)
 
     def schedule_rule_location_evaluation(self, user_id: str) -> None:
         evaluator = self.rule_evaluator
@@ -119,6 +121,36 @@ class DomestiServerRuntime:
         evaluator = self.rule_evaluator
         if evaluator is not None:
             evaluator.schedule_device_state_change(family_id, device_id)
+
+    def schedule_vacation_anomaly_alert(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+        previous: bool,
+        current: bool | None,
+    ) -> None:
+        """Queue vacation anomaly handling off the device-state poll path."""
+        cache_path = self.discovery_cache_path()
+        if cache_path is None:
+            return
+
+        def _run() -> None:
+            handle_vacation_device_anomaly(
+                cache_path,
+                family_id=family_id,
+                device_id=device_id,
+                previous=previous,
+                current=current,
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _run()
+            return
+        task = loop.create_task(asyncio.to_thread(_run), name="vacation-anomaly")
+        self._vacation_anomaly_tasks.add(task)
+        task.add_done_callback(self._vacation_anomaly_tasks.discard)
 
     def signal_shutdown(self) -> None:
         """Tell every background loop to stop starting new work."""
@@ -196,6 +228,25 @@ class DomestiServerRuntime:
             self.watcher_task.cancel()
         if self.discovery_task is not None and not self.discovery_task.done():
             self.discovery_task.cancel()
+        for task in list(self._vacation_anomaly_tasks):
+            if not task.done():
+                task.cancel()
+        self._vacation_anomaly_tasks.clear()
+
+    def _on_device_bool_transition(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+        previous: bool,
+        current: bool | None,
+    ) -> None:
+        self.schedule_rule_device_state_evaluation(family_id, device_id)
+        self.schedule_vacation_anomaly_alert(
+            family_id,
+            device_id,
+            previous,
+            current,
+        )
 
 
 runtime = DomestiServerRuntime()

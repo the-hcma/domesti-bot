@@ -6,26 +6,36 @@ Config lives in the automation-rules bundle (``vacation_mode``). While
 that predicate stops holding for the same dwell. Transition emails go to
 ``notification_emails`` on both edges.
 
+While the latch is **armed** and ``enabled`` is true, unmarked device-state
+transitions (not covered by UI/rule :mod:`app.expected_device_change` marks)
+send anomaly emails to the same recipients (#464). When ``enabled`` is false,
+anomaly mail is quiet even if a prior latch row remains armed.
+
 Restart policy (see also :mod:`app.vacation_mode_store`): persist ``armed`` plus
 ``far_since`` / ``near_since`` clocks; after boot the next tick reconciles clocks
 against the live predicate without dropping a still-valid dwell. When
 ``enabled`` is false, evaluation is skipped and the persisted latch is left
 unchanged (no arm/disarm emails).
-
-Anomaly device alerts while armed are out of scope here (#464).
 """
 
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from html import escape
 from pathlib import Path
 
 from app.api.schemas import VacationModeSettingsOut, normalized_vacation_notification_emails
-from app.automation_rules_loader import load_settings_location
-from app.device_enums import VacationEmailSource
+from app.automation_rules_loader import (
+    load_settings_location,
+    load_vacation_mode_settings,
+)
+from app.device_enums import DeviceFamilyId, VacationEmailSource
+from app.expected_device_change import consume_expected_device_change
 from app.home_location import try_resolve_home_location
 from app.operator_alerts import operator_alert_store
 from app.rule_conditions import RuleEvaluationContext, users_min_distance_from_home_met
@@ -37,6 +47,7 @@ from app.vacation_mode_store import (
     save_vacation_mode_state,
 )
 
+DEFAULT_VACATION_ANOMALY_DEBOUNCE_S = 30.0
 DEFAULT_VACATION_HYSTERESIS_S = 1800.0
 _METERS_PER_MILE = 1609.344
 
@@ -52,6 +63,44 @@ class VacationModeTickResult:
     near_since: float | None
     transitioned_to: bool | None
     """``True`` arm edge, ``False`` disarm edge, ``None`` no edge."""
+
+
+def build_vacation_mode_anomaly_bodies(
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+    previous: bool,
+    current: bool | None,
+    observed_at: datetime,
+) -> tuple[str, str]:
+    """Return ``(plain_text, html)`` bodies for a vacation device-anomaly email."""
+    family_label = family_id.display_name()
+    prev_label = format_vacation_bool_device_state(family_id, previous)
+    next_label = format_vacation_bool_device_state(family_id, current)
+    when_label = observed_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    provenance = _provenance_footer(VacationEmailSource.ANOMALY)
+    headline = f"Unexpected {family_label} change while vacation mode is on."
+    why = (
+        f"{device_id} went from {prev_label} to {next_label}. "
+        "domesti-bot did not mark this as a UI or automation action."
+    )
+    facts = [
+        f"Device: {device_id}",
+        f"Family: {family_label}",
+        f"Change: {prev_label} → {next_label}",
+        f"Observed: {when_label}",
+    ]
+    plain_parts = [headline, "", why, "", *facts, "", "—", provenance]
+    plain_body = "\n".join(plain_parts) + "\n"
+    html_parts = [
+        f"<p><strong>{escape(headline, quote=False)}</strong></p>",
+        f"<p>{escape(why, quote=False)}</p>",
+        "<ul>",
+        *[f"<li>{escape(fact, quote=False)}</li>" for fact in facts],
+        "</ul>",
+        f"<p><em>{escape(provenance, quote=False)}</em></p>",
+    ]
+    return plain_body, "".join(html_parts)
 
 
 def build_vacation_mode_transition_bodies(
@@ -162,6 +211,178 @@ def evaluate_vacation_mode_tick(
         near_since=near_since,
         transitioned_to=transitioned_to,
     )
+
+
+def format_vacation_bool_device_state(
+    family_id: DeviceFamilyId,
+    state: bool | None,
+) -> str:
+    """Human label for a watcher bool (or unknown) for the given family."""
+    if state is None:
+        return "unknown"
+    match family_id:
+        case DeviceFamilyId.SONOS:
+            return "playing" if state else "paused"
+        case DeviceFamilyId.TAILWIND:
+            return "open" if state else "closed"
+        case _:
+            return "on" if state else "off"
+
+
+def handle_vacation_device_anomaly(
+    cache_path: Path,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+    previous: bool,
+    current: bool | None,
+    now_monotonic: float | None = None,
+    observed_at: datetime | None = None,
+) -> bool:
+    """Send an anomaly email when vacation is armed and the change is unmarked.
+
+    Returns whether a message was handed to SMTP. Quiet when disarmed, when
+    ``enabled`` is false, when the change was expected (UI/rule mark consumed),
+    when recipients/SMTP are missing, or when the per-device anti-storm debounce
+    suppresses a repeat. A debounce reservation is rolled back when the send
+    does not complete so missed SMTP does not burn the storm window.
+    """
+    state = load_vacation_mode_state(cache_path)
+    if not state.armed:
+        return False
+    try:
+        settings = load_vacation_mode_settings()
+    except Exception:
+        _LOGGER.exception("[vacation] anomaly email skipped — failed to load settings")
+        return False
+    if not settings.enabled:
+        return False
+    clock = time.monotonic() if now_monotonic is None else now_monotonic
+    if consume_expected_device_change(family_id, device_id, now=clock):
+        _LOGGER.debug(
+            "[vacation] anomaly skipped — expected mark family=%s device_id=%s",
+            family_id.value,
+            device_id,
+        )
+        return False
+    if not _vacation_anomaly_debounce.allow(
+        family_id,
+        device_id,
+        now=clock,
+        window_s=DEFAULT_VACATION_ANOMALY_DEBOUNCE_S,
+    ):
+        _LOGGER.info(
+            "[vacation] anomaly email debounce family=%s device_id=%s",
+            family_id.value,
+            device_id,
+        )
+        return False
+    when = observed_at if observed_at is not None else datetime.now(UTC)
+    try:
+        sent = send_vacation_mode_anomaly_email(
+            cache_path,
+            settings=settings,
+            family_id=family_id,
+            device_id=device_id,
+            previous=previous,
+            current=current,
+            observed_at=when,
+        )
+    except Exception:
+        _vacation_anomaly_debounce.release(family_id, device_id, reserved_at=clock)
+        _LOGGER.exception(
+            "[vacation] anomaly email raised family=%s device_id=%s",
+            family_id.value,
+            device_id,
+        )
+        return False
+    if not sent:
+        _vacation_anomaly_debounce.release(family_id, device_id, reserved_at=clock)
+    return sent
+
+
+def send_vacation_mode_anomaly_email(
+    cache_path: Path,
+    *,
+    settings: VacationModeSettingsOut,
+    family_id: DeviceFamilyId,
+    device_id: str,
+    previous: bool,
+    current: bool | None,
+    observed_at: datetime,
+) -> bool:
+    """Email vacation recipients about an unmarked device transition."""
+    recipients = normalized_vacation_notification_emails(settings)
+    if not recipients:
+        _LOGGER.warning(
+            "[vacation] anomaly email skipped — notification_emails is empty "
+            "(family=%s device_id=%s)",
+            family_id.value,
+            device_id,
+        )
+        return False
+    config = load_smtp_config(cache_path)
+    if config is None or not smtp_send_ready(config):
+        _LOGGER.warning(
+            "[vacation] anomaly email skipped — SMTP is not configured "
+            "(family=%s device_id=%s recipient_count=%d)",
+            family_id.value,
+            device_id,
+            len(recipients),
+        )
+        return False
+    password = resolve_password_for_send(cache_path, draft_password=None, host=config.host)
+    params = SmtpConnectionParams(
+        from_address=config.from_address,
+        host=config.host,
+        mail_domain=config.mail_domain,
+        password=password,
+        port=config.port,
+        username=config.username,
+    )
+    plain_body, html_body = build_vacation_mode_anomaly_bodies(
+        family_id=family_id,
+        device_id=device_id,
+        previous=previous,
+        current=current,
+        observed_at=observed_at,
+    )
+    prev_label = format_vacation_bool_device_state(family_id, previous)
+    next_label = format_vacation_bool_device_state(family_id, current)
+    subject = (
+        f"domesti-bot vacation anomaly: {family_id.display_name()} "
+        f"{device_id} {prev_label}→{next_label}"
+    )
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = params.from_address
+    message["To"] = ", ".join(recipients)
+    message.set_content(plain_body)
+    message.add_alternative(html_body, subtype="html")
+    try:
+        delivery = deliver_email_message(params, message)
+    except Exception as exc:
+        friendly = smtp_friendly_error(exc, host=params.host)
+        operator_alert_store.record_smtp_notification_failure(message=friendly)
+        _LOGGER.error(
+            "[vacation] anomaly email failed family=%s device_id=%s "
+            "recipient_count=%d host=%s:%s: %s",
+            family_id.value,
+            device_id,
+            len(recipients),
+            params.host,
+            params.port,
+            friendly,
+        )
+        raise
+    operator_alert_store.clear_smtp_notification_failure()
+    _LOGGER.info(
+        "[vacation] anomaly email sent family=%s device_id=%s %s",
+        family_id.value,
+        device_id,
+        delivery.format_for_log(redact_recipients=True),
+    )
+    return True
 
 
 def send_vacation_mode_transition_email(
@@ -325,6 +546,51 @@ def tick_vacation_mode(
     return result
 
 
+class _VacationAnomalyDebounce:
+    """Minimal per-device anti-storm guard for anomaly emails."""
+
+    def __init__(self) -> None:
+        self._last_sent_at: dict[tuple[DeviceFamilyId, str], float] = {}
+        self._lock = threading.Lock()
+
+    def allow(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+        *,
+        now: float,
+        window_s: float,
+    ) -> bool:
+        key = (family_id, device_id.strip())
+        if key[1] == "":
+            return False
+        with self._lock:
+            last = self._last_sent_at.get(key)
+            if last is not None and (now - last) < window_s:
+                return False
+            self._last_sent_at[key] = now
+            return True
+
+    def clear(self) -> None:
+        with self._lock:
+            self._last_sent_at.clear()
+
+    def release(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+        *,
+        reserved_at: float,
+    ) -> None:
+        """Drop a reservation when the matching alert did not send."""
+        key = (family_id, device_id.strip())
+        if key[1] == "":
+            return
+        with self._lock:
+            if self._last_sent_at.get(key) == reserved_at:
+                del self._last_sent_at[key]
+
+
 def _format_vacation_distance_m(distance_m: float) -> str:
     if distance_m >= 1000.0:
         km = distance_m / 1000.0
@@ -386,6 +652,8 @@ def _format_vacation_user_ids(user_ids: list[str]) -> str:
 
 def _provenance_footer(source: VacationEmailSource) -> str:
     match source:
+        case VacationEmailSource.ANOMALY:
+            return "Sent by: domesti-bot · Vacation mode (device anomaly)"
         case VacationEmailSource.SETTINGS_TEST:
             return "Sent by: domesti-bot · Automations → Vacation (test email)"
         case VacationEmailSource.LATCH:
@@ -396,3 +664,6 @@ def _provenance_footer(source: VacationEmailSource) -> str:
                 source.value,
             )
             return f"Sent by: domesti-bot · Vacation mode ({source.value})"
+
+
+_vacation_anomaly_debounce = _VacationAnomalyDebounce()
