@@ -17,6 +17,7 @@ from app.api.ui_state import (
 from app.device_enums import DeviceFamilyId
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
+from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
 from app.vizio_device_manager import VizioDeviceManager
@@ -41,6 +42,7 @@ async def flip_ui_device(
 ) -> UiDeviceFlipResult:
     """Read cached state, flip the device, return a refreshed tile view."""
     family = _parse_family_id(family_id)
+    mark_expected_device_change(family, device_id)
     try:
         label, log_detail = await _flip_tile(state, family, device_id)
     except (KeyError, ValueError) as exc:
