@@ -67,6 +67,8 @@ def test_send_test_email_includes_instance_dashboard_link(smtp_cls: MagicMock) -
     payload = message.as_string()
     assert "http://192.168.0.5:8003/" in payload
     assert "<a href" in payload
+    plain = message.get_body(preferencelist=("plain",)).get_content()
+    assert "Sent by: domesti-bot · Settings → Mail (test email)" in plain
 
 
 @patch("app.smtp_service._LoggingSMTPSSL")

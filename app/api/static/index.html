@@ -791,9 +791,21 @@
       font-size: 13px; font-weight: normal; color: var(--fg); }
     .rules-mail-mount .settings-dialog-field input,
     .rules-mail-mount .settings-dialog-field select { width: 100%; }
+    .rules-vacation-mount { display: flex; flex-direction: column; gap: 10px; }
+    .rules-vacation-mount .rules-vacation-form { display: flex; flex-direction: column;
+      gap: 10px; margin: 0; }
+    .rules-vacation-mount .settings-dialog-field { flex: 0 0 auto; }
+    .rules-vacation-mount .settings-dialog-field-row { margin-bottom: 0; }
+    .rules-vacation-mount .settings-dialog-fieldset { gap: 4px; padding: 8px 10px; }
+    .rules-vacation-mount .settings-dialog-field input,
+    .rules-vacation-mount .settings-dialog-field select { width: 100%; box-sizing: border-box; }
+    .rules-vacation-armed { margin: 0; font-size: 14px; font-weight: 600; color: var(--fg); }
     .rules-mail-test-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .rules-mail-test-row input { flex: 1 1 12rem; min-width: 0; font: inherit;
       padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--input-fill); color: var(--fg); }
+    .rules-vacation-mount .rules-mail-test-row select { flex: 1 1 14rem; min-width: 0;
+      font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
       background: var(--input-fill); color: var(--fg); }
     .automations-dialog .rules-editor-form input:not([type="checkbox"]):not([type="radio"]),
     .automations-dialog .rules-geofence-form-panel input:not([type="checkbox"]):not([type="radio"]),

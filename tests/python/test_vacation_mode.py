@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 from app.api.schemas import VacationModeSettingsOut
 from app.db.engine import dispose_engine
 from app.db.schema import clear_bootstrap_cache
+from app.device_enums import VacationEmailSource
 from app.vacation_mode import (
+    build_vacation_mode_transition_bodies,
     evaluate_vacation_mode_tick,
     send_vacation_mode_transition_email,
     tick_vacation_mode,
@@ -172,6 +174,8 @@ def test_tick_vacation_mode_arms_and_emails(tmp_path: Path) -> None:
     assert result.armed is True
     assert result.transitioned_to is True
     send_email.assert_called_once()
+    assert send_email.call_args.kwargs["armed"] is True
+    assert send_email.call_args.kwargs["source"] is VacationEmailSource.LATCH
     assert load_vacation_mode_state(db).armed is True
     dispose_engine(db)
 
@@ -204,6 +208,7 @@ def test_tick_vacation_mode_disarms_and_emails(tmp_path: Path) -> None:
     assert result.armed is False
     assert result.transitioned_to is False
     assert send_email.call_args.kwargs["armed"] is False
+    assert send_email.call_args.kwargs["source"] is VacationEmailSource.LATCH
     dispose_engine(db)
 
 
@@ -254,8 +259,60 @@ def test_send_vacation_mode_transition_email_uses_smtp_stack(tmp_path: Path) -> 
     clear_bootstrap_cache()
     settings = VacationModeSettingsOut(
         enabled=True,
+        hysteresis_s=1800.0,
+        min_distance_m=80_000.0,
         notification_emails=["operator@example.com", " operator@example.com "],
-        user_ids=["user-a"],
+        user_ids=["user-a", "user-b"],
+    )
+    smtp_config = MagicMock()
+    smtp_config.from_address = "noreply@example.com"
+    smtp_config.host = "smtp.example.com"
+    smtp_config.mail_domain = "example.com"
+    smtp_config.port = 587
+    smtp_config.username = "user"
+    delivery = MagicMock()
+    delivery.format_for_log.return_value = "recipient_count=1"
+    home = MagicMock()
+    home.home_label = "House"
+    home.lat = 37.7749
+    home.lon = -122.4194
+    with (
+        patch("app.vacation_mode.load_smtp_config", return_value=smtp_config),
+        patch("app.vacation_mode.smtp_send_ready", return_value=True),
+        patch("app.vacation_mode.resolve_password_for_send", return_value="secret"),
+        patch(
+            "app.vacation_mode.deliver_email_message",
+            return_value=delivery,
+        ) as deliver,
+        patch("app.vacation_mode.operator_alert_store") as alerts,
+        patch("app.vacation_mode.try_resolve_home_location", return_value=home),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+    ):
+        sent = send_vacation_mode_transition_email(db, armed=True, settings=settings)
+    assert sent is True
+    message = deliver.call_args.args[1]
+    assert message["Subject"] == "domesti-bot vacation mode on"
+    assert message["To"] == "operator@example.com"
+    body = message.get_body(preferencelist=("plain",)).get_content()
+    assert "Vacation mode is now on." in body
+    assert "user-a and user-b" in body
+    assert "80 km (≈ 50 mi)" in body
+    assert "30 minutes" in body
+    assert "House (37.774900, -122.419400)" in body
+    assert "Sent by: domesti-bot · Vacation mode (automatic)" in body
+    alerts.clear_smtp_notification_failure.assert_called_once()
+    dispose_engine(db)
+
+
+def test_send_vacation_mode_test_email_marks_subject_and_body(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    clear_bootstrap_cache()
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=90.0,
+        min_distance_m=500.0,
+        notification_emails=["ops@example.com"],
+        user_ids=["henrique"],
     )
     smtp_config = MagicMock()
     smtp_config.from_address = "noreply@example.com"
@@ -273,12 +330,102 @@ def test_send_vacation_mode_transition_email_uses_smtp_stack(tmp_path: Path) -> 
             "app.vacation_mode.deliver_email_message",
             return_value=delivery,
         ) as deliver,
-        patch("app.vacation_mode.operator_alert_store") as alerts,
+        patch("app.vacation_mode.operator_alert_store"),
+        patch("app.vacation_mode.try_resolve_home_location", return_value=None),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
     ):
-        sent = send_vacation_mode_transition_email(db, armed=True, settings=settings)
+        sent = send_vacation_mode_transition_email(
+            db,
+            armed=False,
+            settings=settings,
+            source=VacationEmailSource.SETTINGS_TEST,
+        )
     assert sent is True
     message = deliver.call_args.args[1]
-    assert message["Subject"] == "domesti-bot vacation mode on"
-    assert message["To"] == "operator@example.com"
-    alerts.clear_smtp_notification_failure.assert_called_once()
+    assert message["Subject"] == "domesti-bot [test] vacation mode off"
+    body = message.get_body(preferencelist=("plain",)).get_content()
+    assert "This is a test email from Automations → Vacation." in body
+    assert "Vacation mode was not actually changed." in body
+    assert "Sent by: domesti-bot · Automations → Vacation (test email)" in body
+    dispose_engine(db)
+
+
+def test_build_vacation_mode_transition_bodies_humanizes_duration() -> None:
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=1800.0,
+        min_distance_m=80_000.0,
+        notification_emails=["ops@example.com"],
+        user_ids=["a", "b", "c"],
+    )
+    home = MagicMock()
+    home.home_label = "Home"
+    home.lat = 1.0
+    home.lon = 2.0
+    with (
+        patch("app.vacation_mode.try_resolve_home_location", return_value=home),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+    ):
+        plain, html = build_vacation_mode_transition_bodies(
+            armed=True,
+            settings=settings,
+            source=VacationEmailSource.LATCH,
+        )
+    assert "a, b, and c" in plain
+    assert "30 minutes" in plain
+    assert "Wait before turning on: 30 minutes" in plain
+    assert "Home (1.000000, 2.000000)" in plain
+    assert "Sent by: domesti-bot · Vacation mode (automatic)" in plain
+    assert "<ul>" in html
+
+
+def test_format_vacation_home_label_survives_settings_load_error() -> None:
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=60.0,
+        min_distance_m=1000.0,
+        notification_emails=["ops@example.com"],
+        user_ids=["henrique"],
+    )
+    with patch(
+        "app.vacation_mode.load_settings_location",
+        side_effect=RuntimeError("boom"),
+    ):
+        plain, _html = build_vacation_mode_transition_bodies(
+            armed=True,
+            settings=settings,
+            source=VacationEmailSource.LATCH,
+        )
+    assert "home (unavailable — could not load settings location)" in plain
+
+
+def test_tick_email_failure_records_operator_alert(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    clear_bootstrap_cache()
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=30.0,
+        min_distance_m=80_000.0,
+        notification_emails=["operator@example.com"],
+        user_ids=["henrique"],
+    )
+    save_vacation_mode_state(db, armed=False, far_since=100.0, near_since=None)
+    with (
+        patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True),
+        patch(
+            "app.vacation_mode.send_vacation_mode_transition_email",
+            side_effect=RuntimeError("smtp down"),
+        ),
+        patch("app.vacation_mode.operator_alert_store") as alerts,
+    ):
+        result = tick_vacation_mode(
+            db,
+            ctx=MagicMock(),
+            now=130.0,
+            settings=settings,
+        )
+    assert result is not None
+    assert result.armed is True
+    alerts.record_smtp_notification_failure.assert_called_once()
+    assert load_vacation_mode_state(db).armed is True
     dispose_engine(db)

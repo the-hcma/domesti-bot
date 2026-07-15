@@ -57,6 +57,7 @@ from app.rules_store import (
     set_user_home_wifi,
     user_exists,
 )
+from app.device_enums import VacationEmailSource
 from app.vacation_mode import send_vacation_mode_transition_email
 from app.vacation_mode_store import load_vacation_mode_state
 
@@ -221,6 +222,7 @@ async def post_rules_settings_vacation_mode_test(
             cache_path,
             armed=body.armed,
             settings=settings,
+            source=VacationEmailSource.SETTINGS_TEST,
         )
     except Exception as exc:
         return VacationModeTestEmailOut(

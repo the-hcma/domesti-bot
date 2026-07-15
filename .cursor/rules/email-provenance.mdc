@@ -1,0 +1,35 @@
+---
+description: Outbound emails must identify subsystem and trigger (provenance)
+alwaysApply: true
+---
+
+# Email provenance
+
+Every outbound email from domesti-bot MUST identify **who/what sent it** and **why** (trigger), so operators can tell automatic latch mail from Settings tests, rule notifications, and SMTP probes.
+
+## Required shape
+
+Include a short footer line (plain text, and an equivalent HTML line) near the end of the body:
+
+```text
+Sent by: domesti-bot · <subsystem> (<trigger>)
+```
+
+Examples:
+
+- `Sent by: domesti-bot · Vacation mode (automatic)`
+- `Sent by: domesti-bot · Automations → Vacation (test email)`
+- `Sent by: domesti-bot · Settings → Mail (test email)`
+
+## Subject lines for tests
+
+Settings / Automations **test** sends must also mark the subject (e.g. `[test]`), and the body must state that no live state was changed when that is true.
+
+## Closed sets
+
+When the code branches on send source (latch vs settings test, etc.), use a `StrEnum` (see `python-closed-set-enums.mdc`) rather than bare string literals.
+
+## Do not
+
+- Ship vague bodies such as “hysteresis window” without concrete values (users, home label + lat/lon, distance, wait duration).
+- Omit provenance because the From address “already says enough” — From is the SMTP identity, not the subsystem.
