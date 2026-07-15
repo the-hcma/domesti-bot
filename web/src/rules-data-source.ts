@@ -553,8 +553,7 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     if (this.cachedSettingsLocation !== null) {
       return structuredClone(this.cachedSettingsLocation);
     }
-    const rules = await this.loadFileBackedRules();
-    if (rules !== null) {
+    if (this.rulesLive) {
       try {
         const live = await api.fetchRulesSettingsLocation();
         this.cachedSettingsLocation = live;
@@ -667,7 +666,14 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return this.inner.saveRule(rule);
   }
 
-  saveSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut> {
+  async saveSettingsLocation(
+    location: SettingsLocationOut,
+  ): Promise<SettingsLocationOut> {
+    if (this.rulesLive) {
+      const saved = await api.putRulesSettingsLocation(location);
+      this.cachedSettingsLocation = saved;
+      return structuredClone(saved);
+    }
     return this.inner.saveSettingsLocation(location);
   }
 

@@ -198,6 +198,7 @@ export function createMockStoreSeed(): MockStoreSeed {
       "arrive-home-lights": null,
     },
     settings_location: {
+      home_configured: true,
       lat: MOCK_HOUSE_CENTER_LAT,
       lon: MOCK_HOUSE_CENTER_LON,
       timezone: "America/New_York",

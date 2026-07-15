@@ -9,11 +9,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from app.api.schemas import RuleOut, SettingsLocationOut
+from app.api.schemas import RuleOut, SettingsLocationIn, SettingsLocationOut
 from app.db.secrets_key import secrets_json_path
+from app.home_location import HomeLocationRef, resolve_home_location
 
-_AUTOMATION_RULES_FILENAME = "automation-rules.json"
 _AUTOMATION_RULES_EXAMPLE_FILENAME = "automation-rules.json.example"
+_AUTOMATION_RULES_FILENAME = "automation-rules.json"
 AutomationRulesSource = Literal["operator", "example"]
 
 
@@ -44,6 +45,14 @@ def automation_rules_json_path() -> Path:
     return root / _AUTOMATION_RULES_EXAMPLE_FILENAME
 
 
+def automation_rules_operator_json_path() -> Path:
+    """Path for mutable operator rules (never the committed ``*.example`` template)."""
+    override = (os.environ.get("DOMESTI_AUTOMATION_RULES_FILE") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return secrets_json_path().parent / _AUTOMATION_RULES_FILENAME
+
+
 def automation_rules_source() -> AutomationRulesSource:
     """Whether the active bundle path is the operator copy or the example template."""
     override = (os.environ.get("DOMESTI_AUTOMATION_RULES_FILE") or "").strip()
@@ -53,6 +62,11 @@ def automation_rules_source() -> AutomationRulesSource:
     if (root / _AUTOMATION_RULES_FILENAME).is_file():
         return "operator"
     return "example"
+
+
+def list_automation_rules(*, path: Path | None = None) -> list[RuleOut]:
+    """Return enabled and disabled rules from the bundle."""
+    return load_automation_rules_bundle(path=path).rules
 
 
 def load_automation_rules_bundle(
@@ -84,11 +98,63 @@ def load_automation_rules_bundle(
         ) from exc
 
 
-def list_automation_rules(*, path: Path | None = None) -> list[RuleOut]:
-    """Return enabled and disabled rules from the bundle."""
-    return load_automation_rules_bundle(path=path).rules
+def load_home_location(*, path: Path | None = None) -> HomeLocationRef:
+    """Return the configured home point, or raise if unconfigured.
+
+    Prefer this (or :func:`app.home_location.resolve_home_location`) for distance
+    features instead of reading geofence centers.
+    """
+    return resolve_home_location(load_settings_location(path=path))
 
 
 def load_settings_location(*, path: Path | None = None) -> SettingsLocationOut:
-    """Return sunset/home coordinates from the bundle."""
+    """Return home / timezone settings from the automation rules bundle."""
     return load_automation_rules_bundle(path=path).settings_location
+
+
+def save_settings_location(
+    location: SettingsLocationIn | SettingsLocationOut,
+    *,
+    path: Path | None = None,
+) -> SettingsLocationOut:
+    """Persist ``settings_location`` into the operator automation rules file.
+
+    Never writes the committed ``automation-rules.json.example`` template. When only
+    the example is present, copies it to the operator path first.
+    """
+    validated = SettingsLocationOut.model_validate(
+        location.model_dump(exclude={"home_configured"}),
+    )
+    source_path = (path or automation_rules_json_path()).expanduser().resolve()
+    dest_path = (path or automation_rules_operator_json_path()).expanduser().resolve()
+    if not source_path.is_file():
+        raise AutomationRulesLoadError(
+            f"Expected automation rules file at {source_path}, got missing path"
+        )
+    try:
+        text = source_path.read_text(encoding="utf-8")
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise AutomationRulesLoadError(
+            f"Expected {source_path} to contain JSON, got invalid JSON: {exc}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise AutomationRulesLoadError(
+            f"Expected {source_path} to contain a JSON object, got {type(raw).__name__}"
+        )
+    raw["settings_location"] = validated.model_dump(
+        mode="json",
+        exclude={"home_configured"},
+    )
+    try:
+        AutomationRulesBundle.model_validate(raw)
+    except ValidationError as exc:
+        raise AutomationRulesLoadError(
+            f"Expected updated bundle to match the automation rules schema, got: {exc}"
+        ) from exc
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_text(
+        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return validated

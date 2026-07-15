@@ -3,6 +3,7 @@
   "device_id_resolution": "preferred_label",
   "_notes": [
     "Copy this file to automation-rules.json in the repo/server root (same directory as domesti-bot.config.json).",
+    "settings_location.lat/lon are the configured home point (maps, astronomical schedules, and distance features such as vacation mode). Do not use a geofence center as a substitute. lat=0 and lon=0 together mean home is not configured.",
     "device_id values are tile/REPL display names; the evaluator resolves them to Kasa hosts, Sonos zone labels, Vizio TV labels, or Tailwind door ids.",
     "Geofence ids must match Automations → Geofences (house is typical for home; west-point for West Point).",
     "Edge-triggered rules that use geofence conditions (users_inside_geofence / users_outside_geofence) rely on accuracy_edge_grace_s (default 120 s). Poor horizontal GPS accuracy can block enter/leave edges without grace; the evaluator also reconciles sustained GPS inside/outside streaks after 10 min.",
