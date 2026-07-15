@@ -133,3 +133,10 @@ class UiActionType(StrEnum):
     OPEN = "open"
     PAUSE_ALL = "pause_all"
     TOGGLE = "toggle"
+
+
+class VacationEmailSource(StrEnum):
+    """What triggered a vacation-mode transition notification email."""
+
+    LATCH = "latch"
+    SETTINGS_TEST = "settings_test"

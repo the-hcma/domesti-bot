@@ -308,4 +308,6 @@ def test_vacation_mode_test_email_does_not_flip_latch(
     assert response.status_code == HTTPStatus.OK
     assert response.json()["ok"] is True
     send.assert_called_once()
+    assert send.call_args.kwargs["armed"] is True
+    assert send.call_args.kwargs["source"].value == "settings_test"
     assert load_vacation_mode_state(db).armed is False

@@ -1023,7 +1023,7 @@ class RulesHubController {
 
   private async renderVacationTab(): Promise<void> {
     const mount = document.createElement("div");
-    mount.className = "rules-mail-mount";
+    mount.className = "rules-vacation-mount";
     this.body.append(mount);
     const { mountVacationModeSettingsPanel } = await import(
       "./vacation-mode-settings-panel.js"

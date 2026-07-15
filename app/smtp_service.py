@@ -214,8 +214,11 @@ def send_test_email(
         html_lines.append(
             f'<p>Open your dashboard: <a href="{safe_url}">{safe_url}</a></p>',
         )
-    message.set_content("\n\n".join(plain_lines))
-    message.add_alternative("\n".join(html_lines), subtype="html")
+    provenance = "Sent by: domesti-bot · Settings → Mail (test email)"
+    plain_lines.extend(["", "—", provenance])
+    html_lines.append(f"<p><em>{escape(provenance, quote=False)}</em></p>")
+    message.set_content("\n\n".join(plain_lines) + "\n")
+    message.add_alternative("".join(html_lines), subtype="html")
     delivery = _send_message(params, message)
     _LOGGER.info(
         "SMTP test email sent %s",

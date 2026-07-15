@@ -8,6 +8,7 @@ import type {
   VacationModeSettingsOut,
   VacationModeSettingsStatusOut,
 } from "./types.js";
+import { showSuccessToast } from "./ui-toast.js";
 
 function formatError(err: unknown): string {
   if (err instanceof HttpError) {
@@ -65,41 +66,53 @@ export async function mountVacationModeSettingsPanel(
   const lead = document.createElement("p");
   lead.className = "settings-dialog-lead";
   lead.textContent =
-    "Sticky far-from-home latch. Arms when every selected user stays beyond the distance for the hysteresis window; emails recipients on arm and disarm. Configure SMTP under Mail.";
+    "Turns on when every selected person stays beyond the distance from home for the wait time; emails recipients on both edges. SMTP is under Mail.";
 
   const armedBadge = document.createElement("p");
-  armedBadge.className = "settings-dialog-status";
+  armedBadge.className = "rules-vacation-armed";
   armedBadge.textContent =
-    current?.armed === true ? "Status: armed" : "Status: disarmed";
+    current?.armed === true ? "Latch: on (armed)" : "Latch: off (disarmed)";
 
   const form = document.createElement("form");
-  form.className = "rules-mail-form";
+  form.className = "rules-vacation-form";
   form.noValidate = true;
 
-  const enabledLabel = document.createElement("label");
-  enabledLabel.className = "settings-dialog-field";
-  const enabledCb = document.createElement("input");
-  enabledCb.type = "checkbox";
-  enabledCb.checked = current?.enabled ?? false;
-  enabledLabel.append(enabledCb, document.createTextNode(" Enabled"));
+  const enabledSelect = document.createElement("select");
+  const optEnabled = document.createElement("option");
+  optEnabled.value = "true";
+  optEnabled.textContent = "Enabled — evaluate far-from-home latch";
+  const optDisabled = document.createElement("option");
+  optDisabled.value = "false";
+  optDisabled.textContent = "Disabled — leave latch unchanged";
+  enabledSelect.append(optEnabled, optDisabled);
+  enabledSelect.value = current?.enabled === true ? "true" : "false";
+  const enabledField = document.createElement("label");
+  enabledField.className = "settings-dialog-field";
+  enabledField.append(createFieldLabel("Vacation mode"), enabledSelect);
 
   const usersField = document.createElement("fieldset");
-  usersField.className = "settings-dialog-field";
+  usersField.className = "settings-dialog-fieldset";
   const usersLegend = document.createElement("legend");
-  usersLegend.textContent = "Users (all must be far from home)";
+  usersLegend.textContent = "People (all must be far from home)";
   usersField.append(usersLegend);
   const userChecks = new Map<string, HTMLInputElement>();
   const selected = new Set(current?.user_ids ?? []);
   for (const user of users) {
     const row = document.createElement("label");
-    row.className = "settings-dialog-field";
+    row.className = "settings-dialog-checkbox";
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = selected.has(user.user_id);
     userChecks.set(user.user_id, cb);
     const label = user.display_name.trim() !== "" ? user.display_name : user.user_id;
-    row.append(cb, document.createTextNode(` ${label}`));
+    row.append(cb, document.createTextNode(label));
     usersField.append(row);
+  }
+  if (users.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "settings-dialog-help";
+    empty.textContent = "No users in the roster yet. Sync My Tracks under Users.";
+    usersField.append(empty);
   }
 
   const distanceInput = document.createElement("input");
@@ -132,11 +145,15 @@ export async function mountVacationModeSettingsPanel(
 
   const hysteresisField = document.createElement("label");
   hysteresisField.className = "settings-dialog-field";
-  hysteresisField.append(createFieldLabel("Hysteresis (seconds)"), hysteresisInput);
+  hysteresisField.append(createFieldLabel("Wait before arm/disarm (s)"), hysteresisInput);
 
   const accuracyField = document.createElement("label");
   accuracyField.className = "settings-dialog-field";
   accuracyField.append(createFieldLabel("Min location accuracy (m)"), accuracyInput);
+
+  const tuningRow = document.createElement("div");
+  tuningRow.className = "settings-dialog-field-row";
+  tuningRow.append(distanceField, hysteresisField, accuracyField);
 
   const emailsField = document.createElement("label");
   emailsField.className = "settings-dialog-field";
@@ -162,21 +179,33 @@ export async function mountVacationModeSettingsPanel(
   testArmed.append(optOn, optOff);
   const testBtn = document.createElement("button");
   testBtn.type = "button";
-  testBtn.className = "btn";
+  testBtn.className = "btn btn-secondary";
   testBtn.textContent = "Send test email";
   testRow.append(testArmed, testBtn);
 
   form.append(
-    enabledLabel,
+    enabledField,
     usersField,
-    distanceField,
-    hysteresisField,
-    accuracyField,
+    tuningRow,
     emailsField,
     actions,
     testRow,
   );
   container.append(lead, armedBadge, status, form);
+
+  let busy = false;
+
+  const syncActionEnabled = (): void => {
+    const hasEmails = parseEmailList(emailsInput.value).length > 0;
+    saveBtn.disabled = busy;
+    testBtn.disabled = busy || !hasEmails;
+    testArmed.disabled = busy;
+    enabledSelect.disabled = busy;
+  };
+  syncActionEnabled();
+  emailsInput.addEventListener("input", () => {
+    syncActionEnabled();
+  });
 
   const collectSettings = (): VacationModeSettingsOut | null => {
     const userIds = [...userChecks.entries()]
@@ -192,7 +221,7 @@ export async function mountVacationModeSettingsPanel(
     }
     if (!Number.isFinite(hysteresis) || hysteresis < 1) {
       status.hidden = false;
-      status.textContent = "Expected hysteresis ≥ 1 second";
+      status.textContent = "Expected wait time ≥ 1 second";
       return null;
     }
     if (!Number.isFinite(accuracy) || accuracy < 1) {
@@ -201,7 +230,7 @@ export async function mountVacationModeSettingsPanel(
       return null;
     }
     return settingsFromForm(
-      enabledCb.checked,
+      enabledSelect.value === "true",
       userIds,
       minDistance,
       hysteresis,
@@ -216,33 +245,54 @@ export async function mountVacationModeSettingsPanel(
     if (settings === null) {
       return;
     }
+    busy = true;
+    syncActionEnabled();
     status.hidden = false;
     status.textContent = "Saving…";
     void dataSource
       .saveVacationModeSettings(settings)
       .then((saved) => {
         armedBadge.textContent =
-          saved.armed === true ? "Status: armed" : "Status: disarmed";
-        status.textContent = "Saved vacation mode settings.";
+          saved.armed === true ? "Latch: on (armed)" : "Latch: off (disarmed)";
+        status.textContent = "Saved.";
+        showSuccessToast("Vacation mode settings saved.");
       })
       .catch((err: unknown) => {
         status.textContent = `Save failed: ${formatError(err)}`;
+      })
+      .finally(() => {
+        busy = false;
+        syncActionEnabled();
       });
   });
 
   testBtn.addEventListener("click", () => {
+    if (parseEmailList(emailsInput.value).length === 0) {
+      status.hidden = false;
+      status.textContent = "Add at least one notification email before testing.";
+      return;
+    }
+    busy = true;
+    syncActionEnabled();
     status.hidden = false;
     status.textContent = "Sending test email…";
     const armed = testArmed.value === "true";
     void dataSource
       .sendVacationModeTestEmail({ armed })
       .then((result) => {
-        status.textContent = result.ok
-          ? result.message
-          : `Test failed: ${result.message}`;
+        if (result.ok) {
+          status.textContent = result.message;
+          showSuccessToast(result.message);
+        } else {
+          status.textContent = `Test failed: ${result.message}`;
+        }
       })
       .catch((err: unknown) => {
         status.textContent = `Test failed: ${formatError(err)}`;
+      })
+      .finally(() => {
+        busy = false;
+        syncActionEnabled();
       });
   });
 }
