@@ -31,6 +31,7 @@ from app.api.schemas import (
     UserLocationOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
+    UsersMinDistanceFromHomeMCondition,
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
     RuleConditionOut,
@@ -46,6 +47,7 @@ from app.device_enums import (
     RuleEvaluationCause,
     RuleTrigger,
 )
+from app.home_location import try_resolve_home_location
 from app.rule_actions import (
     cached_kasa_is_on,
     cached_sonos_is_playing,
@@ -647,6 +649,8 @@ def _evaluate_condition(
         return _evaluate_users_geofence(condition, rule, ctx, want_inside=True)
     if isinstance(condition, UsersInsideGeofenceForSCondition):
         return _evaluate_users_inside_geofence_for_s(condition, rule, ctx)
+    if isinstance(condition, UsersMinDistanceFromHomeMCondition):
+        return _evaluate_users_min_distance_from_home_m(condition, rule, ctx)
     if isinstance(condition, UsersOutsideGeofenceCondition):
         return _evaluate_users_geofence(condition, rule, ctx, want_inside=False)
     if isinstance(condition, UsersOutsideGeofenceForSCondition):
@@ -1228,6 +1232,95 @@ def _evaluate_users_inside_geofence_for_s(
     )
 
 
+def _evaluate_users_min_distance_from_home_m(
+    condition: UsersMinDistanceFromHomeMCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    need_label = _format_distance_m(condition.min_distance_m)
+    home = try_resolve_home_location(load_settings_location())
+    if home is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="Home location is not configured (settings_location lat/lon)",
+            label=f"At least {need_label} from home",
+            met=False,
+        )
+
+    home_name = home.home_label or "home"
+    min_accuracy_m = rule.min_location_accuracy_m
+    now_epoch = ctx.now.timestamp()
+    presence_lines: list[str] = []
+    unmet_names: list[str] = []
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            presence_lines.append(
+                f'"{rule_user_id}": not in user roster (sync users from My Tracks)',
+            )
+            unmet_names.append(rule_user_id)
+            continue
+        name = _user_display_name(ctx, roster_user_id)
+        latest = ctx.user_locations.get(roster_user_id)
+        if latest is None:
+            presence_lines.append(f"{name}: no location yet")
+            unmet_names.append(name)
+            continue
+        effective = _effective_location_for_rule(
+            latest,
+            ctx.user_location_history.get(roster_user_id, ()),
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=now_epoch,
+            walkback_max_s=ctx.walkback_max_s,
+        )
+        if effective is None:
+            accuracy = latest.accuracy_m
+            accuracy_label = f"±{accuracy} m" if accuracy is not None else "unknown accuracy"
+            presence_lines.append(
+                f"{name}: location ignored ({accuracy_label} > {min_accuracy_m} m "
+                "threshold or stale)",
+            )
+            unmet_names.append(name)
+            continue
+        distance_m = _haversine_m(
+            effective.lat,
+            effective.lon,
+            home.lat,
+            home.lon,
+        )
+        distance_label = _format_distance_m(distance_m)
+        if distance_m >= condition.min_distance_m:
+            presence_lines.append(
+                f"{name} is {distance_label} from {home_name} (≥ {need_label})",
+            )
+            continue
+        presence_lines.append(
+            f"{name} is {distance_label} from {home_name} (need ≥ {need_label})",
+        )
+        unmet_names.append(name)
+
+    selected_names: list[str] = []
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            selected_names.append(rule_user_id)
+            continue
+        selected_names.append(_user_display_name(ctx, roster_user_id))
+    who = _join_names(selected_names)
+    label = f"{who} ≥ {need_label} from {home_name}"
+    met = len(unmet_names) == 0
+    if met:
+        detail = f"Everyone is at least {need_label} from {home_name}"
+    else:
+        detail = "; ".join(presence_lines)
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=label,
+        met=met,
+    )
+
+
 def _evaluate_users_outside_geofence_for_s(
     condition: UsersOutsideGeofenceForSCondition,
     rule: RuleOut,
@@ -1359,6 +1452,17 @@ def _evaluate_users_outside_geofence_for_s(
         label=label,
         met=met,
     )
+
+
+def _format_distance_m(distance_m: float) -> str:
+    if distance_m >= 1000.0:
+        km = distance_m / 1000.0
+        if abs(km - round(km)) < 1e-6:
+            return f"{int(round(km))} km"
+        return f"{km:.1f} km"
+    if abs(distance_m - round(distance_m)) < 1e-6:
+        return f"{int(round(distance_m))} m"
+    return f"{distance_m:.0f} m"
 
 
 def _format_dwell_duration_s(total_s: float | int) -> str:
@@ -1600,6 +1704,12 @@ def _presence_user_ids_for_condition(
             rule,
             ctx,
         )
+    if isinstance(condition, UsersMinDistanceFromHomeMCondition):
+        return _roster_user_ids_satisfying_users_min_distance_from_home_m(
+            condition,
+            rule,
+            ctx,
+        )
     if isinstance(condition, UsersOutsideGeofenceCondition):
         return _roster_user_ids_satisfying_users_outside_geofence(
             condition,
@@ -1778,6 +1888,44 @@ def _roster_user_ids_satisfying_users_inside_geofence_for_s(
         if now_epoch - inside_since < condition.min_inside_s:
             continue
         satisfied.add(roster_user_id)
+    return satisfied
+
+
+def _roster_user_ids_satisfying_users_min_distance_from_home_m(
+    condition: UsersMinDistanceFromHomeMCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> set[str]:
+    home = try_resolve_home_location(load_settings_location())
+    if home is None:
+        return set()
+    min_accuracy_m = rule.min_location_accuracy_m
+    now_epoch = ctx.now.timestamp()
+    satisfied: set[str] = set()
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            continue
+        latest = ctx.user_locations.get(roster_user_id)
+        if latest is None:
+            continue
+        effective = _effective_location_for_rule(
+            latest,
+            ctx.user_location_history.get(roster_user_id, ()),
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=now_epoch,
+            walkback_max_s=ctx.walkback_max_s,
+        )
+        if effective is None:
+            continue
+        distance_m = _haversine_m(
+            effective.lat,
+            effective.lon,
+            home.lat,
+            home.lon,
+        )
+        if distance_m >= condition.min_distance_m:
+            satisfied.add(roster_user_id)
     return satisfied
 
 

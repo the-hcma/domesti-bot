@@ -17,6 +17,7 @@ from app.api.schemas import (
     RuleReferenceIssueOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
+    UsersMinDistanceFromHomeMCondition,
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
     normalized_rule_notification_emails,
@@ -562,6 +563,7 @@ def _walk_user_ids(condition: RuleConditionOut, ids: set[str]) -> None:
         (
             UsersInsideGeofenceCondition,
             UsersInsideGeofenceForSCondition,
+            UsersMinDistanceFromHomeMCondition,
             UsersOutsideGeofenceCondition,
             UsersOutsideGeofenceForSCondition,
         ),

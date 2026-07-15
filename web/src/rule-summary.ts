@@ -106,6 +106,7 @@ export function collectUserIdsFromConditions(
     if (
       condition.type === "users_inside_geofence"
       || condition.type === "users_inside_geofence_for_s"
+      || condition.type === "users_min_distance_from_home_m"
       || condition.type === "users_outside_geofence"
       || condition.type === "users_outside_geofence_for_s"
     ) {
@@ -209,6 +210,20 @@ function formatDwellNeed(minInsideS: number): string {
   return formatDwellDuration(minInsideS);
 }
 
+function formatDistanceMeters(distanceM: number): string {
+  if (distanceM >= 1000) {
+    const km = distanceM / 1000;
+    if (Number.isInteger(km)) {
+      return `${km} km`;
+    }
+    return `${km.toFixed(1)} km`;
+  }
+  if (Number.isInteger(distanceM)) {
+    return `${distanceM} m`;
+  }
+  return `${Math.round(distanceM)} m`;
+}
+
 export function formatGeofenceDwellLabel(
   condition: Extract<RuleConditionOut, { type: "users_inside_geofence_for_s" }>,
   context: RuleSummaryContext,
@@ -231,6 +246,16 @@ export function formatGeofenceAwayDwellLabel(
   return `${who} outside ${where} for ${needLabel}+`;
 }
 
+export function formatMinDistanceFromHomeLabel(
+  condition: Extract<RuleConditionOut, { type: "users_min_distance_from_home_m" }>,
+  context: RuleSummaryContext,
+): string {
+  const names = userDisplayNames(condition.user_ids, context);
+  const who = joinNames(names);
+  const needLabel = formatDistanceMeters(condition.min_distance_m);
+  return `${who} ≥ ${needLabel} from home`;
+}
+
 export function formatPresenceEventLabel(
   condition: Extract<
     RuleConditionOut,
@@ -251,6 +276,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
   switch (condition.type) {
     case "users_inside_geofence":
     case "users_inside_geofence_for_s":
+    case "users_min_distance_from_home_m":
     case "users_outside_geofence":
     case "users_outside_geofence_for_s":
     case "devices_all_in_state":
@@ -361,6 +387,10 @@ export function summarizeRule(
     }
     if (condition.type === "users_outside_geofence_for_s") {
       presence.push(formatGeofenceAwayDwellLabel(condition, context));
+      return;
+    }
+    if (condition.type === "users_min_distance_from_home_m") {
+      presence.push(formatMinDistanceFromHomeLabel(condition, context));
       return;
     }
     if (
