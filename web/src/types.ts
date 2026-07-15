@@ -450,6 +450,28 @@ export interface SmtpTestEmailOut {
   ok: boolean;
 }
 
+export interface VacationModeSettingsOut {
+  enabled: boolean;
+  hysteresis_s: number;
+  min_distance_m: number;
+  min_location_accuracy_m: number;
+  notification_emails: string[];
+  user_ids: string[];
+}
+
+export interface VacationModeSettingsStatusOut extends VacationModeSettingsOut {
+  armed: boolean;
+}
+
+export interface VacationModeTestEmailIn {
+  armed: boolean;
+}
+
+export interface VacationModeTestEmailOut {
+  message: string;
+  ok: boolean;
+}
+
 export interface GeofenceOut {
   geofence_id: string;
   label: string;

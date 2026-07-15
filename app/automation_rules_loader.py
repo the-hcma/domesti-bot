@@ -7,9 +7,14 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.api.schemas import RuleOut, SettingsLocationIn, SettingsLocationOut
+from app.api.schemas import (
+    RuleOut,
+    SettingsLocationIn,
+    SettingsLocationOut,
+    VacationModeSettingsOut,
+)
 from app.db.secrets_key import secrets_json_path
 from app.home_location import HomeLocationRef, resolve_home_location
 
@@ -26,6 +31,9 @@ class AutomationRulesBundle(BaseModel):
     device_id_resolution: str = "preferred_label"
     rules: list[RuleOut]
     settings_location: SettingsLocationOut
+    vacation_mode: VacationModeSettingsOut = Field(
+        default_factory=VacationModeSettingsOut,
+    )
     version: int
 
 
@@ -112,6 +120,11 @@ def load_settings_location(*, path: Path | None = None) -> SettingsLocationOut:
     return load_automation_rules_bundle(path=path).settings_location
 
 
+def load_vacation_mode_settings(*, path: Path | None = None) -> VacationModeSettingsOut:
+    """Return vacation-mode latch config from the automation rules bundle."""
+    return load_automation_rules_bundle(path=path).vacation_mode
+
+
 def save_settings_location(
     location: SettingsLocationIn | SettingsLocationOut,
     *,
@@ -146,6 +159,45 @@ def save_settings_location(
         mode="json",
         exclude={"home_configured"},
     )
+    try:
+        AutomationRulesBundle.model_validate(raw)
+    except ValidationError as exc:
+        raise AutomationRulesLoadError(
+            f"Expected updated bundle to match the automation rules schema, got: {exc}"
+        ) from exc
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_text(
+        json.dumps(raw, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return validated
+
+
+def save_vacation_mode_settings(
+    settings: VacationModeSettingsOut,
+    *,
+    path: Path | None = None,
+) -> VacationModeSettingsOut:
+    """Persist ``vacation_mode`` into the operator automation rules file."""
+    validated = VacationModeSettingsOut.model_validate(settings.model_dump())
+    source_path = (path or automation_rules_json_path()).expanduser().resolve()
+    dest_path = (path or automation_rules_operator_json_path()).expanduser().resolve()
+    if not source_path.is_file():
+        raise AutomationRulesLoadError(
+            f"Expected automation rules file at {source_path}, got missing path"
+        )
+    try:
+        text = source_path.read_text(encoding="utf-8")
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise AutomationRulesLoadError(
+            f"Expected {source_path} to contain JSON, got invalid JSON: {exc}"
+        ) from exc
+    if not isinstance(raw, dict):
+        raise AutomationRulesLoadError(
+            f"Expected {source_path} to contain a JSON object, got {type(raw).__name__}"
+        )
+    raw["vacation_mode"] = validated.model_dump(mode="json")
     try:
         AutomationRulesBundle.model_validate(raw)
     except ValidationError as exc:

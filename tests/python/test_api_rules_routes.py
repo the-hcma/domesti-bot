@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 from http import HTTPStatus
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
+from app.vacation_mode_store import load_vacation_mode_state, save_vacation_mode_state
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EXAMPLE_BUNDLE = _REPO_ROOT / "automation-rules.json.example"
@@ -244,3 +246,66 @@ def test_put_rules_settings_location_updates_operator_bundle(
     listed = client.get("/v1/rules/settings/location")
     assert listed.status_code == HTTPStatus.OK
     assert listed.json()["home_label"] == "Updated Home"
+
+
+def test_get_and_put_vacation_mode_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "automation-rules.json"
+    path.write_text(_EXAMPLE_BUNDLE.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(path))
+    db = tmp_path / "discovery.sqlite"
+    client = _client(db)
+
+    listed = client.get("/v1/rules/settings/vacation-mode")
+    assert listed.status_code == HTTPStatus.OK
+    body = listed.json()
+    assert body["enabled"] is False
+    assert body["armed"] is False
+    assert body["hysteresis_s"] == 1800
+
+    put = client.put(
+        "/v1/rules/settings/vacation-mode",
+        json={
+            "enabled": True,
+            "user_ids": ["user-a"],
+            "min_distance_m": 90_000,
+            "hysteresis_s": 120,
+            "min_location_accuracy_m": 40,
+            "notification_emails": ["ops@example.com"],
+        },
+    )
+    assert put.status_code == HTTPStatus.OK
+    assert put.json()["enabled"] is True
+    assert put.json()["min_distance_m"] == 90_000
+    assert put.json()["armed"] is False
+
+    again = client.get("/v1/rules/settings/vacation-mode")
+    assert again.status_code == HTTPStatus.OK
+    assert again.json()["notification_emails"] == ["ops@example.com"]
+
+
+def test_vacation_mode_test_email_does_not_flip_latch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "automation-rules.json"
+    path.write_text(_EXAMPLE_BUNDLE.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(path))
+    db = tmp_path / "discovery.sqlite"
+    save_vacation_mode_state(db, armed=False, far_since=None, near_since=None)
+    client = _client(db)
+
+    with patch(
+        "app.api.rules_routes.send_vacation_mode_transition_email",
+        return_value=True,
+    ) as send:
+        response = client.post(
+            "/v1/rules/settings/vacation-mode/test",
+            json={"armed": True},
+        )
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["ok"] is True
+    send.assert_called_once()
+    assert load_vacation_mode_state(db).armed is False

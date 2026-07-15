@@ -1452,6 +1452,75 @@ class SettingsLocationOut(SettingsLocationIn):
         return not (self.lat == 0.0 and self.lon == 0.0)
 
 
+class VacationModeSettingsOut(BaseModel):
+    """Top-level vacation-mode latch config in ``automation-rules.json``.
+
+    When ``enabled`` is true, the process arms after configured users remain
+    far from home for ``hysteresis_s``, and disarms after that stops holding for
+    the same dwell. Operator-specific users / distances / recipients belong in
+    the gitignored operator bundle (#465); tracked examples use placeholders.
+    """
+
+    enabled: bool = False
+    hysteresis_s: float = Field(
+        default=1800.0,
+        ge=1.0,
+        description="Arm and disarm dwell seconds (same value both directions).",
+    )
+    min_distance_m: float = Field(
+        default=80_000.0,
+        gt=0,
+        description="Haversine meters from configured home; AND across user_ids.",
+    )
+    min_location_accuracy_m: int = Field(
+        default=50,
+        ge=1,
+        description="Reject fixes with worse horizontal accuracy (fail closed).",
+    )
+    notification_emails: list[str] = Field(default_factory=list)
+    user_ids: list[str] = Field(default_factory=list)
+
+
+class VacationModeSettingsStatusOut(VacationModeSettingsOut):
+    """Vacation-mode config plus the live sticky latch bit."""
+
+    armed: bool = Field(
+        default=False,
+        description="True when the persisted vacation latch is currently armed.",
+    )
+
+
+class VacationModeTestEmailIn(BaseModel):
+    """Body for ``POST /v1/rules/settings/vacation-mode/test``."""
+
+    armed: bool = Field(
+        default=True,
+        description="Send the vacation-mode-on sample when true, off when false.",
+    )
+
+
+class VacationModeTestEmailOut(BaseModel):
+    """Result of a vacation-mode transition test email (does not flip the latch)."""
+
+    message: str
+    ok: bool
+
+
+def normalized_vacation_notification_emails(
+    settings: VacationModeSettingsOut,
+) -> list[str]:
+    """Return de-duplicated non-empty vacation-mode notification recipients."""
+    seen: set[str] = set()
+    recipients: list[str] = []
+    for raw in settings.notification_emails:
+        email = raw.strip()
+        if email == "" or email in seen:
+            continue
+        seen.add(email)
+        recipients.append(email)
+    return recipients
+
+
 AllConditionsCondition.model_rebuild()
 AnyConditionsCondition.model_rebuild()
 RuleConditionsOut.model_rebuild()

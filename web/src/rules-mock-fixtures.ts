@@ -9,6 +9,7 @@ import type {
   TimeConditionTemplateOut,
   UserLocationOut,
   UserOut,
+  VacationModeSettingsStatusOut,
 } from "./types.js";
 
 export interface MockSmtpConfig {
@@ -55,6 +56,7 @@ export interface MockStoreSeed {
   time_condition_templates: TimeConditionTemplateOut[];
   smtp_config: MockSmtpConfig | null;
   smtp_last_test_recipient: string | null;
+  vacation_mode: VacationModeSettingsStatusOut;
   my_tracks_user_catalog: UserOut[];
   my_tracks_geofence_catalog: GeofenceOut[];
   my_tracks_settings: MockMyTracksSettings | null;
@@ -203,6 +205,15 @@ export function createMockStoreSeed(): MockStoreSeed {
       lon: MOCK_HOUSE_CENTER_LON,
       timezone: "America/New_York",
       home_label: "Home",
+    },
+    vacation_mode: {
+      armed: false,
+      enabled: false,
+      hysteresis_s: 1800,
+      min_distance_m: 80_000,
+      min_location_accuracy_m: 50,
+      notification_emails: ["operator@example.com"],
+      user_ids: ["henrique", "kristen"],
     },
     smtp_config: null,
     smtp_last_test_recipient: null,

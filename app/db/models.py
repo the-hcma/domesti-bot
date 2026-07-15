@@ -203,6 +203,27 @@ class TailwindLastHost(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class UiPreference(Base):
+    __tablename__ = "ui_preferences"
+
+    backend: Mapped[str] = mapped_column(String, primary_key=True)
+    canonical_key: Mapped[str] = mapped_column(String, primary_key=True)
+    exclude_from_global: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class VacationModeState(Base):
+    """Singleton row for the sticky vacation-mode latch and hysteresis clocks."""
+
+    __tablename__ = "vacation_mode_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    armed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    far_since: Mapped[float | None] = mapped_column(Float, nullable=True)
+    near_since: Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class VizioKnownTv(Base):
     __tablename__ = "vizio_known_tvs"
 
@@ -212,13 +233,4 @@ class VizioKnownTv(Base):
     model: Mapped[str | None] = mapped_column(String, nullable=True)
     mac: Mapped[str | None] = mapped_column(String, nullable=True)
     diid: Mapped[str | None] = mapped_column(String, nullable=True)
-    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
-
-
-class UiPreference(Base):
-    __tablename__ = "ui_preferences"
-
-    backend: Mapped[str] = mapped_column(String, primary_key=True)
-    canonical_key: Mapped[str] = mapped_column(String, primary_key=True)
-    exclude_from_global: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)

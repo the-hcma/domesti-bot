@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sqlalchemy.engine import Engine
 
+import app.db.models as _db_models  # noqa: F401 — register ORM tables on Base.metadata
 from app.db.base import Base
 from app.db.bootstrap_cache import (
     add_bootstrapped,

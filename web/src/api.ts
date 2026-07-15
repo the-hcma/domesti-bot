@@ -37,6 +37,10 @@ import type {
   SmtpConfigOut,
   SmtpTestEmailIn,
   SmtpTestEmailOut,
+  VacationModeSettingsOut,
+  VacationModeSettingsStatusOut,
+  VacationModeTestEmailIn,
+  VacationModeTestEmailOut,
   KasaCredentialsSetOut,
   KasaCredentialsSettingsOut,
   KasaCredentialsTestIn,
@@ -304,6 +308,27 @@ export const api = {
   putRulesSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut> {
     const { home_configured: _homeConfigured, ...body } = location;
     return call<SettingsLocationOut>("PUT", "/v1/rules/settings/location", body);
+  },
+  fetchVacationModeSettings(): Promise<VacationModeSettingsStatusOut> {
+    return call<VacationModeSettingsStatusOut>("GET", "/v1/rules/settings/vacation-mode");
+  },
+  putVacationModeSettings(
+    settings: VacationModeSettingsOut,
+  ): Promise<VacationModeSettingsStatusOut> {
+    return call<VacationModeSettingsStatusOut>(
+      "PUT",
+      "/v1/rules/settings/vacation-mode",
+      settings,
+    );
+  },
+  sendVacationModeTestEmail(
+    input: VacationModeTestEmailIn,
+  ): Promise<VacationModeTestEmailOut> {
+    return call<VacationModeTestEmailOut>(
+      "POST",
+      "/v1/rules/settings/vacation-mode/test",
+      input,
+    );
   },
   fetchRulesStatus(): Promise<RulesStatusOut> {
     return call<RulesStatusOut>("GET", "/v1/rules/status");

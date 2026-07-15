@@ -30,6 +30,10 @@ import type {
   SmtpTestEmailIn,
   SmtpTestEmailOut,
   TimeConditionTemplateOut,
+  VacationModeSettingsOut,
+  VacationModeSettingsStatusOut,
+  VacationModeTestEmailIn,
+  VacationModeTestEmailOut,
 } from "./types.js";
 
 const FILE_BACKED_RULES_ERROR =
@@ -70,10 +74,17 @@ export interface RulesDataSource {
   setRuleEnabled(ruleId: string, enabled: boolean): Promise<RuleOut>;
   getSettingsLocation(): Promise<SettingsLocationOut>;
   getSmtpConfig(): Promise<SmtpConfigOut | null>;
+  getVacationModeSettings(): Promise<VacationModeSettingsStatusOut>;
   saveSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut>;
   resetSmtpConfig(): Promise<void>;
   saveSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut>;
+  saveVacationModeSettings(
+    settings: VacationModeSettingsOut,
+  ): Promise<VacationModeSettingsStatusOut>;
   sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut>;
+  sendVacationModeTestEmail(
+    input: VacationModeTestEmailIn,
+  ): Promise<VacationModeTestEmailOut>;
   saveTimeConditionTemplate(
     template: TimeConditionTemplateOut,
   ): Promise<TimeConditionTemplateOut>;
@@ -384,6 +395,10 @@ export class MockRulesDataSource implements RulesDataSource {
     };
   }
 
+  async getVacationModeSettings(): Promise<VacationModeSettingsStatusOut> {
+    return structuredClone(this.store.vacation_mode);
+  }
+
   async saveSettingsLocation(
     location: SettingsLocationOut,
   ): Promise<SettingsLocationOut> {
@@ -440,6 +455,26 @@ export class MockRulesDataSource implements RulesDataSource {
     return {
       ok: true,
       message: `Test email queued to ${input.to_address.trim()} (mock — no message sent)`,
+    };
+  }
+
+  async saveVacationModeSettings(
+    settings: VacationModeSettingsOut,
+  ): Promise<VacationModeSettingsStatusOut> {
+    this.store.vacation_mode = {
+      ...structuredClone(settings),
+      armed: this.store.vacation_mode.armed,
+    };
+    return structuredClone(this.store.vacation_mode);
+  }
+
+  async sendVacationModeTestEmail(
+    input: VacationModeTestEmailIn,
+  ): Promise<VacationModeTestEmailOut> {
+    const kind = input.armed ? "on" : "off";
+    return {
+      ok: true,
+      message: `Vacation mode ${kind} test email queued (mock — no message sent)`,
     };
   }
 
@@ -569,6 +604,17 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return api.fetchSmtpConfig();
   }
 
+  async getVacationModeSettings(): Promise<VacationModeSettingsStatusOut> {
+    if (this.rulesLive) {
+      try {
+        return await api.fetchVacationModeSettings();
+      } catch (err) {
+        console.warn("Vacation mode settings fetch failed", err);
+      }
+    }
+    return this.inner.getVacationModeSettings();
+  }
+
   async getStatus(): Promise<RulesStatusOut> {
     try {
       const status = await api.fetchRulesStatus();
@@ -689,6 +735,24 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
 
   sendSmtpTestEmail(input: SmtpTestEmailIn): Promise<SmtpTestEmailOut> {
     return api.sendSmtpTestEmail(input);
+  }
+
+  async saveVacationModeSettings(
+    settings: VacationModeSettingsOut,
+  ): Promise<VacationModeSettingsStatusOut> {
+    if (this.rulesLive) {
+      return api.putVacationModeSettings(settings);
+    }
+    return this.inner.saveVacationModeSettings(settings);
+  }
+
+  sendVacationModeTestEmail(
+    input: VacationModeTestEmailIn,
+  ): Promise<VacationModeTestEmailOut> {
+    if (this.rulesLive) {
+      return api.sendVacationModeTestEmail(input);
+    }
+    return this.inner.sendVacationModeTestEmail(input);
   }
 
   setRuleEnabled(ruleId: string, enabled: boolean): Promise<RuleOut> {
