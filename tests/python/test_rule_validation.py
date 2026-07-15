@@ -14,6 +14,7 @@ from app.api.schemas import (
     RuleOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
+    UsersMinDistanceFromHomeMCondition,
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
 )
@@ -74,6 +75,12 @@ def test_geofence_condition_rejects_empty_user_ids() -> None:
         UsersOutsideGeofenceCondition(
             type="users_outside_geofence",
             geofence_id="house",
+            user_ids=[],
+        )
+    with pytest.raises(ValidationError):
+        UsersMinDistanceFromHomeMCondition(
+            type="users_min_distance_from_home_m",
+            min_distance_m=80_000,
             user_ids=[],
         )
 

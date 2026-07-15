@@ -7,6 +7,7 @@ import {
   formatDeviceStateCondition,
   formatGeofenceAwayDwellLabel,
   formatGeofenceDwellLabel,
+  formatMinDistanceFromHomeLabel,
   formatPresenceEventLabel,
   formatTimingCondition,
   resolveDeviceLabel,
@@ -49,6 +50,8 @@ function appendConditionTree(
       item.textContent = formatGeofenceDwellLabel(condition, context);
     } else if (condition.type === "users_outside_geofence_for_s") {
       item.textContent = formatGeofenceAwayDwellLabel(condition, context);
+    } else if (condition.type === "users_min_distance_from_home_m") {
+      item.textContent = formatMinDistanceFromHomeLabel(condition, context);
     } else if (
       condition.type === "users_inside_geofence"
       || condition.type === "users_outside_geofence"

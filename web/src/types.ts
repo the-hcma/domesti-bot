@@ -229,6 +229,11 @@ export type RuleConditionOut =
       min_inside_s: number;
     }
   | {
+      type: "users_min_distance_from_home_m";
+      user_ids: string[];
+      min_distance_m: number;
+    }
+  | {
       type: "users_outside_geofence";
       geofence_id: string;
       user_ids: string[];

@@ -912,6 +912,14 @@ class UsersInsideGeofenceForSCondition(BaseModel):
     user_ids: list[str] = Field(min_length=1)
 
 
+class UsersMinDistanceFromHomeMCondition(BaseModel):
+    """True when every listed user has a usable location at least ``min_distance_m`` from home."""
+
+    type: Literal["users_min_distance_from_home_m"]
+    min_distance_m: float = Field(gt=0)
+    user_ids: list[str] = Field(min_length=1)
+
+
 class UsersOutsideGeofenceCondition(BaseModel):
     type: Literal["users_outside_geofence"]
     geofence_id: str
@@ -970,6 +978,7 @@ RuleConditionOut = Annotated[
     | LocalTimeWindowCondition
     | UsersInsideGeofenceCondition
     | UsersInsideGeofenceForSCondition
+    | UsersMinDistanceFromHomeMCondition
     | UsersOutsideGeofenceCondition
     | UsersOutsideGeofenceForSCondition,
     Field(discriminator="type"),
