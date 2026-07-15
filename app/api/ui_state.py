@@ -29,11 +29,12 @@ from pathlib import Path
 
 from app import device_discovery_store
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIOperatorAlertOut, UISonosStreamFavoriteOut, UIStateOut
-from app.device_enums import DeviceConditionState
+from app.device_enums import DeviceConditionState, DeviceFamilyId
 from app.domesti_bot_cli import DeviceManagersState
-from app.operator_alerts import operator_alert_store
+from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
+from app.operator_alerts import operator_alert_store
 from app.sonos_device_manager import (
     SonosDeviceManager,
     SonosSpeakerDevice,
@@ -76,6 +77,7 @@ async def _bulk_close_tailwind_apply_impl(
             continue
         if gd.is_closed:
             continue
+        mark_expected_device_change(DeviceFamilyId.TAILWIND, key)
         await gd.close()
         affected.append(key)
     affected.sort()
@@ -115,6 +117,7 @@ async def _bulk_pause_sonos_apply_impl(
             continue
         if sp.is_playing is False:
             continue
+        mark_expected_device_change(DeviceFamilyId.SONOS, key)
         try:
             await sp.pause()
         except SonosTransitionUnavailableError as exc:
@@ -144,6 +147,7 @@ async def _bulk_off_vizio_apply_impl(
             continue
         if not tv.is_on:
             continue
+        mark_expected_device_change(DeviceFamilyId.VIZIO, device_id)
         await tv.turn_off()
         affected.append(device_id)
     affected.sort()
@@ -176,6 +180,7 @@ async def _bulk_off_kasa_apply_impl(
             continue
         if not kd.is_on:
             continue
+        mark_expected_device_change(DeviceFamilyId.KASA, host)
         await kd.turn_off()
         affected.append(host)
     affected.sort()

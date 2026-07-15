@@ -20,6 +20,7 @@ from starlette.responses import FileResponse, HTMLResponse, Response
 
 from app import device_discovery_store
 from app.device_enums import DeviceFamilyId, UiActionType
+from app.expected_device_change import mark_expected_device_change
 from app.logging_config import TRACE_LEVEL
 from app.api.schemas import (
     CompletionAliasesOut,
@@ -556,6 +557,7 @@ def create_app(args: Any) -> FastAPI:
             device_label=kd.preferred_label,
             detail=f"on={body.on}",
         )
+        mark_expected_device_change(DeviceFamilyId.KASA, device_id)
         if body.on:
             await kd.turn_on()
         else:
@@ -697,6 +699,7 @@ def create_app(args: Any) -> FastAPI:
             device_label=sp.preferred_label,
             detail=f"playing={body.playing}",
         )
+        mark_expected_device_change(DeviceFamilyId.SONOS, device_id)
         try:
             if body.playing:
                 await sp.resume(favorite_index=body.favorite_index)
@@ -780,6 +783,7 @@ def create_app(args: Any) -> FastAPI:
             device_id=device_id,
             device_label=gd.preferred_label,
         )
+        mark_expected_device_change(DeviceFamilyId.TAILWIND, device_id)
         await gd.close()
         return UIDeviceActionOut(
             device=build_tailwind_device_view(
@@ -822,6 +826,7 @@ def create_app(args: Any) -> FastAPI:
             device_id=device_id,
             device_label=gd.preferred_label,
         )
+        mark_expected_device_change(DeviceFamilyId.TAILWIND, device_id)
         await gd.open()
         return UIDeviceActionOut(
             device=build_tailwind_device_view(
@@ -883,6 +888,7 @@ def create_app(args: Any) -> FastAPI:
             device_label=tv.preferred_label,
             detail=f"on={body.on}",
         )
+        mark_expected_device_change(DeviceFamilyId.VIZIO, device_id)
         if body.on:
             await tv.turn_on()
         else:

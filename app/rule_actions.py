@@ -19,6 +19,7 @@ from app.api.ui_state import (
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType
 from app.domesti_bot_cli import DeviceManagersState
+from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.operator_alerts import operator_alert_store
@@ -322,6 +323,7 @@ async def dispatch_device_action(
     action: RuleDeviceActionOut,
 ) -> None:
     """Run one device action using the same code paths as the tile UI."""
+    mark_expected_device_change(action.family_id, action.device_id)
     match action.family_id:
         case DeviceFamilyId.KASA:
             await _dispatch_kasa_action(state.kasa_mgr, action)
