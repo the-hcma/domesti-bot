@@ -21,12 +21,18 @@ from app.api.schemas import (
     UserLocationOut,
     UserOut,
     UserStatusOut,
+    VacationModeSettingsOut,
+    VacationModeSettingsStatusOut,
+    VacationModeTestEmailIn,
+    VacationModeTestEmailOut,
 )
 from app.automation_rules_loader import (
     AutomationRulesLoadError,
     list_automation_rules,
     load_settings_location,
+    load_vacation_mode_settings,
     save_settings_location,
+    save_vacation_mode_settings,
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.server_runtime import runtime
@@ -51,6 +57,8 @@ from app.rules_store import (
     set_user_home_wifi,
     user_exists,
 )
+from app.vacation_mode import send_vacation_mode_transition_email
+from app.vacation_mode_store import load_vacation_mode_state
 
 router = APIRouter(prefix="/v1/rules", tags=["rules"])
 
@@ -165,6 +173,73 @@ async def put_rules_settings_location(body: SettingsLocationIn) -> SettingsLocat
         return save_settings_location(body)
     except AutomationRulesLoadError as exc:
         raise _automation_rules_http_error(exc) from exc
+
+
+@router.get(
+    "/settings/vacation-mode",
+    response_model=VacationModeSettingsStatusOut,
+)
+async def get_rules_settings_vacation_mode(
+    request: Request,
+) -> VacationModeSettingsStatusOut:
+    """Return vacation-mode config and the persisted armed latch bit."""
+    return _vacation_mode_status(request)
+
+
+@router.put(
+    "/settings/vacation-mode",
+    response_model=VacationModeSettingsStatusOut,
+)
+async def put_rules_settings_vacation_mode(
+    body: VacationModeSettingsOut,
+    request: Request,
+) -> VacationModeSettingsStatusOut:
+    """Update vacation-mode config in the operator ``automation-rules.json``."""
+    try:
+        save_vacation_mode_settings(body)
+    except AutomationRulesLoadError as exc:
+        raise _automation_rules_http_error(exc) from exc
+    return _vacation_mode_status(request)
+
+
+@router.post(
+    "/settings/vacation-mode/test",
+    response_model=VacationModeTestEmailOut,
+)
+async def post_rules_settings_vacation_mode_test(
+    body: VacationModeTestEmailIn,
+    request: Request,
+) -> VacationModeTestEmailOut:
+    """Send a sample vacation on/off email without flipping the latch."""
+    cache_path = _require_discovery_cache(request)
+    try:
+        settings = load_vacation_mode_settings()
+    except AutomationRulesLoadError as exc:
+        raise _automation_rules_http_error(exc) from exc
+    try:
+        sent = send_vacation_mode_transition_email(
+            cache_path,
+            armed=body.armed,
+            settings=settings,
+        )
+    except Exception as exc:
+        return VacationModeTestEmailOut(
+            ok=False,
+            message=str(exc),
+        )
+    if not sent:
+        return VacationModeTestEmailOut(
+            ok=False,
+            message=(
+                "Vacation transition email was skipped — configure notification_emails "
+                "and SMTP under Automations → Mail"
+            ),
+        )
+    kind = "on" if body.armed else "off"
+    return VacationModeTestEmailOut(
+        ok=True,
+        message=f"Vacation mode {kind} test email sent",
+    )
 
 
 @router.get("/status", response_model=RulesStatusOut)
@@ -357,3 +432,18 @@ def _require_discovery_cache(request: Request) -> Path:
             ),
         )
     return cache_path
+
+
+def _vacation_mode_status(request: Request) -> VacationModeSettingsStatusOut:
+    try:
+        settings = load_vacation_mode_settings()
+    except AutomationRulesLoadError as exc:
+        raise _automation_rules_http_error(exc) from exc
+    cache_path = discovery_cache_path_from_request(request)
+    armed = False
+    if cache_path is not None:
+        armed = load_vacation_mode_state(cache_path).armed
+    return VacationModeSettingsStatusOut(
+        **settings.model_dump(),
+        armed=armed,
+    )

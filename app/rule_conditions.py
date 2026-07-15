@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -202,6 +203,54 @@ def evaluate_rule_conditions_met(
 ) -> bool:
     """Return whether every top-level condition is currently met."""
     return evaluate_rule(rule, ctx).all_met
+
+
+def users_min_distance_from_home_met(
+    *,
+    ctx: RuleEvaluationContext,
+    min_distance_m: float,
+    min_location_accuracy_m: int,
+    user_ids: Sequence[str],
+) -> bool:
+    """Return whether every listed user is at least ``min_distance_m`` from home.
+
+    Fail closed when home is unconfigured, a roster id is unknown, or a usable
+    location is missing / too inaccurate / stale. Shared by the rule condition
+    and the vacation-mode latch.
+    """
+    home = try_resolve_home_location(load_settings_location())
+    if home is None:
+        _LOGGER.warning(
+            "[rules] users_min_distance_from_home_met: home location is not "
+            "configured (settings_location lat/lon) — treating as unmet",
+        )
+        return False
+    now_epoch = ctx.now.timestamp()
+    for rule_user_id in user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            return False
+        latest = ctx.user_locations.get(roster_user_id)
+        if latest is None:
+            return False
+        effective = _effective_location_for_rule(
+            latest,
+            ctx.user_location_history.get(roster_user_id, ()),
+            min_accuracy_m=min_location_accuracy_m,
+            now_epoch=now_epoch,
+            walkback_max_s=ctx.walkback_max_s,
+        )
+        if effective is None:
+            return False
+        distance_m = _haversine_m(
+            effective.lat,
+            effective.lon,
+            home.lat,
+            home.lon,
+        )
+        if distance_m < min_distance_m:
+            return False
+    return True
 
 
 def _coerce_now(now: datetime | None, tz: ZoneInfo) -> datetime:
@@ -1308,7 +1357,12 @@ def _evaluate_users_min_distance_from_home_m(
         selected_names.append(_user_display_name(ctx, roster_user_id))
     who = _join_names(selected_names)
     label = f"{who} ≥ {need_label} from {home_name}"
-    met = len(unmet_names) == 0
+    met = users_min_distance_from_home_met(
+        ctx=ctx,
+        min_distance_m=condition.min_distance_m,
+        min_location_accuracy_m=min_accuracy_m,
+        user_ids=condition.user_ids,
+    )
     if met:
         detail = f"Everyone is at least {need_label} from {home_name}"
     else:

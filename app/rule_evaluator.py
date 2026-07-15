@@ -40,7 +40,11 @@ from app.astronomical_schedule import (
     uses_astronomical_materialized_schedule,
     uses_astronomical_repeat_schedule,
 )
-from app.automation_rules_loader import list_automation_rules, load_settings_location
+from app.automation_rules_loader import (
+    list_automation_rules,
+    load_settings_location,
+    load_vacation_mode_settings,
+)
 from app.cron_schedule import (
     fired_on_same_local_calendar_day,
     local_calendar_date,
@@ -111,6 +115,7 @@ from app.rule_validation import (
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.presence_connection_type import connection_type_is_wifi
+from app.vacation_mode import tick_vacation_mode
 from app.wifi_home_presence import (
     history_row_geofence_inside,
     wifi_home_geofence_ids,
@@ -1114,6 +1119,7 @@ class RuleEvaluator:
                     self._sync_all_device_dwell_streaks(ctx, self._now_fn())
                     await self._maybe_process_device_dwell_satisfied()
                     await self._maybe_request_locations_for_deferred_edges()
+                    await self._tick_vacation_mode(ctx, now=self._now_fn())
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1132,6 +1138,36 @@ class RuleEvaluator:
             last_fired_at=state.last_fired_at,
             rule_id=rule_id,
         )
+
+    async def _tick_vacation_mode(
+        self,
+        ctx: RuleEvaluationContext,
+        *,
+        now: float,
+    ) -> None:
+        """Advance the vacation-mode latch from periodic and location ticks.
+
+        Runs the tick (including possible SMTP) via ``asyncio.to_thread`` so a
+        slow mail server does not block the evaluator event loop.
+        """
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        try:
+            settings = load_vacation_mode_settings()
+        except Exception:
+            _LOGGER.exception("[vacation] failed to load vacation_mode settings")
+            return
+        try:
+            await asyncio.to_thread(
+                tick_vacation_mode,
+                cache_path,
+                ctx=ctx,
+                now=now,
+                settings=settings,
+            )
+        except Exception:
+            _LOGGER.exception("[vacation] latch tick failed")
 
     def _persist_rule_schedule_state(self, rule_id: str) -> None:
         cache_path = self._cache_path
@@ -1419,6 +1455,7 @@ class RuleEvaluator:
             now=now,
         )
         await self._maybe_process_dwell_satisfied(user_id)
+        await self._tick_vacation_mode(ctx, now=now)
         self._last_run_at = now
         self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
 

@@ -71,9 +71,10 @@ type RulesTabId =
   | "conditions"
   | "geofences"
   | "mail"
-  | "users"
   | "rules"
-  | "status";
+  | "status"
+  | "users"
+  | "vacation";
 
 export type AutomationsHubOpenOptions = {
   ruleId?: string;
@@ -305,6 +306,7 @@ class RulesHubController {
       ["rules", "Rules"],
       ["geofences", "Geofences"],
       ["users", "Users"],
+      ["vacation", "Vacation"],
       ["mail", "Mail"],
     ] as const) {
       const btn = document.createElement("button");
@@ -1005,6 +1007,9 @@ class RulesHubController {
       case "users":
         await this.renderUsersTab();
         break;
+      case "vacation":
+        await this.renderVacationTab();
+        break;
     }
   }
 
@@ -1014,6 +1019,16 @@ class RulesHubController {
     this.body.append(mount);
     const { mountMailSettingsPanel } = await import("./mail-settings-panel.js");
     await mountMailSettingsPanel(mount, this.dataSource);
+  }
+
+  private async renderVacationTab(): Promise<void> {
+    const mount = document.createElement("div");
+    mount.className = "rules-mail-mount";
+    this.body.append(mount);
+    const { mountVacationModeSettingsPanel } = await import(
+      "./vacation-mode-settings-panel.js"
+    );
+    await mountVacationModeSettingsPanel(mount, this.dataSource);
   }
 
   private async renderConditionsTab(status: RulesStatusOut): Promise<void> {
