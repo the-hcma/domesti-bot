@@ -14,6 +14,7 @@ _REVIEW_FILENAME = "review.html"
 
 _REQUIRED_KEYS = frozenset(
     {
+        "antenna",
         "bulb",
         "desk",
         "fan",
@@ -26,6 +27,7 @@ _REQUIRED_KEYS = frozenset(
         "outlet",
         "pendant",
         "plug",
+        "remote",
         "speaker",
         "speaker_paused",
         "speaker_playing",

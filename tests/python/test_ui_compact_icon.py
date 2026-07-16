@@ -27,6 +27,63 @@ def test_resolve_compact_icon_kasa_basement_lamp_is_lamp() -> None:
     )
 
 
+def test_resolve_compact_icon_kasa_garage_lights_is_not_remote() -> None:
+    """Bare room ``garage`` must not map to the Tailwind-controller remote."""
+
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Garage lights",
+            kind="switch",
+        )
+        == "light"
+    )
+
+
+def test_resolve_compact_icon_kasa_garage_only_is_room_garage() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Garage",
+            kind="switch",
+        )
+        == "room_garage"
+    )
+
+
+def test_resolve_compact_icon_kasa_garage_tailwind_is_remote() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Garage Tailwind",
+            kind="switch",
+        )
+        == "remote"
+    )
+
+
+def test_resolve_compact_icon_kasa_hdhomerun_is_antenna() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="HDHomeRun",
+            kind="switch",
+        )
+        == "antenna"
+    )
+
+
+def test_resolve_compact_icon_kasa_tuner_is_antenna() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="kasa",
+            label="Living room tuner",
+            kind="switch",
+        )
+        == "antenna"
+    )
+
+
 def test_resolve_compact_icon_kasa_hall_light_is_light() -> None:
     assert (
         resolve_compact_icon(
