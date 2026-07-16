@@ -47,20 +47,27 @@ def _client() -> tuple[TestClient, FastAPI]:
 def _fake_kasa_mgr(devices: list[tuple[str, str, bool]]) -> KasaDeviceManager:
     """Return a Mock manager whose ``.switches`` is the supplied tuples.
 
-    Each input tuple is ``(host, preferred_label, is_on)`` — exactly the
-    fields :func:`build_ui_state._kasa_devices` reads.
+    Each input tuple is ``(identifier, preferred_label, is_on)``. ``identifier``
+    is the MAC address (canonical key); ``host`` is a synthetic LAN IP for
+    secondary lookup.
     """
 
     fakes: list[Any] = []
-    for host, label, is_on in devices:
+    for index, (ident, label, is_on) in enumerate(devices):
         kd = MagicMock()
+        host = f"10.0.0.{index + 1}"
         kd._kDevice.host = host
+        kd._kDevice.model = None
+        kd.host = host
+        kd.identifier = ident
+        kd.mac_address = ident
         kd.preferred_label = label
         kd.is_on = is_on
         fakes.append(kd)
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(fakes)
     mgr.skipped_auth_hosts = ()
+    mgr.get_device_by_alias.return_value = None
     return cast(KasaDeviceManager, mgr)
 
 
@@ -79,8 +86,12 @@ def _fake_sonos_mgr(
     for ident, label, is_playing in zones:
         sp = MagicMock()
         sp.identifier = ident
+        sp.rincon_uid = f"RINCON_{ident.replace(':', '')}01400"
+        sp.mac_address = ident
+        sp.host = "10.0.0.50"
         sp.preferred_label = label
         sp.is_playing = is_playing
+        sp.stream_favorites = ()
         fakes.append(sp)
     mgr = MagicMock(spec=SonosDeviceManager)
     mgr.players = tuple(fakes)
@@ -102,12 +113,16 @@ def _fake_tailwind_mgr(
     for ident, label, is_open, is_closed in doors:
         gd = MagicMock()
         gd.identifier = ident
+        gd.door_key = ident.split(":")[-1] if ":" in ident else ident
+        gd.door_index = 1
+        gd.mac_address = ident.split(":")[0] if ident.count(":") >= 5 else "aa:bb:cc:dd:ee:ff"
         gd.preferred_label = label
         gd.is_open = is_open
         gd.is_closed = is_closed
         fakes.append(gd)
     mgr = MagicMock(spec=GotailwindDeviceManager)
     mgr.doors = tuple(fakes)
+    mgr.host = "10.0.0.60"
     return cast(GotailwindDeviceManager, mgr)
 
 
@@ -117,12 +132,19 @@ def _fake_vizio_mgr(
     """Return a Mock manager whose ``.tvs`` is the supplied tuples."""
 
     fakes: list[Any] = []
-    for ident, label, is_on in tvs:
+    for index, (ident, label, is_on) in enumerate(tvs):
         tv = MagicMock()
         tv.identifier = ident
+        tv.mac_address = ident
         tv.preferred_label = label
         tv.is_on = is_on
         tv.ui_power_state.return_value = "on" if is_on else "off"
+        endpoint = MagicMock()
+        endpoint.host = f"10.0.1.{index + 1}"
+        endpoint.port = 7345
+        endpoint.model = None
+        endpoint.diid = None
+        tv.endpoint = endpoint
         fakes.append(tv)
     mgr = MagicMock(spec=VizioDeviceManager)
     mgr.tvs = tuple(fakes)
@@ -198,6 +220,9 @@ def test_build_ui_state_emits_only_kasa_family_when_tailwind_manager_absent() ->
             kind="switch",
             state="on",
             compact_icon="desk",
+            mac_address="192.168.1.10",
+            host="10.0.0.1",
+            identity_details=["alias: Desk"],
             exclude_from_global=False,
         )
     ]
@@ -236,6 +261,9 @@ def test_build_ui_state_emits_sonos_between_kasa_and_tailwind() -> None:
             kind="speaker",
             state="playing",
             compact_icon="speaker",
+            mac_address="RINCON_AAAA",
+            host="10.0.0.50",
+            identity_details=["RINCON: RINCON_RINCON_AAAA01400"],
             exclude_from_global=False,
         )
     ]
@@ -553,5 +581,8 @@ def test_ui_state_out_is_a_pydantic_model_with_expected_fields() -> None:
         "compact_icon",
         "exclude_from_global",
         "hide_on_mobile",
+        "host",
+        "identity_details",
+        "mac_address",
         "stream_favorites",
     }

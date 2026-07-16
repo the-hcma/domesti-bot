@@ -48,12 +48,14 @@ class _FakeTailwind:
 
 def _make_device(tailwind: _FakeTailwind, *, reported: TailwindDoorState) -> GotailwindDevice:
     return GotailwindDevice(
-        identifier="garage:0",
+        identifier="aa:bb:cc:dd:ee:ff:garage",
         tailwind=tailwind,  # type: ignore[arg-type]
         door=0,
         reported_state=reported,
         door_index=0,
         display_name="Garage",
+        door_key="garage:0",
+        mac_address="aa:bb:cc:dd:ee:ff",
     )
 
 

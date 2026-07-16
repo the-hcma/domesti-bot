@@ -17,6 +17,7 @@ class AndroidTvDiscoveredHost(Base):
     friendly_name: Mapped[str | None] = mapped_column(String, nullable=True)
     uuid: Mapped[str | None] = mapped_column(String, nullable=True)
     model_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    mac: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class AppSecret(Base):
@@ -56,6 +57,7 @@ class KasaDiscoveredDevice(Base):
     config_json: Mapped[str] = mapped_column(Text, nullable=False)
     # 1 when LAN KLAP handshake needs account credentials; 0 when anonymous works.
     requires_klap_auth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    mac: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
@@ -197,6 +199,7 @@ class SonosKnownZone(Base):
     uuid: Mapped[str] = mapped_column(String, primary_key=True)
     host: Mapped[str] = mapped_column(String, nullable=False)
     zone_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    mac: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
@@ -218,6 +221,7 @@ class TailwindLastHost(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     host: Mapped[str] = mapped_column(String, nullable=False)
+    mac: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 

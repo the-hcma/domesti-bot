@@ -164,11 +164,10 @@ async def _bulk_off_kasa_apply_impl(
 ) -> tuple[list[str], list[str]]:
     """Iterate kasa switches, turn off non-excluded ones, return ``(affected, skipped)``.
 
-    ``affected`` is the host list the helper called ``turn_off`` on because
+    ``affected`` is the canonical id list the helper called ``turn_off`` on because
     ``is_on`` was true (already-off switches are omitted). ``skipped`` is
-    the excluded subset (also sorted). Hosts
-    that are blank/whitespace are dropped silently — they can't be
-    addressed and were already filtered out of :func:`build_ui_state`.
+    the excluded subset (also sorted). Blank identifiers are dropped silently
+    (identifiers are MACs when known, else hosts).
     When Kasa discovery failed at boot (``NotInitializedError``), both
     lists are empty — same as an empty switch set.
     """
@@ -180,17 +179,17 @@ async def _bulk_off_kasa_apply_impl(
     except NotInitializedError:
         return [], []
     for kd in switches:
-        host = (kd._kDevice.host or "").strip()
-        if not host:
+        key = (kd.identifier or "").strip()
+        if not key:
             continue
-        if host in excluded:
-            skipped.append(host)
+        if key in excluded:
+            skipped.append(key)
             continue
         if not kd.is_on:
             continue
-        mark_expected_device_change(DeviceFamilyId.KASA, host)
+        mark_expected_device_change(DeviceFamilyId.KASA, key)
         await kd.turn_off()
-        affected.append(host)
+        affected.append(key)
     affected.sort()
     skipped.sort()
     return affected, skipped
@@ -227,11 +226,61 @@ def _hidden_on_mobile_keys(rows: Iterable[tuple[str, str, bool, bool]], backend:
     return {key for be, key, _exclude, hide in rows if be == backend and hide}
 
 
+def _identity_details_kasa(kd: KasaDevice) -> list[str]:
+    details: list[str] = []
+    model = _kasa_hardware_model(kd)
+    if model:
+        details.append(f"model: {model}")
+    preferred = getattr(kd, "preferred_label", None) or ""
+    identifier = getattr(kd, "identifier", None) or ""
+    if preferred and preferred != identifier:
+        details.append(f"alias: {preferred}")
+    return details
+
+
+def _identity_details_sonos(sp: SonosSpeakerDevice) -> list[str]:
+    rincon = (getattr(sp, "rincon_uid", None) or "").strip()
+    if not rincon:
+        return []
+    return [f"RINCON: {rincon}"]
+
+
+def _identity_details_tailwind(gd: GotailwindDevice) -> list[str]:
+    details: list[str] = []
+    door_index = getattr(gd, "door_index", None)
+    if door_index is not None:
+        details.append(f"door index: {door_index}")
+    door_key = (getattr(gd, "door_key", None) or "").strip()
+    identifier = (getattr(gd, "identifier", None) or "").strip()
+    if door_key and door_key != identifier:
+        details.append(f"door id: {door_key}")
+    return details
+
+
+def _identity_details_vizio(tv: VizioTvDevice) -> list[str]:
+    details: list[str] = []
+    endpoint = getattr(tv, "endpoint", None)
+    if endpoint is None:
+        return details
+    model = (getattr(endpoint, "model", None) or "").strip()
+    if model:
+        details.append(f"model: {model}")
+    diid = (getattr(endpoint, "diid", None) or "").strip()
+    if diid:
+        details.append(f"diid: {diid}")
+    return details
+
+
+def _optional_host(value: object | None) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
 def _kasa_hardware_model(kd: KasaDevice) -> str | None:
-    raw = getattr(kd._kDevice, "model", None)
-    if raw is None:
+    raw = getattr(getattr(kd, "_kDevice", None), "model", None)
+    if not isinstance(raw, str):
         return None
-    text = str(raw).strip()
+    text = raw.strip()
     return text or None
 
 
@@ -240,10 +289,10 @@ def _kasa_devices(
     excluded: set[str],
     hidden_on_mobile: set[str],
 ) -> list[UIDeviceOut]:
-    """One :class:`UIDeviceOut` per *unique* kasa device (host-deduped).
+    """One :class:`UIDeviceOut` per *unique* kasa device.
 
-    ``mgr.switches`` already de-duplicates by ``id()``; the ``host`` is the
-    canonical key for both ``ui_preferences`` and the API payload.
+    Canonical key is the MAC address — matching ``ui_preferences.canonical_key``.
+    Devices without a learned MAC address are omitted.
 
     When bootstrap left the manager unfetched (Kasa family failed while
     other backends succeeded), treat the family as empty so
@@ -256,12 +305,12 @@ def _kasa_devices(
     except NotInitializedError:
         return []
     for kd in switches:
-        host = (kd._kDevice.host or "").strip()
-        if not host:
+        key = (kd.identifier or "").strip()
+        if not key:
             continue
         out.append(
             UIDeviceOut(
-                id=host,
+                id=key,
                 family_id="kasa",
                 label=kd.preferred_label,
                 kind="switch",
@@ -272,8 +321,11 @@ def _kasa_devices(
                     kind="switch",
                     kasa_model=_kasa_hardware_model(kd),
                 ),
-                exclude_from_global=host in excluded,
-                hide_on_mobile=host in hidden_on_mobile,
+                mac_address=kd.mac_address,
+                host=_optional_host(getattr(kd, "host", None)),
+                identity_details=_identity_details_kasa(kd),
+                exclude_from_global=key in excluded,
+                hide_on_mobile=key in hidden_on_mobile,
             )
         )
     out.sort(key=lambda d: (d.label.lower(), d.id))
@@ -287,11 +339,10 @@ def _sonos_devices(
 ) -> list[UIDeviceOut]:
     """One :class:`UIDeviceOut` per Sonos zone.
 
-    Canonical key is the zone's ``identifier`` (``RINCON_…`` UID when
-    SoCo provides it). ``state`` is derived from the cached
-    :attr:`SonosSpeakerDevice.is_playing` flag — ``None`` (no poll yet)
-    becomes ``"unknown"`` so the UI never blocks on a live UPnP call
-    just to render a tile.
+    Canonical key is the zone's MAC address (from ``RINCON_…`` or ARP). ``state`` is
+    derived from the cached :attr:`SonosSpeakerDevice.is_playing` flag —
+    ``None`` (no poll yet) becomes ``"unknown"`` so the UI never blocks
+    on a live UPnP call just to render a tile.
     """
 
     out: list[UIDeviceOut] = []
@@ -309,6 +360,9 @@ def _sonos_devices(
                     label=sp.preferred_label,
                     kind="speaker",
                 ),
+                mac_address=sp.mac_address,
+                host=_optional_host(getattr(sp, "host", None)),
+                identity_details=_identity_details_sonos(sp),
                 exclude_from_global=key in excluded,
                 hide_on_mobile=key in hidden_on_mobile,
                 stream_favorites=_sonos_stream_favorites_out(sp),
@@ -370,6 +424,9 @@ def _tailwind_devices(
                     label=gd.preferred_label,
                     kind="door",
                 ),
+                mac_address=gd.mac_address,
+                host=_optional_host(getattr(mgr, "host", None)),
+                identity_details=_identity_details_tailwind(gd),
                 exclude_from_global=key in excluded,
                 hide_on_mobile=key in hidden_on_mobile,
             )
@@ -400,6 +457,9 @@ def _vizio_devices(
                     label=tv.preferred_label,
                     kind="switch",
                 ),
+                mac_address=tv.mac_address,
+                host=_optional_host(getattr(getattr(tv, "endpoint", None), "host", None)),
+                identity_details=_identity_details_vizio(tv),
                 exclude_from_global=key in excluded,
                 hide_on_mobile=key in hidden_on_mobile,
             )
@@ -418,18 +478,19 @@ def build_kasa_device_view(
 
     Re-reads the ``ui_preferences`` row each call so a toggle endpoint
     can return the exclusion flag without the caller hand-passing it.
-    Raises :class:`KeyError` when the host doesn't match a known device
+    Raises :class:`KeyError` when the host/MAC doesn't match a known device
     (the route handler maps that to a 404).
     """
 
-    kd = find_kasa_by_host(mgr, host)
+    kd = find_kasa_by_id(mgr, host)
     if kd is None:
         raise KeyError(host)
     pref_rows = device_discovery_store.load_ui_preferences(cache_path) if cache_path is not None else []
     excluded = _excluded_keys(pref_rows, "kasa")
     hidden = _hidden_on_mobile_keys(pref_rows, "kasa")
+    key = kd.identifier
     return UIDeviceOut(
-        id=host,
+        id=key,
         family_id="kasa",
         label=kd.preferred_label,
         kind="switch",
@@ -440,8 +501,11 @@ def build_kasa_device_view(
             kind="switch",
             kasa_model=_kasa_hardware_model(kd),
         ),
-        exclude_from_global=host in excluded,
-        hide_on_mobile=host in hidden,
+        mac_address=kd.mac_address,
+        host=_optional_host(getattr(kd, "host", None)),
+        identity_details=_identity_details_kasa(kd),
+        exclude_from_global=key in excluded,
+        hide_on_mobile=key in hidden,
     )
 
 
@@ -478,6 +542,9 @@ def build_sonos_device_view(
             label=sp.preferred_label,
             kind="speaker",
         ),
+        mac_address=sp.mac_address,
+        host=_optional_host(getattr(sp, "host", None)),
+        identity_details=_identity_details_sonos(sp),
         exclude_from_global=device_id in excluded,
         hide_on_mobile=device_id in hidden,
         stream_favorites=_sonos_stream_favorites_out(sp),
@@ -514,6 +581,9 @@ def build_tailwind_device_view(
             label=gd.preferred_label,
             kind="door",
         ),
+        mac_address=gd.mac_address,
+        host=_optional_host(getattr(mgr, "host", None)),
+        identity_details=_identity_details_tailwind(gd),
         exclude_from_global=device_id in excluded,
         hide_on_mobile=device_id in hidden,
     )
@@ -544,6 +614,9 @@ def build_vizio_device_view(
             label=tv.preferred_label,
             kind="switch",
         ),
+        mac_address=tv.mac_address,
+        host=_optional_host(getattr(getattr(tv, "endpoint", None), "host", None)),
+        identity_details=_identity_details_vizio(tv),
         exclude_from_global=device_id in excluded,
         hide_on_mobile=device_id in hidden,
     )
@@ -703,71 +776,79 @@ async def bulk_pause_sonos_apply(
 
 
 def find_kasa_by_host(mgr: KasaDeviceManager, host: str) -> KasaDevice | None:
-    """Look up a kasa device by its **host** (the canonical key).
+    """Look up a kasa device by MAC, host, or other lookup key.
 
-    ``KasaDeviceManager.get_device_by_alias`` indexes by
-    :attr:`KasaDevice.identifier` (the kasa-reported alias when present,
-    otherwise the host) — not the host directly. The UI layer only ever
-    receives the host (as ``UIDeviceOut.id``), so it needs this dedicated
-    lookup.
+    Retained name for call-site compatibility; prefers MAC-primary identity.
     """
 
-    needle = host.strip()
+    return find_kasa_by_id(mgr, host)
+
+
+def find_kasa_by_id(mgr: KasaDeviceManager, device_id: str) -> KasaDevice | None:
+    """Look up a kasa device by MAC (preferred), host, alias, or label."""
+
+    needle = device_id.strip()
     if not needle:
         return None
+    try:
+        by_alias = mgr.get_device_by_alias(needle)
+    except NotInitializedError:
+        return None
+    # Require a real string identifier so MagicMock auto-returns from tests
+    # (and other non-device objects) do not short-circuit the switches scan.
+    # Also confirm ``needle`` is one of this device's identity / label keys so a
+    # stale alias map entry cannot return an unrelated device.
+    if by_alias is not None and isinstance(getattr(by_alias, "identifier", None), str):
+        vendor_alias = (getattr(getattr(by_alias, "_kDevice", None), "alias", None) or "").strip()
+        if needle in {
+            by_alias.identifier,
+            by_alias.host,
+            by_alias.mac_address,
+            by_alias.preferred_label,
+            vendor_alias,
+        }:
+            return by_alias
     try:
         switches = mgr.switches
     except NotInitializedError:
         return None
     for kd in switches:
-        if (kd._kDevice.host or "").strip() == needle:
+        if needle in {kd.identifier, kd.host, kd.mac_address}:
             return kd
     return None
 
 
 def find_sonos_by_identifier(mgr: SonosDeviceManager, device_id: str) -> SonosSpeakerDevice | None:
-    """Look up a Sonos zone by its ``identifier`` (``RINCON_…`` UID).
-
-    Mirrors :func:`find_kasa_by_host`. ``mgr.get_device_by_alias``
-    accepts both the identifier and the display label; the UI layer
-    restricts to the identifier here so two zones sharing a label
-    cannot collide on a single tile click.
-    """
+    """Look up a Sonos zone by MAC, ``RINCON_…`` UID, or identifier."""
 
     needle = device_id.strip()
     if not needle:
         return None
     for sp in mgr.players:
-        if sp.identifier == needle:
+        if needle in {sp.identifier, sp.rincon_uid, sp.mac_address}:
             return sp
     return None
 
 
 def find_vizio_by_id(mgr: VizioDeviceManager, device_id: str) -> VizioTvDevice | None:
-    """Look up a Vizio TV by its ``identifier`` (normalized MAC when known)."""
+    """Look up a Vizio TV by MAC or ``identifier`` (MAC when known)."""
 
     needle = device_id.strip()
     if not needle:
         return None
     for tv in mgr.tvs:
-        if tv.identifier == needle:
+        if needle in {tv.identifier, tv.mac_address}:
             return tv
     return None
 
 
 def find_tailwind_by_identifier(mgr: GotailwindDeviceManager, device_id: str) -> GotailwindDevice | None:
-    """Look up a Tailwind door by its ``identifier`` (the canonical key).
-
-    Mirrors :func:`find_kasa_by_host`. ``mgr.get_device_by_alias`` accepts
-    both the identifier and the display label; we restrict to the
-    identifier here so the UI never accidentally addresses two doors
-    that share a label.
-    """
+    """Look up a Tailwind door by MAC-compound id, door key, or identifier."""
 
     needle = device_id.strip()
     if not needle:
         return None
     for gd in mgr.doors:
-        if gd.identifier == needle:
+        if needle in {gd.identifier, gd.door_key}:
             return gd
     return None

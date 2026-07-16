@@ -47,6 +47,12 @@ export interface UIDeviceOut {
   state: UIDeviceState;
   /** Server-resolved compact-tile SVG key (bulb, outlet, garage, speaker, …). */
   compact_icon: string;
+  /** Normalized MAC address (required; same hardware identity as ``id`` when single-endpoint). */
+  mac_address: string;
+  /** Current IP / hostname when known. */
+  host?: string | null;
+  /** Family-specific identity lines (RINCON, door index, model, …). */
+  identity_details?: string[];
   exclude_from_global: boolean;
   hide_on_mobile: boolean;
   /** Configured radio streams for Sonos zones (empty for other families). */

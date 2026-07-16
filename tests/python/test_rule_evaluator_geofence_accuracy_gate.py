@@ -30,6 +30,8 @@ class _FakeKasa:
     def __init__(self, host: str, label: str) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
+        self.host = host
+        self.mac_address = None
         self.identifier = host
         self.preferred_label = label
         self.calls: list[str] = []
@@ -59,6 +61,7 @@ def _write_bundle(path: Path, rule: RuleOut) -> None:
 def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = (device,)
+    mgr.get_device_by_alias.return_value = None
     return cast(KasaDeviceManager, mgr)
 
 

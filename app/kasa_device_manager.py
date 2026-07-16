@@ -75,6 +75,8 @@ from kasa.exceptions import (
 )
 
 from app import device_discovery_store
+from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
+from app.device_mac import lookup_mac_via_arp, try_normalize_mac
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
 
@@ -277,7 +279,7 @@ async def _connect_from_saved_config(
 
 
 class KasaDevice(SwitchDevice):
-    __slots__ = ("_kDevice",)
+    __slots__ = ("_kDevice", "_mac_address")
 
     def __init__(
         self,
@@ -285,10 +287,20 @@ class KasaDevice(SwitchDevice):
         kDevice: KDevice,
         *,
         display_name: str | None = None,
+        mac_address: str,
     ) -> None:
         super().__init__(identifier, display_name=display_name)
         self._kDevice = kDevice
+        self._mac_address = mac_address
         self.set_power(kDevice.is_on)
+
+    @property
+    def host(self) -> str:
+        return (self._kDevice.host or "").strip()
+
+    @property
+    def mac_address(self) -> str:
+        return self._mac_address
 
     async def turn_off(self) -> None:
         await self._kDevice.turn_off()
@@ -299,6 +311,45 @@ class KasaDevice(SwitchDevice):
     async def turn_on(self) -> None:
         await self._kDevice.turn_on()
         self.set_power(True)
+
+
+def _kasa_mac_from_device(dev: KDevice) -> str | None:
+    """Prefer vendor-reported MAC address (no ARP — callers layer cache / ARP)."""
+    raw_mac = getattr(dev, "mac", None)
+    if raw_mac:
+        mac = try_normalize_mac(str(raw_mac))
+        if mac is not None:
+            return mac
+    sys_info = getattr(dev, "sys_info", None)
+    if isinstance(sys_info, dict):
+        for key in ("mac", "mic_mac", "ethernet_mac"):
+            raw = sys_info.get(key)
+            if raw:
+                mac = try_normalize_mac(str(raw))
+                if mac is not None:
+                    return mac
+    return None
+
+
+def _make_kasa_device(dev: KDevice, *, cached_mac: str | None = None) -> KasaDevice | None:
+    """Build a :class:`KasaDevice` with MAC-address primary ``identifier``.
+
+    Returns ``None`` when neither the vendor stack nor ARP can supply a MAC
+    address — discovery must not admit host-only identity.
+    """
+    host = (dev.host or "").strip()
+    mac = _kasa_mac_from_device(dev) or try_normalize_mac(cached_mac or "")
+    if mac is None and host:
+        mac = lookup_mac_via_arp(host)
+    if mac is None:
+        _LOGGER.warning(
+            "Skipping Kasa device at %s — MAC address required (vendor/ARP miss)",
+            host or "<unknown>",
+        )
+        return None
+    alias = (getattr(dev, "alias", None) or "").strip() or None
+    display = alias if alias and alias != mac else None
+    return KasaDevice(mac, dev, display_name=display, mac_address=mac)
 
 
 class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
@@ -340,6 +391,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 _alias,
                 _cfg,
                 requires_klap_auth,
+                _mac,
             ) in device_discovery_store.load_cached_configs(
                 self._discovery_cache_path,
             ):
@@ -494,12 +546,18 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         # Preserve KLAP-auth hosts that were skipped (e.g. no credentials) so a
         # successful anonymous-only cache write does not forget them.
         prior_by_host = {
-            host: (alias, cfg_dict, requires_klap_auth)
-            for host, alias, cfg_dict, requires_klap_auth in (
+            host: (alias, cfg_dict, requires_klap_auth, mac)
+            for host, alias, cfg_dict, requires_klap_auth, mac in (
                 device_discovery_store.load_cached_configs(self._discovery_cache_path)
             )
         }
-        rows: list[tuple[str, str | None, dict[str, Any], bool]] = []
+        prior_label_by_mac: dict[str, str] = {}
+        for alias, _cfg, _requires, mac in prior_by_host.values():
+            mac_s = (mac or "").strip().lower()
+            alias_s = (alias or "").strip()
+            if mac_s and alias_s:
+                prior_label_by_mac[mac_s] = alias_s
+        rows: list[tuple[str, str | None, dict[str, Any], bool, str | None]] = []
         seen_hosts: set[str] = set()
         seen_ids: set[int] = set()
         for kd in alias_map.values():
@@ -512,28 +570,45 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             if not host:
                 continue
             cfg_dict = dev.config.to_dict_control_credentials(exclude_credentials=True)
+            mac = kd.mac_address
+            alias = getattr(dev, "alias", None)
+            note_display_name_rename(
+                backend="kasa",
+                mac_address=mac,
+                previous_label=prior_label_by_mac.get(mac.lower()),
+                current_label=(alias or "").strip() or None,
+            )
             rows.append(
                 (
                     host,
-                    dev.alias,
+                    alias,
                     cfg_dict,
                     host in self._hosts_requiring_klap_auth,
+                    mac,
                 )
             )
             seen_hosts.add(host)
+            for old_key in (host, (getattr(dev, "alias", None) or "").strip()):
+                if old_key and old_key != mac:
+                    device_discovery_store.migrate_canonical_key_to_mac(
+                        self._discovery_cache_path,
+                        backend="kasa",
+                        old_key=old_key,
+                        mac=mac,
+                    )
         for host in sorted(self._hosts_requiring_klap_auth):
             if host in seen_hosts:
                 continue
             prior = prior_by_host.get(host)
             if prior is not None:
-                alias, cfg_dict, _requires = prior
-                rows.append((host, alias, cfg_dict, True))
+                alias, cfg_dict, _requires, prior_mac = prior
+                rows.append((host, alias, cfg_dict, True, prior_mac))
                 continue
             skipped = self._skipped_klap_auth_configs.get(host)
             if skipped is None:
                 continue
             alias, cfg_dict = skipped
-            rows.append((host, alias, cfg_dict, True))
+            rows.append((host, alias, cfg_dict, True, None))
         rows.sort(key=lambda r: r[0])
         device_discovery_store.save_configs(self._discovery_cache_path, rows)
 
@@ -652,28 +727,33 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             return None, auth_failure
 
     def _expand_kasa_lookup(self, devices: list[KasaDevice]) -> dict[str, KasaDevice]:
-        """Build the multi-key lookup: host (always) + alias / display name (when unique).
+        """Build the multi-key lookup: MAC/host (always) + alias / display name (when unique).
 
-        Host is the only identifier guaranteed unique on the LAN, so
-        every device is registered under its host first. Aliases and
-        display names register as *additional* lookup keys; if two
-        devices share an alias (e.g. two outlets the user named ``"Plug"``
-        in the Kasa app) only the first claimant wins that key — the
-        duplicate stays reachable via its host and a warning is logged.
+        The canonical UI key is the MAC address. Aliases and
+        display names register as *additional* lookup keys; if two devices share
+        an alias only the first claimant wins that key — the duplicate stays
+        reachable via MAC address / host and a warning is logged.
         """
 
         lookup: dict[str, KasaDevice] = {}
         for kd in devices:
-            host = (kd._kDevice.host or "").strip()
+            host = kd.host
             if host:
                 lookup[host] = kd
+            if kd.mac_address:
+                lookup[kd.mac_address] = kd
+            if kd.identifier and kd.identifier not in lookup:
+                lookup[kd.identifier] = kd
         for kd in devices:
-            host = (kd._kDevice.host or "").strip()
+            host = kd.host
             candidate_keys: list[str] = [kd.identifier]
             if kd.preferred_label != kd.identifier:
                 candidate_keys.append(kd.preferred_label)
+            alias = (getattr(kd._kDevice, "alias", None) or "").strip()
+            if alias:
+                candidate_keys.append(alias)
             for key in candidate_keys:
-                if not key or key == host:
+                if not key or key == host or key == kd.mac_address:
                     continue
                 existing = lookup.get(key)
                 if existing is None:
@@ -692,7 +772,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
     async def _connect_devices_from_cache(
         self,
-        cached: list[tuple[str, str | None, dict[str, Any], bool]],
+        cached: list[tuple[str, str | None, dict[str, Any], bool, str | None]],
     ) -> dict[str, KasaDevice] | None:
         """Reconnect every saved config without UDP.
 
@@ -710,7 +790,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         # in the Kasa/Tapo app (e.g. two "Plug" or "Lamp") and the old
         # alias-keyed map silently dropped all-but-one of them.
         devices_by_host: dict[str, KasaDevice] = {}
-        for host, _alias, cfg_dict, requires_klap_auth in cached:
+        for host, _alias, cfg_dict, requires_klap_auth, cached_mac in cached:
             if requires_klap_auth:
                 self._hosts_requiring_klap_auth.add(host)
             else:
@@ -794,7 +874,11 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     if ingested is not None:
                         self._hosts_requiring_klap_auth.add(host)
             if ingested is not None:
-                kd = KasaDevice(ingested.alias or ingested.host, ingested)
+                kd = _make_kasa_device(ingested, cached_mac=cached_mac)
+                if kd is None:
+                    with contextlib.suppress(Exception):
+                        await ingested.disconnect()
+                    continue
                 devices_by_host[ingested.host] = kd
                 continue
             if requires_klap_auth or was_auth_failure:
@@ -884,7 +968,11 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 finalized = await self._ingest_discovered_device(discovered, qtimeout)
                 if finalized is None:
                     continue
-                kd = KasaDevice(finalized.alias or finalized.host, finalized)
+                kd = _make_kasa_device(finalized)
+                if kd is None:
+                    with contextlib.suppress(Exception):
+                        await finalized.disconnect()
+                    continue
                 devices_by_host[finalized.host] = kd
         except BaseException:
             for kd in devices_by_host.values():
@@ -909,7 +997,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self._last_discovery_source = "discovery"
 
     def _finalize_kasa_lookup(self, alias_map: dict[str, KasaDevice]) -> None:
-        """Apply SQLite display names (keyed by device host) and rebuild lookup keys."""
+        """Apply SQLite display names (keyed by MAC or host) and rebuild lookup keys."""
 
         uniq = list({id(kd): kd for kd in alias_map.values()}.values())
         if self._discovery_cache_path is not None:
@@ -917,9 +1005,13 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 if backend != "kasa":
                     continue
                 for kd in uniq:
-                    if kd._kDevice.host == key:
+                    if key in {kd.mac_address, kd.host, kd.identifier}:
                         kd.set_display_name(disp)
                         break
+        record_duplicate_preferred_labels(
+            backend="kasa",
+            devices=[(kd.mac_address, kd.preferred_label) for kd in uniq],
+        )
         self._device_name_to_device = self._expand_kasa_lookup(uniq)
 
     def rebuild_lookup_after_display_change(self) -> None:

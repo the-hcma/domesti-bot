@@ -83,14 +83,21 @@ class UIDeviceOut(BaseModel):
     Field semantics (the front-end renders the tile from these):
 
     * ``id``: stable per-family **canonical key** also used as
-      ``ui_preferences.canonical_key`` (kasa → host IP, sonos →
-      ``RINCON_…`` UID, tailwind → door identifier, future androidtv →
-      Cast UUID). Pair with ``family_id`` for cross-family uniqueness.
+      ``ui_preferences.canonical_key``. Always the normalized MAC address
+      (kasa / sonos / vizio / cast / hub MAC for Tailwind doors). Pair with
+      ``family_id`` for cross-family uniqueness. Secondary transport ids
+      (host, ``RINCON_…``, door id, Cast UUID) stay on the device objects
+      for connection — they are not the durable UI id.
+    * ``mac_address``: normalized MAC address (required). Matches ``id`` for
+      single-endpoint devices; for multi-endpoint devices (e.g. Tailwind
+      doors) ``id`` may be ``mac_address:door_id`` while ``mac_address`` is
+      the hub MAC.
     * ``family_id``: matches the parent :class:`UIFamilyOut.id`. Repeated
       here so the UI can flatten the structure when needed (e.g. building a
       "global off" set without re-walking the tree).
-    * ``label``: ``preferred_label`` (display name when the user has set
-      one via ``set-display-name`` in the CLI; otherwise the identifier).
+    * ``label``: human-friendly display name (``preferred_label`` when set
+      via ``set-display-name`` / discovery alias; never the raw MAC when a
+      display name exists).
     * ``kind``: ``"switch"`` (kasa, future androidtv), ``"speaker"``
       (sonos), or ``"door"`` (tailwind). The UI uses this to pick
       tile iconography and which action verb to render.
@@ -113,9 +120,12 @@ class UIDeviceOut(BaseModel):
       label and, for Kasa, hardware model — not from TP-Link app rooms.
     """
 
-    id: str = Field(..., description="Stable canonical key within the family.")
+    id: str = Field(
+        ...,
+        description="Stable canonical key within the family (MAC address, or MAC-rooted compound id).",
+    )
     family_id: str = Field(..., description="Parent family id (e.g. ``kasa``).")
-    label: str = Field(..., description="Display name; falls back to ``id``.")
+    label: str = Field(..., description="Human-friendly display name; falls back to ``id``.")
     kind: str = Field(..., description="``switch``, ``speaker``, or ``door``.")
     state: str = Field(
         ...,
@@ -127,6 +137,21 @@ class UIDeviceOut(BaseModel):
     compact_icon: str = Field(
         ...,
         description="Icon key for saturated compact tiles (e.g. ``bulb``, ``garage``).",
+    )
+    mac_address: str = Field(
+        ...,
+        description="Normalized MAC address for the device (or hub, for multi-endpoint families).",
+    )
+    host: str | None = Field(
+        default=None,
+        description="Current IP address or hostname when known (LAN transport endpoint).",
+    )
+    identity_details: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Family-specific identity lines for hover tooltips / diagnostics "
+            "(e.g. Sonos RINCON uid, Tailwind door index)."
+        ),
     )
     exclude_from_global: bool = Field(
         default=False,

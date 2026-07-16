@@ -28,6 +28,8 @@ def _mock_device(host: str, alias: str, cfg: dict) -> MagicMock:
     mock_dev = MagicMock()
     mock_dev.host = host
     mock_dev.alias = alias
+    mock_dev.mac = None
+    mock_dev.sys_info = {}
     mock_dev.is_on = False
     mock_dev.config = DeviceConfig.from_dict(cfg)
     mock_dev.config.to_dict_control_credentials = MagicMock(return_value=cfg)

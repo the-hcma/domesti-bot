@@ -22,7 +22,7 @@ from app.vizio_smartcast_client import (
 
 def _tv(*, is_on: bool = False) -> VizioTvDevice:
     endpoint = VizioTvEndpoint(host="192.168.86.201", port=7345)
-    device = VizioTvDevice(endpoint, MagicMock(), display_name="Kitchen TV")
+    device = VizioTvDevice(endpoint, MagicMock(), display_name="Kitchen TV", mac_address="00:bd:3e:d5:f0:11")
     device.set_power(is_on)
     return device
 
@@ -53,7 +53,7 @@ async def test_fetch_relocates_cached_tv_when_dhcp_ip_changes(tmp_path: Path) ->
     )
     fake_client = MagicMock()
     fake_client.aclose = AsyncMock()
-    fake_tv = VizioTvDevice(endpoint, fake_client, display_name="Kitchen TV")
+    fake_tv = VizioTvDevice(endpoint, fake_client, display_name="Kitchen TV", mac_address="00:bd:3e:d5:f0:11")
     fake_tv.set_power(False)
     with (
         patch.object(
@@ -176,7 +176,7 @@ async def test_fetch_resolves_mac_from_smartcast_and_migrates_host_token(
     )
     fake_client = MagicMock()
     fake_client.aclose = AsyncMock()
-    fake_tv = VizioTvDevice(endpoint, fake_client, display_name="Kitchen TV", mac="00:bd:3e:d5:f0:11")
+    fake_tv = VizioTvDevice(endpoint, fake_client, display_name="Kitchen TV", mac_address="00:bd:3e:d5:f0:11")
     fake_tv.set_power(False)
     with (
         patch.object(
@@ -455,6 +455,7 @@ async def test_offline_tv_registers_off(tmp_path: Path) -> None:
     ) as connect:
         tv = await mgr._offline_tv(endpoint, "test-token")
     connect.assert_not_called()
+    assert tv is not None
     assert tv.ui_power_state() == "off"
     assert tv.is_on is False
 

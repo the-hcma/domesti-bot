@@ -32,7 +32,7 @@ def test_transport_state_summary_maps_soco_states() -> None:
     zone.get_current_transport_info.return_value = {
         "current_transport_state": "PAUSED_PLAYBACK",
     }
-    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office", mac_address="aa:bb:cc:dd:ee:ff")
     assert dev.transport_state_summary() == "paused"
 
     zone.get_current_transport_info.return_value = {
@@ -48,7 +48,7 @@ async def test_pause_resume_invokes_soco(
 ) -> None:
     monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(tmp_path / "missing-config.json"))
     zone = MagicMock()
-    zone.uid = "RINCON_TEST12345678"
+    zone.uid = "RINCON_AA112233445501400"
     zone.player_name = "Living room"
 
     mgr = SonosDeviceManager(discovery_timeout=0.1)
@@ -85,7 +85,7 @@ async def test_resume_uses_play_uri_when_stream_favorites_configured(
     monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(secrets))
 
     zone = MagicMock()
-    zone.uid = "RINCON_TEST12345678"
+    zone.uid = "RINCON_AA112233445501400"
     zone.player_name = "Living room"
 
     mgr = SonosDeviceManager(discovery_timeout=0.1)
@@ -103,8 +103,8 @@ async def test_resume_uses_play_uri_when_stream_favorites_configured(
 
 @pytest.mark.asyncio
 async def test_rediscover_refetches() -> None:
-    z1 = MagicMock(uid="u1", player_name="A")
-    z2 = MagicMock(uid="u2", player_name="B")
+    z1 = MagicMock(uid="RINCON_AAAAAAAAAAAA01400", player_name="A")
+    z2 = MagicMock(uid="RINCON_BBBBBBBBBBBB01400", player_name="B")
     mgr = SonosDeviceManager(discovery_timeout=0.1)
 
     with patch("app.sonos_device_manager.soco_discover", side_effect=[{z1}, {z2}]):
@@ -112,7 +112,7 @@ async def test_rediscover_refetches() -> None:
         assert len(mgr.players) == 1
         await mgr.rediscover()
         assert len(mgr.players) == 1
-        assert mgr.players[0].identifier == "u2"
+        assert mgr.players[0].identifier == "bb:bb:bb:bb:bb:bb"
 
 
 @pytest.mark.asyncio
@@ -123,8 +123,8 @@ async def test_fetch_skips_udp_when_cache_warm(tmp_path: Path) -> None:
     device_discovery_store.save_sonos_zones(
         db,
         [
-            ("RINCON_AAA", "192.168.1.10", "Living Room"),
-            ("RINCON_BBB", "192.168.1.11", "Kitchen"),
+            ("RINCON_AAAAAAAAAAAA01400", "192.168.1.10", "Living Room"),
+            ("RINCON_BBBBBBBBBBBB01400", "192.168.1.11", "Kitchen"),
         ],
     )
 
@@ -134,10 +134,10 @@ async def test_fetch_skips_udp_when_cache_warm(tmp_path: Path) -> None:
         z = MagicMock()
         z.ip_address = host
         if host == "192.168.1.10":
-            z.uid = "RINCON_AAA"
+            z.uid = "RINCON_AAAAAAAAAAAA01400"
             z.player_name = "Living Room"
         else:
-            z.uid = "RINCON_BBB"
+            z.uid = "RINCON_BBBBBBBBBBBB01400"
             z.player_name = "Kitchen"
         fakes[host] = z
         return z
@@ -154,7 +154,7 @@ async def test_fetch_skips_udp_when_cache_warm(tmp_path: Path) -> None:
     discover.assert_not_called()
     assert soco_cls.call_count == 2
     ids = sorted(p.identifier for p in mgr.players)
-    assert ids == ["RINCON_AAA", "RINCON_BBB"]
+    assert ids == ["aa:aa:aa:aa:aa:aa", "bb:bb:bb:bb:bb:bb"]
     assert mgr.last_discovery_source == "cache"
 
 
@@ -167,12 +167,12 @@ async def test_fetch_cache_hit_uses_live_zone_name_over_stale_cache_label(
     db = tmp_path / "sonos.sqlite"
     device_discovery_store.save_sonos_zones(
         db,
-        [("RINCON_AAA", "192.168.1.10", "Old Kitchen Name")],
+        [("RINCON_AAAAAAAAAAAA01400", "192.168.1.10", "Old Kitchen Name")],
     )
 
     zone = MagicMock()
     zone.ip_address = "192.168.1.10"
-    zone.uid = "RINCON_AAA"
+    zone.uid = "RINCON_AAAAAAAAAAAA01400"
     zone.player_name = "Kitchen"
 
     mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db)
@@ -185,7 +185,7 @@ async def test_fetch_cache_hit_uses_live_zone_name_over_stale_cache_label(
     discover.assert_not_called()
     assert mgr.players[0].preferred_label == "Kitchen"
     assert device_discovery_store.load_sonos_zones(db) == [
-        ("RINCON_AAA", "192.168.1.10", "Kitchen"),
+        ("RINCON_AAAAAAAAAAAA01400", "192.168.1.10", "Kitchen", "aa:aa:aa:aa:aa:aa"),
     ]
 
 
@@ -196,17 +196,17 @@ async def test_fetch_falls_back_to_udp_when_cached_uid_changes(tmp_path: Path) -
     db = tmp_path / "sonos.sqlite"
     device_discovery_store.save_sonos_zones(
         db,
-        [("RINCON_OLD", "192.168.1.10", "Living Room")],
+        [("RINCON_DDDDDDDDDDDD01400", "192.168.1.10", "Living Room")],
     )
 
     stale = MagicMock()
     stale.ip_address = "192.168.1.10"
-    stale.uid = "RINCON_NEW"  # cache mismatch — host now hosts a different zone
+    stale.uid = "RINCON_EEEEEEEEEEEE01400"  # cache mismatch — host now hosts a different zone
     stale.player_name = "Living Room"
 
     fresh = MagicMock()
     fresh.ip_address = "192.168.1.10"
-    fresh.uid = "RINCON_NEW"
+    fresh.uid = "RINCON_EEEEEEEEEEEE01400"
     fresh.player_name = "Living Room"
 
     mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db)
@@ -218,10 +218,10 @@ async def test_fetch_falls_back_to_udp_when_cached_uid_changes(tmp_path: Path) -
         await mgr.fetch()
 
     discover.assert_called_once()
-    assert [p.identifier for p in mgr.players] == ["RINCON_NEW"]
+    assert [p.identifier for p in mgr.players] == ["ee:ee:ee:ee:ee:ee"]
     # And the cache must be refreshed to the new UID.
     assert device_discovery_store.load_sonos_zones(db) == [
-        ("RINCON_NEW", "192.168.1.10", "Living Room"),
+        ("RINCON_EEEEEEEEEEEE01400", "192.168.1.10", "Living Room", "ee:ee:ee:ee:ee:ee"),
     ]
     assert mgr.last_discovery_source == "discovery"
 
@@ -233,12 +233,12 @@ async def test_fetch_falls_back_when_cached_host_unreachable(tmp_path: Path) -> 
     db = tmp_path / "sonos.sqlite"
     device_discovery_store.save_sonos_zones(
         db,
-        [("RINCON_AAA", "10.0.0.99", "Office")],
+        [("RINCON_AAAAAAAAAAAA01400", "10.0.0.99", "Office")],
     )
 
     discovered = MagicMock()
     discovered.ip_address = "10.0.0.55"
-    discovered.uid = "RINCON_AAA"
+    discovered.uid = "RINCON_AAAAAAAAAAAA01400"
     discovered.player_name = "Office"
 
     mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db)
@@ -253,10 +253,10 @@ async def test_fetch_falls_back_when_cached_host_unreachable(tmp_path: Path) -> 
         await mgr.fetch()
 
     discover.assert_called_once()
-    assert [p.identifier for p in mgr.players] == ["RINCON_AAA"]
+    assert [p.identifier for p in mgr.players] == ["aa:aa:aa:aa:aa:aa"]
     # Cache rewritten with the new host the zone is at.
     assert device_discovery_store.load_sonos_zones(db) == [
-        ("RINCON_AAA", "10.0.0.55", "Office"),
+        ("RINCON_AAAAAAAAAAAA01400", "10.0.0.55", "Office", "aa:aa:aa:aa:aa:aa"),
     ]
 
 
@@ -265,11 +265,11 @@ async def test_force_discovery_always_runs_udp(tmp_path: Path) -> None:
     db = tmp_path / "sonos.sqlite"
     device_discovery_store.save_sonos_zones(
         db,
-        [("RINCON_AAA", "192.168.1.10", "Living Room")],
+        [("RINCON_AAAAAAAAAAAA01400", "192.168.1.10", "Living Room")],
     )
 
     zone = MagicMock()
-    zone.uid = "RINCON_AAA"
+    zone.uid = "RINCON_AAAAAAAAAAAA01400"
     zone.player_name = "Living Room"
     zone.ip_address = "192.168.1.10"
 
@@ -284,7 +284,7 @@ async def test_force_discovery_always_runs_udp(tmp_path: Path) -> None:
 
     soco_cls.assert_not_called()
     discover.assert_called_once()
-    assert [p.identifier for p in mgr.players] == ["RINCON_AAA"]
+    assert [p.identifier for p in mgr.players] == ["aa:aa:aa:aa:aa:aa"]
     assert mgr.last_discovery_source == "discovery"
 
 
@@ -294,7 +294,7 @@ async def test_fetch_persists_cache_after_udp_discovery(tmp_path: Path) -> None:
 
     db = tmp_path / "sonos.sqlite"
     zone = MagicMock()
-    zone.uid = "RINCON_ZZZ"
+    zone.uid = "RINCON_CCCCCCCCCCCC01400"
     zone.ip_address = "192.168.1.42"
     zone.player_name = "Den"
 
@@ -306,7 +306,7 @@ async def test_fetch_persists_cache_after_udp_discovery(tmp_path: Path) -> None:
         await mgr.fetch()
 
     assert device_discovery_store.load_sonos_zones(db) == [
-        ("RINCON_ZZZ", "192.168.1.42", "Den"),
+        ("RINCON_CCCCCCCCCCCC01400", "192.168.1.42", "Den", "cc:cc:cc:cc:cc:cc"),
     ]
     assert mgr.last_discovery_source == "discovery"
 
@@ -328,7 +328,7 @@ def test_is_playing_cache_starts_none() -> None:
     relies on."""
 
     zone = MagicMock(uid="u1", player_name="X")
-    dev = SonosSpeakerDevice("u1", zone, display_name="X")
+    dev = SonosSpeakerDevice("u1", zone, display_name="X", mac_address="aa:bb:cc:dd:ee:ff")
     assert dev.is_playing is None
 
 
@@ -341,7 +341,7 @@ async def test_pause_resume_sync_is_playing_cache() -> None:
     what keeps the optimistic UI update honest."""
 
     zone = MagicMock(uid="u1", player_name="Office")
-    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office", mac_address="aa:bb:cc:dd:ee:ff")
     assert dev.is_playing is None
     await dev.resume()
     assert dev.is_playing is True
@@ -354,7 +354,7 @@ def test_transport_state_summary_updates_is_playing_cache() -> None:
     watcher; the cache it leaves behind drives the cheap UI render."""
 
     zone = MagicMock(uid="u1", player_name="Office")
-    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office", mac_address="aa:bb:cc:dd:ee:ff")
 
     zone.get_current_transport_info.return_value = {
         "current_transport_state": "PLAYING",
@@ -383,7 +383,7 @@ def test_transport_state_summary_leaves_cache_intact_on_failure() -> None:
     known value so transient LAN blips don't churn the state badge."""
 
     zone = MagicMock(uid="u1", player_name="Office")
-    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office", mac_address="aa:bb:cc:dd:ee:ff")
     zone.get_current_transport_info.return_value = {
         "current_transport_state": "PLAYING",
     }
@@ -412,7 +412,7 @@ async def test_pause_raises_domain_error_on_upnp_701() -> None:
     zone.get_current_transport_info.return_value = {
         "current_transport_state": "STOPPED",
     }
-    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office", mac_address="aa:bb:cc:dd:ee:ff")
 
     with pytest.raises(SonosTransitionUnavailableError) as exc_info:
         await dev.pause()
@@ -428,7 +428,7 @@ async def test_pause_raises_domain_error_on_upnp_701() -> None:
 async def test_pause_propagates_non_701_upnp_errors() -> None:
     zone = MagicMock(uid="u1", player_name="Office")
     zone.pause.side_effect = _upnp_error("500", "Internal server error")
-    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office", mac_address="aa:bb:cc:dd:ee:ff")
 
     with pytest.raises(SoCoUPnPException):
         await dev.pause()
@@ -445,7 +445,7 @@ async def test_resume_raises_domain_error_on_upnp_701_empty_queue() -> None:
     zone.get_current_transport_info.return_value = {
         "current_transport_state": "STOPPED",
     }
-    dev = SonosSpeakerDevice("u1", zone, display_name="Living Room")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Living Room", mac_address="aa:bb:cc:dd:ee:ff")
 
     with pytest.raises(SonosTransitionUnavailableError) as exc_info:
         await dev.resume()
@@ -461,7 +461,7 @@ async def test_resume_raises_domain_error_on_upnp_701_empty_queue() -> None:
 async def test_resume_propagates_non_701_upnp_errors() -> None:
     zone = MagicMock(uid="u1", player_name="Office")
     zone.play.side_effect = _upnp_error("500", "Internal server error")
-    dev = SonosSpeakerDevice("u1", zone, display_name="Office")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office", mac_address="aa:bb:cc:dd:ee:ff")
 
     with pytest.raises(SoCoUPnPException):
         await dev.resume()
@@ -473,7 +473,7 @@ async def test_manager_is_playing_refreshes_cache() -> None:
     asserts it forces a fresh transport read on each call and
     returns the cached flag."""
 
-    zone = MagicMock(uid="RINCON_TEST", player_name="Living room")
+    zone = MagicMock(uid="RINCON_AA112233445501400", player_name="Living room")
     zone.get_current_transport_info.return_value = {
         "current_transport_state": "PLAYING",
     }
@@ -487,3 +487,19 @@ async def test_manager_is_playing_refreshes_cache() -> None:
         "current_transport_state": "PAUSED_PLAYBACK",
     }
     assert await mgr.is_playing("Living room") is False
+
+
+def test_speaker_device_uses_mac_from_rincon(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.sonos_device_manager.lookup_mac_via_arp", lambda host: None)
+    zone = MagicMock()
+    zone.ip_address = "192.168.1.10"
+    zone.uid = "RINCON_5CAAFD0A123401400"
+    zone.player_name = "Living Room"
+    mgr = SonosDeviceManager(discovery_timeout=0.1)
+    sd = mgr._speaker_device(zone.uid, zone, display_name="Living Room")
+    assert sd is not None
+    assert sd.mac_address == "5c:aa:fd:0a:12:34"
+    assert sd.identifier == "5c:aa:fd:0a:12:34"
+    assert sd.rincon_uid == "RINCON_5CAAFD0A123401400"

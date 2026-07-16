@@ -168,6 +168,8 @@ async def test_device_dwell_fires_when_door_open_for_threshold_while_away(
 class _FakeTailwindDoor:
     def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
         self.identifier = identifier
+        self.mac_address = None
+        self.door_key = self.identifier
         self.preferred_label = label
         self.is_open = is_open
 

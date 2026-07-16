@@ -31,6 +31,8 @@ def _kdev(host: str, alias: str, *, is_on: bool = False) -> MagicMock:
     dev = MagicMock(name=f"KDevice({host})")
     dev.host = host
     dev.alias = alias
+    dev.mac = None
+    dev.sys_info = {}
     dev.is_on = is_on
     dev.update = AsyncMock()
     dev.disconnect = AsyncMock()
@@ -40,9 +42,14 @@ def _kdev(host: str, alias: str, *, is_on: bool = False) -> MagicMock:
 @pytest.mark.asyncio
 async def test_fetch_keeps_all_devices_even_when_aliases_collide(
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two physically distinct outlets named ``"Plug"`` both survive discovery."""
 
+    monkeypatch.setattr(
+        "app.kasa_device_manager.lookup_mac_via_arp",
+        lambda host: f"aa:bb:c0:a8:01:{int(str(host).rsplit('.', 1)[-1]):02x}",
+    )
     a = _kdev("192.168.1.10", "Plug", is_on=True)
     b = _kdev("192.168.1.11", "Plug", is_on=False)
     c = _kdev("192.168.1.12", "Other", is_on=True)
@@ -76,9 +83,15 @@ async def test_fetch_keeps_all_devices_even_when_aliases_collide(
 
 
 @pytest.mark.asyncio
-async def test_fetch_does_not_warn_when_all_aliases_unique() -> None:
+async def test_fetch_does_not_warn_when_all_aliases_unique(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """No collision warning fires when every device has a distinct alias."""
 
+    monkeypatch.setattr(
+        "app.kasa_device_manager.lookup_mac_via_arp",
+        lambda host: f"aa:bb:c0:a8:01:{int(str(host).rsplit('.', 1)[-1]):02x}",
+    )
     a = _kdev("192.168.1.10", "Living Room Lamp")
     b = _kdev("192.168.1.11", "Kitchen Counter")
     c = _kdev("192.168.1.12", "Office Plug")
@@ -143,7 +156,7 @@ async def test_turn_on_updates_cached_power_when_underlying_is_on_stays_stale() 
 
     kdev = _kdev("192.168.1.10", "Basement leds", is_on=False)
     kdev.turn_on = AsyncMock()
-    kd = KasaDevice("192.168.1.10", kdev, display_name="Basement leds")
+    kd = KasaDevice("192.168.1.10", kdev, display_name="Basement leds", mac_address="aa:bb:cc:dd:ee:ff")
     assert kd.is_on is False
     await kd.turn_on()
     kdev.turn_on.assert_awaited_once()

@@ -17,25 +17,25 @@ async def test_sonos_reload_from_cache_never_calls_discover(tmp_path) -> None:
     db = tmp_path / "cached.sqlite"
     device_discovery_store.save_sonos_zones(
         db,
-        [("RINCON_A", "192.168.1.30", "Kitchen")],
+        [("RINCON_AAAAAAAAAAAA01400", "192.168.1.30", "Kitchen", "aa:aa:aa:aa:aa:aa")],
     )
     mgr = SonosDeviceManager(discovery_cache_path=db)
-    mgr._alias_to_device = {"RINCON_A": MagicMock()}
+    mgr._alias_to_device = {"aa:aa:aa:aa:aa:aa": MagicMock()}
 
     zone = MagicMock()
-    zone.uid = "RINCON_A"
+    zone.uid = "RINCON_AAAAAAAAAAAA01400"
     zone.player_name = "Kitchen"
     zone.ip_address = "192.168.1.30"
 
     device_discovery_store.save_sonos_zones(
         db,
         [
-            ("RINCON_A", "192.168.1.30", "Kitchen"),
-            ("RINCON_B", "192.168.1.31", "Patio"),
+            ("RINCON_AAAAAAAAAAAA01400", "192.168.1.30", "Kitchen", "aa:aa:aa:aa:aa:aa"),
+            ("RINCON_BBBBBBBBBBBB01400", "192.168.1.31", "Patio", "bb:bb:bb:bb:bb:bb"),
         ],
     )
     zone_b = MagicMock()
-    zone_b.uid = "RINCON_B"
+    zone_b.uid = "RINCON_BBBBBBBBBBBB01400"
     zone_b.player_name = "Patio"
     zone_b.ip_address = "192.168.1.31"
 
@@ -54,14 +54,14 @@ async def test_sonos_reload_from_cache_never_calls_discover(tmp_path) -> None:
         ok = await mgr.reload_from_cache()
 
     assert ok is True
-    assert {p.identifier for p in mgr.players} == {"RINCON_A", "RINCON_B"}
+    assert {p.identifier for p in mgr.players} == {"aa:aa:aa:aa:aa:aa", "bb:bb:bb:bb:bb:bb"}
     discover.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_tailwind_reload_from_cache_never_calls_mdns(tmp_path) -> None:
     db = tmp_path / "cached.sqlite"
-    device_discovery_store.save_tailwind_host(db, "192.168.1.40")
+    device_discovery_store.save_tailwind_host(db, "192.168.1.40", mac="aa:bb:c0:a8:01:28")
     mgr = GotailwindDeviceManager(
         token="123456",
         host="192.168.1.39",

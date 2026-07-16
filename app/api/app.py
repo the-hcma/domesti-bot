@@ -589,7 +589,7 @@ def create_app(args: Any) -> FastAPI:
                 )
         if family_id == "tailwind":
             tw = state.tailwind_mgr
-            if tw is None or all(d.identifier != device_id for d in tw.doors):
+            if tw is None or find_tailwind_by_identifier(tw, device_id) is None:
                 raise HTTPException(
                     status_code=HTTPStatus.NOT_FOUND,
                     detail=(f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: {device_id}"),

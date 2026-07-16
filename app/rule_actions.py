@@ -452,12 +452,13 @@ def partition_device_actions_by_delay(
 
 
 def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | None:
-    """Resolve a Kasa tile label (or host) to the canonical LAN host."""
+    """Resolve a Kasa tile label / MAC / host to the canonical device id."""
     needle = device_id.strip()
     if not needle:
         return None
-    if find_kasa_by_host(mgr, needle) is not None:
-        return needle
+    found = find_kasa_by_host(mgr, needle)
+    if found is not None:
+        return found.identifier
     lower_needle = needle.lower()
     matches: list[str] = []
     try:
@@ -465,12 +466,17 @@ def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | 
     except NotInitializedError:
         return None
     for kd in switches:
-        host = (kd._kDevice.host or "").strip()
-        if not host:
+        key = kd.identifier
+        if not key:
             continue
-        candidates = {host.lower(), kd.identifier.lower(), kd.preferred_label.lower()}
+        candidates = {
+            key.lower(),
+            kd.host.lower(),
+            (kd.mac_address or "").lower(),
+            kd.preferred_label.lower(),
+        }
         if lower_needle in candidates:
-            matches.append(host)
+            matches.append(key)
     unique = sorted(set(matches))
     if len(unique) == 1:
         return unique[0]
@@ -485,18 +491,25 @@ def resolve_sonos_identifier_by_label(
     mgr: SonosDeviceManager | None,
     device_id: str,
 ) -> str | None:
-    """Resolve a Sonos zone label to its ``RINCON_…`` identifier."""
+    """Resolve a Sonos zone label / MAC / RINCON to its canonical identifier."""
     if mgr is None:
         return None
     needle = device_id.strip()
     if not needle:
         return None
     if find_sonos_by_identifier(mgr, needle) is not None:
-        return needle
+        zone = find_sonos_by_identifier(mgr, needle)
+        assert zone is not None
+        return zone.identifier
     lower_needle = needle.lower()
     matches: list[str] = []
     for zone in mgr.players:
-        candidates = {zone.identifier.lower(), zone.preferred_label.lower()}
+        candidates = {
+            zone.identifier.lower(),
+            zone.rincon_uid.lower(),
+            (zone.mac_address or "").lower(),
+            zone.preferred_label.lower(),
+        }
         if lower_needle in candidates:
             matches.append(zone.identifier)
     unique = sorted(set(matches))
@@ -519,12 +532,17 @@ def resolve_tailwind_identifier_by_label(
     needle = device_id.strip()
     if not needle:
         return None
-    if find_tailwind_by_identifier(mgr, needle) is not None:
-        return needle
+    found = find_tailwind_by_identifier(mgr, needle)
+    if found is not None:
+        return found.identifier
     lower_needle = needle.lower()
     matches: list[str] = []
     for door in mgr.doors:
-        candidates = {door.identifier.lower(), door.preferred_label.lower()}
+        candidates = {
+            door.identifier.lower(),
+            door.door_key.lower(),
+            door.preferred_label.lower(),
+        }
         if lower_needle in candidates:
             matches.append(door.identifier)
     unique = sorted(set(matches))

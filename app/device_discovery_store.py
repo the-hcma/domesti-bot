@@ -12,9 +12,10 @@ friendly_name)`` hints from PyChromecast (typically port **8009**), not ADB.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -32,13 +33,15 @@ from app.db.models import (
 )
 from app.db.schema import bootstrap_schema, ensure_schema_if_exists
 from app.db.session import discovery_session, discovery_write
+from app.device_mac import try_normalize_mac
 from app.vizio_credentials import vizio_device_id_from_parts
 from app.vizio_mac import (
     device_id_for_vizio,
     is_vizio_mac_device_id,
-    normalize_mac,
 )
 from app.vizio_smartcast_client import device_id_for, parse_host_spec
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def open_db(path: Path) -> sqlite3.Connection:
@@ -82,14 +85,15 @@ def load_androidtv_hosts(path: Path) -> list[tuple[str, int]]:
 
 def load_androidtv_known_devices(
     path: Path,
-) -> list[tuple[str, int, str | None, str | None, str | None]]:
-    """Return rows ``(host, port, friendly_name, uuid, model_name)`` ordered by host, port.
+) -> list[tuple[str, int, str | None, str | None, str | None, str | None]]:
+    """Return rows ``(host, port, friendly_name, uuid, model_name, mac)``.
 
     Rows that pre-date the uuid/model_name migration will have ``uuid IS NULL``
     (and possibly ``model_name IS NULL``). The Cast manager treats a non-empty
     ``uuid`` on **every** row as the trigger for the no-mDNS fast path; a
     single missing/empty UUID falls back to the targeted-mDNS path that
-    rewrites the cache.
+    rewrites the cache. ``mac`` may be ``None`` on legacy rows; managers must
+    re-learn a MAC address (ARP) before admitting the device.
     """
     path = path.expanduser().resolve()
     if not path.is_file():
@@ -99,22 +103,23 @@ def load_androidtv_known_devices(
         rows = session.scalars(
             select(AndroidTvDiscoveredHost).order_by(AndroidTvDiscoveredHost.host, AndroidTvDiscoveredHost.port)
         ).all()
-        out: list[tuple[str, int, str | None, str | None, str | None]] = []
+        out: list[tuple[str, int, str | None, str | None, str | None, str | None]] = []
         for row in rows:
             label = (row.friendly_name or "").strip() or None
             uid_s = (row.uuid or "").strip() or None
             model_s = (row.model_name or "").strip() or None
-            out.append((row.host, int(row.port), label, uid_s, model_s))
+            mac_s = (getattr(row, "mac", None) or "").strip() or None
+            out.append((row.host, int(row.port), label, uid_s, model_s, mac_s))
         return out
 
 
 def load_cached_configs(
     path: Path,
-) -> list[tuple[str, str | None, dict[str, Any], bool]]:
-    """Return ``(host, alias, config_dict, requires_klap_auth)`` rows ordered by host.
+) -> list[tuple[str, str | None, dict[str, Any], bool, str | None]]:
+    """Return ``(host, alias, config_dict, requires_klap_auth, mac)`` rows ordered by host.
 
     Missing file → empty list. Pre-column rows default ``requires_klap_auth`` to
-    ``False`` (anonymous LAN) until a fetch learns otherwise.
+    ``False`` (anonymous LAN) and ``mac`` to ``None`` until a fetch learns them.
     """
     path = path.expanduser().resolve()
     if not path.is_file():
@@ -128,6 +133,7 @@ def load_cached_configs(
                 row.alias,
                 json.loads(row.config_json),
                 bool(getattr(row, "requires_klap_auth", 0)),
+                (getattr(row, "mac", None) or "").strip() or None,
             )
             for row in rows
         ]
@@ -140,6 +146,7 @@ def save_androidtv_hosts(
         | tuple[str, int, str | None]
         | tuple[str, int, str | None, str | None]
         | tuple[str, int, str | None, str | None, str | None]
+        | tuple[str, int, str | None, str | None, str | None, str | None]
     ],
 ) -> None:
     """Replace all rows.
@@ -149,13 +156,14 @@ def save_androidtv_hosts(
       * ``(host, port, friendly_name)``
       * ``(host, port, friendly_name, uuid)``
       * ``(host, port, friendly_name, uuid, model_name)``
+      * ``(host, port, friendly_name, uuid, model_name, mac)``
 
     Missing trailing values are persisted as ``NULL``. The Cast cache-fast
     path requires every row's ``uuid`` to be non-empty, so callers that want
-    the no-mDNS startup must pass the 4- or 5-tuple shape.
+    the no-mDNS startup must pass the 4-, 5-, or 6-tuple shape.
     """
     now = time.time()
-    records: list[tuple[str, int, str | None, str | None, str | None]] = []
+    records: list[tuple[str, int, str | None, str | None, str | None, str | None]] = []
     for r in rows:
         seq: tuple[Any, ...] = tuple(r)
         h = str(seq[0]).strip()
@@ -163,11 +171,12 @@ def save_androidtv_hosts(
         fn = _nonblank_str(seq[2]) if len(seq) > 2 else None
         uid = _nonblank_str(seq[3]) if len(seq) > 3 else None
         model = _nonblank_str(seq[4]) if len(seq) > 4 else None
-        records.append((h, p, fn, uid, model))
+        mac = try_normalize_mac(str(seq[5])) if len(seq) > 5 and seq[5] else None
+        records.append((h, p, fn, uid, model, mac))
 
     def _write(session: Session) -> None:
         session.execute(delete(AndroidTvDiscoveredHost))
-        for h, p, fn, uid, model in records:
+        for h, p, fn, uid, model, mac in records:
             session.add(
                 AndroidTvDiscoveredHost(
                     host=h,
@@ -176,6 +185,7 @@ def save_androidtv_hosts(
                     friendly_name=fn,
                     uuid=uid,
                     model_name=model,
+                    mac=mac,
                 )
             )
 
@@ -191,20 +201,55 @@ def _nonblank_str(value: object) -> str | None:
 
 def save_configs(
     path: Path,
-    rows: list[tuple[str, str | None, dict[str, Any], bool]],
+    rows: Sequence[
+        tuple[str, str | None, dict[str, Any], bool] | tuple[str, str | None, dict[str, Any], bool, str | None]
+    ],
 ) -> None:
-    """Replace all rows with ``(host, alias, config_dict, requires_klap_auth)``."""
+    """Replace all rows with ``(host, alias, config_dict, requires_klap_auth[, mac])``.
+
+    When ``mac`` is known, rows are de-duplicated by MAC (later hosts with the
+    same MAC win) so DHCP IP changes do not leave stale host-primary duplicates.
+    """
     now = time.time()
+    normalized: list[tuple[str, str | None, dict[str, Any], bool, str | None]] = []
+    for row in rows:
+        host, alias, cfg, requires_klap_auth = row[0], row[1], row[2], row[3]
+        # Empty / whitespace MAC strings intentionally become None (same as omit).
+        mac_raw = row[4] if len(row) > 4 else None
+        mac = try_normalize_mac(str(mac_raw)) if mac_raw else None
+        normalized.append((host, alias, cfg, requires_klap_auth, mac))
+
+    # Prefer the last row for a given MAC so rediscovery at a new IP replaces
+    # the old host without leaving two prefs identities for one device.
+    by_mac: dict[str, tuple[str, str | None, dict[str, Any], bool, str | None]] = {}
+    without_mac: list[tuple[str, str | None, dict[str, Any], bool, str | None]] = []
+    for entry in normalized:
+        mac = entry[4]
+        if mac is None:
+            without_mac.append(entry)
+        else:
+            prior = by_mac.get(mac)
+            if prior is not None and prior[0] != entry[0]:
+                _LOGGER.warning(
+                    "Kasa discovery cache: MAC %s remapped from host %s to %s (keeping latest)",
+                    mac,
+                    prior[0],
+                    entry[0],
+                )
+            by_mac[mac] = entry
+    mac_hosts = {entry[0] for entry in by_mac.values()}
+    deduped = list(by_mac.values()) + [e for e in without_mac if e[0] not in mac_hosts]
 
     def _write(session: Session) -> None:
         session.execute(delete(KasaDiscoveredDevice))
-        for h, a, d, requires_klap_auth in rows:
+        for h, a, d, requires_klap_auth, mac in deduped:
             session.add(
                 KasaDiscoveredDevice(
                     host=h,
                     alias=a,
                     config_json=json.dumps(d),
                     requires_klap_auth=1 if requires_klap_auth else 0,
+                    mac=mac,
                     updated_at=now,
                 )
             )
@@ -214,15 +259,15 @@ def save_configs(
 
 def save_sonos_zones(
     path: Path,
-    rows: Iterable[tuple[str, str, str | None]],
+    rows: Iterable[tuple[str, str, str | None] | tuple[str, str, str | None, str | None]],
 ) -> None:
-    """Replace all rows; each entry is ``(uuid, host, zone_name | None)``.
+    """Replace all rows; each entry is ``(uuid, host, zone_name | None[, mac])``.
 
     Empty/whitespace UUIDs and hosts are dropped (they indicate a bug in the
     discovery layer rather than a usable cache row).
     """
     now = time.time()
-    triples: list[tuple[str, str, str | None]] = []
+    records: list[tuple[str, str, str | None, str | None]] = []
     for r in rows:
         uid = str(r[0]).strip()
         host = str(r[1]).strip()
@@ -232,37 +277,42 @@ def save_sonos_zones(
         if r[2] is not None:
             stripped = str(r[2]).strip()
             name = stripped if stripped else None
-        triples.append((uid, host, name))
+        mac = try_normalize_mac(str(r[3])) if len(r) > 3 and r[3] else None
+        records.append((uid, host, name, mac))
 
     def _write(session: Session) -> None:
         session.execute(delete(SonosKnownZone))
-        for u, h, n in triples:
-            session.add(SonosKnownZone(uuid=u, host=h, zone_name=n, updated_at=now))
+        for u, h, n, mac in records:
+            session.add(SonosKnownZone(uuid=u, host=h, zone_name=n, mac=mac, updated_at=now))
 
     discovery_write(path, _write)
 
 
-def save_tailwind_host(path: Path, host: str) -> None:
+def save_tailwind_host(path: Path, host: str, *, mac: str | None = None) -> None:
     """Remember the last reachable Tailwind controller address (token still comes from env / CLI)."""
     now = time.time()
+    mac_s = try_normalize_mac(mac) if mac else None
 
     def _write(session: Session) -> None:
         row = session.get(TailwindLastHost, 1)
         if row is None:
-            session.add(TailwindLastHost(id=1, host=host.strip(), updated_at=now))
+            session.add(TailwindLastHost(id=1, host=host.strip(), mac=mac_s, updated_at=now))
         else:
             row.host = host.strip()
+            if mac_s is not None:
+                row.mac = mac_s
             row.updated_at = now
 
     discovery_write(path, _write)
 
 
-def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None]]:
-    """Return ``(uuid, host, zone_name)`` rows ordered by zone_name. Missing file → empty.
+def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None, str | None]]:
+    """Return ``(uuid, host, zone_name, mac)`` rows ordered by zone_name.
 
-    The UUID (e.g. ``RINCON_…``) is the stable Sonos zone identifier; ``host`` is
+    The UUID (e.g. ``RINCON_…``) is the secondary Sonos zone identifier; ``host`` is
     the last known LAN address (may drift with DHCP) and ``zone_name`` is the
-    user-facing label (e.g. ``"Living Room"``). Cache consumers reconnect with
+    user-facing label (e.g. ``"Living Room"``). ``mac`` is preferred as the UI /
+    prefs canonical key when known. Cache consumers reconnect with
     :func:`soco.SoCo` and verify ``.uid`` matches before trusting the row.
     """
     path = path.expanduser().resolve()
@@ -273,10 +323,11 @@ def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None]]:
         rows = session.scalars(
             select(SonosKnownZone).order_by(func.coalesce(SonosKnownZone.zone_name, SonosKnownZone.uuid))
         ).all()
-        out: list[tuple[str, str, str | None]] = []
+        out: list[tuple[str, str, str | None, str | None]] = []
         for row in rows:
             label = (row.zone_name or "").strip() or None
-            out.append((row.uuid, row.host, label))
+            mac = (getattr(row, "mac", None) or "").strip() or None
+            out.append((row.uuid, row.host, label, mac))
         return out
 
 
@@ -289,6 +340,75 @@ def load_tailwind_host(path: Path) -> str | None:
     with discovery_session(path) as session:
         row = session.get(TailwindLastHost, 1)
         return row.host.strip() if row else None
+
+
+def load_tailwind_host_row(path: Path) -> tuple[str, str | None] | None:
+    """Return ``(host, mac)`` for the cached Tailwind hub, or ``None``."""
+    path = path.expanduser().resolve()
+    if not path.is_file():
+        return None
+    ensure_schema_if_exists(path)
+    with discovery_session(path) as session:
+        row = session.get(TailwindLastHost, 1)
+        if row is None:
+            return None
+        mac = (getattr(row, "mac", None) or "").strip() or None
+        return row.host.strip(), mac
+
+
+def migrate_canonical_key_to_mac(
+    path: Path,
+    *,
+    backend: str,
+    old_key: str,
+    mac: str,
+) -> None:
+    """Rewrite ``ui_preferences`` + ``device_display_names`` from ``old_key`` → ``mac``.
+
+    ``mac`` may be a plain normalized MAC or a compound key (e.g. Tailwind
+    ``{hub_mac}:{door_id}``). Plain MAC strings are normalized; other forms
+    are used as-is after strip.
+
+    When both the old and MAC-keyed rows exist, keep the MAC row's flags /
+    display name (prefer the already-migrated identity) and drop the old key.
+    """
+    old = old_key.strip()
+    normalized = try_normalize_mac(mac)
+    new = normalized if normalized is not None else mac.strip()
+    if not old or not new or old == new:
+        return
+    be = backend.strip()
+
+    def _write(session: Session) -> None:
+        pref_old = session.get(UiPreference, (be, old))
+        pref_new = session.get(UiPreference, (be, new))
+        if pref_old is not None:
+            if pref_new is None:
+                session.add(
+                    UiPreference(
+                        backend=be,
+                        canonical_key=new,
+                        exclude_from_global=pref_old.exclude_from_global,
+                        hide_on_mobile=pref_old.hide_on_mobile,
+                        updated_at=time.time(),
+                    )
+                )
+            session.delete(pref_old)
+        disp_old = session.get(DeviceDisplayName, (be, old))
+        disp_new = session.get(DeviceDisplayName, (be, new))
+        if disp_old is not None:
+            if disp_new is None:
+                session.add(
+                    DeviceDisplayName(
+                        backend=be,
+                        canonical_key=new,
+                        display_name=disp_old.display_name,
+                        updated_at=time.time(),
+                    )
+                )
+            session.delete(disp_old)
+
+    discovery_write(path, _write)
 
 
 def find_vizio_tv_row(
@@ -460,21 +580,26 @@ def upsert_vizio_tv(
     h = host.strip()
     mac_s: str | None = None
     if mac:
-        try:
-            mac_s = normalize_mac(mac.strip())
-        except ValueError:
-            mac_s = None
+        mac_s = try_normalize_mac(mac.strip())
 
     def _write(session: Session) -> None:
+        preserved_diid: str | None = None
+        preserved_label: str | None = None
+        preserved_model: str | None = None
         if mac_s is not None:
             existing = session.scalar(select(VizioKnownTv).where(VizioKnownTv.mac == mac_s))
             if existing is not None and existing.host != h:
+                # Same MAC at a new IP: drop the stale host PK row, but keep
+                # metadata when this call does not re-supply it.
+                preserved_diid = (existing.diid or "").strip() or None
+                preserved_label = (existing.display_name or "").strip() or None
+                preserved_model = (existing.model or "").strip() or None
                 session.delete(existing)
                 session.flush()
         row = session.get(VizioKnownTv, h)
-        label = (display_name or "").strip() or None
-        model_s = (model or "").strip() or None
-        diid_s = (diid or "").strip() or None
+        label = (display_name or "").strip() or preserved_label
+        model_s = (model or "").strip() or preserved_model
+        diid_s = (diid or "").strip() or preserved_diid
         if row is None:
             session.add(
                 VizioKnownTv(
@@ -489,8 +614,10 @@ def upsert_vizio_tv(
             )
         else:
             row.port = port
-            row.display_name = label
-            row.model = model_s
+            if label is not None:
+                row.display_name = label
+            if model_s is not None:
+                row.model = model_s
             if mac_s is not None:
                 row.mac = mac_s
             if diid_s is not None:
