@@ -5,14 +5,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
 from app.api.schemas import RuleConditionsOut, RuleDeviceActionOut, RuleOut
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
+from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
+from app.operator_alerts import operator_alert_store
 from app.rule_actions import (
     RuleActionDispatchError,
     RuleDeviceActionOutcome,
@@ -22,7 +24,6 @@ from app.rule_actions import (
     resolve_kasa_host_by_label,
     send_rule_notification_email,
 )
-from app.operator_alerts import operator_alert_store
 from app.smtp_service import SmtpDeliveryResult
 from app.smtp_store import SmtpConfigRecord
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
@@ -340,6 +341,12 @@ def test_resolve_kasa_host_by_label_raises_on_ambiguous_label() -> None:
     )
     with pytest.raises(RuleActionDispatchError, match="Ambiguous Kasa device"):
         resolve_kasa_host_by_label(mgr, "Garage")
+
+
+def test_resolve_kasa_host_by_label_returns_none_when_not_initialized() -> None:
+    mgr = MagicMock(spec=KasaDeviceManager)
+    type(mgr).switches = PropertyMock(side_effect=NotInitializedError)
+    assert resolve_kasa_host_by_label(cast(KasaDeviceManager, mgr), "Garage") is None
 
 
 def test_send_rule_notification_email_logs_error_when_recipient_missing(

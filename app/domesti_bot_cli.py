@@ -2404,6 +2404,7 @@ async def bootstrap_device_managers(
                 "count": kasa_count,
             }
         except Exception as ex:
+            await kasa_mgr.disconnect()
             return {
                 "slug": slug,
                 "skipped": False,
