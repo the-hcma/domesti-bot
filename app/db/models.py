@@ -209,6 +209,7 @@ class UiPreference(Base):
     backend: Mapped[str] = mapped_column(String, primary_key=True)
     canonical_key: Mapped[str] = mapped_column(String, primary_key=True)
     exclude_from_global: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    hide_on_mobile: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 

@@ -134,7 +134,8 @@ def test_build_tailwind_device_view_reflects_position_and_exclusion(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="door-1", exclude_from_global=True
+        db, backend="tailwind", canonical_key="door-1", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     door = _FakeDoor("door-1", "Left", is_open=True)
     state = _state(tailwind_doors=[door], cache_path=db)
@@ -180,7 +181,8 @@ async def test_bulk_close_tailwind_apply_ignores_exclude_from_global(
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="door-1", exclude_from_global=True
+        db, backend="tailwind", canonical_key="door-1", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     a = _FakeDoor("door-1", "Excluded", is_open=True)
     b = _FakeDoor("door-2", "Normal", is_open=True)
@@ -197,10 +199,12 @@ async def test_bulk_off_global_apply_mixes_kasa_and_tailwind(tmp_path: Path) -> 
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="door-2", exclude_from_global=True
+        db, backend="tailwind", canonical_key="door-2", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True
+        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     state = _state(
         kasa_devices=[

@@ -282,7 +282,8 @@ def test_build_ui_state_sonos_omitted_when_no_zones_discovered() -> None:
 def test_build_ui_state_sonos_honors_exclude_from_global(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="sonos", canonical_key="RINCON_A", exclude_from_global=True
+        db, backend="sonos", canonical_key="RINCON_A", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     state = _state(
         kasa_mgr=_fake_kasa_mgr([]),
@@ -371,7 +372,8 @@ def test_build_ui_state_cache_path_none_means_no_exclusions(tmp_path: Path) -> N
     # Pre-seed a different file (this is *not* what we pass below):
     other_db = tmp_path / "other.sqlite"
     device_discovery_store.upsert_ui_preference(
-        other_db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True
+        other_db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     state = _state(kasa_mgr=_fake_kasa_mgr([("10.0.0.1", "Lamp", True)]))
     out = build_ui_state(state, cache_path=None)
@@ -383,7 +385,8 @@ def test_build_ui_state_excluded_keys_set_exclude_from_global_true(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True
+        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     state = _state(
         kasa_mgr=_fake_kasa_mgr(
@@ -398,6 +401,34 @@ def test_build_ui_state_excluded_keys_set_exclude_from_global_true(
     by_id = {d.id: d for d in out.families[0].devices}
     assert by_id["10.0.0.1"].exclude_from_global is False
     assert by_id["10.0.0.2"].exclude_from_global is True
+    assert by_id["10.0.0.1"].hide_on_mobile is False
+    assert by_id["10.0.0.2"].hide_on_mobile is False
+
+
+def test_build_ui_state_honors_hide_on_mobile(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    device_discovery_store.upsert_ui_preference(
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.2",
+        exclude_from_global=False,
+        hide_on_mobile=True,
+    )
+    state = _state(
+        kasa_mgr=_fake_kasa_mgr(
+            [
+                ("10.0.0.1", "Visible", True),
+                ("10.0.0.2", "Phone-hidden", True),
+            ]
+        ),
+        cache_path=db,
+    )
+    out = build_ui_state(state, cache_path=db)
+    by_id = {d.id: d for d in out.families[0].devices}
+    assert by_id["10.0.0.1"].hide_on_mobile is False
+    assert by_id["10.0.0.2"].hide_on_mobile is True
+    # Still present in the API payload — compact filtering is client-side.
+    assert set(by_id) == {"10.0.0.1", "10.0.0.2"}
 
 
 def test_build_ui_state_exclusions_dont_cross_families(tmp_path: Path) -> None:
@@ -407,7 +438,8 @@ def test_build_ui_state_exclusions_dont_cross_families(tmp_path: Path) -> None:
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="left", exclude_from_global=True
+        db, backend="tailwind", canonical_key="left", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     state = _state(
         kasa_mgr=_fake_kasa_mgr([("left", "Left lamp", True)]),
@@ -423,7 +455,8 @@ def test_build_ui_state_exclusions_dont_cross_families(tmp_path: Path) -> None:
 def test_get_v1_ui_state_returns_payload_when_state_is_set(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="192.168.1.50", exclude_from_global=True
+        db, backend="kasa", canonical_key="192.168.1.50", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     client, app = _client()
     state = _state(
@@ -504,5 +537,6 @@ def test_ui_state_out_is_a_pydantic_model_with_expected_fields() -> None:
         "state",
         "compact_icon",
         "exclude_from_global",
+        "hide_on_mobile",
         "stream_favorites",
     }

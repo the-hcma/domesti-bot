@@ -472,15 +472,19 @@ export const api = {
       credentials,
     );
   },
-  setExclude(
+  setDevicePreferences(
     familyId: string,
     deviceId: string,
     excludeFromGlobal: boolean,
+    hideOnMobile: boolean,
   ): Promise<UIPreferenceOut> {
     return call<UIPreferenceOut>(
       "PUT",
       `/v1/ui/preferences/${encodeURIComponent(familyId)}/${encodeURIComponent(deviceId)}`,
-      { exclude_from_global: excludeFromGlobal },
+      {
+        exclude_from_global: excludeFromGlobal,
+        hide_on_mobile: hideOnMobile,
+      },
     );
   },
   toggleDevice(familyId: string, deviceId: string): Promise<UIDeviceActionOut> {

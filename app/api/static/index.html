@@ -296,9 +296,6 @@
     .tile-toggle:focus-visible { outline: 2px solid var(--fg);
       outline-offset: 2px; }
     .tile-note { font-size: 12px; color: var(--muted); margin: 0; }
-    .tile-exclude { display: flex; align-items: center; gap: 6px;
-      font-size: 12px; color: var(--muted); cursor: pointer; }
-    .tile-exclude input[type="checkbox"] { width: 18px; height: 18px; }
 
     /* Compact tiles are a separate DOM shape — never inherit comfortable ``.tile``
        card chrome (gray fill, family-colored left border). */
@@ -317,30 +314,33 @@
     #app[data-layout="compact"] .tile-compact > .tile-compact-hit {
       grid-area: 1 / 1; min-width: 0; min-height: 0;
     }
-    #app[data-layout="compact"] .tile-compact > .tile-exclude-inset {
-      display: none;
-    }
     .tile-rich { border-radius: 12px; }
-    /* Global-bulk exclude control — checkbox only; ``title`` shows the hint. */
-    .tile-exclude-inset {
-      position: absolute; top: 5px; right: 5px; z-index: 2;
-      display: flex; align-items: center; justify-content: center;
-      margin: 0; padding: 5px; border-radius: 6px; cursor: pointer;
-      opacity: 0.45; background: rgba(0, 0, 0, 0.2);
-      transition: opacity 150ms ease, background 150ms ease;
+    .tile-prefs-badge {
+      position: absolute; top: 6px; right: 6px; z-index: 2;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+      text-transform: uppercase; color: var(--muted);
+      background: rgba(0, 0, 0, 0.28); padding: 2px 6px; border-radius: 4px;
+      pointer-events: none; user-select: none;
     }
-    .tile-compact:hover .tile-exclude-inset,
-    .tile-rich:hover .tile-exclude-inset,
-    .tile-exclude-inset:focus-within,
-    .tile-exclude-inset:has(input:checked) {
-      opacity: 1; background: rgba(0, 0, 0, 0.32);
+    .device-properties-menu {
+      position: fixed; z-index: 10000; min-width: 240px; max-width: min(360px, 92vw);
+      margin: 0; padding: 6px 0; border-radius: 8px;
+      background: var(--panel, #1e1e1e); color: var(--fg, #f5f5f5);
+      border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
     }
-    .tile-exclude-inset input[type="checkbox"] {
-      width: 16px; height: 16px; margin: 0; cursor: pointer;
+    .device-properties-menu-item {
+      display: flex; align-items: flex-start; gap: 10px; width: 100%;
+      margin: 0; padding: 10px 14px; border: none; background: transparent;
+      color: inherit; font: inherit; font-size: 13px; line-height: 1.35;
+      text-align: left; cursor: pointer;
     }
-    #app[data-layout="compact"] .tile-compact-hit[data-tone="unknown"] ~ .tile-exclude-inset,
-    #app[data-layout="comfortable"] .tile-rich-hit[data-tone="unknown"] ~ .tile-exclude-inset {
-      background: rgba(255, 255, 255, 0.35);
+    .device-properties-menu-item:hover,
+    .device-properties-menu-item:focus-visible {
+      background: rgba(255, 255, 255, 0.08); outline: none;
+    }
+    .device-properties-menu-check {
+      flex: 0 0 1.1em; width: 1.1em; text-align: center; opacity: 0.9;
     }
 
     /* Compact mobile layout (``#app[data-layout="compact"]`` from ``main.ts``).
@@ -965,12 +965,6 @@
     .tile-compact-hit:disabled, .tile-rich-hit:disabled, .btn:disabled {
       cursor: not-allowed; opacity: 0.45; filter: grayscale(1);
     }
-    .tile-exclude-inset input[type="checkbox"]:disabled {
-      cursor: not-allowed; opacity: 0.45;
-    }
-    .tile-exclude-inset:has(input:disabled) {
-      cursor: not-allowed; opacity: 0.55;
-    }
 
     /* Shown until ``main.ts`` removes this node; if the module bundle 404s,
        the user still sees why the screen stayed blank. */
@@ -985,7 +979,6 @@
       main { margin: 0; padding: 10px; max-width: none; }
       #app { gap: 10px; }
       #app .family-header .btn { display: none; }
-      #app .tile-compact > .tile-exclude-inset { display: none; }
       #app .tile-grid-compact,
       #app .tile-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1005,7 +998,6 @@
       }
       #app[data-layout="comfortable"] .tile-saturated-label { font-size: 15px; }
       .btn { padding: 10px 16px; min-height: 44px; font-size: 15px; }
-      .tile-exclude-inset input[type="checkbox"] { width: 20px; height: 20px; }
       /* Global header: keep mascot + bulk button on one row (wrap was
          stacking the icon alone above the full-width button). */
       .tile-header:not(.tile-header-sparse) {

@@ -219,9 +219,15 @@ def _door_state(is_open: bool, is_closed: bool) -> str:
 
 
 def _excluded_keys(
-    rows: Iterable[tuple[str, str, bool]], backend: str
+    rows: Iterable[tuple[str, str, bool, bool]], backend: str
 ) -> set[str]:
-    return {key for be, key, exclude in rows if be == backend and exclude}
+    return {key for be, key, exclude, _hide in rows if be == backend and exclude}
+
+
+def _hidden_on_mobile_keys(
+    rows: Iterable[tuple[str, str, bool, bool]], backend: str
+) -> set[str]:
+    return {key for be, key, _exclude, hide in rows if be == backend and hide}
 
 
 def _kasa_hardware_model(kd: KasaDevice) -> str | None:
@@ -235,6 +241,7 @@ def _kasa_hardware_model(kd: KasaDevice) -> str | None:
 def _kasa_devices(
     mgr: KasaDeviceManager,
     excluded: set[str],
+    hidden_on_mobile: set[str],
 ) -> list[UIDeviceOut]:
     """One :class:`UIDeviceOut` per *unique* kasa device (host-deduped).
 
@@ -269,6 +276,7 @@ def _kasa_devices(
                     kasa_model=_kasa_hardware_model(kd),
                 ),
                 exclude_from_global=host in excluded,
+                hide_on_mobile=host in hidden_on_mobile,
             )
         )
     out.sort(key=lambda d: (d.label.lower(), d.id))
@@ -278,6 +286,7 @@ def _kasa_devices(
 def _sonos_devices(
     mgr: SonosDeviceManager,
     excluded: set[str],
+    hidden_on_mobile: set[str],
 ) -> list[UIDeviceOut]:
     """One :class:`UIDeviceOut` per Sonos zone.
 
@@ -304,6 +313,7 @@ def _sonos_devices(
                     kind="speaker",
                 ),
                 exclude_from_global=key in excluded,
+                hide_on_mobile=key in hidden_on_mobile,
                 stream_favorites=_sonos_stream_favorites_out(sp),
             )
         )
@@ -340,6 +350,7 @@ def _vizio_switch_state(tv: VizioTvDevice) -> str:
 def _tailwind_devices(
     mgr: GotailwindDeviceManager,
     excluded: set[str],
+    hidden_on_mobile: set[str],
 ) -> list[UIDeviceOut]:
     """One :class:`UIDeviceOut` per Tailwind door.
 
@@ -366,6 +377,7 @@ def _tailwind_devices(
                     kind="door",
                 ),
                 exclude_from_global=key in excluded,
+                hide_on_mobile=key in hidden_on_mobile,
             )
         )
     out.sort(key=lambda d: (d.label.lower(), d.id))
@@ -375,6 +387,7 @@ def _tailwind_devices(
 def _vizio_devices(
     mgr: VizioDeviceManager,
     excluded: set[str],
+    hidden_on_mobile: set[str],
 ) -> list[UIDeviceOut]:
     """One :class:`UIDeviceOut` per Vizio TV."""
 
@@ -394,6 +407,7 @@ def _vizio_devices(
                     kind="switch",
                 ),
                 exclude_from_global=key in excluded,
+                hide_on_mobile=key in hidden_on_mobile,
             )
         )
     out.sort(key=lambda d: (d.label.lower(), d.id))
@@ -417,13 +431,13 @@ def build_kasa_device_view(
     kd = find_kasa_by_host(mgr, host)
     if kd is None:
         raise KeyError(host)
-    excluded = (
-        _excluded_keys(
-            device_discovery_store.load_ui_preferences(cache_path), "kasa"
-        )
+    pref_rows = (
+        device_discovery_store.load_ui_preferences(cache_path)
         if cache_path is not None
-        else set()
+        else []
     )
+    excluded = _excluded_keys(pref_rows, "kasa")
+    hidden = _hidden_on_mobile_keys(pref_rows, "kasa")
     return UIDeviceOut(
         id=host,
         family_id="kasa",
@@ -437,6 +451,7 @@ def build_kasa_device_view(
             kasa_model=_kasa_hardware_model(kd),
         ),
         exclude_from_global=host in excluded,
+        hide_on_mobile=host in hidden,
     )
 
 
@@ -459,13 +474,13 @@ def build_sonos_device_view(
     sp = find_sonos_by_identifier(mgr, device_id)
     if sp is None:
         raise KeyError(device_id)
-    excluded = (
-        _excluded_keys(
-            device_discovery_store.load_ui_preferences(cache_path), "sonos"
-        )
+    pref_rows = (
+        device_discovery_store.load_ui_preferences(cache_path)
         if cache_path is not None
-        else set()
+        else []
     )
+    excluded = _excluded_keys(pref_rows, "sonos")
+    hidden = _hidden_on_mobile_keys(pref_rows, "sonos")
     return UIDeviceOut(
         id=device_id,
         family_id="sonos",
@@ -478,6 +493,7 @@ def build_sonos_device_view(
             kind="speaker",
         ),
         exclude_from_global=device_id in excluded,
+        hide_on_mobile=device_id in hidden,
         stream_favorites=_sonos_stream_favorites_out(sp),
     )
 
@@ -498,13 +514,13 @@ def build_tailwind_device_view(
     gd = find_tailwind_by_identifier(mgr, device_id)
     if gd is None:
         raise KeyError(device_id)
-    excluded = (
-        _excluded_keys(
-            device_discovery_store.load_ui_preferences(cache_path), "tailwind"
-        )
+    pref_rows = (
+        device_discovery_store.load_ui_preferences(cache_path)
         if cache_path is not None
-        else set()
+        else []
     )
+    excluded = _excluded_keys(pref_rows, "tailwind")
+    hidden = _hidden_on_mobile_keys(pref_rows, "tailwind")
     return UIDeviceOut(
         id=device_id,
         family_id="tailwind",
@@ -517,6 +533,7 @@ def build_tailwind_device_view(
             kind="door",
         ),
         exclude_from_global=device_id in excluded,
+        hide_on_mobile=device_id in hidden,
     )
 
 
@@ -531,13 +548,13 @@ def build_vizio_device_view(
     tv = find_vizio_by_id(mgr, device_id)
     if tv is None:
         raise KeyError(device_id)
-    excluded = (
-        _excluded_keys(
-            device_discovery_store.load_ui_preferences(cache_path), "vizio"
-        )
+    pref_rows = (
+        device_discovery_store.load_ui_preferences(cache_path)
         if cache_path is not None
-        else set()
+        else []
     )
+    excluded = _excluded_keys(pref_rows, "vizio")
+    hidden = _hidden_on_mobile_keys(pref_rows, "vizio")
     return UIDeviceOut(
         id=device_id,
         family_id="vizio",
@@ -550,6 +567,7 @@ def build_vizio_device_view(
             kind="switch",
         ),
         exclude_from_global=device_id in excluded,
+        hide_on_mobile=device_id in hidden,
     )
 
 
@@ -564,7 +582,8 @@ def build_ui_state(
     threaded through the CLI as ``--discovery-cache`` and surfaced on
     ``DeviceManagersState.cache_path``). When ``None`` (e.g.
     ``--no-discovery-cache``), preferences load returns an empty list and
-    every device defaults to ``exclude_from_global=False``.
+    every device defaults to ``exclude_from_global=False`` and
+    ``hide_on_mobile=False``.
 
     Empty families (e.g. user passed ``--no-tailwind`` so
     ``state.tailwind_mgr is None``, or the kasa sweep found nothing) are
@@ -579,14 +598,15 @@ def build_ui_state(
     families: list[UIFamilyOut] = []
     for family_id, label, color in _FAMILIES:
         excluded = _excluded_keys(pref_rows, family_id)
+        hidden = _hidden_on_mobile_keys(pref_rows, family_id)
         if family_id == "kasa":
-            devices = _kasa_devices(state.kasa_mgr, excluded)
+            devices = _kasa_devices(state.kasa_mgr, excluded, hidden)
         elif family_id == "sonos" and state.sonos_mgr is not None:
-            devices = _sonos_devices(state.sonos_mgr, excluded)
+            devices = _sonos_devices(state.sonos_mgr, excluded, hidden)
         elif family_id == "tailwind" and state.tailwind_mgr is not None:
-            devices = _tailwind_devices(state.tailwind_mgr, excluded)
+            devices = _tailwind_devices(state.tailwind_mgr, excluded, hidden)
         elif family_id == "vizio" and state.vizio_mgr is not None:
-            devices = _vizio_devices(state.vizio_mgr, excluded)
+            devices = _vizio_devices(state.vizio_mgr, excluded, hidden)
         else:
             devices = []
         if not devices:

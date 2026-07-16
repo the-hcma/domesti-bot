@@ -119,7 +119,8 @@ def test_build_kasa_device_view_reflects_current_is_on_and_exclusion(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True
+        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     fake = _FakeKasa("10.0.0.1", "Lamp", is_on=False)
     state = _state(kasa_devices=[fake], cache_path=db)
@@ -134,7 +135,8 @@ def test_build_kasa_device_view_reflects_current_is_on_and_exclusion(
 async def test_bulk_off_global_apply_skips_excluded_devices(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True
+        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     a = _FakeKasa("10.0.0.1", "Keep", is_on=True)
     b = _FakeKasa("10.0.0.2", "Excluded", is_on=True)
@@ -171,7 +173,8 @@ async def test_bulk_off_kasa_apply_ignores_exclude_from_global(tmp_path: Path) -
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True
+        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     a = _FakeKasa("10.0.0.1", "Excluded", is_on=True)
     b = _FakeKasa("10.0.0.2", "Normal", is_on=True)
@@ -220,7 +223,8 @@ def test_find_kasa_by_host_returns_match_or_none() -> None:
 def test_post_global_bulk_off_returns_affected_and_skipped(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True
+        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     a = _FakeKasa("10.0.0.1", "Keep", is_on=True)
     b = _FakeKasa("10.0.0.2", "Excluded", is_on=True)
@@ -239,6 +243,31 @@ def test_post_global_bulk_off_returns_affected_and_skipped(tmp_path: Path) -> No
     }
     assert a.is_on is False
     assert b.is_on is True
+
+
+def test_post_global_bulk_off_ignores_hide_on_mobile(tmp_path: Path) -> None:
+    """``hide_on_mobile`` must not change global bulk membership."""
+
+    db = tmp_path / "ui.sqlite"
+    device_discovery_store.upsert_ui_preference(
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.1",
+        exclude_from_global=False,
+        hide_on_mobile=True,
+    )
+    hidden = _FakeKasa("10.0.0.1", "Hidden on phone", is_on=True)
+    client, app = _client()
+    runtime.device_state = _state(kasa_devices=[hidden], cache_path=db)
+    runtime.discovery_error = None
+
+    response = client.post("/v1/ui/global/bulk-off")
+    assert response.status_code == HTTPStatus.OK
+    assert response.json() == {
+        "affected": [{"family_id": "kasa", "device_id": "10.0.0.1"}],
+        "skipped": [],
+    }
+    assert hidden.is_on is False
 
 
 def test_post_kasa_bulk_off_returns_empty_when_every_switch_already_off() -> None:
@@ -290,7 +319,8 @@ def test_post_kasa_toggle_turns_device_off_and_returns_refreshed_view(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=False
+        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=False,
+        hide_on_mobile=False,
     )
     fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
     client, app = _client()
@@ -340,25 +370,32 @@ def test_put_ui_preference_persists_kasa_exclusion(tmp_path: Path) -> None:
 
     r = client.put(
         "/v1/ui/preferences/kasa/10.0.0.1",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert r.status_code == HTTPStatus.OK
     assert r.json() == {
         "family_id": "kasa",
         "device_id": "10.0.0.1",
         "exclude_from_global": True,
+        "hide_on_mobile": False,
     }
     assert device_discovery_store.load_ui_preferences(db) == [
-        ("kasa", "10.0.0.1", True),
+        ("kasa", "10.0.0.1", True, False),
     ]
 
     r = client.put(
         "/v1/ui/preferences/kasa/10.0.0.1",
-        json={"exclude_from_global": False},
+        json={"exclude_from_global": False, "hide_on_mobile": True},
     )
     assert r.status_code == HTTPStatus.OK
+    assert r.json() == {
+        "family_id": "kasa",
+        "device_id": "10.0.0.1",
+        "exclude_from_global": False,
+        "hide_on_mobile": True,
+    }
     assert device_discovery_store.load_ui_preferences(db) == [
-        ("kasa", "10.0.0.1", False),
+        ("kasa", "10.0.0.1", False, True),
     ]
 
 
@@ -372,7 +409,7 @@ def test_put_ui_preference_returns_404_for_unknown_kasa_device(tmp_path: Path) -
     runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/kasa/10.0.0.99",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert r.status_code == HTTPStatus.NOT_FOUND
 
@@ -390,7 +427,7 @@ def test_put_ui_preference_returns_404_for_unknown_tailwind_device(
     runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/tailwind/door-99",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert r.status_code == HTTPStatus.NOT_FOUND
 
@@ -405,7 +442,7 @@ def test_put_ui_preference_returns_400_for_unknown_family(tmp_path: Path) -> Non
     runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/zigbee/whatever",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert r.status_code == HTTPStatus.BAD_REQUEST
     assert "zigbee" in r.json()["detail"]
@@ -420,7 +457,7 @@ def test_put_ui_preference_returns_409_when_no_discovery_cache_configured() -> N
     runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/kasa/10.0.0.1",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert r.status_code == HTTPStatus.CONFLICT
     assert "discovery cache" in r.json()["detail"]
@@ -437,11 +474,11 @@ def test_put_ui_preference_persists_tailwind_exclusion(tmp_path: Path) -> None:
     runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/tailwind/door-1",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert r.status_code == HTTPStatus.OK
     assert device_discovery_store.load_ui_preferences(db) == [
-        ("tailwind", "door-1", True),
+        ("tailwind", "door-1", True, False),
     ]
 
 
@@ -456,7 +493,11 @@ def test_action_endpoints_return_503_while_discovery_in_progress() -> None:
         ("POST", "/v1/ui/global/bulk-off", {}),
         ("POST", "/v1/ui/kasa/bulk-off", {}),
         ("POST", "/v1/ui/kasa/devices/10.0.0.1/toggle", {"on": True}),
-        ("PUT", "/v1/ui/preferences/kasa/10.0.0.1", {"exclude_from_global": True}),
+        (
+            "PUT",
+            "/v1/ui/preferences/kasa/10.0.0.1",
+            {"exclude_from_global": True, "hide_on_mobile": False},
+        ),
     ]
     for method, path, body in bodies:
         r = client.request(method, path, json=body)

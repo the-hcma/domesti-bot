@@ -110,7 +110,8 @@ def test_global_bulk_off_emits_ui_action_log(
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True
+        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     a = _FakeKasa("10.0.0.1", "Keep", is_on=True)
     b = _FakeKasa("10.0.0.2", "Excluded", is_on=True)

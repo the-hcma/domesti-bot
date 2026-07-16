@@ -104,6 +104,10 @@ class UIDeviceOut(BaseModel):
       ``False`` (the default) means a global "turn off all" / "close all"
       action will operate on this device; ``True`` means it is skipped.
       Family-level bulk actions ignore this flag.
+    * ``hide_on_mobile``: from the ``ui_preferences`` SQLite table.
+      ``True`` means the compact (phone / tablet) layout should omit the
+      tile client-side; the comfortable desktop layout still shows full
+      controls. Bulk actions ignore this flag.
     * ``compact_icon``: stable key for compact mobile tile SVGs (``bulb``,
       ``outlet``, ``garage``, ``speaker``, …). Resolved server-side from
       label and, for Kasa, hardware model — not from TP-Link app rooms.
@@ -121,6 +125,10 @@ class UIDeviceOut(BaseModel):
     exclude_from_global: bool = Field(
         default=False,
         description="True → skip this device on global turn-off/close-all.",
+    )
+    hide_on_mobile: bool = Field(
+        default=False,
+        description="True → omit this tile on the compact (phone / tablet) layout.",
     )
     stream_favorites: list[UISonosStreamFavoriteOut] = Field(
         default_factory=list,
@@ -255,6 +263,13 @@ class UIPreferenceIn(BaseModel):
         ...,
         description="``True`` excludes the device from any future global bulk action.",
     )
+    hide_on_mobile: bool = Field(
+        ...,
+        description=(
+            "``True`` hides the tile on the compact (phone / tablet) layout; "
+            "the comfortable desktop layout still shows it."
+        ),
+    )
 
 
 class UIPreferenceOut(BaseModel):
@@ -263,6 +278,7 @@ class UIPreferenceOut(BaseModel):
     family_id: str
     device_id: str
     exclude_from_global: bool
+    hide_on_mobile: bool
 
 
 class SmtpConfigIn(BaseModel):
