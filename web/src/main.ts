@@ -29,6 +29,16 @@ const COMPACT_LABEL_FONT_MAX_PX = 30;
 const COMPACT_BULK_FONT_MIN_PX = 11;
 const COMPACT_BULK_FONT_MAX_PX = 18;
 
+const DEVICE_PROPERTIES_EXCLUDE_HELP =
+  "Skip this device when using the global Turn off / pause / close everything control. Family bulk buttons and this tile's own toggle still work.";
+const DEVICE_PROPERTIES_EXCLUDE_LABEL =
+  "Exclude from Turn off / Pause / Close everything";
+const DEVICE_PROPERTIES_HIDE_HELP =
+  "Hide this tile on the compact (phone / tablet) layout. It remains visible and controllable on the desktop web UI.";
+const DEVICE_PROPERTIES_HIDE_LABEL = "Hide on phone / tablet";
+const DEVICE_PROPERTIES_LABEL_HINT = "Right-click to edit device properties";
+const DEVICE_PROPERTIES_LONG_PRESS_MS = 500;
+
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
 
@@ -479,16 +489,25 @@ class DomestiBotController {
     });
   }
 
-  private async onSetExclude(
+  private async onSetDevicePreferences(
     device: UIDeviceOut,
     excludeFromGlobal: boolean,
+    hideOnMobile: boolean,
   ): Promise<void> {
     device.exclude_from_global = excludeFromGlobal;
+    device.hide_on_mobile = hideOnMobile;
     await this.runActionNowOrBuffer(async () => {
       try {
-        await api.setExclude(device.family_id, device.id, excludeFromGlobal);
+        await api.setDevicePreferences(
+          device.family_id,
+          device.id,
+          excludeFromGlobal,
+          hideOnMobile,
+        );
         await this.refresh();
       } catch (err) {
+        device.exclude_from_global = !excludeFromGlobal;
+        device.hide_on_mobile = !hideOnMobile;
         this.renderError(
           `Failed to update preference for ${device.label}`,
           err,
@@ -1009,16 +1028,20 @@ class DomestiBotController {
     });
   }
 
-  toggleDeviceTile(device: UIDeviceOut): void {
-    void this.onToggleDevice(device);
-  }
-
   bulkActionFamilyTile(familyId: string): void {
     void this.onBulkOffFamily(familyId);
   }
 
-  setExcludeTile(device: UIDeviceOut, excludeFromGlobal: boolean): void {
-    void this.onSetExclude(device, excludeFromGlobal);
+  setDevicePreferencesTile(
+    device: UIDeviceOut,
+    excludeFromGlobal: boolean,
+    hideOnMobile: boolean,
+  ): void {
+    void this.onSetDevicePreferences(device, excludeFromGlobal, hideOnMobile);
+  }
+
+  toggleDeviceTile(device: UIDeviceOut): void {
+    void this.onToggleDevice(device);
   }
 }
 
@@ -1841,6 +1864,7 @@ function appendSaturatedTileVisuals(
   const label = document.createElement("span");
   label.className = "tile-saturated-label";
   label.textContent = device.label;
+  label.title = DEVICE_PROPERTIES_LABEL_HINT;
 
   const stateCaption = compactHalfLayout ? null : tileStateCaption(device);
   const stateEl =
@@ -1872,9 +1896,65 @@ function attachTileHitListeners(
   device: UIDeviceOut,
   controller: DomestiBotController,
 ): void {
-  hit.addEventListener("click", () => {
+  let longPressTimer: number | null = null;
+  let suppressClick = false;
+  let startX = 0;
+  let startY = 0;
+
+  const clearLongPress = (): void => {
+    if (longPressTimer !== null) {
+      window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  };
+
+  hit.addEventListener("click", (ev) => {
+    if (suppressClick) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      suppressClick = false;
+      return;
+    }
     controller.toggleDeviceTile(device);
   });
+
+  hit.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openDevicePropertiesMenu(device, controller, ev.clientX, ev.clientY);
+  });
+
+  hit.addEventListener("pointerdown", (ev) => {
+    if (ev.pointerType === "mouse" && ev.button !== 0) {
+      return;
+    }
+    // Start each gesture clean so a prior long-press that never got a
+    // click (pointercancel / lift-off) cannot permanently swallow taps.
+    suppressClick = false;
+    startX = ev.clientX;
+    startY = ev.clientY;
+    clearLongPress();
+    longPressTimer = window.setTimeout(() => {
+      longPressTimer = null;
+      suppressClick = true;
+      openDevicePropertiesMenu(device, controller, startX, startY);
+    }, DEVICE_PROPERTIES_LONG_PRESS_MS);
+  });
+
+  hit.addEventListener("pointermove", (ev) => {
+    if (longPressTimer === null) {
+      return;
+    }
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    if (dx * dx + dy * dy > 100) {
+      clearLongPress();
+    }
+  });
+
+  hit.addEventListener("pointerup", clearLongPress);
+  hit.addEventListener("pointercancel", clearLongPress);
+  hit.addEventListener("pointerleave", clearLongPress);
 }
 
 function compactTileAriaLabel(device: UIDeviceOut): string {
@@ -2089,41 +2169,54 @@ function warmCompactTileIcons(state: UIStateOut): void {
   }
 }
 
-function excludeHintForDevice(device: UIDeviceOut): string {
-  if (device.kind === "switch") {
-    return "Exclude from all-off";
-  }
-  if (device.kind === "speaker") {
-    return "Exclude from pause-all";
-  }
-  return "Exclude from close-all";
+function closeDevicePropertiesMenu(): void {
+  document.getElementById("device-properties-menu")?.remove();
 }
 
-function createTileExcludeInset(
-  device: UIDeviceOut,
-  controller: DomestiBotController,
-  connected: boolean,
-): HTMLLabelElement {
-  const hint = excludeHintForDevice(device);
-  const label = document.createElement("label");
-  label.className = "tile-exclude-inset";
-  label.title = hint;
-  label.setAttribute("aria-label", hint);
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = device.exclude_from_global;
-  checkbox.disabled = !connected;
-  checkbox.addEventListener("click", (ev) => {
+function createDevicePropertiesMenuItem(
+  label: string,
+  help: string,
+  checked: boolean,
+  onToggle: () => void,
+): HTMLButtonElement {
+  const item = document.createElement("button");
+  item.type = "button";
+  item.className = "device-properties-menu-item";
+  item.setAttribute("role", "menuitemcheckbox");
+  item.setAttribute("aria-checked", checked ? "true" : "false");
+  item.title = help;
+  const mark = document.createElement("span");
+  mark.className = "device-properties-menu-check";
+  mark.textContent = checked ? "✓" : "";
+  mark.setAttribute("aria-hidden", "true");
+  const text = document.createElement("span");
+  text.textContent = label;
+  item.append(mark, text);
+  item.addEventListener("click", (ev) => {
+    ev.preventDefault();
     ev.stopPropagation();
+    closeDevicePropertiesMenu();
+    onToggle();
   });
-  checkbox.addEventListener("change", () => {
-    controller.setExcludeTile(device, checkbox.checked);
-  });
-  label.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-  });
-  label.append(checkbox);
-  return label;
+  return item;
+}
+
+function createTilePrefsBadge(device: UIDeviceOut): HTMLSpanElement | null {
+  if (!device.exclude_from_global && !device.hide_on_mobile) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (device.exclude_from_global) {
+    parts.push("excluded from bulk");
+  }
+  if (device.hide_on_mobile) {
+    parts.push("hidden on phone / tablet");
+  }
+  const badge = document.createElement("span");
+  badge.className = "tile-prefs-badge";
+  badge.textContent = "prefs";
+  badge.title = parts.join("; ");
+  return badge;
 }
 
 function createTileSaturatedHit(
@@ -2178,6 +2271,79 @@ function isMobileFormFactor(): boolean {
   return window.matchMedia(COMPACT_LAYOUT_MQ).matches;
 }
 
+function openDevicePropertiesMenu(
+  device: UIDeviceOut,
+  controller: DomestiBotController,
+  clientX: number,
+  clientY: number,
+): void {
+  closeDevicePropertiesMenu();
+  const menu = document.createElement("div");
+  menu.id = "device-properties-menu";
+  menu.className = "device-properties-menu";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "Device properties");
+  menu.append(
+    createDevicePropertiesMenuItem(
+      DEVICE_PROPERTIES_EXCLUDE_LABEL,
+      DEVICE_PROPERTIES_EXCLUDE_HELP,
+      device.exclude_from_global,
+      () => {
+        controller.setDevicePreferencesTile(
+          device,
+          !device.exclude_from_global,
+          device.hide_on_mobile,
+        );
+      },
+    ),
+    createDevicePropertiesMenuItem(
+      DEVICE_PROPERTIES_HIDE_LABEL,
+      DEVICE_PROPERTIES_HIDE_HELP,
+      device.hide_on_mobile,
+      () => {
+        controller.setDevicePreferencesTile(
+          device,
+          device.exclude_from_global,
+          !device.hide_on_mobile,
+        );
+      },
+    ),
+  );
+  document.body.append(menu);
+  const pad = 8;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(
+    Math.max(pad, clientX),
+    window.innerWidth - rect.width - pad,
+  );
+  const top = Math.min(
+    Math.max(pad, clientY),
+    window.innerHeight - rect.height - pad,
+  );
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+
+  const dismiss = (ev: Event): void => {
+    if (ev.target instanceof Node && menu.contains(ev.target)) {
+      return;
+    }
+    closeDevicePropertiesMenu();
+    window.removeEventListener("pointerdown", dismiss, true);
+    window.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (ev: KeyboardEvent): void => {
+    if (ev.key === "Escape") {
+      closeDevicePropertiesMenu();
+      window.removeEventListener("pointerdown", dismiss, true);
+      window.removeEventListener("keydown", onKey, true);
+    }
+  };
+  window.setTimeout(() => {
+    window.addEventListener("pointerdown", dismiss, true);
+    window.addEventListener("keydown", onKey, true);
+  }, 0);
+}
+
 function renderDevice(
   device: UIDeviceOut,
   controller: DomestiBotController,
@@ -2200,10 +2366,11 @@ function renderDeviceComfortable(
   tile.dataset["deviceId"] = device.id;
   tile.dataset["state"] = device.state;
 
-  tile.append(
-    createTileSaturatedHit(device, controller, connected, "tile-rich-hit"),
-    createTileExcludeInset(device, controller, connected),
-  );
+  tile.append(createTileSaturatedHit(device, controller, connected, "tile-rich-hit"));
+  const badge = createTilePrefsBadge(device);
+  if (badge !== null) {
+    tile.append(badge);
+  }
   return tile;
 }
 
@@ -2280,7 +2447,11 @@ function renderFamily(
   grid.className = isMobileFormFactor()
     ? "tile-grid tile-grid-compact"
     : "tile-grid";
+  const compact = isMobileFormFactor();
   for (const device of family.devices) {
+    if (compact && device.hide_on_mobile) {
+      continue;
+    }
     grid.append(renderDevice(device, controller, controlsEnabled));
   }
   section.append(grid);

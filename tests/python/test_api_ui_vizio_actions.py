@@ -139,11 +139,11 @@ def test_vizio_preference_route_accepts_vizio_family(tmp_path: Path) -> None:
     runtime.device_state = state
     response = client.put(
         "/v1/ui/preferences/vizio/192.168.1.10",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert response.status_code == HTTPStatus.OK
     rows = device_discovery_store.load_ui_preferences(db)
-    assert ("vizio", "192.168.1.10", True) in rows
+    assert ("vizio", "192.168.1.10", True, False) in rows
 
 
 def test_build_vizio_device_view_reflects_exclusion(tmp_path: Path) -> None:
@@ -153,6 +153,7 @@ def test_build_vizio_device_view_reflects_exclusion(tmp_path: Path) -> None:
         backend="vizio",
         canonical_key="192.168.1.10",
         exclude_from_global=True,
+        hide_on_mobile=True,
     )
     tv = _FakeVizioTv("192.168.1.10", "Kitchen TV", is_on=True)
     state = _state(vizio_tvs=[tv], cache_path=db)
@@ -163,4 +164,5 @@ def test_build_vizio_device_view_reflects_exclusion(tmp_path: Path) -> None:
         cache_path=db,
     )
     assert view.exclude_from_global is True
+    assert view.hide_on_mobile is True
     assert view.compact_icon == "tv"

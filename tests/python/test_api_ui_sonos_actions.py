@@ -160,7 +160,8 @@ def test_build_sonos_device_view_reflects_is_playing_and_exclusion(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="sonos", canonical_key="RINCON_AAAA", exclude_from_global=True
+        db, backend="sonos", canonical_key="RINCON_AAAA", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     zone = _FakeSonosZone("RINCON_AAAA", "Kitchen", is_playing=False)
     state = _state(sonos_zones=[zone], cache_path=db)
@@ -240,7 +241,8 @@ async def test_bulk_off_global_apply_pauses_sonos_alongside_kasa(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="sonos", canonical_key="RINCON_B", exclude_from_global=True
+        db, backend="sonos", canonical_key="RINCON_B", exclude_from_global=True,
+        hide_on_mobile=False,
     )
     kasa = _FakeKasa("10.0.0.1", "Lamp", is_on=True)
     a = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
@@ -302,7 +304,8 @@ def test_post_sonos_toggle_pauses_zone_and_returns_refreshed_view(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="sonos", canonical_key="RINCON_A", exclude_from_global=False
+        db, backend="sonos", canonical_key="RINCON_A", exclude_from_global=False,
+        hide_on_mobile=False,
     )
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
     client, app = _client()
@@ -436,16 +439,17 @@ def test_put_ui_preference_persists_sonos_exclusion(tmp_path: Path) -> None:
     runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/sonos/RINCON_A",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert r.status_code == HTTPStatus.OK
     assert r.json() == {
         "family_id": "sonos",
         "device_id": "RINCON_A",
         "exclude_from_global": True,
+        "hide_on_mobile": False,
     }
     assert device_discovery_store.load_ui_preferences(db) == [
-        ("sonos", "RINCON_A", True),
+        ("sonos", "RINCON_A", True, False),
     ]
 
 
@@ -457,7 +461,7 @@ def test_put_ui_preference_returns_404_for_unknown_sonos_zone(tmp_path: Path) ->
     runtime.discovery_error = None
     r = client.put(
         "/v1/ui/preferences/sonos/RINCON_ZZZZ",
-        json={"exclude_from_global": True},
+        json={"exclude_from_global": True, "hide_on_mobile": False},
     )
     assert r.status_code == HTTPStatus.NOT_FOUND
     assert "RINCON_ZZZZ" in r.json()["detail"]

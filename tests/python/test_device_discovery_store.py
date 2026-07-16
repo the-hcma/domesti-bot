@@ -262,10 +262,14 @@ def test_sonos_zones_save_drops_empty_uuid_or_host(tmp_path: Path) -> None:
 def test_ui_preferences_delete_removes_row(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="192.168.1.50", exclude_from_global=True
+        db,
+        backend="kasa",
+        canonical_key="192.168.1.50",
+        exclude_from_global=True,
+        hide_on_mobile=False,
     )
     assert device_discovery_store.load_ui_preferences(db) == [
-        ("kasa", "192.168.1.50", True),
+        ("kasa", "192.168.1.50", True, False),
     ]
     device_discovery_store.delete_ui_preference(
         db, backend="kasa", canonical_key="192.168.1.50"
@@ -278,15 +282,56 @@ def test_ui_preferences_distinct_backends_dont_collide(tmp_path: Path) -> None:
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="left", exclude_from_global=True
+        db,
+        backend="kasa",
+        canonical_key="left",
+        exclude_from_global=True,
+        hide_on_mobile=False,
     )
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="left", exclude_from_global=False
+        db,
+        backend="tailwind",
+        canonical_key="left",
+        exclude_from_global=False,
+        hide_on_mobile=True,
     )
     rows = device_discovery_store.load_ui_preferences(db)
     assert rows == [
-        ("kasa", "left", True),
-        ("tailwind", "left", False),
+        ("kasa", "left", True, False),
+        ("tailwind", "left", False, True),
+    ]
+
+
+def test_ui_preferences_hide_on_mobile_round_trip(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    device_discovery_store.upsert_ui_preference(
+        db,
+        backend="kasa",
+        canonical_key="k1",
+        exclude_from_global=False,
+        hide_on_mobile=True,
+    )
+    rows = device_discovery_store.load_ui_preferences(db)
+    assert rows == [("kasa", "k1", False, True)]
+    assert type(rows[0][3]) is bool
+
+
+def test_migrate_vizio_ui_preference_key_preserves_both_flags(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    device_discovery_store.upsert_ui_preference(
+        db,
+        backend="vizio",
+        canonical_key="192.168.1.10",
+        exclude_from_global=True,
+        hide_on_mobile=True,
+    )
+    device_discovery_store.migrate_vizio_ui_preference_key(
+        db,
+        old_key="192.168.1.10",
+        new_key="aa:bb:cc:dd:ee:ff",
+    )
+    assert device_discovery_store.load_ui_preferences(db) == [
+        ("vizio", "aa:bb:cc:dd:ee:ff", True, True),
     ]
 
 
@@ -304,13 +349,18 @@ def test_ui_preferences_load_returns_python_bool_not_int(tmp_path: Path) -> None
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="k1", exclude_from_global=True
+        db,
+        backend="kasa",
+        canonical_key="k1",
+        exclude_from_global=True,
+        hide_on_mobile=True,
     )
     rows = device_discovery_store.load_ui_preferences(db)
-    assert rows == [("kasa", "k1", True)]
+    assert rows == [("kasa", "k1", True, True)]
     # ``isinstance(True, int)`` is True in Python (bool subclasses int), so
     # ``isinstance(..., bool)`` alone isn't enough; assert the exact type.
     assert type(rows[0][2]) is bool
+    assert type(rows[0][3]) is bool
 
 
 def test_ui_preferences_orders_by_backend_then_key(tmp_path: Path) -> None:
@@ -322,27 +372,43 @@ def test_ui_preferences_orders_by_backend_then_key(tmp_path: Path) -> None:
         ("tailwind", "garage-1"),
     ]:
         device_discovery_store.upsert_ui_preference(
-            db, backend=backend, canonical_key=key, exclude_from_global=False
+            db,
+            backend=backend,
+            canonical_key=key,
+            exclude_from_global=False,
+            hide_on_mobile=False,
         )
     rows = device_discovery_store.load_ui_preferences(db)
     assert rows == [
-        ("kasa", "192.168.1.10", False),
-        ("kasa", "192.168.1.50", False),
-        ("tailwind", "garage-1", False),
-        ("tailwind", "garage-2", False),
+        ("kasa", "192.168.1.10", False, False),
+        ("kasa", "192.168.1.50", False, False),
+        ("tailwind", "garage-1", False, False),
+        ("tailwind", "garage-2", False, False),
     ]
 
 
 def test_ui_preferences_upsert_overwrites_previous_value(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="k", exclude_from_global=True
+        db,
+        backend="kasa",
+        canonical_key="k",
+        exclude_from_global=True,
+        hide_on_mobile=True,
     )
-    assert device_discovery_store.load_ui_preferences(db) == [("kasa", "k", True)]
+    assert device_discovery_store.load_ui_preferences(db) == [
+        ("kasa", "k", True, True),
+    ]
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="k", exclude_from_global=False
+        db,
+        backend="kasa",
+        canonical_key="k",
+        exclude_from_global=False,
+        hide_on_mobile=False,
     )
-    assert device_discovery_store.load_ui_preferences(db) == [("kasa", "k", False)]
+    assert device_discovery_store.load_ui_preferences(db) == [
+        ("kasa", "k", False, False),
+    ]
 
 
 def test_ui_preferences_upsert_load_round_trip_default_false(tmp_path: Path) -> None:
@@ -352,6 +418,7 @@ def test_ui_preferences_upsert_load_round_trip_default_false(tmp_path: Path) -> 
         backend="kasa",
         canonical_key="192.168.1.42",
         exclude_from_global=False,
+        hide_on_mobile=False,
     )
     rows = device_discovery_store.load_ui_preferences(db)
-    assert rows == [("kasa", "192.168.1.42", False)]
+    assert rows == [("kasa", "192.168.1.42", False, False)]

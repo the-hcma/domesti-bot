@@ -48,6 +48,7 @@ export interface UIDeviceOut {
   /** Server-resolved compact-tile SVG key (bulb, outlet, garage, speaker, …). */
   compact_icon: string;
   exclude_from_global: boolean;
+  hide_on_mobile: boolean;
   /** Configured radio streams for Sonos zones (empty for other families). */
   stream_favorites: UISonosStreamFavoriteOut[];
 }
@@ -93,6 +94,7 @@ export interface UIPreferenceOut {
   family_id: string;
   device_id: string;
   exclude_from_global: boolean;
+  hide_on_mobile: boolean;
 }
 
 export type KasaCredentialsSource = "env" | "database" | "none";

@@ -341,22 +341,25 @@ def migrate_vizio_ui_preference_key(
     new = new_key.strip()
     if not old or not new or old == new:
         return
-    def _write(session: Session) -> bool | None:
+    def _write(session: Session) -> tuple[bool, bool] | None:
         row = session.get(UiPreference, ("vizio", old))
         if row is None:
             return None
         exclude = bool(row.exclude_from_global)
+        hide = bool(row.hide_on_mobile)
         session.delete(row)
-        return exclude
+        return (exclude, hide)
 
-    exclude = discovery_write(path, _write)
-    if exclude is None:
+    flags = discovery_write(path, _write)
+    if flags is None:
         return
+    exclude, hide = flags
     upsert_ui_preference(
         path,
         backend="vizio",
         canonical_key=new,
         exclude_from_global=exclude,
+        hide_on_mobile=hide,
     )
 
 
@@ -382,8 +385,8 @@ def load_vizio_tvs(
         return out
 
 
-def load_ui_preferences(path: Path) -> list[tuple[str, str, bool]]:
-    """Return ``(backend, canonical_key, exclude_from_global)`` rows.
+def load_ui_preferences(path: Path) -> list[tuple[str, str, bool, bool]]:
+    """Return ``(backend, canonical_key, exclude_from_global, hide_on_mobile)`` rows.
 
     Backend strings mirror :func:`load_display_names`: ``kasa``, ``tailwind``,
     ``androidtv``, ``sonos``. Missing file → empty list.
@@ -392,6 +395,10 @@ def load_ui_preferences(path: Path) -> list[tuple[str, str, bool]]:
     all" action must skip this device. Per-device toggles still operate on
     excluded devices; family-level bulks may also still operate on them
     (callers decide; see :mod:`app.api.app` once the tile UI lands).
+
+    ``hide_on_mobile`` means the compact (phone / tablet) layout should omit
+    the tile client-side; the device remains in ``/v1/ui/state`` and is fully
+    controllable on the comfortable desktop layout. Bulk actions ignore it.
     """
     path = path.expanduser().resolve()
     if not path.is_file():
@@ -403,7 +410,15 @@ def load_ui_preferences(path: Path) -> list[tuple[str, str, bool]]:
                 UiPreference.backend, UiPreference.canonical_key
             )
         ).all()
-        return [(row.backend, row.canonical_key, bool(row.exclude_from_global)) for row in rows]
+        return [
+            (
+                row.backend,
+                row.canonical_key,
+                bool(row.exclude_from_global),
+                bool(row.hide_on_mobile),
+            )
+            for row in rows
+        ]
 
 
 def load_display_names(path: Path) -> list[tuple[str, str, str]]:
@@ -513,6 +528,7 @@ def upsert_ui_preference(
     backend: str,
     canonical_key: str,
     exclude_from_global: bool,
+    hide_on_mobile: bool,
 ) -> None:
     """Insert or replace one ``(backend, canonical_key)`` UI preference row.
 
@@ -530,11 +546,13 @@ def upsert_ui_preference(
                     backend=b,
                     canonical_key=k,
                     exclude_from_global=1 if exclude_from_global else 0,
+                    hide_on_mobile=1 if hide_on_mobile else 0,
                     updated_at=now,
                 )
             )
         else:
             row.exclude_from_global = 1 if exclude_from_global else 0
+            row.hide_on_mobile = 1 if hide_on_mobile else 0
             row.updated_at = now
 
 
@@ -556,9 +574,9 @@ def delete_display_name(path: Path, *, backend: str, canonical_key: str) -> None
 def delete_ui_preference(path: Path, *, backend: str, canonical_key: str) -> None:
     """Forget a per-device UI preference row.
 
-    Equivalent to a tile reverting to defaults (``exclude_from_global=False``).
-    Used by future tile-management endpoints; not exercised by the current
-    landing page.
+    Equivalent to a tile reverting to defaults (``exclude_from_global=False``,
+    ``hide_on_mobile=False``). Used by future tile-management endpoints; not
+    exercised by the current landing page.
     """
     def _write(session: Session) -> None:
         row = session.get(UiPreference, (backend.strip(), canonical_key.strip()))

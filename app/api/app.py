@@ -590,8 +590,7 @@ def create_app(args: Any) -> FastAPI:
                 detail=(
                     "Per-device UI preferences cannot be persisted: server "
                     "started with --no-discovery-cache. Restart with a "
-                    "discovery cache path to enable the exclude-from-global "
-                    "checkbox."
+                    "discovery cache path to enable device property edits."
                 ),
             )
         if family_id == "kasa" and find_kasa_by_host(state.kasa_mgr, device_id) is None:
@@ -636,11 +635,13 @@ def create_app(args: Any) -> FastAPI:
             backend=family_id,
             canonical_key=device_id,
             exclude_from_global=body.exclude_from_global,
+            hide_on_mobile=body.hide_on_mobile,
         )
         return UIPreferenceOut(
             family_id=family_id,
             device_id=device_id,
             exclude_from_global=body.exclude_from_global,
+            hide_on_mobile=body.hide_on_mobile,
         )
 
     @app.post(
