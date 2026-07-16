@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.api.schemas import VacationModeSettingsOut
 from app.db.engine import dispose_engine
 from app.db.schema import clear_bootstrap_cache
@@ -477,9 +479,44 @@ def test_send_vacation_mode_transition_email_uses_smtp_stack(tmp_path: Path) -> 
     assert "80 km (≈ 50 mi)" in body
     assert "30 minutes" in body
     assert "House (37.774900, -122.419400)" in body
+    assert "Open Automations → Vacation in domesti-bot" in body
     assert "Sent by: domesti-bot · Vacation mode (automatic)" in body
     alerts.clear_smtp_notification_failure.assert_called_once()
     dispose_engine(db)
+
+
+def test_build_vacation_mode_transition_bodies_includes_deep_link(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_PUBLIC_BASE_URL", "https://domesti.example.com")
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=1800.0,
+        min_distance_m=80_000.0,
+        notification_emails=["ops@example.com"],
+        user_ids=["a"],
+    )
+    home = MagicMock()
+    home.home_label = "Home"
+    home.lat = 1.0
+    home.lon = 2.0
+    with (
+        patch("app.vacation_mode.try_resolve_home_location", return_value=home),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+    ):
+        plain, html = build_vacation_mode_transition_bodies(
+            armed=True,
+            settings=settings,
+            source=VacationEmailSource.LATCH,
+            cache_path=tmp_path / "cache.sqlite",
+        )
+    assert (
+        "Open Automations → Vacation: "
+        "https://domesti.example.com/#/automations/vacation" in plain
+    )
+    assert "Instance: https://domesti.example.com" in plain
+    assert 'href="https://domesti.example.com/#/automations/vacation"' in html
 
 
 def test_send_vacation_mode_test_email_marks_subject_and_body(tmp_path: Path) -> None:
@@ -556,6 +593,7 @@ def test_build_vacation_mode_transition_bodies_humanizes_duration() -> None:
     assert "Home (1.000000, 2.000000)" in plain
     assert "Sent by: domesti-bot · Vacation mode (automatic)" in plain
     assert "<ul>" in html
+    assert "Open Automations → Vacation in domesti-bot" in plain
 
 
 def test_format_vacation_home_label_survives_settings_load_error() -> None:

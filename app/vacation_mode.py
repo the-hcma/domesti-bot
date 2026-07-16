@@ -42,6 +42,15 @@ from app.device_enums import DeviceFamilyId, VacationEmailSource
 from app.expected_device_change import consume_expected_device_change
 from app.home_location import try_resolve_home_location
 from app.operator_alerts import operator_alert_store
+from app.outbound_email import (
+    append_provenance_footer,
+    automations_vacation_url,
+    domesti_public_base_url,
+    format_ui_link_html,
+    format_ui_link_plain,
+    provenance_footer,
+)
+from app.presence_store import _haversine_m, list_user_locations
 from app.rule_conditions import (
     RuleEvaluationContext,
     users_any_inside_home_geofence,
@@ -91,6 +100,7 @@ def build_vacation_mode_anomaly_bodies(
     current: bool | None,
     observed_at: datetime,
     source: VacationEmailSource = VacationEmailSource.ANOMALY,
+    cache_path: Path | None = None,
 ) -> tuple[str, str]:
     """Return ``(plain_text, html)`` bodies for a vacation device-anomaly email."""
     family_label = family_id.display_name()
@@ -115,8 +125,7 @@ def build_vacation_mode_anomaly_bodies(
         plain_parts.append(VACATION_SETTINGS_TEST_PREAMBLE)
         plain_parts.append(VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER)
         plain_parts.append("")
-    plain_parts.extend([headline, "", why, "", *facts, "", "—", provenance])
-    plain_body = "\n".join(plain_parts) + "\n"
+    plain_parts.extend([headline, "", why, "", *facts])
     html_parts: list[str] = []
     if is_test:
         html_parts.append(
@@ -130,10 +139,11 @@ def build_vacation_mode_anomaly_bodies(
             "<ul>",
             *[f"<li>{escape(fact, quote=False)}</li>" for fact in facts],
             "</ul>",
-            f"<p><em>{escape(provenance, quote=False)}</em></p>",
         ],
     )
-    return plain_body, "".join(html_parts)
+    _append_vacation_ui_link(plain_parts, html_parts, cache_path=cache_path)
+    append_provenance_footer(plain_parts, html_parts, provenance=provenance)
+    return "\n".join(plain_parts) + "\n", "".join(html_parts)
 
 
 def build_vacation_mode_transition_bodies(
@@ -141,6 +151,7 @@ def build_vacation_mode_transition_bodies(
     armed: bool,
     settings: VacationModeSettingsOut,
     source: VacationEmailSource,
+    cache_path: Path | None = None,
 ) -> tuple[str, str]:
     """Return ``(plain_text, html)`` bodies for a vacation on/off notification."""
     users_label = _format_vacation_user_ids(settings.user_ids)
@@ -160,6 +171,10 @@ def build_vacation_mode_transition_bodies(
             f"Distance from home: {distance_label}",
             f"Wait before turning on: {wait_label}",
             f"Home: {home_label}",
+            *_vacation_observed_distance_facts(
+                cache_path=cache_path,
+                user_ids=settings.user_ids,
+            ),
         ]
     else:
         headline = "Vacation mode is now off."
@@ -171,6 +186,10 @@ def build_vacation_mode_transition_bodies(
             f"People: {users_label}",
             f"Disarm: home geofence arrival",
             f"Home: {home_label}",
+            *_vacation_observed_distance_facts(
+                cache_path=cache_path,
+                user_ids=settings.user_ids,
+            ),
         ]
 
     provenance = _provenance_footer(source)
@@ -185,10 +204,6 @@ def build_vacation_mode_transition_bodies(
     plain_parts.append(why)
     plain_parts.append("")
     plain_parts.extend(facts)
-    plain_parts.append("")
-    plain_parts.append("—")
-    plain_parts.append(provenance)
-    plain_body = "\n".join(plain_parts) + "\n"
 
     html_parts: list[str] = []
     if is_test:
@@ -202,9 +217,9 @@ def build_vacation_mode_transition_bodies(
     for fact in facts:
         html_parts.append(f"<li>{escape(fact, quote=False)}</li>")
     html_parts.append("</ul>")
-    html_parts.append(f"<p><em>{escape(provenance, quote=False)}</em></p>")
-    html_body = "".join(html_parts)
-    return plain_body, html_body
+    _append_vacation_ui_link(plain_parts, html_parts, cache_path=cache_path)
+    append_provenance_footer(plain_parts, html_parts, provenance=provenance)
+    return "\n".join(plain_parts) + "\n", "".join(html_parts)
 
 
 def evaluate_vacation_mode_tick(
@@ -391,6 +406,7 @@ def send_vacation_mode_anomaly_email(
         current=current,
         observed_at=observed_at,
         source=source,
+        cache_path=cache_path,
     )
     prev_label = format_vacation_bool_device_state(family_id, previous)
     next_label = format_vacation_bool_device_state(family_id, current)
@@ -480,6 +496,7 @@ def send_vacation_mode_transition_email(
         armed=armed,
         settings=settings,
         source=source,
+        cache_path=cache_path,
     )
     if source == VacationEmailSource.SETTINGS_TEST:
         subject = (
@@ -693,6 +710,45 @@ class _VacationAnomalyDebounce:
                 del self._last_sent_at[key]
 
 
+def _append_vacation_ui_link(
+    plain_parts: list[str],
+    html_parts: list[str],
+    *,
+    cache_path: Path | None,
+) -> None:
+    instance_url = domesti_public_base_url(cache_path)
+    vacation_url = automations_vacation_url(cache_path)
+    plain_parts.append("")
+    if instance_url is not None:
+        plain_parts.append(
+            format_ui_link_plain(href=instance_url, label="Instance"),
+        )
+        html_parts.append(
+            format_ui_link_html(href=instance_url, label="Open instance dashboard"),
+        )
+    if vacation_url is not None:
+        plain_parts.append(
+            format_ui_link_plain(
+                href=vacation_url,
+                label="Open Automations → Vacation",
+            ),
+        )
+        html_parts.append(
+            format_ui_link_html(
+                href=vacation_url,
+                label="Open Automations → Vacation",
+            ),
+        )
+        return
+    plain_parts.append(
+        "Open Automations → Vacation in domesti-bot to review this setting.",
+    )
+    html_parts.append(
+        "<p>Open Automations → Vacation in domesti-bot to review this "
+        "setting.</p>",
+    )
+
+
 def _format_vacation_distance_m(distance_m: float) -> str:
     if distance_m >= 1000.0:
         km = distance_m / 1000.0
@@ -755,17 +811,70 @@ def _format_vacation_user_ids(user_ids: list[str]) -> str:
 def _provenance_footer(source: VacationEmailSource) -> str:
     match source:
         case VacationEmailSource.ANOMALY:
-            return "Sent by: domesti-bot · Vacation mode (device anomaly)"
+            return provenance_footer(
+                subsystem="Vacation mode",
+                trigger="device anomaly",
+            )
         case VacationEmailSource.SETTINGS_TEST:
-            return "Sent by: domesti-bot · Automations → Vacation (test email)"
+            return provenance_footer(
+                subsystem="Automations → Vacation",
+                trigger="test email",
+            )
         case VacationEmailSource.LATCH:
-            return "Sent by: domesti-bot · Vacation mode (automatic)"
+            return provenance_footer(
+                subsystem="Vacation mode",
+                trigger="automatic",
+            )
         case _:
             _LOGGER.warning(
                 "[vacation] unknown VacationEmailSource for provenance: %s",
                 source.value,
             )
-            return f"Sent by: domesti-bot · Vacation mode ({source.value})"
+            return provenance_footer(
+                subsystem="Vacation mode",
+                trigger=source.value,
+            )
+
+
+def _vacation_observed_distance_facts(
+    *,
+    cache_path: Path | None,
+    user_ids: list[str],
+) -> list[str]:
+    """Return per-user observed distance-from-home lines when locations are known."""
+    if cache_path is None:
+        return []
+    try:
+        settings = load_settings_location()
+        home = try_resolve_home_location(settings)
+    except Exception:
+        _LOGGER.exception(
+            "[vacation] failed to resolve home for observed-distance email facts",
+        )
+        return []
+    if home is None:
+        return []
+    try:
+        locations = list_user_locations(cache_path)
+    except Exception:
+        _LOGGER.exception(
+            "[vacation] failed to load user locations for observed-distance email facts",
+        )
+        return []
+    lines: list[str] = []
+    for user_id in user_ids:
+        cleaned = user_id.strip()
+        if cleaned == "":
+            continue
+        row = locations.get(cleaned)
+        if row is None:
+            lines.append(f"Observed distance ({cleaned}): unknown (no last location)")
+            continue
+        distance_m = _haversine_m(home.lat, home.lon, row.lat, row.lon)
+        lines.append(
+            f"Observed distance ({cleaned}): {_format_vacation_distance_m(distance_m)}",
+        )
+    return lines
 
 
 _vacation_anomaly_debounce = _VacationAnomalyDebounce()

@@ -595,3 +595,4 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
     assert (
         "https://domesti.example.com/#/automations/status/test-rule" in plain
     )
+    assert "Sent by: domesti-bot · Rule test-rule (automation)" in plain

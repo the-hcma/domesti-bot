@@ -9,10 +9,10 @@ import pytest
 from app.api.schemas import RuleConditionsOut, RuleOut
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.mytracks_store import MyTracksPairingSave, save_mytracks_pairing
+from app.outbound_email import domesti_public_base_url
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_notification import (
     build_rule_notification_bodies,
-    domesti_public_base_url,
     format_device_action_outcomes,
     format_devices_already_in_desired_state_message,
     rule_automation_status_url,
@@ -224,12 +224,15 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
     assert (
         "https://domesti.example.com/#/automations/status/away-shutdown" in plain
     )
+    assert "Instance: https://domesti.example.com" in plain
     assert "Kitchen TV (Vizio): on → off" in html
     assert (
         'href="https://domesti.example.com/#/automations/status/away-shutdown"'
         in html
     )
     assert "Open Automations → Status" not in plain
+    assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in plain
+    assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in html
 
 
 def test_build_rule_notification_bodies_shows_all_clear_when_devices_unchanged(
@@ -272,3 +275,4 @@ def test_build_rule_notification_bodies_falls_back_without_public_base_url(
     assert "Open Automations → Status in domesti-bot" in plain
     assert "View live status:" not in plain
     assert "href=" not in html
+    assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in plain

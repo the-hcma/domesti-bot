@@ -365,6 +365,71 @@ Everything else is forwarded to `python -m config.serve` (after `--`, or simply 
 
 ---
 
+## Outgoing email
+
+Every message domesti-bot sends (rule notifications, vacation latch / anomaly, SMTP / Settings / Automations test probes, and future senders) MUST follow these standards. Keep `.cursor/rules/email-provenance.mdc` aligned with this section.
+
+### Provenance
+
+End the body (plain text and HTML) with a footer identifying subsystem and trigger:
+
+```text
+Sent by: domesti-bot · <subsystem> (<trigger>)
+```
+
+Examples:
+
+- `Sent by: domesti-bot · Vacation mode (automatic)`
+- `Sent by: domesti-bot · Automations → Vacation (test email)`
+- `Sent by: domesti-bot · Settings → Mail (test email)`
+- `Sent by: domesti-bot · Rule <rule-id> (automation)`
+
+Prefer :func:`app.outbound_email.provenance_footer` (and related helpers in :mod:`app.outbound_email`) so footers stay consistent. The SMTP `From:` address is **not** sufficient provenance.
+
+### Instance URL and deep links
+
+When a stable public base URL is known (`DOMESTI_PUBLIC_BASE_URL`, My Tracks pair `domesti_public_base_url`, or the live UI origin for Settings tests), include:
+
+- the **instance top-level dashboard URL**, and
+- a direct Automations UI deep link when the mail concerns something editable there (e.g. `#/automations/status/<rule-id>`, `#/automations/vacation`, `#/automations/mail`).
+
+Omit links only when no stable URL can be resolved; do not invent broken hash routes.
+
+### Human-friendly copy and concrete facts
+
+Prefer plain language over internal jargon. Do not ship bodies that only say things like “configured hysteresis window” without explaining what happened in operator terms (e.g. “waited 30 minutes”, “vacation mode is now on”).
+
+When the mail is about a decision involving people, place, distance, or time, include the values the operator needs to verify the decision (users / display names when available, home label + lat/lon, distance **thresholds** in human units, wait / dwell in minutes or hours).
+
+When the decision depends on how far a user is from **home** or a **geofence**, also report the **observed** distance(s) (and which home point / geofence) when those GPS readings are available — not only the configured threshold.
+
+### Test vs real
+
+Settings / Automations / Mail **test** sends must:
+
+- mark the subject (e.g. `[test]`)
+- state clearly in the body that this is a test
+- state when live state was **not** changed
+
+### Closed sets and example addresses
+
+When code branches on why mail was sent (latch vs settings test vs rule fire, …), use a `StrEnum` (see closed-set enum guidance above), not bare string literals.
+
+Tracked examples and fixtures use `@example.com` only (see example-email-addresses guidance). Real recipients stay in gitignored operator config.
+
+### Current senders
+
+| Sender | Module |
+| --- | --- |
+| SMTP Settings test | `app/smtp_service.py` (`send_test_email`) |
+| Vacation transition / Automations test | `app/vacation_mode.py` |
+| Vacation anomaly (live + test) | `app/vacation_mode.py` |
+| Rule fire notification | `app/rule_actions.py` → `app/rule_notification.py` |
+
+New senders must comply from day one and ship hermetic tests for provenance (and test markers when applicable).
+
+---
+
 ## Security
 
 - **Never log, store, or transmit credentials** (`KASA_PASSWORD`, `TAILWIND_TOKEN`, `DOMESTI_API_KEY`, `domesti_secrets_key`) in plain text. Read them from the environment or from mode-`600` files; do not echo them to stdout or commit `.env` / `domesti-bot.config.json` (the latter is gitignored; ship only `domesti-bot.config.json.example`).

@@ -95,7 +95,13 @@ def test_post_smtp_test_email_sends_via_plain_smtp(
     smtp_cls.assert_called_once_with("localhost", 25, timeout=10.0)
     smtp_instance.send_message.assert_called_once()
     message = smtp_instance.send_message.call_args[0][0]
-    assert "http://testserver/" in message.as_string()
+    plain_part = message.get_body(preferencelist=("plain",))
+    assert plain_part is not None
+    plain = plain_part.get_content()
+    assert isinstance(plain, str)
+    assert "http://testserver/#/automations/mail" in plain
+    assert "Instance: http://testserver" in plain
+    assert message["Subject"] == "domesti-bot [test] SMTP configuration"
 
 
 def test_put_smtp_without_secrets_key_returns_503(
