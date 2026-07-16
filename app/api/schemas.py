@@ -19,6 +19,7 @@ from app.device_enums import (
     RuleDeviceActionType,
     RuleTrigger,
     SettingsCredentialsTestSource,
+    VacationModeTestEmailKind,
 )
 from app.presence_connection_type import normalize_presence_connection_type
 from app.presence_wifi import normalize_wifi_bssid
@@ -1501,14 +1502,17 @@ class VacationModeSettingsStatusOut(VacationModeSettingsOut):
 class VacationModeTestEmailIn(BaseModel):
     """Body for ``POST /v1/rules/settings/vacation-mode/test``."""
 
-    armed: bool = Field(
-        default=True,
-        description="Send the vacation-mode-on sample when true, off when false.",
+    kind: VacationModeTestEmailKind = Field(
+        default=VacationModeTestEmailKind.ARM,
+        description=(
+            "Which sample to send: arm / disarm transition bodies, or a device "
+            "anomaly sample. Does not flip the latch or change device state."
+        ),
     )
 
 
 class VacationModeTestEmailOut(BaseModel):
-    """Result of a vacation-mode transition test email (does not flip the latch)."""
+    """Result of a vacation-mode sample test email (does not flip the latch)."""
 
     message: str
     ok: bool

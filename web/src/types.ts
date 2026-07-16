@@ -465,7 +465,7 @@ export interface VacationModeSettingsStatusOut extends VacationModeSettingsOut {
 }
 
 export interface VacationModeTestEmailIn {
-  armed: boolean;
+  kind: "anomaly" | "arm" | "disarm";
 }
 
 export interface VacationModeTestEmailOut {

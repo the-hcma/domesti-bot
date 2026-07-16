@@ -141,3 +141,11 @@ class VacationEmailSource(StrEnum):
     ANOMALY = "anomaly"
     LATCH = "latch"
     SETTINGS_TEST = "settings_test"
+
+
+class VacationModeTestEmailKind(StrEnum):
+    """Sample email kinds for ``POST /v1/rules/settings/vacation-mode/test``."""
+
+    ANOMALY = "anomaly"
+    ARM = "arm"
+    DISARM = "disarm"

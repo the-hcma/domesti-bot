@@ -10,6 +10,8 @@ from app.db.engine import dispose_engine
 from app.db.schema import clear_bootstrap_cache
 from app.device_enums import VacationEmailSource
 from app.vacation_mode import (
+    VACATION_SETTINGS_TEST_PREAMBLE,
+    VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER,
     build_vacation_mode_transition_bodies,
     evaluate_vacation_mode_tick,
     send_vacation_mode_transition_email,
@@ -520,8 +522,8 @@ def test_send_vacation_mode_test_email_marks_subject_and_body(tmp_path: Path) ->
     message = deliver.call_args.args[1]
     assert message["Subject"] == "domesti-bot [test] vacation mode off"
     body = message.get_body(preferencelist=("plain",)).get_content()
-    assert "This is a test email from Automations → Vacation." in body
-    assert "Vacation mode was not actually changed." in body
+    assert VACATION_SETTINGS_TEST_PREAMBLE in body
+    assert VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER in body
     assert "entered the home geofence" in body
     assert "Sent by: domesti-bot · Automations → Vacation (test email)" in body
     dispose_engine(db)

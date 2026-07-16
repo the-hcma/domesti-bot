@@ -58,6 +58,15 @@ from app.wifi_home_presence import home_geofence_ids
 
 DEFAULT_VACATION_ANOMALY_DEBOUNCE_S = 30.0
 DEFAULT_VACATION_HYSTERESIS_S = 1800.0
+VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER = (
+    "No device state was changed and vacation mode was not updated."
+)
+VACATION_SETTINGS_TEST_PREAMBLE = (
+    "This is a test email from Automations → Vacation."
+)
+VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER = (
+    "Vacation mode was not actually changed."
+)
 _METERS_PER_MILE = 1609.344
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,13 +90,15 @@ def build_vacation_mode_anomaly_bodies(
     previous: bool,
     current: bool | None,
     observed_at: datetime,
+    source: VacationEmailSource = VacationEmailSource.ANOMALY,
 ) -> tuple[str, str]:
     """Return ``(plain_text, html)`` bodies for a vacation device-anomaly email."""
     family_label = family_id.display_name()
     prev_label = format_vacation_bool_device_state(family_id, previous)
     next_label = format_vacation_bool_device_state(family_id, current)
     when_label = observed_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    provenance = _provenance_footer(VacationEmailSource.ANOMALY)
+    provenance = _provenance_footer(source)
+    is_test = source == VacationEmailSource.SETTINGS_TEST
     headline = f"Unexpected {family_label} change while vacation mode is on."
     why = (
         f"{device_id} went from {prev_label} to {next_label}. "
@@ -99,16 +110,29 @@ def build_vacation_mode_anomaly_bodies(
         f"Change: {prev_label} → {next_label}",
         f"Observed: {when_label}",
     ]
-    plain_parts = [headline, "", why, "", *facts, "", "—", provenance]
+    plain_parts: list[str] = []
+    if is_test:
+        plain_parts.append(VACATION_SETTINGS_TEST_PREAMBLE)
+        plain_parts.append(VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER)
+        plain_parts.append("")
+    plain_parts.extend([headline, "", why, "", *facts, "", "—", provenance])
     plain_body = "\n".join(plain_parts) + "\n"
-    html_parts = [
-        f"<p><strong>{escape(headline, quote=False)}</strong></p>",
-        f"<p>{escape(why, quote=False)}</p>",
-        "<ul>",
-        *[f"<li>{escape(fact, quote=False)}</li>" for fact in facts],
-        "</ul>",
-        f"<p><em>{escape(provenance, quote=False)}</em></p>",
-    ]
+    html_parts: list[str] = []
+    if is_test:
+        html_parts.append(
+            f"<p><strong>Test email</strong> from Automations → Vacation. "
+            f"{escape(VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER, quote=False)}</p>",
+        )
+    html_parts.extend(
+        [
+            f"<p><strong>{escape(headline, quote=False)}</strong></p>",
+            f"<p>{escape(why, quote=False)}</p>",
+            "<ul>",
+            *[f"<li>{escape(fact, quote=False)}</li>" for fact in facts],
+            "</ul>",
+            f"<p><em>{escape(provenance, quote=False)}</em></p>",
+        ],
+    )
     return plain_body, "".join(html_parts)
 
 
@@ -153,10 +177,8 @@ def build_vacation_mode_transition_bodies(
 
     plain_parts: list[str] = []
     if is_test:
-        plain_parts.append(
-            "This is a test email from Automations → Vacation. "
-            "Vacation mode was not actually changed.",
-        )
+        plain_parts.append(VACATION_SETTINGS_TEST_PREAMBLE)
+        plain_parts.append(VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER)
         plain_parts.append("")
     plain_parts.append(headline)
     plain_parts.append("")
@@ -171,8 +193,8 @@ def build_vacation_mode_transition_bodies(
     html_parts: list[str] = []
     if is_test:
         html_parts.append(
-            "<p><strong>Test email</strong> from Automations → Vacation. "
-            "Vacation mode was not actually changed.</p>",
+            f"<p><strong>Test email</strong> from Automations → Vacation. "
+            f"{escape(VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER, quote=False)}</p>",
         )
     html_parts.append(f"<p><strong>{escape(headline, quote=False)}</strong></p>")
     html_parts.append(f"<p>{escape(why, quote=False)}</p>")
@@ -331,6 +353,7 @@ def send_vacation_mode_anomaly_email(
     previous: bool,
     current: bool | None,
     observed_at: datetime,
+    source: VacationEmailSource = VacationEmailSource.ANOMALY,
 ) -> bool:
     """Email vacation recipients about an unmarked device transition."""
     recipients = normalized_vacation_notification_emails(settings)
@@ -367,13 +390,18 @@ def send_vacation_mode_anomaly_email(
         previous=previous,
         current=current,
         observed_at=observed_at,
+        source=source,
     )
     prev_label = format_vacation_bool_device_state(family_id, previous)
     next_label = format_vacation_bool_device_state(family_id, current)
-    subject = (
-        f"domesti-bot vacation anomaly: {family_id.display_name()} "
+    subject_core = (
+        f"vacation anomaly: {family_id.display_name()} "
         f"{device_id} {prev_label}→{next_label}"
     )
+    if source == VacationEmailSource.SETTINGS_TEST:
+        subject = f"domesti-bot [test] {subject_core}"
+    else:
+        subject = f"domesti-bot {subject_core}"
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = params.from_address
@@ -398,9 +426,10 @@ def send_vacation_mode_anomaly_email(
         raise
     operator_alert_store.clear_smtp_notification_failure()
     _LOGGER.info(
-        "[vacation] anomaly email sent family=%s device_id=%s %s",
+        "[vacation] anomaly email sent family=%s device_id=%s source=%s %s",
         family_id.value,
         device_id,
+        source.value,
         delivery.format_for_log(redact_recipients=True),
     )
     return True
