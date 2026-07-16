@@ -38,13 +38,9 @@ class Device:
 
     __slots__ = ("_identifier", "_display_name", "_lat", "_lon", "_x", "_y")
 
-    def __init__(
-        self, identifier: str, *, display_name: str | None = None
-    ) -> None:
+    def __init__(self, identifier: str, *, display_name: str | None = None) -> None:
         self._identifier = identifier
-        self._display_name = (
-            display_name.strip() if display_name and display_name.strip() else None
-        )
+        self._display_name = display_name.strip() if display_name and display_name.strip() else None
         self._lat, self._lon = None, None
         self._x, self._y = None, None
 
@@ -71,9 +67,7 @@ class Device:
     def set_display_name(self, value: str | None) -> None:
         """Set or clear the optional display name (whitespace-only clears)."""
 
-        self._display_name = (
-            value.strip() if value and value.strip() else None
-        )
+        self._display_name = value.strip() if value and value.strip() else None
 
     @property
     def lat(self):
@@ -102,9 +96,7 @@ class DoorDevice(Device, ABC):
 
     __slots__ = ()
 
-    def __init__(
-        self, identifier: str, *, display_name: str | None = None
-    ) -> None:
+    def __init__(self, identifier: str, *, display_name: str | None = None) -> None:
         super().__init__(identifier, display_name=display_name)
 
     @abstractmethod
@@ -144,9 +136,7 @@ class SpeakerDevice(Device, ABC):
 
     __slots__ = ()
 
-    def __init__(
-        self, identifier: str, *, display_name: str | None = None
-    ) -> None:
+    def __init__(self, identifier: str, *, display_name: str | None = None) -> None:
         super().__init__(identifier, display_name=display_name)
 
     @property
@@ -176,9 +166,7 @@ class SwitchDevice(Device, ABC):
 
     __slots__ = ("_on",)
 
-    def __init__(
-        self, identifier: str, *, display_name: str | None = None
-    ) -> None:
+    def __init__(self, identifier: str, *, display_name: str | None = None) -> None:
         super().__init__(identifier, display_name=display_name)
         self._on = False
 
@@ -282,7 +270,6 @@ class Condition:
 
 
 class Geofence:
-
     def __init__(self, description: str, lat: float, lon: float, radius: float) -> None:
         self._description = description
         self._lat = lat

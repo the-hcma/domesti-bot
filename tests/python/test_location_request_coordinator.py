@@ -194,7 +194,8 @@ async def test_accuracy_streak_requests_fresh_location(
                 lat=41.194085,
                 lon=-73.888365,
                 accuracy_m=accuracy_m,
-                fix_at=now + offset, reported_at=now + offset,
+                fix_at=now + offset,
+                reported_at=now + offset,
                 source="test",
             ),
             retention=default_location_history_retention(),
@@ -217,7 +218,8 @@ async def test_accuracy_streak_requests_fresh_location(
                     lat=41.194085,
                     lon=-73.888365,
                     accuracy_m=130,
-                    fix_at=now + 10.0, reported_at=now + 10.0,
+                    fix_at=now + 10.0,
+                    reported_at=now + 10.0,
                     source="test",
                 ),
                 now=now + 10.0,
@@ -258,7 +260,8 @@ async def test_coordinator_skips_when_remote_requests_disabled(
                     lat=41.194085,
                     lon=-73.888365,
                     accuracy_m=120,
-                    fix_at=now, reported_at=now,
+                    fix_at=now,
+                    reported_at=now,
                     source="test",
                 ),
                 now=now,
@@ -284,7 +287,8 @@ async def test_coordinator_skips_when_wifi_home_bssid_matches(
         lat=41.194085,
         lon=-73.888365,
         accuracy_m=120,
-        fix_at=now, reported_at=now,
+        fix_at=now,
+        reported_at=now,
         source="test",
         connection_type="w",
         wifi_bssid="aa:bb:cc:dd:ee:ff",
@@ -325,7 +329,8 @@ async def test_deferred_edge_trigger_respects_grace_fraction(
         lat=41.194085,
         lon=-73.888365,
         accuracy_m=120,
-        fix_at=now, reported_at=now,
+        fix_at=now,
+        reported_at=now,
         source="test",
     )
     coordinator = LocationRequestCoordinator(cache_path=db, now_fn=lambda: now)
@@ -389,9 +394,7 @@ def test_cooldown_until_from_result_prefers_server_timestamp() -> None:
 
 def test_cooldown_until_from_result_falls_back_to_local_default() -> None:
     now = 1_700_000_000.0
-    assert _cooldown_until_from_result(now=now, cooldown_until_epoch=None) == (
-        now + LOCATION_REQUEST_COOLDOWN_S
-    )
+    assert _cooldown_until_from_result(now=now, cooldown_until_epoch=None) == (now + LOCATION_REQUEST_COOLDOWN_S)
 
 
 def test_location_request_context_log_value_uses_not_applicable_for_missing() -> None:
@@ -433,7 +436,8 @@ async def test_accepted_log_uses_not_applicable_for_missing_rule_and_geofence(
                     lat=41.194085,
                     lon=-73.888365,
                     accuracy_m=12,
-                    fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
+                    fix_at=1_700_000_000.0,
+                    reported_at=1_700_000_000.0,
                     source="test",
                 ),
                 now=1_700_000_000.0,
@@ -444,10 +448,7 @@ async def test_accepted_log_uses_not_applicable_for_missing_rule_and_geofence(
             geofence_id=None,
         )
 
-    assert any(
-        "rule_id=<not applicable> geofence_id=<not applicable>" in record.message
-        for record in caplog.records
-    )
+    assert any("rule_id=<not applicable> geofence_id=<not applicable>" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -470,7 +471,8 @@ async def test_accepted_response_records_server_cooldown_until(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=120,
-            fix_at=now, reported_at=now,
+            fix_at=now,
+            reported_at=now,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -497,7 +499,8 @@ async def test_accepted_response_records_server_cooldown_until(
                     lat=41.194085,
                     lon=-73.888365,
                     accuracy_m=120,
-                    fix_at=now + 1.0, reported_at=now + 1.0,
+                    fix_at=now + 1.0,
+                    reported_at=now + 1.0,
                     source="test",
                 ),
                 now=now + 1.0,

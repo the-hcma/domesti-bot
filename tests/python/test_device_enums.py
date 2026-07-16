@@ -52,27 +52,9 @@ def test_device_condition_state_supported_by_family_matrix() -> None:
 
 
 def test_expected_state_for_action_type_maps_to_device_condition_state() -> None:
-    assert (
-        expected_state_for_action_type(RuleDeviceActionType.TURN_ON)
-        is DeviceConditionState.ON
-    )
-    assert (
-        expected_state_for_action_type(RuleDeviceActionType.TURN_OFF)
-        is DeviceConditionState.OFF
-    )
-    assert (
-        expected_state_for_action_type(RuleDeviceActionType.PAUSE)
-        is DeviceConditionState.PAUSED
-    )
-    assert (
-        expected_state_for_action_type(RuleDeviceActionType.RESUME)
-        is DeviceConditionState.PLAYING
-    )
-    assert (
-        expected_state_for_action_type(RuleDeviceActionType.OPEN)
-        is DeviceConditionState.OPEN
-    )
-    assert (
-        expected_state_for_action_type(RuleDeviceActionType.CLOSE)
-        is DeviceConditionState.CLOSED
-    )
+    assert expected_state_for_action_type(RuleDeviceActionType.TURN_ON) is DeviceConditionState.ON
+    assert expected_state_for_action_type(RuleDeviceActionType.TURN_OFF) is DeviceConditionState.OFF
+    assert expected_state_for_action_type(RuleDeviceActionType.PAUSE) is DeviceConditionState.PAUSED
+    assert expected_state_for_action_type(RuleDeviceActionType.RESUME) is DeviceConditionState.PLAYING
+    assert expected_state_for_action_type(RuleDeviceActionType.OPEN) is DeviceConditionState.OPEN
+    assert expected_state_for_action_type(RuleDeviceActionType.CLOSE) is DeviceConditionState.CLOSED

@@ -259,7 +259,7 @@ def _evening_lights_off_rule() -> RuleOut:
                 ),
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.ON,
+                    state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Front door lights",

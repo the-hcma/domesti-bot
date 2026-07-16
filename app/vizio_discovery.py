@@ -34,9 +34,7 @@ async def discover_vizio_hosts_ssdp(*, timeout: float = 5.0) -> list[VizioDiscov
     async with aiohttp.ClientSession() as session:
         for location in locations:
             try:
-                async with session.get(
-                    location, timeout=aiohttp.ClientTimeout(total=timeout)
-                ) as resp:
+                async with session.get(location, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                     xml = await resp.read()
             except (TimeoutError, aiohttp.ClientError):
                 continue

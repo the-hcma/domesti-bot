@@ -46,9 +46,7 @@ async def test_dwell_satisfied_trigger_fires_when_outside_dwell_elapses(
         await evaluator.on_location_update("kristen")
 
     send_mock.assert_called_once()
-    assert evaluator.fire_state_for_rule("away-dwell-notify").last_fired_at == (
-        clock["now"]
-    )
+    assert evaluator.fire_state_for_rule("away-dwell-notify").last_fired_at == (clock["now"])
 
 
 @pytest.mark.asyncio

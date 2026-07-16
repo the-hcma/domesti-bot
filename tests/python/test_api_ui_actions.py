@@ -119,7 +119,10 @@ def test_build_kasa_device_view_reflects_current_is_on_and_exclusion(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True,
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.1",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     fake = _FakeKasa("10.0.0.1", "Lamp", is_on=False)
@@ -135,7 +138,10 @@ def test_build_kasa_device_view_reflects_current_is_on_and_exclusion(
 async def test_bulk_off_global_apply_skips_excluded_devices(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.2",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     a = _FakeKasa("10.0.0.1", "Keep", is_on=True)
@@ -173,7 +179,10 @@ async def test_bulk_off_kasa_apply_ignores_exclude_from_global(tmp_path: Path) -
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True,
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.1",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     a = _FakeKasa("10.0.0.1", "Excluded", is_on=True)
@@ -223,7 +232,10 @@ def test_find_kasa_by_host_returns_match_or_none() -> None:
 def test_post_global_bulk_off_returns_affected_and_skipped(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.2",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     a = _FakeKasa("10.0.0.1", "Keep", is_on=True)
@@ -301,9 +313,7 @@ def test_post_kasa_bulk_off_turns_off_every_kasa_device() -> None:
 
 def test_post_kasa_toggle_returns_404_for_unknown_device() -> None:
     client, app = _client()
-    runtime.device_state = _state(
-        kasa_devices=[_FakeKasa("10.0.0.1", "Lamp", is_on=True)]
-    )
+    runtime.device_state = _state(kasa_devices=[_FakeKasa("10.0.0.1", "Lamp", is_on=True)])
     runtime.discovery_error = None
     r = client.post(
         "/v1/ui/kasa/devices/10.0.0.99/toggle",
@@ -319,7 +329,10 @@ def test_post_kasa_toggle_turns_device_off_and_returns_refreshed_view(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=False,
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.1",
+        exclude_from_global=False,
         hide_on_mobile=False,
     )
     fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
@@ -501,9 +514,7 @@ def test_action_endpoints_return_503_while_discovery_in_progress() -> None:
     ]
     for method, path, body in bodies:
         r = client.request(method, path, json=body)
-        assert r.status_code == HTTPStatus.SERVICE_UNAVAILABLE, (
-            f"{method} {path} → {r.status_code}"
-        )
+        assert r.status_code == HTTPStatus.SERVICE_UNAVAILABLE, f"{method} {path} → {r.status_code}"
         assert r.headers.get("Retry-After") == "2"
 
 

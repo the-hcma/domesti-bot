@@ -248,8 +248,7 @@ async def post_rules_settings_vacation_mode_test(
         return VacationModeTestEmailOut(
             ok=False,
             message=(
-                "Vacation sample email was skipped — configure notification_emails "
-                "and SMTP under Automations → Mail"
+                "Vacation sample email was skipped — configure notification_emails and SMTP under Automations → Mail"
             ),
         )
     return VacationModeTestEmailOut(
@@ -309,10 +308,7 @@ async def put_geofence(
     if body.geofence_id != geofence_id:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Expected geofence_id in path to match body, got {geofence_id!r} "
-                f"and {body.geofence_id!r}"
-            ),
+            detail=(f"Expected geofence_id in path to match body, got {geofence_id!r} and {body.geofence_id!r}"),
         )
     saved = save_geofence(
         cache_path,

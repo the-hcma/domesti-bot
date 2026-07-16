@@ -32,6 +32,7 @@ from app.rule_actions import (
     resolve_vizio_identifier_by_label,
 )
 
+
 @dataclass(frozen=True)
 class RosterUserRow:
     """Minimal roster fields used for rule reference validation."""
@@ -61,11 +62,7 @@ def build_roster_name_hint_lookup(users: list[RosterUserRow]) -> dict[str, str]:
             if key == "":
                 continue
             candidates.setdefault(key, set()).add(user.user_id)
-    return {
-        key: next(iter(user_ids))
-        for key, user_ids in candidates.items()
-        if len(user_ids) == 1
-    }
+    return {key: next(iter(user_ids)) for key, user_ids in candidates.items() if len(user_ids) == 1}
 
 
 def build_roster_user_id_lookup(roster_user_ids: list[str]) -> dict[str, str]:
@@ -203,19 +200,13 @@ def _device_reference_issue(
     reference = device_id.strip()
     if reference == "":
         return RuleReferenceIssueOut(
-            detail=(
-                f"Expected non-empty {family_id.value} device_id "
-                f"in {context_label}"
-            ),
+            detail=(f"Expected non-empty {family_id.value} device_id in {context_label}"),
             kind="unknown_device",
             reference=reference,
         )
     if ctx.device_state is None:
         return RuleReferenceIssueOut(
-            detail=(
-                f"Cannot verify {family_id.value} device "
-                f'"{reference}" — device discovery is not ready yet'
-            ),
+            detail=(f'Cannot verify {family_id.value} device "{reference}" — device discovery is not ready yet'),
             kind="discovery_pending",
             reference=reference,
         )
@@ -229,10 +220,7 @@ def _device_reference_issue(
             reference=reference,
         )
     return RuleReferenceIssueOut(
-        detail=(
-            f'Unknown {family_id.value} device "{reference}" '
-            "(not found in the current device list)."
-        ),
+        detail=(f'Unknown {family_id.value} device "{reference}" (not found in the current device list).'),
         kind="unknown_device",
         reference=reference,
     )
@@ -279,10 +267,7 @@ def _device_reference_resolves(
         return False
     match family_id:
         case DeviceFamilyId.KASA:
-            return (
-                resolve_kasa_host_by_label(state.kasa_mgr, device_id)
-                is not None
-            )
+            return resolve_kasa_host_by_label(state.kasa_mgr, device_id) is not None
         case DeviceFamilyId.SONOS:
             return (
                 resolve_sonos_identifier_by_label(
@@ -340,18 +325,12 @@ def _unknown_user_issue(
     suggestion = ctx.roster_name_hint_lookup.get(reference.strip().lower())
     if suggestion is not None and suggestion.lower() != reference.strip().lower():
         return RuleReferenceIssueOut(
-            detail=(
-                f'User "{reference}" is not in the automation user roster. '
-                f'Did you mean user_id "{suggestion}"?'
-            ),
+            detail=(f'User "{reference}" is not in the automation user roster. Did you mean user_id "{suggestion}"?'),
             kind="unknown_user",
             reference=reference,
         )
     return RuleReferenceIssueOut(
-        detail=(
-            f'User "{reference}" is not in the automation user roster '
-            "(sync users from My Tracks)."
-        ),
+        detail=(f'User "{reference}" is not in the automation user roster (sync users from My Tracks).'),
         kind="unknown_user",
         reference=reference,
     )
@@ -398,10 +377,7 @@ def _validate_geofences(
         if geofence_id not in ctx.geofence_ids:
             issues.append(
                 RuleReferenceIssueOut(
-                    detail=(
-                        f'Geofence "{geofence_id}" is not defined '
-                        "(add it under Automations → Geofences)."
-                    ),
+                    detail=(f'Geofence "{geofence_id}" is not defined (add it under Automations → Geofences).'),
                     kind="unknown_geofence",
                     reference=geofence_id,
                 ),
@@ -420,10 +396,7 @@ def _validate_notification(
     if not recipients:
         issues.append(
             RuleReferenceIssueOut(
-                detail=(
-                    f'Rule "{rule.id}" has notify_on_fire enabled but no '
-                    "notification_emails"
-                ),
+                detail=(f'Rule "{rule.id}" has notify_on_fire enabled but no notification_emails'),
                 kind="missing_notification_email",
                 reference=rule.id,
             ),
@@ -433,8 +406,7 @@ def _validate_notification(
         issues.append(
             RuleReferenceIssueOut(
                 detail=(
-                    "SMTP is not configured; notification emails cannot be sent "
-                    "(configure under Automations → Mail)."
+                    "SMTP is not configured; notification emails cannot be sent (configure under Automations → Mail)."
                 ),
                 kind="missing_smtp",
                 reference=recipients[0],
@@ -485,10 +457,7 @@ def _validate_device_condition_states(rule: RuleOut) -> list[RuleReferenceIssueO
                 continue
             issues.append(
                 RuleReferenceIssueOut(
-                    detail=(
-                        f'Device "{ref.device_id}" family {ref.family_id.value} '
-                        f"cannot report state {state.value}"
-                    ),
+                    detail=(f'Device "{ref.device_id}" family {ref.family_id.value} cannot report state {state.value}'),
                     kind="unknown_device",
                     reference=ref.device_id,
                 ),
@@ -520,9 +489,7 @@ def _walk_device_refs(
 ) -> None:
     if isinstance(
         condition,
-        DevicesAllInStateCondition
-        | DevicesAnyInStateCondition
-        | DevicesAnyInStateForSCondition,
+        DevicesAllInStateCondition | DevicesAnyInStateCondition | DevicesAnyInStateForSCondition,
     ):
         for ref in condition.devices:
             refs.add((ref.family_id, ref.device_id))

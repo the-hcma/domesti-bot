@@ -38,6 +38,7 @@ def test_geofence_is_inside():
     device_kristen.setLocation(44.417597, -72.023842)
     assert not close_to_the_house.is_inside({device_kristen})
 
+
 @pytest.mark.asyncio
 async def test_rule_evaluation():
     engine = RuleEngine()
@@ -62,5 +63,5 @@ async def test_rule_evaluation():
     assert isinstance(sync_action, Action)
     sync_action.run()
     assert kitchen_sync.is_on
-    #rule = Rule(condition, True, action)
-    #rule.evaluate()
+    # rule = Rule(condition, True, action)
+    # rule.evaluate()

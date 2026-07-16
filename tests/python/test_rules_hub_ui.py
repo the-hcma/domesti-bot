@@ -81,7 +81,8 @@ def _seed_rules_hub_browser_db(cache_path: Path) -> None:
             lat=_HENRIQUE_AT_HOME_LAT,
             lon=_HENRIQUE_AT_HOME_LON,
             accuracy_m=12,
-            fix_at=now - 60, reported_at=now - 60,
+            fix_at=now - 60,
+            reported_at=now - 60,
             source="my-tracks",
         ),
         retention=default_location_history_retention(),
@@ -93,7 +94,8 @@ def _seed_rules_hub_browser_db(cache_path: Path) -> None:
             lat=_KRISTEN_OUTSIDE_LAT,
             lon=_KRISTEN_OUTSIDE_LON,
             accuracy_m=18,
-            fix_at=now - 300, reported_at=now - 300,
+            fix_at=now - 300,
+            reported_at=now - 300,
             source="my-tracks",
         ),
         retention=default_location_history_retention(),
@@ -209,13 +211,16 @@ def landing_base_url(rules_hub_browser_cache: Path) -> Iterator[str]:
             args=argparse.Namespace(),
         )
 
-    with patch(
-        "app.api.app.bootstrap_device_managers",
-        bootstrap_device_state,
-    ), patch.dict(
-        os.environ,
-        {"DOMESTI_AUTOMATION_RULES_FILE": str(_EXAMPLE_BUNDLE)},
-        clear=False,
+    with (
+        patch(
+            "app.api.app.bootstrap_device_managers",
+            bootstrap_device_state,
+        ),
+        patch.dict(
+            os.environ,
+            {"DOMESTI_AUTOMATION_RULES_FILE": str(_EXAMPLE_BUNDLE)},
+            clear=False,
+        ),
     ):
         app = create_app(args)
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
@@ -723,4 +728,3 @@ def test_geofence_draw_mode_adds_crosshair_class(
         assert "rules-geofence-draw-mode" in (map_el.get_attribute("class") or "")
     finally:
         context.close()
-

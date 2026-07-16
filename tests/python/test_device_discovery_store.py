@@ -18,16 +18,12 @@ def test_ensure_schema_upgrades_legacy_database(tmp_path: Path) -> None:
 
     db = tmp_path / "legacy.sqlite"
     with contextlib.closing(sqlite3.connect(db)) as conn:
-        conn.execute(
-            "CREATE TABLE kasa_discovered_devices (host TEXT PRIMARY KEY, config_json TEXT)"
-        )
+        conn.execute("CREATE TABLE kasa_discovered_devices (host TEXT PRIMARY KEY, config_json TEXT)")
         conn.commit()
 
     device_discovery_store.ensure_schema(db)
     with contextlib.closing(sqlite3.connect(db)) as conn:
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        )
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         names = {row[0] for row in cur.fetchall()}
         assert "device_display_names" in names
         assert "tailwind_last_host" in names
@@ -62,9 +58,7 @@ def test_roundtrip_save_and_load(tmp_path: Path) -> None:
     assert rows == [("192.168.1.50", "Desk lamp", cfg, False)]
 
     with contextlib.closing(device_discovery_store.open_db(db)) as conn:
-        cur = conn.execute(
-            "SELECT host, alias, config_json FROM kasa_discovered_devices"
-        )
+        cur = conn.execute("SELECT host, alias, config_json FROM kasa_discovered_devices")
         h, alias, raw = cur.fetchone()
         assert h == "192.168.1.50"
         assert alias == "Desk lamp"
@@ -165,8 +159,7 @@ def test_ensure_schema_adds_androidtv_uuid_and_model_columns(tmp_path: Path) -> 
             " friendly_name TEXT, PRIMARY KEY (host, port))"
         )
         conn.execute(
-            "INSERT INTO androidtv_discovered_hosts (host, port, updated_at, friendly_name) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO androidtv_discovered_hosts (host, port, updated_at, friendly_name) VALUES (?, ?, ?, ?)",
             ("192.168.1.10", 8009, 0.0, "Living room"),
         )
         conn.commit()
@@ -271,9 +264,7 @@ def test_ui_preferences_delete_removes_row(tmp_path: Path) -> None:
     assert device_discovery_store.load_ui_preferences(db) == [
         ("kasa", "192.168.1.50", True, False),
     ]
-    device_discovery_store.delete_ui_preference(
-        db, backend="kasa", canonical_key="192.168.1.50"
-    )
+    device_discovery_store.delete_ui_preference(db, backend="kasa", canonical_key="192.168.1.50")
     assert device_discovery_store.load_ui_preferences(db) == []
 
 

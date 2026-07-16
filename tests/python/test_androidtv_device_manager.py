@@ -50,9 +50,7 @@ def test_discover_cast_infos_sync_does_not_emit_pychromecast_deprecation_log(
     assert infos == []
     assert browser is fake_browser
     fake_browser.start_discovery.assert_called_once()
-    deprecation_msgs = [
-        r.getMessage() for r in caplog.records if "deprecated" in r.getMessage().lower()
-    ]
+    deprecation_msgs = [r.getMessage() for r in caplog.records if "deprecated" in r.getMessage().lower()]
     assert deprecation_msgs == [], deprecation_msgs
 
 
@@ -91,9 +89,7 @@ def test_discover_cast_infos_sync_short_circuits_when_all_known_hosts_resolve() 
         import time as _t
 
         started = _t.perf_counter()
-        infos, _browser = _discover_cast_infos_sync(
-            timeout=5.0, known_hosts=["10.0.0.1", "10.0.0.2"]
-        )
+        infos, _browser = _discover_cast_infos_sync(timeout=5.0, known_hosts=["10.0.0.1", "10.0.0.2"])
         elapsed = _t.perf_counter() - started
 
     assert len(infos) == 2
@@ -296,9 +292,7 @@ async def test_fetch_uses_no_mdns_fast_path_when_cache_has_uuids(tmp_path) -> No
 
     mgr = AndroidTvDeviceManager([], discovery_store_path=db, zeroconf_discovery=True)
     with (
-        patch(
-            "app.androidtv_device_manager._discover_cast_infos_sync"
-        ) as zc_fn,
+        patch("app.androidtv_device_manager._discover_cast_infos_sync") as zc_fn,
         patch(
             "app.androidtv_device_manager.pychromecast.get_chromecast_from_host",
             side_effect=fake_from_host,
@@ -340,9 +334,7 @@ async def test_fetch_fast_path_drops_unreachable_cached_device(tmp_path) -> None
 
     mgr = AndroidTvDeviceManager([], discovery_store_path=db, zeroconf_discovery=True)
     with (
-        patch(
-            "app.androidtv_device_manager._discover_cast_infos_sync"
-        ) as zc_fn,
+        patch("app.androidtv_device_manager._discover_cast_infos_sync") as zc_fn,
         patch(
             "app.androidtv_device_manager.pychromecast.get_chromecast_from_host",
             side_effect=fake_from_host,
@@ -389,9 +381,7 @@ async def test_fetch_falls_back_to_mdns_when_any_cache_row_missing_uuid(tmp_path
             "app.androidtv_device_manager._discover_cast_infos_sync",
             return_value=([info], browser),
         ) as zc_fn,
-        patch(
-            "app.androidtv_device_manager.pychromecast.get_chromecast_from_host"
-        ) as host_fn,
+        patch("app.androidtv_device_manager.pychromecast.get_chromecast_from_host") as host_fn,
         patch(
             "app.androidtv_device_manager.pychromecast.get_chromecast_from_cast_info",
             return_value=cast,

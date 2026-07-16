@@ -212,8 +212,7 @@ class _FakeSonosZone:
 
     async def pause(self) -> None:
         raise SonosTransitionUnavailableError(
-            "Sonos zone 'Living Room' cannot pause from its current transport state "
-            "(likely already paused / stopped)."
+            "Sonos zone 'Living Room' cannot pause from its current transport state (likely already paused / stopped)."
         )
 
 
@@ -592,7 +591,5 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
     assert isinstance(plain, str)
     assert "Garage (Kasa): on → off" in plain
     assert "Garage door is open." in plain
-    assert (
-        "https://domesti.example.com/#/automations/status/test-rule" in plain
-    )
+    assert "https://domesti.example.com/#/automations/status/test-rule" in plain
     assert "Sent by: domesti-bot · Rule test-rule (automation)" in plain

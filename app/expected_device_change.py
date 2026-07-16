@@ -89,11 +89,7 @@ class ExpectedDeviceChangeStore:
                 family_id.value,
             )
             return
-        duration = (
-            resolve_expected_device_change_window_s()
-            if window_s is None
-            else window_s
-        )
+        duration = resolve_expected_device_change_window_s() if window_s is None else window_s
         if duration <= 0:
             raise ValueError(f"Expected window_s > 0, got {duration}")
         clock = time.monotonic() if now is None else now
@@ -102,9 +98,7 @@ class ExpectedDeviceChangeStore:
             self._expires_at[key] = clock + duration
 
     def _prune_locked(self, now: float) -> None:
-        stale = [
-            key for key, expires_at in self._expires_at.items() if expires_at <= now
-        ]
+        stale = [key for key, expires_at in self._expires_at.items() if expires_at <= now]
         for key in stale:
             del self._expires_at[key]
 

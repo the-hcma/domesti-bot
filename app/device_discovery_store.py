@@ -67,9 +67,7 @@ def load_androidtv_endpoint_rows(path: Path) -> list[tuple[str, int, str | None]
     ensure_schema_if_exists(path)
     with discovery_session(path) as session:
         rows = session.scalars(
-            select(AndroidTvDiscoveredHost).order_by(
-                AndroidTvDiscoveredHost.host, AndroidTvDiscoveredHost.port
-            )
+            select(AndroidTvDiscoveredHost).order_by(AndroidTvDiscoveredHost.host, AndroidTvDiscoveredHost.port)
         ).all()
         out: list[tuple[str, int, str | None]] = []
         for row in rows:
@@ -100,9 +98,7 @@ def load_androidtv_known_devices(
     ensure_schema_if_exists(path)
     with discovery_session(path) as session:
         rows = session.scalars(
-            select(AndroidTvDiscoveredHost).order_by(
-                AndroidTvDiscoveredHost.host, AndroidTvDiscoveredHost.port
-            )
+            select(AndroidTvDiscoveredHost).order_by(AndroidTvDiscoveredHost.host, AndroidTvDiscoveredHost.port)
         ).all()
         out: list[tuple[str, int, str | None, str | None, str | None]] = []
         for row in rows:
@@ -126,9 +122,7 @@ def load_cached_configs(
         return []
     ensure_schema_if_exists(path)
     with discovery_session(path) as session:
-        rows = session.scalars(
-            select(KasaDiscoveredDevice).order_by(KasaDiscoveredDevice.host)
-        ).all()
+        rows = session.scalars(select(KasaDiscoveredDevice).order_by(KasaDiscoveredDevice.host)).all()
         return [
             (
                 row.host,
@@ -171,6 +165,7 @@ def save_androidtv_hosts(
         uid = _nonblank_str(seq[3]) if len(seq) > 3 else None
         model = _nonblank_str(seq[4]) if len(seq) > 4 else None
         records.append((h, p, fn, uid, model))
+
     def _write(session: Session) -> None:
         session.execute(delete(AndroidTvDiscoveredHost))
         for h, p, fn, uid, model in records:
@@ -184,7 +179,6 @@ def save_androidtv_hosts(
                     model_name=model,
                 )
             )
-
 
     discovery_write(path, _write)
 
@@ -202,6 +196,7 @@ def save_configs(
 ) -> None:
     """Replace all rows with ``(host, alias, config_dict, requires_klap_auth)``."""
     now = time.time()
+
     def _write(session: Session) -> None:
         session.execute(delete(KasaDiscoveredDevice))
         for h, a, d, requires_klap_auth in rows:
@@ -214,7 +209,6 @@ def save_configs(
                     updated_at=now,
                 )
             )
-
 
     discovery_write(path, _write)
 
@@ -240,13 +234,11 @@ def save_sonos_zones(
             stripped = str(r[2]).strip()
             name = stripped if stripped else None
         triples.append((uid, host, name))
+
     def _write(session: Session) -> None:
         session.execute(delete(SonosKnownZone))
         for u, h, n in triples:
-            session.add(
-                SonosKnownZone(uuid=u, host=h, zone_name=n, updated_at=now)
-            )
-
+            session.add(SonosKnownZone(uuid=u, host=h, zone_name=n, updated_at=now))
 
     discovery_write(path, _write)
 
@@ -254,6 +246,7 @@ def save_sonos_zones(
 def save_tailwind_host(path: Path, host: str) -> None:
     """Remember the last reachable Tailwind controller address (token still comes from env / CLI)."""
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(TailwindLastHost, 1)
         if row is None:
@@ -261,7 +254,6 @@ def save_tailwind_host(path: Path, host: str) -> None:
         else:
             row.host = host.strip()
             row.updated_at = now
-
 
     discovery_write(path, _write)
 
@@ -280,9 +272,7 @@ def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None]]:
     ensure_schema_if_exists(path)
     with discovery_session(path) as session:
         rows = session.scalars(
-            select(SonosKnownZone).order_by(
-                func.coalesce(SonosKnownZone.zone_name, SonosKnownZone.uuid)
-            )
+            select(SonosKnownZone).order_by(func.coalesce(SonosKnownZone.zone_name, SonosKnownZone.uuid))
         ).all()
         out: list[tuple[str, str, str | None]] = []
         for row in rows:
@@ -341,6 +331,7 @@ def migrate_vizio_ui_preference_key(
     new = new_key.strip()
     if not old or not new or old == new:
         return
+
     def _write(session: Session) -> tuple[bool, bool] | None:
         row = session.get(UiPreference, ("vizio", old))
         if row is None:
@@ -372,9 +363,7 @@ def load_vizio_tvs(
         return []
     ensure_schema_if_exists(path)
     with discovery_session(path) as session:
-        rows = session.scalars(
-            select(VizioKnownTv).order_by(VizioKnownTv.host)
-        ).all()
+        rows = session.scalars(select(VizioKnownTv).order_by(VizioKnownTv.host)).all()
         out: list[tuple[str, int, str | None, str | None, str | None, str | None]] = []
         for row in rows:
             display = (row.display_name or "").strip() or None
@@ -405,11 +394,7 @@ def load_ui_preferences(path: Path) -> list[tuple[str, str, bool, bool]]:
         return []
     ensure_schema_if_exists(path)
     with discovery_session(path) as session:
-        rows = session.scalars(
-            select(UiPreference).order_by(
-                UiPreference.backend, UiPreference.canonical_key
-            )
-        ).all()
+        rows = session.scalars(select(UiPreference).order_by(UiPreference.backend, UiPreference.canonical_key)).all()
         return [
             (
                 row.backend,
@@ -440,6 +425,7 @@ def upsert_display_name(
     display_name: str,
 ) -> None:
     now = time.time()
+
     def _write(session: Session) -> None:
         b = backend.strip()
         k = canonical_key.strip()
@@ -456,7 +442,6 @@ def upsert_display_name(
         else:
             row.display_name = display_name.strip()
             row.updated_at = now
-
 
     discovery_write(path, _write)
 
@@ -480,11 +465,10 @@ def upsert_vizio_tv(
             mac_s = normalize_mac(mac.strip())
         except ValueError:
             mac_s = None
+
     def _write(session: Session) -> None:
         if mac_s is not None:
-            existing = session.scalar(
-                select(VizioKnownTv).where(VizioKnownTv.mac == mac_s)
-            )
+            existing = session.scalar(select(VizioKnownTv).where(VizioKnownTv.mac == mac_s))
             if existing is not None and existing.host != h:
                 session.delete(existing)
                 session.flush()
@@ -536,6 +520,7 @@ def upsert_ui_preference(
     :func:`load_ui_preferences` reader converts back to :class:`bool`.
     """
     now = time.time()
+
     def _write(session: Session) -> None:
         b = backend.strip()
         k = canonical_key.strip()
@@ -555,18 +540,14 @@ def upsert_ui_preference(
             row.hide_on_mobile = 1 if hide_on_mobile else 0
             row.updated_at = now
 
-
     discovery_write(path, _write)
 
 
 def delete_display_name(path: Path, *, backend: str, canonical_key: str) -> None:
     def _write(session: Session) -> None:
-        row = session.get(
-            DeviceDisplayName, (backend.strip(), canonical_key.strip())
-        )
+        row = session.get(DeviceDisplayName, (backend.strip(), canonical_key.strip()))
         if row is not None:
             session.delete(row)
-
 
     discovery_write(path, _write)
 
@@ -578,6 +559,7 @@ def delete_ui_preference(path: Path, *, backend: str, canonical_key: str) -> Non
     ``hide_on_mobile=False``). Used by future tile-management endpoints; not
     exercised by the current landing page.
     """
+
     def _write(session: Session) -> None:
         row = session.get(UiPreference, (backend.strip(), canonical_key.strip()))
         if row is not None:

@@ -38,16 +38,8 @@ def location_history_retention_from_settings(
             unlimited=True,
         )
     return LocationHistoryRetention(
-        max_age_s=(
-            max_age_s
-            if max_age_s is not None
-            else DEFAULT_LOCATION_HISTORY_MAX_AGE_S
-        ),
-        min_keep_count=(
-            min_keep_count
-            if min_keep_count is not None
-            else DEFAULT_LOCATION_HISTORY_MIN_KEEP_COUNT
-        ),
+        max_age_s=(max_age_s if max_age_s is not None else DEFAULT_LOCATION_HISTORY_MAX_AGE_S),
+        min_keep_count=(min_keep_count if min_keep_count is not None else DEFAULT_LOCATION_HISTORY_MIN_KEEP_COUNT),
         unlimited=False,
     )
 

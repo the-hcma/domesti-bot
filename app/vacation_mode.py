@@ -67,15 +67,9 @@ from app.wifi_home_presence import home_geofence_ids
 
 DEFAULT_VACATION_ANOMALY_DEBOUNCE_S = 30.0
 DEFAULT_VACATION_HYSTERESIS_S = 1800.0
-VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER = (
-    "No device state was changed and vacation mode was not updated."
-)
-VACATION_SETTINGS_TEST_PREAMBLE = (
-    "This is a test email from Automations → Vacation."
-)
-VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER = (
-    "Vacation mode was not actually changed."
-)
+VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER = "No device state was changed and vacation mode was not updated."
+VACATION_SETTINGS_TEST_PREAMBLE = "This is a test email from Automations → Vacation."
+VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER = "Vacation mode was not actually changed."
 _METERS_PER_MILE = 1609.344
 
 _LOGGER = logging.getLogger(__name__)
@@ -178,10 +172,7 @@ def build_vacation_mode_transition_bodies(
         ]
     else:
         headline = "Vacation mode is now off."
-        why = (
-            f"At least one of {users_label} entered the home geofence at "
-            f"{home_label}, so vacation mode turned off."
-        )
+        why = f"At least one of {users_label} entered the home geofence at {home_label}, so vacation mode turned off."
         facts = [
             f"People: {users_label}",
             f"Disarm: home geofence arrival",
@@ -374,8 +365,7 @@ def send_vacation_mode_anomaly_email(
     recipients = normalized_vacation_notification_emails(settings)
     if not recipients:
         _LOGGER.warning(
-            "[vacation] anomaly email skipped — notification_emails is empty "
-            "(family=%s device_id=%s)",
+            "[vacation] anomaly email skipped — notification_emails is empty (family=%s device_id=%s)",
             family_id.value,
             device_id,
         )
@@ -383,8 +373,7 @@ def send_vacation_mode_anomaly_email(
     config = load_smtp_config(cache_path)
     if config is None or not smtp_send_ready(config):
         _LOGGER.warning(
-            "[vacation] anomaly email skipped — SMTP is not configured "
-            "(family=%s device_id=%s recipient_count=%d)",
+            "[vacation] anomaly email skipped — SMTP is not configured (family=%s device_id=%s recipient_count=%d)",
             family_id.value,
             device_id,
             len(recipients),
@@ -410,10 +399,7 @@ def send_vacation_mode_anomaly_email(
     )
     prev_label = format_vacation_bool_device_state(family_id, previous)
     next_label = format_vacation_bool_device_state(family_id, current)
-    subject_core = (
-        f"vacation anomaly: {family_id.display_name()} "
-        f"{device_id} {prev_label}→{next_label}"
-    )
+    subject_core = f"vacation anomaly: {family_id.display_name()} {device_id} {prev_label}→{next_label}"
     if source == VacationEmailSource.SETTINGS_TEST:
         subject = f"domesti-bot [test] {subject_core}"
     else:
@@ -430,8 +416,7 @@ def send_vacation_mode_anomaly_email(
         friendly = smtp_friendly_error(exc, host=params.host)
         operator_alert_store.record_smtp_notification_failure(message=friendly)
         _LOGGER.error(
-            "[vacation] anomaly email failed family=%s device_id=%s "
-            "recipient_count=%d host=%s:%s: %s",
+            "[vacation] anomaly email failed family=%s device_id=%s recipient_count=%d host=%s:%s: %s",
             family_id.value,
             device_id,
             len(recipients),
@@ -467,8 +452,7 @@ def send_vacation_mode_transition_email(
     recipients = normalized_vacation_notification_emails(settings)
     if not recipients:
         _LOGGER.warning(
-            "[vacation] transition email skipped — notification_emails is empty "
-            "(armed=%s source=%s)",
+            "[vacation] transition email skipped — notification_emails is empty (armed=%s source=%s)",
             armed,
             source.value,
         )
@@ -476,8 +460,7 @@ def send_vacation_mode_transition_email(
     config = load_smtp_config(cache_path)
     if config is None or not smtp_send_ready(config):
         _LOGGER.warning(
-            "[vacation] transition email skipped — SMTP is not configured "
-            "(armed=%s recipient_count=%d source=%s)",
+            "[vacation] transition email skipped — SMTP is not configured (armed=%s recipient_count=%d source=%s)",
             armed,
             len(recipients),
             source.value,
@@ -499,11 +482,7 @@ def send_vacation_mode_transition_email(
         cache_path=cache_path,
     )
     if source == VacationEmailSource.SETTINGS_TEST:
-        subject = (
-            "domesti-bot [test] vacation mode on"
-            if armed
-            else "domesti-bot [test] vacation mode off"
-        )
+        subject = "domesti-bot [test] vacation mode on" if armed else "domesti-bot [test] vacation mode off"
     elif armed:
         subject = "domesti-bot vacation mode on"
     else:
@@ -520,8 +499,7 @@ def send_vacation_mode_transition_email(
         friendly = smtp_friendly_error(exc, host=params.host)
         operator_alert_store.record_smtp_notification_failure(message=friendly)
         _LOGGER.error(
-            "[vacation] transition email failed armed=%s recipient_count=%d "
-            "host=%s:%s source=%s: %s",
+            "[vacation] transition email failed armed=%s recipient_count=%d host=%s:%s source=%s: %s",
             armed,
             len(recipients),
             params.host,
@@ -633,8 +611,7 @@ def tick_vacation_mode(
         # "entered the home geofence" transition body.
         if fail_safe_disarm:
             _LOGGER.info(
-                "[vacation] transition email skipped — fail-safe disarm "
-                "(no home geofence)",
+                "[vacation] transition email skipped — fail-safe disarm (no home geofence)",
             )
         elif settings.notify_on_transition:
             try:
@@ -658,8 +635,7 @@ def tick_vacation_mode(
                 )
         else:
             _LOGGER.info(
-                "[vacation] transition email skipped — notify_on_transition=false "
-                "armed=%s",
+                "[vacation] transition email skipped — notify_on_transition=false armed=%s",
                 result.transitioned_to,
             )
     return result
@@ -744,8 +720,7 @@ def _append_vacation_ui_link(
         "Open Automations → Vacation in domesti-bot to review this setting.",
     )
     html_parts.append(
-        "<p>Open Automations → Vacation in domesti-bot to review this "
-        "setting.</p>",
+        "<p>Open Automations → Vacation in domesti-bot to review this setting.</p>",
     )
 
 

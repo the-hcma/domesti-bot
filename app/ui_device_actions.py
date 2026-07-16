@@ -77,9 +77,7 @@ def _build_device_view(
 ) -> UIDeviceOut:
     match family:
         case DeviceFamilyId.KASA:
-            return build_kasa_device_view(
-                state.kasa_mgr, host=device_id, cache_path=state.cache_path
-            )
+            return build_kasa_device_view(state.kasa_mgr, host=device_id, cache_path=state.cache_path)
         case DeviceFamilyId.SONOS:
             return build_sonos_device_view(
                 _require_sonos_mgr(state, family),

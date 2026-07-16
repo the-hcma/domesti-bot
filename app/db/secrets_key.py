@@ -72,9 +72,7 @@ def load_secrets_key_material() -> tuple[str | None, SecretsKeySource]:
         text = path.read_text(encoding="utf-8")
         raw = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Expected {path} to contain JSON, got {_format_json_decode_error(path, text, exc)}"
-        ) from exc
+        raise ValueError(f"Expected {path} to contain JSON, got {_format_json_decode_error(path, text, exc)}") from exc
     if not isinstance(raw, dict):
         raise ValueError(f"Expected {path} to contain a JSON object, got {type(raw).__name__}")
     value = raw.get("domesti_secrets_key")
@@ -100,9 +98,7 @@ def write_secrets_json(domesti_secrets_key: str, *, path: Path | None = None) ->
     try:
         Fernet(key.encode("ascii"))
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "Expected domesti_secrets_key to be a url-safe base64-encoded 32-byte Fernet key"
-        ) from exc
+        raise ValueError("Expected domesti_secrets_key to be a url-safe base64-encoded 32-byte Fernet key") from exc
     target = (path or secrets_json_path()).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     existing: dict[str, object] = {}

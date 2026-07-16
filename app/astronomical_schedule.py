@@ -96,10 +96,7 @@ def uses_astronomical_eligibility_wake(rule: RuleOut) -> bool:
         return False
     if astronomical_repeat_cron(rule) is not None:
         return False
-    return (
-        RuleTrigger.DEVICE_STATE in rule.triggers
-        or RuleTrigger.DWELL_SATISFIED in rule.triggers
-    )
+    return RuleTrigger.DEVICE_STATE in rule.triggers or RuleTrigger.DWELL_SATISFIED in rule.triggers
 
 
 def uses_astronomical_materialized_schedule(rule: RuleOut) -> bool:
@@ -177,14 +174,15 @@ def next_astronomical_repeat_evaluate_at(
     anchor = extract_astronomical_anchor(rule)
     repeat_cron = astronomical_repeat_cron(rule)
     if anchor is None or repeat_cron is None:
-        msg = (
-            "Expected astronomical scheduled rule with schedule_cron, "
-            f"got rule_id={rule.id!r}"
-        )
+        msg = f"Expected astronomical scheduled rule with schedule_cron, got rule_id={rule.id!r}"
         raise ValueError(msg)
 
-    local_now = now.astimezone(timezone) if now.tzinfo is not None else now.replace(
-        tzinfo=timezone,
+    local_now = (
+        now.astimezone(timezone)
+        if now.tzinfo is not None
+        else now.replace(
+            tzinfo=timezone,
+        )
     )
     sun = compute_rules_sun_out(settings, now=local_now)
     anchor_dt = astronomical_anchor_datetime(anchor, sun, timezone)

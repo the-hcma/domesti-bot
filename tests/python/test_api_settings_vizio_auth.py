@@ -32,9 +32,7 @@ def _client(*, cache_path: Path | None) -> tuple[TestClient, FastAPI]:
     return TestClient(app), app
 
 
-def test_get_vizio_tvs_reports_secrets_key_status(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_get_vizio_tvs_reports_secrets_key_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     response = client.get("/v1/settings/vizio/tvs")
@@ -45,9 +43,7 @@ def test_get_vizio_tvs_reports_secrets_key_status(
     assert body["tvs"] == []
 
 
-def test_put_vizio_auth_persists_token_and_tv_row(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_put_vizio_auth_persists_token_and_tv_row(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VIZIO_AUTH_TOKEN", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
@@ -102,20 +98,21 @@ def test_put_vizio_auth_without_cache_returns_409(tmp_path: Path) -> None:
     assert "discovery cache" in response.json()["detail"].lower()
 
 
-def test_delete_vizio_auth_clears_database_row(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_delete_vizio_auth_clears_database_row(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
-    with patch(
-        "app.api.vizio_settings_routes.VizioSmartCastClient.fetch_deviceinfo",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "app.api.vizio_settings_routes.resolve_vizio_tv_mac",
-        new_callable=AsyncMock,
-        return_value="00:bd:3e:d5:f0:11",
+    with (
+        patch(
+            "app.api.vizio_settings_routes.VizioSmartCastClient.fetch_deviceinfo",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.api.vizio_settings_routes.resolve_vizio_tv_mac",
+            new_callable=AsyncMock,
+            return_value="00:bd:3e:d5:f0:11",
+        ),
     ):
         put = client.put(
             "/v1/settings/vizio/tvs/192.168.86.201/auth",
@@ -130,9 +127,7 @@ def test_delete_vizio_auth_clears_database_row(
     assert deleted.json()["stored_token"] is None
 
 
-def test_put_vizio_auth_hot_reloads_manager(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_put_vizio_auth_hot_reloads_manager(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VIZIO_AUTH_TOKEN", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"

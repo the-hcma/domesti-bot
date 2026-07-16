@@ -313,8 +313,7 @@ class VizioPollingWatcher(DeviceStateWatcher):
                         return
                 except asyncio.TimeoutError:
                     _LOGGER.warning(
-                        "[state-watcher vizio] %s update timed out after %.1fs; "
-                        "keeping last known state",
+                        "[state-watcher vizio] %s update timed out after %.1fs; keeping last known state",
                         device.identifier,
                         _VIZIO_WATCHER_REFRESH_TIMEOUT_S,
                     )
@@ -466,14 +465,9 @@ def poll_interval_from_env() -> float:
     try:
         value = float(raw)
     except ValueError as exc:
-        raise ValueError(
-            f"Expected a positive float for DOMESTI_STATE_POLL_INTERVAL_S, got {raw!r}"
-        ) from exc
+        raise ValueError(f"Expected a positive float for DOMESTI_STATE_POLL_INTERVAL_S, got {raw!r}") from exc
     if value < _MIN_POLL_INTERVAL_S:
-        raise ValueError(
-            f"Expected DOMESTI_STATE_POLL_INTERVAL_S >= {_MIN_POLL_INTERVAL_S}, "
-            f"got {value}"
-        )
+        raise ValueError(f"Expected DOMESTI_STATE_POLL_INTERVAL_S >= {_MIN_POLL_INTERVAL_S}, got {value}")
     return value
 
 
@@ -496,9 +490,7 @@ async def run_device_state_watchers(
         await stop.wait()
         return
     tasks = [
-        asyncio.create_task(
-            w.run(stop=stop), name=f"state-watcher-{type(w).__name__}-{i}"
-        )
+        asyncio.create_task(w.run(stop=stop), name=f"state-watcher-{type(w).__name__}-{i}")
         for i, w in enumerate(materialised)
     ]
     try:
@@ -575,10 +567,7 @@ async def _refresh_all_devices_concurrently(
     materialised = list(device_refreshes)
     if not materialised:
         return
-    device_tasks = [
-        asyncio.create_task(refresh(), name=task_name)
-        for task_name, refresh in materialised
-    ]
+    device_tasks = [asyncio.create_task(refresh(), name=task_name) for task_name, refresh in materialised]
 
     async def _gather_device_results() -> list[BaseException | None]:
         return await asyncio.gather(*device_tasks, return_exceptions=True)
@@ -606,9 +595,7 @@ async def _refresh_all_devices_concurrently(
             await stop_task
         results = await gather_task
     for (task_name, _refresh), result in zip(materialised, results, strict=True):
-        if isinstance(result, BaseException) and not isinstance(
-            result, asyncio.CancelledError
-        ):
+        if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
             _LOGGER.warning(
                 "[state-watcher] %s failed unexpectedly; keeping last known state",
                 task_name,

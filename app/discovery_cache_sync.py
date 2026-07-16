@@ -106,10 +106,7 @@ def _cached_androidtv_uuids(cache_path: Path) -> frozenset[str]:
 
 def _cached_kasa_hosts(cache_path: Path) -> frozenset[str]:
     return frozenset(
-        host
-        for host, _alias, _cfg, _requires_klap in device_discovery_store.load_cached_configs(
-            cache_path
-        )
+        host for host, _alias, _cfg, _requires_klap in device_discovery_store.load_cached_configs(cache_path)
     )
 
 
@@ -130,9 +127,7 @@ def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[st
     """IDs that ``reload_from_cache`` would attempt (token-backed endpoints only)."""
 
     ids: set[str] = set()
-    for host, port, _display, _model, mac, _diid in device_discovery_store.load_vizio_tvs(
-        cache_path
-    ):
+    for host, port, _display, _model, mac, _diid in device_discovery_store.load_vizio_tvs(cache_path):
         token, _source = resolve_vizio_auth_token(
             mac=mac,
             host=host,

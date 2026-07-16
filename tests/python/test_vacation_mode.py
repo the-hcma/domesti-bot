@@ -511,10 +511,7 @@ def test_build_vacation_mode_transition_bodies_includes_deep_link(
             source=VacationEmailSource.LATCH,
             cache_path=tmp_path / "cache.sqlite",
         )
-    assert (
-        "Open Automations → Vacation: "
-        "https://domesti.example.com/#/automations/vacation" in plain
-    )
+    assert "Open Automations → Vacation: https://domesti.example.com/#/automations/vacation" in plain
     assert "Instance: https://domesti.example.com" in plain
     assert 'href="https://domesti.example.com/#/automations/vacation"' in html
 

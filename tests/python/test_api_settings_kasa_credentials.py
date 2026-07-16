@@ -196,9 +196,7 @@ def test_put_kasa_credentials_reload_failure_sets_restart_required(
     )
     with (
         runtime.temporary_device_state(state),
-        patch.object(
-            runtime, "restart_device_state_watchers", new_callable=AsyncMock
-        ) as restart_mock,
+        patch.object(runtime, "restart_device_state_watchers", new_callable=AsyncMock) as restart_mock,
     ):
         r = client.put(
             "/v1/settings/kasa-credentials",
@@ -233,9 +231,7 @@ def test_put_kasa_credentials_hot_reloads_manager(
     )
     with (
         runtime.temporary_device_state(state),
-        patch.object(
-            runtime, "restart_device_state_watchers", new_callable=AsyncMock
-        ) as restart_mock,
+        patch.object(runtime, "restart_device_state_watchers", new_callable=AsyncMock) as restart_mock,
     ):
         r = client.put(
             "/v1/settings/kasa-credentials",

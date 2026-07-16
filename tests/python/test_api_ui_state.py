@@ -282,7 +282,10 @@ def test_build_ui_state_sonos_omitted_when_no_zones_discovered() -> None:
 def test_build_ui_state_sonos_honors_exclude_from_global(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="sonos", canonical_key="RINCON_A", exclude_from_global=True,
+        db,
+        backend="sonos",
+        canonical_key="RINCON_A",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     state = _state(
@@ -372,7 +375,10 @@ def test_build_ui_state_cache_path_none_means_no_exclusions(tmp_path: Path) -> N
     # Pre-seed a different file (this is *not* what we pass below):
     other_db = tmp_path / "other.sqlite"
     device_discovery_store.upsert_ui_preference(
-        other_db, backend="kasa", canonical_key="10.0.0.1", exclude_from_global=True,
+        other_db,
+        backend="kasa",
+        canonical_key="10.0.0.1",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     state = _state(kasa_mgr=_fake_kasa_mgr([("10.0.0.1", "Lamp", True)]))
@@ -385,7 +391,10 @@ def test_build_ui_state_excluded_keys_set_exclude_from_global_true(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.2",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     state = _state(
@@ -438,7 +447,10 @@ def test_build_ui_state_exclusions_dont_cross_families(tmp_path: Path) -> None:
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="left", exclude_from_global=True,
+        db,
+        backend="tailwind",
+        canonical_key="left",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     state = _state(
@@ -455,7 +467,10 @@ def test_build_ui_state_exclusions_dont_cross_families(tmp_path: Path) -> None:
 def test_get_v1_ui_state_returns_payload_when_state_is_set(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="192.168.1.50", exclude_from_global=True,
+        db,
+        backend="kasa",
+        canonical_key="192.168.1.50",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     client, app = _client()

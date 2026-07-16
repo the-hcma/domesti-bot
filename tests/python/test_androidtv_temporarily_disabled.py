@@ -39,10 +39,7 @@ def test_domesti_bot_cli_reexports_the_disable_flag() -> None:
     # The bootstrap branch in ``boot_androidtv`` checks this re-export,
     # so a future move of the constant must keep the symbol reachable
     # from ``app.domesti_bot_cli`` or risk a silent fall-through.
-    assert (
-        domesti_bot_cli.ANDROIDTV_TEMPORARILY_DISABLED
-        is androidtv_device_manager.ANDROIDTV_TEMPORARILY_DISABLED
-    )
+    assert domesti_bot_cli.ANDROIDTV_TEMPORARILY_DISABLED is androidtv_device_manager.ANDROIDTV_TEMPORARILY_DISABLED
     assert (
         domesti_bot_cli.ANDROIDTV_TEMPORARILY_DISABLED_REASON
         is androidtv_device_manager.ANDROIDTV_TEMPORARILY_DISABLED_REASON

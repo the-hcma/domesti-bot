@@ -123,16 +123,18 @@ async def test_fetch_records_skipped_auth_hosts() -> None:
     discovered = {bad_auth.host: bad_auth, bad_net.host: bad_net}
 
     mgr = KasaDeviceManager()
-    with patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(return_value=discovered),
-    ), patch(
-        "app.kasa_device_manager._connect_smart_plain_http",
-        AsyncMock(side_effect=AuthenticationError("klap")),
-    ), patch(
-        "app.kasa_device_manager._connect_legacy_xor",
-        AsyncMock(
-            side_effect=ConnectionRefusedError("Connect call failed (..., 9999)")
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value=discovered),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_smart_plain_http",
+            AsyncMock(side_effect=AuthenticationError("klap")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_legacy_xor",
+            AsyncMock(side_effect=ConnectionRefusedError("Connect call failed (..., 9999)")),
         ),
     ):
         await mgr.fetch()
@@ -166,27 +168,28 @@ async def test_fetch_keeps_klap_flag_when_credential_retry_fails_non_auth() -> N
             DeviceEncryptionType.Klap,
         ),
     )
-    klap.config.to_dict_control_credentials = MagicMock(
-        return_value={"host": host, "timeout": 5}
-    )
+    klap.config.to_dict_control_credentials = MagicMock(return_value={"host": host, "timeout": 5})
 
     mgr = KasaDeviceManager()
     mgr.set_credentials(username="a@b.com", password="hunter2")
-    legacy_xor = AsyncMock(
-        side_effect=AssertionError("KLAP recovery must not try legacy XOR")
-    )
-    with patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(return_value={host: klap}),
-    ), patch(
-        "app.kasa_device_manager._connect_smart_plain_http",
-        AsyncMock(side_effect=AuthenticationError("klap")),
-    ), patch(
-        "app.kasa_device_manager._connect_legacy_xor",
-        legacy_xor,
-    ), patch(
-        "app.kasa_device_manager.KDevice.connect",
-        AsyncMock(side_effect=RuntimeError("handshake timed out")),
+    legacy_xor = AsyncMock(side_effect=AssertionError("KLAP recovery must not try legacy XOR"))
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={host: klap}),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_smart_plain_http",
+            AsyncMock(side_effect=AuthenticationError("klap")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_legacy_xor",
+            legacy_xor,
+        ),
+        patch(
+            "app.kasa_device_manager.KDevice.connect",
+            AsyncMock(side_effect=RuntimeError("handshake timed out")),
+        ),
     ):
         await mgr.fetch()
 
@@ -222,9 +225,7 @@ async def test_known_klap_ingest_tracks_non_auth_credential_failure(
             DeviceEncryptionType.Klap,
         ),
     )
-    klap.config.to_dict_control_credentials = MagicMock(
-        return_value={"host": host, "timeout": 5}
-    )
+    klap.config.to_dict_control_credentials = MagicMock(return_value={"host": host, "timeout": 5})
 
     mgr = KasaDeviceManager()
     mgr.set_credentials(username="a@b.com", password="hunter2")
@@ -255,15 +256,19 @@ async def test_fetch_clears_skipped_auth_hosts_after_success() -> None:
     auth_fail = _kdev_auth_fail("192.168.86.216")
     mgr = KasaDeviceManager()
 
-    with patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(return_value={auth_fail.host: auth_fail}),
-    ), patch(
-        "app.kasa_device_manager._connect_smart_plain_http",
-        AsyncMock(side_effect=AuthenticationError("klap")),
-    ), patch(
-        "app.kasa_device_manager._connect_legacy_xor",
-        AsyncMock(side_effect=ConnectionRefusedError("…")),
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={auth_fail.host: auth_fail}),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_smart_plain_http",
+            AsyncMock(side_effect=AuthenticationError("klap")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_legacy_xor",
+            AsyncMock(side_effect=ConnectionRefusedError("…")),
+        ),
     ):
         await mgr.fetch()
     assert mgr.skipped_auth_hosts == ("192.168.86.216",)
@@ -292,9 +297,7 @@ async def test_repl_cmd_kasa_creds_sets_credentials_and_rediscovers() -> None:
         with redirect_stdout(out_buf), redirect_stderr(err_buf):
             await _repl_cmd_kasa_creds(
                 mgr,
-                prompt_fn=_make_prompt(
-                    {"email": "alice@example.com", "password": "hunter2"}
-                ),
+                prompt_fn=_make_prompt({"email": "alice@example.com", "password": "hunter2"}),
                 theme=_Theme(enabled=False),
             )
 
@@ -320,9 +323,7 @@ async def test_repl_cmd_kasa_creds_persists_to_encrypted_db(
         with redirect_stdout(out_buf), redirect_stderr(io.StringIO()):
             await _repl_cmd_kasa_creds(
                 mgr,
-                prompt_fn=_make_prompt(
-                    {"email": "alice@example.com", "password": "hunter2"}
-                ),
+                prompt_fn=_make_prompt({"email": "alice@example.com", "password": "hunter2"}),
                 theme=_Theme(enabled=False),
                 cache_path=db,
             )
@@ -344,9 +345,7 @@ async def test_repl_cmd_kasa_creds_handles_cancelled_input() -> None:
     with patch.object(KasaDeviceManager, "rediscover", rediscover):
         err_buf = io.StringIO()
         with redirect_stdout(io.StringIO()), redirect_stderr(err_buf):
-            await _repl_cmd_kasa_creds(
-                mgr, prompt_fn=cancelling_prompt, theme=_Theme(enabled=False)
-            )
+            await _repl_cmd_kasa_creds(mgr, prompt_fn=cancelling_prompt, theme=_Theme(enabled=False))
 
     rediscover.assert_not_called()
     assert mgr.has_credentials is False
@@ -365,9 +364,7 @@ async def test_repl_cmd_kasa_creds_surfaces_rediscover_failure() -> None:
         with redirect_stdout(io.StringIO()), redirect_stderr(err_buf):
             await _repl_cmd_kasa_creds(
                 mgr,
-                prompt_fn=_make_prompt(
-                    {"email": "alice@example.com", "password": "hunter2"}
-                ),
+                prompt_fn=_make_prompt({"email": "alice@example.com", "password": "hunter2"}),
                 theme=_Theme(enabled=False),
             )
 
@@ -379,9 +376,7 @@ async def test_repl_cmd_kasa_creds_surfaces_rediscover_failure() -> None:
 
 def test_maybe_print_kasa_auth_notice_fires_when_skipped_and_no_creds() -> None:
     mgr = KasaDeviceManager()
-    mgr._last_skipped_auth_hosts.extend(
-        ["192.168.86.216", "192.168.86.225", "192.168.86.234"]
-    )
+    mgr._last_skipped_auth_hosts.extend(["192.168.86.216", "192.168.86.225", "192.168.86.234"])
 
     buf = io.StringIO()
     with redirect_stdout(buf):

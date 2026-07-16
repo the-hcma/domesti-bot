@@ -84,26 +84,18 @@ def load_automation_rules_bundle(
     """Parse and validate the automation rule bundle."""
     resolved = (path or automation_rules_json_path()).expanduser().resolve()
     if not resolved.is_file():
-        raise AutomationRulesLoadError(
-            f"Expected automation rules file at {resolved}, got missing path"
-        )
+        raise AutomationRulesLoadError(f"Expected automation rules file at {resolved}, got missing path")
     try:
         text = resolved.read_text(encoding="utf-8")
         raw = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise AutomationRulesLoadError(
-            f"Expected {resolved} to contain JSON, got invalid JSON: {exc}"
-        ) from exc
+        raise AutomationRulesLoadError(f"Expected {resolved} to contain JSON, got invalid JSON: {exc}") from exc
     if not isinstance(raw, dict):
-        raise AutomationRulesLoadError(
-            f"Expected {resolved} to contain a JSON object, got {type(raw).__name__}"
-        )
+        raise AutomationRulesLoadError(f"Expected {resolved} to contain a JSON object, got {type(raw).__name__}")
     try:
         return AutomationRulesBundle.model_validate(raw)
     except ValidationError as exc:
-        raise AutomationRulesLoadError(
-            f"Expected {resolved} to match the automation rules schema, got: {exc}"
-        ) from exc
+        raise AutomationRulesLoadError(f"Expected {resolved} to match the automation rules schema, got: {exc}") from exc
 
 
 def load_home_location(*, path: Path | None = None) -> HomeLocationRef:
@@ -141,20 +133,14 @@ def save_settings_location(
     source_path = (path or automation_rules_json_path()).expanduser().resolve()
     dest_path = (path or automation_rules_operator_json_path()).expanduser().resolve()
     if not source_path.is_file():
-        raise AutomationRulesLoadError(
-            f"Expected automation rules file at {source_path}, got missing path"
-        )
+        raise AutomationRulesLoadError(f"Expected automation rules file at {source_path}, got missing path")
     try:
         text = source_path.read_text(encoding="utf-8")
         raw = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise AutomationRulesLoadError(
-            f"Expected {source_path} to contain JSON, got invalid JSON: {exc}"
-        ) from exc
+        raise AutomationRulesLoadError(f"Expected {source_path} to contain JSON, got invalid JSON: {exc}") from exc
     if not isinstance(raw, dict):
-        raise AutomationRulesLoadError(
-            f"Expected {source_path} to contain a JSON object, got {type(raw).__name__}"
-        )
+        raise AutomationRulesLoadError(f"Expected {source_path} to contain a JSON object, got {type(raw).__name__}")
     raw["settings_location"] = validated.model_dump(
         mode="json",
         exclude={"home_configured"},
@@ -183,20 +169,14 @@ def save_vacation_mode_settings(
     source_path = (path or automation_rules_json_path()).expanduser().resolve()
     dest_path = (path or automation_rules_operator_json_path()).expanduser().resolve()
     if not source_path.is_file():
-        raise AutomationRulesLoadError(
-            f"Expected automation rules file at {source_path}, got missing path"
-        )
+        raise AutomationRulesLoadError(f"Expected automation rules file at {source_path}, got missing path")
     try:
         text = source_path.read_text(encoding="utf-8")
         raw = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise AutomationRulesLoadError(
-            f"Expected {source_path} to contain JSON, got invalid JSON: {exc}"
-        ) from exc
+        raise AutomationRulesLoadError(f"Expected {source_path} to contain JSON, got invalid JSON: {exc}") from exc
     if not isinstance(raw, dict):
-        raise AutomationRulesLoadError(
-            f"Expected {source_path} to contain a JSON object, got {type(raw).__name__}"
-        )
+        raise AutomationRulesLoadError(f"Expected {source_path} to contain a JSON object, got {type(raw).__name__}")
     raw["vacation_mode"] = validated.model_dump(mode="json")
     try:
         AutomationRulesBundle.model_validate(raw)

@@ -23,7 +23,8 @@ def _location_record(user_id: str, reported_at: float) -> UserLocationRecord:
         lat=41.194085,
         lon=-73.888365,
         accuracy_m=12,
-        fix_at=reported_at, reported_at=reported_at,
+        fix_at=reported_at,
+        reported_at=reported_at,
         source="test",
     )
 

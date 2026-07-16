@@ -45,7 +45,7 @@ def _detect_system_timezone() -> ZoneInfo | _tz:
         link = os.readlink("/etc/localtime")
         idx = link.find("/zoneinfo/")
         if idx != -1:
-            return ZoneInfo(link[idx + len("/zoneinfo/"):])
+            return ZoneInfo(link[idx + len("/zoneinfo/") :])
     except OSError:
         pass
     try:
@@ -239,10 +239,7 @@ def build_dict_config(
         "formatters": {
             "verbose": {
                 "()": f"{__name__}.LocalTimeFormatter",
-                "format": (
-                    "%(asctime)s.%(msecs)03d | %(levelname)-8s | "
-                    "%(logtag)-12s | %(message)s"
-                ),
+                "format": ("%(asctime)s.%(msecs)03d | %(levelname)-8s | %(logtag)-12s | %(message)s"),
                 "datefmt": "%Y%m%d-%H:%M:%S",
             },
         },

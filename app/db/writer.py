@@ -79,8 +79,7 @@ class _PathWriter:
         with self._start_lock:
             if self._thread.is_alive():
                 raise TimeoutError(
-                    f"Expected discovery writer for {self._path} to stop within "
-                    f"{timeout_s}s, got still running",
+                    f"Expected discovery writer for {self._path} to stop within {timeout_s}s, got still running",
                 )
             # Timeout-recovery may leave a second _STOP (and rarely a late job)
             # in the queue after the worker already exited on the first sentinel.
@@ -91,17 +90,13 @@ class _PathWriter:
             self._thread_ident = None
 
     def submit(self, fn: Callable[[Session], T]) -> T:
-        if (
-            self._thread_ident is not None
-            and threading.get_ident() == self._thread_ident
-        ):
+        if self._thread_ident is not None and threading.get_ident() == self._thread_ident:
             return self._execute(fn)
         future: concurrent.futures.Future[T] = concurrent.futures.Future()
         with self._start_lock:
             if self._closed or self._stopping:
                 raise DiscoveryWriterStoppedError(
-                    f"Expected discovery writer for {self._path} to accept writes, "
-                    "got shutting down",
+                    f"Expected discovery writer for {self._path} to accept writes, got shutting down",
                 )
             self._ensure_started_locked()
             self._jobs.put((fn, future))
@@ -121,16 +116,14 @@ class _PathWriter:
             if future.set_running_or_notify_cancel():
                 future.set_exception(
                     DiscoveryWriterStoppedError(
-                        f"Expected discovery writer for {self._path} to run queued "
-                        "write, got stopped",
+                        f"Expected discovery writer for {self._path} to run queued write, got stopped",
                     ),
                 )
 
     def _ensure_started_locked(self) -> None:
         if self._closed:
             raise DiscoveryWriterStoppedError(
-                f"Expected discovery writer for {self._path} to accept writes, "
-                "got closed",
+                f"Expected discovery writer for {self._path} to accept writes, got closed",
             )
         if self._started:
             return

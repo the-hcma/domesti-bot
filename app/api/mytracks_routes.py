@@ -389,9 +389,7 @@ async def post_mytracks_pair(
 
 
 @settings_router.put("/my-tracks", response_model=MyTracksSettingsOut)
-async def put_mytracks_settings(
-    body: MyTracksSettingsIn, request: Request
-) -> MyTracksSettingsOut:
+async def put_mytracks_settings(body: MyTracksSettingsIn, request: Request) -> MyTracksSettingsOut:
     """Persist My Tracks domain and default admin username."""
     cache_path = _require_discovery_cache(request)
     _validate_mytracks_body(body)
@@ -448,9 +446,7 @@ async def get_mytracks_users_sync_status(
 
 
 @rules_router.post("/geofences/sync", response_model=MyTracksGeofencesSyncOut)
-async def post_mytracks_geofences_sync(
-    body: MyTracksSyncIn, request: Request
-) -> MyTracksGeofencesSyncOut:
+async def post_mytracks_geofences_sync(body: MyTracksSyncIn, request: Request) -> MyTracksGeofencesSyncOut:
     """Pull geofence definitions from My Tracks using admin credentials."""
     cache_path = _require_discovery_cache(request)
     record, username = _resolve_sync_credentials(request, body)
@@ -505,9 +501,7 @@ async def post_mytracks_geofences_sync(
 
 
 @rules_router.post("/users/sync", response_model=MyTracksUsersSyncOut)
-async def post_mytracks_users_sync(
-    body: MyTracksSyncIn, request: Request
-) -> MyTracksUsersSyncOut:
+async def post_mytracks_users_sync(body: MyTracksSyncIn, request: Request) -> MyTracksUsersSyncOut:
     """Pull the user roster from My Tracks using admin credentials."""
     cache_path = _require_discovery_cache(request)
     record, username = _resolve_sync_credentials(request, body)
@@ -675,9 +669,7 @@ def _pair_status_to_schema(
         user_location_update_url=record.user_location_update_url,
         user_location_test_url=record.user_location_test_url,
         relay_key_configured=record.relay_key_configured,
-        location_history_retention=_retention_record_to_schema(
-            record.location_history_retention
-        ),
+        location_history_retention=_retention_record_to_schema(record.location_history_retention),
         location_updates_accepted=record.location_updates_accepted,
         mytracks_location_updates_enabled=_maybe_mytracks_location_updates_enabled(
             record,
@@ -767,10 +759,7 @@ def _require_secrets_key_for_pairing() -> None:
     if not secrets_key_configured():
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-            detail=(
-                "Expected domesti_secrets_key before pairing — run setup-secrets or set "
-                "DOMESTI_BOT_SECRETS_KEY"
-            ),
+            detail=("Expected domesti_secrets_key before pairing — run setup-secrets or set DOMESTI_BOT_SECRETS_KEY"),
         )
 
 

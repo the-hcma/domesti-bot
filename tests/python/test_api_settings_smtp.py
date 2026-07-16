@@ -32,9 +32,7 @@ def test_get_smtp_settings_returns_null_when_unconfigured(tmp_path: Path) -> Non
     assert response.json() is None
 
 
-def test_put_smtp_settings_persists_config(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_put_smtp_settings_persists_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
@@ -104,9 +102,7 @@ def test_post_smtp_test_email_sends_via_plain_smtp(
     assert message["Subject"] == "domesti-bot [test] SMTP configuration"
 
 
-def test_put_smtp_without_secrets_key_returns_503(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_put_smtp_without_secrets_key_returns_503(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(tmp_path / "missing-config.json"))
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
@@ -124,9 +120,7 @@ def test_put_smtp_without_secrets_key_returns_503(
     assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
 
 
-def test_delete_smtp_settings_clears_config(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_delete_smtp_settings_clears_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)

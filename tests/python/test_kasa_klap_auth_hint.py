@@ -95,18 +95,20 @@ async def test_fetch_warning_surfaces_klap_hint_for_auth_failures(
 
     # Without credentials: KLAP-auth hosts are ignored quietly (no per-device WARNING).
     mgr = KasaDeviceManager()
-    legacy_xor = AsyncMock(
-        side_effect=AssertionError("KLAP recovery must not try legacy XOR")
-    )
-    with patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(return_value=discovered),
-    ), patch(
-        "app.kasa_device_manager._connect_smart_plain_http",
-        AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
-    ), patch(
-        "app.kasa_device_manager._connect_legacy_xor",
-        legacy_xor,
+    legacy_xor = AsyncMock(side_effect=AssertionError("KLAP recovery must not try legacy XOR"))
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value=discovered),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_smart_plain_http",
+            AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_legacy_xor",
+            legacy_xor,
+        ),
     ):
         with caplog.at_level(logging.WARNING, logger="app.kasa_device_manager"):
             await mgr.fetch()
@@ -117,9 +119,7 @@ async def test_fetch_warning_surfaces_klap_hint_for_auth_failures(
     assert mgr.skipped_auth_hosts == ("192.168.86.216",)
     assert mgr.hosts_requiring_klap_auth == ("192.168.86.216",)
     per_host_warnings = [
-        r.getMessage()
-        for r in caplog.records
-        if r.levelno == logging.WARNING and "192.168.86.216" in r.getMessage()
+        r.getMessage() for r in caplog.records if r.levelno == logging.WARNING and "192.168.86.216" in r.getMessage()
     ]
     assert per_host_warnings == []
 
@@ -130,30 +130,31 @@ async def test_fetch_warning_surfaces_klap_hint_for_auth_failures(
     mgr_with_creds = KasaDeviceManager(
         credentials=Credentials(username="a@b.com", password="x"),
     )
-    legacy_xor = AsyncMock(
-        side_effect=AssertionError("KLAP recovery must not try legacy XOR")
-    )
-    with patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(return_value={bad.host: _bad_kdev("192.168.86.216")}),
-    ), patch(
-        "app.kasa_device_manager.KDevice.connect",
-        AsyncMock(side_effect=AuthenticationError("klap")),
-    ), patch(
-        "app.kasa_device_manager._connect_smart_plain_http",
-        AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
-    ), patch(
-        "app.kasa_device_manager._connect_legacy_xor",
-        legacy_xor,
+    legacy_xor = AsyncMock(side_effect=AssertionError("KLAP recovery must not try legacy XOR"))
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={bad.host: _bad_kdev("192.168.86.216")}),
+        ),
+        patch(
+            "app.kasa_device_manager.KDevice.connect",
+            AsyncMock(side_effect=AuthenticationError("klap")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_smart_plain_http",
+            AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_legacy_xor",
+            legacy_xor,
+        ),
     ):
         with caplog.at_level(logging.WARNING, logger="app.kasa_device_manager"):
             await mgr_with_creds.fetch()
 
     legacy_xor.assert_not_awaited()
 
-    warning_messages = [
-        r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
-    ]
+    warning_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     matching = [m for m in warning_messages if "192.168.86.216" in m and "skipped" in m]
     assert matching, warning_messages
     msg = matching[0]
@@ -174,18 +175,20 @@ async def test_klap_saved_config_auth_failure_skips_legacy_xor() -> None:
             DeviceEncryptionType.Klap,
         ),
     )
-    legacy_xor = AsyncMock(
-        side_effect=AssertionError("KLAP saved config must not try legacy XOR")
-    )
-    with patch(
-        "app.kasa_device_manager.KDevice.connect",
-        AsyncMock(side_effect=AuthenticationError("klap")),
-    ), patch(
-        "app.kasa_device_manager._connect_smart_plain_http",
-        AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
-    ), patch(
-        "app.kasa_device_manager._connect_legacy_xor",
-        legacy_xor,
+    legacy_xor = AsyncMock(side_effect=AssertionError("KLAP saved config must not try legacy XOR"))
+    with (
+        patch(
+            "app.kasa_device_manager.KDevice.connect",
+            AsyncMock(side_effect=AuthenticationError("klap")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_smart_plain_http",
+            AsyncMock(side_effect=AuthenticationError("klap (plain http)")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_legacy_xor",
+            legacy_xor,
+        ),
     ):
         result = await _connect_from_saved_config(
             cfg,
@@ -213,12 +216,15 @@ async def test_klap_saved_config_timeout_reraises_when_raise_auth_failure() -> N
         f"Unable to query the device: {host}: ",
         TimeoutError(),
     )
-    with patch(
-        "app.kasa_device_manager.KDevice.connect",
-        AsyncMock(side_effect=query_exc),
-    ), patch(
-        "app.kasa_device_manager._connect_smart_plain_http",
-        AsyncMock(side_effect=query_exc),
+    with (
+        patch(
+            "app.kasa_device_manager.KDevice.connect",
+            AsyncMock(side_effect=query_exc),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_smart_plain_http",
+            AsyncMock(side_effect=query_exc),
+        ),
     ):
         with pytest.raises(KasaException, match="Unable to query the device"):
             await _connect_from_saved_config(
@@ -247,15 +253,19 @@ async def test_klap_saved_config_timeout_skips_without_aborting() -> None:
         f"Unable to query the device: {host}: ",
         TimeoutError(),
     )
-    with patch(
-        "app.kasa_device_manager.KDevice.connect",
-        AsyncMock(side_effect=query_exc),
-    ), patch(
-        "app.kasa_device_manager._connect_smart_plain_http",
-        AsyncMock(side_effect=query_exc),
-    ), patch(
-        "app.kasa_device_manager._connect_legacy_xor",
-        AsyncMock(side_effect=AssertionError("KLAP timeout must not try XOR")),
+    with (
+        patch(
+            "app.kasa_device_manager.KDevice.connect",
+            AsyncMock(side_effect=query_exc),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_smart_plain_http",
+            AsyncMock(side_effect=query_exc),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_legacy_xor",
+            AsyncMock(side_effect=AssertionError("KLAP timeout must not try XOR")),
+        ),
     ):
         result = await _connect_from_saved_config(
             cfg,

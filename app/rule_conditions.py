@@ -172,14 +172,8 @@ def evaluate_rule(
     ctx: RuleEvaluationContext,
 ) -> RuleEvaluationResult:
     """Evaluate top-level ``conditions.all`` rows for one rule."""
-    conditions = [
-        _evaluate_condition(condition, rule, ctx)
-        for condition in rule.conditions.all
-    ]
-    if (
-        RuleTrigger.EDGE_TRUE in rule.triggers
-        and ctx.triggered_by == RuleEvaluationCause.EDGE
-    ):
+    conditions = [_evaluate_condition(condition, rule, ctx) for condition in rule.conditions.all]
+    if RuleTrigger.EDGE_TRUE in rule.triggers and ctx.triggered_by == RuleEvaluationCause.EDGE:
         steady_rows = [
             row
             for row, condition in zip(conditions, rule.conditions.all, strict=True)
@@ -363,13 +357,9 @@ def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
     ):
         return False
     if isinstance(condition, AllConditionsCondition):
-        return any(
-            _counts_for_steady_armed_state(child) for child in condition.conditions
-        )
+        return any(_counts_for_steady_armed_state(child) for child in condition.conditions)
     if isinstance(condition, AnyConditionsCondition):
-        return any(
-            _counts_for_steady_armed_state(child) for child in condition.conditions
-        )
+        return any(_counts_for_steady_armed_state(child) for child in condition.conditions)
     return True
 
 
@@ -433,10 +423,7 @@ def _device_condition_power_labels(
                 break
         else:
             off_labels.append(label)
-            if (
-                short_circuit_match == DeviceConditionState.OFF
-                or fail_fast_unmet
-            ):
+            if short_circuit_match == DeviceConditionState.OFF or fail_fast_unmet:
                 break
     return on_labels, off_labels, missing_labels
 
@@ -624,9 +611,7 @@ def _evaluate_all(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> RuleConditionStatusOut:
-    children = [
-        _evaluate_condition(child, rule, ctx) for child in condition.conditions
-    ]
+    children = [_evaluate_condition(child, rule, ctx) for child in condition.conditions]
     met = all(child.met for child in children)
     return RuleConditionStatusOut(
         condition=condition,
@@ -641,9 +626,7 @@ def _evaluate_any(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> RuleConditionStatusOut:
-    children = [
-        _evaluate_condition(child, rule, ctx) for child in condition.conditions
-    ]
+    children = [_evaluate_condition(child, rule, ctx) for child in condition.conditions]
     if (
         RuleTrigger.EDGE_TRUE in rule.triggers
         and ctx.triggered_by == RuleEvaluationCause.EDGE
@@ -658,11 +641,7 @@ def _evaluate_any(
         )
     else:
         met = any(child.met for child in children)
-        detail = (
-            "At least one nested condition met"
-            if met
-            else "No nested conditions met yet"
-        )
+        detail = "At least one nested condition met" if met else "No nested conditions met yet"
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
@@ -775,14 +754,9 @@ def _evaluate_daylight(
     sunrise_label = _format_iso_local_time(ctx.sun.sunrise_at, ctx.timezone)
     sunset_label = _format_iso_local_time(ctx.sun.sunset_at, ctx.timezone)
     if met:
-        detail = (
-            f"Daylight active (sunrise {sunrise_label} to sunset {sunset_label})"
-        )
+        detail = f"Daylight active (sunrise {sunrise_label} to sunset {sunset_label})"
     else:
-        detail = (
-            f"Outside daylight hours (sunrise {sunrise_label}, "
-            f"sunset {sunset_label})"
-        )
+        detail = f"Outside daylight hours (sunrise {sunrise_label}, sunset {sunset_label})"
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
@@ -800,10 +774,7 @@ def _evaluate_days_of_week(
     # Python weekday(): Mon=0 … Sun=6; rule JSON uses JS getDay(): Sun=0 … Sat=6.
     today_js = (today + 1) % 7
     met = today_js in condition.days
-    selected = ", ".join(
-        _DAY_NAMES[day] if 0 <= day < len(_DAY_NAMES) else str(day)
-        for day in sorted(condition.days)
-    )
+    selected = ", ".join(_DAY_NAMES[day] if 0 <= day < len(_DAY_NAMES) else str(day) for day in sorted(condition.days))
     today_name = _DAY_NAMES[today_js] if 0 <= today_js < len(_DAY_NAMES) else "?"
     if met:
         detail = f"Today ({today_name}) is in {selected}"
@@ -830,7 +801,6 @@ def _evaluate_devices_all_in_state(
         ctx=ctx,
         require_all=True,
     )
-
 
 
 def _evaluate_devices_any_in_state(
@@ -875,8 +845,7 @@ def _evaluate_devices_any_in_state_for_s(
                 missing_labels.append(device_label)
             else:
                 missing_labels.append(
-                    f"{device_label} (unsupported family {ref.family_id.value} "
-                    f"for state {condition.state.value})",
+                    f"{device_label} (unsupported family {ref.family_id.value} for state {condition.state.value})",
                 )
             continue
         if not matches:
@@ -892,8 +861,7 @@ def _evaluate_devices_any_in_state_for_s(
             matched_labels.append(f"{device_label} {elapsed_label}")
         else:
             pending_labels.append(
-                f"{device_label} {elapsed_label} "
-                f"(need {_format_dwell_need_s(condition.min_duration_s)})",
+                f"{device_label} {elapsed_label} (need {_format_dwell_need_s(condition.min_duration_s)})",
             )
     if matched_labels:
         detail = f"{condition.state.value.capitalize()}: {', '.join(matched_labels)}"
@@ -925,7 +893,6 @@ def _evaluate_devices_any_in_state_for_s(
     )
 
 
-
 def _evaluate_devices_in_state(
     condition: RuleConditionOut,
     *,
@@ -935,9 +902,7 @@ def _evaluate_devices_in_state(
     require_all: bool,
 ) -> RuleConditionStatusOut:
     """Shared instant device-state evaluator for any/all in-state conditions."""
-    label = (
-        f"All devices {state.value}" if require_all else f"Any device {state.value}"
-    )
+    label = f"All devices {state.value}" if require_all else f"Any device {state.value}"
     if ctx.device_state is None:
         return RuleConditionStatusOut(
             condition=condition,
@@ -956,8 +921,7 @@ def _evaluate_devices_in_state(
                 missing_labels.append(device_label)
             else:
                 missing_labels.append(
-                    f"{device_label} (unsupported family {ref.family_id.value} "
-                    f"for state {state.value})",
+                    f"{device_label} (unsupported family {ref.family_id.value} for state {state.value})",
                 )
             if require_all:
                 break
@@ -991,8 +955,7 @@ def _evaluate_devices_in_state(
         complement = _complementary_device_state_label(state)
         if missing_labels:
             detail = (
-                f"All resolved devices {complement} ({', '.join(unmet_labels)}); "
-                f"not found: {', '.join(missing_labels)}"
+                f"All resolved devices {complement} ({', '.join(unmet_labels)}); not found: {', '.join(missing_labels)}"
             )
         else:
             detail = f"All {complement} ({', '.join(unmet_labels)})"
@@ -1049,11 +1012,7 @@ def _evaluate_users_geofence(
         (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
         None,
     )
-    fence_label = (
-        geofence.label
-        if geofence is not None
-        else condition.geofence_id
-    )
+    fence_label = geofence.label if geofence is not None else condition.geofence_id
     if geofence is None:
         return RuleConditionStatusOut(
             condition=condition,
@@ -1136,15 +1095,8 @@ def _evaluate_users_geofence(
             continue
         selected_names.append(_user_display_name(ctx, roster_user_id))
     who = _join_names(selected_names)
-    if (
-        RuleTrigger.EDGE_TRUE in rule.triggers
-        and ctx.triggered_by == RuleEvaluationCause.EDGE
-    ):
-        label = (
-            f"Presence at {fence_label} ({who})"
-            if want_inside
-            else f"Outside {fence_label} ({who})"
-        )
+    if RuleTrigger.EDGE_TRUE in rule.triggers and ctx.triggered_by == RuleEvaluationCause.EDGE:
+        label = f"Presence at {fence_label} ({who})" if want_inside else f"Outside {fence_label} ({who})"
         met = False
         if ignored_accuracy:
             detail = f"Ignored low-accuracy location: {'; '.join(ignored_accuracy)}"
@@ -1152,17 +1104,9 @@ def _evaluate_users_geofence(
             detail = "; ".join(presence_lines)
     else:
         met = len(unmet_names) == 0
-        label = (
-            f"When {who} enter {fence_label}"
-            if want_inside
-            else f"When {who} leave {fence_label}"
-        )
+        label = f"When {who} enter {fence_label}" if want_inside else f"When {who} leave {fence_label}"
         if met:
-            detail = (
-                f"Everyone is inside {fence_label}"
-                if want_inside
-                else f"Everyone is outside {fence_label}"
-            )
+            detail = f"Everyone is inside {fence_label}" if want_inside else f"Everyone is outside {fence_label}"
         elif ignored_accuracy:
             detail = f"Ignored low-accuracy location: {'; '.join(ignored_accuracy)}"
         elif want_inside:
@@ -1186,11 +1130,7 @@ def _evaluate_users_inside_geofence_for_s(
         (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
         None,
     )
-    fence_label = (
-        geofence.label
-        if geofence is not None
-        else condition.geofence_id
-    )
+    fence_label = geofence.label if geofence is not None else condition.geofence_id
     if geofence is None:
         return RuleConditionStatusOut(
             condition=condition,
@@ -1242,18 +1182,12 @@ def _evaluate_users_inside_geofence_for_s(
                 ctx,
                 roster_user_id,
             )
-            if (
-                inside_s >= condition.min_inside_s
-                and accurate_inside is not False
-            ):
+            if inside_s >= condition.min_inside_s and accurate_inside is not False:
                 presence_lines.append(
                     f"{name} inside {elapsed_label} (need {need_label})",
                 )
                 continue
-            if (
-                inside_s >= condition.min_inside_s
-                and accurate_inside is False
-            ):
+            if inside_s >= condition.min_inside_s and accurate_inside is False:
                 presence_lines.append(f"{name} outside")
                 unmet = True
                 continue
@@ -1323,9 +1257,7 @@ def _evaluate_users_inside_geofence_for_s(
         detail = "; ".join(presence_lines)
         met = False
     else:
-        detail = (
-            f"Everyone inside {fence_label} for at least {need_label}"
-        )
+        detail = f"Everyone inside {fence_label} for at least {need_label}"
         met = True
     return RuleConditionStatusOut(
         condition=condition,
@@ -1380,8 +1312,7 @@ def _evaluate_users_min_distance_from_home_m(
             accuracy = latest.accuracy_m
             accuracy_label = f"±{accuracy} m" if accuracy is not None else "unknown accuracy"
             presence_lines.append(
-                f"{name}: location ignored ({accuracy_label} > {min_accuracy_m} m "
-                "threshold or stale)",
+                f"{name}: location ignored ({accuracy_label} > {min_accuracy_m} m threshold or stale)",
             )
             unmet_names.append(name)
             continue
@@ -1438,11 +1369,7 @@ def _evaluate_users_outside_geofence_for_s(
         (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
         None,
     )
-    fence_label = (
-        geofence.label
-        if geofence is not None
-        else condition.geofence_id
-    )
+    fence_label = geofence.label if geofence is not None else condition.geofence_id
     if geofence is None:
         return RuleConditionStatusOut(
             condition=condition,
@@ -1494,10 +1421,7 @@ def _evaluate_users_outside_geofence_for_s(
                 ctx,
                 roster_user_id,
             )
-            if (
-                outside_s >= condition.min_outside_s
-                and accurate_inside is not True
-            ):
+            if outside_s >= condition.min_outside_s and accurate_inside is not True:
                 presence_lines.append(
                     f"{name} outside {elapsed_label} (need {need_label})",
                 )
@@ -1550,9 +1474,7 @@ def _evaluate_users_outside_geofence_for_s(
         detail = "; ".join(presence_lines)
         met = False
     else:
-        detail = (
-            f"Everyone outside {fence_label} for at least {need_label}"
-        )
+        detail = f"Everyone outside {fence_label} for at least {need_label}"
         met = True
     return RuleConditionStatusOut(
         condition=condition,
@@ -1611,9 +1533,7 @@ def _format_iso_local_time(iso: str, tz: ZoneInfo) -> str:
 
 
 def _format_window_display(start_hhmm: str, end_hhmm: str) -> str:
-    return (
-        f"{_format_hhmm_display(start_hhmm)} – {_format_hhmm_display(end_hhmm)}"
-    )
+    return f"{_format_hhmm_display(start_hhmm)} – {_format_hhmm_display(end_hhmm)}"
 
 
 def _location_reported_at_epoch(location: UserLocationOut) -> float:
@@ -1639,10 +1559,7 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     phi2 = math.radians(lat2)
     d_phi = math.radians(lat2 - lat1)
     d_lambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_phi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
-    )
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     return 2 * earth_radius_m * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
@@ -1688,9 +1605,7 @@ def iter_device_dwell_for_s_conditions(
 def iter_dwell_for_s_conditions(
     conditions: list[RuleConditionOut],
 ) -> list[UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition]:
-    found: list[
-        UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition
-    ] = []
+    found: list[UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition] = []
     for condition in conditions:
         if isinstance(
             condition,
@@ -1849,10 +1764,7 @@ def _presence_user_ids_for_condition(
         "[rules] unhandled condition type %s in presence_user_ids_for_condition",
         type(condition).__name__,
     )
-    raise AssertionError(
-        f"Unhandled condition type {type(condition).__name__!r} in "
-        "presence_user_ids_for_condition"
-    )
+    raise AssertionError(f"Unhandled condition type {type(condition).__name__!r} in presence_user_ids_for_condition")
 
 
 def _resolved_location_for_geofence_rule(

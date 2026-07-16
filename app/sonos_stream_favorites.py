@@ -34,16 +34,12 @@ def load_sonos_stream_favorites() -> tuple[SonosStreamFavorite, ...]:
         detail = _format_json_decode_error(path, text, exc)
         raise ValueError(detail) from exc
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"Expected JSON object in {path}, got {type(raw).__name__}"
-        )
+        raise ValueError(f"Expected JSON object in {path}, got {type(raw).__name__}")
     block = raw.get(_SECRETS_FAVORITES_KEY)
     if block is None:
         return ()
     if not isinstance(block, list):
-        raise ValueError(
-            f"Expected {_SECRETS_FAVORITES_KEY} to be a list, got {type(block).__name__}"
-        )
+        raise ValueError(f"Expected {_SECRETS_FAVORITES_KEY} to be a list, got {type(block).__name__}")
     parsed: list[SonosStreamFavorite] = []
     for index, entry in enumerate(block):
         favorite = _parse_favorite_entry(entry, index=index)

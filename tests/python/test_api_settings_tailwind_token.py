@@ -25,9 +25,7 @@ def _client(*, cache_path: Path | None) -> tuple[TestClient, FastAPI]:
     return TestClient(app), app
 
 
-def test_get_tailwind_token_settings_reports_env_source(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_get_tailwind_token_settings_reports_env_source(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("TAILWIND_TOKEN", "654321")
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     r = client.get("/v1/settings/tailwind-token")
@@ -38,9 +36,7 @@ def test_get_tailwind_token_settings_reports_env_source(
     assert body["stored_in_database"] is False
 
 
-def test_put_tailwind_token_persists_when_secrets_key_from_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_put_tailwind_token_persists_when_secrets_key_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
@@ -76,9 +72,7 @@ def test_put_tailwind_token_persists_when_secrets_key_in_json_file(
     assert body["secrets_key_source"] == "file"
 
 
-def test_put_tailwind_token_without_secrets_key_returns_503(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_put_tailwind_token_without_secrets_key_returns_503(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(tmp_path / "missing-config.json"))
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
@@ -95,9 +89,7 @@ def test_put_tailwind_token_without_cache_returns_409(tmp_path: Path) -> None:
     assert "discovery cache" in r.json()["detail"].lower()
 
 
-def test_delete_tailwind_token_clears_database_row(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_delete_tailwind_token_clears_database_row(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
     key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", key)

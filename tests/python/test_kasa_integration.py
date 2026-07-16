@@ -60,9 +60,7 @@ def _print_discovered_switches(mgr: KasaDeviceManager) -> None:
 def _require_kasa_integration() -> None:
     flag = (os.environ.get("KASA_INTEGRATION") or "").strip().lower()
     if flag not in ("1", "yes", "true", "on"):
-        pytest.skip(
-            "Set KASA_INTEGRATION=1 to run Kasa LAN integration tests (requires hardware on LAN)"
-        )
+        pytest.skip("Set KASA_INTEGRATION=1 to run Kasa LAN integration tests (requires hardware on LAN)")
 
 
 @pytest.mark.integration

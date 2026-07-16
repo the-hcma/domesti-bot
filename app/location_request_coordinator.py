@@ -109,10 +109,7 @@ class LocationRequestCoordinator:
         if len(recent) < ACCURACY_STREAK_COUNT:
             return None
         for rule in edge_rules:
-            if all(
-                not _location_accuracy_passes(row, rule.min_location_accuracy_m)
-                for row in recent
-            ):
+            if all(not _location_accuracy_passes(row, rule.min_location_accuracy_m) for row in recent):
                 return rule.id, None, "accuracy_streak"
         return None
 
@@ -217,9 +214,7 @@ class LocationRequestCoordinator:
             )
             if prepared is None:
                 return
-            resolved_reason, resolved_rule_id, resolved_geofence_id, pair_status, relay_key = (
-                prepared
-            )
+            resolved_reason, resolved_rule_id, resolved_geofence_id, pair_status, relay_key = prepared
             result = await request_user_location(
                 base_url=pair_status.domain,
                 relay_api_key=relay_key,
@@ -303,13 +298,16 @@ class LocationRequestCoordinator:
         rule_id: str | None,
         log_skips: bool,
         check_in_flight: bool = True,
-    ) -> tuple[
-        _LOCATION_REQUEST_REASON,
-        str | None,
-        str | None,
-        MyTracksPairStatusRecord,
-        str,
-    ] | None:
+    ) -> (
+        tuple[
+            _LOCATION_REQUEST_REASON,
+            str | None,
+            str | None,
+            MyTracksPairStatusRecord,
+            str,
+        ]
+        | None
+    ):
         cache_path = self._cache_path
         if cache_path is None:
             return None
@@ -460,15 +458,18 @@ class LocationRequestCoordinator:
         if self._cache_path is None:
             return False
         trimmed = user_id.strip()
-        if self._prepare_location_request(
-            trimmed,
-            context=context,
-            geofence_id=geofence_id,
-            reason=reason,
-            require_edge_rules=require_edge_rules,
-            rule_id=rule_id,
-            log_skips=False,
-        ) is None:
+        if (
+            self._prepare_location_request(
+                trimmed,
+                context=context,
+                geofence_id=geofence_id,
+                reason=reason,
+                require_edge_rules=require_edge_rules,
+                rule_id=rule_id,
+                log_skips=False,
+            )
+            is None
+        ):
             return False
         try:
             loop = asyncio.get_running_loop()
@@ -503,9 +504,7 @@ def _enabled_edge_rules_for_user(user_id: str) -> list[RuleOut]:
     return [
         rule
         for rule in list_automation_rules()
-        if rule.enabled
-        and RuleTrigger.EDGE_TRUE in rule.triggers
-        and user_id in collect_rule_user_ids(rule)
+        if rule.enabled and RuleTrigger.EDGE_TRUE in rule.triggers and user_id in collect_rule_user_ids(rule)
     ]
 
 

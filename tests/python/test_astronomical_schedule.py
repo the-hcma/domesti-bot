@@ -100,7 +100,7 @@ def _eligibility_wake_rule() -> RuleOut:
                 ),
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.ON,
+                    state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Front door lights",
@@ -163,9 +163,12 @@ def test_uses_astronomical_schedule_when_anchor_with_repeat_cron() -> None:
 
 
 def test_uses_astronomical_repeat_schedule_when_anchor_with_repeat_cron() -> None:
-    assert uses_astronomical_repeat_schedule(
-        _scheduled_rule(schedule_cron="*/10 * * * *"),
-    ) is True
+    assert (
+        uses_astronomical_repeat_schedule(
+            _scheduled_rule(schedule_cron="*/10 * * * *"),
+        )
+        is True
+    )
 
 
 def test_uses_astronomical_repeat_schedule_false_without_cron() -> None:
@@ -180,8 +183,7 @@ def test_uses_astronomical_edge_window_open_schedule_when_opted_in() -> None:
     assert uses_astronomical_edge_window_open_schedule(_edge_window_open_rule()) is True
 
 
-def test_uses_astronomical_edge_window_open_schedule_false_for_enter_only_evening(
-) -> None:
+def test_uses_astronomical_edge_window_open_schedule_false_for_enter_only_evening() -> None:
     enter_only = _edge_window_open_rule().model_copy(update={"triggers": [RuleTrigger.EDGE_TRUE]})
     assert uses_astronomical_edge_window_open_schedule(enter_only) is False
 
@@ -213,13 +215,15 @@ def test_uses_astronomical_eligibility_wake_for_dwell_and_device_state() -> None
 
 def test_uses_astronomical_materialized_schedule_includes_eligibility_wake() -> None:
     assert uses_astronomical_materialized_schedule(_eligibility_wake_rule()) is True
-    assert uses_astronomical_materialized_schedule(
-        _scheduled_rule(schedule_cron=None),
-    ) is True
+    assert (
+        uses_astronomical_materialized_schedule(
+            _scheduled_rule(schedule_cron=None),
+        )
+        is True
+    )
 
 
-def test_uses_astronomical_schedule_false_when_scheduled_trigger_missing(
-) -> None:
+def test_uses_astronomical_schedule_false_when_scheduled_trigger_missing() -> None:
     enter_only = _edge_window_open_rule().model_copy(update={"triggers": [RuleTrigger.EDGE_TRUE]})
     assert uses_astronomical_schedule(enter_only) is False
 
@@ -331,8 +335,7 @@ def test_next_astronomical_repeat_evaluate_at_waits_for_anchor_before_window(
     assert next_at == anchor_dt.timestamp()
 
 
-def test_next_astronomical_repeat_evaluate_at_after_before_sunrise_window_returns_midnight(
-) -> None:
+def test_next_astronomical_repeat_evaluate_at_after_before_sunrise_window_returns_midnight() -> None:
     tz = ZoneInfo("America/New_York")
     settings = SettingsLocationOut(
         lat=41.194072,

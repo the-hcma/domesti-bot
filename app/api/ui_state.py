@@ -55,6 +55,7 @@ _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("tailwind", "Garage doors", "#10B981"),
 )
 
+
 async def _bulk_close_tailwind_apply_impl(
     mgr: GotailwindDeviceManager,
     *,
@@ -218,15 +219,11 @@ def _door_state(is_open: bool, is_closed: bool) -> str:
     return "unknown"
 
 
-def _excluded_keys(
-    rows: Iterable[tuple[str, str, bool, bool]], backend: str
-) -> set[str]:
+def _excluded_keys(rows: Iterable[tuple[str, str, bool, bool]], backend: str) -> set[str]:
     return {key for be, key, exclude, _hide in rows if be == backend and exclude}
 
 
-def _hidden_on_mobile_keys(
-    rows: Iterable[tuple[str, str, bool, bool]], backend: str
-) -> set[str]:
+def _hidden_on_mobile_keys(rows: Iterable[tuple[str, str, bool, bool]], backend: str) -> set[str]:
     return {key for be, key, _exclude, hide in rows if be == backend and hide}
 
 
@@ -325,10 +322,7 @@ def _sonos_stream_favorites_out(
     sp: SonosSpeakerDevice,
 ) -> list[UISonosStreamFavoriteOut]:
     favorites = getattr(sp, "stream_favorites", ())
-    return [
-        UISonosStreamFavoriteOut(name=favorite.name, uri=favorite.uri)
-        for favorite in favorites
-    ]
+    return [UISonosStreamFavoriteOut(name=favorite.name, uri=favorite.uri) for favorite in favorites]
 
 
 def _sonos_state(is_playing: bool | None) -> str:
@@ -431,11 +425,7 @@ def build_kasa_device_view(
     kd = find_kasa_by_host(mgr, host)
     if kd is None:
         raise KeyError(host)
-    pref_rows = (
-        device_discovery_store.load_ui_preferences(cache_path)
-        if cache_path is not None
-        else []
-    )
+    pref_rows = device_discovery_store.load_ui_preferences(cache_path) if cache_path is not None else []
     excluded = _excluded_keys(pref_rows, "kasa")
     hidden = _hidden_on_mobile_keys(pref_rows, "kasa")
     return UIDeviceOut(
@@ -474,11 +464,7 @@ def build_sonos_device_view(
     sp = find_sonos_by_identifier(mgr, device_id)
     if sp is None:
         raise KeyError(device_id)
-    pref_rows = (
-        device_discovery_store.load_ui_preferences(cache_path)
-        if cache_path is not None
-        else []
-    )
+    pref_rows = device_discovery_store.load_ui_preferences(cache_path) if cache_path is not None else []
     excluded = _excluded_keys(pref_rows, "sonos")
     hidden = _hidden_on_mobile_keys(pref_rows, "sonos")
     return UIDeviceOut(
@@ -514,11 +500,7 @@ def build_tailwind_device_view(
     gd = find_tailwind_by_identifier(mgr, device_id)
     if gd is None:
         raise KeyError(device_id)
-    pref_rows = (
-        device_discovery_store.load_ui_preferences(cache_path)
-        if cache_path is not None
-        else []
-    )
+    pref_rows = device_discovery_store.load_ui_preferences(cache_path) if cache_path is not None else []
     excluded = _excluded_keys(pref_rows, "tailwind")
     hidden = _hidden_on_mobile_keys(pref_rows, "tailwind")
     return UIDeviceOut(
@@ -548,11 +530,7 @@ def build_vizio_device_view(
     tv = find_vizio_by_id(mgr, device_id)
     if tv is None:
         raise KeyError(device_id)
-    pref_rows = (
-        device_discovery_store.load_ui_preferences(cache_path)
-        if cache_path is not None
-        else []
-    )
+    pref_rows = device_discovery_store.load_ui_preferences(cache_path) if cache_path is not None else []
     excluded = _excluded_keys(pref_rows, "vizio")
     hidden = _hidden_on_mobile_keys(pref_rows, "vizio")
     return UIDeviceOut(
@@ -590,11 +568,7 @@ def build_ui_state(
     omitted from the payload.
     """
 
-    pref_rows = (
-        device_discovery_store.load_ui_preferences(cache_path)
-        if cache_path is not None
-        else []
-    )
+    pref_rows = device_discovery_store.load_ui_preferences(cache_path) if cache_path is not None else []
     families: list[UIFamilyOut] = []
     for family_id, label, color in _FAMILIES:
         excluded = _excluded_keys(pref_rows, family_id)
@@ -611,9 +585,7 @@ def build_ui_state(
             devices = []
         if not devices:
             continue
-        families.append(
-            UIFamilyOut(id=family_id, label=label, color=color, devices=devices)
-        )
+        families.append(UIFamilyOut(id=family_id, label=label, color=color, devices=devices))
     operator_alert: UIOperatorAlertOut | None = None
     smtp_alert = operator_alert_store.current_smtp_notification_failure()
     if smtp_alert is not None:
@@ -638,9 +610,7 @@ async def bulk_close_tailwind_apply(
 
     if state.tailwind_mgr is None:
         return [], []
-    return await _bulk_close_tailwind_apply_impl(
-        state.tailwind_mgr, excluded=set()
-    )
+    return await _bulk_close_tailwind_apply_impl(state.tailwind_mgr, excluded=set())
 
 
 async def bulk_off_global_apply(
@@ -665,38 +635,26 @@ async def bulk_off_global_apply(
     behavior of :func:`build_ui_state`.
     """
 
-    rows = (
-        device_discovery_store.load_ui_preferences(cache_path)
-        if cache_path is not None
-        else []
-    )
+    rows = device_discovery_store.load_ui_preferences(cache_path) if cache_path is not None else []
     kasa_excluded = _excluded_keys(rows, "kasa")
     sonos_excluded = _excluded_keys(rows, "sonos")
     tailwind_excluded = _excluded_keys(rows, "tailwind")
     vizio_excluded = _excluded_keys(rows, "vizio")
     affected: list[tuple[str, str]] = []
     skipped: list[tuple[str, str]] = []
-    kasa_aff, kasa_skip = await _bulk_off_kasa_apply_impl(
-        state.kasa_mgr, excluded=kasa_excluded
-    )
+    kasa_aff, kasa_skip = await _bulk_off_kasa_apply_impl(state.kasa_mgr, excluded=kasa_excluded)
     affected.extend(("kasa", k) for k in kasa_aff)
     skipped.extend(("kasa", k) for k in kasa_skip)
     if state.sonos_mgr is not None:
-        son_aff, son_skip = await _bulk_pause_sonos_apply_impl(
-            state.sonos_mgr, excluded=sonos_excluded
-        )
+        son_aff, son_skip = await _bulk_pause_sonos_apply_impl(state.sonos_mgr, excluded=sonos_excluded)
         affected.extend(("sonos", k) for k in son_aff)
         skipped.extend(("sonos", k) for k in son_skip)
     if state.tailwind_mgr is not None:
-        tw_aff, tw_skip = await _bulk_close_tailwind_apply_impl(
-            state.tailwind_mgr, excluded=tailwind_excluded
-        )
+        tw_aff, tw_skip = await _bulk_close_tailwind_apply_impl(state.tailwind_mgr, excluded=tailwind_excluded)
         affected.extend(("tailwind", k) for k in tw_aff)
         skipped.extend(("tailwind", k) for k in tw_skip)
     if state.vizio_mgr is not None:
-        vz_aff, vz_skip = await _bulk_off_vizio_apply_impl(
-            state.vizio_mgr, excluded=vizio_excluded
-        )
+        vz_aff, vz_skip = await _bulk_off_vizio_apply_impl(state.vizio_mgr, excluded=vizio_excluded)
         affected.extend(("vizio", k) for k in vz_aff)
         skipped.extend(("vizio", k) for k in vz_skip)
     affected.sort()
@@ -767,9 +725,7 @@ def find_kasa_by_host(mgr: KasaDeviceManager, host: str) -> KasaDevice | None:
     return None
 
 
-def find_sonos_by_identifier(
-    mgr: SonosDeviceManager, device_id: str
-) -> SonosSpeakerDevice | None:
+def find_sonos_by_identifier(mgr: SonosDeviceManager, device_id: str) -> SonosSpeakerDevice | None:
     """Look up a Sonos zone by its ``identifier`` (``RINCON_…`` UID).
 
     Mirrors :func:`find_kasa_by_host`. ``mgr.get_device_by_alias``
@@ -787,9 +743,7 @@ def find_sonos_by_identifier(
     return None
 
 
-def find_vizio_by_id(
-    mgr: VizioDeviceManager, device_id: str
-) -> VizioTvDevice | None:
+def find_vizio_by_id(mgr: VizioDeviceManager, device_id: str) -> VizioTvDevice | None:
     """Look up a Vizio TV by its ``identifier`` (normalized MAC when known)."""
 
     needle = device_id.strip()
@@ -801,9 +755,7 @@ def find_vizio_by_id(
     return None
 
 
-def find_tailwind_by_identifier(
-    mgr: GotailwindDeviceManager, device_id: str
-) -> GotailwindDevice | None:
+def find_tailwind_by_identifier(mgr: GotailwindDeviceManager, device_id: str) -> GotailwindDevice | None:
     """Look up a Tailwind door by its ``identifier`` (the canonical key).
 
     Mirrors :func:`find_kasa_by_host`. ``mgr.get_device_by_alias`` accepts

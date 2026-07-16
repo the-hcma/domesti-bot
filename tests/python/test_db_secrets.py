@@ -45,18 +45,14 @@ def test_secrets_key_configured_when_env_valid(fernet_key: str) -> None:
     assert secrets_key_source() == "env"
 
 
-def test_secrets_json_path_uses_git_repository_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_secrets_json_path_uses_git_repository_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo_root = tmp_path / "domesti-bot"
     worktree = tmp_path / "domesti-bot" / ".worktrees" / "feature-wt"
     repo_root.mkdir(parents=True)
     worktree.mkdir(parents=True)
     key = Fernet.generate_key().decode("ascii")
     repo_secrets = repo_root / "domesti-bot.config.json"
-    repo_secrets.write_text(
-        json.dumps({"domesti_secrets_key": key}), encoding="utf-8"
-    )
+    repo_secrets.write_text(json.dumps({"domesti_secrets_key": key}), encoding="utf-8")
     monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
     monkeypatch.delenv("DOMESTI_BOT_CONFIG_FILE", raising=False)
     monkeypatch.setattr("app.db.secrets_key._REPO_ROOT", worktree)
@@ -68,14 +64,10 @@ def test_secrets_json_path_uses_git_repository_root(
     assert secrets_key_configured() is True
 
 
-def test_secrets_key_from_json_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_secrets_key_from_json_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     key = Fernet.generate_key().decode("ascii")
     secrets_file = tmp_path / "domesti-bot.config.json"
-    secrets_file.write_text(
-        json.dumps({"domesti_secrets_key": key}), encoding="utf-8"
-    )
+    secrets_file.write_text(json.dumps({"domesti_secrets_key": key}), encoding="utf-8")
     monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(secrets_file))
     material, source = load_secrets_key_material()
@@ -102,9 +94,7 @@ def test_write_secrets_json_preserves_sonos_stream_favorites(tmp_path: Path) -> 
         json.dumps(
             {
                 "domesti_secrets_key": "old-key-should-be-replaced",
-                "sonos_stream_favorites": [
-                    {"name": "Alvorada", "uri": "https://example.com/a"}
-                ],
+                "sonos_stream_favorites": [{"name": "Alvorada", "uri": "https://example.com/a"}],
             }
         ),
         encoding="utf-8",
@@ -150,9 +140,7 @@ def test_resolve_kasa_credentials_treats_decrypt_error_as_absent(
     assert source == "none"
 
 
-def test_save_and_load_kasa_credentials_roundtrip(
-    tmp_path: Path, fernet_key: str
-) -> None:
+def test_save_and_load_kasa_credentials_roundtrip(tmp_path: Path, fernet_key: str) -> None:
     db = tmp_path / "secrets.sqlite"
     save_kasa_credentials_to_db(db, username="alice@example.com", password="hunter2")
     assert load_kasa_credentials_from_db(db) == ("alice@example.com", "hunter2")
@@ -162,18 +150,14 @@ def test_save_and_load_kasa_credentials_roundtrip(
     assert kasa_credentials_stored_in_db(db) is False
 
 
-def test_save_and_load_tailwind_token_roundtrip(
-    tmp_path: Path, fernet_key: str
-) -> None:
+def test_save_and_load_tailwind_token_roundtrip(tmp_path: Path, fernet_key: str) -> None:
     db = tmp_path / "secrets.sqlite"
     save_tailwind_token_to_db(db, "123456")
     assert load_tailwind_token_from_db(db) == "123456"
     assert tailwind_token_stored_in_db(db) is True
 
 
-def test_delete_app_secret_clears_tailwind_token(
-    tmp_path: Path, fernet_key: str
-) -> None:
+def test_delete_app_secret_clears_tailwind_token(tmp_path: Path, fernet_key: str) -> None:
     db = tmp_path / "secrets.sqlite"
     save_tailwind_token_to_db(db, "123456")
     delete_app_secret(db, key="tailwind_token")
@@ -181,9 +165,7 @@ def test_delete_app_secret_clears_tailwind_token(
     assert tailwind_token_stored_in_db(db) is False
 
 
-def test_save_without_secrets_key_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_save_without_secrets_key_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     worktree = tmp_path / "wt"
     worktree.mkdir()
     monkeypatch.delenv("DOMESTI_BOT_SECRETS_KEY", raising=False)
@@ -195,9 +177,7 @@ def test_save_without_secrets_key_raises(
         save_tailwind_token_to_db(db, "123456")
 
 
-def test_load_with_wrong_key_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_with_wrong_key_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "secrets.sqlite"
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     save_tailwind_token_to_db(db, "123456")
@@ -206,9 +186,7 @@ def test_load_with_wrong_key_raises(
         load_tailwind_token_from_db(db)
 
 
-def test_resolve_tailwind_token_precedence(
-    tmp_path: Path, fernet_key: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_tailwind_token_precedence(tmp_path: Path, fernet_key: str, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "secrets.sqlite"
     save_tailwind_token_to_db(db, "111111")
     token, source = resolve_tailwind_token(cli_token=None, cache_path=db)
