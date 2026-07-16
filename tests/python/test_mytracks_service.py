@@ -392,12 +392,9 @@ def test_pair_with_my_tracks_sends_user_location_url_keys(
         username="admin",
     )
     assert status.status_code == HTTPStatus.OK
-    assert posted_json["user_location_update_url"] == (
-        "https://domesti.example.com/v1/webhooks/location_update"
-    )
-    assert posted_json["user_location_test_url"] == (
-        "https://domesti.example.com/v1/webhooks/location_update/test"
-    )
+    assert posted_json["user_location_update_url"] == ("https://domesti.example.com/v1/webhooks/location_update")
+    assert posted_json["user_location_test_url"] == ("https://domesti.example.com/v1/webhooks/location_update/test")
+
 
 def test_fetch_users_rejects_html_export_response(
     monkeypatch: pytest.MonkeyPatch,

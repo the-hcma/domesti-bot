@@ -104,9 +104,7 @@ def test_successful_ui_state_poll_is_logged_at_trace(
     matching = [r for r in records if "/v1/ui/state" in r.getMessage()]
     assert matching, f"expected an [http] line for /v1/ui/state, got: {records}"
     for rec in matching:
-        assert rec.levelno == TRACE_LEVEL, (
-            f"expected TRACE, got {rec.levelname}: {rec.getMessage()}"
-        )
+        assert rec.levelno == TRACE_LEVEL, f"expected TRACE, got {rec.levelname}: {rec.getMessage()}"
 
 
 def test_discovery_in_progress_ui_state_503_is_logged_at_trace(
@@ -124,9 +122,7 @@ def test_discovery_in_progress_ui_state_503_is_logged_at_trace(
     matching = [r for r in records if "/v1/ui/state" in r.getMessage()]
     assert matching
     for rec in matching:
-        assert rec.levelno == TRACE_LEVEL, (
-            f"expected TRACE for discovery 503, got {rec.levelname}: {rec.getMessage()}"
-        )
+        assert rec.levelno == TRACE_LEVEL, f"expected TRACE for discovery 503, got {rec.levelname}: {rec.getMessage()}"
 
 
 def test_non_quiet_path_is_logged_at_debug(
@@ -142,9 +138,7 @@ def test_non_quiet_path_is_logged_at_debug(
     matching = [r for r in records if "/openapi.json" in r.getMessage()]
     assert matching
     for rec in matching:
-        assert rec.levelno == logging.DEBUG, (
-            f"expected DEBUG, got {rec.levelname}: {rec.getMessage()}"
-        )
+        assert rec.levelno == logging.DEBUG, f"expected DEBUG, got {rec.levelname}: {rec.getMessage()}"
 
 
 def test_static_asset_404_is_logged_at_debug(
@@ -160,9 +154,7 @@ def test_static_asset_404_is_logged_at_debug(
     matching = [r for r in records if "/static/icons/compact/tv.svg" in r.getMessage()]
     assert matching
     for rec in matching:
-        assert rec.levelno == logging.DEBUG, (
-            f"expected DEBUG for static 404, got {rec.levelname}: {rec.getMessage()}"
-        )
+        assert rec.levelno == logging.DEBUG, f"expected DEBUG for static 404, got {rec.levelname}: {rec.getMessage()}"
 
 
 def test_successful_http_is_not_logged_at_info(

@@ -108,9 +108,7 @@ async def post_kasa_credentials_test(
 
 
 @router.put("/kasa-credentials", response_model=KasaCredentialsSetOut)
-async def put_kasa_credentials(
-    body: KasaCredentialsSetIn, request: Request
-) -> KasaCredentialsSetOut:
+async def put_kasa_credentials(body: KasaCredentialsSetIn, request: Request) -> KasaCredentialsSetOut:
     """Encrypt and store Kasa/Tapo account credentials for KLAP LAN auth."""
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
@@ -199,9 +197,7 @@ async def post_tailwind_token_test(
 
 
 @router.put("/tailwind-token", response_model=TailwindTokenSetOut)
-async def put_tailwind_token(
-    body: TailwindTokenSetIn, request: Request
-) -> TailwindTokenSetOut:
+async def put_tailwind_token(body: TailwindTokenSetIn, request: Request) -> TailwindTokenSetOut:
     """Encrypt and store the GoTailwind Local Control Key."""
     cache_path = discovery_cache_path_from_request(request)
     if cache_path is None:
@@ -252,9 +248,7 @@ def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:
     del request
     cache_path = runtime.discovery_cache_path()
     creds, source = resolve_kasa_credentials(cache_path=cache_path)
-    stored = (
-        kasa_credentials_stored_in_db(cache_path) if cache_path is not None else False
-    )
+    stored = kasa_credentials_stored_in_db(cache_path) if cache_path is not None else False
     stored_password: str | None = None
     stored_username: str | None = None
     # Row existence (not decryptability) drives "password stored" UI state.
@@ -351,11 +345,7 @@ def _tailwind_settings_response(request: Request) -> TailwindTokenSettingsOut:
         cli_token=_cli_tailwind_token(),
         cache_path=cache_path,
     )
-    stored = (
-        tailwind_token_stored_in_db(cache_path)
-        if cache_path is not None
-        else False
-    )
+    stored = tailwind_token_stored_in_db(cache_path) if cache_path is not None else False
     return TailwindTokenSettingsOut(
         configured=bool(token),
         source=source,

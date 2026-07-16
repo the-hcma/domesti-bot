@@ -155,16 +155,12 @@ def parse_state_extended(payload: dict[str, Any]) -> VizioStateExtendedSnapshot:
     power_mode = ""
     power_mode_raw = ci_payload.get("power_mode")
     if isinstance(power_mode_raw, dict):
-        power_mode = _optional_string(
-            _case_insensitive_mapping(power_mode_raw).get("value")
-        )
+        power_mode = _optional_string(_case_insensitive_mapping(power_mode_raw).get("value"))
 
     current_input = ""
     current_input_raw = ci_payload.get("current_input")
     if isinstance(current_input_raw, dict):
-        current_input = _optional_string(
-            _case_insensitive_mapping(current_input_raw).get("name")
-        )
+        current_input = _optional_string(_case_insensitive_mapping(current_input_raw).get("name"))
 
     has_current_app = False
     app_current_raw = ci_payload.get("app_current")
@@ -338,9 +334,7 @@ class VizioSmartCastClient:
             challenge_type = int(item["CHALLENGE_TYPE"])
             pairing_req_token = int(item["PAIRING_REQ_TOKEN"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise VizioSmartCastError(
-                "pairing/start response missing CHALLENGE_TYPE or PAIRING_REQ_TOKEN"
-            ) from exc
+            raise VizioSmartCastError("pairing/start response missing CHALLENGE_TYPE or PAIRING_REQ_TOKEN") from exc
         return VizioPairChallenge(
             challenge_type=challenge_type,
             pairing_req_token=pairing_req_token,
@@ -399,9 +393,7 @@ class VizioSmartCastClient:
         timeout: aiohttp.ClientTimeout | None = None,
     ) -> dict[str, Any]:
         if auth and not self._auth_token:
-            raise VizioSmartCastAuthError(
-                f"SmartCast endpoint {path} requires an auth token for {self.device_id}"
-            )
+            raise VizioSmartCastAuthError(f"SmartCast endpoint {path} requires an auth token for {self.device_id}")
         session = await self._ensure_session()
         url = f"https://{self._host}:{self._port}{path}"
         headers = {
@@ -422,23 +414,15 @@ class VizioSmartCastClient:
             ) as resp:
                 text = await resp.text()
         except (TimeoutError, aiohttp.ClientError) as exc:
-            raise VizioSmartCastConnectionError(
-                f"failed to reach {url}: {exc!r}"
-            ) from exc
+            raise VizioSmartCastConnectionError(f"failed to reach {url}: {exc!r}") from exc
         if resp.status in (401, 403):
-            raise VizioSmartCastAuthError(
-                f"device returned HTTP {resp.status} for {path}"
-            )
+            raise VizioSmartCastAuthError(f"device returned HTTP {resp.status} for {path}")
         if resp.status != 200:
-            raise VizioSmartCastConnectionError(
-                f"device returned HTTP {resp.status} for {path}"
-            )
+            raise VizioSmartCastConnectionError(f"device returned HTTP {resp.status} for {path}")
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise VizioSmartCastError(
-                f"expected JSON body from {path}, got non-JSON"
-            ) from exc
+            raise VizioSmartCastError(f"expected JSON body from {path}, got non-JSON") from exc
         if not isinstance(payload, dict):
             raise VizioSmartCastError(f"expected JSON object from {path}")
         status = payload.get("STATUS")
@@ -451,14 +435,10 @@ class VizioSmartCastClient:
         if result == "BLOCKED":
             raise VizioSmartCastBusyError(detail or "Operation blocked")
         if result == "URI_NOT_FOUND":
-            raise VizioSmartCastNotFoundError(
-                detail or f"device has no endpoint at {path}"
-            )
+            raise VizioSmartCastNotFoundError(detail or f"device has no endpoint at {path}")
         if result in {"REQUIRES_PAIRING", "PAIRING_DENIED"}:
             raise VizioSmartCastAuthError(detail or result)
-        raise VizioSmartCastError(
-            f"unexpected SmartCast status {result!r} from {path}: {detail}"
-        )
+        raise VizioSmartCastError(f"unexpected SmartCast status {result!r} from {path}: {detail}")
 
     async def _request_raw_json(
         self,
@@ -469,9 +449,7 @@ class VizioSmartCastClient:
     ) -> dict[str, Any]:
         """Issue GET and return parsed JSON without requiring the SCPL ITEMS envelope."""
         if auth and not self._auth_token:
-            raise VizioSmartCastAuthError(
-                f"SmartCast endpoint {path} requires an auth token for {self.device_id}"
-            )
+            raise VizioSmartCastAuthError(f"SmartCast endpoint {path} requires an auth token for {self.device_id}")
         session = await self._ensure_session()
         url = f"https://{self._host}:{self._port}{path}"
         headers = {
@@ -491,27 +469,17 @@ class VizioSmartCastClient:
             ) as resp:
                 text = await resp.text()
         except (TimeoutError, aiohttp.ClientError) as exc:
-            raise VizioSmartCastConnectionError(
-                f"failed to reach {url}: {exc!r}"
-            ) from exc
+            raise VizioSmartCastConnectionError(f"failed to reach {url}: {exc!r}") from exc
         if resp.status in (401, 403):
-            raise VizioSmartCastAuthError(
-                f"device returned HTTP {resp.status} for {path}"
-            )
+            raise VizioSmartCastAuthError(f"device returned HTTP {resp.status} for {path}")
         if resp.status == 404:
-            raise VizioSmartCastNotFoundError(
-                f"device has no endpoint at {path}"
-            )
+            raise VizioSmartCastNotFoundError(f"device has no endpoint at {path}")
         if resp.status != 200:
-            raise VizioSmartCastConnectionError(
-                f"device returned HTTP {resp.status} for {path}"
-            )
+            raise VizioSmartCastConnectionError(f"device returned HTTP {resp.status} for {path}")
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise VizioSmartCastError(
-                f"expected JSON body from {path}, got non-JSON"
-            ) from exc
+            raise VizioSmartCastError(f"expected JSON body from {path}, got non-JSON") from exc
         if not isinstance(payload, dict):
             raise VizioSmartCastError(f"expected JSON object from {path}")
         status = payload.get("STATUS")
@@ -519,15 +487,11 @@ class VizioSmartCastClient:
             result = str(status.get("RESULT") or "").upper()
             detail = str(status.get("DETAIL") or "")
             if result == "URI_NOT_FOUND":
-                raise VizioSmartCastNotFoundError(
-                    detail or f"device has no endpoint at {path}"
-                )
+                raise VizioSmartCastNotFoundError(detail or f"device has no endpoint at {path}")
             if result not in {"", "SUCCESS"}:
                 if result in {"REQUIRES_PAIRING", "PAIRING_DENIED"}:
                     raise VizioSmartCastAuthError(detail or result)
-                raise VizioSmartCastError(
-                    f"unexpected SmartCast status {result!r} from {path}: {detail}"
-                )
+                raise VizioSmartCastError(f"unexpected SmartCast status {result!r} from {path}: {detail}")
         return payload
 
     async def _ensure_session(self) -> aiohttp.ClientSession:

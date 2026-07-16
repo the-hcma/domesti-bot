@@ -122,6 +122,16 @@ markers = [
     "integration: exercises real LAN hardware; requires env-specific credentials",
 ]
 
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "config"]
+
 [dependency-groups]
 dev = [
     "httpx2>=2.4.0",
@@ -131,4 +141,5 @@ dev = [
     "pytest>=9.1.0",
     "pytest-asyncio>=1.4.0",
     "pytest-xdist>=3.8.0",
+    "ruff>=0.15.17",
 ]

@@ -49,10 +49,7 @@ def location_fix_at_epoch_from_webhook(body: LocationUpdateWebhookIn) -> float:
 
 def location_report_log_fragment(*, reported_at: float, fix_at: float) -> str:
     """Space-prefixed report vs fix times for stored-location log lines."""
-    return (
-        f" report_at={format_log_timestamp(reported_at)}"
-        f" fix_at={format_log_timestamp(fix_at)}"
-    )
+    return f" report_at={format_log_timestamp(reported_at)} fix_at={format_log_timestamp(fix_at)}"
 
 
 def location_report_log_stale_suffix(

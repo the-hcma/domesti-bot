@@ -117,7 +117,10 @@ class UIDeviceOut(BaseModel):
     family_id: str = Field(..., description="Parent family id (e.g. ``kasa``).")
     label: str = Field(..., description="Display name; falls back to ``id``.")
     kind: str = Field(..., description="``switch``, ``speaker``, or ``door``.")
-    state: str = Field(..., description="``on``/``off`` (switch), ``playing``/``paused`` (speaker), or ``open``/``closed`` (door); ``unknown`` for transient.")
+    state: str = Field(
+        ...,
+        description="``on``/``off`` (switch), ``playing``/``paused`` (speaker), or ``open``/``closed`` (door); ``unknown`` for transient.",
+    )
     compact_icon: str = Field(
         ...,
         description="Icon key for saturated compact tiles (e.g. ``bulb``, ``garage``).",
@@ -346,10 +349,7 @@ class KasaCredentialsSetOut(BaseModel):
     )
     restart_required: bool = Field(
         ...,
-        description=(
-            "True when the running server could not hot-reload Kasa discovery "
-            "after this change."
-        ),
+        description=("True when the running server could not hot-reload Kasa discovery after this change."),
     )
     source: KasaCredentialsSourceOut = Field(
         ...,
@@ -597,9 +597,7 @@ class MyTracksPairIn(BaseModel):
     """Body for ``POST /v1/settings/my-tracks/pair``."""
 
     domain: str = Field(..., min_length=1)
-    location_history_retention: LocationHistoryRetentionIn = Field(
-        default_factory=LocationHistoryRetentionIn
-    )
+    location_history_retention: LocationHistoryRetentionIn = Field(default_factory=LocationHistoryRetentionIn)
     password: str = Field(..., min_length=1)
     username: str = Field(..., min_length=1)
 
@@ -1052,10 +1050,7 @@ class RuleOut(BaseModel):
     enabled: bool
     fire_once_per_local_day: bool = Field(
         default=False,
-        description=(
-            "When true, fire at most once per local calendar day "
-            "(timezone from settings_location)."
-        ),
+        description=("When true, fire at most once per local calendar day (timezone from settings_location)."),
     )
     id: str
     label: str
@@ -1125,21 +1120,16 @@ class RuleOut(BaseModel):
         has_scheduled = RuleTrigger.SCHEDULED in trigger_set
         cron = (self.schedule_cron or "").strip()
         if has_device_state and not collect_rule_device_refs(self):
-            raise ValueError(
-                "device_state rules must reference at least one device in conditions"
-            )
+            raise ValueError("device_state rules must reference at least one device in conditions")
         if has_dwell_satisfied and not (
-            iter_dwell_for_s_conditions(self.conditions.all)
-            or iter_device_dwell_for_s_conditions(self.conditions.all)
+            iter_dwell_for_s_conditions(self.conditions.all) or iter_device_dwell_for_s_conditions(self.conditions.all)
         ):
             raise ValueError(
                 "dwell_satisfied rules must include a geofence or device dwell "
                 "condition (*_for_s / devices_any_in_state_for_s)"
             )
         if not has_scheduled and cron != "":
-            raise ValueError(
-                "schedule_cron is only allowed when triggers includes scheduled"
-            )
+            raise ValueError("schedule_cron is only allowed when triggers includes scheduled")
         if not has_scheduled:
             self.schedule_cron = None
             if has_device_state:
@@ -1148,20 +1138,16 @@ class RuleOut(BaseModel):
 
         anchor = extract_astronomical_anchor(self)
         astronomical_count = sum(
-            1
-            for condition in self.conditions.all
-            if condition.type in ("after_sunset", "before_sunrise")
+            1 for condition in self.conditions.all if condition.type in ("after_sunset", "before_sunrise")
         )
         if astronomical_count > 1:
             raise ValueError(
-                "scheduled rules may include at most one top-level "
-                "after_sunset or before_sunrise condition"
+                "scheduled rules may include at most one top-level after_sunset or before_sunrise condition"
             )
         if has_edge_true:
             if not self.fire_once_per_local_day:
                 raise ValueError(
-                    "rules with both edge_true and scheduled triggers must set "
-                    "fire_once_per_local_day=true"
+                    "rules with both edge_true and scheduled triggers must set fire_once_per_local_day=true"
                 )
             if anchor is None:
                 raise ValueError(
@@ -1169,10 +1155,7 @@ class RuleOut(BaseModel):
                     "top-level after_sunset or before_sunrise condition"
                 )
             if cron != "":
-                raise ValueError(
-                    "rules with both edge_true and scheduled triggers do not allow "
-                    "schedule_cron"
-                )
+                raise ValueError("rules with both edge_true and scheduled triggers do not allow schedule_cron")
             self.schedule_cron = None
             return self
 
@@ -1183,10 +1166,7 @@ class RuleOut(BaseModel):
         if anchor is not None:
             self.schedule_cron = None
             return self
-        raise ValueError(
-            "scheduled rules require schedule_cron or a top-level "
-            "after_sunset / before_sunrise condition"
-        )
+        raise ValueError("scheduled rules require schedule_cron or a top-level after_sunset / before_sunrise condition")
 
 
 def normalized_rule_notification_emails(rule: RuleOut) -> list[str]:
@@ -1300,10 +1280,7 @@ class VizioAuthTokenSetOut(BaseModel):
     device_id: str
     restart_required: bool = Field(
         ...,
-        description=(
-            "True when the running server could not hot-reload the Vizio "
-            "manager after saving the token."
-        ),
+        description=("True when the running server could not hot-reload the Vizio manager after saving the token."),
     )
 
 
@@ -1350,10 +1327,7 @@ class VizioPairCompleteOut(BaseModel):
     device_id: str
     restart_required: bool = Field(
         ...,
-        description=(
-            "True when the running server could not hot-reload the Vizio "
-            "manager after pairing."
-        ),
+        description=("True when the running server could not hot-reload the Vizio manager after pairing."),
     )
 
 

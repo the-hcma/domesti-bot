@@ -152,11 +152,7 @@ def smtp_send_ready(record: SmtpConfigRecord | None) -> bool:
     """True when stored SMTP settings are sufficient to send mail."""
     if record is None:
         return False
-    if (
-        record.host.strip() == ""
-        or record.from_address.strip() == ""
-        or record.mail_domain.strip() == ""
-    ):
+    if record.host.strip() == "" or record.from_address.strip() == "" or record.mail_domain.strip() == "":
         return False
     if record.username.strip() == "":
         return True

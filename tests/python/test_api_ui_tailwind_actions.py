@@ -124,9 +124,7 @@ def test_build_tailwind_device_view_raises_keyerror_for_unknown_door() -> None:
     state = _state(tailwind_doors=[_FakeDoor("door-1", "Left", is_open=False)])
     assert state.tailwind_mgr is not None
     with pytest.raises(KeyError):
-        build_tailwind_device_view(
-            state.tailwind_mgr, device_id="door-99", cache_path=None
-        )
+        build_tailwind_device_view(state.tailwind_mgr, device_id="door-99", cache_path=None)
 
 
 def test_build_tailwind_device_view_reflects_position_and_exclusion(
@@ -134,15 +132,16 @@ def test_build_tailwind_device_view_reflects_position_and_exclusion(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="door-1", exclude_from_global=True,
+        db,
+        backend="tailwind",
+        canonical_key="door-1",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     door = _FakeDoor("door-1", "Left", is_open=True)
     state = _state(tailwind_doors=[door], cache_path=db)
     assert state.tailwind_mgr is not None
-    view = build_tailwind_device_view(
-        state.tailwind_mgr, device_id="door-1", cache_path=db
-    )
+    view = build_tailwind_device_view(state.tailwind_mgr, device_id="door-1", cache_path=db)
     assert view.id == "door-1"
     assert view.family_id == "tailwind"
     assert view.kind == "door"
@@ -181,7 +180,10 @@ async def test_bulk_close_tailwind_apply_ignores_exclude_from_global(
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="door-1", exclude_from_global=True,
+        db,
+        backend="tailwind",
+        canonical_key="door-1",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     a = _FakeDoor("door-1", "Excluded", is_open=True)
@@ -199,11 +201,17 @@ async def test_bulk_off_global_apply_mixes_kasa_and_tailwind(tmp_path: Path) -> 
 
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="tailwind", canonical_key="door-2", exclude_from_global=True,
+        db,
+        backend="tailwind",
+        canonical_key="door-2",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     device_discovery_store.upsert_ui_preference(
-        db, backend="kasa", canonical_key="10.0.0.2", exclude_from_global=True,
+        db,
+        backend="kasa",
+        canonical_key="10.0.0.2",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     state = _state(
@@ -267,9 +275,7 @@ def test_post_tailwind_close_all_returns_empty_when_manager_absent() -> None:
 
 def test_post_tailwind_close_door_returns_404_for_unknown_device() -> None:
     client, app = _client()
-    runtime.device_state = _state(
-        tailwind_doors=[_FakeDoor("door-1", "Left", is_open=True)]
-    )
+    runtime.device_state = _state(tailwind_doors=[_FakeDoor("door-1", "Left", is_open=True)])
     runtime.discovery_error = None
     r = client.post("/v1/ui/tailwind/doors/door-99/close")
     assert r.status_code == HTTPStatus.NOT_FOUND
@@ -333,9 +339,7 @@ def test_post_tailwind_actions_return_503_while_discovery_in_progress() -> None:
     ]
     for method, path, body in paths:
         r = client.request(method, path, json=body)
-        assert r.status_code == HTTPStatus.SERVICE_UNAVAILABLE, (
-            f"{method} {path} → {r.status_code}"
-        )
+        assert r.status_code == HTTPStatus.SERVICE_UNAVAILABLE, f"{method} {path} → {r.status_code}"
         assert r.headers.get("Retry-After") == "2"
 
 

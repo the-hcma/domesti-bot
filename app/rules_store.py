@@ -54,7 +54,6 @@ def delete_geofence(path: Path, geofence_id: str) -> None:
         if row is not None:
             session.delete(row)
 
-
     discovery_write(path, _write)
 
 
@@ -72,6 +71,7 @@ def list_users(path: Path) -> list[UserRecord]:
 
 def replace_geofences(path: Path, geofences: list[GeofenceRecord]) -> int:
     now = time.time()
+
     def _write(session: Session) -> None:
         session.execute(delete(RuleGeofence))
         for geofence in geofences:
@@ -95,10 +95,10 @@ def replace_geofences(path: Path, geofences: list[GeofenceRecord]) -> int:
 def replace_users(path: Path, users: list[UserRecord]) -> int:
     """Replace the full user roster, preserving ``user_id`` values from the export."""
     now = time.time()
+
     def _write(session: Session) -> None:
         preserved_home_wifi: dict[str, tuple[str | None, str | None]] = {
-            row.user_id: (row.home_wifi_ssid, row.home_wifi_bssid)
-            for row in session.scalars(select(RuleUser)).all()
+            row.user_id: (row.home_wifi_ssid, row.home_wifi_bssid) for row in session.scalars(select(RuleUser)).all()
         }
         session.execute(delete(RuleUser))
         for user in users:
@@ -143,6 +143,7 @@ def set_user_home_wifi(
     elif trimmed_ssid is None:
         raise ValueError("Expected wifi_ssid when wifi_bssid is set, got None")
     now = time.time()
+
     def _write(session: Session) -> UserRecord:
         row = session.get(RuleUser, trimmed_user_id)
         if row is None:
@@ -152,12 +153,12 @@ def set_user_home_wifi(
         row.updated_at = now
         return _user_to_record(row)
 
-
     return discovery_write(path, _write)
 
 
 def save_geofence(path: Path, geofence: GeofenceRecord) -> GeofenceRecord:
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(RuleGeofence, geofence.geofence_id)
         if row is None:

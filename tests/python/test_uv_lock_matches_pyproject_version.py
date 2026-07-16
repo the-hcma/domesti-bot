@@ -31,4 +31,3 @@ def test_uv_lock_domesti_bot_version_matches_pyproject() -> None:
         f"({pyproject_version}), got {lock_version}. "
         "Run `uv lock` and commit the updated uv.lock."
     )
-

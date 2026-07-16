@@ -448,11 +448,7 @@ def _vizio_tv_settings_out(
         env_token=os.environ.get("VIZIO_AUTH_TOKEN"),
         cache_path=cache_path,
     )
-    stored = (
-        _stored_token_for_tv(cache_path, host=host, mac=mac)
-        if source == "database"
-        else None
-    )
+    stored = _stored_token_for_tv(cache_path, host=host, mac=mac) if source == "database" else None
     return VizioTvSettingsOut(
         device_id=canonical_id,
         mac=mac,
@@ -468,9 +464,7 @@ def _vizio_tv_settings_out(
 def _vizio_tv_settings_rows(cache_path: Path) -> list[VizioTvSettingsOut]:
     seen: set[str] = set()
     rows: list[VizioTvSettingsOut] = []
-    for host, port, _display, _model, mac, _diid in device_discovery_store.load_vizio_tvs(
-        cache_path
-    ):
+    for host, port, _display, _model, mac, _diid in device_discovery_store.load_vizio_tvs(cache_path):
         canonical_id = vizio_device_id_from_parts(mac=mac, host=host, port=port)
         if canonical_id in seen:
             continue
@@ -485,9 +479,7 @@ def _vizio_tv_settings_rows(cache_path: Path) -> list[VizioTvSettingsOut]:
                 if canonical_id in seen:
                     continue
                 seen.add(canonical_id)
-                rows.append(
-                    _vizio_tv_settings_out(cache_path, host=host, port=port, mac=mac)
-                )
+                rows.append(_vizio_tv_settings_out(cache_path, host=host, port=port, mac=mac))
             continue
         try:
             parsed_host, port = parse_host_spec(auth_key)
@@ -497,9 +489,7 @@ def _vizio_tv_settings_rows(cache_path: Path) -> list[VizioTvSettingsOut]:
         if canonical_id in seen:
             continue
         seen.add(canonical_id)
-        rows.append(
-            _vizio_tv_settings_out(cache_path, host=parsed_host, port=port, mac=None)
-        )
+        rows.append(_vizio_tv_settings_out(cache_path, host=parsed_host, port=port, mac=None))
     rows.sort(key=lambda row: (row.display_name or row.device_id).lower())
     return rows
 

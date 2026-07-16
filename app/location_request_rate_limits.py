@@ -25,12 +25,7 @@ class LocationRequestRateLimits:
 def _parse_rate_limits_dict(raw_limits: dict[str, Any]) -> LocationRequestRateLimits | None:
     user_raw = raw_limits.get("user_cooldown_seconds")
     device_raw = raw_limits.get("device_cooldown_seconds")
-    if (
-        type(user_raw) is not int
-        or type(device_raw) is not int
-        or user_raw < 0
-        or device_raw < 0
-    ):
+    if type(user_raw) is not int or type(device_raw) is not int or user_raw < 0 or device_raw < 0:
         return None
     by_reason_raw = raw_limits.get("user_cooldown_seconds_by_reason")
     by_reason: dict[str, int] | None = None
@@ -50,12 +45,7 @@ def _parse_rate_limits_dict(raw_limits: dict[str, Any]) -> LocationRequestRateLi
 def _rate_limits_from_flat_payload(payload: dict[str, Any]) -> LocationRequestRateLimits | None:
     user_raw = payload.get("location_request_user_cooldown_seconds")
     device_raw = payload.get("location_request_device_cooldown_seconds")
-    if (
-        type(user_raw) is int
-        and type(device_raw) is int
-        and user_raw >= 0
-        and device_raw >= 0
-    ):
+    if type(user_raw) is int and type(device_raw) is int and user_raw >= 0 and device_raw >= 0:
         return LocationRequestRateLimits(
             device_cooldown_seconds=device_raw,
             user_cooldown_seconds=user_raw,

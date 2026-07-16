@@ -249,9 +249,7 @@ async def test_fetch_falls_back_when_cached_host_unreachable(tmp_path: Path) -> 
 
     with (
         patch("app.sonos_device_manager.SoCo", side_effect=_raise),
-        patch(
-            "app.sonos_device_manager.soco_discover", return_value={discovered}
-        ) as discover,
+        patch("app.sonos_device_manager.soco_discover", return_value={discovered}) as discover,
     ):
         await mgr.fetch()
 
@@ -276,9 +274,7 @@ async def test_force_discovery_always_runs_udp(tmp_path: Path) -> None:
     zone.player_name = "Living Room"
     zone.ip_address = "192.168.1.10"
 
-    mgr = SonosDeviceManager(
-        discovery_timeout=0.1, discovery_cache_path=db, force_discovery=True
-    )
+    mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db, force_discovery=True)
     assert mgr.is_cache_warm is False
 
     with (
@@ -322,9 +318,7 @@ def test_is_cache_warm_false_without_cache_path() -> None:
 
 
 def test_is_cache_warm_false_when_cache_file_missing(tmp_path: Path) -> None:
-    mgr = SonosDeviceManager(
-        discovery_timeout=0.1, discovery_cache_path=tmp_path / "absent.sqlite"
-    )
+    mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=tmp_path / "absent.sqlite")
     assert mgr.is_cache_warm is False
 
 

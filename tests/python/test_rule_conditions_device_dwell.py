@@ -21,6 +21,7 @@ from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, evaluate_rule
 from app.rule_validation import build_roster_user_id_lookup
 
+
 def test_devices_any_in_state_for_s_met_when_open_long_enough() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     since = now.timestamp() - 1300.0

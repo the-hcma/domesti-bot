@@ -75,6 +75,4 @@ def test_resolve_password_for_send_ignores_stored_secret_on_relay(
             username="",
         ),
     )
-    assert (
-        resolve_password_for_send(db, draft_password=None, host="localhost") == ""
-    )
+    assert resolve_password_for_send(db, draft_password=None, host="localhost") == ""

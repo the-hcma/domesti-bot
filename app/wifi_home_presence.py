@@ -194,9 +194,9 @@ def wifi_home_presence_applies(
 ) -> bool:
     """Return whether a WiFi reading should be treated as inside ``geofence_id``.
 
-  When ``home_wifi_bssid`` is configured, match on normalized BSSID only (no
-  geofence-radius fallback). Otherwise use low-accuracy ``conn=w`` plus proximity
-  slack from the geofence center.
+    When ``home_wifi_bssid`` is configured, match on normalized BSSID only (no
+    geofence-radius fallback). Otherwise use low-accuracy ``conn=w`` plus proximity
+    slack from the geofence center.
     """
     if geofence_id not in wifi_home_geofence_ids(settings, geofences):
         return False

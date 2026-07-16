@@ -48,13 +48,9 @@ def resolve_home_location(settings: SettingsLocationOut) -> HomeLocationRef:
             "got lat=0.0 lon=0.0 (unconfigured sentinel)"
         )
     if not (-90.0 <= settings.lat <= 90.0):
-        raise HomeLocationNotConfiguredError(
-            f"Expected settings_location lat in [-90, 90], got {settings.lat}"
-        )
+        raise HomeLocationNotConfiguredError(f"Expected settings_location lat in [-90, 90], got {settings.lat}")
     if not (-180.0 <= settings.lon <= 180.0):
-        raise HomeLocationNotConfiguredError(
-            f"Expected settings_location lon in [-180, 180], got {settings.lon}"
-        )
+        raise HomeLocationNotConfiguredError(f"Expected settings_location lon in [-180, 180], got {settings.lon}")
     label = settings.home_label
     if label is not None:
         trimmed = label.strip()

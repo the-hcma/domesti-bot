@@ -31,10 +31,7 @@ def _restore_logging_state() -> Any:
     saved_app = logging.getLogger("app")
     saved_app_handlers = list(saved_app.handlers)
     saved_app_level = saved_app.level
-    saved_env = {
-        k: os.environ.get(k)
-        for k in ("DOMESTI_LOG_LEVEL", "LOG_FILE", "LOG_UTC", "DOMESTI_LOG_CONSOLE")
-    }
+    saved_env = {k: os.environ.get(k) for k in ("DOMESTI_LOG_LEVEL", "LOG_FILE", "LOG_UTC", "DOMESTI_LOG_CONSOLE")}
     yield
     root.handlers = saved_root_handlers
     root.setLevel(saved_root_level)
@@ -199,9 +196,7 @@ def test_apply_logging_from_env_defaults_to_console(monkeypatch: pytest.MonkeyPa
     assert cfg["root"]["handlers"] == ["console"]
 
 
-def test_apply_logging_from_env_with_file_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_apply_logging_from_env_with_file_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_LOG_LEVEL", "debug")
     monkeypatch.setenv("LOG_FILE", str(tmp_path / "out.log"))
     monkeypatch.delenv("DOMESTI_LOG_CONSOLE", raising=False)
@@ -210,9 +205,7 @@ def test_apply_logging_from_env_with_file_only(
     assert cfg["root"]["handlers"] == ["file"]
 
 
-def test_apply_logging_from_env_console_plus_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_apply_logging_from_env_console_plus_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_LOG_LEVEL", "info")
     monkeypatch.setenv("LOG_FILE", str(tmp_path / "out.log"))
     monkeypatch.setenv("DOMESTI_LOG_CONSOLE", "1")

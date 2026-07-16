@@ -261,8 +261,7 @@ def main() -> int:
         type=Path,
         default=None,
         help=(
-            "directory for review.html "
-            f"(default: {_default_review_output_dir()} or DOMESTI_COMPACT_ICON_REVIEW_DIR)"
+            f"directory for review.html (default: {_default_review_output_dir()} or DOMESTI_COMPACT_ICON_REVIEW_DIR)"
         ),
     )
     args = parser.parse_args()

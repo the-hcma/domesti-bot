@@ -121,9 +121,7 @@ async def _wait_for_await_count(
         if loop.time() >= deadline:
             break
         await asyncio.sleep(0)
-    assert mock.await_count >= minimum, (
-        f"Expected at least {minimum} await calls, got {mock.await_count}"
-    )
+    assert mock.await_count >= minimum, f"Expected at least {minimum} await calls, got {mock.await_count}"
 
 
 @pytest.mark.asyncio
@@ -150,9 +148,9 @@ async def test_kasa_watcher_keeps_going_when_one_device_raises() -> None:
     mgr = _fake_kasa_mgr(["host-a", "host-b"])
     cast(AsyncMock, mgr.is_on).side_effect = [
         RuntimeError("boom"),  # host-a fails
-        True,                  # host-b succeeds
-        True,                  # next cycle: host-a
-        True,                  # next cycle: host-b
+        True,  # host-b succeeds
+        True,  # next cycle: host-a
+        True,  # next cycle: host-b
     ]
     watcher = KasaPollingWatcher(mgr, interval_s=0.01)
     stop = asyncio.Event()

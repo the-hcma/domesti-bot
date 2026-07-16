@@ -35,6 +35,7 @@ _CSRF_INPUT_RE = re.compile(
     re.IGNORECASE,
 )
 
+
 class MyTracksSyncError(ValueError):
     """Raised when My Tracks export HTTP or payload parsing fails."""
 
@@ -136,9 +137,7 @@ def fetch_mytracks_domesti_config(
         try:
             response = client.get(_DOMESTI_BOT_CONFIG_PATH)
         except httpx.HTTPError as exc:
-            raise MyTracksSyncError(
-                f"My Tracks domesti-bot config request failed for {base_url}: {exc!r}"
-            ) from exc
+            raise MyTracksSyncError(f"My Tracks domesti-bot config request failed for {base_url}: {exc!r}") from exc
     finally:
         client.close()
     payload = _parse_export_response(
@@ -147,17 +146,11 @@ def fetch_mytracks_domesti_config(
         export_path=_DOMESTI_BOT_CONFIG_PATH,
     )
     if not isinstance(payload, dict):
-        raise MyTracksSyncError(
-            f"Expected domesti-bot config object, got {type(payload).__name__}"
-        )
+        raise MyTracksSyncError(f"Expected domesti-bot config object, got {type(payload).__name__}")
     enabled_raw = payload.get("location_updates_enabled")
-    location_updates_enabled = (
-        bool(enabled_raw) if enabled_raw is not None else None
-    )
+    location_updates_enabled = bool(enabled_raw) if enabled_raw is not None else None
     remote_raw = payload.get("remote_request_location_enabled")
-    remote_request_location_enabled = (
-        bool(remote_raw) if remote_raw is not None else None
-    )
+    remote_request_location_enabled = bool(remote_raw) if remote_raw is not None else None
     update_url = _optional_str(payload.get("user_location_update_url"))
     test_url = _optional_str(payload.get("user_location_test_url"))
     return DomestiBotConfigFromMyTracks(
@@ -249,15 +242,11 @@ def pair_with_my_tracks(
                 headers={"X-CSRFToken": csrf, "Referer": f"{base_url.rstrip('/')}/"},
             )
         except httpx.HTTPError as exc:
-            raise MyTracksSyncError(
-                f"My Tracks pair request failed for {base_url}: {exc!r}"
-            ) from exc
+            raise MyTracksSyncError(f"My Tracks pair request failed for {base_url}: {exc!r}") from exc
     finally:
         client.close()
     if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
-        message = (
-            "My Tracks rejected the admin session during pairing (staff account required)"
-        )
+        message = "My Tracks rejected the admin session during pairing (staff account required)"
         _LOGGER.warning(
             "pair request failed for %s as %s: %s",
             mytracks_log_host(base_url),
@@ -304,9 +293,7 @@ def pair_with_my_tracks(
     remote_enabled = bool(remote_raw) if remote_raw is not None else None
     return MyTracksPairResult(
         status_code=response.status_code,
-        location_request_rate_limits=(
-            location_request_rate_limits_from_payload(payload) if payload else None
-        ),
+        location_request_rate_limits=(location_request_rate_limits_from_payload(payload) if payload else None),
         remote_request_location_enabled=remote_enabled,
     )
 
@@ -329,15 +316,11 @@ def patch_mytracks_location_updates(
                 headers={"X-CSRFToken": csrf, "Referer": f"{base_url.rstrip('/')}/"},
             )
         except httpx.HTTPError as exc:
-            raise MyTracksSyncError(
-                f"My Tracks location-updates patch failed for {base_url}: {exc!r}"
-            ) from exc
+            raise MyTracksSyncError(f"My Tracks location-updates patch failed for {base_url}: {exc!r}") from exc
     finally:
         client.close()
     if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
-        raise MyTracksSyncError(
-            "My Tracks rejected the admin session during location-updates patch"
-        )
+        raise MyTracksSyncError("My Tracks rejected the admin session during location-updates patch")
     if response.status_code == HTTPStatus.NOT_FOUND:
         raise MyTracksSyncError(
             "My Tracks domesti-bot config endpoint not found — upgrade my-tracks to a build "
@@ -345,9 +328,7 @@ def patch_mytracks_location_updates(
         )
     if response.status_code >= HTTPStatus.BAD_REQUEST:
         detail = _response_error_detail(response)
-        raise MyTracksSyncError(
-            f"My Tracks location-updates patch returned HTTP {response.status_code}: {detail}"
-        )
+        raise MyTracksSyncError(f"My Tracks location-updates patch returned HTTP {response.status_code}: {detail}")
 
 
 def patch_mytracks_remote_request_location(
@@ -368,15 +349,11 @@ def patch_mytracks_remote_request_location(
                 headers={"X-CSRFToken": csrf, "Referer": f"{base_url.rstrip('/')}/"},
             )
         except httpx.HTTPError as exc:
-            raise MyTracksSyncError(
-                f"My Tracks remote-request-location patch failed for {base_url}: {exc!r}"
-            ) from exc
+            raise MyTracksSyncError(f"My Tracks remote-request-location patch failed for {base_url}: {exc!r}") from exc
     finally:
         client.close()
     if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
-        raise MyTracksSyncError(
-            "My Tracks rejected the admin session during remote-request-location patch"
-        )
+        raise MyTracksSyncError("My Tracks rejected the admin session during remote-request-location patch")
     if response.status_code == HTTPStatus.NOT_FOUND:
         raise MyTracksSyncError(
             "My Tracks domesti-bot config endpoint not found — upgrade my-tracks to a build "
@@ -385,8 +362,7 @@ def patch_mytracks_remote_request_location(
     if response.status_code >= HTTPStatus.BAD_REQUEST:
         detail = _response_error_detail(response)
         raise MyTracksSyncError(
-            "My Tracks remote-request-location patch returned HTTP "
-            f"{response.status_code}: {detail}"
+            f"My Tracks remote-request-location patch returned HTTP {response.status_code}: {detail}"
         )
 
 
@@ -454,8 +430,7 @@ async def request_user_location(
         return RequestLocationResult(
             status="error",
             detail=(
-                f"My Tracks request-location returned HTTP {response.status_code}: "
-                f"{_response_error_detail(response)}"
+                f"My Tracks request-location returned HTTP {response.status_code}: {_response_error_detail(response)}"
             ),
         )
     return RequestLocationResult(status="error", detail="Unexpected my-tracks response")
@@ -504,9 +479,7 @@ def _extract_rows(payload: Any, *, key: str) -> list[dict[str, Any]]:
         value = payload.get(key)
         if isinstance(value, list):
             return [row for row in value if isinstance(row, dict)]
-    raise MyTracksSyncError(
-        f"Expected export payload with {key} list, got {type(payload).__name__}"
-    )
+    raise MyTracksSyncError(f"Expected export payload with {key} list, got {type(payload).__name__}")
 
 
 def _fetch_export_json(
@@ -525,9 +498,7 @@ def _fetch_export_json(
         try:
             response = client.get(export_path)
         except httpx.HTTPError as exc:
-            raise MyTracksSyncError(
-                f"My Tracks export request failed for {base_url}{export_path}: {exc!r}"
-            ) from exc
+            raise MyTracksSyncError(f"My Tracks export request failed for {base_url}{export_path}: {exc!r}") from exc
     finally:
         client.close()
     return _parse_export_response(response, base_url=base_url, export_path=export_path)
@@ -544,8 +515,7 @@ def _login_client(base_url: str, *, username: str, password: str) -> httpx.Clien
         if login_page.status_code >= HTTPStatus.BAD_REQUEST:
             client.close()
             raise MyTracksSyncError(
-                f"My Tracks login page returned HTTP {login_page.status_code} "
-                f"for {base_url.rstrip('/')}/login/"
+                f"My Tracks login page returned HTTP {login_page.status_code} for {base_url.rstrip('/')}/login/"
             )
         csrf = _resolve_csrf_token(client, login_page)
         referer = f"{base_url.rstrip('/')}/login/"
@@ -565,8 +535,7 @@ def _login_client(base_url: str, *, username: str, password: str) -> httpx.Clien
             client.close()
             if response.status_code == HTTPStatus.FORBIDDEN:
                 raise MyTracksSyncError(
-                    "My Tracks rejected the login CSRF check — verify the domain URL "
-                    "matches the server"
+                    "My Tracks rejected the login CSRF check — verify the domain URL matches the server"
                 )
             raise MyTracksSyncError("My Tracks rejected the admin username or password")
         return client
@@ -574,9 +543,7 @@ def _login_client(base_url: str, *, username: str, password: str) -> httpx.Clien
         raise
     except httpx.HTTPError as exc:
         client.close()
-        raise MyTracksSyncError(
-            f"My Tracks login request failed for {base_url.rstrip('/')}/login/: {exc!r}"
-        ) from exc
+        raise MyTracksSyncError(f"My Tracks login request failed for {base_url.rstrip('/')}/login/: {exc!r}") from exc
     except Exception:
         client.close()
         raise
@@ -596,9 +563,7 @@ def _parse_export_response(
     export_path: str,
 ) -> Any:
     if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
-        raise MyTracksSyncError(
-            "My Tracks rejected the admin session (staff account required)"
-        )
+        raise MyTracksSyncError("My Tracks rejected the admin session (staff account required)")
     if response.status_code == HTTPStatus.NOT_FOUND:
         raise MyTracksSyncError(
             f"My Tracks export endpoint not found at {export_path} — "
@@ -606,9 +571,7 @@ def _parse_export_response(
             "and /api/admin/waypoints/ export routes"
         )
     if response.status_code >= HTTPStatus.BAD_REQUEST:
-        raise MyTracksSyncError(
-            f"My Tracks export returned HTTP {response.status_code} for {base_url}{export_path}"
-        )
+        raise MyTracksSyncError(f"My Tracks export returned HTTP {response.status_code} for {base_url}{export_path}")
     content_type = response.headers.get("content-type", "")
     if "json" not in content_type.lower():
         raise MyTracksSyncError(
@@ -665,33 +628,21 @@ def _parse_latest_location(row: dict[str, Any]) -> ExportedUserLocation | None:
     if raw is None:
         return None
     if not isinstance(raw, dict):
-        raise MyTracksSyncError(
-            f"Expected latest_location object in users-with-devices row, got {raw!r}"
-        )
+        raise MyTracksSyncError(f"Expected latest_location object in users-with-devices row, got {raw!r}")
     try:
         lat = float(raw["lat"])
         lon = float(raw["lon"])
         fix_at = str(raw["timestamp"]).strip()
         reported_raw = raw.get("reported_at")
-        reported_at = (
-            str(reported_raw).strip()
-            if reported_raw is not None
-            else fix_at
-        )
+        reported_at = str(reported_raw).strip() if reported_raw is not None else fix_at
         accuracy_raw = raw.get("accuracy_m")
         accuracy_m = int(accuracy_raw) if accuracy_raw is not None else None
     except (KeyError, TypeError, ValueError) as exc:
-        raise MyTracksSyncError(
-            f"Expected latest_location export object, got {raw!r}"
-        ) from exc
+        raise MyTracksSyncError(f"Expected latest_location export object, got {raw!r}") from exc
     if fix_at == "":
-        raise MyTracksSyncError(
-            f"Expected non-empty latest_location.timestamp, got {raw!r}"
-        )
+        raise MyTracksSyncError(f"Expected non-empty latest_location.timestamp, got {raw!r}")
     if reported_at == "":
-        raise MyTracksSyncError(
-            f"Expected non-empty latest_location.reported_at, got {raw!r}"
-        )
+        raise MyTracksSyncError(f"Expected non-empty latest_location.reported_at, got {raw!r}")
     return ExportedUserLocation(
         lat=lat,
         lon=lon,
@@ -710,9 +661,7 @@ def _parse_user_with_device(row: dict[str, Any]) -> ExportedUser:
     except (KeyError, TypeError, ValueError) as exc:
         raise MyTracksSyncError(f"Expected users-with-devices export row, got {row!r}") from exc
     if user_id == "" or export_display_name == "" or tracking_device_label == "":
-        raise MyTracksSyncError(
-            f"Expected non-empty users-with-devices export row, got {row!r}"
-        )
+        raise MyTracksSyncError(f"Expected non-empty users-with-devices export row, got {row!r}")
     enabled_raw = row.get("enabled", True)
     enabled = bool(enabled_raw)
     first_name, last_name = parse_person_name(export_display_name)

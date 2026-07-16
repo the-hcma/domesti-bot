@@ -56,9 +56,7 @@ _BROWSER_OPEN_TIMEOUT_S: float = 5.0
 def build_serve_parser() -> argparse.ArgumentParser:
     parent = build_arg_parser(add_help=False, add_version=False)
     parser = argparse.ArgumentParser(
-        description=(
-            "Start the domesti device-control HTTP API (same discovery flags as the REPL CLI)."
-        ),
+        description=("Start the domesti device-control HTTP API (same discovery flags as the REPL CLI)."),
         parents=[parent],
     )
     parser.add_argument(
@@ -154,16 +152,12 @@ def resolve_listen_address(
         try:
             port = int(env_port_raw)
         except ValueError as exc:
-            raise SystemExit(
-                f"domesti-bot-server: invalid DOMESTI_LISTEN_PORT={env_port_raw!r}"
-            ) from exc
+            raise SystemExit(f"domesti-bot-server: invalid DOMESTI_LISTEN_PORT={env_port_raw!r}") from exc
     else:
         port = 0
 
     if not 0 <= port <= 65535:
-        raise SystemExit(
-            f"domesti-bot-server: --listen-port out of range (0..65535): {port}"
-        )
+        raise SystemExit(f"domesti-bot-server: --listen-port out of range (0..65535): {port}")
 
     return host, port
 
@@ -188,9 +182,7 @@ def bind_listen_socket(host: str, port: int) -> socket.socket:
                 f"({exc.strerror or exc}). Choose a different --listen-port, "
                 f"or omit --listen-port to let the OS pick a free port."
             ) from exc
-        raise SystemExit(
-            f"domesti-bot-server: failed to bind {host}:0 ({exc.strerror or exc})"
-        ) from exc
+        raise SystemExit(f"domesti-bot-server: failed to bind {host}:0 ({exc.strerror or exc})") from exc
     sock.listen(128)
     sock.set_inheritable(True)
     return sock

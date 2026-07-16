@@ -223,9 +223,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         self._request_timeout = request_timeout
         self._discovery_timeout = discovery_timeout
         self._display_names_store_path = (
-            Path(display_names_store_path).expanduser().resolve()
-            if display_names_store_path
-            else None
+            Path(display_names_store_path).expanduser().resolve() if display_names_store_path else None
         )
         self._host: str | None = None
         self._tailwind: Tailwind | None = None
@@ -238,10 +236,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         unique.sort(key=lambda d: d.door_index)
         lines = [f"GotailwindDeviceManager(host={self._host}):"]
         for gd in unique:
-            lines.append(
-                f"  door {gd.door_index} ({gd.preferred_label!r}, id={gd.identifier!r}): "
-                f"{gd.door_state}"
-            )
+            lines.append(f"  door {gd.door_index} ({gd.preferred_label!r}, id={gd.identifier!r}): {gd.door_state}")
         return "\n".join(lines)
 
     def _device_for(self, identifier: str) -> GotailwindDevice:
@@ -287,9 +282,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         unique.sort(key=lambda d: d.door_index)
         return tuple(unique)
 
-    def _expand_tailwind_lookup(
-        self, uniq: list[GotailwindDevice]
-    ) -> dict[str, GotailwindDevice]:
+    def _expand_tailwind_lookup(self, uniq: list[GotailwindDevice]) -> dict[str, GotailwindDevice]:
         new_map: dict[str, GotailwindDevice] = {}
         for gd in uniq:
             new_map[gd.identifier] = gd
@@ -301,9 +294,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
 
     def _finalize_tailwind_devices(self, uniq: list[GotailwindDevice]) -> None:
         if self._display_names_store_path is not None:
-            for backend, key, disp in device_discovery_store.load_display_names(
-                self._display_names_store_path
-            ):
+            for backend, key, disp in device_discovery_store.load_display_names(self._display_names_store_path):
                 if backend != "tailwind":
                     continue
                 for gd in uniq:
@@ -396,9 +387,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             return False
         host = (device_discovery_store.load_tailwind_host(path) or "").strip()
         if not host:
-            _LOGGER.info(
-                "Tailwind reload_from_cache: empty cache; keeping prior device map"
-            )
+            _LOGGER.info("Tailwind reload_from_cache: empty cache; keeping prior device map")
             return False
 
         previous_host_arg = self._host_arg
@@ -420,8 +409,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
                 with contextlib.suppress(Exception):
                     await failed_tailwind.close()
             _LOGGER.warning(
-                "Tailwind reload_from_cache: reconnect to %s failed; "
-                "keeping prior device map",
+                "Tailwind reload_from_cache: reconnect to %s failed; keeping prior device map",
                 host,
                 exc_info=True,
             )
@@ -436,8 +424,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             with contextlib.suppress(Exception):
                 await previous_tailwind.close()
         _LOGGER.info(
-            "Tailwind reload_from_cache: replaced door map from cache host %s "
-            "(%d door(s))",
+            "Tailwind reload_from_cache: replaced door map from cache host %s (%d door(s))",
             host,
             len(self.doors),
         )

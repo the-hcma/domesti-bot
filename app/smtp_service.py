@@ -254,9 +254,7 @@ def smtp_friendly_error(exc: Exception, *, host: str = "") -> str:
     msg = str(exc)
     host_label = f" '{host}'" if host else ""
     if isinstance(exc, socket.gaierror):
-        return (
-            f"Could not resolve hostname{host_label} — check that the SMTP host is correct."
-        )
+        return f"Could not resolve hostname{host_label} — check that the SMTP host is correct."
     if isinstance(exc, ConnectionRefusedError):
         return (
             f"Connection to{host_label} was refused — verify the host and port are correct "
@@ -276,20 +274,14 @@ def smtp_friendly_error(exc: Exception, *, host: str = "") -> str:
             "leave Username and Password blank."
         )
     if isinstance(exc, smtplib.SMTPNotSupportedError):
-        return (
-            "The server does not support a required feature — check your TLS/SSL settings. "
-            f"({msg})"
-        )
+        return f"The server does not support a required feature — check your TLS/SSL settings. ({msg})"
     if isinstance(exc, smtplib.SMTPConnectError):
         return (
             f"Could not connect to the server{host_label} — verify the host and port are "
             f"correct and the server is reachable. ({msg})"
         )
     if isinstance(exc, smtplib.SMTPRecipientsRefused):
-        return (
-            f"SMTP relay refused {len(exc.recipients)} recipient(s) — "
-            "verify notification addresses are valid."
-        )
+        return f"SMTP relay refused {len(exc.recipients)} recipient(s) — verify notification addresses are valid."
     if isinstance(exc, smtplib.SMTPException):
         return f"SMTP error: {msg}"
     return msg

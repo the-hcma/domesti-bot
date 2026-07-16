@@ -57,8 +57,7 @@ _LOGGER = logging.getLogger(__name__)
 # short-circuit in ``app.domesti_bot_cli.bootstrap_device_managers``.
 ANDROIDTV_TEMPORARILY_DISABLED = True
 ANDROIDTV_TEMPORARILY_DISABLED_REASON = (
-    "temporarily disabled — TODO(google-cast-on-off): Cast turn_off path "
-    "is unreliable; investigate before re-enabling"
+    "temporarily disabled — TODO(google-cast-on-off): Cast turn_off path is unreliable; investigate before re-enabling"
 )
 
 _DEFAULT_CAST_PORT = 8009
@@ -223,9 +222,7 @@ class AndroidTvSwitchDevice(SwitchDevice):
             return
         tup = self._host_connect_tuple
         if tup is None:
-            raise RuntimeError(
-                "Expected host_connect_tuple for reconnect after disconnect, got None"
-            )
+            raise RuntimeError("Expected host_connect_tuple for reconnect after disconnect, got None")
         cc = pychromecast.get_chromecast_from_host(
             tup,
             tries=1,
@@ -311,11 +308,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
     ) -> None:
         self._alias_to_device: dict[str, AndroidTvSwitchDevice] | None = None
         self._connection_timeout = float(connection_timeout)
-        self._discovery_store_path = (
-            Path(discovery_store_path).expanduser().resolve()
-            if discovery_store_path
-            else None
-        )
+        self._discovery_store_path = Path(discovery_store_path).expanduser().resolve() if discovery_store_path else None
         self._explicit_specs = _dedupe_strs(list(explicit_host_specs))
         self._zeroconf_discovery = bool(zeroconf_discovery)
         self._zeroconf_timeout = float(zeroconf_timeout)
@@ -331,9 +324,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         uniq.sort(key=lambda d: d.preferred_label.lower())
         lines = ["AndroidTvDeviceManager (Google Cast):"]
         for dev in uniq:
-            lines.append(
-                f"  {dev.preferred_label!r} ({dev.identifier}) — proxy power {dev.power_state}"
-            )
+            lines.append(f"  {dev.preferred_label!r} ({dev.identifier}) — proxy power {dev.power_state}")
         return "\n".join(lines)
 
     def _device_for(self, identifier: str) -> AndroidTvSwitchDevice:
@@ -372,9 +363,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
 
     def _finalize_devices(self, uniq: list[AndroidTvSwitchDevice]) -> None:
         if self._discovery_store_path is not None:
-            for backend, key, disp in device_discovery_store.load_display_names(
-                self._discovery_store_path
-            ):
+            for backend, key, disp in device_discovery_store.load_display_names(self._discovery_store_path):
                 if backend != "androidtv":
                     continue
                 for dev in uniq:
@@ -521,9 +510,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         # caller can opt out with ``full_zeroconf=True`` (used by
         # :meth:`rediscover`) which forces the LAN-wide browse below.
         if not full_zeroconf and self._discovery_store_path is not None:
-            known = device_discovery_store.load_androidtv_known_devices(
-                self._discovery_store_path
-            )
+            known = device_discovery_store.load_androidtv_known_devices(self._discovery_store_path)
             if known and all(uid for _, _, _, uid, _ in known):
                 uniq = await self._connect_devices_from_cache(known)
                 self._finalize_devices(uniq)
@@ -678,14 +665,9 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         if self._alias_to_device is None:
             _LOGGER.debug("AndroidTV reload_from_cache: manager not initialized")
             return False
-        known = device_discovery_store.load_androidtv_known_devices(
-            self._discovery_store_path
-        )
+        known = device_discovery_store.load_androidtv_known_devices(self._discovery_store_path)
         if not known or not all(uid for _h, _p, _fn, uid, _m in known):
-            _LOGGER.info(
-                "AndroidTV reload_from_cache: empty or incomplete cache; "
-                "keeping prior device map"
-            )
+            _LOGGER.info("AndroidTV reload_from_cache: empty or incomplete cache; keeping prior device map")
             return False
         previous = self._alias_to_device
         uniq = await self._connect_devices_from_cache(known)
@@ -702,8 +684,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
 
                 await asyncio.to_thread(_dc)
             _LOGGER.warning(
-                "AndroidTV reload_from_cache: reconnect incomplete "
-                "(%d/%d); keeping prior device map",
+                "AndroidTV reload_from_cache: reconnect incomplete (%d/%d); keeping prior device map",
                 len(uniq),
                 expected,
             )
@@ -713,8 +694,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         self._finalize_devices(uniq)
         self._last_discovery_source = "cache"
         _LOGGER.info(
-            "AndroidTV reload_from_cache: replaced device map from cache "
-            "(%d device(s))",
+            "AndroidTV reload_from_cache: replaced device map from cache (%d device(s))",
             len(uniq),
         )
         return True

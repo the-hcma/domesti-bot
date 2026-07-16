@@ -86,9 +86,7 @@ def test_format_device_action_outcomes_includes_before_and_after() -> None:
             succeeded=True,
         ),
     )
-    assert format_device_action_outcomes(outcomes) == (
-        "Garage lights (Kasa): on → off",
-    )
+    assert format_device_action_outcomes(outcomes) == ("Garage lights (Kasa): on → off",)
 
 
 def test_format_device_action_outcomes_omits_unchanged_devices() -> None:
@@ -114,9 +112,7 @@ def test_format_device_action_outcomes_omits_unchanged_devices() -> None:
             succeeded=True,
         ),
     )
-    assert format_device_action_outcomes(outcomes) == (
-        "Basement leds (Kasa): off → on",
-    )
+    assert format_device_action_outcomes(outcomes) == ("Basement leds (Kasa): off → on",)
 
 
 def test_format_devices_already_in_desired_state_message_lists_mixed_targets() -> None:
@@ -190,9 +186,7 @@ def test_summarize_device_action_outcomes_reports_all_already_desired() -> None:
     )
     summary = summarize_device_action_outcomes(outcomes)
     assert summary.changed_lines == ()
-    assert summary.no_change_message == (
-        "All devices already in their desired (on) state."
-    )
+    assert summary.no_change_message == ("All devices already in their desired (on) state.")
 
 
 def test_build_rule_notification_bodies_includes_device_states_and_link(
@@ -221,15 +215,10 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
     )
     assert "Kitchen TV (Vizio): on → off" in plain
     assert "Everyone left home." in plain
-    assert (
-        "https://domesti.example.com/#/automations/status/away-shutdown" in plain
-    )
+    assert "https://domesti.example.com/#/automations/status/away-shutdown" in plain
     assert "Instance: https://domesti.example.com" in plain
     assert "Kitchen TV (Vizio): on → off" in html
-    assert (
-        'href="https://domesti.example.com/#/automations/status/away-shutdown"'
-        in html
-    )
+    assert 'href="https://domesti.example.com/#/automations/status/away-shutdown"' in html
     assert "Open Automations → Status" not in plain
     assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in plain
     assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in html

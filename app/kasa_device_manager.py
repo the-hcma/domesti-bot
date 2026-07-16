@@ -107,10 +107,7 @@ def _klap_auth_recovery_hint(
             "Kasa/Tapo cloud — set KASA_USERNAME + KASA_PASSWORD to "
             "your account credentials and rerun with --force-discovery"
         )
-    return (
-        "; the configured KASA_USERNAME / KASA_PASSWORD may be wrong "
-        "for this device's KLAP handshake"
-    )
+    return "; the configured KASA_USERNAME / KASA_PASSWORD may be wrong for this device's KLAP handshake"
 
 
 def _patch_klap_transport_plain_http_ssl() -> None:
@@ -164,9 +161,7 @@ async def _connect_smart_plain_http(
     timeout: int,
 ) -> KDevice:
     """Reconnect SMART transports over HTTP when discovery incorrectly preferred HTTPS."""
-    return await KDevice.connect(
-        config=_plain_http_device_config(cfg, credentials=credentials, timeout=timeout)
-    )
+    return await KDevice.connect(config=_plain_http_device_config(cfg, credentials=credentials, timeout=timeout))
 
 
 async def _connect_legacy_xor(
@@ -208,8 +203,7 @@ async def _connect_legacy_xor(
     if last_error is not None:
         raise last_error
     raise AuthenticationError(
-        f"No legacy XOR connection profile matched for {host} "
-        "(KLAP discovery may have won the UDP race)."
+        f"No legacy XOR connection profile matched for {host} (KLAP discovery may have won the UDP race)."
     )
 
 
@@ -242,9 +236,7 @@ async def _connect_from_saved_config(
         # or flaky cached host must not abort the whole cache reconnect.
         last_exc: BaseException = exc
         ctype = cfg.connection_type
-        if ctype.device_family.value.startswith(
-            "SMART"
-        ) and ctype.encryption_type is DeviceEncryptionType.Klap:
+        if ctype.device_family.value.startswith("SMART") and ctype.encryption_type is DeviceEncryptionType.Klap:
             try:
                 return await _connect_smart_plain_http(
                     cfg,
@@ -255,17 +247,9 @@ async def _connect_from_saved_config(
                 last_exc = ex
         if _config_uses_klap(cfg):
             if raise_auth_failure:
-                if isinstance(exc, AuthenticationError) or isinstance(
-                    last_exc, AuthenticationError
-                ):
-                    auth_exc = (
-                        last_exc
-                        if isinstance(last_exc, AuthenticationError)
-                        else exc
-                    )
-                    raise AuthenticationError(
-                        f"KLAP authentication failed for {cfg.host}"
-                    ) from auth_exc
+                if isinstance(exc, AuthenticationError) or isinstance(last_exc, AuthenticationError):
+                    auth_exc = last_exc if isinstance(last_exc, AuthenticationError) else exc
+                    raise AuthenticationError(f"KLAP authentication failed for {cfg.host}") from auth_exc
                 raise last_exc
             _LOGGER.warning(
                 "Kasa: skipped device at %s (%s)%s",
@@ -286,15 +270,12 @@ async def _connect_from_saved_config(
                 cfg.host,
                 type(last_exc).__name__,
                 ex,
-                _klap_auth_recovery_hint(
-                    initial_exc=exc, credentials=credentials
-                ),
+                _klap_auth_recovery_hint(initial_exc=exc, credentials=credentials),
             )
             return None
 
 
 class KasaDevice(SwitchDevice):
-
     __slots__ = ("_kDevice",)
 
     def __init__(
@@ -320,7 +301,6 @@ class KasaDevice(SwitchDevice):
 
 
 class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
-
     def __init__(
         self,
         *,
@@ -337,11 +317,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self._discovery_target = (discovery_target or "").strip() or None
         self._discovery_timeout = discovery_timeout
         self._query_timeout = query_timeout
-        self._discovery_cache_path = (
-            Path(discovery_cache_path).expanduser().resolve()
-            if discovery_cache_path
-            else None
-        )
+        self._discovery_cache_path = Path(discovery_cache_path).expanduser().resolve() if discovery_cache_path else None
         self._force_discovery = force_discovery
         # Set by :meth:`_fetch_impl` to ``"cache"`` (every saved config
         # reconnected without falling back to UDP) or ``"discovery"`` (full
@@ -457,11 +433,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         """
         host = (dev.host or "").strip()
         known_needs_auth = host in self._hosts_requiring_klap_auth
-        use_creds = (
-            prefer_credentials
-            if prefer_credentials is not None
-            else known_needs_auth
-        )
+        use_creds = prefer_credentials if prefer_credentials is not None else known_needs_auth
         creds_order: list[Credentials | None]
         if use_creds and self._discovery_credentials is not None:
             creds_order = [self._discovery_credentials]
@@ -642,11 +614,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             except Exception as ex:
                 last_exc = ex
         if _config_uses_klap(cfg_before):
-            suppress_warning = (
-                quiet_anonymous_auth
-                and auth_failure
-                and credentials is None
-            )
+            suppress_warning = quiet_anonymous_auth and auth_failure and credentials is None
             if log_failure and not suppress_warning:
                 _LOGGER.warning(
                     "Kasa: skipped device at %s (%s)%s",
@@ -668,11 +636,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 False,
             )
         except Exception as ex:
-            suppress_warning = (
-                quiet_anonymous_auth
-                and auth_failure
-                and credentials is None
-            )
+            suppress_warning = quiet_anonymous_auth and auth_failure and credentials is None
             if log_failure and not suppress_warning:
                 _LOGGER.warning(
                     "Kasa: skipped device at %s (%s); recovery failed (%s)%s",
@@ -738,11 +702,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         ``None`` as failure and keep their prior map.
         """
 
-        qtimeout = (
-            self._query_timeout
-            if self._query_timeout is not None
-            else DeviceConfig.DEFAULT_TIMEOUT
-        )
+        qtimeout = self._query_timeout if self._query_timeout is not None else DeviceConfig.DEFAULT_TIMEOUT
         # Dedup by ``host`` (the LAN identifier, guaranteed unique by
         # virtue of being an IP address) rather than by ``alias`` —
         # users routinely give multiple physical outlets the same name
@@ -759,8 +719,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             if requires_klap_auth and self._discovery_credentials is None:
                 self._last_skipped_auth_hosts.append(host)
                 _LOGGER.debug(
-                    "Kasa: ignoring KLAP-auth host %s "
-                    "(no account credentials configured)",
+                    "Kasa: ignoring KLAP-auth host %s (no account credentials configured)",
                     host,
                 )
                 continue
@@ -789,8 +748,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     self._last_skipped_auth_hosts.append(host)
                     self._hosts_requiring_klap_auth.add(host)
                     _LOGGER.warning(
-                        "Kasa: skipped KLAP-auth host %s "
-                        "(credentials configured but handshake failed)",
+                        "Kasa: skipped KLAP-auth host %s (credentials configured but handshake failed)",
                         host,
                     )
                     continue
@@ -807,14 +765,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 qtimeout,
                 credentials=None,
                 log_failure=True,
-                quiet_anonymous_auth=(
-                    not requires_klap_auth and self._discovery_credentials is None
-                ),
+                quiet_anonymous_auth=(not requires_klap_auth and self._discovery_credentials is None),
             )
             if ingested is None and (
-                not requires_klap_auth
-                and was_auth_failure
-                and self._discovery_credentials is not None
+                not requires_klap_auth and was_auth_failure and self._discovery_credentials is not None
             ):
                 # Mis-classified row: anonymous connect worked but update
                 # needs KLAP account credentials.
@@ -860,8 +814,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 )
                 if requires_klap_auth:
                     _LOGGER.warning(
-                        "Kasa: skipped KLAP-auth host %s "
-                        "(credentials configured but handshake failed)",
+                        "Kasa: skipped KLAP-auth host %s (credentials configured but handshake failed)",
                         host,
                     )
                 with contextlib.suppress(Exception):
@@ -894,11 +847,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 await dev.disconnect()
 
     async def _fetch_impl(self, *, force_discovery: bool) -> None:
-        qtimeout = (
-            self._query_timeout
-            if self._query_timeout is not None
-            else DeviceConfig.DEFAULT_TIMEOUT
-        )
+        qtimeout = self._query_timeout if self._query_timeout is not None else DeviceConfig.DEFAULT_TIMEOUT
         # Reset per-fetch state so subsequent rediscovers don't carry
         # stale auth-failure markers from a previous attempt that ran
         # without credentials.
@@ -918,11 +867,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     return
 
         # Always discover anonymously; attach credentials per-host during ingest.
-        if (
-            self._discovery_target is None
-            and self._query_timeout is None
-            and self._discovery_timeout == 5
-        ):
+        if self._discovery_target is None and self._query_timeout is None and self._discovery_timeout == 5:
             devices = await Discover.discover()
         else:
             discover_kw: dict[str, Any] = {"discovery_timeout": self._discovery_timeout}
@@ -967,9 +912,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
         uniq = list({id(kd): kd for kd in alias_map.values()}.values())
         if self._discovery_cache_path is not None:
-            for backend, key, disp in device_discovery_store.load_display_names(
-                self._discovery_cache_path
-            ):
+            for backend, key, disp in device_discovery_store.load_display_names(self._discovery_cache_path):
                 if backend != "kasa":
                     continue
                 for kd in uniq:
@@ -1082,9 +1025,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             return False
         cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
         if not cached:
-            _LOGGER.info(
-                "Kasa reload_from_cache: empty cache; keeping prior device map"
-            )
+            _LOGGER.info("Kasa reload_from_cache: empty cache; keeping prior device map")
             return False
 
         previous_map = self._device_name_to_device
@@ -1104,9 +1045,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             self._hosts_requiring_klap_auth = previous_klap
             self._last_skipped_auth_hosts = previous_skipped
             self._skipped_klap_auth_configs = previous_skipped_cfgs
-            _LOGGER.warning(
-                "Kasa reload_from_cache: reconnect failed; keeping prior device map"
-            )
+            _LOGGER.warning("Kasa reload_from_cache: reconnect failed; keeping prior device map")
             return False
 
         self._finalize_kasa_lookup(from_cache)

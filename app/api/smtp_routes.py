@@ -74,9 +74,7 @@ async def put_smtp_settings(body: SmtpConfigIn, request: Request) -> SmtpConfigO
 
 
 @router.post("/smtp/test", response_model=SmtpTestEmailOut)
-async def post_smtp_test_email(
-    body: SmtpTestEmailIn, request: Request
-) -> SmtpTestEmailOut:
+async def post_smtp_test_email(body: SmtpTestEmailIn, request: Request) -> SmtpTestEmailOut:
     """Send a test email using the submitted settings (saved password may be reused)."""
     cache_path = discovery_cache_path_from_request(request)
     _validate_smtp_body(body)

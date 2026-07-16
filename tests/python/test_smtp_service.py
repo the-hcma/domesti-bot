@@ -34,10 +34,7 @@ def test_resolve_instance_url_prefers_ui_origin() -> None:
         )
         == "http://192.168.0.5:8003/"
     )
-    assert (
-        resolve_instance_url(instance_url=None, mail_domain="hcma.info")
-        == "https://hcma.info/"
-    )
+    assert resolve_instance_url(instance_url=None, mail_domain="hcma.info") == "https://hcma.info/"
 
 
 @patch("app.smtp_service._LoggingSMTP")

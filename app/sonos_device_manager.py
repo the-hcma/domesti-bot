@@ -117,8 +117,7 @@ class SonosSpeakerDevice(SpeakerDevice):
         if self._stream_favorites:
             if favorite_index < 0 or favorite_index >= len(self._stream_favorites):
                 raise ValueError(
-                    f"Expected favorite_index in 0..{len(self._stream_favorites) - 1}, "
-                    f"got {favorite_index}"
+                    f"Expected favorite_index in 0..{len(self._stream_favorites) - 1}, got {favorite_index}"
                 )
             favorite = self._stream_favorites[favorite_index]
         if favorite is not None:
@@ -182,9 +181,7 @@ class SonosSpeakerDevice(SpeakerDevice):
             return "unknown"
         if not raw:
             return "unknown"
-        label = _SONOS_TRANSPORT_LABELS.get(
-            raw, raw.replace("_", " ").lower()
-        )
+        label = _SONOS_TRANSPORT_LABELS.get(raw, raw.replace("_", " ").lower())
         # Keep :attr:`is_playing` in sync so a manual REPL read of
         # ``transport_state_summary`` and the next UI poll converge on
         # the same answer.
@@ -227,11 +224,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
     ) -> None:
         self._discovery_timeout = discovery_timeout
         self._alias_to_device: dict[str, SonosSpeakerDevice] | None = None
-        self._discovery_cache_path = (
-            Path(discovery_cache_path).expanduser().resolve()
-            if discovery_cache_path
-            else None
-        )
+        self._discovery_cache_path = Path(discovery_cache_path).expanduser().resolve() if discovery_cache_path else None
         self._force_discovery = bool(force_discovery)
         self._stream_favorites = load_sonos_stream_favorites()
         # Set by :meth:`fetch` to ``"cache"`` (every cached zone reconnected
@@ -456,15 +449,11 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             return False
         cached = device_discovery_store.load_sonos_zones(self._discovery_cache_path)
         if not cached:
-            _LOGGER.info(
-                "Sonos reload_from_cache: empty cache; keeping prior device map"
-            )
+            _LOGGER.info("Sonos reload_from_cache: empty cache; keeping prior device map")
             return False
         devices = await self._reconnect_from_cache()
         if devices is None:
-            _LOGGER.warning(
-                "Sonos reload_from_cache: reconnect failed; keeping prior device map"
-            )
+            _LOGGER.warning("Sonos reload_from_cache: reconnect failed; keeping prior device map")
             return False
         self._finalize(devices)
         self._last_discovery_source = "cache"

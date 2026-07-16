@@ -60,9 +60,7 @@ def count_user_location_history(path: Path, user_id: str) -> int:
     """Return how many history rows are stored for ``user_id``."""
     with discovery_session(path) as session:
         rows = session.scalars(
-            select(RuleUserLocationHistory.id).where(
-                RuleUserLocationHistory.user_id == user_id
-            )
+            select(RuleUserLocationHistory.id).where(RuleUserLocationHistory.user_id == user_id)
         ).all()
         return len(rows)
 
@@ -140,9 +138,7 @@ def list_user_location_history_for_user(
     When ``since`` is set, only rows with ``reported_at >= since`` are returned.
     """
     with discovery_session(path) as session:
-        query = select(RuleUserLocationHistory).where(
-            RuleUserLocationHistory.user_id == user_id
-        )
+        query = select(RuleUserLocationHistory).where(RuleUserLocationHistory.user_id == user_id)
         if since is not None:
             query = query.where(RuleUserLocationHistory.reported_at >= since)
         rows = session.scalars(
@@ -206,17 +202,12 @@ def list_user_location_history_for_walkback_by_user(
                 RuleUserLocationHistory.id.desc(),
             )
         ).all()
-    history_by_user: dict[str, list[UserLocationRecord]] = {
-        user_id: [] for user_id in unique_user_ids
-    }
+    history_by_user: dict[str, list[UserLocationRecord]] = {user_id: [] for user_id in unique_user_ids}
     for row in rows:
         bucket = history_by_user.get(row.user_id)
         if bucket is None:
             continue
-        if (
-            limit_per_user is not None
-            and len(bucket) >= limit_per_user
-        ):
+        if limit_per_user is not None and len(bucket) >= limit_per_user:
             continue
         bucket.append(_history_to_record(row))
     return history_by_user
@@ -236,9 +227,7 @@ def prune_all_user_location_history(
 ) -> int:
     """Apply ``retention`` to every user and return rows deleted."""
     with discovery_session(path) as session:
-        user_ids = session.scalars(
-            select(RuleUserLocationHistory.user_id).distinct()
-        ).all()
+        user_ids = session.scalars(select(RuleUserLocationHistory.user_id).distinct()).all()
     deleted = 0
     for user_id in user_ids:
         deleted += prune_user_location_history(
@@ -257,6 +246,7 @@ def prune_user_location_history(
 ) -> int:
     """Delete history rows for ``user_id`` outside ``retention``."""
     now = time.time()
+
     def _write(session: Session) -> int:
         rows = session.scalars(
             select(RuleUserLocationHistory)
@@ -276,11 +266,7 @@ def prune_user_location_history(
         delete_ids = [row.id for row in rows if row.id not in keep_ids]
         if not delete_ids:
             return 0
-        session.execute(
-            delete(RuleUserLocationHistory).where(
-                RuleUserLocationHistory.id.in_(delete_ids)
-            )
-        )
+        session.execute(delete(RuleUserLocationHistory).where(RuleUserLocationHistory.id.in_(delete_ids)))
         if _LOCATION_LOGGER.isEnabledFor(logging.INFO):
             _LOCATION_LOGGER.info(
                 "pruned %d history row(s) for %s (kept %d)",
@@ -289,7 +275,6 @@ def prune_user_location_history(
                 len(keep_ids),
             )
         return len(delete_ids)
-
 
     return discovery_write(path, _write)
 
@@ -302,6 +287,7 @@ def replace_user_locations(
 ) -> int:
     """Replace all stored user locations with ``locations`` and append history."""
     now = time.time()
+
     def _write(session: Session) -> None:
         session.execute(delete(RuleUserLastLocation))
         for location in locations:
@@ -431,11 +417,7 @@ def upsert_user_location(
 
     stored = discovery_write(path, _write)
     if stored:
-        accuracy_label = (
-            "unknown"
-            if location.accuracy_m is None
-            else f"{location.accuracy_m:g}"
-        )
+        accuracy_label = "unknown" if location.accuracy_m is None else f"{location.accuracy_m:g}"
         connection_label = connection_type_label_for_log(location.connection_type)
         metadata_suffix = _location_log_metadata_suffix(location)
         report_fragment = location_report_log_fragment(
@@ -473,10 +455,7 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     phi2 = math.radians(lat2)
     d_phi = math.radians(lat2 - lat1)
     d_lambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(d_phi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
-    )
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     return 2 * earth_radius_m * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
@@ -542,10 +521,7 @@ def _location_with_normalized_fields(
         location.connection_type,
     )
     normalized_wifi_bssid = normalize_wifi_bssid(location.wifi_bssid)
-    if (
-        normalized_connection_type == location.connection_type
-        and normalized_wifi_bssid == location.wifi_bssid
-    ):
+    if normalized_connection_type == location.connection_type and normalized_wifi_bssid == location.wifi_bssid:
         return location
     return replace(
         location,

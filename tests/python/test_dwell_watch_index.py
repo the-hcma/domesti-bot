@@ -17,6 +17,7 @@ from app.dwell_watch_index import (
     build_dwell_watch_index,
 )
 
+
 def test_build_device_dwell_watch_index_indexes_open_door_dwell() -> None:
     rules = [
         RuleOut(
@@ -84,6 +85,7 @@ def test_build_device_dwell_watch_index_indexes_open_door_dwell() -> None:
     assert watch.rule_ids == frozenset({"away-garage-open-alert"})
     assert watch.state == DeviceConditionState.OPEN
 
+
 def test_build_dwell_watch_index_ignores_non_dwell_satisfied_rules() -> None:
     rules = [
         RuleOut(
@@ -111,6 +113,7 @@ def test_build_dwell_watch_index_ignores_non_dwell_satisfied_rules() -> None:
     ]
 
     assert build_dwell_watch_index(rules).watches == ()
+
 
 def test_build_dwell_watch_index_merges_rules_for_same_tuple() -> None:
     condition = UsersOutsideGeofenceForSCondition(

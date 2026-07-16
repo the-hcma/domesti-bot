@@ -89,9 +89,7 @@ async def test_resolve_vizio_tv_mac_falls_back_to_arp_on_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = MagicMock()
-    client.fetch_network_mac = AsyncMock(
-        side_effect=VizioSmartCastNotFoundError("networkinfo missing")
-    )
+    client.fetch_network_mac = AsyncMock(side_effect=VizioSmartCastNotFoundError("networkinfo missing"))
     monkeypatch.setattr(
         "app.vizio_smartcast_client.lookup_mac_via_arp",
         lambda host: "00:bd:3e:d5:f0:11",

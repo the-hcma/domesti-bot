@@ -112,14 +112,10 @@ async def _dispatch_kasa_action(
 ) -> None:
     host = resolve_kasa_host_by_label(mgr, action.device_id)
     if host is None:
-        raise RuleActionDispatchError(
-            f"Unknown {DeviceFamilyId.KASA.display_name()} device: {action.device_id!r}"
-        )
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.KASA.display_name()} device: {action.device_id!r}")
     device = find_kasa_by_host(mgr, host)
     if device is None:
-        raise RuleActionDispatchError(
-            f"Unknown {DeviceFamilyId.KASA.display_name()} device: {action.device_id!r}"
-        )
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.KASA.display_name()} device: {action.device_id!r}")
     match action.action:
         case RuleDeviceActionType.TURN_ON:
             await device.turn_on()
@@ -137,19 +133,13 @@ async def _dispatch_sonos_action(
     action: RuleDeviceActionOut,
 ) -> None:
     if mgr is None:
-        raise RuleActionDispatchError(
-            f"{DeviceFamilyId.SONOS.display_name()} manager is not configured on this server"
-        )
+        raise RuleActionDispatchError(f"{DeviceFamilyId.SONOS.display_name()} manager is not configured on this server")
     identifier = resolve_sonos_identifier_by_label(mgr, action.device_id)
     if identifier is None:
-        raise RuleActionDispatchError(
-            f"Unknown {DeviceFamilyId.SONOS.display_name()} zone: {action.device_id!r}"
-        )
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.SONOS.display_name()} zone: {action.device_id!r}")
     zone = find_sonos_by_identifier(mgr, identifier)
     if zone is None:
-        raise RuleActionDispatchError(
-            f"Unknown {DeviceFamilyId.SONOS.display_name()} zone: {action.device_id!r}"
-        )
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.SONOS.display_name()} zone: {action.device_id!r}")
     match action.action:
         case RuleDeviceActionType.PAUSE:
             await zone.pause()
@@ -168,19 +158,14 @@ async def _dispatch_tailwind_action(
 ) -> None:
     if mgr is None:
         raise RuleActionDispatchError(
-            f"{DeviceFamilyId.TAILWIND.display_name()} manager is not configured on "
-            "this server"
+            f"{DeviceFamilyId.TAILWIND.display_name()} manager is not configured on this server"
         )
     identifier = resolve_tailwind_identifier_by_label(mgr, action.device_id)
     if identifier is None:
-        raise RuleActionDispatchError(
-            f"Unknown {DeviceFamilyId.TAILWIND.display_name()} door: {action.device_id!r}"
-        )
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.TAILWIND.display_name()} door: {action.device_id!r}")
     door = find_tailwind_by_identifier(mgr, identifier)
     if door is None:
-        raise RuleActionDispatchError(
-            f"Unknown {DeviceFamilyId.TAILWIND.display_name()} door: {action.device_id!r}"
-        )
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.TAILWIND.display_name()} door: {action.device_id!r}")
     match action.action:
         case RuleDeviceActionType.OPEN:
             await door.open()
@@ -198,19 +183,13 @@ async def _dispatch_vizio_action(
     action: RuleDeviceActionOut,
 ) -> None:
     if mgr is None:
-        raise RuleActionDispatchError(
-            f"{DeviceFamilyId.VIZIO.display_name()} manager is not configured on this server"
-        )
+        raise RuleActionDispatchError(f"{DeviceFamilyId.VIZIO.display_name()} manager is not configured on this server")
     identifier = resolve_vizio_identifier_by_label(mgr, action.device_id)
     if identifier is None:
-        raise RuleActionDispatchError(
-            f"Unknown {DeviceFamilyId.VIZIO.display_name()} TV: {action.device_id!r}"
-        )
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.VIZIO.display_name()} TV: {action.device_id!r}")
     tv = find_vizio_by_id(mgr, identifier)
     if tv is None:
-        raise RuleActionDispatchError(
-            f"Unknown {DeviceFamilyId.VIZIO.display_name()} TV: {action.device_id!r}"
-        )
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.VIZIO.display_name()} TV: {action.device_id!r}")
     match action.action:
         case RuleDeviceActionType.TURN_ON:
             await tv.turn_on()
@@ -335,10 +314,7 @@ async def dispatch_device_action(
         case DeviceFamilyId.VIZIO:
             await _dispatch_vizio_action(state.vizio_mgr, action)
         case _:
-            raise RuleActionDispatchError(
-                "Expected supported device family, got "
-                f"{action.family_id.display_name()!r}"
-            )
+            raise RuleActionDispatchError(f"Expected supported device family, got {action.family_id.display_name()!r}")
 
 
 async def dispatch_rule_device_actions(
@@ -410,8 +386,7 @@ async def dispatch_rule_device_actions(
                 probable_text = f"{message} (probable)"
                 probable_successes.append(probable_text)
                 _LOGGER.info(
-                    "[rules] device action probable success family=%s device=%s "
-                    "action=%s: %s",
+                    "[rules] device action probable success family=%s device=%s action=%s: %s",
                     action.family_id,
                     action.device_id,
                     action.action,
@@ -482,8 +457,7 @@ def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | 
         return unique[0]
     if len(unique) > 1:
         raise RuleActionDispatchError(
-            f"Ambiguous {DeviceFamilyId.KASA.display_name()} device {device_id!r}; "
-            f"matches: {', '.join(unique)}"
+            f"Ambiguous {DeviceFamilyId.KASA.display_name()} device {device_id!r}; matches: {', '.join(unique)}"
         )
     return None
 
@@ -511,8 +485,7 @@ def resolve_sonos_identifier_by_label(
         return unique[0]
     if len(unique) > 1:
         raise RuleActionDispatchError(
-            f"Ambiguous {DeviceFamilyId.SONOS.display_name()} zone {device_id!r}; "
-            f"matches: {', '.join(unique)}"
+            f"Ambiguous {DeviceFamilyId.SONOS.display_name()} zone {device_id!r}; matches: {', '.join(unique)}"
         )
     return None
 
@@ -540,8 +513,7 @@ def resolve_tailwind_identifier_by_label(
         return unique[0]
     if len(unique) > 1:
         raise RuleActionDispatchError(
-            f"Ambiguous {DeviceFamilyId.TAILWIND.display_name()} door {device_id!r}; "
-            f"matches: {', '.join(unique)}"
+            f"Ambiguous {DeviceFamilyId.TAILWIND.display_name()} door {device_id!r}; matches: {', '.join(unique)}"
         )
     return None
 
@@ -569,8 +541,7 @@ def resolve_vizio_identifier_by_label(
         return unique[0]
     if len(unique) > 1:
         raise RuleActionDispatchError(
-            f"Ambiguous {DeviceFamilyId.VIZIO.display_name()} TV {device_id!r}; "
-            f"matches: {', '.join(unique)}"
+            f"Ambiguous {DeviceFamilyId.VIZIO.display_name()} TV {device_id!r}; matches: {', '.join(unique)}"
         )
     return None
 
@@ -591,14 +562,10 @@ def send_rule_notification_email(
             "[rules] rule_id=%s notify_on_fire enabled but notification_emails is empty",
             rule.id,
         )
-        raise RuleActionDispatchError(
-            f"Rule {rule.id!r} has notify_on_fire but no notification_emails"
-        )
+        raise RuleActionDispatchError(f"Rule {rule.id!r} has notify_on_fire but no notification_emails")
     config = load_smtp_config(cache_path)
     if config is None or not smtp_send_ready(config):
-        raise RuleActionDispatchError(
-            "SMTP is not configured; cannot send rule notification email"
-        )
+        raise RuleActionDispatchError("SMTP is not configured; cannot send rule notification email")
     password = resolve_password_for_send(cache_path, draft_password=None, host=config.host)
     params = SmtpConnectionParams(
         from_address=config.from_address,
@@ -653,9 +620,11 @@ def snapshot_device_action_state(
     """Return a human-readable cached device state label before/after dispatch."""
     match action.family_id:
         case DeviceFamilyId.KASA | DeviceFamilyId.VIZIO:
-            is_on = cached_kasa_is_on(state, action.device_id) if (
-                action.family_id == DeviceFamilyId.KASA
-            ) else cached_vizio_is_on(state, action.device_id)
+            is_on = (
+                cached_kasa_is_on(state, action.device_id)
+                if (action.family_id == DeviceFamilyId.KASA)
+                else cached_vizio_is_on(state, action.device_id)
+            )
             if is_on is None:
                 return None
             return DeviceConditionState.ON if is_on else DeviceConditionState.OFF
@@ -663,11 +632,7 @@ def snapshot_device_action_state(
             is_playing = cached_sonos_is_playing(state, action.device_id)
             if is_playing is None:
                 return None
-            return (
-                DeviceConditionState.PLAYING
-                if is_playing
-                else DeviceConditionState.PAUSED
-            )
+            return DeviceConditionState.PLAYING if is_playing else DeviceConditionState.PAUSED
         case DeviceFamilyId.TAILWIND:
             is_open = cached_tailwind_is_open(state, action.device_id)
             if is_open is None:

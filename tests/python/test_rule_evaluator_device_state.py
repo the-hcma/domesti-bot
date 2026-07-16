@@ -28,7 +28,6 @@ from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, repla
 
 
 @pytest.mark.asyncio
-
 async def test_device_dwell_does_not_fire_when_door_just_opened_while_away(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -66,7 +65,6 @@ async def test_device_dwell_does_not_fire_when_door_just_opened_while_away(
 
 
 @pytest.mark.asyncio
-
 async def test_device_dwell_fires_once_per_away_episode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -123,6 +121,7 @@ async def test_device_dwell_fires_once_per_away_episode(
 
     assert send_mock.call_count == 1
 
+
 async def test_device_dwell_fires_when_door_open_for_threshold_while_away(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -162,13 +161,10 @@ async def test_device_dwell_fires_when_door_open_for_threshold_while_away(
         )
 
     send_mock.assert_called_once()
-    assert evaluator.fire_state_for_rule("away-garage-open-alert").last_fired_at == (
-        clock["now"]
-    )
+    assert evaluator.fire_state_for_rule("away-garage-open-alert").last_fired_at == (clock["now"])
 
 
 @pytest.mark.asyncio
-
 class _FakeTailwindDoor:
     def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
         self.identifier = identifier

@@ -38,9 +38,7 @@ class _FakeTailwind:
     ) -> object:
         self.calls.append((door, str(operation)))
         if self._raise:
-            raise TailwindDoorAlreadyInStateError(
-                f"Door {door} is already in the requested state"
-            )
+            raise TailwindDoorAlreadyInStateError(f"Door {door} is already in the requested state")
 
         class _Door:
             state = self._response_state

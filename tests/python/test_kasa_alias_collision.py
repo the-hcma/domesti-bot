@@ -71,12 +71,8 @@ async def test_fetch_keeps_all_devices_even_when_aliases_collide(
     assert mgr.get_device_by_alias("Plug") is not None
     assert mgr.get_device_by_alias("Other") is not None
 
-    warning_messages = [
-        r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
-    ]
-    assert any(
-        "lookup key 'Plug' is shared by" in m for m in warning_messages
-    ), warning_messages
+    warning_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("lookup key 'Plug' is shared by" in m for m in warning_messages), warning_messages
 
 
 @pytest.mark.asyncio
@@ -123,23 +119,21 @@ async def test_fetch_logs_ingest_shortfall_when_some_devices_fail_recovery(
         return dev
 
     mgr = KasaDeviceManager()
-    with patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(return_value=discovered),
-    ), patch.object(
-        KasaDeviceManager, "_ingest_discovered_device", _drop_b
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value=discovered),
+        ),
+        patch.object(KasaDeviceManager, "_ingest_discovered_device", _drop_b),
     ):
         with caplog.at_level(logging.WARNING, logger="app.kasa_device_manager"):
             await mgr.fetch()
 
     assert len(mgr.switches) == 2
-    warning_messages = [
-        r.getMessage() for r in caplog.records if r.levelno == logging.WARNING
-    ]
-    assert any(
-        "discovered 3 device(s) on the LAN but only 2 completed" in m
-        for m in warning_messages
-    ), warning_messages
+    warning_messages = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("discovered 3 device(s) on the LAN but only 2 completed" in m for m in warning_messages), (
+        warning_messages
+    )
 
 
 @pytest.mark.asyncio

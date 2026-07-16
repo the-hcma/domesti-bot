@@ -25,14 +25,10 @@ def _ns(
     *,
     listen_all: bool = False,
 ) -> argparse.Namespace:
-    return argparse.Namespace(
-        listen_host=host, listen_port=port, listen_all=listen_all
-    )
+    return argparse.Namespace(listen_host=host, listen_port=port, listen_all=listen_all)
 
 
-def _ns_with_browser(
-    *, no_browser: bool = False
-) -> argparse.Namespace:
+def _ns_with_browser(*, no_browser: bool = False) -> argparse.Namespace:
     return argparse.Namespace(
         listen_host=None,
         listen_port=None,
@@ -72,9 +68,7 @@ def test_cli_beats_env() -> None:
 
 def test_cli_port_zero_is_respected() -> None:
     # Explicit --listen-port 0 must NOT fall through to the env var.
-    host, port = resolve_listen_address(
-        _ns(None, 0), env={"DOMESTI_LISTEN_PORT": "8765"}
-    )
+    host, port = resolve_listen_address(_ns(None, 0), env={"DOMESTI_LISTEN_PORT": "8765"})
     assert port == 0
     assert host == "127.0.0.1"
 
@@ -97,9 +91,7 @@ def test_listen_all_binds_wildcard_when_no_explicit_host() -> None:
 
 def test_listen_all_does_not_change_port_resolution() -> None:
     # Port comes from --listen-port / env / 0 — --listen-all only touches host.
-    host, port = resolve_listen_address(
-        _ns(None, 9876, listen_all=True), env={}
-    )
+    host, port = resolve_listen_address(_ns(None, 9876, listen_all=True), env={})
     assert (host, port) == ("0.0.0.0", 9876)
 
 
@@ -107,9 +99,7 @@ def test_explicit_listen_host_beats_listen_all() -> None:
     # Explicit --listen-host 127.0.0.1 wins over --listen-all 0.0.0.0
     # — useful when the user wants to override the wildcard convenience
     # flag for a single run (e.g. a temporarily-tightened test).
-    host, _ = resolve_listen_address(
-        _ns("127.0.0.1", None, listen_all=True), env={}
-    )
+    host, _ = resolve_listen_address(_ns("127.0.0.1", None, listen_all=True), env={})
     assert host == "127.0.0.1"
 
 
@@ -243,9 +233,7 @@ def test_browser_url_for_auto_open_uses_ipv4_form_for_ipv6_loopback() -> None:
 
 def test_browser_url_for_auto_open_returns_none_when_no_browser_flag() -> None:
     sock = _mock_sock("127.0.0.1", 12345)
-    url = browser_url_for_auto_open(
-        _ns_with_browser(no_browser=True), sock, env={}
-    )
+    url = browser_url_for_auto_open(_ns_with_browser(no_browser=True), sock, env={})
     assert url is None
 
 
@@ -253,9 +241,7 @@ def test_browser_url_for_auto_open_returns_none_under_systemd() -> None:
     # systemd sets INVOCATION_ID for every unit; treat that as a signal
     # to skip auto-open regardless of bind address.
     sock = _mock_sock("127.0.0.1", 12345)
-    url = browser_url_for_auto_open(
-        _ns_with_browser(), sock, env={"INVOCATION_ID": "abc123"}
-    )
+    url = browser_url_for_auto_open(_ns_with_browser(), sock, env={"INVOCATION_ID": "abc123"})
     assert url is None
 
 
@@ -295,9 +281,7 @@ async def test_open_browser_after_server_ready_calls_webbrowser_open_when_starte
     flip_task = asyncio.create_task(_flip_started())
     with patch.object(serve_module.webbrowser, "open", return_value=True) as wb_open:
         await asyncio.wait_for(
-            serve_module._open_browser_after_server_ready(
-                server, "http://127.0.0.1:12345/", timeout_s=1.0
-            ),
+            serve_module._open_browser_after_server_ready(server, "http://127.0.0.1:12345/", timeout_s=1.0),
             timeout=2.0,
         )
     await flip_task
@@ -310,9 +294,7 @@ async def test_open_browser_after_server_ready_gives_up_on_timeout() -> None:
     server.started = False  # stays False forever
     with patch.object(serve_module.webbrowser, "open") as wb_open:
         await asyncio.wait_for(
-            serve_module._open_browser_after_server_ready(
-                server, "http://127.0.0.1:12345/", timeout_s=0.1
-            ),
+            serve_module._open_browser_after_server_ready(server, "http://127.0.0.1:12345/", timeout_s=0.1),
             timeout=1.0,
         )
     wb_open.assert_not_called()
@@ -332,9 +314,7 @@ def test_log_listening_banner_warns_on_wildcard_without_api_key(
         serve_module._log_listening_banner(sock)
     records = [r for r in caplog.records if r.name == "config.serve"]
     warnings = [r for r in records if r.levelno >= logging.WARNING]
-    assert any(
-        "DOMESTI_API_KEY unset" in r.getMessage() for r in warnings
-    ), [r.getMessage() for r in records]
+    assert any("DOMESTI_API_KEY unset" in r.getMessage() for r in warnings), [r.getMessage() for r in records]
 
 
 def test_log_listening_banner_quiet_on_wildcard_with_api_key(
@@ -348,10 +328,7 @@ def test_log_listening_banner_quiet_on_wildcard_with_api_key(
     sock = _mock_sock("0.0.0.0", 8765)
     with caplog.at_level(logging.INFO, logger="config.serve"):
         serve_module._log_listening_banner(sock)
-    warnings = [
-        r for r in caplog.records
-        if r.name == "config.serve" and r.levelno >= logging.WARNING
-    ]
+    warnings = [r for r in caplog.records if r.name == "config.serve" and r.levelno >= logging.WARNING]
     assert warnings == [], [r.getMessage() for r in warnings]
 
 
@@ -365,10 +342,7 @@ def test_log_listening_banner_quiet_on_loopback_without_api_key(
     sock = _mock_sock("127.0.0.1", 12345)
     with caplog.at_level(logging.INFO, logger="config.serve"):
         serve_module._log_listening_banner(sock)
-    warnings = [
-        r for r in caplog.records
-        if r.name == "config.serve" and r.levelno >= logging.WARNING
-    ]
+    warnings = [r for r in caplog.records if r.name == "config.serve" and r.levelno >= logging.WARNING]
     assert warnings == [], [r.getMessage() for r in warnings]
 
 
@@ -376,14 +350,10 @@ def test_log_listening_banner_quiet_on_loopback_without_api_key(
 async def test_open_browser_after_server_ready_swallows_webbrowser_error() -> None:
     server: Any = MagicMock()
     server.started = True
-    with patch.object(
-        serve_module.webbrowser, "open", side_effect=RuntimeError("no DISPLAY")
-    ):
+    with patch.object(serve_module.webbrowser, "open", side_effect=RuntimeError("no DISPLAY")):
         # MUST NOT raise — a missing $DISPLAY shouldn't take the server
         # launcher down.
         await asyncio.wait_for(
-            serve_module._open_browser_after_server_ready(
-                server, "http://127.0.0.1:12345/", timeout_s=0.5
-            ),
+            serve_module._open_browser_after_server_ready(server, "http://127.0.0.1:12345/", timeout_s=0.5),
             timeout=1.0,
         )

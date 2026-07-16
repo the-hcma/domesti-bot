@@ -22,9 +22,7 @@ from app.ui_device_actions import flip_ui_device
 
 def test_consume_expected_device_change_false_when_unmarked() -> None:
     expected_device_changes.clear()
-    assert (
-        consume_expected_device_change(DeviceFamilyId.KASA, "lamp.local") is False
-    )
+    assert consume_expected_device_change(DeviceFamilyId.KASA, "lamp.local") is False
 
 
 def test_is_expected_device_change_false_when_unmarked() -> None:
@@ -87,10 +85,7 @@ def test_resolve_expected_device_change_window_s_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("DOMESTI_EXPECTED_DEVICE_CHANGE_WINDOW_S", raising=False)
-    assert (
-        resolve_expected_device_change_window_s()
-        == DEFAULT_EXPECTED_DEVICE_CHANGE_WINDOW_S
-    )
+    assert resolve_expected_device_change_window_s() == DEFAULT_EXPECTED_DEVICE_CHANGE_WINDOW_S
 
 
 def test_resolve_expected_device_change_window_s_from_env(
@@ -104,15 +99,9 @@ def test_resolve_expected_device_change_window_s_rejects_invalid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DOMESTI_EXPECTED_DEVICE_CHANGE_WINDOW_S", "nope")
-    assert (
-        resolve_expected_device_change_window_s()
-        == DEFAULT_EXPECTED_DEVICE_CHANGE_WINDOW_S
-    )
+    assert resolve_expected_device_change_window_s() == DEFAULT_EXPECTED_DEVICE_CHANGE_WINDOW_S
     monkeypatch.setenv("DOMESTI_EXPECTED_DEVICE_CHANGE_WINDOW_S", "0.5")
-    assert (
-        resolve_expected_device_change_window_s()
-        == DEFAULT_EXPECTED_DEVICE_CHANGE_WINDOW_S
-    )
+    assert resolve_expected_device_change_window_s() == DEFAULT_EXPECTED_DEVICE_CHANGE_WINDOW_S
 
 
 @pytest.mark.asyncio

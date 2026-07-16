@@ -234,9 +234,7 @@ class LocationMonitoringPolicy:
             self._exit_approach(state.user_id, state.geofence_id, reason="beyond_corridor")
             return
         interval_s = _effective_approach_request_interval_s(path)
-        throttle_anchor_at = (
-            state.last_request_at if state.last_request_at is not None else state.entered_at
-        )
+        throttle_anchor_at = state.last_request_at if state.last_request_at is not None else state.entered_at
         if (now - throttle_anchor_at) < interval_s:
             return
         context = LocationRequestContext(
@@ -410,9 +408,7 @@ def _enabled_edge_rules_for_user(user_id: str) -> list[RuleOut]:
     return [
         rule
         for rule in list_automation_rules()
-        if rule.enabled
-        and RuleTrigger.EDGE_TRUE in rule.triggers
-        and user_id in collect_rule_user_ids(rule)
+        if rule.enabled and RuleTrigger.EDGE_TRUE in rule.triggers and user_id in collect_rule_user_ids(rule)
     ]
 
 

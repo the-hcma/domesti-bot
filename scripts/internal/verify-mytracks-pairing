@@ -80,8 +80,7 @@ def _explain_webhook_failure(
         print(f"  Response: {detail[:500]}", file=sys.stderr)
     if status_code == 401:
         print(
-            "  Likely cause: X-Domesti-Api-Key does not match the relay secret stored on "
-            f"{domesti_base}.",
+            f"  Likely cause: X-Domesti-Api-Key does not match the relay secret stored on {domesti_base}.",
             file=sys.stderr,
         )
         print(
@@ -94,13 +93,11 @@ def _explain_webhook_failure(
     if status_code == 404:
         if "Unknown user_id" in detail:
             print(
-                f"  Likely cause: user {user_id!r} is not in the domesti-bot "
-                "roster on that host.",
+                f"  Likely cause: user {user_id!r} is not in the domesti-bot roster on that host.",
                 file=sys.stderr,
             )
             print(
-                "  Sync users from my-tracks, or pass --user-id for someone "
-                "already on the roster.",
+                "  Sync users from my-tracks, or pass --user-id for someone already on the roster.",
                 file=sys.stderr,
             )
             return
@@ -109,8 +106,7 @@ def _explain_webhook_failure(
             file=sys.stderr,
         )
         print(
-            "  Deploy a domesti-bot build with /v1/webhooks/location_update routes "
-            "(my-tracks pairing PR).",
+            "  Deploy a domesti-bot build with /v1/webhooks/location_update routes (my-tracks pairing PR).",
             file=sys.stderr,
         )
         return
@@ -148,8 +144,7 @@ def _parse_args() -> argparse.Namespace:
             {
                 "default": None,
                 "help": (
-                    f"Public domesti-bot HTTPS origin registered at pair time "
-                    f"(default: {_DEFAULT_DOMESTI_BASE_URL})"
+                    f"Public domesti-bot HTTPS origin registered at pair time (default: {_DEFAULT_DOMESTI_BASE_URL})"
                 ),
             },
         ),
@@ -157,9 +152,7 @@ def _parse_args() -> argparse.Namespace:
             ("--mytracks-domain",),
             {
                 "default": None,
-                "help": (
-                    f"My Tracks public HTTPS origin (default: {_DEFAULT_MYTRACKS_DOMAIN})"
-                ),
+                "help": (f"My Tracks public HTTPS origin (default: {_DEFAULT_MYTRACKS_DOMAIN})"),
             },
         ),
         (
@@ -173,20 +166,14 @@ def _parse_args() -> argparse.Namespace:
             ("--user-id",),
             {
                 "default": None,
-                "help": (
-                    f"Synthetic user id for webhook smoke test "
-                    f"(default: {_DEFAULT_SYNTHETIC_USER_ID})"
-                ),
+                "help": (f"Synthetic user id for webhook smoke test (default: {_DEFAULT_SYNTHETIC_USER_ID})"),
             },
         ),
         (
             ("--username",),
             {
                 "default": os.environ.get("MYTRACKS_ADMIN_USERNAME", "house_meister"),
-                "help": (
-                    "My Tracks admin username "
-                    "(default: house_meister or $MYTRACKS_ADMIN_USERNAME)"
-                ),
+                "help": ("My Tracks admin username (default: house_meister or $MYTRACKS_ADMIN_USERNAME)"),
             },
         ),
     ]

@@ -121,7 +121,8 @@ def _seed_db(
             lon=lon,
             accuracy_m=accuracy_m,
             connection_type=connection_type,
-            fix_at=fix_epoch, reported_at=reported_at,
+            fix_at=fix_epoch,
+            reported_at=reported_at,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -162,7 +163,8 @@ async def test_wifi_home_reconciles_after_mobile_leave_without_false_arrive(
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0,
+        reported_at=clock["now"] - 400.0,
         accuracy_m=20,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
@@ -191,7 +193,8 @@ async def test_wifi_home_reconciles_after_mobile_leave_without_false_arrive(
             lon=-73.88399,
             accuracy_m=4,
             connection_type="m",
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -208,7 +211,8 @@ async def test_wifi_home_reconciles_after_mobile_leave_without_false_arrive(
             lon=-73.888365,
             accuracy_m=300,
             connection_type="w",
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -233,7 +237,8 @@ async def test_wifi_home_reconciles_after_mobile_leave_without_false_arrive(
             lon=-73.88827,
             accuracy_m=5,
             connection_type="m",
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -259,7 +264,8 @@ async def test_wifi_far_from_home_does_not_reconcile(
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0,
+        reported_at=clock["now"] - 400.0,
         accuracy_m=20,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
@@ -287,7 +293,8 @@ async def test_wifi_far_from_home_does_not_reconcile(
             lon=-73.88399,
             accuracy_m=4,
             connection_type="m",
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -303,7 +310,8 @@ async def test_wifi_far_from_home_does_not_reconcile(
             lon=-73.9000,
             accuracy_m=300,
             connection_type="w",
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -358,7 +366,8 @@ async def test_wifi_home_seeds_dwell_inside_since_for_low_accuracy_wifi(
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0,
+        reported_at=clock["now"] - 400.0,
         accuracy_m=20,
     )
     evaluator = RuleEvaluator(
@@ -377,7 +386,8 @@ async def test_wifi_home_seeds_dwell_inside_since_for_low_accuracy_wifi(
             lon=-73.88399,
             accuracy_m=4,
             connection_type="m",
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -393,7 +403,8 @@ async def test_wifi_home_seeds_dwell_inside_since_for_low_accuracy_wifi(
             lon=-73.888365,
             accuracy_m=300,
             connection_type="w",
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -406,8 +417,7 @@ async def test_wifi_home_seeds_dwell_inside_since_for_low_accuracy_wifi(
     override_logs = [
         call
         for call in info_mock.call_args_list
-        if call.args
-        and "wifi home presence overrode low-accuracy location" in str(call.args[0])
+        if call.args and "wifi home presence overrode low-accuracy location" in str(call.args[0])
     ]
     assert override_logs
 
@@ -450,7 +460,8 @@ async def test_wifi_home_reconcile_runs_for_dwell_only_bundle(
         user_id="henrique",
         lat=41.19167,
         lon=-73.88399,
-        fix_at=clock["now"] - 120.0, reported_at=clock["now"] - 120.0,
+        fix_at=clock["now"] - 120.0,
+        reported_at=clock["now"] - 120.0,
         accuracy_m=4,
         connection_type="m",
     )
@@ -469,7 +480,8 @@ async def test_wifi_home_reconcile_runs_for_dwell_only_bundle(
             lon=-73.888365,
             accuracy_m=300,
             connection_type="w",
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),

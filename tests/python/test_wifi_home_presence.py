@@ -208,7 +208,8 @@ def test_effective_geofence_ids_includes_wifi_home() -> None:
         lon=-73.8882358,
         accuracy_m=97,
         connection_type="w",
-        fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
+        fix_at=1_700_000_000.0,
+        reported_at=1_700_000_000.0,
         source="test",
     )
     assert effective_geofence_ids_containing_location(
@@ -228,7 +229,8 @@ def test_history_row_geofence_inside_credits_wifi() -> None:
         lon=-73.8882358,
         accuracy_m=97,
         connection_type="w",
-        fix_at=1_700_000_000.0, reported_at=1_700_000_000.0,
+        fix_at=1_700_000_000.0,
+        reported_at=1_700_000_000.0,
         source="test",
     )
     assert (
@@ -254,7 +256,8 @@ def test_reconstruct_geofence_seed_credits_wifi_dwell_streak() -> None:
             lon=-73.8882358,
             accuracy_m=97,
             connection_type="w",
-            fix_at=inside_since_at, reported_at=inside_since_at,
+            fix_at=inside_since_at,
+            reported_at=inside_since_at,
             source="test",
         ),
         UserLocationRecord(
@@ -263,7 +266,8 @@ def test_reconstruct_geofence_seed_credits_wifi_dwell_streak() -> None:
             lon=-73.8882358,
             accuracy_m=97,
             connection_type="w",
-            fix_at=inside_since_at + 600.0, reported_at=inside_since_at + 600.0,
+            fix_at=inside_since_at + 600.0,
+            reported_at=inside_since_at + 600.0,
             source="test",
         ),
     ]

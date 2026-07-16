@@ -82,6 +82,7 @@ def clear_mytracks_pairing(path: Path) -> None:
     set_location_request_rate_limits(path, limits=None)
     set_remote_request_location_enabled(path, enabled=None)
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -99,11 +100,11 @@ def clear_mytracks_pairing(path: Path) -> None:
 def delete_mytracks_settings(path: Path) -> None:
     """Remove My Tracks settings."""
     clear_mytracks_pairing(path)
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is not None:
             session.delete(row)
-
 
     discovery_write(path, _write)
 
@@ -123,10 +124,7 @@ def load_location_request_rate_limits(path: Path) -> LocationRequestRateLimits |
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             return None
-        if (
-            row.location_request_user_cooldown_seconds is None
-            or row.location_request_device_cooldown_seconds is None
-        ):
+        if row.location_request_user_cooldown_seconds is None or row.location_request_device_cooldown_seconds is None:
             return None
         return LocationRequestRateLimits(
             device_cooldown_seconds=int(row.location_request_device_cooldown_seconds),
@@ -202,6 +200,7 @@ def record_mytracks_geofences_sync(path: Path, *, count: int) -> MyTracksConfigR
     """Persist geofence sync metadata and return the updated settings row."""
     _ = count
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -220,6 +219,7 @@ def record_mytracks_users_sync(path: Path, *, count: int) -> MyTracksConfigRecor
     """Persist user roster sync metadata and return the updated settings row."""
     _ = count
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -237,6 +237,7 @@ def record_mytracks_users_sync(path: Path, *, count: int) -> MyTracksConfigRecor
 def save_mytracks_config(path: Path, config: MyTracksConfigSave) -> MyTracksConfigRecord:
     """Upsert My Tracks domain and default admin username."""
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -305,6 +306,7 @@ def save_location_history_retention(
 def save_mytracks_pairing(path: Path, pairing: MyTracksPairingSave) -> MyTracksPairStatusRecord:
     """Persist successful pairing metadata."""
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -347,6 +349,7 @@ def save_mytracks_pairing(path: Path, pairing: MyTracksPairingSave) -> MyTracksP
 def set_last_pair_error(path: Path, error: str | None) -> None:
     """Record the latest pairing failure message."""
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -360,6 +363,7 @@ def set_last_pair_error(path: Path, error: str | None) -> None:
 def save_approach_monitoring_distance_m(path: Path, *, distance_m: int) -> int:
     """Persist geofence approach corridor distance in meters."""
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -380,6 +384,7 @@ def set_location_request_rate_limits(
 ) -> None:
     """Persist my-tracks location-request rate limits from admin config reads."""
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -391,10 +396,8 @@ def set_location_request_rate_limits(
         else:
             row.location_request_user_cooldown_seconds = limits.user_cooldown_seconds
             row.location_request_device_cooldown_seconds = limits.device_cooldown_seconds
-            row.location_request_user_cooldown_by_reason_json = (
-                serialize_user_cooldown_by_reason(
-                    limits.user_cooldown_seconds_by_reason,
-                )
+            row.location_request_user_cooldown_by_reason_json = serialize_user_cooldown_by_reason(
+                limits.user_cooldown_seconds_by_reason,
             )
         row.updated_at = now
 
@@ -404,6 +407,7 @@ def set_location_request_rate_limits(
 def set_location_updates_accepted(path: Path, *, accepted: bool) -> MyTracksPairStatusRecord:
     """Update the local emergency switch for live location-update ingest."""
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
@@ -421,6 +425,7 @@ def set_location_updates_accepted(path: Path, *, accepted: bool) -> MyTracksPair
 def set_remote_request_location_enabled(path: Path, *, enabled: bool | None) -> None:
     """Persist my-tracks remote request-location opt-in from admin config reads."""
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:

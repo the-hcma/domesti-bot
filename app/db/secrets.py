@@ -32,23 +32,23 @@ class SecretsDecryptError(ValueError):
 
 def delete_app_secret(path: Path, *, key: str) -> None:
     """Remove one secret row if present."""
+
     def _write(session: Session) -> None:
         row = session.get(AppSecret, key.strip())
         if row is not None:
             session.delete(row)
-
 
     discovery_write(path, _write)
 
 
 def delete_kasa_credentials_from_db(path: Path) -> None:
     """Remove encrypted Kasa account username and password rows atomically."""
+
     def _write(session: Session) -> None:
         for key in (_KASA_PASSWORD_KEY, _KASA_USERNAME_KEY):
             row = session.get(AppSecret, key)
             if row is not None:
                 session.delete(row)
-
 
     discovery_write(path, _write)
 
@@ -97,9 +97,7 @@ def load_vizio_auth_hosts_from_db(path: Path) -> list[str]:
         return []
     prefix = "vizio_auth:"
     with discovery_session(path) as session:
-        rows = session.scalars(
-            select(AppSecret.key).where(AppSecret.key.like(f"{prefix}%"))
-        )
+        rows = session.scalars(select(AppSecret.key).where(AppSecret.key.like(f"{prefix}%")))
         hosts = [str(key)[len(prefix) :] for key in rows if str(key).startswith(prefix)]
     return sorted(set(h.strip() for h in hosts if h.strip()))
 
@@ -146,6 +144,7 @@ def save_kasa_credentials_to_db(
         )
     fernet = _require_fernet()
     now = time.time()
+
     def _write(session: Session) -> None:
         for key, value in ((_KASA_PASSWORD_KEY, pw), (_KASA_USERNAME_KEY, un)):
             ciphertext = fernet.encrypt(value.encode("utf-8"))
@@ -161,7 +160,6 @@ def save_kasa_credentials_to_db(
             else:
                 row.ciphertext = ciphertext
                 row.updated_at = now
-
 
     discovery_write(path, _write)
 
@@ -300,9 +298,7 @@ def _load_app_secret_plaintext(path: Path, key: str) -> str | None:
         try:
             plain = fernet.decrypt(row.ciphertext)
         except InvalidToken as exc:
-            raise SecretsDecryptError(
-                f"Expected valid Fernet ciphertext for {key}, got undecryptable data"
-            ) from exc
+            raise SecretsDecryptError(f"Expected valid Fernet ciphertext for {key}, got undecryptable data") from exc
         text = plain.decode("utf-8")
         return text if text else None
 
@@ -322,6 +318,7 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
     fernet = _require_fernet()
     ciphertext = fernet.encrypt(value.encode("utf-8"))
     now = time.time()
+
     def _write(session: Session) -> None:
         row = session.get(AppSecret, key)
         if row is None:
@@ -335,7 +332,6 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
         else:
             row.ciphertext = ciphertext
             row.updated_at = now
-
 
     discovery_write(path, _write)
 

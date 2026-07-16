@@ -352,12 +352,15 @@ async def test_rediscover_keeps_switches_visible_during_udp_sweep(tmp_path) -> N
     mock_dev.disconnect = AsyncMock()
 
     mgr = KasaDeviceManager(discovery_cache_path=db)
-    with patch(
-        "app.kasa_device_manager._connect_from_saved_config",
-        AsyncMock(return_value=mock_dev),
-    ), patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(return_value={}),
+    with (
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(return_value=mock_dev),
+        ),
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={}),
+        ),
     ):
         await mgr.fetch()
 
@@ -405,23 +408,29 @@ async def test_rediscover_clears_map_when_udp_and_cache_both_fail(tmp_path) -> N
     mock_dev.disconnect = AsyncMock()
 
     mgr = KasaDeviceManager(discovery_cache_path=db)
-    with patch(
-        "app.kasa_device_manager._connect_from_saved_config",
-        AsyncMock(return_value=mock_dev),
-    ), patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(return_value={}),
+    with (
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(return_value=mock_dev),
+        ),
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={}),
+        ),
     ):
         await mgr.fetch()
 
     assert len(mgr.switches) == 1
 
-    with patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(side_effect=RuntimeError("udp down")),
-    ), patch(
-        "app.kasa_device_manager._connect_from_saved_config",
-        AsyncMock(side_effect=RuntimeError("cache down")),
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=RuntimeError("udp down")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(side_effect=RuntimeError("cache down")),
+        ),
     ):
         with pytest.raises(RuntimeError, match="udp down"):
             await mgr.rediscover()

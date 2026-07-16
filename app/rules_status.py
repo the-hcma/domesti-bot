@@ -82,11 +82,7 @@ def build_rules_validation(
     )
     issues_by_rule = validate_rules(list_automation_rules(), validation_ctx)
     return RulesValidationOut(
-        rules=[
-            RuleValidationOut(id=rule_id, issues=issues)
-            for rule_id, issues in issues_by_rule.items()
-            if issues
-        ],
+        rules=[RuleValidationOut(id=rule_id, issues=issues) for rule_id, issues in issues_by_rule.items() if issues],
     )
 
 
@@ -115,23 +111,11 @@ def build_rules_status(
     roster_user_id_lookup = build_roster_user_id_lookup(
         [row.user_id for row in users],
     )
-    inside_since = (
-        evaluator.geofence_inside_since_snapshot()
-        if evaluator is not None
-        else {}
-    )
-    outside_since = (
-        evaluator.geofence_outside_since_snapshot()
-        if evaluator is not None
-        else {}
-    )
+    inside_since = evaluator.geofence_inside_since_snapshot() if evaluator is not None else {}
+    outside_since = evaluator.geofence_outside_since_snapshot() if evaluator is not None else {}
     eval_ctx = RuleEvaluationContext(
-        device_bool_since=(
-            evaluator.device_bool_since_snapshot() if evaluator is not None else {}
-        ),
-        device_bool_value=(
-            evaluator.device_bool_value_snapshot() if evaluator is not None else {}
-        ),
+        device_bool_since=(evaluator.device_bool_since_snapshot() if evaluator is not None else {}),
+        device_bool_value=(evaluator.device_bool_value_snapshot() if evaluator is not None else {}),
         device_state=device_state,
         geofence_inside_since=inside_since,
         geofence_outside_since=outside_since,
@@ -164,10 +148,7 @@ def build_rules_status(
         next_evaluate_at: str | None = None
         scheduled_detail: str | None = None
         if (
-            (
-                RuleTrigger.SCHEDULED in rule.triggers
-                or uses_astronomical_eligibility_wake(rule)
-            )
+            (RuleTrigger.SCHEDULED in rule.triggers or uses_astronomical_eligibility_wake(rule))
             and rule.enabled
             and evaluator is not None
         ):
@@ -183,13 +164,8 @@ def build_rules_status(
                 tz,
             )
         ):
-            scheduled_detail = (
-                "Already fired today (next eligible after local midnight)"
-            )
-        elif (
-            uses_astronomical_repeat_schedule(rule)
-            and evaluator is not None
-        ):
+            scheduled_detail = "Already fired today (next eligible after local midnight)"
+        elif uses_astronomical_repeat_schedule(rule) and evaluator is not None:
             effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)
             anchor = extract_astronomical_anchor(rule)
             if effective_cron is not None and anchor is not None:
@@ -198,15 +174,9 @@ def build_rules_status(
                 )
                 if anchor.condition_type == "after_sunset":
                     window_label = "local midnight"
-                    scheduled_detail = (
-                        f"Evaluates every {effective_cron} from {anchor_label} until "
-                        f"{window_label}"
-                    )
+                    scheduled_detail = f"Evaluates every {effective_cron} from {anchor_label} until {window_label}"
                 else:
-                    scheduled_detail = (
-                        f"Evaluates every {effective_cron} from local midnight until "
-                        f"{anchor_label}"
-                    )
+                    scheduled_detail = f"Evaluates every {effective_cron} from local midnight until {anchor_label}"
         elif uses_astronomical_edge_window_open_schedule(rule) and evaluator is not None:
             anchor = extract_astronomical_anchor(rule)
             if anchor is not None:
@@ -225,20 +195,12 @@ def build_rules_status(
                     f"{_format_astronomical_anchor_label(anchor_dt)}; "
                     "also on dwell threshold and watched device changes"
                 )
-        elif (
-            RuleTrigger.SCHEDULED in rule.triggers
-            and uses_astronomical_schedule(rule)
-            and evaluator is not None
-        ):
+        elif RuleTrigger.SCHEDULED in rule.triggers and uses_astronomical_schedule(rule) and evaluator is not None:
             effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)
             if effective_cron is not None:
-                scheduled_detail = (
-                    f"Today's astronomical schedule: {effective_cron} (local)"
-                )
+                scheduled_detail = f"Today's astronomical schedule: {effective_cron} (local)"
         elif RuleTrigger.DWELL_SATISFIED in rule.triggers:
-            scheduled_detail = (
-                "Evaluates when a referenced user/geofence dwell threshold is satisfied"
-            )
+            scheduled_detail = "Evaluates when a referenced user/geofence dwell threshold is satisfied"
         elif RuleTrigger.DEVICE_STATE in rule.triggers:
             try:
                 poll_interval_s = poll_interval_from_env()
@@ -246,13 +208,11 @@ def build_rules_status(
                 poll_interval_s = None
             if poll_interval_s is not None:
                 scheduled_detail = (
-                    "Evaluates when a watched device changes state "
-                    f"(background state poll every {poll_interval_s:g}s)"
+                    f"Evaluates when a watched device changes state (background state poll every {poll_interval_s:g}s)"
                 )
             else:
                 scheduled_detail = (
-                    "Evaluates when a watched device changes state "
-                    "(background state poll interval misconfigured)"
+                    "Evaluates when a watched device changes state (background state poll interval misconfigured)"
                 )
         rule_rows.append(
             RuleStatusSummaryOut(
@@ -263,9 +223,7 @@ def build_rules_status(
                 label=rule.label,
                 last_error=fire_state.last_error,
                 last_fired_at=(
-                    _epoch_to_iso_z(fire_state.last_fired_at)
-                    if fire_state.last_fired_at is not None
-                    else None
+                    _epoch_to_iso_z(fire_state.last_fired_at) if fire_state.last_fired_at is not None else None
                 ),
                 next_evaluate_at=next_evaluate_at,
                 reference_issues=validate_rule(rule, validation_ctx),

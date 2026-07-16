@@ -104,10 +104,12 @@ _LANDING_PAGE_PATH = _STATIC_DIR / "index.html"
 # This complements :class:`app.logging_config.HealthCheckFilter`,
 # which post-hoc demotes ``/health`` lines all the way to TRACE as
 # well. All other successful requests log at DEBUG (below INFO).
-_QUIET_ACCESS_LOG_PATHS: frozenset[str] = frozenset({
-    # The web UI polls this on a 5s cadence (see ``main.ts``).
-    "/v1/ui/state",
-})
+_QUIET_ACCESS_LOG_PATHS: frozenset[str] = frozenset(
+    {
+        # The web UI polls this on a 5s cadence (see ``main.ts``).
+        "/v1/ui/state",
+    }
+)
 
 # Static assets (``/static/…``) are pure transport traffic — missing
 # icons and other browser fetches should not surface at INFO.
@@ -242,9 +244,7 @@ def create_app(args: Any) -> FastAPI:
             started = time.monotonic()
             _LOGGER.info("[startup] device discovery beginning in background")
             try:
-                state = await bootstrap_device_managers(
-                    args, theme=theme, log_progress=True
-                )
+                state = await bootstrap_device_managers(args, theme=theme, log_progress=True)
             except asyncio.CancelledError:
                 _LOGGER.info("[startup] device discovery cancelled before completing")
                 raise
@@ -374,9 +374,7 @@ def create_app(args: Any) -> FastAPI:
         try:
             html = _LANDING_PAGE_PATH.read_text(encoding="utf-8")
         except FileNotFoundError:
-            _LOGGER.exception(
-                "[index] landing page missing at %s", _LANDING_PAGE_PATH
-            )
+            _LOGGER.exception("[index] landing page missing at %s", _LANDING_PAGE_PATH)
             raise HTTPException(
                 status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                 detail=f"Landing page missing at {_LANDING_PAGE_PATH}",
@@ -436,9 +434,7 @@ def create_app(args: Any) -> FastAPI:
             switch=_switch_aliases(state.kasa_mgr, state.androidtv_mgr),
             sonos=_media_playback_aliases(state.sonos_mgr),
             tailwind=_tailwind_door_aliases(state.tailwind_mgr),
-            all_device_labels=_all_cli_device_labels(
-                state.kasa_mgr, state.tailwind_mgr, state.androidtv_mgr
-            ),
+            all_device_labels=_all_cli_device_labels(state.kasa_mgr, state.tailwind_mgr, state.androidtv_mgr),
         )
 
     @app.post("/v1/execute-line", dependencies=[Depends(_verify_api_key)])
@@ -468,9 +464,7 @@ def create_app(args: Any) -> FastAPI:
         # Global "turn off / close everything" — kasa devices get
         # ``turn_off``, tailwind doors get ``close``. ``exclude_from_global=True``
         # rows are honored (they appear in ``skipped``).
-        affected, skipped = await bulk_off_global_apply(
-            state, cache_path=state.cache_path
-        )
+        affected, skipped = await bulk_off_global_apply(state, cache_path=state.cache_path)
         log_ui_action(
             request,
             action=UiActionType.BULK_OFF,
@@ -478,14 +472,8 @@ def create_app(args: Any) -> FastAPI:
             detail=f"affected={len(affected)} skipped={len(skipped)}",
         )
         return UIGlobalBulkActionOut(
-            affected=[
-                UIGlobalBulkActionItem(family_id=fam, device_id=dev)
-                for fam, dev in affected
-            ],
-            skipped=[
-                UIGlobalBulkActionItem(family_id=fam, device_id=dev)
-                for fam, dev in skipped
-            ],
+            affected=[UIGlobalBulkActionItem(family_id=fam, device_id=dev) for fam, dev in affected],
+            skipped=[UIGlobalBulkActionItem(family_id=fam, device_id=dev) for fam, dev in skipped],
         )
 
     @app.post(
@@ -546,9 +534,7 @@ def create_app(args: Any) -> FastAPI:
         if kd is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"Unknown {DeviceFamilyId.KASA.display_name()} device: {device_id}"
-                ),
+                detail=(f"Unknown {DeviceFamilyId.KASA.display_name()} device: {device_id}"),
             )
         log_ui_action(
             request,
@@ -564,9 +550,7 @@ def create_app(args: Any) -> FastAPI:
         else:
             await kd.turn_off()
         return UIDeviceActionOut(
-            device=build_kasa_device_view(
-                state.kasa_mgr, host=device_id, cache_path=state.cache_path
-            )
+            device=build_kasa_device_view(state.kasa_mgr, host=device_id, cache_path=state.cache_path)
         )
 
     @app.put(
@@ -596,39 +580,28 @@ def create_app(args: Any) -> FastAPI:
         if family_id == "kasa" and find_kasa_by_host(state.kasa_mgr, device_id) is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"Unknown {DeviceFamilyId.KASA.display_name()} device: {device_id}"
-                ),
+                detail=(f"Unknown {DeviceFamilyId.KASA.display_name()} device: {device_id}"),
             )
         if family_id == "sonos":
             son = state.sonos_mgr
             if son is None or find_sonos_by_identifier(son, device_id) is None:
                 raise HTTPException(
                     status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"Unknown {DeviceFamilyId.SONOS.display_name()} device: "
-                        f"{device_id}"
-                    ),
+                    detail=(f"Unknown {DeviceFamilyId.SONOS.display_name()} device: {device_id}"),
                 )
         if family_id == "tailwind":
             tw = state.tailwind_mgr
             if tw is None or all(d.identifier != device_id for d in tw.doors):
                 raise HTTPException(
                     status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: "
-                        f"{device_id}"
-                    ),
+                    detail=(f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: {device_id}"),
                 )
         if family_id == "vizio":
             vz = state.vizio_mgr
             if vz is None or find_vizio_by_id(vz, device_id) is None:
                 raise HTTPException(
                     status_code=HTTPStatus.NOT_FOUND,
-                    detail=(
-                        f"Unknown {DeviceFamilyId.VIZIO.display_name()} device: "
-                        f"{device_id}"
-                    ),
+                    detail=(f"Unknown {DeviceFamilyId.VIZIO.display_name()} device: {device_id}"),
                 )
         device_discovery_store.upsert_ui_preference(
             state.cache_path,
@@ -679,19 +652,13 @@ def create_app(args: Any) -> FastAPI:
         if state.sonos_mgr is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"{DeviceFamilyId.SONOS.display_name()} manager is not configured "
-                    "on this server"
-                ),
+                detail=(f"{DeviceFamilyId.SONOS.display_name()} manager is not configured on this server"),
             )
         sp = find_sonos_by_identifier(state.sonos_mgr, device_id)
         if sp is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"Unknown {DeviceFamilyId.SONOS.display_name()} device: "
-                    f"{device_id}"
-                ),
+                detail=(f"Unknown {DeviceFamilyId.SONOS.display_name()} device: {device_id}"),
             )
         log_ui_action(
             request,
@@ -720,9 +687,7 @@ def create_app(args: Any) -> FastAPI:
             # ``resume``, so the refreshed view below mirrors reality.
             # 409 is the right status here — the request was
             # well-formed but the resource state forbids the action.
-            raise HTTPException(
-                status_code=HTTPStatus.CONFLICT, detail=str(exc)
-            ) from exc
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
         return UIDeviceActionOut(
             device=build_sonos_device_view(
                 state.sonos_mgr,
@@ -764,19 +729,13 @@ def create_app(args: Any) -> FastAPI:
         if state.tailwind_mgr is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"{DeviceFamilyId.TAILWIND.display_name()} manager is not "
-                    "configured on this server"
-                ),
+                detail=(f"{DeviceFamilyId.TAILWIND.display_name()} manager is not configured on this server"),
             )
         gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
         if gd is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: "
-                    f"{device_id}"
-                ),
+                detail=(f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: {device_id}"),
             )
         log_ui_action(
             request,
@@ -807,19 +766,13 @@ def create_app(args: Any) -> FastAPI:
         if state.tailwind_mgr is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"{DeviceFamilyId.TAILWIND.display_name()} manager is not "
-                    "configured on this server"
-                ),
+                detail=(f"{DeviceFamilyId.TAILWIND.display_name()} manager is not configured on this server"),
             )
         gd = find_tailwind_by_identifier(state.tailwind_mgr, device_id)
         if gd is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: "
-                    f"{device_id}"
-                ),
+                detail=(f"Unknown {DeviceFamilyId.TAILWIND.display_name()} device: {device_id}"),
             )
         log_ui_action(
             request,
@@ -868,19 +821,13 @@ def create_app(args: Any) -> FastAPI:
         if state.vizio_mgr is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"{DeviceFamilyId.VIZIO.display_name()} manager is not "
-                    "configured on this server"
-                ),
+                detail=(f"{DeviceFamilyId.VIZIO.display_name()} manager is not configured on this server"),
             )
         tv = find_vizio_by_id(state.vizio_mgr, device_id)
         if tv is None:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail=(
-                    f"Unknown {DeviceFamilyId.VIZIO.display_name()} device: "
-                    f"{device_id}"
-                ),
+                detail=(f"Unknown {DeviceFamilyId.VIZIO.display_name()} device: {device_id}"),
             )
         log_ui_action(
             request,

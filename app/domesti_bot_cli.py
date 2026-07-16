@@ -416,9 +416,7 @@ def _kasa_switch_aliases(mgr: KasaDeviceManager) -> list[str]:
         return []
 
 
-def _maybe_print_kasa_auth_notice(
-    kasa_mgr: KasaDeviceManager, *, theme: _Theme
-) -> None:
+def _maybe_print_kasa_auth_notice(kasa_mgr: KasaDeviceManager, *, theme: _Theme) -> None:
     """One-shot suggestion when KLAP devices were skipped over auth.
 
     Fires after the ``Ready`` banner when (a) at least one device was
@@ -442,9 +440,7 @@ def _maybe_print_kasa_auth_notice(
         f"  {theme.dim('Type')} {theme.cmd('kasa-creds')} "
         f"{theme.dim('to enter your Kasa/Tapo email/password (hidden) and rediscover,')}"
     )
-    print(
-        f"  {theme.dim('or open Settings → Kasa, or set KASA_USERNAME + KASA_PASSWORD before restart.')}"
-    )
+    print(f"  {theme.dim('or open Settings → Kasa, or set KASA_USERNAME + KASA_PASSWORD before restart.')}")
 
 
 async def _repl_cmd_kasa_creds(
@@ -500,11 +496,7 @@ async def _repl_cmd_kasa_creds(
             print(theme.err(f"kasa-creds: {ex}"), file=sys.stderr)
             return
     else:
-        print(
-            theme.warn(
-                "kasa-creds: no discovery cache — credentials are in-memory only"
-            )
-        )
+        print(theme.warn("kasa-creds: no discovery cache — credentials are in-memory only"))
     print(theme.dim("kasa-creds: rediscovering Kasa devices…"))
     try:
         await kasa_mgr.rediscover()
@@ -514,12 +506,7 @@ async def _repl_cmd_kasa_creds(
     n_switches = len(_kasa_switch_aliases(kasa_mgr))
     skipped = kasa_mgr.skipped_auth_hosts
     if skipped:
-        print(
-            theme.warn(
-                f"kasa-creds: {len(skipped)} device(s) still failed auth: "
-                f"{', '.join(skipped)}"
-            )
-        )
+        print(theme.warn(f"kasa-creds: {len(skipped)} device(s) still failed auth: {', '.join(skipped)}"))
         print(f"  {theme.dim('Likely a wrong account email/password.')}")
     print(theme.ok(f"Kasa: ready ({n_switches} switch(es))"))
 
@@ -532,16 +519,9 @@ async def _repl_cmd_setup_secrets(
     """Create or update ``domesti-bot.config.json`` (driven by ``prompt_fn`` for tests)."""
 
     path = secrets_json_path()
-    print(
-        f"{theme.header('Secrets file')} "
-        f"{theme.dim(f'({path})')}"
-    )
+    print(f"{theme.header('Secrets file')} {theme.dim(f'({path})')}")
     if (os.environ.get("DOMESTI_BOT_SECRETS_KEY") or "").strip():
-        print(
-            theme.warn(
-                "DOMESTI_BOT_SECRETS_KEY is set in the environment and overrides the JSON file."
-            )
-        )
+        print(theme.warn("DOMESTI_BOT_SECRETS_KEY is set in the environment and overrides the JSON file."))
     if path.is_file():
         try:
             overwrite = await prompt_fn(
@@ -826,9 +806,7 @@ def _switch_aliases(
     return sorted(labels)
 
 
-def _resolve_device_name(
-    raw: str, candidates: list[str]
-) -> tuple[str | None, list[str]]:
+def _resolve_device_name(raw: str, candidates: list[str]) -> tuple[str | None, list[str]]:
     """Resolve user input to a canonical id.
 
     Returns ``(canonical, [])`` on success, or ``(None, [])`` if nothing matched,
@@ -857,10 +835,7 @@ def _resolve_device_name(
 def _repl_prompt_message(theme: _Theme) -> HTML | str:
     if not theme._enabled:
         return "device_manager> "
-    return HTML(
-        '<style fg="ansicyan"><b>device_manager</b></style>'
-        '<style fg="ansibrightblack"> &gt; </style>'
-    )
+    return HTML('<style fg="ansicyan"><b>device_manager</b></style><style fg="ansibrightblack"> &gt; </style>')
 
 
 def _report_resolve_failure(theme: _Theme, kind: str, arg: str, ambiguous: list[str]) -> None:
@@ -1065,8 +1040,7 @@ async def _repl_cmd_discover_androidtv(
     if not hits:
         print(
             theme.dim(
-                "  (no Cast devices found — same LAN/VLAN as this host? "
-                "Try ANDROIDTV_HOSTS / --androidtv-host hints.)"
+                "  (no Cast devices found — same LAN/VLAN as this host? Try ANDROIDTV_HOSTS / --androidtv-host hints.)"
             )
         )
         return
@@ -1159,8 +1133,7 @@ async def _repl_cmd_show_devices(
     if androidtv_mgr is None:
         print(
             theme.dim(
-                "  (skipped — use --no-androidtv; otherwise ensure LAN Cast discovery "
-                "or set ANDROIDTV_HOSTS / cache.)"
+                "  (skipped — use --no-androidtv; otherwise ensure LAN Cast discovery or set ANDROIDTV_HOSTS / cache.)"
             )
         )
     else:
@@ -1170,11 +1143,7 @@ async def _repl_cmd_show_devices(
                 key=lambda d: _lex_show_devices_key(d.preferred_label, d.identifier),
             )
             if not devices:
-                print(
-                    theme.dim(
-                        "  (none connected — try discover-androidtv or explicit hosts.)"
-                    )
-                )
+                print(theme.dim("  (none connected — try discover-androidtv or explicit hosts.)"))
             for d in devices:
                 if d.preferred_label != d.identifier:
                     print(
@@ -1183,10 +1152,7 @@ async def _repl_cmd_show_devices(
                         f"{theme.meta(']')} {theme.state('(' + d.power_state + ')')}"
                     )
                 else:
-                    print(
-                        f"  {theme.device(repr(d.identifier))}  "
-                        f"{theme.state('(' + d.power_state + ')')}"
-                    )
+                    print(f"  {theme.device(repr(d.identifier))}  {theme.state('(' + d.power_state + ')')}")
         except NotInitializedError:
             print(theme.dim("  (not available)"))
     print(theme.header("Kasa switches:"))
@@ -1205,19 +1171,12 @@ async def _repl_cmd_show_devices(
                     f"{theme.meta(']')} {theme.state('(' + sw.power_state + ')')}"
                 )
             else:
-                print(
-                    f"  {theme.device(repr(sw.identifier))}  "
-                    f"{theme.state('(' + sw.power_state + ')')}"
-                )
+                print(f"  {theme.device(repr(sw.identifier))}  {theme.state('(' + sw.power_state + ')')}")
     except NotInitializedError:
         print(theme.dim("  (not available)"))
     print(theme.header("Sonos zones:"))
     if sonos_mgr is None:
-        print(
-            theme.dim(
-                "  (not loaded — omit --no-sonos or check LAN discovery.)"
-            )
-        )
+        print(theme.dim("  (not loaded — omit --no-sonos or check LAN discovery.)"))
     else:
         try:
             players = sorted(
@@ -1227,12 +1186,7 @@ async def _repl_cmd_show_devices(
             if not players:
                 print(theme.dim("  (none discovered)"))
             else:
-                playbacks = await asyncio.gather(
-                    *(
-                        asyncio.to_thread(p.transport_state_summary)
-                        for p in players
-                    )
-                )
+                playbacks = await asyncio.gather(*(asyncio.to_thread(p.transport_state_summary) for p in players))
                 for p, playback in zip(players, playbacks):
                     print(
                         f"  {theme.device(repr(p.preferred_label))}  "
@@ -1275,10 +1229,7 @@ async def _repl_cmd_show_devices(
     print(theme.header("Vizio TVs:"))
     if vizio_mgr is None:
         print(
-            theme.dim(
-                "  (skipped — pair via settings, set VIZIO_HOSTS / --vizio-host, "
-                "or configure VIZIO_AUTH_TOKEN.)"
-            )
+            theme.dim("  (skipped — pair via settings, set VIZIO_HOSTS / --vizio-host, or configure VIZIO_AUTH_TOKEN.)")
         )
     else:
         try:
@@ -1287,11 +1238,7 @@ async def _repl_cmd_show_devices(
                 key=lambda tv: _lex_show_devices_key(tv.preferred_label, tv.identifier),
             )
             if not tvs:
-                print(
-                    theme.dim(
-                        "  (none — pair while the TV is on, or turn on a cached TV via the UI/REPL.)"
-                    )
-                )
+                print(theme.dim("  (none — pair while the TV is on, or turn on a cached TV via the UI/REPL.)"))
             for tv in tvs:
                 host_meta = tv.endpoint.host
                 if tv.endpoint.port != 7345:
@@ -1303,10 +1250,7 @@ async def _repl_cmd_show_devices(
                         f"{theme.meta(']')} {theme.state('(' + tv.ui_power_state() + ')')}"
                     )
                 else:
-                    print(
-                        f"  {theme.device(repr(tv.identifier))}  "
-                        f"{theme.state('(' + tv.ui_power_state() + ')')}"
-                    )
+                    print(f"  {theme.device(repr(tv.identifier))}  {theme.state('(' + tv.ui_power_state() + ')')}")
         except NotInitializedError:
             print(theme.dim("  (not available)"))
 
@@ -1321,9 +1265,7 @@ async def _repl_cmd_sonos_pause_resume(
     triples_pb = _collect_media_triples(sonos_mgr)
     if not triples_pb:
         print(
-            theme.err(
-                "No Sonos zones loaded (omit --no-sonos or check LAN discovery)."
-            ),
+            theme.err("No Sonos zones loaded (omit --no-sonos or check LAN discovery)."),
             file=sys.stderr,
         )
         return
@@ -1360,9 +1302,7 @@ async def dispatch_repl_action(
     if cmd == "set-display-name":
         if cache_path is None:
             print(
-                theme.err(
-                    "Persistence disabled; omit --no-discovery-cache to save display names."
-                ),
+                theme.err("Persistence disabled; omit --no-discovery-cache to save display names."),
                 file=sys.stderr,
             )
             return
@@ -1376,9 +1316,7 @@ async def dispatch_repl_action(
             )
             return
         (backend, api_lookup_id), disp_name = got
-        ck = _sqlite_canonical_key(
-            backend, api_lookup_id, kasa_mgr, tailwind_mgr, androidtv_mgr
-        )
+        ck = _sqlite_canonical_key(backend, api_lookup_id, kasa_mgr, tailwind_mgr, androidtv_mgr)
         if ck is None:
             print(theme.err("Could not resolve device for persistence."), file=sys.stderr)
             return
@@ -1419,9 +1357,7 @@ async def dispatch_repl_action(
     if cmd == "clear-display-name":
         if cache_path is None:
             print(
-                theme.err(
-                    "Persistence disabled; omit --no-discovery-cache."
-                ),
+                theme.err("Persistence disabled; omit --no-discovery-cache."),
                 file=sys.stderr,
             )
             return
@@ -1437,15 +1373,11 @@ async def dispatch_repl_action(
             _report_resolve_failure(theme, "device", arg.strip(), amb)
             return
         backend, _api = meta
-        ck = _sqlite_canonical_key(
-            backend, api_lookup_id, kasa_mgr, tailwind_mgr, androidtv_mgr
-        )
+        ck = _sqlite_canonical_key(backend, api_lookup_id, kasa_mgr, tailwind_mgr, androidtv_mgr)
         if ck is None:
             print(theme.err("Could not resolve device."), file=sys.stderr)
             return
-        device_discovery_store.delete_display_name(
-            cache_path, backend=backend, canonical_key=ck
-        )
+        device_discovery_store.delete_display_name(cache_path, backend=backend, canonical_key=ck)
         try:
             if backend == "kasa":
                 kd = kasa_mgr.get_device_by_alias(api_lookup_id)
@@ -1464,10 +1396,7 @@ async def dispatch_repl_action(
                     androidtv_mgr.rebuild_lookup_after_display_change()
         except (NotInitializedError, ValueError):
             pass
-        print(
-            f"{theme.dim('Cleared display name for')} "
-            f"{theme.device(repr(ck))} {theme.dim('(' + backend + ')')}"
-        )
+        print(f"{theme.dim('Cleared display name for')} {theme.device(repr(ck))} {theme.dim('(' + backend + ')')}")
         return
 
     if cmd == "show-devices":
@@ -1593,9 +1522,7 @@ async def dispatch_repl_action(
             try:
                 await tailwind_mgr.fetch()
                 if cache_path is not None and tailwind_mgr.host:
-                    device_discovery_store.save_tailwind_host(
-                        cache_path, tailwind_mgr.host
-                    )
+                    device_discovery_store.save_tailwind_host(cache_path, tailwind_mgr.host)
                 return {
                     "slug": slug,
                     "skipped": False,
@@ -1656,9 +1583,7 @@ async def dispatch_repl_action(
         )
         ref_by = {b["slug"]: b for b in ref_bundles}
         for slug in _FAMILY_BOOT_SLUGS:
-            _print_family_parallel_line(
-                theme, slug, ref_by[slug], ok_verb="reconnected"
-            )
+            _print_family_parallel_line(theme, slug, ref_by[slug], ok_verb="reconnected")
         nk = len(_kasa_switch_aliases(kasa_mgr))
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
@@ -1672,6 +1597,7 @@ async def dispatch_repl_action(
         return
 
     if cmd == "kasa-creds":
+
         async def _toolkit_prompt(message: str, is_password: bool) -> str:
             # A fresh, completion-less PromptSession keeps the cred
             # input visually distinct from the regular REPL line — no
@@ -1688,6 +1614,7 @@ async def dispatch_repl_action(
         return
 
     if cmd == "setup-secrets":
+
         async def _secrets_prompt(message: str, is_password: bool) -> str:
             session = PromptSession()
             return await session.prompt_async(message, is_password=is_password)
@@ -1696,6 +1623,7 @@ async def dispatch_repl_action(
         return
 
     if cmd == "refresh-discovery":
+
         async def rd_androidtv() -> dict[str, Any]:
             slug = "androidtv"
             if androidtv_mgr is None:
@@ -1794,9 +1722,7 @@ async def dispatch_repl_action(
             try:
                 await tailwind_mgr.rediscover()
                 if cache_path is not None and tailwind_mgr.host:
-                    device_discovery_store.save_tailwind_host(
-                        cache_path, tailwind_mgr.host
-                    )
+                    device_discovery_store.save_tailwind_host(cache_path, tailwind_mgr.host)
                 return {
                     "slug": slug,
                     "skipped": False,
@@ -1857,9 +1783,7 @@ async def dispatch_repl_action(
         )
         rd_by = {b["slug"]: b for b in rd_bundles}
         for slug in _FAMILY_BOOT_SLUGS:
-            _print_family_parallel_line(
-                theme, slug, rd_by[slug], ok_verb="rediscovered"
-            )
+            _print_family_parallel_line(theme, slug, rd_by[slug], ok_verb="rediscovered")
         nk = len(_kasa_switch_aliases(kasa_mgr))
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
@@ -1904,10 +1828,7 @@ async def dispatch_repl_action(
                 _report_resolve_failure(theme, "Tailwind door", arg, amb)
                 return
             await tailwind_mgr.open(key)
-            print(
-                f"{theme.device(repr(key))} {theme.dim('->')} "
-                f"{theme.ok('open')} {theme.dim('(command sent)')}"
-            )
+            print(f"{theme.device(repr(key))} {theme.dim('->')} {theme.ok('open')} {theme.dim('(command sent)')}")
         elif cmd == "close-door":
             if tailwind_mgr is None:
                 print(theme.err("Tailwind not configured."), file=sys.stderr)
@@ -1917,10 +1838,7 @@ async def dispatch_repl_action(
                 _report_resolve_failure(theme, "Tailwind door", arg, amb)
                 return
             await tailwind_mgr.close(key)
-            print(
-                f"{theme.device(repr(key))} {theme.dim('->')} "
-                f"{theme.meta('close')} {theme.dim('(command sent)')}"
-            )
+            print(f"{theme.device(repr(key))} {theme.dim('->')} {theme.meta('close')} {theme.dim('(command sent)')}")
         elif cmd == "is-open":
             if tailwind_mgr is None:
                 print(theme.err("Tailwind not configured."), file=sys.stderr)
@@ -1932,9 +1850,7 @@ async def dispatch_repl_action(
             open_ = await tailwind_mgr.is_open(key)
             label = "open" if open_ else "closed"
             st_fn = theme.ok if open_ else theme.meta
-            print(
-                f"{theme.device(repr(key))} {theme.dim('->')} {st_fn(label)}"
-            )
+            print(f"{theme.device(repr(key))} {theme.dim('->')} {st_fn(label)}")
         elif cmd == "pause":
             await _repl_cmd_sonos_pause_resume(
                 cmd,
@@ -1951,9 +1867,7 @@ async def dispatch_repl_action(
             )
     except NotInitializedError:
         print(
-            theme.err(
-                "That backend is not initialized (discovery may have failed)."
-            ),
+            theme.err("That backend is not initialized (discovery may have failed)."),
             file=sys.stderr,
         )
     except ValueError as ex:
@@ -2196,10 +2110,7 @@ async def _cmd_loop_remote(
                     session.completer = _ReplCompleterRemote(bundles=bundles, theme=theme)
                 except httpx.HTTPStatusError as ex:
                     print(
-                        theme.err(
-                            f"GET /v1/completion-aliases after {cmd} failed: "
-                            f"HTTP {ex.response.status_code}"
-                        ),
+                        theme.err(f"GET /v1/completion-aliases after {cmd} failed: HTTP {ex.response.status_code}"),
                         file=sys.stderr,
                     )
                 except httpx.RequestError as ex:
@@ -2599,13 +2510,7 @@ async def bootstrap_device_managers(
     sonos_ready = sonos_mgr is not None
     androidtv_ready = androidtv_mgr is not None
     vizio_ready = vizio_mgr is not None
-    if (
-        not kasa_ok
-        and not tw_ok
-        and not sonos_ready
-        and not androidtv_ready
-        and not vizio_ready
-    ):
+    if not kasa_ok and not tw_ok and not sonos_ready and not androidtv_ready and not vizio_ready:
         print(theme.err("No backends initialized; exiting."), file=sys.stderr)
         raise SystemExit(1)
 
@@ -2663,16 +2568,10 @@ async def shutdown_device_managers(state: DeviceManagersState) -> None:
                 )
             )
         )
-    disconnect_tasks.append(
-        asyncio.create_task(
-            _disconnect_backend_on_shutdown("kasa", state.kasa_mgr.disconnect())
-        )
-    )
+    disconnect_tasks.append(asyncio.create_task(_disconnect_backend_on_shutdown("kasa", state.kasa_mgr.disconnect())))
     if state.sonos_mgr is not None:
         disconnect_tasks.append(
-            asyncio.create_task(
-                _disconnect_backend_on_shutdown("sonos", state.sonos_mgr.disconnect())
-            )
+            asyncio.create_task(_disconnect_backend_on_shutdown("sonos", state.sonos_mgr.disconnect()))
         )
     if state.tailwind_mgr is not None:
         disconnect_tasks.append(
@@ -2685,9 +2584,7 @@ async def shutdown_device_managers(state: DeviceManagersState) -> None:
         )
     if state.vizio_mgr is not None:
         disconnect_tasks.append(
-            asyncio.create_task(
-                _disconnect_backend_on_shutdown("vizio", state.vizio_mgr.disconnect())
-            )
+            asyncio.create_task(_disconnect_backend_on_shutdown("vizio", state.vizio_mgr.disconnect()))
         )
     if disconnect_tasks:
         await asyncio.gather(*disconnect_tasks)
@@ -2732,10 +2629,7 @@ async def _async_main_remote(args: argparse.Namespace) -> None:
 
 def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description=(
-            "Interactive REPL for Google Cast, Kasa switches, Sonos zones, "
-            "and GoTailwind garage doors."
-        ),
+        description=("Interactive REPL for Google Cast, Kasa switches, Sonos zones, and GoTailwind garage doors."),
         add_help=add_help,
     )
     p.add_argument(
@@ -2791,10 +2685,7 @@ def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argp
         "--color",
         choices=("auto", "always", "never"),
         default="auto",
-        help=(
-            "Terminal colors in the REPL (default: auto when stdout is a TTY). "
-            "Disabled when NO_COLOR is set."
-        ),
+        help=("Terminal colors in the REPL (default: auto when stdout is a TTY). Disabled when NO_COLOR is set."),
     )
     p.add_argument(
         "--discovery-cache",
@@ -2915,8 +2806,7 @@ def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argp
         default=None,
         metavar="HOST[:PORT]",
         help=(
-            "Known Vizio TV host or IP (port optional, default 7345; repeatable). "
-            "Also VIZIO_HOSTS (comma-separated)."
+            "Known Vizio TV host or IP (port optional, default 7345; repeatable). Also VIZIO_HOSTS (comma-separated)."
         ),
     )
     if add_version:

@@ -30,9 +30,7 @@ def test_provenance_footer_rejects_blank_parts() -> None:
 
 
 def test_rule_fire_provenance_footer_includes_rule_id() -> None:
-    assert rule_fire_provenance_footer("away-shutdown") == (
-        "Sent by: domesti-bot · Rule away-shutdown (automation)"
-    )
+    assert rule_fire_provenance_footer("away-shutdown") == ("Sent by: domesti-bot · Rule away-shutdown (automation)")
 
 
 def test_with_instance_hash_joins_origin_and_hash_path() -> None:
@@ -48,13 +46,8 @@ def test_automations_tab_urls_use_public_base(
 ) -> None:
     monkeypatch.setenv("DOMESTI_PUBLIC_BASE_URL", "https://domesti.example.com")
     cache = tmp_path / "cache.sqlite"
-    assert (
-        automations_vacation_url(cache)
-        == "https://domesti.example.com/#/automations/vacation"
-    )
-    assert (
-        automations_mail_url(cache) == "https://domesti.example.com/#/automations/mail"
-    )
+    assert automations_vacation_url(cache) == "https://domesti.example.com/#/automations/vacation"
+    assert automations_mail_url(cache) == "https://domesti.example.com/#/automations/mail"
 
 
 def test_automations_tab_urls_none_without_public_base(

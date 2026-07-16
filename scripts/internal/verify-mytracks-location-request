@@ -178,8 +178,7 @@ def main() -> int:
         return 2
     if paired_base != mytracks_base:
         print(
-            f"Refusing to send relay key to {mytracks_base}; "
-            f"discovery cache is paired with {paired_base}",
+            f"Refusing to send relay key to {mytracks_base}; discovery cache is paired with {paired_base}",
             file=sys.stderr,
         )
         return 2
@@ -202,11 +201,7 @@ def main() -> int:
 
     admin_password: str | None = None
     env_admin_password_available = os.environ.get("MYTRACKS_ADMIN_PASSWORD", "").strip() != ""
-    if (
-        args.enable_remote_requests
-        or env_admin_password_available
-        or mytracks_admin_password_stored_in_db(cache_path)
-    ):
+    if args.enable_remote_requests or env_admin_password_available or mytracks_admin_password_stored_in_db(cache_path):
         admin_password = _resolve_admin_password(args, cache_path)
 
     _log_step(1, "Read my-tracks domesti-bot config")

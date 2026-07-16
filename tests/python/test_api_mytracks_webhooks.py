@@ -72,9 +72,7 @@ def _store_relay_key(db: Path, relay_key: str, fernet_key: str) -> None:
     save_mytracks_relay_api_key_to_db(db, relay_key)
 
 
-def test_location_update_webhook_rejects_missing_relay_key(
-    tmp_path: Path, fernet_key: str
-) -> None:
+def test_location_update_webhook_rejects_missing_relay_key(tmp_path: Path, fernet_key: str) -> None:
     _ = fernet_key
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
@@ -114,11 +112,7 @@ def test_location_update_webhook_requires_user_id_field(
     _seed_user(db)
     relay_key = "relay-secret-value"
     _store_relay_key(db, relay_key, fernet_key)
-    payload_without_user_id = {
-        key: value
-        for key, value in _LOCATION_UPDATE_PAYLOAD.items()
-        if key != "user_id"
-    }
+    payload_without_user_id = {key: value for key, value in _LOCATION_UPDATE_PAYLOAD.items() if key != "user_id"}
     response = client.post(
         "/v1/webhooks/location_update",
         json=payload_without_user_id,
@@ -203,9 +197,7 @@ def test_location_update_webhook_ping_with_old_fix_updates_location(
     assert response.status_code == HTTPStatus.NO_CONTENT
     stored = list_user_locations(db)["henrique"]
     assert stored.lat == 41.2
-    assert stored.reported_at == parse_iso_timestamp_to_epoch(
-        "2026-06-30T14:01:00+00:00"
-    )
+    assert stored.reported_at == parse_iso_timestamp_to_epoch("2026-06-30T14:01:00+00:00")
     assert stored.fix_at == parse_iso_timestamp_to_epoch("2026-06-30T10:00:00+00:00")
 
 
@@ -247,9 +239,7 @@ def test_location_update_webhook_drops_stale_report(
     assert response.status_code == HTTPStatus.NO_CONTENT
     stored = list_user_locations(db)["henrique"]
     assert stored.lat == 41.2
-    assert stored.reported_at == parse_iso_timestamp_to_epoch(
-        "2026-06-30T14:01:00+00:00"
-    )
+    assert stored.reported_at == parse_iso_timestamp_to_epoch("2026-06-30T14:01:00+00:00")
 
 
 def test_location_update_webhook_stores_connection_type(
@@ -460,12 +450,8 @@ def test_post_mytracks_pair_persists_relay_key_and_status(
         "min_keep_count": 20,
         "unlimited": False,
     }
-    assert body["user_location_update_url"] == (
-        "http://testserver/v1/webhooks/location_update"
-    )
-    assert body["user_location_test_url"] == (
-        "http://testserver/v1/webhooks/location_update/test"
-    )
+    assert body["user_location_update_url"] == ("http://testserver/v1/webhooks/location_update")
+    assert body["user_location_test_url"] == ("http://testserver/v1/webhooks/location_update/test")
     stored_key = load_mytracks_relay_api_key_from_db(db)
     assert stored_key is not None
     assert stored_key != ""
@@ -630,9 +616,7 @@ def test_post_mytracks_pair_uses_forwarded_public_url(
     assert response.status_code == HTTPStatus.OK
     body = response.json()
     assert body["domesti_public_base_url"] == "https://domesti.example.com"
-    assert body["user_location_update_url"] == (
-        "https://domesti.example.com/v1/webhooks/location_update"
-    )
+    assert body["user_location_update_url"] == ("https://domesti.example.com/v1/webhooks/location_update")
 
 
 def test_get_mytracks_relay_key_returns_stored_secret(

@@ -369,7 +369,7 @@ def test_rule_out_accepts_device_state_trigger_with_device_condition() -> None:
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.OPEN,
+                    state=DeviceConditionState.OPEN,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Left",
@@ -506,14 +506,12 @@ def test_rule_out_rejects_legacy_trigger_field() -> None:
 
 def test_devices_any_off_condition_rejects_empty_devices() -> None:
     with pytest.raises(ValidationError):
-        DevicesAnyInStateCondition(type="devices_any_in_state",
-            state=DeviceConditionState.OFF, devices=[])
+        DevicesAnyInStateCondition(type="devices_any_in_state", state=DeviceConditionState.OFF, devices=[])
 
 
 def test_devices_any_on_condition_rejects_empty_devices() -> None:
     with pytest.raises(ValidationError):
-        DevicesAnyInStateCondition(type="devices_any_in_state",
-            state=DeviceConditionState.ON, devices=[])
+        DevicesAnyInStateCondition(type="devices_any_in_state", state=DeviceConditionState.ON, devices=[])
 
 
 def test_validate_rule_accepts_kasa_devices_any_off_condition() -> None:
@@ -522,7 +520,7 @@ def test_validate_rule_accepts_kasa_devices_any_off_condition() -> None:
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.OFF,
+                    state=DeviceConditionState.OFF,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Basement lamp",
@@ -564,7 +562,7 @@ def test_validate_rule_flags_unknown_kasa_devices_any_off_condition() -> None:
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.OFF,
+                    state=DeviceConditionState.OFF,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Basement lamp",
@@ -608,7 +606,7 @@ def test_validate_rule_accepts_tailwind_devices_any_open_condition() -> None:
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.OPEN,
+                    state=DeviceConditionState.OPEN,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Henrique's side",
@@ -650,7 +648,7 @@ def test_validate_rule_flags_unknown_tailwind_devices_any_open_condition() -> No
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.OPEN,
+                    state=DeviceConditionState.OPEN,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Henrique's side",
@@ -694,7 +692,7 @@ def test_validate_rule_accepts_sonos_device_condition_when_zone_exists() -> None
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.ON,
+                    state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Kitchen",
@@ -736,7 +734,7 @@ def test_validate_rule_flags_androidtv_device_condition() -> None:
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.ON,
+                    state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Living Room TV",
@@ -778,7 +776,7 @@ def test_validate_rule_flags_unknown_sonos_device_condition() -> None:
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.ON,
+                    state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="Kitchen",
@@ -822,7 +820,7 @@ def test_validate_rule_flags_blank_device_condition_ref() -> None:
             all=[
                 DevicesAnyInStateCondition(
                     type="devices_any_in_state",
-            state=DeviceConditionState.ON,
+                    state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
                             device_id="   ",

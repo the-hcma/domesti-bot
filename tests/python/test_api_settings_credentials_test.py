@@ -37,9 +37,7 @@ def _client(*, cache_path: Path | None) -> tuple[TestClient, FastAPI]:
     return TestClient(app), app
 
 
-def test_post_tailwind_token_test_ok(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_tailwind_token_test_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
@@ -63,9 +61,7 @@ def test_post_tailwind_token_test_ok(
     probe.assert_awaited_once()
 
 
-def test_post_tailwind_token_test_auth_fail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_tailwind_token_test_auth_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("TAILWIND_TOKEN", "654321")
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     with patch(
@@ -87,9 +83,7 @@ def test_post_tailwind_token_test_auth_fail(
     assert "unauthorized" in body["detail"]
 
 
-def test_post_tailwind_token_test_not_configured(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_tailwind_token_test_not_configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     response = client.post("/v1/settings/tailwind-token/test", json={})
@@ -97,9 +91,7 @@ def test_post_tailwind_token_test_not_configured(
     assert "No Tailwind token" in response.json()["detail"]
 
 
-def test_post_kasa_credentials_test_ok(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_kasa_credentials_test_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("KASA_USERNAME", raising=False)
     monkeypatch.delenv("KASA_PASSWORD", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
@@ -122,9 +114,7 @@ def test_post_kasa_credentials_test_ok(
     assert body["source"] == "database"
 
 
-def test_post_kasa_credentials_test_auth_fail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_kasa_credentials_test_auth_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     with patch(
         "app.api.settings_routes.probe_kasa_credentials",
@@ -143,9 +133,7 @@ def test_post_kasa_credentials_test_auth_fail(
     assert response.json()["ok"] is False
 
 
-def test_post_kasa_credentials_test_not_configured(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_kasa_credentials_test_not_configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("KASA_USERNAME", raising=False)
     monkeypatch.delenv("KASA_PASSWORD", raising=False)
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
@@ -154,9 +142,7 @@ def test_post_kasa_credentials_test_not_configured(
     assert "No Kasa credentials" in response.json()["detail"]
 
 
-def test_post_kasa_credentials_test_no_klap_hosts(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_kasa_credentials_test_no_klap_hosts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("KASA_USERNAME", "alice@example.com")
     monkeypatch.setenv("KASA_PASSWORD", "hunter2")
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
@@ -395,9 +381,7 @@ async def test_probe_kasa_credentials_partial_when_one_host_lacks_profile(
     assert "no cached KLAP connection profile" in result.detail
 
 
-def test_post_mytracks_credentials_test_ok(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_mytracks_credentials_test_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
     save_mytracks_config(
@@ -424,9 +408,7 @@ def test_post_mytracks_credentials_test_ok(
     assert "user" in body["detail"]
 
 
-def test_post_mytracks_credentials_test_auth_fail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_mytracks_credentials_test_auth_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
     save_mytracks_config(
@@ -467,9 +449,7 @@ def test_post_mytracks_credentials_test_no_domain(tmp_path: Path) -> None:
     assert "domain" in response.json()["detail"].lower()
 
 
-def test_post_mytracks_probe_raises_sync_error_as_ok_false(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_mytracks_probe_raises_sync_error_as_ok_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
     save_mytracks_config(
@@ -489,9 +469,7 @@ def test_post_mytracks_probe_raises_sync_error_as_ok_false(
     assert response.json()["ok"] is False
 
 
-def test_post_vizio_auth_test_ok(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_vizio_auth_test_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VIZIO_AUTH_TOKEN", raising=False)
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     db = tmp_path / "ui.sqlite"
@@ -521,9 +499,7 @@ def test_post_vizio_auth_test_ok(
     assert body["source"] == "database"
 
 
-def test_post_vizio_auth_test_auth_fail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_vizio_auth_test_auth_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     with patch(
         "app.api.vizio_settings_routes.probe_vizio_auth",
@@ -542,9 +518,7 @@ def test_post_vizio_auth_test_auth_fail(
     assert response.json()["ok"] is False
 
 
-def test_post_vizio_auth_test_not_configured(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_vizio_auth_test_not_configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VIZIO_AUTH_TOKEN", raising=False)
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
     response = client.post(
@@ -564,9 +538,7 @@ def test_post_vizio_auth_test_unknown_device_id(tmp_path: Path) -> None:
     assert response.status_code == HTTPStatus.NOT_FOUND
 
 
-def test_post_vizio_probe_auth_error_as_ok_false(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_vizio_probe_auth_error_as_ok_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VIZIO_AUTH_TOKEN", raising=False)
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
 
@@ -585,9 +557,7 @@ def test_post_vizio_probe_auth_error_as_ok_false(
     assert response.json()["ok"] is False
 
 
-def test_post_vizio_probe_busy_error_as_ok_false(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_post_vizio_probe_busy_error_as_ok_false(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VIZIO_AUTH_TOKEN", raising=False)
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")
 

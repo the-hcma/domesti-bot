@@ -94,18 +94,14 @@ class _FakeSonosZone:
         self.calls.append("pause")
         if self._raise_on == "pause":
             self.is_playing = False
-            raise SonosTransitionUnavailableError(
-                f"{self.preferred_label!r} cannot pause"
-            )
+            raise SonosTransitionUnavailableError(f"{self.preferred_label!r} cannot pause")
         self.is_playing = False
 
     async def resume(self, *, favorite_index: int = 0) -> None:
         self.calls.append(f"resume:{favorite_index}")
         if self._raise_on == "resume":
             self.is_playing = False
-            raise SonosTransitionUnavailableError(
-                f"{self.preferred_label!r} cannot resume"
-            )
+            raise SonosTransitionUnavailableError(f"{self.preferred_label!r} cannot resume")
         self.is_playing = True
 
     async def flip(self, *, favorite_index: int = 0) -> str:

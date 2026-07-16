@@ -103,7 +103,8 @@ def _seed_presence_db(
             lat=lat,
             lon=lon,
             accuracy_m=accuracy_m,
-            fix_at=fix_epoch, reported_at=reported_at,
+            fix_at=fix_epoch,
+            reported_at=reported_at,
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -157,7 +158,8 @@ def _setup_evaluator(
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0,
+        reported_at=clock["now"] - 400.0,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
     evaluator = RuleEvaluator(
@@ -191,9 +193,7 @@ def _formatted_logger_calls(info_mock: MagicMock) -> list[str]:
 
 
 def _info_messages_matching(info_mock: MagicMock, needle: str) -> list[str]:
-    return [
-        message for message in _formatted_logger_calls(info_mock) if needle in message
-    ]
+    return [message for message in _formatted_logger_calls(info_mock) if needle in message]
 
 
 def _move_inside(
@@ -211,7 +211,8 @@ def _move_inside(
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=accuracy_m,
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -253,7 +254,8 @@ async def test_accuracy_edge_grace_does_not_register_without_geofence_transition
         user_id="henrique",
         lat=44.0,
         lon=-73.0,
-        fix_at=clock["now"] - 400.0, reported_at=clock["now"] - 400.0,
+        fix_at=clock["now"] - 400.0,
+        reported_at=clock["now"] - 400.0,
         accuracy_m=20,
     )
     device = _FakeKasa("192.168.1.10", "Garage")
@@ -278,7 +280,8 @@ async def test_accuracy_edge_grace_does_not_register_without_geofence_transition
             lat=41.194085,
             lon=-73.888365,
             accuracy_m=20,
-            fix_at=clock["now"], reported_at=clock["now"],
+            fix_at=clock["now"],
+            reported_at=clock["now"],
             source="test",
         ),
         retention=default_location_history_retention(),
@@ -295,7 +298,8 @@ async def test_accuracy_edge_grace_does_not_register_without_geofence_transition
                 lat=41.194085,
                 lon=-73.888365,
                 accuracy_m=120,
-                fix_at=clock["now"], reported_at=clock["now"],
+                fix_at=clock["now"],
+                reported_at=clock["now"],
                 source="test",
             ),
             retention=default_location_history_retention(),

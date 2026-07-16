@@ -345,8 +345,7 @@ class RuleEvaluator:
             event_loop = self._event_loop
             if event_loop is None:
                 _LOGGER.warning(
-                    "[rules] dropped location update for user_id=%s: "
-                    "no event loop registered yet",
+                    "[rules] dropped location update for user_id=%s: no event loop registered yet",
                     user_id,
                 )
                 return
@@ -357,8 +356,7 @@ class RuleEvaluator:
                 )
             except RuntimeError:
                 _LOGGER.warning(
-                    "[rules] dropped location update for user_id=%s: "
-                    "event loop is closed",
+                    "[rules] dropped location update for user_id=%s: event loop is closed",
                     user_id,
                 )
             return
@@ -388,8 +386,7 @@ class RuleEvaluator:
             event_loop = self._event_loop
             if event_loop is None:
                 _LOGGER.warning(
-                    "[rules] dropped device-state update for %s/%s: "
-                    "no event loop registered yet",
+                    "[rules] dropped device-state update for %s/%s: no event loop registered yet",
                     family_id.value,
                     device_id,
                 )
@@ -402,8 +399,7 @@ class RuleEvaluator:
                 )
             except RuntimeError:
                 _LOGGER.warning(
-                    "[rules] dropped device-state update for %s/%s: "
-                    "event loop is closed",
+                    "[rules] dropped device-state update for %s/%s: event loop is closed",
                     family_id.value,
                     device_id,
                 )
@@ -436,16 +432,10 @@ class RuleEvaluator:
         user_location_history: dict[str, tuple[UserLocationOut, ...]] = {}
         user_locations: dict[str, UserLocationOut] = {}
         if cache_path is not None:
-            geofences = [
-                _geofence_record_to_out(row) for row in list_geofences(cache_path)
-            ]
+            geofences = [_geofence_record_to_out(row) for row in list_geofences(cache_path)]
             users = list_users(cache_path)
-            user_display_names = {
-                row.user_id: row.display_name for row in users
-            }
-            user_home_wifi_bssid = {
-                row.user_id: row.home_wifi_bssid for row in users
-            }
+            user_display_names = {row.user_id: row.display_name for row in users}
+            user_home_wifi_bssid = {row.user_id: row.home_wifi_bssid for row in users}
             stored = list_user_locations(cache_path)
             now_epoch = effective_now.timestamp()
             walkback_max_s = LOCATION_HISTORY_WALKBACK_MAX_S
@@ -613,10 +603,7 @@ class RuleEvaluator:
                     geofence_id=geofence_id,
                     connection_type=location.connection_type,
                 )
-            if (
-                dwell_accuracy_limit_m is not None
-                and key not in self._geofence_inside_since
-            ):
+            if dwell_accuracy_limit_m is not None and key not in self._geofence_inside_since:
                 self._set_geofence_inside_since(key, observed_at)
             self._persist_geofence_transition_state(
                 user_id,
@@ -653,17 +640,15 @@ class RuleEvaluator:
         home_wifi_bssid = _home_wifi_bssid_for_user(cache_path, user_id)
         seeded = False
         if history:
-            was_inside, outside_since, inside_since = (
-                _reconstruct_geofence_seed_from_history(
-                    geofence,
-                    history,
-                    dwell_accuracy_limit_m=dwell_accuracy_limit_m,
-                    edge_accuracy_limit_m=edge_accuracy_limit_m,
-                    geofences=geofence_list,
-                    settings=settings,
-                    user_id=user_id,
-                    home_wifi_bssid=home_wifi_bssid,
-                )
+            was_inside, outside_since, inside_since = _reconstruct_geofence_seed_from_history(
+                geofence,
+                history,
+                dwell_accuracy_limit_m=dwell_accuracy_limit_m,
+                edge_accuracy_limit_m=edge_accuracy_limit_m,
+                geofences=geofence_list,
+                settings=settings,
+                user_id=user_id,
+                home_wifi_bssid=home_wifi_bssid,
             )
             if was_inside is not None:
                 self._geofence_was_inside[key] = was_inside
@@ -765,17 +750,11 @@ class RuleEvaluator:
             if runtime.next_evaluate_at > now_epoch:
                 continue
             eligibility_wake = uses_astronomical_eligibility_wake(rule)
-            fire_source: RuleFireSource = (
-                "eligibility" if eligibility_wake else "scheduled"
-            )
+            fire_source: RuleFireSource = "eligibility" if eligibility_wake else "scheduled"
             log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
             evaluation_ctx = replace(
                 ctx,
-                triggered_by=(
-                    RuleEvaluationCause.ELIGIBILITY
-                    if eligibility_wake
-                    else RuleEvaluationCause.SCHEDULED
-                ),
+                triggered_by=(RuleEvaluationCause.ELIGIBILITY if eligibility_wake else RuleEvaluationCause.SCHEDULED),
             )
             evaluation = evaluate_rule(rule, evaluation_ctx)
             _LOGGER.info(
@@ -809,9 +788,7 @@ class RuleEvaluator:
                         transitions={},
                     )
                 else:
-                    remaining_s = rule.cooldown_s - (
-                        now_epoch - (runtime.last_fired_at or 0.0)
-                    )
+                    remaining_s = rule.cooldown_s - (now_epoch - (runtime.last_fired_at or 0.0))
                     _log_rule_skipped(
                         rule.id,
                         log_user_ids,
@@ -840,19 +817,13 @@ class RuleEvaluator:
         now: float,
     ) -> set[str]:
         fired_rule_ids: set[str] = set()
-        keys_for_user = [
-            key for key in self._deferred_accuracy_edges if key[1] == user_id
-        ]
+        keys_for_user = [key for key in self._deferred_accuracy_edges if key[1] == user_id]
         for key in keys_for_user:
             deferred = self._deferred_accuracy_edges.get(key)
             if deferred is None or now > deferred.expires_at:
                 continue
             rule = _automation_rule_by_id(deferred.rule_id)
-            if (
-                rule is None
-                or not rule.enabled
-                or RuleTrigger.EDGE_TRUE not in rule.triggers
-            ):
+            if rule is None or not rule.enabled or RuleTrigger.EDGE_TRUE not in rule.triggers:
                 self._deferred_accuracy_edges.pop(key, None)
                 continue
             if not _accuracy_passes(rule, location):
@@ -889,9 +860,7 @@ class RuleEvaluator:
             ):
                 continue
             if not self._cooldown_elapsed(rule, runtime):
-                remaining_s = rule.cooldown_s - (
-                    now - (runtime.last_fired_at or 0.0)
-                )
+                remaining_s = rule.cooldown_s - (now - (runtime.last_fired_at or 0.0))
                 _log_rule_skipped(
                     rule.id,
                     user_id,
@@ -937,11 +906,7 @@ class RuleEvaluator:
         rule_id: str,
         user_id: str,
     ) -> None:
-        keys = [
-            key
-            for key in self._deferred_accuracy_edges
-            if key[0] == rule_id and key[1] == user_id
-        ]
+        keys = [key for key in self._deferred_accuracy_edges if key[0] == rule_id and key[1] == user_id]
         for key in keys:
             self._deferred_accuracy_edges.pop(key, None)
 
@@ -1018,10 +983,8 @@ class RuleEvaluator:
                 runtime.last_error,
             )
         runtime.last_fired_at = self._now_fn()
-        if (
-            fire_source
-            in ("device_state", "dwell_satisfied", "eligibility", "scheduled")
-            and _rule_has_dwell_condition(rule)
+        if fire_source in ("device_state", "dwell_satisfied", "eligibility", "scheduled") and _rule_has_dwell_condition(
+            rule
         ):
             consume_scheduled_dwell_episodes_for_fire(
                 rule,
@@ -1334,8 +1297,7 @@ class RuleEvaluator:
         if transitions:
             transitions_summary = _format_geofence_transitions_for_log(transitions)
             _LOGGER.debug(
-                "[rules] evaluating location update user_id=%s lat=%.5f lon=%.5f "
-                "accuracy_m=%s transitions=%s",
+                "[rules] evaluating location update user_id=%s lat=%.5f lon=%.5f accuracy_m=%s transitions=%s",
                 user_id,
                 location.lat,
                 location.lon,
@@ -1393,10 +1355,7 @@ class RuleEvaluator:
                         rule.id,
                         user_id,
                         reason="location_accuracy",
-                        detail=(
-                            f"accuracy_m={location.accuracy_m} "
-                            f"limit={rule.min_location_accuracy_m}"
-                        ),
+                        detail=(f"accuracy_m={location.accuracy_m} limit={rule.min_location_accuracy_m}"),
                     )
                 continue
             if not transitions:
@@ -1464,9 +1423,7 @@ class RuleEvaluator:
         if cache_path is None:
             return
         now = self._now_fn()
-        user_ids = {
-            deferred.user_id for deferred in self._deferred_accuracy_edges.values()
-        }
+        user_ids = {deferred.user_id for deferred in self._deferred_accuracy_edges.values()}
         if not user_ids:
             return
         locations = list_user_locations(cache_path)
@@ -1644,12 +1601,7 @@ class RuleEvaluator:
             since = self._device_bool_since.get(streak_key)
             value = self._device_bool_value.get(streak_key)
             desired = desired_bool_for_device_condition_state(watch.state)
-            if (
-                since is None
-                or value is None
-                or value != desired
-                or (now_epoch - since) < watch.min_duration_s
-            ):
+            if since is None or value is None or value != desired or (now_epoch - since) < watch.min_duration_s:
                 to_drop = [
                     key
                     for key in self._device_dwell_satisfied_evaluated_since
@@ -1705,9 +1657,7 @@ class RuleEvaluator:
         now = datetime.fromtimestamp(now_epoch, tz=timezone)
         ctx = await self._build_evaluation_context(now=now)
         crossed_rule_ids: set[str] = set()
-        newly_evaluated_rules: list[
-            tuple[tuple[str, str, str, DwellDirection, int], float]
-        ] = []
+        newly_evaluated_rules: list[tuple[tuple[str, str, str, DwellDirection, int], float]] = []
         rules_by_id = {rule.id: rule for rule in rules}
         for watch in index.watches_for_roster_user(
             roster_user_id,
@@ -1811,8 +1761,7 @@ class RuleEvaluator:
             ]
         if matched_rules:
             _LOGGER.info(
-                "[rules] evaluating device-state change family_id=%s device_id=%s "
-                "rule_count=%d",
+                "[rules] evaluating device-state change family_id=%s device_id=%s rule_count=%d",
                 family_id.value,
                 device_id,
                 len(matched_rules),
@@ -1852,9 +1801,7 @@ class RuleEvaluator:
                     )
                     continue
                 if not self._cooldown_elapsed(rule, runtime):
-                    remaining_s = rule.cooldown_s - (
-                        now_epoch - (runtime.last_fired_at or 0.0)
-                    )
+                    remaining_s = rule.cooldown_s - (now_epoch - (runtime.last_fired_at or 0.0))
                     _log_rule_skipped(
                         rule.id,
                         log_user_ids,
@@ -1880,16 +1827,8 @@ class RuleEvaluator:
         now_epoch: float,
         timezone: ZoneInfo,
     ) -> None:
-        rules_by_id = {
-            rule.id: rule
-            for rule in rules
-            if rule.enabled and RuleTrigger.DWELL_SATISFIED in rule.triggers
-        }
-        matched_rules = [
-            rules_by_id[rule_id]
-            for rule_id in sorted(rule_ids)
-            if rule_id in rules_by_id
-        ]
+        rules_by_id = {rule.id: rule for rule in rules if rule.enabled and RuleTrigger.DWELL_SATISFIED in rule.triggers}
+        matched_rules = [rules_by_id[rule_id] for rule_id in sorted(rule_ids) if rule_id in rules_by_id]
         if not matched_rules:
             return
         _LOGGER.info(
@@ -1935,9 +1874,7 @@ class RuleEvaluator:
                 )
                 continue
             if not self._cooldown_elapsed(rule, runtime):
-                remaining_s = rule.cooldown_s - (
-                    now_epoch - (runtime.last_fired_at or 0.0)
-                )
+                remaining_s = rule.cooldown_s - (now_epoch - (runtime.last_fired_at or 0.0))
                 _log_rule_skipped(
                     rule.id,
                     log_user_ids,
@@ -1986,9 +1923,7 @@ class RuleEvaluator:
         to_drop = [
             key
             for key in self._dwell_satisfied_evaluated_since
-            if key[1] == roster_user_id
-            and key[2] == geofence_id
-            and key[3] == direction
+            if key[1] == roster_user_id and key[2] == geofence_id and key[3] == direction
         ]
         for key in to_drop:
             del self._dwell_satisfied_evaluated_since[key]
@@ -2001,11 +1936,7 @@ class RuleEvaluator:
         min_s: int,
     ) -> None:
         suffix = (roster_user_id, geofence_id, direction, min_s)
-        to_drop = [
-            key
-            for key in self._dwell_satisfied_evaluated_since
-            if key[1:] == suffix
-        ]
+        to_drop = [key for key in self._dwell_satisfied_evaluated_since if key[1:] == suffix]
         for key in to_drop:
             del self._dwell_satisfied_evaluated_since[key]
 
@@ -2158,14 +2089,9 @@ class RuleEvaluator:
                     continue
                 runtime = self._rule_state.get(rule_id)
                 fired_on_streak = (
-                    runtime is not None
-                    and runtime.last_fired_at is not None
-                    and runtime.last_fired_at >= since
+                    runtime is not None and runtime.last_fired_at is not None and runtime.last_fired_at >= since
                 )
-                episode_consumed = (
-                    consumed.get((rule_id, roster_user_id, watch.geofence_id))
-                    == episode
-                )
+                episode_consumed = consumed.get((rule_id, roster_user_id, watch.geofence_id)) == episode
                 if not fired_on_streak and not episode_consumed:
                     continue
                 debounce_key = (
@@ -2286,9 +2212,7 @@ class RuleEvaluator:
                         continue
                     if runtime.last_fired_at >= streak_start:
                         episode = self._geofence_presence_episode.get(key, 0)
-                        consumed[(rule.id, roster_user_id, condition.geofence_id)] = (
-                            episode
-                        )
+                        consumed[(rule.id, roster_user_id, condition.geofence_id)] = episode
 
     def _skip_if_daily_cap(
         self,
@@ -2331,14 +2255,11 @@ class RuleEvaluator:
         inside_ids = set(geofence_ids_containing_location(location, geofences))
         mutate_state = _location_accuracy_passes(location, accuracy_limit_m)
         was_inside_before_history_reconcile = {
-            key: value
-            for key, value in self._geofence_was_inside.items()
-            if key[0] == user_id
+            key: value for key, value in self._geofence_was_inside.items() if key[0] == user_id
         }
         if not mutate_state and _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug(
-                "[rules] geofence edge state unchanged user_id=%s "
-                "accuracy_m=%s limit_m=%s",
+                "[rules] geofence edge state unchanged user_id=%s accuracy_m=%s limit_m=%s",
                 user_id,
                 location.accuracy_m,
                 accuracy_limit_m,
@@ -2412,8 +2333,7 @@ class RuleEvaluator:
                 )
             now_inside_for_dwell = gps_inside or wifi_dwell_inside
             track_dwell = dwell_accuracy_limit_m is not None and (
-                _location_accuracy_passes(location, dwell_accuracy_limit_m)
-                or wifi_dwell_inside
+                _location_accuracy_passes(location, dwell_accuracy_limit_m) or wifi_dwell_inside
             )
             transition = GeofenceTransition()
             episode_bumped = False
@@ -2423,10 +2343,7 @@ class RuleEvaluator:
                 if streak_since is None:
                     streak_since = observed_at
                     self._geofence_geo_inside_streak_since[key] = streak_since
-                if (
-                    not was_inside
-                    and observed_at - streak_since >= _GEO_INSIDE_STATE_RECONCILE_S
-                ):
+                if not was_inside and observed_at - streak_since >= _GEO_INSIDE_STATE_RECONCILE_S:
                     outside_since = self._geofence_outside_since.get(key)
                     dwell_elapsed = outside_since is None or (
                         observed_at - outside_since >= _MIN_GEOFENCE_OUTSIDE_DWELL_S
@@ -2456,8 +2373,7 @@ class RuleEvaluator:
                                 user_id=user_id,
                                 geofence_id=geofence_id,
                                 outside_s=observed_at - outside_since,
-                                dwell_remaining_s=_MIN_GEOFENCE_OUTSIDE_DWELL_S
-                                - (observed_at - outside_since),
+                                dwell_remaining_s=_MIN_GEOFENCE_OUTSIDE_DWELL_S - (observed_at - outside_since),
                             )
             else:
                 self._geofence_geo_inside_streak_since.pop(key, None)
@@ -2466,10 +2382,8 @@ class RuleEvaluator:
                     outside_streak_since = observed_at
                     self._geofence_geo_outside_streak_since[key] = outside_streak_since
                 if (
-                    (was_inside or prior_was_inside)
-                    and observed_at - outside_streak_since
-                    >= _GEO_OUTSIDE_STATE_RECONCILE_S
-                ):
+                    was_inside or prior_was_inside
+                ) and observed_at - outside_streak_since >= _GEO_OUTSIDE_STATE_RECONCILE_S:
                     if mutate_state:
                         if was_inside or prior_was_inside:
                             self._bump_geofence_presence_episode(user_id, geofence_id)
@@ -2492,9 +2406,7 @@ class RuleEvaluator:
                         transition = GeofenceTransition(left=True)
             if gps_inside and not was_inside:
                 outside_since = self._geofence_outside_since.get(key)
-                dwell_elapsed = outside_since is None or (
-                    observed_at - outside_since >= _MIN_GEOFENCE_OUTSIDE_DWELL_S
-                )
+                dwell_elapsed = outside_since is None or (observed_at - outside_since >= _MIN_GEOFENCE_OUTSIDE_DWELL_S)
                 if mutate_state:
                     if not was_inside:
                         self._bump_geofence_presence_episode(user_id, geofence_id)
@@ -2509,8 +2421,7 @@ class RuleEvaluator:
                             user_id=user_id,
                             geofence_id=geofence_id,
                             outside_s=observed_at - outside_since,
-                            dwell_remaining_s=_MIN_GEOFENCE_OUTSIDE_DWELL_S
-                            - (observed_at - outside_since),
+                            dwell_remaining_s=_MIN_GEOFENCE_OUTSIDE_DWELL_S - (observed_at - outside_since),
                         )
             elif (was_inside or depart_edge_pending) and not now_inside_for_dwell:
                 leaving_from_inside = was_inside or depart_edge_pending
@@ -2635,9 +2546,7 @@ def _condition_geofence_edge_intents(
 def _condition_has_dwell(condition: RuleConditionOut) -> bool:
     if isinstance(
         condition,
-        DevicesAnyInStateForSCondition
-        | UsersInsideGeofenceForSCondition
-        | UsersOutsideGeofenceForSCondition,
+        DevicesAnyInStateForSCondition | UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition,
     ):
         return True
     if isinstance(condition, AllConditionsCondition):
@@ -2665,17 +2574,11 @@ def _condition_triggered_geofence_edge(
     if isinstance(condition, AllConditionsCondition):
         if not condition.conditions:
             return False
-        return any(
-            _condition_triggered_geofence_edge(child, user_id, transitions)
-            for child in condition.conditions
-        )
+        return any(_condition_triggered_geofence_edge(child, user_id, transitions) for child in condition.conditions)
     if isinstance(condition, AnyConditionsCondition):
         if not condition.conditions:
             return False
-        return any(
-            _condition_triggered_geofence_edge(child, user_id, transitions)
-            for child in condition.conditions
-        )
+        return any(_condition_triggered_geofence_edge(child, user_id, transitions) for child in condition.conditions)
     return False
 
 
@@ -2724,12 +2627,11 @@ def _format_rule_conditions_for_log(
     parts: list[str] = []
     for row in evaluation.conditions:
         if (
-            fire_source
-            not in ("device_state", "dwell_satisfied", "eligibility", "scheduled")
+            fire_source not in ("device_state", "dwell_satisfied", "eligibility", "scheduled")
             and RuleTrigger.EDGE_TRUE in rule.triggers
             and isinstance(
-            row.condition,
-            (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+                row.condition,
+                (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
             )
         ):
             parts.append(f"{row.label}: {row.detail}")
@@ -2766,10 +2668,13 @@ def _notification_detail_from_condition(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> str | None:
-    if isinstance(
-        condition,
-        (DevicesAllInStateCondition, DevicesAnyInStateCondition),
-    ) and condition.state == DeviceConditionState.OPEN:
+    if (
+        isinstance(
+            condition,
+            (DevicesAllInStateCondition, DevicesAnyInStateCondition),
+        )
+        and condition.state == DeviceConditionState.OPEN
+    ):
         row = _evaluate_condition(condition, rule, ctx)
         if row.met:
             return row.detail
@@ -2801,21 +2706,13 @@ def _notification_detail_from_evaluation(
 
 
 def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
-    unmet = [
-        f"{row.label} ({row.detail})"
-        for row in evaluation.conditions
-        if not row.met
-    ]
+    unmet = [f"{row.label} ({row.detail})" for row in evaluation.conditions if not row.met]
     return "; ".join(unmet) if unmet else "none"
 
 
 def _geofence_dwell_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
     """Return the strictest accuracy limit among enabled rules with dwell conditions."""
-    limits = [
-        rule.min_location_accuracy_m
-        for rule in rules
-        if rule.enabled and _rule_has_dwell_condition(rule)
-    ]
+    limits = [rule.min_location_accuracy_m for rule in rules if rule.enabled and _rule_has_dwell_condition(rule)]
     if not limits:
         return None
     return min(limits)
@@ -2823,11 +2720,7 @@ def _geofence_dwell_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
 
 def _geofence_edge_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
     """Return the strictest accuracy limit among enabled ``edge_true`` rules."""
-    limits = [
-        rule.min_location_accuracy_m
-        for rule in rules
-        if rule.enabled and RuleTrigger.EDGE_TRUE in rule.triggers
-    ]
+    limits = [rule.min_location_accuracy_m for rule in rules if rule.enabled and RuleTrigger.EDGE_TRUE in rule.triggers]
     if not limits:
         return None
     return min(limits)
@@ -3049,11 +2942,7 @@ def _reconstruct_geofence_seed_from_history(
                 ):
                     streak_wifi_row = row
             inside_since = streak_start
-            if (
-                user_id is not None
-                and streak_wifi_row is not None
-                and inside_since == streak_wifi_row.reported_at
-            ):
+            if user_id is not None and streak_wifi_row is not None and inside_since == streak_wifi_row.reported_at:
                 _log_wifi_home_presence_overrode_low_accuracy(
                     user_id=user_id,
                     geofence_id=geofence.geofence_id,
@@ -3126,8 +3015,7 @@ def _log_geofence_enter_debounced(
     dwell_remaining_s: float,
 ) -> None:
     _LOGGER.info(
-        "[rules] geofence enter suppressed user_id=%s geofence_id=%s "
-        "outside_s=%.0f dwell_remaining_s=%.0f",
+        "[rules] geofence enter suppressed user_id=%s geofence_id=%s outside_s=%.0f dwell_remaining_s=%.0f",
         user_id,
         geofence_id,
         outside_s,
@@ -3257,10 +3145,7 @@ def _rule_has_dwell_condition(rule: RuleOut) -> bool:
 
 
 def _rule_uses_scheduled_evaluation_tick(rule: RuleOut) -> bool:
-    return (
-        RuleTrigger.SCHEDULED in rule.triggers
-        or uses_astronomical_eligibility_wake(rule)
-    )
+    return RuleTrigger.SCHEDULED in rule.triggers or uses_astronomical_eligibility_wake(rule)
 
 
 def _scheduled_rule_user_ids_for_log(
@@ -3281,7 +3166,4 @@ def _user_triggered_geofence_edge(
 ) -> bool:
     if not conditions:
         return False
-    return any(
-        _condition_triggered_geofence_edge(condition, user_id, transitions)
-        for condition in conditions
-    )
+    return any(_condition_triggered_geofence_edge(condition, user_id, transitions) for condition in conditions)

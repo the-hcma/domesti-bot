@@ -52,13 +52,8 @@ def test_bootstrap_schema_upgrades_legacy_kasa_database(tmp_path: Path) -> None:
     bootstrap_schema(db)
 
     with sqlite3.connect(db) as conn:
-        names = {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
-        kasa_cols = {
-            row[1] for row in conn.execute("PRAGMA table_info(kasa_discovered_devices)")
-        }
+        names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        kasa_cols = {row[1] for row in conn.execute("PRAGMA table_info(kasa_discovered_devices)")}
     assert "device_display_names" in names
     assert "smtp_settings" in names
     assert "alias" in kasa_cols
@@ -69,9 +64,7 @@ def test_bootstrap_schema_upgrades_legacy_kasa_database(tmp_path: Path) -> None:
 def _legacy_kasa_only_db(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
-        conn.execute(
-            "CREATE TABLE kasa_discovered_devices (host TEXT PRIMARY KEY, config_json TEXT)"
-        )
+        conn.execute("CREATE TABLE kasa_discovered_devices (host TEXT PRIMARY KEY, config_json TEXT)")
 
 
 def _legacy_mytracks_settings_db(path: Path) -> None:

@@ -70,9 +70,7 @@ async def probe_kasa_credentials(
     )
     hosts = _klap_hosts_for_probe(cache_path=cache_path)
     if not hosts:
-        raise CredentialsTestUnavailableError(
-            "No known KLAP hosts to probe; discover Kasa devices first"
-        )
+        raise CredentialsTestUnavailableError("No known KLAP hosts to probe; discover Kasa devices first")
     probeable: list[tuple[str, dict[str, Any]]] = []
     missing_profile: list[str] = []
     for host, cfg_dict in hosts:
@@ -82,16 +80,13 @@ async def probe_kasa_credentials(
         probeable.append((host, cfg_dict))
     if not probeable:
         raise CredentialsTestUnavailableError(
-            "No cached KLAP connection profile for "
-            f"{', '.join(missing_profile)}; run device discovery first"
+            f"No cached KLAP connection profile for {', '.join(missing_profile)}; run device discovery first"
         )
     successes: list[str] = []
     failures: list[str] = []
     auth_failures = 0
     for host in missing_profile:
-        failures.append(
-            f"{host}: no cached KLAP connection profile (run device discovery first)"
-        )
+        failures.append(f"{host}: no cached KLAP connection profile (run device discovery first)")
     for host, cfg_dict in probeable:
         try:
             state_label = await _probe_one_kasa_host(
@@ -145,9 +140,7 @@ async def probe_mytracks_credentials(
     """Authenticated roster read against My Tracks (password is never stored)."""
     password_trimmed = password.strip()
     if not password_trimmed:
-        raise CredentialsTestUnavailableError(
-            "Expected My Tracks admin password, got empty value"
-        )
+        raise CredentialsTestUnavailableError("Expected My Tracks admin password, got empty value")
     domain_trimmed = (domain or "").strip()
     username_trimmed = (username or "").strip()
     if not domain_trimmed or not username_trimmed:
@@ -158,13 +151,9 @@ async def probe_mytracks_credentials(
             if not username_trimmed:
                 username_trimmed = stored.username.strip()
     if not domain_trimmed:
-        raise CredentialsTestUnavailableError(
-            "Expected My Tracks domain, got empty value"
-        )
+        raise CredentialsTestUnavailableError("Expected My Tracks domain, got empty value")
     if not username_trimmed:
-        raise CredentialsTestUnavailableError(
-            "Expected My Tracks admin username, got empty value"
-        )
+        raise CredentialsTestUnavailableError("Expected My Tracks admin username, got empty value")
     # Password is always supplied in the request body (never stored).
     source = SettingsCredentialsTestSource.FORM
     try:
@@ -202,9 +191,7 @@ async def probe_tailwind_token(
             cache_path=cache_path,
         )
         if not resolved_token:
-            raise CredentialsTestUnavailableError(
-                "No Tailwind token configured; enter a token or save one first"
-            )
+            raise CredentialsTestUnavailableError("No Tailwind token configured; enter a token or save one first")
         source = SettingsCredentialsTestSource(resolved_source)
     resolved_host = await _resolve_tailwind_probe_host(
         cache_path=cache_path,
@@ -253,9 +240,7 @@ async def probe_vizio_auth(
             cache_path=cache_path,
         )
         if not resolved_token:
-            raise CredentialsTestUnavailableError(
-                "No Vizio auth token configured; enter a token or pair the TV first"
-            )
+            raise CredentialsTestUnavailableError("No Vizio auth token configured; enter a token or pair the TV first")
         source = SettingsCredentialsTestSource(resolved_source)
     client = VizioSmartCastClient(host, port=port, auth_token=resolved_token)
     try:
@@ -291,9 +276,7 @@ def _klap_hosts_for_probe(
         for host in state.kasa_mgr.hosts_requiring_klap_auth:
             host_to_config[host] = None
     if cache_path is not None:
-        for host, _alias, cfg_dict, requires_klap in (
-            device_discovery_store.load_cached_configs(cache_path)
-        ):
+        for host, _alias, cfg_dict, requires_klap in device_discovery_store.load_cached_configs(cache_path):
             if not requires_klap:
                 continue
             host_to_config.setdefault(host, cfg_dict)
@@ -320,9 +303,7 @@ async def _probe_one_kasa_host(
             raise_auth_failure=True,
         )
         if dev is None:
-            raise _ConnectionError(
-                f"Could not reach KLAP host {host} using cached profile"
-            )
+            raise _ConnectionError(f"Could not reach KLAP host {host} using cached profile")
         await dev.update()
         is_on = getattr(dev, "is_on", None)
         if is_on is True:

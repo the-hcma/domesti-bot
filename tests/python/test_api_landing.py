@@ -110,9 +110,7 @@ def test_lifespan_yields_immediately_even_when_discovery_blocks() -> None:
             # If discovery were on the critical path the slow_bootstrap above
             # would block startup for ~60s. A generous 5s upper bound proves
             # the lifespan returned without waiting.
-            assert startup_elapsed < 5.0, (
-                f"lifespan startup took {startup_elapsed:.1f}s; discovery is still blocking"
-            )
+            assert startup_elapsed < 5.0, f"lifespan startup took {startup_elapsed:.1f}s; discovery is still blocking"
             # Static routes must be live immediately:
             assert client.get("/").status_code == HTTPStatus.OK
             assert client.get("/favicon.ico").status_code == HTTPStatus.NO_CONTENT

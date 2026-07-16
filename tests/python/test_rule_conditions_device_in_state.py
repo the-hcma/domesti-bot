@@ -552,9 +552,7 @@ def test_validate_rule_flags_unsupported_family_for_devices_any_in_state() -> No
             smtp_configured=False,
         ),
     )
-    assert any(
-        "cannot report state open" in issue.detail for issue in issues
-    )
+    assert any("cannot report state open" in issue.detail for issue in issues)
 
 
 class _FakeKasaSwitch:
@@ -607,11 +605,7 @@ def _ctx(
 
 
 def _device_state_rule(
-    condition: (
-        DevicesAllInStateCondition
-        | DevicesAnyInStateCondition
-        | RuleConditionOut
-    ),
+    condition: (DevicesAllInStateCondition | DevicesAnyInStateCondition | RuleConditionOut),
 ) -> RuleOut:
     return RuleOut(
         conditions=RuleConditionsOut(all=[condition]),

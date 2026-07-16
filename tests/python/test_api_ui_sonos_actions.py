@@ -94,18 +94,14 @@ class _FakeSonosZone:
         self.calls.append("pause")
         if self._raise_on == "pause":
             self.is_playing = False
-            raise SonosTransitionUnavailableError(
-                f"{self.preferred_label!r} cannot pause"
-            )
+            raise SonosTransitionUnavailableError(f"{self.preferred_label!r} cannot pause")
         self.is_playing = False
 
     async def resume(self, *, favorite_index: int = 0) -> None:
         self.calls.append(f"resume:{favorite_index}")
         if self._raise_on == "resume":
             self.is_playing = False
-            raise SonosTransitionUnavailableError(
-                f"{self.preferred_label!r} cannot resume"
-            )
+            raise SonosTransitionUnavailableError(f"{self.preferred_label!r} cannot resume")
         self.is_playing = True
 
 
@@ -145,14 +141,10 @@ def _state(
 
 
 def test_build_sonos_device_view_raises_keyerror_for_unknown_zone() -> None:
-    state = _state(
-        sonos_zones=[_FakeSonosZone("RINCON_AAAA", "Kitchen", is_playing=True)]
-    )
+    state = _state(sonos_zones=[_FakeSonosZone("RINCON_AAAA", "Kitchen", is_playing=True)])
     assert state.sonos_mgr is not None
     with pytest.raises(KeyError):
-        build_sonos_device_view(
-            state.sonos_mgr, device_id="RINCON_ZZZZ", cache_path=None
-        )
+        build_sonos_device_view(state.sonos_mgr, device_id="RINCON_ZZZZ", cache_path=None)
 
 
 def test_build_sonos_device_view_reflects_is_playing_and_exclusion(
@@ -160,15 +152,16 @@ def test_build_sonos_device_view_reflects_is_playing_and_exclusion(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="sonos", canonical_key="RINCON_AAAA", exclude_from_global=True,
+        db,
+        backend="sonos",
+        canonical_key="RINCON_AAAA",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     zone = _FakeSonosZone("RINCON_AAAA", "Kitchen", is_playing=False)
     state = _state(sonos_zones=[zone], cache_path=db)
     assert state.sonos_mgr is not None
-    view = build_sonos_device_view(
-        state.sonos_mgr, device_id="RINCON_AAAA", cache_path=db
-    )
+    view = build_sonos_device_view(state.sonos_mgr, device_id="RINCON_AAAA", cache_path=db)
     assert view.id == "RINCON_AAAA"
     assert view.kind == "speaker"
     assert view.state == "paused"
@@ -179,9 +172,7 @@ def test_build_sonos_device_view_unknown_when_is_playing_is_none() -> None:
     zone = _FakeSonosZone("RINCON_AAAA", "Kitchen", is_playing=None)
     state = _state(sonos_zones=[zone])
     assert state.sonos_mgr is not None
-    view = build_sonos_device_view(
-        state.sonos_mgr, device_id="RINCON_AAAA", cache_path=None
-    )
+    view = build_sonos_device_view(state.sonos_mgr, device_id="RINCON_AAAA", cache_path=None)
     assert view.state == "unknown"
 
 
@@ -241,16 +232,17 @@ async def test_bulk_off_global_apply_pauses_sonos_alongside_kasa(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="sonos", canonical_key="RINCON_B", exclude_from_global=True,
+        db,
+        backend="sonos",
+        canonical_key="RINCON_B",
+        exclude_from_global=True,
         hide_on_mobile=False,
     )
     kasa = _FakeKasa("10.0.0.1", "Lamp", is_on=True)
     a = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)
     b = _FakeSonosZone("RINCON_B", "Office", is_playing=True)
     c = _FakeSonosZone("RINCON_C", "Patio", is_playing=False)
-    state = _state(
-        kasa_devices=[kasa], sonos_zones=[a, b, c], cache_path=db
-    )
+    state = _state(kasa_devices=[kasa], sonos_zones=[a, b, c], cache_path=db)
     affected, skipped = await bulk_off_global_apply(state, cache_path=db)
     assert ("kasa", "10.0.0.1") in affected
     assert ("sonos", "RINCON_A") in affected
@@ -304,7 +296,10 @@ def test_post_sonos_toggle_pauses_zone_and_returns_refreshed_view(
 ) -> None:
     db = tmp_path / "ui.sqlite"
     device_discovery_store.upsert_ui_preference(
-        db, backend="sonos", canonical_key="RINCON_A", exclude_from_global=False,
+        db,
+        backend="sonos",
+        canonical_key="RINCON_A",
+        exclude_from_global=False,
         hide_on_mobile=False,
     )
     zone = _FakeSonosZone("RINCON_A", "Kitchen", is_playing=True)

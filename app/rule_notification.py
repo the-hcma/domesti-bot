@@ -63,8 +63,7 @@ def build_rule_notification_bodies(
     safe_label = escape(rule.label, quote=False)
     safe_id = escape(rule.id, quote=False)
     html_parts = [
-        f"<p>The automation rule <strong>{safe_label}</strong> "
-        f"(<code>{safe_id}</code>) just fired.</p>",
+        f"<p>The automation rule <strong>{safe_label}</strong> (<code>{safe_id}</code>) just fired.</p>",
     ]
     if notification_detail:
         safe_detail = escape(notification_detail, quote=False).replace("\n", "<br>")
@@ -87,8 +86,7 @@ def build_rule_notification_bodies(
         )
     else:
         html_parts.append(
-            "<p>Open Automations → Status in domesti-bot for live condition "
-            "details.</p>",
+            "<p>Open Automations → Status in domesti-bot for live condition details.</p>",
         )
     if instance_url is not None:
         safe_instance = escape(instance_url, quote=True)

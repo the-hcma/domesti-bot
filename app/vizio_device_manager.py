@@ -336,9 +336,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             return False
         rows = device_discovery_store.load_vizio_tvs(self._discovery_cache_path)
         if not rows:
-            _LOGGER.info(
-                "Vizio reload_from_cache: empty cache; keeping prior device map"
-            )
+            _LOGGER.info("Vizio reload_from_cache: empty cache; keeping prior device map")
             return False
 
         targets: list[VizioTvEndpoint] = []
@@ -355,10 +353,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             )
         token_targets = [ep for ep in targets if self._resolve_token(ep)[0]]
         if not token_targets:
-            _LOGGER.info(
-                "Vizio reload_from_cache: no cached TVs with auth tokens; "
-                "keeping prior device map"
-            )
+            _LOGGER.info("Vizio reload_from_cache: no cached TVs with auth tokens; keeping prior device map")
             return False
 
         if self._session is None or self._session.closed:
@@ -373,9 +368,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 token, _source = self._resolve_token(endpoint)
                 tv, _unreachable = await self._connect_target(endpoint, token)
                 if tv is None:
-                    raise RuntimeError(
-                        f"Vizio reload_from_cache: failed to connect {endpoint.device_id}"
-                    )
+                    raise RuntimeError(f"Vizio reload_from_cache: failed to connect {endpoint.device_id}")
                 connected.append(tv)
         except Exception:
             for tv in connected:
@@ -555,8 +548,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
     async def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice:
         """Return a cached off tile when SmartCast is unreachable at bootstrap."""
         _LOGGER.info(
-            "Vizio TV %s bootstrap: SmartCast unreachable at %s:%s; "
-            "registering as off",
+            "Vizio TV %s bootstrap: SmartCast unreachable at %s:%s; registering as off",
             endpoint.device_id,
             endpoint.host,
             endpoint.port,
@@ -589,10 +581,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 return True
             if endpoint.mac and tv.mac and endpoint.mac == tv.mac:
                 return True
-            if (
-                tv.endpoint.host == endpoint.host
-                and tv.endpoint.port == endpoint.port
-            ):
+            if tv.endpoint.host == endpoint.host and tv.endpoint.port == endpoint.port:
                 return True
         return False
 

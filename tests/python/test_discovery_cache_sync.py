@@ -84,9 +84,7 @@ async def test_maybe_sync_noop_when_host_sets_match(tmp_path: Path) -> None:
 
     runtime.reset()
     with patch.object(mgr, "reload_from_cache", AsyncMock()) as reload:
-        changed = await maybe_sync_discovery_cache(
-            _state(mgr, cache_path=db)
-        )
+        changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
     assert changed is False
     reload.assert_not_awaited()
 
@@ -130,9 +128,7 @@ async def test_maybe_sync_reloads_and_restarts_watchers_on_drift(
             "restart_device_state_watchers",
             AsyncMock(),
         ) as restart:
-            changed = await maybe_sync_discovery_cache(
-                _state(mgr, cache_path=db)
-            )
+            changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
 
     assert changed is True
     assert {kd._kDevice.host for kd in mgr.switches} == {
@@ -186,16 +182,12 @@ async def test_maybe_sync_skips_retry_after_failed_fingerprint(
     ):
         first = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
         with patch.object(mgr, "reload_from_cache", AsyncMock()) as reload:
-            second = await maybe_sync_discovery_cache(
-                _state(mgr, cache_path=db)
-            )
+            second = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
 
     assert first is False
     assert second is False
     reload.assert_not_awaited()
-    assert runtime.discovery_cache_sync_failed[DeviceFamilyId.KASA.value] == frozenset(
-        {"192.168.1.10", "192.168.1.20"}
-    )
+    assert runtime.discovery_cache_sync_failed[DeviceFamilyId.KASA.value] == frozenset({"192.168.1.10", "192.168.1.20"})
 
 
 @pytest.mark.asyncio

@@ -19,12 +19,8 @@ from app.ui_compact_icon import resolve_compact_icon
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _COMPACT_ICONS_DIR = _REPO_ROOT / "app" / "api" / "static" / "icons" / "compact"
 _INDEX_HTML_PATH = _REPO_ROOT / "app" / "api" / "static" / "index.html"
-_COMPACT_LABEL_RULE_NEEDLE = (
-    '#app[data-layout="compact"] .tile-saturated-text .tile-saturated-label'
-)
-_COMFORTABLE_LABEL_RULE_NEEDLE = (
-    '#app[data-layout="comfortable"] .tile-saturated-label'
-)
+_COMPACT_LABEL_RULE_NEEDLE = '#app[data-layout="compact"] .tile-saturated-text .tile-saturated-label'
+_COMFORTABLE_LABEL_RULE_NEEDLE = '#app[data-layout="comfortable"] .tile-saturated-label'
 _LONG_DEVICE_LABEL = (
     "Basement workshop outlet strip north wall "
     "Basement workshop outlet strip south wall "
@@ -327,10 +323,7 @@ def _build_layout_probe_html(
 
 def _build_mock_kasa_compact_grid_probe_html(style_css: str) -> str:
     """Three-column Kasa grid with mock room names and per-label compact icons."""
-    tiles_markup = "\n".join(
-        _mock_kasa_tile_markup(label=label, tone=tone)
-        for label, tone in _MOCK_KASA_GRID_TILES
-    )
+    tiles_markup = "\n".join(_mock_kasa_tile_markup(label=label, tone=tone) for label, tone in _MOCK_KASA_GRID_TILES)
     safe_bulk = html.escape(_GLOBAL_BULK_LABEL, quote=True)
     return f"""<!doctype html>
 <html lang="en" data-theme="dark">
@@ -609,12 +602,7 @@ def test_compact_label_binary_search_sets_fitting_css_var(
         font_px = app_root.evaluate(_COMPACT_LABEL_BINARY_SEARCH_JS, bounds)
         assert font_px is not None
         assert _COMPACT_LABEL_FONT_MIN_PX <= font_px <= _COMPACT_LABEL_FONT_MAX_PX
-        assert (
-            app_root.evaluate(
-                "el => el.style.getPropertyValue('--compact-tile-label-px')"
-            )
-            == f"{font_px}px"
-        )
+        assert app_root.evaluate("el => el.style.getPropertyValue('--compact-tile-label-px')") == f"{font_px}px"
         _assert_long_label_contained_in_tile(
             page,
             layout="compact",
@@ -653,9 +641,7 @@ def test_compact_global_bulk_uses_dedicated_fitted_font_size(
         bulk = page.locator(".tile-header-global-off")
         bulk_font = bulk.evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
         assert bulk_font <= _COMPACT_BULK_FONT_MAX_PX + 0.5
-        bulk_px = app_root.evaluate(
-            "el => el.style.getPropertyValue('--compact-global-bulk-px')"
-        )
+        bulk_px = app_root.evaluate("el => el.style.getPropertyValue('--compact-global-bulk-px')")
         assert bulk_px.endswith("px")
         assert float(bulk_px.removesuffix("px")) <= _COMPACT_BULK_FONT_MAX_PX + 0.5
         _assert_compact_global_bulk_button_fits(page)
@@ -674,9 +660,7 @@ def test_compact_label_binary_search_shrinks_when_text_zone_is_short(
         device_label=_LONG_DEVICE_LABEL,
         style_css=style_css,
         include_global_bulk=False,
-        extra_style=(
-            '#app[data-layout="compact"] .tile-saturated-text { max-height: 2.5rem; }'
-        ),
+        extra_style=('#app[data-layout="compact"] .tile-saturated-text { max-height: 2.5rem; }'),
     )
     context = chromium_browser.new_context(
         viewport={"width": 320, "height": 568},
@@ -731,9 +715,7 @@ def test_mock_kasa_grid_compact_typography_fit_avoids_overflow(
         )
         assert font_px is not None
         assert _COMPACT_LABEL_FONT_MIN_PX <= font_px <= _COMPACT_LABEL_FONT_MAX_PX
-        bulk_font = page.locator(".tile-header-global-off").evaluate(
-            "el => parseFloat(getComputedStyle(el).fontSize)"
-        )
+        bulk_font = page.locator(".tile-header-global-off").evaluate("el => parseFloat(getComputedStyle(el).fontSize)")
         assert bulk_font <= _COMPACT_BULK_FONT_MAX_PX + 0.5
         _assert_all_compact_labels_contained_in_tiles(page)
         _assert_compact_global_bulk_button_fits(page)
