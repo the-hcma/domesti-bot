@@ -1,5 +1,5 @@
 ---
-description: Ship a PR end-to-end — local gates, submit, agent review loop, approve + operator email
+description: Ship a PR end-to-end — local gates, submit, agent review loop, operator email
 alwaysApply: true
 ---
 
@@ -17,18 +17,19 @@ rh="${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}"
 
 Configure `~/.config/agent-review.env` from `${rh}/etc/agent-review.env.example` (`AGENT_REVIEW_REPORT_TO`, SMTP).
 
+<!-- pr-ship-canonical-skill: https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/ship-and-review/SKILL.md -->
 <!-- pr-ship-canonical-rule: https://github.com/the-hcma/repository-helpers/blob/main/.cursor/rules/pr-ship-and-review.mdc -->
 
-**Canonical operator prompt (read first):** This file is a consumer summary. Exit codes,
-dual-timeout semantics, quota chains, and triage details are maintained in
+**Canonical playbook (read first):** This file is a consumer summary. Exit codes,
+early-complete semantics, quota chains, and triage details are maintained in
 repository-helpers and may change between releases.
 
-Agents **must** read the canonical rule before running the agent review loop:
+Agents **must** read the canonical Skill before running the agent review loop:
 
-- **GitHub (`main`):** https://github.com/the-hcma/repository-helpers/blob/main/.cursor/rules/pr-ship-and-review.mdc
-- **Local clone (when `${rh}` is synced to `main`):** `${rh}/.cursor/rules/pr-ship-and-review.mdc`
+- **GitHub (`main`):** https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/ship-and-review/SKILL.md
+- **Local clone (when `${rh}` is synced to `main`):** `${rh}/.cursor/skills/ship-and-review/SKILL.md`
 
-When this summary and the canonical rule disagree, follow the canonical rule.
+When this summary and the canonical Skill disagree, follow the canonical Skill.
 
 ## 1. Local quality gates (all must pass before submit)
 
@@ -36,8 +37,12 @@ Run this repository's quality gates from the stack worktree (tests, linters, etc
 
 ## 2. Commit and submit
 
+Only after §1 quality gates pass:
+
 ```bash
 gt create <stack>/<topic> -m 'feat: …'   # or gt modify -m '…'
+# Prefer this repo's submit wrapper if it runs quality gates; otherwise:
+# re-run §1 gates, then:
 gt submit --publish --no-interactive
 ```
 
@@ -65,9 +70,17 @@ Prefer the built-in loop:
 "${rh}/scripts/wait-for-agent-review" loop --pr <n>
 ```
 
-**Dual timeouts** (see `${rh}/etc/agent-review.env.example`): **15m** idle-success after
-all threads are addressed and CI is green; **12h** cap when review cycles never converge.
-Per-agent quota caches skip exhausted agents (CodeRabbit, Copilot, Bugbot).
+**Early complete:** when all threads are addressed, CI is green, there is **no** pending requested
+Copilot/Bugbot review, and CodeRabbit’s workflow is **not** running, the loop finishes — no
+mandatory idle dwell. **12h PR cap** (`AGENT_REVIEW_PR_TIMEOUT`) when review cycles never
+converge (exit **6** give-up). Per-agent quota caches skip exhausted agents (CodeRabbit, Copilot,
+Bugbot).
+
+**CodeRabbit is on_push:** a new push starts CodeRabbit — never post `@coderabbitai review`.
+If quota-limited, wait the cooldown with feedback polls (issue #369; default poll **60s**) +
+grace (default **60s**); only then, if still no real review on head, the loop may post a
+one-shot `@coderabbitai full review`. Rate-limit stubs are not reviews. Mid-cooldown pending
+feedback wakes the loop (exit **3**).
 
 When `loop` exits **3**, triage each unaddressed agent thread:
 
@@ -92,6 +105,8 @@ When `check` reports `complete_ready: true`:
 "${rh}/scripts/wait-for-agent-review" complete --pr <n>
 ```
 
-This **approves the PR as the authenticated gh user** and emails `AGENT_REVIEW_REPORT_TO`.
+`complete_ready` requires an agent sign-off on the current head (not a bare CodeRabbit
+commit status / rate-limit stub). This emails `AGENT_REVIEW_REPORT_TO`. It does **not**
+run `gh pr review --approve` (self-approve is skipped; merge stays an explicit operator step).
 
 Do **not** add `merge-it` unless the user explicitly confirms.
