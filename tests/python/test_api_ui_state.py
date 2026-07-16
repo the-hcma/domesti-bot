@@ -19,7 +19,7 @@ import os
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -27,12 +27,13 @@ from fastapi.testclient import TestClient
 from app import device_discovery_store
 from app.api.app import create_app
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIOperatorAlertOut, UIStateOut
-from app.api.ui_state import build_ui_state
-from app.operator_alerts import operator_alert_store
+from app.api.ui_state import build_ui_state, find_kasa_by_host
+from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
-from app.server_runtime import runtime
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
+from app.operator_alerts import operator_alert_store
+from app.server_runtime import runtime
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
 
@@ -151,6 +152,21 @@ def test_build_ui_state_emits_no_families_when_kasa_is_empty_and_no_tailwind() -
     state = _state(kasa_mgr=_fake_kasa_mgr([]))
     out = build_ui_state(state, cache_path=None)
     assert out == UIStateOut(families=[], operator_alert=None)
+
+
+def test_build_ui_state_omits_kasa_when_manager_not_initialized() -> None:
+    """Partial bootstrap: Kasa fetch failed, other families still ready."""
+
+    operator_alert_store.clear_smtp_notification_failure()
+    mgr = MagicMock(spec=KasaDeviceManager)
+    type(mgr).switches = PropertyMock(side_effect=NotInitializedError)
+    state = _state(
+        kasa_mgr=cast(KasaDeviceManager, mgr),
+        sonos_mgr=_fake_sonos_mgr([("RINCON_1", "Kitchen", True)]),
+    )
+    out = build_ui_state(state, cache_path=None)
+    assert [f.id for f in out.families] == ["sonos"]
+    assert find_kasa_by_host(cast(KasaDeviceManager, mgr), "192.168.1.1") is None
 
 
 def test_build_ui_state_includes_operator_alert() -> None:

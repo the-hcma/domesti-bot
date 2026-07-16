@@ -46,6 +46,7 @@ from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
 from typing import Any, Final
 
 from app.device_enums import DeviceFamilyId
+from app.device_manager import NotInitializedError
 from app.device_state_change import DeviceStateChangeDetector
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -111,7 +112,13 @@ class KasaPollingWatcher(DeviceStateWatcher):
 
     async def _refresh_once(self, *, stop: asyncio.Event) -> None:
         refreshes: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = []
-        for kd in self._mgr.switches:
+        try:
+            switches = self._mgr.switches
+        except NotInitializedError:
+            # Partial bootstrap: Kasa fetch failed while other families are ready.
+            # Skip this cycle so the shared watcher task keeps running.
+            return
+        for kd in switches:
             task_name = f"state-watcher-{DeviceFamilyId.KASA.value}-{kd.identifier}"
 
             async def _refresh_switch(device: Any = kd) -> None:

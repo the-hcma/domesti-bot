@@ -30,6 +30,7 @@ from pathlib import Path
 from app import device_discovery_store
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIOperatorAlertOut, UISonosStreamFavoriteOut, UIStateOut
 from app.device_enums import DeviceConditionState, DeviceFamilyId
+from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
@@ -167,11 +168,17 @@ async def _bulk_off_kasa_apply_impl(
     the excluded subset (also sorted). Hosts
     that are blank/whitespace are dropped silently — they can't be
     addressed and were already filtered out of :func:`build_ui_state`.
+    When Kasa discovery failed at boot (``NotInitializedError``), both
+    lists are empty — same as an empty switch set.
     """
 
     affected: list[str] = []
     skipped: list[str] = []
-    for kd in mgr.switches:
+    try:
+        switches = mgr.switches
+    except NotInitializedError:
+        return [], []
+    for kd in switches:
         host = (kd._kDevice.host or "").strip()
         if not host:
             continue
@@ -233,10 +240,18 @@ def _kasa_devices(
 
     ``mgr.switches`` already de-duplicates by ``id()``; the ``host`` is the
     canonical key for both ``ui_preferences`` and the API payload.
+
+    When bootstrap left the manager unfetched (Kasa family failed while
+    other backends succeeded), treat the family as empty so
+    ``GET /v1/ui/state`` stays usable instead of raising ``500``.
     """
 
     out: list[UIDeviceOut] = []
-    for kd in mgr.switches:
+    try:
+        switches = mgr.switches
+    except NotInitializedError:
+        return []
+    for kd in switches:
         host = (kd._kDevice.host or "").strip()
         if not host:
             continue
@@ -722,7 +737,11 @@ def find_kasa_by_host(mgr: KasaDeviceManager, host: str) -> KasaDevice | None:
     needle = host.strip()
     if not needle:
         return None
-    for kd in mgr.switches:
+    try:
+        switches = mgr.switches
+    except NotInitializedError:
+        return None
+    for kd in switches:
         if (kd._kDevice.host or "").strip() == needle:
             return kd
     return None

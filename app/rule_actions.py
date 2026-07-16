@@ -18,6 +18,7 @@ from app.api.ui_state import (
     find_vizio_by_id,
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType
+from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -465,7 +466,11 @@ def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | 
         return needle
     lower_needle = needle.lower()
     matches: list[str] = []
-    for kd in mgr.switches:
+    try:
+        switches = mgr.switches
+    except NotInitializedError:
+        return None
+    for kd in switches:
         host = (kd._kDevice.host or "").strip()
         if not host:
             continue

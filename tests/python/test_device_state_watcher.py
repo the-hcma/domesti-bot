@@ -23,10 +23,11 @@ from __future__ import annotations
 import asyncio
 import errno
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from app.device_manager import NotInitializedError
 from app.device_state_watcher import (
     DEFAULT_POLL_INTERVAL_S,
     DeviceStateWatcher,
@@ -239,6 +240,20 @@ async def test_kasa_watcher_logs_requests_wrapped_connect_error_without_tracebac
     assert warning_mock.call_count >= 1
     _, kwargs = warning_mock.call_args_list[0]
     assert kwargs.get("exc_info") is not True
+
+
+@pytest.mark.asyncio
+async def test_kasa_watcher_skips_cycle_when_manager_not_initialized() -> None:
+    mgr = MagicMock()
+    type(mgr).switches = PropertyMock(side_effect=NotInitializedError)
+    mgr.is_on = AsyncMock(return_value=True)
+    watcher = KasaPollingWatcher(mgr, interval_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await asyncio.sleep(0.05)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    cast(AsyncMock, mgr.is_on).assert_not_awaited()
 
 
 @pytest.mark.asyncio
