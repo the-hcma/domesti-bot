@@ -10,6 +10,7 @@ from app.wifi_home_presence import (
     WIFI_HOME_GEOFENCE_RADIUS_SCALE,
     effective_geofence_ids_containing_location,
     history_row_geofence_inside,
+    home_geofence_ids,
     location_accuracy_is_low,
     location_within_wifi_home_proximity,
     wifi_home_geofence_ids,
@@ -85,6 +86,12 @@ def test_wifi_home_geofence_ids_disabled_returns_empty() -> None:
     settings = _settings(wifi_home_presence_enabled=False, wifi_home_geofence_id="house")
     ids = wifi_home_geofence_ids(settings, [_house_geofence()])
     assert ids == frozenset()
+
+
+def test_home_geofence_ids_ignores_wifi_presence_toggle() -> None:
+    settings = _settings(wifi_home_presence_enabled=False, wifi_home_geofence_id="house")
+    ids = home_geofence_ids(settings, [_house_geofence()])
+    assert ids == frozenset({"house"})
 
 
 def test_wifi_home_geofence_ids_honors_explicit_geofence() -> None:

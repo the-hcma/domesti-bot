@@ -1456,16 +1456,17 @@ class VacationModeSettingsOut(BaseModel):
     """Top-level vacation-mode latch config in ``automation-rules.json``.
 
     When ``enabled`` is true, the process arms after configured users remain
-    far from home for ``hysteresis_s``, and disarms after that stops holding for
-    the same dwell. Operator-specific users / distances / recipients belong in
-    the gitignored operator bundle (#465); tracked examples use placeholders.
+    far from home for ``hysteresis_s``, and disarms when any of those users is
+    inside the home geofence. Operator-specific users / distances / recipients
+    belong in the gitignored operator bundle (#465); tracked examples use
+    placeholders.
     """
 
     enabled: bool = False
     hysteresis_s: float = Field(
         default=1800.0,
         ge=1.0,
-        description="Arm and disarm dwell seconds (same value both directions).",
+        description="Arm dwell seconds while every user_id stays far from home.",
     )
     min_distance_m: float = Field(
         default=80_000.0,
@@ -1478,6 +1479,13 @@ class VacationModeSettingsOut(BaseModel):
         description="Reject fixes with worse horizontal accuracy (fail closed).",
     )
     notification_emails: list[str] = Field(default_factory=list)
+    notify_on_transition: bool = Field(
+        default=True,
+        description=(
+            "When true, email notification_emails on arm and disarm edges. "
+            "Anomaly device emails while armed are unaffected."
+        ),
+    )
     user_ids: list[str] = Field(default_factory=list)
 
 

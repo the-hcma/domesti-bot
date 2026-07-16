@@ -9,7 +9,7 @@
     "Geofence ids must match Automations → Geofences (house is typical for home; west-point for West Point).",
     "Edge-triggered rules that use geofence conditions (users_inside_geofence / users_outside_geofence) rely on accuracy_edge_grace_s (default 120 s). Poor horizontal GPS accuracy can block enter/leave edges without grace; the evaluator also reconciles sustained GPS inside/outside streaks after 10 min.",
     "SMTP must be configured under Automations → Mail for notification emails to send.",
-    "vacation_mode (optional top-level block; also editable under Automations → Vacation) is a sticky far-from-home latch: when enabled, arms after all user_ids stay ≥ min_distance_m from settings_location home for hysteresis_s (default 1800), and disarms when that stops holding for the same dwell; emails notification_emails on both edges. Persists armed + dwell clocks across restart. Leave enabled false in the example; operator wiring is local (#465). Anomaly device emails while armed are a separate feature (#464).",
+    "vacation_mode (optional top-level block; also editable under Automations → Vacation) is a sticky latch: when enabled, arms after all user_ids stay ≥ min_distance_m from settings_location home for hysteresis_s (default 1800), and disarms when any of those users is inside the home geofence (wifi_home_geofence_id or geofences containing home lat/lon). Being closer than min_distance_m without entering the home geofence does not disarm. Without a resolvable home geofence the latch will not arm, and if already armed it fail-safe disarms. notify_on_transition (default true) emails notification_emails on arm/disarm edges; anomaly device emails while armed are separate (#464). Persists armed + far_since across restart. Leave enabled false in the example; operator wiring is local (#465).",
     "Rule 1 fires when Henrique OR Kristen enters house after sunset (arrival edge, not merely present at sunset).",
     "Rule 2 (evening-lights-off-both-home) runs every 10 min after sunset: when both have been home 10+ min and either arrival light is still on, turn both off.",
     "Rule 3 (evening-interior-lights-on-anyone-home) uses triggers [edge_true, scheduled] and arms from 25 min before sunset until midnight: at the window open it evaluates once — if Henrique OR Kristen is already home, interior lamps turn on; otherwise the next home geofence enter by either person fires the rule (once per local day). Not a periodic poll.",
@@ -32,7 +32,8 @@
     "min_distance_m": 80000,
     "hysteresis_s": 1800,
     "min_location_accuracy_m": 50,
-    "notification_emails": ["operator@example.com"]
+    "notification_emails": ["operator@example.com"],
+    "notify_on_transition": true
   },
   "rules": [
     {

@@ -456,6 +456,7 @@ export interface VacationModeSettingsOut {
   min_distance_m: number;
   min_location_accuracy_m: number;
   notification_emails: string[];
+  notify_on_transition: boolean;
   user_ids: string[];
 }
 

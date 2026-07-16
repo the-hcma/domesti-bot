@@ -213,6 +213,7 @@ export function createMockStoreSeed(): MockStoreSeed {
       min_distance_m: 80_000,
       min_location_accuracy_m: 50,
       notification_emails: ["operator@example.com"],
+      notify_on_transition: true,
       user_ids: ["henrique", "kristen"],
     },
     smtp_config: null,
