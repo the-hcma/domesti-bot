@@ -1,0 +1,44 @@
+---
+description: Assert user-facing message strings via shared constants
+alwaysApply: true
+---
+
+# Test assertions for user-facing messages
+
+When tests assert the contents of user-facing messages (email bodies, SMTP
+subjects, toast/status copy, API `detail` / `message` strings, provenance
+footers), **do not hard-code the prose in the test**.
+
+## Pattern
+
+1. Define the string once as a **public module-level constant** next to the
+   production code that emits it (same module or a small shared messages
+   module).
+2. Use that constant in the builder / sender.
+3. Import the constant in the test and assert against it
+   (`assert SOME_CONSTANT in body`).
+
+```python
+# app/vacation_mode.py
+VACATION_SETTINGS_TEST_PREAMBLE = (
+    "This is a test email from Automations → Vacation."
+)
+
+# tests/python/test_vacation_mode.py
+from app.vacation_mode import VACATION_SETTINGS_TEST_PREAMBLE
+
+assert VACATION_SETTINGS_TEST_PREAMBLE in body
+```
+
+## Why
+
+Wording tweaks then update one constant; tests keep locking the contract
+without churning duplicate literals.
+
+## Exceptions
+
+- Protocol / wire literals required for interoperability (HTTP status text from
+  third parties, upstream API enum strings).
+- One-off assertions that the message *contains a dynamic value* (device id,
+  timestamp) — those fragments stay inline; the surrounding template still
+  comes from a constant when practical.

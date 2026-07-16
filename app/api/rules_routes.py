@@ -57,8 +57,11 @@ from app.rules_store import (
     set_user_home_wifi,
     user_exists,
 )
-from app.device_enums import VacationEmailSource
-from app.vacation_mode import send_vacation_mode_transition_email
+from app.device_enums import DeviceFamilyId, VacationEmailSource, VacationModeTestEmailKind
+from app.vacation_mode import (
+    send_vacation_mode_anomaly_email,
+    send_vacation_mode_transition_email,
+)
 from app.vacation_mode_store import load_vacation_mode_state
 
 router = APIRouter(prefix="/v1/rules", tags=["rules"])
@@ -211,19 +214,31 @@ async def post_rules_settings_vacation_mode_test(
     body: VacationModeTestEmailIn,
     request: Request,
 ) -> VacationModeTestEmailOut:
-    """Send a sample vacation on/off email without flipping the latch."""
+    """Send a sample vacation arm / disarm / anomaly email without flipping the latch."""
     cache_path = _require_discovery_cache(request)
     try:
         settings = load_vacation_mode_settings()
     except AutomationRulesLoadError as exc:
         raise _automation_rules_http_error(exc) from exc
     try:
-        sent = send_vacation_mode_transition_email(
-            cache_path,
-            armed=body.armed,
-            settings=settings,
-            source=VacationEmailSource.SETTINGS_TEST,
-        )
+        if body.kind == VacationModeTestEmailKind.ANOMALY:
+            sent = send_vacation_mode_anomaly_email(
+                cache_path,
+                settings=settings,
+                family_id=DeviceFamilyId.KASA,
+                device_id="sample-switch",
+                previous=False,
+                current=True,
+                observed_at=datetime.now(UTC),
+                source=VacationEmailSource.SETTINGS_TEST,
+            )
+        else:
+            sent = send_vacation_mode_transition_email(
+                cache_path,
+                armed=body.kind == VacationModeTestEmailKind.ARM,
+                settings=settings,
+                source=VacationEmailSource.SETTINGS_TEST,
+            )
     except Exception as exc:
         return VacationModeTestEmailOut(
             ok=False,
@@ -233,14 +248,13 @@ async def post_rules_settings_vacation_mode_test(
         return VacationModeTestEmailOut(
             ok=False,
             message=(
-                "Vacation transition email was skipped — configure notification_emails "
+                "Vacation sample email was skipped — configure notification_emails "
                 "and SMTP under Automations → Mail"
             ),
         )
-    kind = "on" if body.armed else "off"
     return VacationModeTestEmailOut(
         ok=True,
-        message=f"Vacation mode {kind} test email sent",
+        message=f"Vacation mode {body.kind.value} test email sent",
     )
 
 

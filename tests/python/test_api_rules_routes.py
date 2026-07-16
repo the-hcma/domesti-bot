@@ -307,11 +307,38 @@ def test_vacation_mode_test_email_does_not_flip_latch(
     ) as send:
         response = client.post(
             "/v1/rules/settings/vacation-mode/test",
-            json={"armed": True},
+            json={"kind": "arm"},
         )
     assert response.status_code == HTTPStatus.OK
     assert response.json()["ok"] is True
+    assert response.json()["message"] == "Vacation mode arm test email sent"
     send.assert_called_once()
     assert send.call_args.kwargs["armed"] is True
     assert send.call_args.kwargs["source"].value == "settings_test"
     assert load_vacation_mode_state(db).armed is False
+
+
+def test_vacation_mode_test_email_anomaly_sample(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "automation-rules.json"
+    path.write_text(_EXAMPLE_BUNDLE.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(path))
+    db = tmp_path / "discovery.sqlite"
+    client = _client(db)
+
+    with patch(
+        "app.api.rules_routes.send_vacation_mode_anomaly_email",
+        return_value=True,
+    ) as send:
+        response = client.post(
+            "/v1/rules/settings/vacation-mode/test",
+            json={"kind": "anomaly"},
+        )
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["ok"] is True
+    assert response.json()["message"] == "Vacation mode anomaly test email sent"
+    send.assert_called_once()
+    assert send.call_args.kwargs["source"].value == "settings_test"
+    assert send.call_args.kwargs["device_id"] == "sample-switch"

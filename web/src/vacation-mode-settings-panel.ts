@@ -182,19 +182,22 @@ export async function mountVacationModeSettingsPanel(
 
   const testRow = document.createElement("div");
   testRow.className = "rules-mail-test-row";
-  const testArmed = document.createElement("select");
-  const optOn = document.createElement("option");
-  optOn.value = "true";
-  optOn.textContent = "Sample: vacation mode on";
-  const optOff = document.createElement("option");
-  optOff.value = "false";
-  optOff.textContent = "Sample: vacation mode off";
-  testArmed.append(optOn, optOff);
+  const testKind = document.createElement("select");
+  const optArm = document.createElement("option");
+  optArm.value = "arm";
+  optArm.textContent = "Sample: arm (vacation on)";
+  const optDisarm = document.createElement("option");
+  optDisarm.value = "disarm";
+  optDisarm.textContent = "Sample: disarm (vacation off)";
+  const optAnomaly = document.createElement("option");
+  optAnomaly.value = "anomaly";
+  optAnomaly.textContent = "Sample: anomaly (device change)";
+  testKind.append(optArm, optDisarm, optAnomaly);
   const testBtn = document.createElement("button");
   testBtn.type = "button";
   testBtn.className = "btn btn-secondary";
   testBtn.textContent = "Send test email";
-  testRow.append(testArmed, testBtn);
+  testRow.append(testKind, testBtn);
 
   form.append(
     enabledField,
@@ -213,7 +216,7 @@ export async function mountVacationModeSettingsPanel(
     const hasEmails = parseEmailList(emailsInput.value).length > 0;
     saveBtn.disabled = busy;
     testBtn.disabled = busy || !hasEmails;
-    testArmed.disabled = busy;
+    testKind.disabled = busy;
     enabledSelect.disabled = busy;
   };
   syncActionEnabled();
@@ -291,9 +294,9 @@ export async function mountVacationModeSettingsPanel(
     syncActionEnabled();
     status.hidden = false;
     status.textContent = "Sending test email…";
-    const armed = testArmed.value === "true";
+    const kind = testKind.value as "arm" | "disarm" | "anomaly";
     void dataSource
-      .sendVacationModeTestEmail({ armed })
+      .sendVacationModeTestEmail({ kind })
       .then((result) => {
         if (result.ok) {
           status.textContent = result.message;

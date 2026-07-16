@@ -15,6 +15,8 @@ from app.expected_device_change import (
     mark_expected_device_change,
 )
 from app.vacation_mode import (
+    VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER,
+    VACATION_SETTINGS_TEST_PREAMBLE,
     _vacation_anomaly_debounce,
     build_vacation_mode_anomaly_bodies,
     format_vacation_bool_device_state,
@@ -288,6 +290,50 @@ def test_send_vacation_mode_anomaly_email_uses_smtp_stack(tmp_path: Path) -> Non
     assert "Sent by: domesti-bot · Vacation mode (device anomaly)" in body
     assert VacationEmailSource.ANOMALY.value == "anomaly"
     alerts.clear_smtp_notification_failure.assert_called_once()
+    dispose_engine(db)
+
+
+def test_send_vacation_mode_anomaly_test_email_marks_subject_and_body(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "discovery.sqlite"
+    clear_bootstrap_cache()
+    smtp_config = MagicMock()
+    smtp_config.from_address = "noreply@example.com"
+    smtp_config.host = "smtp.example.com"
+    smtp_config.mail_domain = "example.com"
+    smtp_config.port = 587
+    smtp_config.username = "user"
+    delivery = MagicMock()
+    delivery.format_for_log.return_value = "recipient_count=1"
+    observed = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    with (
+        patch("app.vacation_mode.load_smtp_config", return_value=smtp_config),
+        patch("app.vacation_mode.smtp_send_ready", return_value=True),
+        patch("app.vacation_mode.resolve_password_for_send", return_value="secret"),
+        patch(
+            "app.vacation_mode.deliver_email_message",
+            return_value=delivery,
+        ) as deliver,
+        patch("app.vacation_mode.operator_alert_store"),
+    ):
+        sent = send_vacation_mode_anomaly_email(
+            db,
+            settings=_settings(),
+            family_id=DeviceFamilyId.KASA,
+            device_id="sample-switch",
+            previous=False,
+            current=True,
+            observed_at=observed,
+            source=VacationEmailSource.SETTINGS_TEST,
+        )
+    assert sent is True
+    message = deliver.call_args.args[1]
+    assert message["Subject"].startswith("domesti-bot [test] vacation anomaly:")
+    body = message.get_body(preferencelist=("plain",)).get_content()
+    assert VACATION_SETTINGS_TEST_PREAMBLE in body
+    assert VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER in body
+    assert "Sent by: domesti-bot · Automations → Vacation (test email)" in body
     dispose_engine(db)
 
 

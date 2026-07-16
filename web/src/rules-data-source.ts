@@ -471,10 +471,9 @@ export class MockRulesDataSource implements RulesDataSource {
   async sendVacationModeTestEmail(
     input: VacationModeTestEmailIn,
   ): Promise<VacationModeTestEmailOut> {
-    const kind = input.armed ? "on" : "off";
     return {
       ok: true,
-      message: `Vacation mode ${kind} test email queued (mock — no message sent)`,
+      message: `Vacation mode ${input.kind} test email queued (mock — no message sent)`,
     };
   }
 
