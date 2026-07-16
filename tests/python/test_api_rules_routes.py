@@ -264,6 +264,7 @@ def test_get_and_put_vacation_mode_settings(
     assert body["enabled"] is False
     assert body["armed"] is False
     assert body["hysteresis_s"] == 1800
+    assert body["notify_on_transition"] is True
 
     put = client.put(
         "/v1/rules/settings/vacation-mode",
@@ -274,16 +275,19 @@ def test_get_and_put_vacation_mode_settings(
             "hysteresis_s": 120,
             "min_location_accuracy_m": 40,
             "notification_emails": ["ops@example.com"],
+            "notify_on_transition": False,
         },
     )
     assert put.status_code == HTTPStatus.OK
     assert put.json()["enabled"] is True
     assert put.json()["min_distance_m"] == 90_000
+    assert put.json()["notify_on_transition"] is False
     assert put.json()["armed"] is False
 
     again = client.get("/v1/rules/settings/vacation-mode")
     assert again.status_code == HTTPStatus.OK
     assert again.json()["notification_emails"] == ["ops@example.com"]
+    assert again.json()["notify_on_transition"] is False
 
 
 def test_vacation_mode_test_email_does_not_flip_latch(

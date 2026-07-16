@@ -1,10 +1,14 @@
-"""Sticky vacation-mode latch: far-from-home hysteresis with transition emails.
+"""Sticky vacation-mode latch: far-from-home arm, home-geofence disarm.
 
 Config lives in the automation-rules bundle (``vacation_mode``). While
 ``enabled`` is true, the latch arms when every configured user remains at least
-``min_distance_m`` from home for ``hysteresis_s`` (default 1800), and disarms when
-that predicate stops holding for the same dwell. Transition emails go to
-``notification_emails`` on both edges.
+``min_distance_m`` from home for ``hysteresis_s`` (default 1800), and disarms
+when any of those users is inside the configured home geofence (explicit
+``wifi_home_geofence_id`` or geofences containing settings home lat/lon). Being
+closer than ``min_distance_m`` without entering the home geofence does **not**
+disarm. When no home geofence resolves, the latch will not arm; if already
+armed it fail-safe disarms. Transition emails go to ``notification_emails`` on
+both edges when ``notify_on_transition`` is true (default).
 
 While the latch is **armed** and ``enabled`` is true, unmarked device-state
 transitions (not covered by UI/rule :mod:`app.expected_device_change` marks)
@@ -38,7 +42,11 @@ from app.device_enums import DeviceFamilyId, VacationEmailSource
 from app.expected_device_change import consume_expected_device_change
 from app.home_location import try_resolve_home_location
 from app.operator_alerts import operator_alert_store
-from app.rule_conditions import RuleEvaluationContext, users_min_distance_from_home_met
+from app.rule_conditions import (
+    RuleEvaluationContext,
+    users_any_inside_home_geofence,
+    users_min_distance_from_home_met,
+)
 from app.smtp_service import SmtpConnectionParams, deliver_email_message, smtp_friendly_error
 from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
 from app.vacation_mode_store import (
@@ -46,6 +54,7 @@ from app.vacation_mode_store import (
     load_vacation_mode_state,
     save_vacation_mode_state,
 )
+from app.wifi_home_presence import home_geofence_ids
 
 DEFAULT_VACATION_ANOMALY_DEBOUNCE_S = 30.0
 DEFAULT_VACATION_HYSTERESIS_S = 1800.0
@@ -110,35 +119,37 @@ def build_vacation_mode_transition_bodies(
     source: VacationEmailSource,
 ) -> tuple[str, str]:
     """Return ``(plain_text, html)`` bodies for a vacation on/off notification."""
-    distance_label = _format_vacation_distance_m(settings.min_distance_m)
-    wait_label = _format_vacation_duration_s(settings.hysteresis_s)
     users_label = _format_vacation_user_ids(settings.user_ids)
     home_label = _format_vacation_home_label()
     is_test = source == VacationEmailSource.SETTINGS_TEST
 
     if armed:
+        distance_label = _format_vacation_distance_m(settings.min_distance_m)
+        wait_label = _format_vacation_duration_s(settings.hysteresis_s)
         headline = "Vacation mode is now on."
         why = (
             f"{users_label} stayed at least {distance_label} from {home_label} "
             f"for {wait_label}, so vacation mode turned on."
         )
-        wait_key = "Wait before turning on"
+        facts = [
+            f"People: {users_label}",
+            f"Distance from home: {distance_label}",
+            f"Wait before turning on: {wait_label}",
+            f"Home: {home_label}",
+        ]
     else:
         headline = "Vacation mode is now off."
         why = (
-            f"The far-from-home check for {users_label} stopped holding for "
-            f"{wait_label} (threshold {distance_label} from {home_label}), "
-            "so vacation mode turned off."
+            f"At least one of {users_label} entered the home geofence at "
+            f"{home_label}, so vacation mode turned off."
         )
-        wait_key = "Wait before turning off"
+        facts = [
+            f"People: {users_label}",
+            f"Disarm: home geofence arrival",
+            f"Home: {home_label}",
+        ]
 
     provenance = _provenance_footer(source)
-    facts = [
-        f"People: {users_label}",
-        f"Distance from home: {distance_label}",
-        f"{wait_key}: {wait_label}",
-        f"Home: {home_label}",
-    ]
 
     plain_parts: list[str] = []
     if is_test:
@@ -177,33 +188,43 @@ def build_vacation_mode_transition_bodies(
 def evaluate_vacation_mode_tick(
     *,
     all_far: bool,
+    anyone_home: bool,
     hysteresis_s: float,
     now: float,
     state: VacationModeStateRecord,
 ) -> VacationModeTickResult:
-    """Advance hysteresis clocks and return the next latch state."""
+    """Advance arm dwell and return the next latch state.
+
+    Arms after ``all_far`` holds for ``hysteresis_s``. Disarms immediately when
+    ``anyone_home`` (a configured vacation user inside the home geofence). While
+    armed, failing ``all_far`` without ``anyone_home`` leaves the latch armed.
+    ``near_since`` is cleared; disarm no longer uses a near-home dwell clock.
+    """
     if hysteresis_s < 1.0:
         raise ValueError(f"Expected hysteresis_s >= 1.0, got {hysteresis_s}")
 
     armed = state.armed
     far_since = state.far_since
-    near_since = state.near_since
+    near_since: float | None = None
     transitioned_to: bool | None = None
 
-    if all_far:
-        near_since = None
-        if far_since is None:
-            far_since = now
-        if not armed and (now - far_since) >= hysteresis_s:
-            armed = True
-            transitioned_to = True
-    else:
+    if anyone_home:
         far_since = None
-        if near_since is None:
-            near_since = now
-        if armed and (now - near_since) >= hysteresis_s:
+        if armed:
             armed = False
             transitioned_to = False
+    elif not armed:
+        if all_far:
+            if far_since is None:
+                far_since = now
+            if (now - far_since) >= hysteresis_s:
+                armed = True
+                transitioned_to = True
+        else:
+            far_since = None
+    else:
+        # Armed and nobody home — stay armed even when not all_far.
+        far_since = None
 
     return VacationModeTickResult(
         armed=armed,
@@ -499,8 +520,46 @@ def tick_vacation_mode(
         min_location_accuracy_m=settings.min_location_accuracy_m,
         user_ids=settings.user_ids,
     )
+    try:
+        location_settings = load_settings_location()
+    except Exception:
+        _LOGGER.exception(
+            "[vacation] failed to load settings location for home geofence check",
+        )
+        home_ids: frozenset[str] = frozenset()
+    else:
+        home_ids = home_geofence_ids(location_settings, ctx.geofences)
+    if not home_ids:
+        fail_safe_disarm = False
+        if previous.armed:
+            _LOGGER.warning(
+                "[vacation] armed but no home geofence resolved — fail-safe "
+                "disarm (configure wifi_home_geofence_id or a geofence "
+                "containing home lat/lon)",
+            )
+            anyone_home = True
+            all_far = False
+            fail_safe_disarm = True
+        else:
+            # Debug: vacation ticks while misconfigured would otherwise spam WARNING.
+            _LOGGER.debug(
+                "[vacation] no home geofence resolved — skipping arm until "
+                "wifi_home_geofence_id or a geofence containing home lat/lon "
+                "is configured",
+            )
+            anyone_home = False
+            all_far = False
+    else:
+        fail_safe_disarm = False
+        anyone_home = users_any_inside_home_geofence(
+            ctx=ctx,
+            min_location_accuracy_m=settings.min_location_accuracy_m,
+            user_ids=settings.user_ids,
+            home_ids=home_ids,
+        )
     result = evaluate_vacation_mode_tick(
         all_far=all_far,
+        anyone_home=anyone_home,
         hysteresis_s=settings.hysteresis_s,
         now=now,
         state=previous,
@@ -524,23 +583,37 @@ def tick_vacation_mode(
             settings.min_distance_m,
             ",".join(settings.user_ids),
         )
-        try:
-            send_vacation_mode_transition_email(
-                cache_path,
-                armed=result.transitioned_to,
-                settings=settings,
-                source=VacationEmailSource.LATCH,
+        # Fail-safe disarm is not a home arrival — do not send the usual
+        # "entered the home geofence" transition body.
+        if fail_safe_disarm:
+            _LOGGER.info(
+                "[vacation] transition email skipped — fail-safe disarm "
+                "(no home geofence)",
             )
-        except Exception as exc:
-            operator_alert_store.record_smtp_notification_failure(
-                message=(
-                    "Vacation mode transition email failed after latch update "
-                    f"(armed={result.transitioned_to}): {exc}"
-                ),
-                reason_code="vacation_transition_email_failed",
-            )
-            _LOGGER.exception(
-                "[vacation] transition email raised after latch update armed=%s",
+        elif settings.notify_on_transition:
+            try:
+                send_vacation_mode_transition_email(
+                    cache_path,
+                    armed=result.transitioned_to,
+                    settings=settings,
+                    source=VacationEmailSource.LATCH,
+                )
+            except Exception as exc:
+                operator_alert_store.record_smtp_notification_failure(
+                    message=(
+                        "Vacation mode transition email failed after latch update "
+                        f"(armed={result.transitioned_to}): {exc}"
+                    ),
+                    reason_code="vacation_transition_email_failed",
+                )
+                _LOGGER.exception(
+                    "[vacation] transition email raised after latch update armed=%s",
+                    result.transitioned_to,
+                )
+        else:
+            _LOGGER.info(
+                "[vacation] transition email skipped — notify_on_transition=false "
+                "armed=%s",
                 result.transitioned_to,
             )
     return result

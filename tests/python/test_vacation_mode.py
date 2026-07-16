@@ -26,6 +26,7 @@ def test_evaluate_arms_only_after_hysteresis() -> None:
     disarmed = VacationModeStateRecord(armed=False, far_since=None, near_since=None)
     start = evaluate_vacation_mode_tick(
         all_far=True,
+        anyone_home=False,
         hysteresis_s=1800.0,
         now=1000.0,
         state=disarmed,
@@ -36,6 +37,7 @@ def test_evaluate_arms_only_after_hysteresis() -> None:
 
     still_waiting = evaluate_vacation_mode_tick(
         all_far=True,
+        anyone_home=False,
         hysteresis_s=1800.0,
         now=2799.0,
         state=VacationModeStateRecord(
@@ -49,6 +51,7 @@ def test_evaluate_arms_only_after_hysteresis() -> None:
 
     armed = evaluate_vacation_mode_tick(
         all_far=True,
+        anyone_home=False,
         hysteresis_s=1800.0,
         now=2800.0,
         state=VacationModeStateRecord(
@@ -61,34 +64,36 @@ def test_evaluate_arms_only_after_hysteresis() -> None:
     assert armed.transitioned_to is True
 
 
-def test_evaluate_disarms_only_after_hysteresis() -> None:
+def test_evaluate_disarms_immediately_when_anyone_home() -> None:
     armed = VacationModeStateRecord(armed=True, far_since=100.0, near_since=None)
-    first_near = evaluate_vacation_mode_tick(
+    disarmed = evaluate_vacation_mode_tick(
         all_far=False,
+        anyone_home=True,
         hysteresis_s=60.0,
         now=200.0,
         state=armed,
     )
-    assert first_near.armed is True
-    assert first_near.far_since is None
-    assert first_near.near_since == 200.0
-    assert first_near.transitioned_to is None
-
-    disarmed = evaluate_vacation_mode_tick(
-        all_far=False,
-        hysteresis_s=60.0,
-        now=260.0,
-        state=VacationModeStateRecord(
-            armed=True,
-            far_since=None,
-            near_since=200.0,
-        ),
-    )
     assert disarmed.armed is False
+    assert disarmed.far_since is None
+    assert disarmed.near_since is None
     assert disarmed.transitioned_to is False
 
 
-def test_evaluate_resets_dwell_when_predicate_flips() -> None:
+def test_evaluate_stays_armed_when_closer_but_not_home() -> None:
+    armed = VacationModeStateRecord(armed=True, far_since=100.0, near_since=None)
+    still_armed = evaluate_vacation_mode_tick(
+        all_far=False,
+        anyone_home=False,
+        hysteresis_s=60.0,
+        now=500.0,
+        state=armed,
+    )
+    assert still_armed.armed is True
+    assert still_armed.transitioned_to is None
+    assert still_armed.near_since is None
+
+
+def test_evaluate_resets_arm_dwell_when_not_all_far() -> None:
     waiting_to_arm = VacationModeStateRecord(
         armed=False,
         far_since=1000.0,
@@ -96,13 +101,28 @@ def test_evaluate_resets_dwell_when_predicate_flips() -> None:
     )
     flipped = evaluate_vacation_mode_tick(
         all_far=False,
+        anyone_home=False,
         hysteresis_s=1800.0,
         now=1500.0,
         state=waiting_to_arm,
     )
     assert flipped.far_since is None
-    assert flipped.near_since == 1500.0
+    assert flipped.near_since is None
     assert flipped.armed is False
+
+
+def test_evaluate_anyone_home_blocks_arm_dwell() -> None:
+    waiting = VacationModeStateRecord(armed=False, far_since=1000.0, near_since=None)
+    blocked = evaluate_vacation_mode_tick(
+        all_far=True,
+        anyone_home=True,
+        hysteresis_s=1800.0,
+        now=2800.0,
+        state=waiting,
+    )
+    assert blocked.armed is False
+    assert blocked.far_since is None
+    assert blocked.transitioned_to is None
 
 
 def test_vacation_mode_state_survives_round_trip(tmp_path: Path) -> None:
@@ -159,6 +179,9 @@ def test_tick_vacation_mode_arms_and_emails(tmp_path: Path) -> None:
     save_vacation_mode_state(db, armed=False, far_since=100.0, near_since=None)
     with (
         patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset({"house"})),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch("app.vacation_mode.users_any_inside_home_geofence", return_value=False),
         patch(
             "app.vacation_mode.send_vacation_mode_transition_email",
             return_value=True,
@@ -193,6 +216,9 @@ def test_tick_vacation_mode_disarms_and_emails(tmp_path: Path) -> None:
     save_vacation_mode_state(db, armed=True, far_since=None, near_since=50.0)
     with (
         patch("app.vacation_mode.users_min_distance_from_home_met", return_value=False),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset({"house"})),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch("app.vacation_mode.users_any_inside_home_geofence", return_value=True),
         patch(
             "app.vacation_mode.send_vacation_mode_transition_email",
             return_value=True,
@@ -212,6 +238,148 @@ def test_tick_vacation_mode_disarms_and_emails(tmp_path: Path) -> None:
     dispose_engine(db)
 
 
+def test_tick_vacation_mode_closer_but_not_home_stays_armed(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    clear_bootstrap_cache()
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=10.0,
+        min_distance_m=80_000.0,
+        notification_emails=["ops@example.com"],
+        user_ids=["henrique"],
+    )
+    save_vacation_mode_state(db, armed=True, far_since=None, near_since=None)
+    with (
+        patch("app.vacation_mode.users_min_distance_from_home_met", return_value=False),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset({"house"})),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch("app.vacation_mode.users_any_inside_home_geofence", return_value=False),
+        patch(
+            "app.vacation_mode.send_vacation_mode_transition_email",
+            return_value=True,
+        ) as send_email,
+    ):
+        result = tick_vacation_mode(
+            db,
+            ctx=MagicMock(),
+            now=60.0,
+            settings=settings,
+        )
+    assert result is not None
+    assert result.armed is True
+    assert result.transitioned_to is None
+    send_email.assert_not_called()
+    assert load_vacation_mode_state(db).armed is True
+    dispose_engine(db)
+
+
+def test_tick_notify_on_transition_false_skips_email(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    clear_bootstrap_cache()
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=30.0,
+        min_distance_m=80_000.0,
+        notification_emails=["operator@example.com"],
+        notify_on_transition=False,
+        user_ids=["henrique"],
+    )
+    save_vacation_mode_state(db, armed=False, far_since=100.0, near_since=None)
+    with (
+        patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset({"house"})),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch("app.vacation_mode.users_any_inside_home_geofence", return_value=False),
+        patch(
+            "app.vacation_mode.send_vacation_mode_transition_email",
+            return_value=True,
+        ) as send_email,
+    ):
+        result = tick_vacation_mode(
+            db,
+            ctx=MagicMock(),
+            now=130.0,
+            settings=settings,
+        )
+    assert result is not None
+    assert result.armed is True
+    assert result.transitioned_to is True
+    send_email.assert_not_called()
+    assert load_vacation_mode_state(db).armed is True
+    dispose_engine(db)
+
+
+def test_tick_no_home_geofence_fail_safe_disarms(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    clear_bootstrap_cache()
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=10.0,
+        min_distance_m=80_000.0,
+        notification_emails=["ops@example.com"],
+        user_ids=["henrique"],
+    )
+    save_vacation_mode_state(db, armed=True, far_since=None, near_since=None)
+    ctx = MagicMock()
+    ctx.geofences = ()
+    with (
+        patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset()),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch(
+            "app.vacation_mode.send_vacation_mode_transition_email",
+            return_value=True,
+        ) as send_email,
+    ):
+        result = tick_vacation_mode(
+            db,
+            ctx=ctx,
+            now=60.0,
+            settings=settings,
+        )
+    assert result is not None
+    assert result.armed is False
+    assert result.transitioned_to is False
+    send_email.assert_not_called()
+    assert load_vacation_mode_state(db).armed is False
+    dispose_engine(db)
+
+
+def test_tick_no_home_geofence_does_not_arm(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    clear_bootstrap_cache()
+    settings = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=30.0,
+        min_distance_m=80_000.0,
+        notification_emails=["ops@example.com"],
+        user_ids=["henrique"],
+    )
+    save_vacation_mode_state(db, armed=False, far_since=100.0, near_since=None)
+    ctx = MagicMock()
+    ctx.geofences = ()
+    with (
+        patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset()),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch(
+            "app.vacation_mode.send_vacation_mode_transition_email",
+            return_value=True,
+        ) as send_email,
+    ):
+        result = tick_vacation_mode(
+            db,
+            ctx=ctx,
+            now=130.0,
+            settings=settings,
+        )
+    assert result is not None
+    assert result.armed is False
+    assert result.transitioned_to is None
+    send_email.assert_not_called()
+    dispose_engine(db)
+
+
 def test_tick_mid_dwell_survives_reload(tmp_path: Path) -> None:
     db = tmp_path / "discovery.sqlite"
     clear_bootstrap_cache()
@@ -222,7 +390,12 @@ def test_tick_mid_dwell_survives_reload(tmp_path: Path) -> None:
         notification_emails=["operator@example.com"],
         user_ids=["henrique"],
     )
-    with patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True):
+    with (
+        patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset({"house"})),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch("app.vacation_mode.users_any_inside_home_geofence", return_value=False),
+    ):
         first = tick_vacation_mode(
             db,
             ctx=MagicMock(),
@@ -236,6 +409,9 @@ def test_tick_mid_dwell_survives_reload(tmp_path: Path) -> None:
     # Simulate process restart: new tick with persisted far_since continues dwell.
     with (
         patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset({"house"})),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch("app.vacation_mode.users_any_inside_home_geofence", return_value=False),
         patch(
             "app.vacation_mode.send_vacation_mode_transition_email",
             return_value=True,
@@ -346,6 +522,7 @@ def test_send_vacation_mode_test_email_marks_subject_and_body(tmp_path: Path) ->
     body = message.get_body(preferencelist=("plain",)).get_content()
     assert "This is a test email from Automations → Vacation." in body
     assert "Vacation mode was not actually changed." in body
+    assert "entered the home geofence" in body
     assert "Sent by: domesti-bot · Automations → Vacation (test email)" in body
     dispose_engine(db)
 
@@ -412,6 +589,9 @@ def test_tick_email_failure_records_operator_alert(tmp_path: Path) -> None:
     save_vacation_mode_state(db, armed=False, far_since=100.0, near_since=None)
     with (
         patch("app.vacation_mode.users_min_distance_from_home_met", return_value=True),
+        patch("app.vacation_mode.home_geofence_ids", return_value=frozenset({"house"})),
+        patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
+        patch("app.vacation_mode.users_any_inside_home_geofence", return_value=False),
         patch(
             "app.vacation_mode.send_vacation_mode_transition_email",
             side_effect=RuntimeError("smtp down"),

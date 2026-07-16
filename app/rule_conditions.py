@@ -205,6 +205,60 @@ def evaluate_rule_conditions_met(
     return evaluate_rule(rule, ctx).all_met
 
 
+def users_any_inside_home_geofence(
+    *,
+    ctx: RuleEvaluationContext,
+    min_location_accuracy_m: int,
+    user_ids: Sequence[str],
+    home_ids: frozenset[str],
+) -> bool:
+    """Return whether any listed user currently counts as inside a home geofence.
+
+    ``home_ids`` must come from :func:`app.wifi_home_presence.home_geofence_ids`
+    (or an empty set when unresolved). Uses the same accuracy / WiFi-home rules
+    as ``users_inside_geofence``. Fail closed when ``home_ids`` is empty.
+    """
+    if not home_ids:
+        return False
+    now_epoch = ctx.now.timestamp()
+    for geofence_id in home_ids:
+        geofence = next(
+            (row for row in ctx.geofences if row.geofence_id == geofence_id),
+            None,
+        )
+        if geofence is None or not geofence.enabled:
+            continue
+        for rule_user_id in user_ids:
+            roster_user_id = ctx.resolve_user_id(rule_user_id)
+            if roster_user_id is None:
+                continue
+            location = ctx.user_locations.get(roster_user_id)
+            if location is None:
+                continue
+            effective = _resolved_location_for_geofence_rule(
+                location,
+                ctx.user_location_history.get(roster_user_id, ()),
+                geofence_id=geofence_id,
+                min_accuracy_m=min_location_accuracy_m,
+                now_epoch=now_epoch,
+                ctx=ctx,
+                roster_user_id=roster_user_id,
+            )
+            if effective is None:
+                continue
+            counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+                effective,
+                geofence,
+                geofence_id,
+                min_location_accuracy_m,
+                ctx,
+                roster_user_id,
+            )
+            if counts_inside:
+                return True
+    return False
+
+
 def users_min_distance_from_home_met(
     *,
     ctx: RuleEvaluationContext,

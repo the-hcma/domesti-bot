@@ -31,6 +31,7 @@ function settingsFromForm(
   hysteresisS: number,
   minAccuracyM: number,
   emails: string[],
+  notifyOnTransition: boolean,
 ): VacationModeSettingsOut {
   return {
     enabled,
@@ -39,6 +40,7 @@ function settingsFromForm(
     hysteresis_s: hysteresisS,
     min_location_accuracy_m: minAccuracyM,
     notification_emails: emails,
+    notify_on_transition: notifyOnTransition,
   };
 }
 
@@ -66,7 +68,7 @@ export async function mountVacationModeSettingsPanel(
   const lead = document.createElement("p");
   lead.className = "settings-dialog-lead";
   lead.textContent =
-    "Turns on when every selected person stays beyond the distance from home for the wait time; emails recipients on both edges. SMTP is under Mail.";
+    "Turns on when every selected person stays beyond the distance from home for the wait time; turns off when any of them enters the home geofence (Automations → Geofences / wifi_home_geofence_id). Optional emails on those edges. SMTP is under Mail.";
 
   const armedBadge = document.createElement("p");
   armedBadge.className = "rules-vacation-armed";
@@ -93,7 +95,7 @@ export async function mountVacationModeSettingsPanel(
   const usersField = document.createElement("fieldset");
   usersField.className = "settings-dialog-fieldset";
   const usersLegend = document.createElement("legend");
-  usersLegend.textContent = "People (all must be far from home)";
+  usersLegend.textContent = "People (all must be far from home to arm)";
   usersField.append(usersLegend);
   const userChecks = new Map<string, HTMLInputElement>();
   const selected = new Set(current?.user_ids ?? []);
@@ -139,13 +141,17 @@ export async function mountVacationModeSettingsPanel(
   emailsInput.placeholder = "operator@example.com";
   emailsInput.value = (current?.notification_emails ?? []).join(", ");
 
+  const notifyCb = document.createElement("input");
+  notifyCb.type = "checkbox";
+  notifyCb.checked = current?.notify_on_transition !== false;
+
   const distanceField = document.createElement("label");
   distanceField.className = "settings-dialog-field";
   distanceField.append(createFieldLabel("Min distance from home (m)"), distanceInput);
 
   const hysteresisField = document.createElement("label");
   hysteresisField.className = "settings-dialog-field";
-  hysteresisField.append(createFieldLabel("Wait before arm/disarm (s)"), hysteresisInput);
+  hysteresisField.append(createFieldLabel("Wait before arm (s)"), hysteresisInput);
 
   const accuracyField = document.createElement("label");
   accuracyField.className = "settings-dialog-field";
@@ -158,6 +164,13 @@ export async function mountVacationModeSettingsPanel(
   const emailsField = document.createElement("label");
   emailsField.className = "settings-dialog-field";
   emailsField.append(createFieldLabel("Notification emails"), emailsInput);
+
+  const notifyRow = document.createElement("label");
+  notifyRow.className = "settings-dialog-checkbox";
+  notifyRow.append(
+    notifyCb,
+    document.createTextNode("Email on arm and disarm (anomaly alerts while armed are separate)"),
+  );
 
   const actions = document.createElement("div");
   actions.className = "settings-dialog-actions";
@@ -188,6 +201,7 @@ export async function mountVacationModeSettingsPanel(
     usersField,
     tuningRow,
     emailsField,
+    notifyRow,
     actions,
     testRow,
   );
@@ -236,6 +250,7 @@ export async function mountVacationModeSettingsPanel(
       hysteresis,
       Math.trunc(accuracy),
       parseEmailList(emailsInput.value),
+      notifyCb.checked,
     );
   };
 

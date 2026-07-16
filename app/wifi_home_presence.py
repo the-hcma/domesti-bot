@@ -121,6 +121,29 @@ def history_row_geofence_inside(
     return geofence.geofence_id in geofence_ids_containing_location(row, [geofence])
 
 
+def home_geofence_ids(
+    settings: SettingsLocationOut,
+    geofences: Sequence[GeofencePresenceTarget],
+) -> frozenset[str]:
+    """Return geofence ids that represent home for presence and vacation disarm.
+
+    Resolution order: explicit ``wifi_home_geofence_id`` when it names an enabled
+    geofence; otherwise enabled geofences whose radius contains settings home
+    lat/lon. Empty when home is unconfigured or no geofence matches.
+    """
+    enabled = [row for row in geofences if row.enabled]
+    if not enabled:
+        return frozenset()
+    explicit = (settings.wifi_home_geofence_id or "").strip()
+    if explicit:
+        if any(row.geofence_id == explicit for row in enabled):
+            return frozenset({explicit})
+        return frozenset()
+    if not settings.home_configured:
+        return frozenset()
+    return _geofence_ids_containing_point(settings.lat, settings.lon, enabled)
+
+
 def location_accuracy_is_low(
     accuracy_m: int | None,
     min_accuracy_m: int,
@@ -153,15 +176,7 @@ def wifi_home_geofence_ids(
     """Return geofence ids eligible for WiFi-at-home presence reconciliation."""
     if not settings.wifi_home_presence_enabled:
         return frozenset()
-    enabled = [row for row in geofences if row.enabled]
-    if not enabled:
-        return frozenset()
-    explicit = (settings.wifi_home_geofence_id or "").strip()
-    if explicit:
-        if any(row.geofence_id == explicit for row in enabled):
-            return frozenset({explicit})
-        return frozenset()
-    return _geofence_ids_containing_point(settings.lat, settings.lon, enabled)
+    return home_geofence_ids(settings, geofences)
 
 
 def wifi_home_presence_applies(
