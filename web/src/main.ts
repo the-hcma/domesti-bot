@@ -36,8 +36,8 @@ const DEVICE_PROPERTIES_EXCLUDE_LABEL =
 const DEVICE_PROPERTIES_HIDE_HELP =
   "Hide this tile on the compact (phone / tablet) layout. It remains visible and controllable on the desktop web UI.";
 const DEVICE_PROPERTIES_HIDE_LABEL = "Hide on phone / tablet";
-const DEVICE_PROPERTIES_LABEL_HINT = "Right-click to edit device properties";
 const DEVICE_PROPERTIES_LONG_PRESS_MS = 500;
+const DEVICE_PROPERTIES_MENU_HINT = "Right-click to edit device properties";
 
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
@@ -1864,7 +1864,6 @@ function appendSaturatedTileVisuals(
   const label = document.createElement("span");
   label.className = "tile-saturated-label";
   label.textContent = device.label;
-  label.title = DEVICE_PROPERTIES_LABEL_HINT;
 
   const stateCaption = compactHalfLayout ? null : tileStateCaption(device);
   const stateEl =
@@ -2235,6 +2234,7 @@ function createTileSaturatedHit(
     device.state === "open";
   hit.setAttribute("aria-pressed", isActive ? "true" : "false");
   hit.setAttribute("aria-label", compactTileAriaLabel(device));
+  hit.title = DEVICE_PROPERTIES_MENU_HINT;
   hit.disabled = !connected;
   appendSaturatedTileVisuals(hit, device, hitClassName === "tile-compact-hit");
   attachTileHitListeners(hit, device, controller);
