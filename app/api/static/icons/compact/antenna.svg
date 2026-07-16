@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Fishbone / Yagi antenna for Kasa plugs powering tuners (e.g. HDHomeRun). -->
+  <path d="M12 22V10"/>
+  <path d="M12 10L4 4"/>
+  <path d="M12 10l8-6"/>
+  <path d="M6 8h12"/>
+  <path d="M8 12h8"/>
+  <path d="M10 16h4"/>
+</svg>

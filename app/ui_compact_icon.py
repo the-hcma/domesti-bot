@@ -7,7 +7,8 @@ today — users often encode the room or object in the alias (``Kitchen lamp``).
 
 Resolution order for Kasa switches:
 
-1. **Object** tokens in the label (``lamp``, ``light``, ``plug``, ``fan``, …).
+1. **Object** tokens in the label (``lamp``, ``light``, ``plug``, ``fan``,
+   ``tailwind`` → remote, ``hdhomerun`` / ``tuner`` → antenna, …).
 2. **Room** tokens when the label names a space (``kitchen``, ``bedroom``, …).
 3. **Hardware model** prefix when the label is otherwise generic.
 4. Default ``bulb``.
@@ -19,6 +20,8 @@ import re
 
 # Multi-word object phrases (substring match, longest first).
 _OBJECT_PHRASE_RULES: tuple[tuple[str, str], ...] = (
+    ("garage tailwind", "remote"),
+    ("hd home run", "antenna"),
     ("night stand", "table"),
     ("nightstand", "table"),
 )
@@ -27,11 +30,13 @@ _OBJECT_PHRASE_RULES: tuple[tuple[str, str], ...] = (
 _OBJECT_WORD_RULES: tuple[tuple[str, str], ...] = (
     ("lamp", "lamp"),
     ("light", "light"),
+    ("lights", "light"),
     ("bulb", "bulb"),
     ("led", "led"),
 )
 
-# Other object substrings (no bare ``light`` / ``lamp`` here).
+# Other object substrings (no bare ``light`` / ``lamp`` / ``garage`` here —
+# bare ``garage`` stays a room token so ``Garage lights`` is not a remote).
 _OBJECT_SUBSTRING_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("chandelier", "sconce"), "bulb"),
     (("strip",), "strip"),
@@ -40,6 +45,8 @@ _OBJECT_SUBSTRING_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("pendant",), "pendant"),
     (("lantern",), "lantern"),
     (("desk",), "desk"),
+    (("hdhomerun", "tuner"), "antenna"),
+    (("tailwind",), "remote"),
 )
 
 # Whole-word room tokens (checked after object tokens).
