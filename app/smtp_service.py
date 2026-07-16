@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 import re
 import smtplib
 import socket
 from dataclasses import dataclass
 from email.message import EmailMessage
-from html import escape
-
-from app.outbound_email import provenance_footer, with_instance_hash
-
-_LOGGER = logging.getLogger(__name__)
 
 _SMTP_TIMEOUT_S = 10.0
 _QUEUE_ID_RE = re.compile(r"queued as ([0-9A-Za-z]+)", re.IGNORECASE)
@@ -184,69 +178,6 @@ def resolve_instance_url(
     if resolved != "":
         return resolved
     return instance_url_from_mail_domain(mail_domain)
-
-
-def send_test_email(
-    params: SmtpConnectionParams,
-    *,
-    instance_url: str | None = None,
-    to_address: str,
-) -> None:
-    """Send a test message using the given connection parameters. Raises on failure."""
-    recipient = to_address.strip()
-    if recipient == "":
-        raise ValueError("Expected recipient email, got empty value")
-    dashboard_url = resolve_instance_url(
-        instance_url=instance_url,
-        mail_domain=params.mail_domain,
-    )
-    mail_settings_url = ""
-    if dashboard_url != "":
-        mail_settings_url = with_instance_hash(dashboard_url, "#/automations/mail")
-    message = EmailMessage()
-    message["Subject"] = "domesti-bot [test] SMTP configuration"
-    message["From"] = params.from_address
-    message["To"] = recipient
-    plain_lines = [
-        "This is a test message from domesti-bot Settings → Mail.",
-        "SMTP is configured correctly.",
-        "No live state was changed.",
-    ]
-    html_lines = [
-        "<p>This is a test message from domesti-bot Settings → Mail.</p>",
-        "<p>SMTP is configured correctly.</p>",
-        "<p>No live state was changed.</p>",
-    ]
-    if mail_settings_url != "":
-        plain_lines.append(f"Instance: {dashboard_url.rstrip('/')}")
-        plain_lines.append(f"Open Automations → Mail: {mail_settings_url}")
-        safe_dash = escape(dashboard_url.rstrip("/"), quote=True)
-        safe_url = escape(mail_settings_url, quote=True)
-        html_lines.append(
-            f'<p>Instance: <a href="{safe_dash}">{safe_dash}</a></p>',
-        )
-        html_lines.append(
-            f'<p><a href="{safe_url}">Open Automations → Mail</a></p>',
-        )
-    elif dashboard_url != "":
-        plain_lines.append(f"Instance: {dashboard_url}")
-        safe_url = escape(dashboard_url, quote=True)
-        html_lines.append(
-            f'<p>Instance: <a href="{safe_url}">{safe_url}</a></p>',
-        )
-    provenance = provenance_footer(
-        subsystem="Settings → Mail",
-        trigger="test email",
-    )
-    plain_lines.extend(["", "—", provenance])
-    html_lines.append(f"<p><em>{escape(provenance, quote=False)}</em></p>")
-    message.set_content("\n\n".join(plain_lines) + "\n")
-    message.add_alternative("".join(html_lines), subtype="html")
-    delivery = _send_message(params, message)
-    _LOGGER.info(
-        "SMTP test email sent %s",
-        delivery.format_for_log(),
-    )
 
 
 def smtp_friendly_error(exc: Exception, *, host: str = "") -> str:

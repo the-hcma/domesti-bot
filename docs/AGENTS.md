@@ -419,9 +419,11 @@ Tracked examples and fixtures use `@example.com` only (see example-email-address
 
 ### Current senders
 
+Domain modules own subject + body facts. MIME assembly, SMTP param loading (for notification sends), delivery, and operator SMTP-failure alerts go through :mod:`app.outbound_email` (:func:`build_outbound_message`, :func:`load_outbound_smtp_params`, :func:`deliver_outbound_email`, :func:`record_outbound_smtp_failure` / :func:`clear_outbound_smtp_failure`). Transport (SSL/STARTTLS) stays in :mod:`app.smtp_service`.
+
 | Sender | Module |
 | --- | --- |
-| SMTP Settings test | `app/smtp_service.py` (`send_test_email`) |
+| SMTP Settings test | `app/outbound_email.py` (`send_test_email`) |
 | Vacation transition / Automations test | `app/vacation_mode.py` |
 | Vacation anomaly (live + test) | `app/vacation_mode.py` |
 | Rule fire notification | `app/rule_actions.py` → `app/rule_notification.py` |

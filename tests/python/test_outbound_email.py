@@ -9,10 +9,41 @@ import pytest
 from app.outbound_email import (
     automations_mail_url,
     automations_vacation_url,
+    build_outbound_message,
     provenance_footer,
     rule_fire_provenance_footer,
     with_instance_hash,
 )
+
+
+def test_build_outbound_message_sets_headers_and_bodies() -> None:
+    message = build_outbound_message(
+        from_address="noreply@example.com",
+        html_body="<p>Hello there</p>",
+        plain_body="Hello there\n",
+        subject="domesti-bot test subject",
+        to_addresses=["ops@example.com", " alerts@example.com ", ""],
+    )
+    assert message["Subject"] == "domesti-bot test subject"
+    assert message["From"] == "noreply@example.com"
+    assert message["To"] == "ops@example.com, alerts@example.com"
+    plain_part = message.get_body(preferencelist=("plain",))
+    assert plain_part is not None
+    assert plain_part.get_content() == "Hello there\n"
+    html_part = message.get_body(preferencelist=("html",))
+    assert html_part is not None
+    assert "<p>Hello there</p>" in html_part.get_content()
+
+
+def test_build_outbound_message_rejects_empty_recipients() -> None:
+    with pytest.raises(ValueError, match="at least one recipient"):
+        build_outbound_message(
+            from_address="noreply@example.com",
+            html_body="<p>body</p>",
+            plain_body="body",
+            subject="subject",
+            to_addresses=["", "   "],
+        )
 
 
 def test_provenance_footer_formats_subsystem_and_trigger() -> None:

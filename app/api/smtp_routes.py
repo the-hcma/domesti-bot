@@ -15,7 +15,8 @@ from app.api.schemas import (
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.db.secrets import SecretsConfigurationError
-from app.smtp_service import SmtpConnectionParams, send_test_email, smtp_friendly_error
+from app.outbound_email import send_test_email
+from app.smtp_service import SmtpConnectionParams, smtp_friendly_error
 from app.smtp_store import (
     SmtpConfigRecord,
     SmtpConfigSave,

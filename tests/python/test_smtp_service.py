@@ -5,13 +5,13 @@ from __future__ import annotations
 import smtplib
 from unittest.mock import MagicMock, patch
 
+from app.outbound_email import send_test_email
 from app.smtp_service import (
     SmtpConnectionParams,
     SmtpDeliveryResult,
     instance_url_from_mail_domain,
     normalize_instance_url,
     resolve_instance_url,
-    send_test_email,
     smtp_friendly_error,
 )
 

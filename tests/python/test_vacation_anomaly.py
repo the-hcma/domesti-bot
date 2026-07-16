@@ -14,6 +14,7 @@ from app.expected_device_change import (
     expected_device_changes,
     mark_expected_device_change,
 )
+from app.smtp_service import SmtpConnectionParams
 from app.vacation_mode import (
     VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER,
     VACATION_SETTINGS_TEST_PREAMBLE,
@@ -250,24 +251,19 @@ def test_handle_vacation_device_anomaly_skips_expected_mark(tmp_path: Path) -> N
 def test_send_vacation_mode_anomaly_email_uses_smtp_stack(tmp_path: Path) -> None:
     db = tmp_path / "discovery.sqlite"
     clear_bootstrap_cache()
-    smtp_config = MagicMock()
-    smtp_config.from_address = "noreply@example.com"
-    smtp_config.host = "smtp.example.com"
-    smtp_config.mail_domain = "example.com"
-    smtp_config.port = 587
-    smtp_config.username = "user"
     delivery = MagicMock()
     delivery.format_for_log.return_value = "recipient_count=1"
     observed = datetime(2026, 7, 15, 18, 30, tzinfo=UTC)
     with (
-        patch("app.vacation_mode.load_smtp_config", return_value=smtp_config),
-        patch("app.vacation_mode.smtp_send_ready", return_value=True),
-        patch("app.vacation_mode.resolve_password_for_send", return_value="secret"),
         patch(
-            "app.vacation_mode.deliver_email_message",
+            "app.vacation_mode.load_outbound_smtp_params",
+            return_value=_smtp_params(),
+        ),
+        patch(
+            "app.vacation_mode.deliver_outbound_email",
             return_value=delivery,
         ) as deliver,
-        patch("app.vacation_mode.operator_alert_store") as alerts,
+        patch("app.vacation_mode.clear_outbound_smtp_failure") as clear_failure,
     ):
         sent = send_vacation_mode_anomaly_email(
             db,
@@ -289,7 +285,7 @@ def test_send_vacation_mode_anomaly_email_uses_smtp_stack(tmp_path: Path) -> Non
     assert "2026-07-15 18:30:00 UTC" in body
     assert "Sent by: domesti-bot · Vacation mode (device anomaly)" in body
     assert VacationEmailSource.ANOMALY.value == "anomaly"
-    alerts.clear_smtp_notification_failure.assert_called_once()
+    clear_failure.assert_called_once()
     dispose_engine(db)
 
 
@@ -298,24 +294,19 @@ def test_send_vacation_mode_anomaly_test_email_marks_subject_and_body(
 ) -> None:
     db = tmp_path / "discovery.sqlite"
     clear_bootstrap_cache()
-    smtp_config = MagicMock()
-    smtp_config.from_address = "noreply@example.com"
-    smtp_config.host = "smtp.example.com"
-    smtp_config.mail_domain = "example.com"
-    smtp_config.port = 587
-    smtp_config.username = "user"
     delivery = MagicMock()
     delivery.format_for_log.return_value = "recipient_count=1"
     observed = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
     with (
-        patch("app.vacation_mode.load_smtp_config", return_value=smtp_config),
-        patch("app.vacation_mode.smtp_send_ready", return_value=True),
-        patch("app.vacation_mode.resolve_password_for_send", return_value="secret"),
         patch(
-            "app.vacation_mode.deliver_email_message",
+            "app.vacation_mode.load_outbound_smtp_params",
+            return_value=_smtp_params(),
+        ),
+        patch(
+            "app.vacation_mode.deliver_outbound_email",
             return_value=delivery,
         ) as deliver,
-        patch("app.vacation_mode.operator_alert_store"),
+        patch("app.vacation_mode.clear_outbound_smtp_failure"),
     ):
         sent = send_vacation_mode_anomaly_email(
             db,
@@ -344,4 +335,15 @@ def _settings() -> VacationModeSettingsOut:
         min_distance_m=80_000.0,
         notification_emails=["ops@example.com"],
         user_ids=["henrique"],
+    )
+
+
+def _smtp_params() -> SmtpConnectionParams:
+    return SmtpConnectionParams(
+        from_address="noreply@example.com",
+        host="smtp.example.com",
+        mail_domain="example.com",
+        password="secret",
+        port=587,
+        username="user",
     )
