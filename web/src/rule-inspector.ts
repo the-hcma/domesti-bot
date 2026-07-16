@@ -230,7 +230,11 @@ export function mountRuleInspectorPanel(
     for (const action of rule.device_actions) {
       const item = document.createElement("li");
       const label = resolveDeviceLabel(action.family_id, action.device_id, context);
-      item.textContent = `${action.family_id} · ${formatDeviceActionPhrase(action.action, label)}`;
+      const phrase = formatDeviceActionPhrase(action.action, label);
+      const delay = action.delay_s;
+      const delaySuffix =
+        delay !== undefined && delay !== null && delay > 0 ? ` (after ${delay}s)` : "";
+      item.textContent = `${action.family_id} · ${phrase}${delaySuffix}`;
       actionList.append(item);
     }
     actionsSection.append(actionList);

@@ -509,6 +509,43 @@ def test_devices_any_off_condition_rejects_empty_devices() -> None:
         DevicesAnyInStateCondition(type="devices_any_in_state", state=DeviceConditionState.OFF, devices=[])
 
 
+def test_rule_device_action_delay_s_rejects_negative() -> None:
+    with pytest.raises(ValidationError):
+        RuleDeviceActionOut(
+            action=RuleDeviceActionType.TURN_ON,
+            delay_s=-1,
+            device_id="Tuner",
+            family_id=DeviceFamilyId.KASA,
+        )
+
+
+def test_rule_device_action_delay_s_rejects_above_24h() -> None:
+    with pytest.raises(ValidationError):
+        RuleDeviceActionOut(
+            action=RuleDeviceActionType.TURN_ON,
+            delay_s=86_401,
+            device_id="Tuner",
+            family_id=DeviceFamilyId.KASA,
+        )
+
+
+def test_rule_device_action_delay_s_accepts_zero_and_max() -> None:
+    zero = RuleDeviceActionOut(
+        action=RuleDeviceActionType.TURN_OFF,
+        delay_s=0,
+        device_id="Tuner",
+        family_id=DeviceFamilyId.KASA,
+    )
+    capped = RuleDeviceActionOut(
+        action=RuleDeviceActionType.TURN_ON,
+        delay_s=86_400,
+        device_id="Tuner",
+        family_id=DeviceFamilyId.KASA,
+    )
+    assert zero.delay_s == 0
+    assert capped.delay_s == 86_400
+
+
 def test_devices_any_on_condition_rejects_empty_devices() -> None:
     with pytest.raises(ValidationError):
         DevicesAnyInStateCondition(type="devices_any_in_state", state=DeviceConditionState.ON, devices=[])

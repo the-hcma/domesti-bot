@@ -95,6 +95,24 @@ class MyTracksSettings(Base):
     username: Mapped[str] = mapped_column(String, nullable=False, default="")
 
 
+class RuleDeferredDeviceAction(Base):
+    """One pending delayed rule device action awaiting its ``due_at``.
+
+    Persisted so a ``delay_s`` follow-up (e.g. the HDHomeRun off -> on power
+    cycle) still runs after a process restart between the fire and the delay.
+    Rows are deleted once dispatched or when the owning rule is disabled/removed.
+    """
+
+    __tablename__ = "rule_deferred_device_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    action_json: Mapped[str] = mapped_column(Text, nullable=False)
+    due_at: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    fire_at: Mapped[float] = mapped_column(Float, nullable=False)
+    rule_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class RuleGeofence(Base):
     __tablename__ = "rule_geofences"
 

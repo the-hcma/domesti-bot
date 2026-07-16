@@ -350,6 +350,7 @@ class RulesHubController {
   ): {
     actionSelect: HTMLSelectElement;
     checkbox: HTMLInputElement;
+    delayInput: HTMLInputElement;
     device: RuleActionDeviceOut;
   }[] {
     const deviceActionState = new Map<string, RuleDeviceActionOut>();
@@ -365,6 +366,7 @@ class RulesHubController {
     const deviceRows: {
       actionSelect: HTMLSelectElement;
       checkbox: HTMLInputElement;
+      delayInput: HTMLInputElement;
       device: RuleActionDeviceOut;
     }[] = [];
     for (const familyId of [...byFamily.keys()].sort()) {
@@ -396,13 +398,29 @@ class RulesHubController {
         const defaultAction = actionOptionsForKind(device.kind)[0] ?? "turn_on";
         actionSelect.value = existingAction?.action ?? defaultAction;
         actionSelect.disabled = !checkbox.checked;
+        const delayInput = document.createElement("input");
+        delayInput.type = "number";
+        delayInput.min = "0";
+        delayInput.max = "86400";
+        delayInput.step = "1";
+        delayInput.placeholder = "delay s";
+        delayInput.title =
+          "Optional seconds after rule fire before this action runs (0 = immediate). Pending delays are saved and survive a server restart.";
+        delayInput.className = "rules-device-action-delay";
+        const existingDelay = existingAction?.delay_s;
+        delayInput.value =
+          existingDelay !== undefined && existingDelay !== null && existingDelay > 0
+            ? String(existingDelay)
+            : "";
+        delayInput.disabled = !checkbox.checked;
         checkbox.addEventListener("change", () => {
           actionSelect.disabled = !checkbox.checked;
+          delayInput.disabled = !checkbox.checked;
         });
-        label.append(checkbox, name, actionSelect);
+        label.append(checkbox, name, actionSelect, delayInput);
         row.append(label);
         group.append(row);
-        deviceRows.push({ actionSelect, checkbox, device });
+        deviceRows.push({ actionSelect, checkbox, delayInput, device });
       }
       actionsWrap.append(group);
     }
@@ -852,11 +870,19 @@ class RulesHubController {
         }
         const device_actions: RuleDeviceActionOut[] = deviceRows
           .filter((row) => row.checkbox.checked)
-          .map((row) => ({
-            family_id: row.device.family_id,
-            device_id: row.device.device_id,
-            action: row.actionSelect.value as RuleActionType,
-          }));
+          .map((row) => {
+            const delayRaw = row.delayInput.value.trim();
+            const delayParsed = delayRaw === "" ? 0 : Number(delayRaw);
+            const entry: RuleDeviceActionOut = {
+              family_id: row.device.family_id,
+              device_id: row.device.device_id,
+              action: row.actionSelect.value as RuleActionType,
+            };
+            if (Number.isFinite(delayParsed) && delayParsed > 0) {
+              entry.delay_s = Math.floor(delayParsed);
+            }
+            return entry;
+          });
         if (device_actions.length === 0) {
           showErrorToast("Select at least one device action.");
           return;

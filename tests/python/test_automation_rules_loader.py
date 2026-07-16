@@ -21,7 +21,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     bundle = load_automation_rules_bundle()
     assert bundle.version == 1
-    assert len(bundle.rules) == 9
+    assert len(bundle.rules) == 10
     assert bundle.rules[0].id == "evening-arrival-home-lights"
     lights_off = next(rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home")
     assert lights_off.triggers == ["scheduled"]
@@ -30,6 +30,9 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     assert interior.fire_once_per_local_day is True
     assert interior.triggers == ["edge_true", "scheduled"]
     assert interior.schedule_cron is None
+    power_cycle = next(rule for rule in bundle.rules if rule.id == "hdhomerun-nightly-power-cycle")
+    assert power_cycle.enabled is False
+    assert power_cycle.device_actions[1].delay_s == 60
     assert automation_rules_source() == "operator"
 
 
@@ -47,6 +50,7 @@ def test_list_automation_rules_returns_all_rules(
         "evening-arrival-home-lights",
         "evening-interior-lights-on-anyone-home",
         "evening-lights-off-both-home",
+        "hdhomerun-nightly-power-cycle",
         "kristen-west-point-arrive",
         "kristen-west-point-leave",
         "morning-master-bedroom-fan-off",

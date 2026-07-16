@@ -55,6 +55,7 @@ Rules fire on location ingest as follows:
 - Per `(user_id, geofence_id)`: previous inside flag; outside-since timestamp for enter debounce (shipped).
 - Per `(user_id, geofence_id)`: **inside-since** timestamp for dwell conditions (**Phase 2c**).
 - Per rule: `last_fired_at` for cooldown; per scheduled rule: `next_evaluate_at` (**Phase 2c**).
+- Pending `device_actions` with `delay_s > 0` (in-memory queue mirrored to SQLite `rule_deferred_device_actions`; reloaded on restart).
 - Lost on restart (re-entering a geofence after restart may re-fire if cooldown expired).
 
 ### Production rule ids (in `automation-rules.json.example`)
@@ -65,6 +66,7 @@ Rules fire on location ingest as follows:
 | `evening-lights-off-both-home` | Scheduled: both home 10+ min after sunset, either arrival light on → `turn_off` (example / operator) |
 | `evening-interior-lights-on-anyone-home` | Scheduled + **once per day**: anyone home after sunset → interior lamps `turn_on` (example) |
 | `away-pause-media` | Scheduled every 10 min: both outside `house`, any listed Sonos zone or Vizio TV on → `pause` / `turn_off` + email (example) |
+| `hdhomerun-nightly-power-cycle` | Scheduled 4am (example, **disabled**): Kasa `turn_off` then `turn_on` with `delay_s=60` |
 | `kristen-west-point-arrive` | Kristen enters `west-point` → email only |
 | `kristen-west-point-leave` | Kristen leaves `west-point` → email only |
 
@@ -76,7 +78,7 @@ Rule evaluation runs on the **asyncio event loop** shared with FastAPI — no th
 | --- | --- |
 | **Lifecycle** | `RuleEvaluator` registered in the FastAPI lifespan (`app/api/app.py`): construct on startup, `await evaluator.close()` on shutdown. |
 | **Location ingest** | After `upsert_user_location`, schedule `asyncio.create_task(evaluator.handle_location_update(...), name="rule-eval-location")` so webhook handlers return quickly. |
-| **Device actions** | `await` existing async manager methods (`KasaDeviceManager.turn_on`, …) via the same paths as `/v1/ui/*`. |
+| **Device actions** | `await` existing async manager methods (`KasaDeviceManager.turn_on`, …) via the same paths as `/v1/ui/*`. Optional per-action `delay_s` (0–86400): omit/0 runs on fire; `>0` enqueues a deferred dispatch at `fire_time + delay_s`. The queue is persisted in SQLite (`rule_deferred_device_actions`) and reloaded on startup, so a follow-up step still runs after a restart mid-delay (a due action waits for device discovery to finish rather than being dropped); it is cancelled if the rule is missing or `enabled=false`. Never `asyncio.sleep` on the fire path. `notify_on_fire` / cooldown / daily cap apply to the rule fire only. |
 | **Email** | `await` async SMTP send helper (or `asyncio.to_thread` around the stdlib client if the helper stays sync). |
 | **Sunset boundary** | Optional `asyncio` background task with `await asyncio.sleep(interval)` for status/logging only — **not** for firing `edge_true` rules at sunset (location edges only). **Phase 2c** extends this tick to evaluate `scheduled` rules. |
 | **Concurrency** | One `asyncio.Lock` (or per-user lock) inside the evaluator so overlapping locations for the same user serialize edge detection. |

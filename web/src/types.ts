@@ -214,6 +214,7 @@ export type RuleActionType =
 
 export interface RuleDeviceActionOut {
   action: RuleActionType;
+  delay_s?: number | null;
   device_id: string;
   family_id: string;
 }
