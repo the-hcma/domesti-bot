@@ -14,8 +14,9 @@ answers **plain HTTP KLAP on port 80**. We reconnect with ``https=False``, clear
 ``http_port``, and drop ``port_override``. ``KlapTransport`` (python-kasa) always passed an
 ``SSLContext`` into aiohttp even for ``http://`` URLs, which can still produce TLS connects
 (e.g. port 443); we patch ``KlapTransport._get_ssl_context`` to return ``False`` when
-``connection_type.https`` is false. On ``AuthenticationError`` or
-``_ConnectionError``, we retry that LAN profile for ``SmartDevice`` instances, then XOR sweep.
+``connection_type.https`` is false. On ``AuthenticationError``,
+``_ConnectionError``, or ``TimeoutError``, we retry that LAN profile for
+``SmartDevice`` instances, then XOR sweep.
 
 Newer KLAP devices that were linked to the Kasa/Tapo cloud **require** your **account**
 email and password for the LAN KLAP handshake — there is no anonymous LAN mode for
@@ -65,7 +66,12 @@ from kasa.deviceconfig import (
     DeviceEncryptionType,
     DeviceFamily,
 )
-from kasa.exceptions import AuthenticationError, UnsupportedDeviceError, _ConnectionError
+from kasa.exceptions import (
+    AuthenticationError,
+    KasaException,
+    UnsupportedDeviceError,
+    _ConnectionError,
+)
 
 from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
@@ -216,16 +222,24 @@ async def _connect_from_saved_config(
 ) -> KDevice | None:
     """Connect using a stored ``DeviceConfig``, mirroring discovery recovery paths.
 
-    When ``raise_auth_failure`` is True and the initial failure was
-    :class:`AuthenticationError`, re-raise instead of logging and returning
-    ``None`` (used by Settings credential probes).
+    Cache reconnect (``raise_auth_failure=False``) treats any
+    :class:`~kasa.exceptions.KasaException` as a per-host skip so one flaky
+    device cannot abort the whole family.
+
+    When ``raise_auth_failure`` is True (Settings credential probes):
+    :class:`AuthenticationError` is re-raised as a probe auth failure; other
+    :class:`~kasa.exceptions.KasaException` subclasses (timeouts, connection
+    errors) propagate unchanged so the probe can distinguish auth vs reachability.
     """
     cfg = replace(cfg, timeout=timeout)
     if credentials is not None:
         cfg = replace(cfg, credentials=credentials)
     try:
         return await KDevice.connect(config=cfg)
-    except (AuthenticationError, _ConnectionError) as exc:
+    except KasaException as exc:
+        # Includes AuthenticationError, _ConnectionError, TimeoutError, and
+        # generic ``Unable to query the device`` wrappers. A single timed-out
+        # or flaky cached host must not abort the whole cache reconnect.
         last_exc: BaseException = exc
         ctype = cfg.connection_type
         if ctype.device_family.value.startswith(
@@ -237,21 +251,22 @@ async def _connect_from_saved_config(
                     credentials=credentials,
                     timeout=timeout,
                 )
-            except Exception as ex:
+            except KasaException as ex:
                 last_exc = ex
         if _config_uses_klap(cfg):
-            if raise_auth_failure and (
-                isinstance(exc, AuthenticationError)
-                or isinstance(last_exc, AuthenticationError)
-            ):
-                auth_exc = (
-                    last_exc
-                    if isinstance(last_exc, AuthenticationError)
-                    else exc
-                )
-                raise AuthenticationError(
-                    f"KLAP authentication failed for {cfg.host}"
-                ) from auth_exc
+            if raise_auth_failure:
+                if isinstance(exc, AuthenticationError) or isinstance(
+                    last_exc, AuthenticationError
+                ):
+                    auth_exc = (
+                        last_exc
+                        if isinstance(last_exc, AuthenticationError)
+                        else exc
+                    )
+                    raise AuthenticationError(
+                        f"KLAP authentication failed for {cfg.host}"
+                    ) from auth_exc
+                raise last_exc
             _LOGGER.warning(
                 "Kasa: skipped device at %s (%s)%s",
                 cfg.host,

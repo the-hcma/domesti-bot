@@ -22,7 +22,7 @@ from kasa.deviceconfig import (
     DeviceEncryptionType,
     DeviceFamily,
 )
-from kasa.exceptions import AuthenticationError, _ConnectionError
+from kasa.exceptions import AuthenticationError, KasaException, _ConnectionError
 
 from app.kasa_device_manager import (
     KasaDeviceManager,
@@ -194,4 +194,73 @@ async def test_klap_saved_config_auth_failure_skips_legacy_xor() -> None:
         )
 
     legacy_xor.assert_not_awaited()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_klap_saved_config_timeout_reraises_when_raise_auth_failure() -> None:
+    """Credential probes must still see timeouts (not a silent None skip)."""
+
+    host = "192.168.86.216"
+    cfg = DeviceConfig(
+        host=host,
+        connection_type=DeviceConnectionParameters(
+            DeviceFamily.SmartTapoPlug,
+            DeviceEncryptionType.Klap,
+        ),
+    )
+    query_exc = KasaException(
+        f"Unable to query the device: {host}: ",
+        TimeoutError(),
+    )
+    with patch(
+        "app.kasa_device_manager.KDevice.connect",
+        AsyncMock(side_effect=query_exc),
+    ), patch(
+        "app.kasa_device_manager._connect_smart_plain_http",
+        AsyncMock(side_effect=query_exc),
+    ):
+        with pytest.raises(KasaException, match="Unable to query the device"):
+            await _connect_from_saved_config(
+                cfg,
+                credentials=Credentials(username="a@b.com", password="x"),
+                timeout=5,
+                raise_auth_failure=True,
+            )
+
+
+@pytest.mark.asyncio
+async def test_klap_saved_config_timeout_skips_without_aborting() -> None:
+    """Cache reconnect must skip timed-out KLAP hosts (not fail the whole fetch)."""
+
+    host = "192.168.86.216"
+    cfg = DeviceConfig(
+        host=host,
+        connection_type=DeviceConnectionParameters(
+            DeviceFamily.SmartTapoPlug,
+            DeviceEncryptionType.Klap,
+        ),
+    )
+    # python-kasa often wraps the asyncio timeout as KasaException args, matching
+    # production logs: ('Unable to query the device: <host>: ', TimeoutError()).
+    query_exc = KasaException(
+        f"Unable to query the device: {host}: ",
+        TimeoutError(),
+    )
+    with patch(
+        "app.kasa_device_manager.KDevice.connect",
+        AsyncMock(side_effect=query_exc),
+    ), patch(
+        "app.kasa_device_manager._connect_smart_plain_http",
+        AsyncMock(side_effect=query_exc),
+    ), patch(
+        "app.kasa_device_manager._connect_legacy_xor",
+        AsyncMock(side_effect=AssertionError("KLAP timeout must not try XOR")),
+    ):
+        result = await _connect_from_saved_config(
+            cfg,
+            credentials=Credentials(username="a@b.com", password="x"),
+            timeout=5,
+        )
+
     assert result is None
