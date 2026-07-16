@@ -79,6 +79,7 @@ from app.domesti_bot_cli import (
     execute_line_for_api,
     shutdown_device_managers,
 )
+from app.discovery_cache_sync import maybe_sync_discovery_cache
 from app.server_runtime import runtime
 from app.sonos_device_manager import SonosTransitionUnavailableError
 from app.ui_device_actions import flip_ui_device
@@ -903,8 +904,9 @@ def create_app(args: Any) -> FastAPI:
 
     @app.get("/v1/ui/state", dependencies=[Depends(_verify_api_key)])
     async def ui_state(state: DeviceState) -> UIStateOut:
-        # Read-only join of in-memory manager state with the persisted
-        # ``ui_preferences`` SQLite rows.
+        # Pull CLI-updated device rosters from the shared discovery cache before
+        # joining in-memory manager state with ``ui_preferences``.
+        await maybe_sync_discovery_cache(state)
         return build_ui_state(state, cache_path=state.cache_path)
 
     return app

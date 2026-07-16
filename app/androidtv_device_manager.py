@@ -665,6 +665,60 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         await self.disconnect()
         await self.fetch(full_zeroconf=True)
 
+    async def reload_from_cache(self) -> bool:
+        """Replace the in-memory Cast map from SQLite only (never mDNS/zeroconf).
+
+        Requires every cached row to have a UUID. On any connect miss, keeps the
+        prior map. Does not rewrite the discovery table.
+        """
+
+        if self._discovery_store_path is None:
+            _LOGGER.debug("AndroidTV reload_from_cache: no discovery cache path")
+            return False
+        if self._alias_to_device is None:
+            _LOGGER.debug("AndroidTV reload_from_cache: manager not initialized")
+            return False
+        known = device_discovery_store.load_androidtv_known_devices(
+            self._discovery_store_path
+        )
+        if not known or not all(uid for _h, _p, _fn, uid, _m in known):
+            _LOGGER.info(
+                "AndroidTV reload_from_cache: empty or incomplete cache; "
+                "keeping prior device map"
+            )
+            return False
+        previous = self._alias_to_device
+        uniq = await self._connect_devices_from_cache(known)
+        expected = sum(1 for _h, _p, _fn, uid, _m in known if uid)
+        if len(uniq) != expected:
+            for dev in uniq:
+                cast = dev._cast
+                if cast is None:
+                    continue
+
+                def _dc(c: Chromecast = cast) -> None:
+                    with contextlib.suppress(Exception):
+                        c.disconnect(timeout=3.0)
+
+                await asyncio.to_thread(_dc)
+            _LOGGER.warning(
+                "AndroidTV reload_from_cache: reconnect incomplete "
+                "(%d/%d); keeping prior device map",
+                len(uniq),
+                expected,
+            )
+            return False
+        self._alias_to_device = previous
+        await self.disconnect()
+        self._finalize_devices(uniq)
+        self._last_discovery_source = "cache"
+        _LOGGER.info(
+            "AndroidTV reload_from_cache: replaced device map from cache "
+            "(%d device(s))",
+            len(uniq),
+        )
+        return True
+
     @property
     def switches(self) -> tuple[AndroidTvSwitchDevice, ...]:
         if self._alias_to_device is None:

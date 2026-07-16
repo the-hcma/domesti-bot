@@ -60,6 +60,7 @@ def _fake_kasa_mgr(devices: list[tuple[str, str, bool]]) -> KasaDeviceManager:
         fakes.append(kd)
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(fakes)
+    mgr.skipped_auth_hosts = ()
     return cast(KasaDeviceManager, mgr)
 
 
