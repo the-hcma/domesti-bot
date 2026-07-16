@@ -440,5 +440,39 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         finally:
             self._force_discovery = previous
 
+    async def reload_from_cache(self) -> bool:
+        """Replace the in-memory zone map from SQLite only (never SSDP/UDP).
+
+        On success the lookup map is replaced and the discovery table is **not**
+        rewritten (the CLI owns those writes). Returns ``False`` (keeping the
+        prior map) when the cache is empty or any cached zone fails to reconnect.
+        """
+
+        if self._discovery_cache_path is None:
+            _LOGGER.debug("Sonos reload_from_cache: no discovery cache path")
+            return False
+        if self._alias_to_device is None:
+            _LOGGER.debug("Sonos reload_from_cache: manager not initialized")
+            return False
+        cached = device_discovery_store.load_sonos_zones(self._discovery_cache_path)
+        if not cached:
+            _LOGGER.info(
+                "Sonos reload_from_cache: empty cache; keeping prior device map"
+            )
+            return False
+        devices = await self._reconnect_from_cache()
+        if devices is None:
+            _LOGGER.warning(
+                "Sonos reload_from_cache: reconnect failed; keeping prior device map"
+            )
+            return False
+        self._finalize(devices)
+        self._last_discovery_source = "cache"
+        _LOGGER.info(
+            "Sonos reload_from_cache: replaced device map from cache (%d zone(s))",
+            len(self.players),
+        )
+        return True
+
     async def resume(self, identifier: str, *, favorite_index: int = 0) -> None:
         await self._device_for(identifier).resume(favorite_index=favorite_index)

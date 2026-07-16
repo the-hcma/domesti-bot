@@ -16,11 +16,14 @@ Where to get or rotate it:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import ipaddress
+import logging
 import os
 import sys
 from pathlib import Path
+from typing import cast
 
 # ``gotailwind`` depends on ``backoff``, which still calls ``asyncio.iscoroutinefunction``.
 # That API is deprecated in Python 3.14+ (removed in 3.16); delegate to ``inspect``.
@@ -37,6 +40,8 @@ from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZerocon
 from app import device_discovery_store
 from app.device_manager import AlreadyInitializedError, DoorDeviceManager, NotInitializedError
 from app.rule_engine import DoorDevice
+
+_LOGGER = logging.getLogger(__name__)
 
 # Same browse type as ``tailwind scan`` (gotailwind CLI).
 _MDNS_HTTP_TCP_LOCAL = "_http._tcp.local."
@@ -373,3 +378,67 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
 
         await self.disconnect()
         await self.fetch()
+
+    async def reload_from_cache(self, *, cache_path: Path | None = None) -> bool:
+        """Reconnect to the SQLite-cached Tailwind host only (never mDNS).
+
+        Uses ``cache_path`` or :attr:`_display_names_store_path` for
+        ``load_tailwind_host``. On failure the prior session and door map are
+        restored. Does not rewrite ``tailwind_last_host``.
+        """
+
+        path = cache_path or self._display_names_store_path
+        if path is None:
+            _LOGGER.debug("Tailwind reload_from_cache: no discovery cache path")
+            return False
+        if self._alias_to_device is None:
+            _LOGGER.debug("Tailwind reload_from_cache: manager not initialized")
+            return False
+        host = (device_discovery_store.load_tailwind_host(path) or "").strip()
+        if not host:
+            _LOGGER.info(
+                "Tailwind reload_from_cache: empty cache; keeping prior device map"
+            )
+            return False
+
+        previous_host_arg = self._host_arg
+        previous_tailwind = self._tailwind
+        previous_map = self._alias_to_device
+        previous_host = self._host
+
+        self._host_arg = host
+        self._tailwind = None
+        self._alias_to_device = None
+        self._host = None
+        try:
+            await self.fetch()
+        except Exception:
+            # ``self._tailwind`` was cleared before ``fetch``; pyright still types it
+            # as None on this path even when ``fetch`` constructed a session then failed.
+            failed_tailwind = cast(Tailwind | None, self._tailwind)
+            if failed_tailwind is not None and failed_tailwind is not previous_tailwind:
+                with contextlib.suppress(Exception):
+                    await failed_tailwind.close()
+            _LOGGER.warning(
+                "Tailwind reload_from_cache: reconnect to %s failed; "
+                "keeping prior device map",
+                host,
+                exc_info=True,
+            )
+            self._host_arg = previous_host_arg
+            self._tailwind = previous_tailwind
+            self._alias_to_device = previous_map
+            self._host = previous_host
+            return False
+
+        self._host_arg = previous_host_arg
+        if previous_tailwind is not None:
+            with contextlib.suppress(Exception):
+                await previous_tailwind.close()
+        _LOGGER.info(
+            "Tailwind reload_from_cache: replaced door map from cache host %s "
+            "(%d door(s))",
+            host,
+            len(self.doors),
+        )
+        return True

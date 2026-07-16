@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from dataclasses import dataclass
@@ -318,6 +319,88 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             await self.fetch()
         finally:
             self._force_discovery = previous
+
+    async def reload_from_cache(self) -> bool:
+        """Replace the in-memory TV map from SQLite only (never SSDP).
+
+        Reconnects every cached endpoint that has an auth token. Does not
+        upsert the discovery table. On auth/connect failure for any token'd
+        row, keeps the prior map and returns ``False``.
+        """
+
+        if not self._initialized:
+            _LOGGER.debug("Vizio reload_from_cache: manager not initialized")
+            return False
+        if self._discovery_cache_path is None:
+            _LOGGER.debug("Vizio reload_from_cache: no discovery cache path")
+            return False
+        rows = device_discovery_store.load_vizio_tvs(self._discovery_cache_path)
+        if not rows:
+            _LOGGER.info(
+                "Vizio reload_from_cache: empty cache; keeping prior device map"
+            )
+            return False
+
+        targets: list[VizioTvEndpoint] = []
+        for host, port, display, model, mac, diid in rows:
+            targets.append(
+                VizioTvEndpoint(
+                    host=host,
+                    port=port,
+                    display_name=display,
+                    model=model,
+                    mac=mac,
+                    diid=diid,
+                )
+            )
+        token_targets = [ep for ep in targets if self._resolve_token(ep)[0]]
+        if not token_targets:
+            _LOGGER.info(
+                "Vizio reload_from_cache: no cached TVs with auth tokens; "
+                "keeping prior device map"
+            )
+            return False
+
+        if self._session is None or self._session.closed:
+            connector = aiohttp.TCPConnector(ssl=False)
+            self._session = aiohttp.ClientSession(connector=connector)
+
+        previous_tvs = self._tvs
+        previous_ids = self._id_to_tv
+        connected: list[VizioTvDevice] = []
+        try:
+            for endpoint in token_targets:
+                token, _source = self._resolve_token(endpoint)
+                tv, _unreachable = await self._connect_target(endpoint, token)
+                if tv is None:
+                    raise RuntimeError(
+                        f"Vizio reload_from_cache: failed to connect {endpoint.device_id}"
+                    )
+                connected.append(tv)
+        except Exception:
+            for tv in connected:
+                with contextlib.suppress(Exception):
+                    await tv._client.aclose()
+            self._tvs = previous_tvs
+            self._id_to_tv = previous_ids
+            _LOGGER.warning(
+                "Vizio reload_from_cache: reconnect failed; keeping prior device map",
+                exc_info=True,
+            )
+            return False
+
+        for tv in previous_tvs:
+            with contextlib.suppress(Exception):
+                await tv._client.aclose()
+        connected.sort(key=lambda tv: tv.preferred_label.lower())
+        self._tvs = tuple(connected)
+        self._id_to_tv = {tv.identifier: tv for tv in connected}
+        self._last_discovery_source = "cache"
+        _LOGGER.info(
+            "Vizio reload_from_cache: replaced device map from cache (%d TV(s))",
+            len(self._tvs),
+        )
+        return True
 
     async def turn_off(self, identifier: str) -> None:
         tv = self.get_device_by_id(identifier)
