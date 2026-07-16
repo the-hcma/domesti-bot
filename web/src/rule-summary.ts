@@ -415,7 +415,12 @@ export function summarizeRule(
   });
   const actions = rule.device_actions.map((entry) => {
     const label = resolveDeviceLabel(entry.family_id, entry.device_id, context);
-    return formatDeviceActionPhrase(entry.action, label);
+    const phrase = formatDeviceActionPhrase(entry.action, label);
+    const delay = entry.delay_s;
+    if (delay !== undefined && delay !== null && delay > 0) {
+      return `${phrase} (after ${delay}s)`;
+    }
+    return phrase;
   });
   return { presence, timing, devices, actions };
 }

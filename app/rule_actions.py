@@ -432,6 +432,21 @@ def expected_state_after_action(action: RuleDeviceActionOut) -> DeviceConditionS
     return expected_state_for_action_type(action.action)
 
 
+def partition_device_actions_by_delay(
+    actions: list[RuleDeviceActionOut],
+) -> tuple[list[RuleDeviceActionOut], list[RuleDeviceActionOut]]:
+    """Split into (immediate, delayed) where delayed have delay_s > 0."""
+    delayed: list[RuleDeviceActionOut] = []
+    immediate: list[RuleDeviceActionOut] = []
+    for action in actions:
+        delay_s = action.delay_s
+        if delay_s is not None and delay_s > 0:
+            delayed.append(action)
+        else:
+            immediate.append(action)
+    return immediate, delayed
+
+
 def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | None:
     """Resolve a Kasa tile label (or host) to the canonical LAN host."""
     needle = device_id.strip()

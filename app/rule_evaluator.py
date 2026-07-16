@@ -21,6 +21,7 @@ from app.api.schemas import (
     DevicesAnyInStateForSCondition,
     GeofenceOut,
     RuleConditionOut,
+    RuleDeviceActionOut,
     RuleOut,
     SettingsLocationOut,
     UserLocationOut,
@@ -49,6 +50,12 @@ from app.cron_schedule import (
     fired_on_same_local_calendar_day,
     local_calendar_date,
     next_scheduled_evaluate_at,
+)
+from app.deferred_device_action_store import (
+    delete_deferred_device_actions,
+    delete_deferred_device_actions_for_rule,
+    insert_deferred_device_action,
+    list_deferred_device_actions,
 )
 from app.device_enums import (
     DeviceConditionState,
@@ -90,6 +97,7 @@ from app.rule_actions import (
     RuleDeviceDispatchResult,
     RuleNotificationEmailOutcome,
     dispatch_rule_device_actions,
+    partition_device_actions_by_delay,
     send_rule_notification_email,
 )
 from app.rule_conditions import (
@@ -126,6 +134,11 @@ _LOGGER = logging.getLogger(__name__)
 _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
 _GEO_INSIDE_STATE_RECONCILE_S = 600.0
 _GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
+# Retry cadence when a due delayed action can't dispatch yet because device
+# discovery has not finished (e.g. shortly after a restart) — the action is kept
+# queued rather than dropped so restart survival holds.
+_DEFERRED_DEVICE_ACTION_DISCOVERY_RETRY_S = 5.0
+_MAX_DEVICE_ACTION_DELAY_S = 86_400  # document; schema enforces
 _MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
 _RULE_EVALUATOR_TICK_S = 60.0
 DeferredGeofenceEvent = Literal["entered", "left"]
@@ -147,6 +160,16 @@ class _DeferredAccuracyEdge:
     observed_at: float
     rule_id: str
     user_id: str
+
+
+@dataclass(frozen=True)
+class _DeferredDeviceAction:
+    action: RuleDeviceActionOut
+    due_at: float
+    fire_at: float
+    rule_id: str
+    # SQLite row id when persisted; None when no discovery cache is configured.
+    row_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +214,10 @@ class RuleEvaluator:
             tuple[str, str, str, str],
             _DeferredAccuracyEdge,
         ] = {}
+        # Delayed device_actions queue; mirrored to SQLite so it survives restart.
+        self._deferred_device_actions: list[_DeferredDeviceAction] = []
+        self._deferred_device_actions_task: asyncio.Task[None] | None = None
+        self._deferred_device_actions_wake = asyncio.Event()
         # Natural bool streak per backend device (on/open/playing vs off/closed/paused).
         self._device_bool_since: dict[tuple[DeviceFamilyId, str], float] = {}
         self._device_bool_value: dict[tuple[DeviceFamilyId, str], bool] = {}
@@ -245,14 +272,23 @@ class RuleEvaluator:
         self._seed_scheduled_dwell_consumed_from_persisted_fire()
         self._seed_dwell_satisfied_eval_debounce()
         self._seed_scheduled_evaluate_times()
+        self._seed_deferred_device_actions()
 
     async def close(self) -> None:
         self._stop.set()
+        self._deferred_device_actions_wake.set()
         await self._location_monitoring.close()
+        if self._deferred_device_actions_task is not None and not self._deferred_device_actions_task.done():
+            self._deferred_device_actions_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._deferred_device_actions_task
+        self._deferred_device_actions_task = None
+        self._deferred_device_actions.clear()
         if self._tick_task is not None and not self._tick_task.done():
             self._tick_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._tick_task
+        self._tick_task = None
 
     def deferred_accuracy_edge_snapshots_for_user(
         self,
@@ -414,6 +450,11 @@ class RuleEvaluator:
             self._periodic_loop(),
             name="rule-evaluator-tick",
         )
+        if self._deferred_device_actions_task is None:
+            self._deferred_device_actions_task = asyncio.create_task(
+                self._deferred_device_actions_loop(),
+                name="rule-evaluator-deferred-device-actions",
+            )
         self._location_monitoring.start_background_loops()
 
     async def _build_evaluation_context(
@@ -886,6 +927,12 @@ class RuleEvaluator:
             fired_rule_ids.add(rule.id)
         return fired_rule_ids
 
+    def _cancel_deferred_device_actions_for_rule(self, rule_id: str) -> None:
+        had_entries = any(entry.rule_id == rule_id for entry in self._deferred_device_actions)
+        self._deferred_device_actions = [entry for entry in self._deferred_device_actions if entry.rule_id != rule_id]
+        if had_entries and self._cache_path is not None:
+            delete_deferred_device_actions_for_rule(self._cache_path, rule_id)
+
     def _clear_deferred_accuracy_edges_for_geofence(
         self,
         user_id: str,
@@ -915,6 +962,135 @@ class RuleEvaluator:
             return True
         return self._now_fn() - state.last_fired_at >= rule.cooldown_s
 
+    async def _deferred_device_actions_loop(self) -> None:
+        while not self._stop.is_set():
+            timeout: float | None = None
+            async with self._process_lock:
+                self._prune_stale_deferred_device_actions()
+                now = self._now_fn()
+                due = [entry for entry in self._deferred_device_actions if entry.due_at <= now]
+                remaining = [entry for entry in self._deferred_device_actions if entry.due_at > now]
+                device_state = self._device_state_getter()
+                if due and device_state is None:
+                    # Discovery has not finished yet (e.g. shortly after a
+                    # restart mid-delay). Keep due actions queued and retry soon
+                    # so persisted follow-ups still run once discovery completes.
+                    _LOGGER.warning(
+                        "[rules] %d delayed device action(s) waiting for device discovery to finish",
+                        len(due),
+                    )
+                    self._deferred_device_actions = due + remaining
+                    timeout = _DEFERRED_DEVICE_ACTION_DISCOVERY_RETRY_S
+                else:
+                    self._deferred_device_actions = remaining
+                    dispatched_row_ids: list[int] = []
+                    for entry in due:
+                        # Reached only when device discovery is ready: the
+                        # ``due and device_state is None`` guard above keeps due
+                        # actions queued while ``device_state`` is None.
+                        assert device_state is not None
+                        if entry.row_id is not None:
+                            dispatched_row_ids.append(entry.row_id)
+                        delay_s = entry.action.delay_s
+                        if delay_s is None:
+                            delay_s = int(max(0.0, entry.due_at - entry.fire_at))
+                        dispatch_result = await dispatch_rule_device_actions(
+                            device_state,
+                            [entry.action],
+                        )
+                        if dispatch_result.errors:
+                            _LOGGER.warning(
+                                "[rules] delayed device action failed rule_id=%s fire_at=%s "
+                                "delay_s=%s family_id=%s device_id=%s action=%s errors=%s",
+                                entry.rule_id,
+                                location_epoch_to_iso_z(entry.fire_at),
+                                delay_s,
+                                entry.action.family_id.value,
+                                entry.action.device_id,
+                                entry.action.action.value,
+                                "; ".join(dispatch_result.errors),
+                            )
+                        else:
+                            _LOGGER.info(
+                                "[rules] delayed device action dispatched rule_id=%s fire_at=%s "
+                                "delay_s=%s family_id=%s device_id=%s action=%s",
+                                entry.rule_id,
+                                location_epoch_to_iso_z(entry.fire_at),
+                                delay_s,
+                                entry.action.family_id.value,
+                                entry.action.device_id,
+                                entry.action.action.value,
+                            )
+                    self._delete_persisted_deferred_device_actions(dispatched_row_ids)
+                if timeout is None and self._deferred_device_actions:
+                    next_due = min(entry.due_at for entry in self._deferred_device_actions)
+                    timeout = max(0.0, next_due - self._now_fn())
+
+            self._deferred_device_actions_wake.clear()
+            wake_task = asyncio.create_task(self._deferred_device_actions_wake.wait())
+            stop_task = asyncio.create_task(self._stop.wait())
+            try:
+                done, pending = await asyncio.wait(
+                    {wake_task, stop_task},
+                    timeout=timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+                for task in done:
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+            except asyncio.CancelledError:
+                wake_task.cancel()
+                stop_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await wake_task
+                with contextlib.suppress(asyncio.CancelledError):
+                    await stop_task
+                raise
+
+    def _delete_persisted_deferred_device_actions(self, row_ids: list[int]) -> None:
+        if not row_ids or self._cache_path is None:
+            return
+        delete_deferred_device_actions(self._cache_path, row_ids)
+
+    def _enqueue_deferred_device_actions(
+        self,
+        rule_id: str,
+        fire_at: float,
+        delayed: list[RuleDeviceActionOut],
+    ) -> None:
+        enqueued_any = False
+        for action in delayed:
+            delay_s = action.delay_s
+            if delay_s is None or delay_s <= 0:
+                continue
+            capped_delay_s = min(delay_s, _MAX_DEVICE_ACTION_DELAY_S)
+            due_at = fire_at + float(capped_delay_s)
+            row_id: int | None = None
+            if self._cache_path is not None:
+                row_id = insert_deferred_device_action(
+                    self._cache_path,
+                    action=action,
+                    due_at=due_at,
+                    fire_at=fire_at,
+                    rule_id=rule_id,
+                )
+            self._deferred_device_actions.append(
+                _DeferredDeviceAction(
+                    action=action,
+                    due_at=due_at,
+                    fire_at=fire_at,
+                    rule_id=rule_id,
+                    row_id=row_id,
+                )
+            )
+            enqueued_any = True
+        if enqueued_any:
+            self._deferred_device_actions_wake.set()
+
     async def _execute_rule(
         self,
         rule: RuleOut,
@@ -931,20 +1107,25 @@ class RuleEvaluator:
         probable_successes: list[str] = []
         email_outcome: RuleNotificationEmailOutcome | None = None
         email_error: str | None = None
+        immediate, delayed = partition_device_actions_by_delay(rule.device_actions)
         performed_side_effect = not rule.device_actions and not rule.notify_on_fire
         device_state = self._device_state_getter()
         dispatch_result = RuleDeviceDispatchResult.empty()
         if device_state is None:
-            if rule.device_actions:
+            if immediate or delayed:
                 errors.append("Device discovery still in progress; actions skipped")
-        elif rule.device_actions:
-            dispatch_result = await dispatch_rule_device_actions(
-                device_state,
-                rule.device_actions,
-            )
-            errors.extend(dispatch_result.errors)
-            probable_successes = list(dispatch_result.probable_successes)
-            if not dispatch_result.errors:
+        else:
+            if immediate:
+                dispatch_result = await dispatch_rule_device_actions(
+                    device_state,
+                    immediate,
+                )
+                errors.extend(dispatch_result.errors)
+                probable_successes = list(dispatch_result.probable_successes)
+                if not dispatch_result.errors:
+                    performed_side_effect = True
+            if delayed:
+                self._enqueue_deferred_device_actions(rule.id, self._now_fn(), delayed)
                 performed_side_effect = True
         if rule.notify_on_fire and self._cache_path is not None:
             try:
@@ -1073,6 +1254,7 @@ class RuleEvaluator:
             self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
             try:
                 async with self._process_lock:
+                    self._prune_stale_deferred_device_actions()
                     self._refresh_astronomical_schedules_for_new_day()
                     await self._evaluate_scheduled_rules()
                     timezone = ZoneInfo(load_settings_location().timezone)
@@ -1101,6 +1283,22 @@ class RuleEvaluator:
             last_fired_at=state.last_fired_at,
             rule_id=rule_id,
         )
+
+    def _prune_stale_deferred_device_actions(self) -> None:
+        if not self._deferred_device_actions:
+            return
+        try:
+            rules_by_id = {rule.id: rule for rule in list_automation_rules()}
+        except Exception:
+            _LOGGER.exception("[rules] failed to load rules while pruning deferred device actions")
+            return
+        stale_rule_ids = {
+            entry.rule_id
+            for entry in self._deferred_device_actions
+            if (rule := rules_by_id.get(entry.rule_id)) is None or not rule.enabled
+        }
+        for rule_id in stale_rule_ids:
+            self._cancel_deferred_device_actions_for_rule(rule_id)
 
     async def _tick_vacation_mode(
         self,
@@ -1439,6 +1637,38 @@ class RuleEvaluator:
                     now=now,
                 ),
             )
+
+    def _seed_deferred_device_actions(self) -> None:
+        """Reload persisted delayed device actions so they survive a restart.
+
+        Rows whose ``due_at`` already elapsed while the process was down are
+        dispatched promptly on the first drain; stale rows for disabled/removed
+        rules are pruned before their first dispatch.
+        """
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        try:
+            records = list_deferred_device_actions(cache_path)
+        except Exception:
+            _LOGGER.exception("[rules] failed to reload persisted delayed device actions")
+            return
+        if not records:
+            return
+        self._deferred_device_actions = [
+            _DeferredDeviceAction(
+                action=record.action,
+                due_at=record.due_at,
+                fire_at=record.fire_at,
+                rule_id=record.rule_id,
+                row_id=record.row_id,
+            )
+            for record in records
+        ]
+        _LOGGER.info(
+            "[rules] reloaded %d persisted delayed device action(s) after restart",
+            len(self._deferred_device_actions),
+        )
 
     def _seed_geofence_state(self) -> None:
         """Initialize geofence transition maps from SQLite with one-time history backfill."""

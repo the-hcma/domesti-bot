@@ -80,6 +80,7 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
         "evening-arrival-home-lights",
         "evening-interior-lights-on-anyone-home",
         "evening-lights-off-both-home",
+        "hdhomerun-nightly-power-cycle",
         "kristen-west-point-arrive",
         "kristen-west-point-leave",
         "morning-master-bedroom-fan-off",

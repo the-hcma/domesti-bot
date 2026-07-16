@@ -1033,6 +1033,17 @@ class RuleConditionStatusOut(BaseModel):
 
 class RuleDeviceActionOut(BaseModel):
     action: RuleDeviceActionType
+    delay_s: int | None = Field(
+        default=None,
+        ge=0,
+        le=86_400,
+        description=(
+            "Seconds after rule fire before this action runs; omit or 0 = immediate. "
+            "Pending delayed actions are persisted in SQLite so they survive a "
+            "process restart; they are cancelled if the rule is deleted or disabled "
+            "before the delay elapses."
+        ),
+    )
     device_id: str
     family_id: DeviceFamilyId
 
