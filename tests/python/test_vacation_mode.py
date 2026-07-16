@@ -11,6 +11,7 @@ from app.api.schemas import VacationModeSettingsOut
 from app.db.engine import dispose_engine
 from app.db.schema import clear_bootstrap_cache
 from app.device_enums import VacationEmailSource
+from app.smtp_service import SmtpConnectionParams
 from app.vacation_mode import (
     VACATION_SETTINGS_TEST_PREAMBLE,
     VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER,
@@ -444,12 +445,6 @@ def test_send_vacation_mode_transition_email_uses_smtp_stack(tmp_path: Path) -> 
         notification_emails=["operator@example.com", " operator@example.com "],
         user_ids=["user-a", "user-b"],
     )
-    smtp_config = MagicMock()
-    smtp_config.from_address = "noreply@example.com"
-    smtp_config.host = "smtp.example.com"
-    smtp_config.mail_domain = "example.com"
-    smtp_config.port = 587
-    smtp_config.username = "user"
     delivery = MagicMock()
     delivery.format_for_log.return_value = "recipient_count=1"
     home = MagicMock()
@@ -457,14 +452,15 @@ def test_send_vacation_mode_transition_email_uses_smtp_stack(tmp_path: Path) -> 
     home.lat = 37.7749
     home.lon = -122.4194
     with (
-        patch("app.vacation_mode.load_smtp_config", return_value=smtp_config),
-        patch("app.vacation_mode.smtp_send_ready", return_value=True),
-        patch("app.vacation_mode.resolve_password_for_send", return_value="secret"),
         patch(
-            "app.vacation_mode.deliver_email_message",
+            "app.vacation_mode.load_outbound_smtp_params",
+            return_value=_smtp_params(),
+        ),
+        patch(
+            "app.vacation_mode.deliver_outbound_email",
             return_value=delivery,
         ) as deliver,
-        patch("app.vacation_mode.operator_alert_store") as alerts,
+        patch("app.vacation_mode.clear_outbound_smtp_failure") as clear_failure,
         patch("app.vacation_mode.try_resolve_home_location", return_value=home),
         patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
     ):
@@ -481,7 +477,7 @@ def test_send_vacation_mode_transition_email_uses_smtp_stack(tmp_path: Path) -> 
     assert "House (37.774900, -122.419400)" in body
     assert "Open Automations → Vacation in domesti-bot" in body
     assert "Sent by: domesti-bot · Vacation mode (automatic)" in body
-    alerts.clear_smtp_notification_failure.assert_called_once()
+    clear_failure.assert_called_once()
     dispose_engine(db)
 
 
@@ -526,23 +522,18 @@ def test_send_vacation_mode_test_email_marks_subject_and_body(tmp_path: Path) ->
         notification_emails=["ops@example.com"],
         user_ids=["henrique"],
     )
-    smtp_config = MagicMock()
-    smtp_config.from_address = "noreply@example.com"
-    smtp_config.host = "smtp.example.com"
-    smtp_config.mail_domain = "example.com"
-    smtp_config.port = 587
-    smtp_config.username = "user"
     delivery = MagicMock()
     delivery.format_for_log.return_value = "recipient_count=1"
     with (
-        patch("app.vacation_mode.load_smtp_config", return_value=smtp_config),
-        patch("app.vacation_mode.smtp_send_ready", return_value=True),
-        patch("app.vacation_mode.resolve_password_for_send", return_value="secret"),
         patch(
-            "app.vacation_mode.deliver_email_message",
+            "app.vacation_mode.load_outbound_smtp_params",
+            return_value=_smtp_params(),
+        ),
+        patch(
+            "app.vacation_mode.deliver_outbound_email",
             return_value=delivery,
         ) as deliver,
-        patch("app.vacation_mode.operator_alert_store"),
+        patch("app.vacation_mode.clear_outbound_smtp_failure"),
         patch("app.vacation_mode.try_resolve_home_location", return_value=None),
         patch("app.vacation_mode.load_settings_location", return_value=MagicMock()),
     ):
@@ -646,3 +637,14 @@ def test_tick_email_failure_records_operator_alert(tmp_path: Path) -> None:
     alerts.record_smtp_notification_failure.assert_called_once()
     assert load_vacation_mode_state(db).armed is True
     dispose_engine(db)
+
+
+def _smtp_params() -> SmtpConnectionParams:
+    return SmtpConnectionParams(
+        from_address="noreply@example.com",
+        host="smtp.example.com",
+        mail_domain="example.com",
+        password="secret",
+        port=587,
+        username="user",
+    )

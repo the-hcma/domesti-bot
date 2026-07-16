@@ -13,7 +13,7 @@ Every outbound email from domesti-bot MUST:
    ```text
    Sent by: domesti-bot · <subsystem> (<trigger>)
    ```
-   Prefer `app.outbound_email.provenance_footer`. The SMTP `From:` address is not sufficient.
+   Prefer `app.outbound_email.provenance_footer` (and related helpers in `app.outbound_email`, including `build_outbound_message` / `deliver_outbound_email` for MIME + send). The SMTP `From:` address is not sufficient.
 
 2. **Instance URL** — When a public base URL is known (`DOMESTI_PUBLIC_BASE_URL` or My Tracks pair status, or the live UI origin for Settings tests), include the instance top-level URL in the body. Prefer an Automations deep link (`#/automations/…`) in addition when the mail concerns something editable there. Do not invent broken hash routes.
 

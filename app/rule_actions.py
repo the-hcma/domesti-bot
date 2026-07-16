@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from email.message import EmailMessage
 from pathlib import Path
 from typing import Literal
 
@@ -23,12 +22,17 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
-from app.operator_alerts import operator_alert_store
+from app.outbound_email import (
+    build_outbound_message,
+    clear_outbound_smtp_failure,
+    deliver_outbound_email,
+    load_outbound_smtp_params,
+    record_outbound_smtp_failure,
+)
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_engine import expected_state_for_action_type
 from app.rule_notification import build_rule_notification_bodies
-from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult, smtp_friendly_error
-from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
+from app.smtp_service import SmtpDeliveryResult
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
 from app.vizio_device_manager import VizioDeviceManager
 
@@ -578,18 +582,9 @@ def send_rule_notification_email(
             rule.id,
         )
         raise RuleActionDispatchError(f"Rule {rule.id!r} has notify_on_fire but no notification_emails")
-    config = load_smtp_config(cache_path)
-    if config is None or not smtp_send_ready(config):
+    params = load_outbound_smtp_params(cache_path)
+    if params is None:
         raise RuleActionDispatchError("SMTP is not configured; cannot send rule notification email")
-    password = resolve_password_for_send(cache_path, draft_password=None, host=config.host)
-    params = SmtpConnectionParams(
-        from_address=config.from_address,
-        host=config.host,
-        mail_domain=config.mail_domain,
-        password=password,
-        port=config.port,
-        username=config.username,
-    )
     subject = f"domesti-bot rule fired: {rule.label}"
     plain_body, html_body = build_rule_notification_bodies(
         rule,
@@ -597,19 +592,17 @@ def send_rule_notification_email(
         device_action_outcomes=device_action_outcomes,
         notification_detail=notification_detail,
     )
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = params.from_address
-    message["To"] = ", ".join(recipients)
-    message.set_content(plain_body)
-    message.add_alternative(html_body, subtype="html")
+    message = build_outbound_message(
+        from_address=params.from_address,
+        html_body=html_body,
+        plain_body=plain_body,
+        subject=subject,
+        to_addresses=recipients,
+    )
     try:
-        from app.smtp_service import deliver_email_message
-
-        delivery = deliver_email_message(params, message)
+        delivery = deliver_outbound_email(params, message)
     except Exception as exc:
-        friendly = smtp_friendly_error(exc, host=params.host)
-        operator_alert_store.record_smtp_notification_failure(message=friendly)
+        friendly = record_outbound_smtp_failure(exc, host=params.host)
         _LOGGER.error(
             "[rules] notification email failed for rule_id=%s recipient_count=%d host=%s:%s: %s",
             rule.id,
@@ -619,7 +612,7 @@ def send_rule_notification_email(
             friendly,
         )
         raise RuleActionDispatchError(friendly) from exc
-    operator_alert_store.clear_smtp_notification_failure()
+    clear_outbound_smtp_failure()
     _LOGGER.info(
         "[rules] notification email sent for rule_id=%s %s",
         rule.id,

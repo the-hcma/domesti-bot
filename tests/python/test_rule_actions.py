@@ -23,8 +23,7 @@ from app.rule_actions import (
     resolve_kasa_host_by_label,
     send_rule_notification_email,
 )
-from app.smtp_service import SmtpDeliveryResult
-from app.smtp_store import SmtpConfigRecord
+from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
 from app.vizio_device_manager import VizioDeviceManager
 
@@ -407,15 +406,6 @@ def test_send_rule_notification_email_clears_operator_alert_on_success(
         notify_on_fire=True,
         triggers=[RuleTrigger.EDGE_TRUE],
     )
-    smtp_config = SmtpConfigRecord(
-        from_address="bot@example.com",
-        host="smtp.example.com",
-        last_test_recipient=None,
-        mail_domain="example.com",
-        password_configured=False,
-        port=25,
-        username="",
-    )
     delivery = SmtpDeliveryResult(
         host="smtp.example.com",
         port=25,
@@ -424,10 +414,8 @@ def test_send_rule_notification_email_clears_operator_alert_on_success(
         smtp_response="2.0.0 Ok: queued as UNITTEST",
     )
     with (
-        patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
-        patch("app.rule_actions.smtp_send_ready", return_value=True),
-        patch("app.rule_actions.resolve_password_for_send", return_value=""),
-        patch("app.smtp_service.deliver_email_message", return_value=delivery),
+        patch("app.rule_actions.load_outbound_smtp_params", return_value=_smtp_params()),
+        patch("app.outbound_email.deliver_email_message", return_value=delivery),
     ):
         send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
 
@@ -450,21 +438,10 @@ def test_send_rule_notification_email_records_operator_alert_on_smtp_failure(
         notify_on_fire=True,
         triggers=[RuleTrigger.EDGE_TRUE],
     )
-    smtp_config = SmtpConfigRecord(
-        from_address="bot@example.com",
-        host="smtp.example.com",
-        last_test_recipient=None,
-        mail_domain="example.com",
-        password_configured=False,
-        port=25,
-        username="",
-    )
     with (
-        patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
-        patch("app.rule_actions.smtp_send_ready", return_value=True),
-        patch("app.rule_actions.resolve_password_for_send", return_value=""),
+        patch("app.rule_actions.load_outbound_smtp_params", return_value=_smtp_params()),
         patch(
-            "app.smtp_service.deliver_email_message",
+            "app.outbound_email.deliver_email_message",
             side_effect=ConnectionRefusedError("connection refused"),
         ),
         pytest.raises(RuleActionDispatchError),
@@ -492,15 +469,6 @@ def test_send_rule_notification_email_sends_to_all_recipients(
         notify_on_fire=True,
         triggers=[RuleTrigger.EDGE_TRUE],
     )
-    smtp_config = SmtpConfigRecord(
-        from_address="bot@example.com",
-        host="smtp.example.com",
-        last_test_recipient=None,
-        mail_domain="example.com",
-        password_configured=False,
-        port=25,
-        username="",
-    )
     delivery = SmtpDeliveryResult(
         host="smtp.example.com",
         port=25,
@@ -509,10 +477,8 @@ def test_send_rule_notification_email_sends_to_all_recipients(
         smtp_response="2.0.0 Ok: queued as UNITTEST",
     )
     with (
-        patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
-        patch("app.rule_actions.smtp_send_ready", return_value=True),
-        patch("app.rule_actions.resolve_password_for_send", return_value=""),
-        patch("app.smtp_service.deliver_email_message", return_value=delivery) as deliver_mock,
+        patch("app.rule_actions.load_outbound_smtp_params", return_value=_smtp_params()),
+        patch("app.outbound_email.deliver_email_message", return_value=delivery) as deliver_mock,
     ):
         outcome = send_rule_notification_email(tmp_path / "cache.sqlite", rule=rule)
 
@@ -542,15 +508,6 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
         notify_on_fire=True,
         triggers=[RuleTrigger.EDGE_TRUE],
     )
-    smtp_config = SmtpConfigRecord(
-        from_address="bot@example.com",
-        host="smtp.example.com",
-        last_test_recipient=None,
-        mail_domain="example.com",
-        password_configured=False,
-        port=25,
-        username="",
-    )
     delivery = SmtpDeliveryResult(
         host="smtp.example.com",
         port=25,
@@ -571,10 +528,8 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
         ),
     )
     with (
-        patch("app.rule_actions.load_smtp_config", return_value=smtp_config),
-        patch("app.rule_actions.smtp_send_ready", return_value=True),
-        patch("app.rule_actions.resolve_password_for_send", return_value=""),
-        patch("app.smtp_service.deliver_email_message", return_value=delivery) as deliver_mock,
+        patch("app.rule_actions.load_outbound_smtp_params", return_value=_smtp_params()),
+        patch("app.outbound_email.deliver_email_message", return_value=delivery) as deliver_mock,
     ):
         send_rule_notification_email(
             tmp_path / "cache.sqlite",
@@ -592,3 +547,14 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
     assert "Garage door is open." in plain
     assert "https://domesti.example.com/#/automations/status/test-rule" in plain
     assert "Sent by: domesti-bot · Rule test-rule (automation)" in plain
+
+
+def _smtp_params() -> SmtpConnectionParams:
+    return SmtpConnectionParams(
+        from_address="bot@example.com",
+        host="smtp.example.com",
+        mail_domain="example.com",
+        password="",
+        port=25,
+        username="",
+    )

@@ -29,7 +29,6 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from email.message import EmailMessage
 from html import escape
 from pathlib import Path
 
@@ -45,10 +44,15 @@ from app.operator_alerts import operator_alert_store
 from app.outbound_email import (
     append_provenance_footer,
     automations_vacation_url,
+    build_outbound_message,
+    clear_outbound_smtp_failure,
+    deliver_outbound_email,
     domesti_public_base_url,
     format_ui_link_html,
     format_ui_link_plain,
+    load_outbound_smtp_params,
     provenance_footer,
+    record_outbound_smtp_failure,
 )
 from app.presence_store import _haversine_m, list_user_locations
 from app.rule_conditions import (
@@ -56,8 +60,6 @@ from app.rule_conditions import (
     users_any_inside_home_geofence,
     users_min_distance_from_home_met,
 )
-from app.smtp_service import SmtpConnectionParams, deliver_email_message, smtp_friendly_error
-from app.smtp_store import load_smtp_config, resolve_password_for_send, smtp_send_ready
 from app.vacation_mode_store import (
     VacationModeStateRecord,
     load_vacation_mode_state,
@@ -370,8 +372,8 @@ def send_vacation_mode_anomaly_email(
             device_id,
         )
         return False
-    config = load_smtp_config(cache_path)
-    if config is None or not smtp_send_ready(config):
+    params = load_outbound_smtp_params(cache_path)
+    if params is None:
         _LOGGER.warning(
             "[vacation] anomaly email skipped — SMTP is not configured (family=%s device_id=%s recipient_count=%d)",
             family_id.value,
@@ -379,15 +381,6 @@ def send_vacation_mode_anomaly_email(
             len(recipients),
         )
         return False
-    password = resolve_password_for_send(cache_path, draft_password=None, host=config.host)
-    params = SmtpConnectionParams(
-        from_address=config.from_address,
-        host=config.host,
-        mail_domain=config.mail_domain,
-        password=password,
-        port=config.port,
-        username=config.username,
-    )
     plain_body, html_body = build_vacation_mode_anomaly_bodies(
         family_id=family_id,
         device_id=device_id,
@@ -404,17 +397,17 @@ def send_vacation_mode_anomaly_email(
         subject = f"domesti-bot [test] {subject_core}"
     else:
         subject = f"domesti-bot {subject_core}"
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = params.from_address
-    message["To"] = ", ".join(recipients)
-    message.set_content(plain_body)
-    message.add_alternative(html_body, subtype="html")
+    message = build_outbound_message(
+        from_address=params.from_address,
+        html_body=html_body,
+        plain_body=plain_body,
+        subject=subject,
+        to_addresses=recipients,
+    )
     try:
-        delivery = deliver_email_message(params, message)
+        delivery = deliver_outbound_email(params, message)
     except Exception as exc:
-        friendly = smtp_friendly_error(exc, host=params.host)
-        operator_alert_store.record_smtp_notification_failure(message=friendly)
+        friendly = record_outbound_smtp_failure(exc, host=params.host)
         _LOGGER.error(
             "[vacation] anomaly email failed family=%s device_id=%s recipient_count=%d host=%s:%s: %s",
             family_id.value,
@@ -425,7 +418,7 @@ def send_vacation_mode_anomaly_email(
             friendly,
         )
         raise
-    operator_alert_store.clear_smtp_notification_failure()
+    clear_outbound_smtp_failure()
     _LOGGER.info(
         "[vacation] anomaly email sent family=%s device_id=%s source=%s %s",
         family_id.value,
@@ -457,8 +450,8 @@ def send_vacation_mode_transition_email(
             source.value,
         )
         return False
-    config = load_smtp_config(cache_path)
-    if config is None or not smtp_send_ready(config):
+    params = load_outbound_smtp_params(cache_path)
+    if params is None:
         _LOGGER.warning(
             "[vacation] transition email skipped — SMTP is not configured (armed=%s recipient_count=%d source=%s)",
             armed,
@@ -466,15 +459,6 @@ def send_vacation_mode_transition_email(
             source.value,
         )
         return False
-    password = resolve_password_for_send(cache_path, draft_password=None, host=config.host)
-    params = SmtpConnectionParams(
-        from_address=config.from_address,
-        host=config.host,
-        mail_domain=config.mail_domain,
-        password=password,
-        port=config.port,
-        username=config.username,
-    )
     plain_body, html_body = build_vacation_mode_transition_bodies(
         armed=armed,
         settings=settings,
@@ -487,17 +471,17 @@ def send_vacation_mode_transition_email(
         subject = "domesti-bot vacation mode on"
     else:
         subject = "domesti-bot vacation mode off"
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = params.from_address
-    message["To"] = ", ".join(recipients)
-    message.set_content(plain_body)
-    message.add_alternative(html_body, subtype="html")
+    message = build_outbound_message(
+        from_address=params.from_address,
+        html_body=html_body,
+        plain_body=plain_body,
+        subject=subject,
+        to_addresses=recipients,
+    )
     try:
-        delivery = deliver_email_message(params, message)
+        delivery = deliver_outbound_email(params, message)
     except Exception as exc:
-        friendly = smtp_friendly_error(exc, host=params.host)
-        operator_alert_store.record_smtp_notification_failure(message=friendly)
+        friendly = record_outbound_smtp_failure(exc, host=params.host)
         _LOGGER.error(
             "[vacation] transition email failed armed=%s recipient_count=%d host=%s:%s source=%s: %s",
             armed,
@@ -508,7 +492,7 @@ def send_vacation_mode_transition_email(
             friendly,
         )
         raise
-    operator_alert_store.clear_smtp_notification_failure()
+    clear_outbound_smtp_failure()
     _LOGGER.info(
         "[vacation] transition email sent armed=%s source=%s %s",
         armed,
