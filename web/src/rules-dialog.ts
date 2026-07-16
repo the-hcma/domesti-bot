@@ -1783,17 +1783,25 @@ export function parseAutomationsDeepLink(
   hash: string,
 ): AutomationsHubOpenOptions | null {
   const raw = hash.startsWith("#") ? hash.slice(1) : hash;
-  const match = /^\/automations\/status\/([^/?#]+)(?:[?#].*)?$/.exec(raw);
-  if (match === null) {
-    return null;
-  }
-  try {
-    const ruleId = decodeURIComponent(match[1] ?? "");
-    if (ruleId === "") {
+  const statusMatch = /^\/automations\/status\/([^/?#]+)(?:[?#].*)?$/.exec(raw);
+  if (statusMatch !== null) {
+    try {
+      const ruleId = decodeURIComponent(statusMatch[1] ?? "");
+      if (ruleId === "") {
+        return null;
+      }
+      return { tab: "status", ruleId };
+    } catch {
       return null;
     }
-    return { tab: "status", ruleId };
-  } catch {
+  }
+  const tabMatch = /^\/automations\/(mail|vacation)(?:[/?#].*)?$/.exec(raw);
+  if (tabMatch === null) {
     return null;
   }
+  const tab = tabMatch[1];
+  if (tab === "mail" || tab === "vacation") {
+    return { tab };
+  }
+  return null;
 }

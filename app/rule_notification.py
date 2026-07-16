@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
 from app.api.schemas import RuleOut
-from app.mytracks_service import MyTracksSyncError, normalize_public_base_url
-from app.mytracks_store import load_mytracks_pair_status
-from app.rule_engine import expected_state_for_action_type
+from app.outbound_email import (
+    append_provenance_footer,
+    domesti_public_base_url,
+    rule_fire_provenance_footer,
+    with_instance_hash,
+)
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
+from app.rule_engine import expected_state_for_action_type
 
 
 @dataclass(frozen=True)
@@ -21,22 +24,6 @@ class DeviceActionEmailSummary:
 
     changed_lines: tuple[str, ...]
     no_change_message: str | None
-
-
-def _device_state_changed(outcome: RuleDeviceActionOutcome) -> bool:
-    before = outcome.before_state
-    after = outcome.after_state
-    if before is None or after is None:
-        return before != after
-    return before != after
-
-
-def _safe_normalize_public_base_url(url: str) -> str | None:
-    """Return a normalized public base URL, or ``None`` when config is invalid."""
-    try:
-        return normalize_public_base_url(url)
-    except MyTracksSyncError:
-        return None
 
 
 def build_rule_notification_bodies(
@@ -69,6 +56,9 @@ def build_rule_notification_bodies(
         plain_parts.append(
             "Open Automations → Status in domesti-bot for live condition details.",
         )
+    instance_url = domesti_public_base_url(cache_path)
+    if instance_url is not None:
+        plain_parts.append(f"Instance: {instance_url}")
 
     safe_label = escape(rule.label, quote=False)
     safe_id = escape(rule.id, quote=False)
@@ -100,20 +90,17 @@ def build_rule_notification_bodies(
             "<p>Open Automations → Status in domesti-bot for live condition "
             "details.</p>",
         )
-    return "\n".join(plain_parts), "".join(html_parts)
-
-
-def domesti_public_base_url(cache_path: Path | None) -> str | None:
-    """Resolve the browser-facing origin for automation UI links."""
-    env = (os.environ.get("DOMESTI_PUBLIC_BASE_URL") or "").strip()
-    if env != "":
-        return _safe_normalize_public_base_url(env)
-    if cache_path is None:
-        return None
-    pair_status = load_mytracks_pair_status(cache_path)
-    if pair_status is None or pair_status.domesti_public_base_url is None:
-        return None
-    return _safe_normalize_public_base_url(pair_status.domesti_public_base_url)
+    if instance_url is not None:
+        safe_instance = escape(instance_url, quote=True)
+        html_parts.append(
+            f'<p>Instance: <a href="{safe_instance}">{safe_instance}</a></p>',
+        )
+    append_provenance_footer(
+        plain_parts,
+        html_parts,
+        provenance=rule_fire_provenance_footer(rule.id),
+    )
+    return "\n".join(plain_parts) + "\n", "".join(html_parts)
 
 
 def format_device_action_outcome_line(outcome: RuleDeviceActionOutcome) -> str:
@@ -160,7 +147,7 @@ def rule_automation_status_url(cache_path: Path | None, rule_id: str) -> str | N
     slug = quote(rule_id.strip(), safe="")
     if slug == "":
         return None
-    return f"{base.rstrip('/')}/#/automations/status/{slug}"
+    return with_instance_hash(base, f"#/automations/status/{slug}")
 
 
 def summarize_device_action_outcomes(
@@ -183,3 +170,11 @@ def summarize_device_action_outcomes(
         changed_lines=(),
         no_change_message=format_devices_already_in_desired_state_message(outcomes),
     )
+
+
+def _device_state_changed(outcome: RuleDeviceActionOutcome) -> bool:
+    before = outcome.before_state
+    after = outcome.after_state
+    if before is None or after is None:
+        return before != after
+    return before != after

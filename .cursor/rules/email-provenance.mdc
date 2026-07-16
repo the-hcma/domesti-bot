@@ -1,35 +1,28 @@
 ---
-description: Outbound emails must identify subsystem and trigger (provenance)
+description: Outbound emails — provenance, human copy, test markers, deep links
 alwaysApply: true
 ---
 
-# Email provenance
+# Outbound email standards
 
-Every outbound email from domesti-bot MUST identify **who/what sent it** and **why** (trigger), so operators can tell automatic latch mail from Settings tests, rule notifications, and SMTP probes.
+Canonical detail lives in `docs/AGENTS.md` (**Outgoing email**). Keep this rule aligned; do not let the two drift.
 
-## Required shape
+Every outbound email from domesti-bot MUST:
 
-Include a short footer line (plain text, and an equivalent HTML line) near the end of the body:
+1. **Provenance** — End the body (plain + HTML) with:
+   ```text
+   Sent by: domesti-bot · <subsystem> (<trigger>)
+   ```
+   Prefer `app.outbound_email.provenance_footer`. The SMTP `From:` address is not sufficient.
 
-```text
-Sent by: domesti-bot · <subsystem> (<trigger>)
-```
+2. **Instance URL** — When a public base URL is known (`DOMESTI_PUBLIC_BASE_URL` or My Tracks pair status, or the live UI origin for Settings tests), include the instance top-level URL in the body. Prefer an Automations deep link (`#/automations/…`) in addition when the mail concerns something editable there. Do not invent broken hash routes.
 
-Examples:
+3. **Human-friendly copy** — Plain language; no jargon-only bodies (e.g. “hysteresis window” without concrete wait / distance / users / home).
 
-- `Sent by: domesti-bot · Vacation mode (automatic)`
-- `Sent by: domesti-bot · Automations → Vacation (test email)`
-- `Sent by: domesti-bot · Settings → Mail (test email)`
+4. **Concrete facts** — Include the values an operator needs to verify the decision (users, home label + lat/lon, distance **thresholds**, dwell durations). When the decision depends on how far a user is from **home** or a **geofence**, also report the **observed** distance(s) (and which geofence / home point) when those readings are available.
 
-## Subject lines for tests
+5. **Test vs real** — Settings / Automations / Mail **test** sends must mark the subject with `[test]`, state that the message is a test, and state when live state was not changed.
 
-Settings / Automations **test** sends must also mark the subject (e.g. `[test]`), and the body must state that no live state was changed when that is true.
+6. **Closed sets** — When code branches on send source, use a `StrEnum` (`python-closed-set-enums.mdc`).
 
-## Closed sets
-
-When the code branches on send source (latch vs settings test, etc.), use a `StrEnum` (see `python-closed-set-enums.mdc`) rather than bare string literals.
-
-## Do not
-
-- Ship vague bodies such as “hysteresis window” without concrete values (users, home label + lat/lon, distance, wait duration).
-- Omit provenance because the From address “already says enough” — From is the SMTP identity, not the subsystem.
+7. **Example addresses** — Tracked fixtures use `@example.com` only (`example-email-addresses.mdc`).
