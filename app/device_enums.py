@@ -136,7 +136,8 @@ class UiActionType(StrEnum):
 
 
 class VacationEmailSource(StrEnum):
-    """What triggered a vacation-mode transition notification email."""
+    """What triggered a vacation-mode notification email."""
 
+    ANOMALY = "anomaly"
     LATCH = "latch"
     SETTINGS_TEST = "settings_test"

@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from app.device_enums import DeviceFamilyId
 
-DeviceStateChangeCallback = Callable[[DeviceFamilyId, str], None]
+DeviceStateChangeCallback = Callable[[DeviceFamilyId, str, bool, bool | None], None]
 
 
 class DeviceStateChangeDetector:
@@ -27,4 +27,4 @@ class DeviceStateChangeDetector:
         prior = self._prior.get(key)
         self._prior[key] = state
         if prior is not None and prior != state:
-            self._on_change(family_id, device_id)
+            self._on_change(family_id, device_id, prior, state)
