@@ -15,6 +15,7 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
 )
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
+from app.location_history_retention import default_location_history_retention
 from app.location_monitoring_policy import (
     LocationMonitoringPolicy,
     _effective_approach_request_interval_s,
@@ -22,7 +23,6 @@ from app.location_monitoring_policy import (
 )
 from app.location_request_coordinator import LocationRequestCoordinator
 from app.location_request_rate_limits import LocationRequestRateLimits
-from app.location_history_retention import default_location_history_retention
 from app.mytracks_store import (
     MyTracksConfigSave,
     save_mytracks_config,

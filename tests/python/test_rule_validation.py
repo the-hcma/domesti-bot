@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from pydantic import ValidationError
 
@@ -18,9 +20,8 @@ from app.api.schemas import (
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
 )
-from unittest.mock import MagicMock, patch
-
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType, RuleTrigger
+from app.rule_actions import RuleActionDispatchError
 from app.rule_validation import (
     RosterUserRow,
     RuleValidationContext,
@@ -31,7 +32,6 @@ from app.rule_validation import (
     rule_references_user_id,
     validate_rule,
 )
-from app.rule_actions import RuleActionDispatchError
 
 
 def _arrival_rule() -> RuleOut:

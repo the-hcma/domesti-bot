@@ -175,7 +175,7 @@ def build_vacation_mode_transition_bodies(
         why = f"At least one of {users_label} entered the home geofence at {home_label}, so vacation mode turned off."
         facts = [
             f"People: {users_label}",
-            f"Disarm: home geofence arrival",
+            "Disarm: home geofence arrival",
             f"Home: {home_label}",
             *_vacation_observed_distance_facts(
                 cache_path=cache_path,

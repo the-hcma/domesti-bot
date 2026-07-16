@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import Any, Final
 from zoneinfo import ZoneInfo
 
-
 TRACE_LEVEL: Final[int] = 5
 """Custom level below DEBUG, used to demote noise like health-check access logs."""
 

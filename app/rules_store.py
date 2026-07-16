@@ -6,8 +6,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy.orm import Session
 from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
 from app.db.models import RuleGeofence, RuleUser
 from app.db.session import discovery_session, discovery_write

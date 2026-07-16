@@ -18,7 +18,6 @@ from app.api.schemas import (
     SettingsLocationOut,
     UsersInsideGeofenceForSCondition,
 )
-from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.astronomical_schedule import (
     astronomical_anchor_datetime,
     cron_expression_for_local_datetime,
@@ -31,6 +30,7 @@ from app.astronomical_schedule import (
     uses_astronomical_repeat_schedule,
     uses_astronomical_schedule,
 )
+from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.rule_conditions import compute_rules_sun_out
 
 

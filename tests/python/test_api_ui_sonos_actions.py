@@ -36,8 +36,8 @@ from app.api.ui_state import (
     find_sonos_by_identifier,
 )
 from app.domesti_bot_cli import DeviceManagersState
-from app.server_runtime import runtime
 from app.kasa_device_manager import KasaDeviceManager
+from app.server_runtime import runtime
 from app.sonos_device_manager import (
     SonosDeviceManager,
     SonosTransitionUnavailableError,

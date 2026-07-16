@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.presence_store import UserLocationRecord, upsert_user_location
 from app.location_history_retention import default_location_history_retention
-from app.presence_store import list_observed_wifi_networks_for_user
+from app.presence_store import UserLocationRecord, list_observed_wifi_networks_for_user, upsert_user_location
 from app.rules_store import UserRecord, list_users, replace_users, set_user_home_wifi
 
 

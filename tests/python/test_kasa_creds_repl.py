@@ -24,15 +24,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
-
 from kasa.credentials import Credentials
 from kasa.exceptions import AuthenticationError, _ConnectionError
 
 from app.db.secrets import load_kasa_credentials_from_db
 from app.domesti_bot_cli import (
-    _Theme,
     _maybe_print_kasa_auth_notice,
     _repl_cmd_kasa_creds,
+    _Theme,
 )
 from app.kasa_device_manager import KasaDeviceManager
 

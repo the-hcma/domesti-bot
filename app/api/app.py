@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import time
@@ -19,9 +18,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, HTMLResponse, Response
 
 from app import device_discovery_store
-from app.device_enums import DeviceFamilyId, UiActionType
-from app.expected_device_change import mark_expected_device_change
-from app.logging_config import TRACE_LEVEL
+from app.api.location_update_routes import router as location_update_router
+from app.api.mytracks_routes import rules_router as mytracks_rules_router
+from app.api.mytracks_routes import settings_router as mytracks_settings_router
+from app.api.rules_routes import router as rules_router
 from app.api.schemas import (
     CompletionAliasesOut,
     ExecuteLineIn,
@@ -38,12 +38,6 @@ from app.api.schemas import (
     UIStateOut,
 )
 from app.api.settings_routes import router as settings_router
-from app.api.vizio_settings_routes import router as vizio_settings_router
-from app.api.mytracks_routes import rules_router as mytracks_rules_router
-from app.api.mytracks_routes import settings_router as mytracks_settings_router
-from app.api.location_update_routes import router as location_update_router
-from app.api.rules_routes import router as rules_router
-from app.api.webhooks_routes import router as webhooks_router
 from app.api.smtp_routes import router as smtp_router
 from app.api.ui_action_logging import log_ui_action
 from app.api.ui_state import (
@@ -62,28 +56,32 @@ from app.api.ui_state import (
     find_tailwind_by_identifier,
     find_vizio_by_id,
 )
+from app.api.vizio_settings_routes import router as vizio_settings_router
+from app.api.webhooks_routes import router as webhooks_router
 from app.build_info import get_build_info
+from app.device_enums import DeviceFamilyId, UiActionType
 from app.device_state_watcher import (
     build_default_watchers,
     poll_interval_from_env,
     run_device_state_watchers,
 )
+from app.discovery_cache_sync import maybe_sync_discovery_cache
 from app.domesti_bot_cli import (
     DeviceManagersState,
-    _Theme,
     _all_cli_device_labels,
     _media_playback_aliases,
     _switch_aliases,
     _tailwind_door_aliases,
+    _Theme,
     bootstrap_device_managers,
     execute_line_for_api,
     shutdown_device_managers,
 )
-from app.discovery_cache_sync import maybe_sync_discovery_cache
+from app.expected_device_change import mark_expected_device_change
+from app.logging_config import TRACE_LEVEL
 from app.server_runtime import runtime
 from app.sonos_device_manager import SonosTransitionUnavailableError
 from app.ui_device_actions import flip_ui_device
-
 
 _LOGGER = logging.getLogger("app.api")
 

@@ -14,7 +14,6 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from kasa.credentials import Credentials
 from kasa.deviceconfig import (
     DeviceConfig,

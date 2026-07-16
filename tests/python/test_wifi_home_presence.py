@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from app.api.schemas import SettingsLocationOut
-from app.presence_store import _haversine_m
-from app.presence_store import UserLocationRecord
+from app.presence_store import UserLocationRecord, _haversine_m
+from app.rule_evaluator import _reconstruct_geofence_seed_from_history
 from app.rules_store import GeofenceRecord
 from app.wifi_home_presence import (
     WIFI_HOME_GEOFENCE_RADIUS_SCALE,
@@ -16,7 +16,6 @@ from app.wifi_home_presence import (
     wifi_home_geofence_ids,
     wifi_home_presence_applies,
 )
-from app.rule_evaluator import _reconstruct_geofence_seed_from_history
 
 _MIN_ACCURACY_M = 50
 

@@ -58,7 +58,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from kasa import Discover, Device as KDevice
+from kasa import Device as KDevice
+from kasa import Discover
 from kasa.credentials import Credentials
 from kasa.deviceconfig import (
     DeviceConfig,

@@ -21,8 +21,7 @@ re-enable PR.
 
 from __future__ import annotations
 
-from app import androidtv_device_manager
-from app import domesti_bot_cli
+from app import androidtv_device_manager, domesti_bot_cli
 
 
 def test_androidtv_disabled_constant_is_true() -> None:

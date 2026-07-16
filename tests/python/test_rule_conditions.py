@@ -19,32 +19,32 @@ from app.api.schemas import (
     DevicesAnyInStateCondition,
     GeofenceOut,
     RuleConditionDeviceRefOut,
+    RuleConditionsOut,
+    RuleOut,
+    SettingsLocationOut,
     UserLocationOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceForSCondition,
-    RuleConditionsOut,
-    RuleOut,
-    SettingsLocationOut,
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleEvaluationCause, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
-from app.sonos_device_manager import SonosDeviceManager
-from app.vizio_device_manager import VizioDeviceManager
 from app.rule_actions import cached_kasa_is_on
 from app.rule_conditions import (
     RuleEvaluationContext,
     _effective_location_for_rule,
     _presence_user_ids_for_condition,
     compute_rules_sun_out,
+    dwell_episode_blocks_fire,
     evaluate_rule,
     presence_user_ids_for_rule,
-    dwell_episode_blocks_fire,
 )
 from app.rule_validation import build_roster_user_id_lookup
 from app.rules_status import build_rules_status
+from app.sonos_device_manager import SonosDeviceManager
+from app.vizio_device_manager import VizioDeviceManager
 
 _SETTINGS = SettingsLocationOut(
     home_label="Home",

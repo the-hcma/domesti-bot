@@ -6,8 +6,8 @@ import time
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.db.models import AppSecret
 from app.db.secrets_key import SecretsKeySource, load_secrets_key_material

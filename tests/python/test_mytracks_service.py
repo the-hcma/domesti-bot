@@ -11,7 +11,6 @@ import pytest
 from app.mytracks_service import (
     ExportedGeofence,
     ExportedUser,
-    MyTracksPairResult,
     MyTracksSyncError,
     fetch_geofences_from_my_tracks,
     fetch_mytracks_domesti_config,

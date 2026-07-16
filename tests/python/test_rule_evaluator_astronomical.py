@@ -129,8 +129,8 @@ def astronomical_fixture(
     ) - timedelta(minutes=15)
     clock = {"now": (anchor_local - timedelta(minutes=2)).timestamp()}
 
-    from app.presence_store import UserLocationRecord, upsert_user_location
     from app.location_history_retention import default_location_history_retention
+    from app.presence_store import UserLocationRecord, upsert_user_location
     from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
     replace_users(
@@ -333,8 +333,8 @@ async def test_astronomical_repeat_rule_fires_after_anchor_when_home_arrives_lat
     ) - timedelta(minutes=15)
     clock = {"now": anchor_local.timestamp()}
 
-    from app.presence_store import UserLocationRecord, upsert_user_location
     from app.location_history_retention import default_location_history_retention
+    from app.presence_store import UserLocationRecord, upsert_user_location
     from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
     replace_users(

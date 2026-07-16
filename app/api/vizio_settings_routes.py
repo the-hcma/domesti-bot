@@ -19,8 +19,8 @@ from app.api.schemas import (
     VizioPairCancelIn,
     VizioPairCompleteIn,
     VizioPairCompleteOut,
-    VizioTvsSettingsOut,
     VizioTvSettingsOut,
+    VizioTvsSettingsOut,
 )
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.db.secrets import (

@@ -69,14 +69,15 @@ from app.geofence_transition_state_store import (
     upsert_geofence_transition_state,
 )
 from app.location_history_retention import LocationHistoryRetention
-from app.location_report import location_epoch_to_iso_z
 from app.location_monitoring_policy import LocationMonitoringPolicy
+from app.location_report import location_epoch_to_iso_z
 from app.location_request_coordinator import (
     DeferredAccuracyEdgeSnapshot,
     LocationRequestContext,
     LocationRequestCoordinator,
 )
 from app.mytracks_store import load_location_history_retention
+from app.presence_connection_type import connection_type_is_wifi
 from app.presence_store import (
     UserLocationRecord,
     geofence_ids_containing_location,
@@ -114,7 +115,6 @@ from app.rule_validation import (
     rule_watches_backend_device,
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
-from app.presence_connection_type import connection_type_is_wifi
 from app.vacation_mode import tick_vacation_mode
 from app.wifi_home_presence import (
     history_row_geofence_inside,

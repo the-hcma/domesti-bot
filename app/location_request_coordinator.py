@@ -12,8 +12,8 @@ from typing import Literal
 
 from app.api.schemas import RuleOut
 from app.automation_rules_loader import list_automation_rules, load_settings_location
-from app.device_enums import RuleTrigger
 from app.db.secrets import SecretsDecryptError, load_mytracks_relay_api_key_from_db
+from app.device_enums import RuleTrigger
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.mytracks_service import request_user_location
 from app.mytracks_store import (

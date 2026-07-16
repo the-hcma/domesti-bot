@@ -13,14 +13,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.api.schemas import (
-    RuleConditionsOut,
+    DevicesAnyInStateCondition,
     RuleConditionDeviceRefOut,
+    RuleConditionsOut,
     RuleDeviceActionOut,
     RuleOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceForSCondition,
-    DevicesAnyInStateCondition,
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState

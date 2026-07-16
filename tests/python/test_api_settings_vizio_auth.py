@@ -12,8 +12,8 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.app import create_app
 from app import device_discovery_store
+from app.api.app import create_app
 from app.db.secrets import SecretsDecryptError
 from app.domesti_bot_cli import DeviceManagersState
 from app.server_runtime import runtime as server_runtime

@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 
 from app import device_discovery_store
 from app.api.app import create_app
-from app.api.schemas import UIDeviceOut, UIFamilyOut, UIOperatorAlertOut, UIStateOut
+from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
 from app.api.ui_state import build_ui_state, find_kasa_by_host
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState

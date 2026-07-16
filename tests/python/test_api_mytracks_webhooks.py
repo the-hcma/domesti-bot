@@ -163,7 +163,7 @@ def test_location_update_webhook_ping_with_old_fix_updates_location(
     fernet_key: str,
 ) -> None:
     """A ping whose GPS fix predates the report still updates last location."""
-    from app.presence_store import parse_iso_timestamp_to_epoch
+    from app.location_report import parse_iso_timestamp_to_epoch
 
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
@@ -206,7 +206,7 @@ def test_location_update_webhook_drops_stale_report(
     fernet_key: str,
 ) -> None:
     """Older report times do not replace a newer stored location."""
-    from app.presence_store import parse_iso_timestamp_to_epoch
+    from app.location_report import parse_iso_timestamp_to_epoch
 
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)

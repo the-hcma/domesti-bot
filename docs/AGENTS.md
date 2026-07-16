@@ -51,9 +51,9 @@ The **primary clone** (repo root — first entry in `git worktree list`, usually
 - **Only `uv`** is used for Python package management. Never `pip` directly.
 - **Production vs dev dependency groups**:
   - **`[project] dependencies`** — runtime only (FastAPI, device libraries, uvicorn, …). Used by `scripts/on-deploy` (`uv sync --frozen`), production systemd installs, and a plain `uv sync` when you want a deploy-shaped venv.
-  - **`[dependency-groups] dev`** — contributors and CI only: `pyright`, `pytest`, `pytest-asyncio`, `pytest-xdist`, `playwright`, `icecream`. Install with `uv sync --group dev` (or `uv sync --all-groups`).
+  - **`[dependency-groups] dev`** — contributors and CI only: `pyright`, `ruff`, `pytest`, `pytest-asyncio`, `pytest-xdist`, `playwright`, `icecream`. Install with `uv sync --group dev` (or `uv sync --all-groups`).
   - Add runtime packages: `uv add <pkg>`. Add tooling: `uv add --group dev <pkg>`. Do not hand-edit `pyproject.toml` for additions.
-- **Contributors** should run `uv sync --group dev` after clone or pull when `pyproject.toml` / `uv.lock` change. Pyright and pytest are not installed by `uv sync` alone.
+- **Contributors** should run `uv sync --group dev` after clone or pull when `pyproject.toml` / `uv.lock` change. Pyright, Ruff, and pytest are not installed by `uv sync` alone.
 - The lock file (`uv.lock`) **must always be committed**.
 - Prefer well-maintained, typed packages. Do not add a dependency for something trivially implementable in ~10 lines of Python.
 
@@ -484,6 +484,8 @@ New senders must comply from day one and ship hermetic tests for provenance (and
    ```
    uv sync --group dev
    uv run pyright                                    # type errors over app/, config/, scripts/, tests/
+   uv run ruff check app config tests scripts        # lint (E/F/I)
+   uv run ruff format --check app config tests scripts
    uv run pytest -m "not integration and not browser" -n auto   # hermetic (CI parallel job)
    uv run playwright install chromium                # once per machine; Linux may need --with-deps
    uv run pytest -m "browser"                        # layout probes (CI browser job)
@@ -606,6 +608,7 @@ CI lives in `.github/workflows/`:
 
 - **`ci.yml`** — runs on every PR (skipping merge-queue staging branches and already-merged PRs). Jobs after `Guard` run **in parallel**:
   - `Pyright` — `uv sync --group dev`, then `uv run pyright`
+  - `Ruff` — `uv sync --group dev`, then `uv run ruff check` + `uv run ruff format --check` (via `.github/ci/ruff`)
   - `Pytest (hermetic)` — `uv sync --group dev`, then `uv run pytest -m "not integration and not browser" -n auto` (**pytest-xdist**)
   - `Pytest (browser layout)` — `uv sync --group dev`, `playwright install --with-deps chromium`, then `uv run pytest -m "browser and not integration"` (single process; parallel to hermetic job)
   - `Shellcheck` — every no-extension script under `scripts/`
@@ -650,6 +653,8 @@ No PR may be merged with a failing CI check.
 Before every commit (mirrors the CI gates above; `uv sync --group dev` when deps changed):
 
 - [ ] `uv run pyright` — passes with no new errors
+- [ ] `uv run ruff check app config tests scripts` — lint clean (E/F/I)
+- [ ] `uv run ruff format --check app config tests scripts` — format clean
 - [ ] `uv run pytest -m "not integration and not browser" -n auto` — green (or single-process without `-n auto` when debugging)
 - [ ] If `app/api/static/index.html` or browser tests changed: `uv run pytest -m browser` — green (Playwright Chromium installed)
 - [ ] `shellcheck` clean on any modified shell scripts

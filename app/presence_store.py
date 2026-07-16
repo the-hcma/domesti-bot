@@ -8,8 +8,8 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from sqlalchemy.orm import Session
 from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
 from app.db.models import RuleUserLastLocation, RuleUserLocationHistory
 from app.db.session import discovery_session, discovery_write
@@ -20,7 +20,6 @@ from app.location_history_retention import (
 from app.location_report import (
     location_report_log_fragment,
     location_report_log_stale_suffix,
-    parse_iso_timestamp_to_epoch,
 )
 from app.presence_connection_type import (
     connection_type_label_for_log,

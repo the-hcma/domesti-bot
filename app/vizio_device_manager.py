@@ -20,10 +20,9 @@ from app.vizio_credentials import (
     resolve_vizio_auth_token,
     vizio_device_id_from_parts,
 )
-from app.vizio_discovery import VizioDiscoveredHost, discover_vizio_hosts_ssdp
+from app.vizio_discovery import discover_vizio_hosts_ssdp
 from app.vizio_mac import lookup_mac_via_arp, resolve_vizio_tv_ip
 from app.vizio_smartcast_client import (
-    DEFAULT_VIZIO_PORT,
     VizioSmartCastAuthError,
     VizioSmartCastClient,
     VizioSmartCastConnectionError,

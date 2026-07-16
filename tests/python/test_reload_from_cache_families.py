@@ -9,7 +9,7 @@ import pytest
 from app import device_discovery_store
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
-from app.vizio_device_manager import VizioDeviceManager, VizioTvEndpoint
+from app.vizio_device_manager import VizioDeviceManager
 
 
 @pytest.mark.asyncio

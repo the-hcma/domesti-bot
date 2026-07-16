@@ -29,17 +29,17 @@ from app.api.schemas import (
     GeofenceOut,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
+    RuleConditionOut,
+    RuleConditionStatusOut,
+    RuleOut,
+    RulesSunOut,
+    SettingsLocationOut,
     UserLocationOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersMinDistanceFromHomeMCondition,
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
-    RuleConditionOut,
-    RuleConditionStatusOut,
-    RuleOut,
-    RulesSunOut,
-    SettingsLocationOut,
 )
 from app.automation_rules_loader import load_settings_location
 from app.device_enums import (
@@ -1810,7 +1810,6 @@ def _roster_user_ids_satisfying_users_inside_geofence(
     )
     if geofence is None:
         return set()
-    settings = load_settings_location()
     min_accuracy_m = rule.min_location_accuracy_m
     satisfied: set[str] = set()
     for rule_user_id in condition.user_ids:

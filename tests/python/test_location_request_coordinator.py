@@ -15,8 +15,8 @@ from app.api.schemas import (
     RuleOut,
     UsersInsideGeofenceCondition,
 )
-from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.db.secrets import save_mytracks_relay_api_key_to_db
+from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.location_history_retention import default_location_history_retention
 from app.location_request_coordinator import (
     DEFERRED_EDGE_FRACTION,

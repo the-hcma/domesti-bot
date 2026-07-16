@@ -18,7 +18,6 @@ from app.operator_alerts import operator_alert_store
 from app.rule_actions import (
     RuleActionDispatchError,
     RuleDeviceActionOutcome,
-    RuleDeviceDispatchResult,
     RuleNotificationEmailOutcome,
     dispatch_rule_device_actions,
     resolve_kasa_host_by_label,

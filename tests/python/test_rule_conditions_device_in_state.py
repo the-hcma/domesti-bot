@@ -7,7 +7,6 @@ from datetime import datetime
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
-import pytest
 from pydantic import TypeAdapter
 
 from app.api.schemas import (

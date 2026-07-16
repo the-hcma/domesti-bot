@@ -26,6 +26,7 @@ from app.api.schemas import (
     VacationModeTestEmailIn,
     VacationModeTestEmailOut,
 )
+from app.api.settings_routes import discovery_cache_path_from_request
 from app.automation_rules_loader import (
     AutomationRulesLoadError,
     list_automation_rules,
@@ -34,17 +35,11 @@ from app.automation_rules_loader import (
     save_settings_location,
     save_vacation_mode_settings,
 )
-from app.api.settings_routes import discovery_cache_path_from_request
-from app.server_runtime import runtime
+from app.device_enums import DeviceFamilyId, VacationEmailSource, VacationModeTestEmailKind
 from app.location_report import location_epoch_to_iso_z
 from app.presence_store import (
-    UserLocationRecord,
     list_observed_wifi_networks_for_user,
     list_user_locations,
-)
-from app.wifi_home_presence import (
-    effective_geofence_ids_containing_location,
-    geofence_presence_accuracy_limit_m,
 )
 from app.rules_status import build_rules_status, build_rules_validation
 from app.rules_store import (
@@ -57,12 +52,16 @@ from app.rules_store import (
     set_user_home_wifi,
     user_exists,
 )
-from app.device_enums import DeviceFamilyId, VacationEmailSource, VacationModeTestEmailKind
+from app.server_runtime import runtime
 from app.vacation_mode import (
     send_vacation_mode_anomaly_email,
     send_vacation_mode_transition_email,
 )
 from app.vacation_mode_store import load_vacation_mode_state
+from app.wifi_home_presence import (
+    effective_geofence_ids_containing_location,
+    geofence_presence_accuracy_limit_m,
+)
 
 router = APIRouter(prefix="/v1/rules", tags=["rules"])
 

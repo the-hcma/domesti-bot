@@ -207,7 +207,6 @@ async def test_probe_kasa_credentials_unreachable_when_connect_returns_none(
     """Network-style connect exhaustion must not be labeled as KLAP auth failure."""
 
     from kasa.credentials import Credentials
-    from kasa.exceptions import _ConnectionError
 
     from app.settings_credentials_test import probe_kasa_credentials
 
@@ -255,7 +254,7 @@ async def test_probe_kasa_credentials_auth_failure_after_plain_http_retry(
     """Auth failure on the plain-HTTP retry must count as KLAP auth failure."""
 
     from kasa.credentials import Credentials
-    from kasa.exceptions import AuthenticationError, _ConnectionError
+    from kasa.exceptions import AuthenticationError
 
     from app.settings_credentials_test import probe_kasa_credentials
 

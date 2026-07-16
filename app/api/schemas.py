@@ -119,7 +119,10 @@ class UIDeviceOut(BaseModel):
     kind: str = Field(..., description="``switch``, ``speaker``, or ``door``.")
     state: str = Field(
         ...,
-        description="``on``/``off`` (switch), ``playing``/``paused`` (speaker), or ``open``/``closed`` (door); ``unknown`` for transient.",
+        description=(
+            "``on``/``off`` (switch), ``playing``/``paused`` (speaker), or "
+            "``open``/``closed`` (door); ``unknown`` for transient."
+        ),
     )
     compact_icon: str = Field(
         ...,
@@ -463,7 +466,10 @@ class TailwindTokenSettingsOut(BaseModel):
     )
     source: TailwindTokenSourceOut = Field(
         ...,
-        description="Active source: ``cli`` → ``--tailwind-token``, ``env`` → ``TAILWIND_TOKEN``, ``database`` → encrypted SQLite row.",
+        description=(
+            "Active source: ``cli`` → ``--tailwind-token``, ``env`` → ``TAILWIND_TOKEN``, "
+            "``database`` → encrypted SQLite row."
+        ),
     )
     secrets_key_configured: bool = Field(
         ...,

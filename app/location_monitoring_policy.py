@@ -16,8 +16,8 @@ from app.automation_rules_loader import list_automation_rules
 from app.device_enums import RuleTrigger
 from app.location_request_coordinator import (
     DeferredAccuracyEdgeSnapshot,
-    LocationRequestCoordinator,
     LocationRequestContext,
+    LocationRequestCoordinator,
 )
 from app.mytracks_logging import mytracks_logger
 from app.mytracks_store import (

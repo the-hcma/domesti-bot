@@ -53,8 +53,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
-import httpx
 import io
 import logging
 import os
@@ -65,8 +63,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import httpx
 from prompt_toolkit import HTML, PromptSession
-from prompt_toolkit.completion import Completion, Completer
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.enums import EditingMode
 
 from app import device_discovery_store
@@ -74,8 +73,8 @@ from app.androidtv_device_manager import (
     ANDROIDTV_TEMPORARILY_DISABLED,
     ANDROIDTV_TEMPORARILY_DISABLED_REASON,
     AndroidTvDeviceManager,
-    discover_cast_adb_specs_via_zeroconf,
     _merge_androidtv_host_specs,
+    discover_cast_adb_specs_via_zeroconf,
 )
 from app.build_info import format_cli_version_line
 from app.db.secrets import SecretsConfigurationError, save_kasa_credentials_to_db

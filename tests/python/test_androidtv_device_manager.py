@@ -10,9 +10,9 @@ import pytest
 
 from app import device_discovery_store
 from app.androidtv_device_manager import (
-    _discover_cast_infos_sync,
     AndroidTvDeviceManager,
     AndroidTvSwitchDevice,
+    _discover_cast_infos_sync,
     _host_hint_from_spec,
     _merge_androidtv_host_specs,
     discover_cast_adb_specs_via_zeroconf,

@@ -19,19 +19,11 @@ from app.api.schemas import (
     RulesEvaluatorOut,
     RulesStatusOut,
     RuleStatusSummaryOut,
-    RuleValidationOut,
     RulesValidationOut,
+    RuleValidationOut,
     UserLocationOut,
     UserStatusOut,
 )
-from app.automation_rules_loader import (
-    AutomationRulesLoadError,
-    list_automation_rules,
-    load_settings_location,
-)
-from app.device_state_watcher import poll_interval_from_env
-from app.cron_schedule import fired_on_same_local_calendar_day
-from app.device_enums import RuleEvaluationCause, RuleTrigger
 from app.astronomical_schedule import (
     astronomical_anchor_datetime,
     extract_astronomical_anchor,
@@ -40,13 +32,16 @@ from app.astronomical_schedule import (
     uses_astronomical_repeat_schedule,
     uses_astronomical_schedule,
 )
-from app.presence_store import (
-    UserLocationRecord,
-    list_user_locations,
+from app.automation_rules_loader import (
+    AutomationRulesLoadError,
+    list_automation_rules,
+    load_settings_location,
 )
-from app.wifi_home_presence import (
-    effective_geofence_ids_containing_location,
-    geofence_presence_accuracy_limit_m,
+from app.cron_schedule import fired_on_same_local_calendar_day
+from app.device_enums import RuleEvaluationCause, RuleTrigger
+from app.device_state_watcher import poll_interval_from_env
+from app.presence_store import (
+    list_user_locations,
 )
 from app.rule_conditions import (
     RuleEvaluationContext,
@@ -64,6 +59,10 @@ from app.rule_validation import (
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.smtp_store import load_smtp_config, smtp_send_ready
+from app.wifi_home_presence import (
+    effective_geofence_ids_containing_location,
+    geofence_presence_accuracy_limit_m,
+)
 
 
 def build_rules_validation(

@@ -21,7 +21,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from soco import SoCo, discover as soco_discover
+from soco import SoCo
+from soco import discover as soco_discover
 from soco.exceptions import SoCoUPnPException
 
 from app import device_discovery_store

@@ -27,8 +27,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.app import _QUIET_ACCESS_LOG_PATHS, create_app
-from app.server_runtime import runtime
 from app.logging_config import TRACE_LEVEL
+from app.server_runtime import runtime
 
 
 class _ListHandler(logging.Handler):

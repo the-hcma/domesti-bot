@@ -1,6 +1,6 @@
-import pytest
-
 from asyncio import sleep as async_sleep
+
+import pytest
 
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_engine import (
@@ -10,7 +10,6 @@ from app.rule_engine import (
     Condition,
     Device,
     Geofence,
-    Rule,
     RuleEngine,
     SimulatedSwitchDevice,
 )

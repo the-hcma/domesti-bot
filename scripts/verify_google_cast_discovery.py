@@ -18,7 +18,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from app.androidtv_device_manager import discover_cast_adb_specs_via_zeroconf
+# Path bootstrap above so ``uv run python scripts/...`` works without install.
+from app.androidtv_device_manager import discover_cast_adb_specs_via_zeroconf  # noqa: E402
 
 
 async def _main(timeout: float) -> int:

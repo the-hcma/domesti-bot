@@ -15,9 +15,9 @@ from app.db.engine import dispose_engine, get_engine
 from app.db.models import RuleUserLastLocation
 from app.db.session import discovery_session, discovery_write
 from app.db.writer import (
+    _STOP,
     DiscoveryWriterStoppedError,
     _PathWriter,
-    _STOP,
     stop_discovery_writer,
 )
 from app.location_history_retention import default_location_history_retention

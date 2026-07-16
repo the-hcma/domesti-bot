@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from soco.exceptions import SoCoUPnPException
 
 from app import device_discovery_store

@@ -11,7 +11,6 @@ friendly_name)`` hints from PyChromecast (typically port **8009**), not ADB.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import sqlite3
 import time
@@ -19,8 +18,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.orm import Session
 from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
 
 from app.db.models import (
     AndroidTvDiscoveredHost,

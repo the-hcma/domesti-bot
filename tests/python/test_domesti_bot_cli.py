@@ -9,10 +9,10 @@ from typing import cast
 import pytest
 
 from app.domesti_bot_cli import (
+    _COMMAND_HELP_LINES,
+    COMMANDS,
     _ArgCtx,
     _CmdCtx,
-    _COMMAND_HELP_LINES,
-    _Theme,
     _collect_label_triples,
     _greedy_resolve_set_display_tokens,
     _normalize_edit_mode_choice,
@@ -21,7 +21,7 @@ from app.domesti_bot_cli import (
     _repl_cmd_setup_secrets,
     _resolve_cli_target,
     _resolve_device_name,
-    COMMANDS,
+    _Theme,
     build_arg_parser,
     split_invocation,
 )

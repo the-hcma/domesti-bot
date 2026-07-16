@@ -7,8 +7,6 @@ import json
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from app import device_discovery_store
 from app.kasa_device_manager import KasaDeviceManager
 

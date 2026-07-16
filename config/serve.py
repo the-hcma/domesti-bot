@@ -42,7 +42,6 @@ from app.build_info import format_cli_version_line
 from app.domesti_bot_cli import build_arg_parser
 from app.logging_config import apply_logging_from_env
 
-
 _LOGGER = logging.getLogger(__name__)
 
 # How long to wait for uvicorn to flip ``server.started=True`` before
