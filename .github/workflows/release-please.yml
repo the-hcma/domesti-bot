@@ -168,8 +168,8 @@ jobs:
       - name: Install Python dependencies (dev)
         run: uv sync --group dev
 
-      - name: Pyright
-        run: uv run pyright
+      - name: Python lint & format checks
+        run: bash .github/ci/python-static
 
       - name: Pytest (hermetic)
         run: uv run pytest -m "not integration and not browser" -n auto

@@ -95,8 +95,8 @@ jobs:
             fi
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
-  pyright:
-    name: Pyright
+  python-static:
+    name: Python lint & format checks
     needs: guard
     if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
@@ -109,25 +109,28 @@ jobs:
         with:
           version: latest
 
-      - name: Pyright
-        run: bash .github/ci/pyright
+      - name: Python lint & format checks
+        run: bash .github/ci/python-static
 
+  # Cutover aliases for classic branch protection. Remove in a follow-up after
+  # `github-repo-lint --repo OWNER/NAME --apply-fix` retargets required checks.
   ruff:
     name: Ruff
-    needs: guard
-    if: needs.guard.outputs.skip != 'true'
+    needs: [guard, python-static]
+    # Custom if overrides Actions' default success(); gate on python-static or
+    # required checks go green when lint/typecheck failed.
+    if: needs.guard.outputs.skip != 'true' && needs.python-static.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - run: echo "Covered by Python lint & format checks"
 
-      - uses: astral-sh/setup-uv@v8.3.0
-        with:
-          version: latest
-
-      - name: Ruff
-        run: bash .github/ci/ruff
+  pyright:
+    name: Pyright
+    needs: [guard, python-static]
+    if: needs.guard.outputs.skip != 'true' && needs.python-static.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Covered by Python lint & format checks"
 
   test:
     name: Pytest (hermetic)

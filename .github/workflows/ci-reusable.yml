@@ -21,8 +21,8 @@ permissions:
   checks: write
 
 jobs:
-  pyright:
-    name: Pyright
+  python-static:
+    name: Python lint & format checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.0
@@ -34,8 +34,25 @@ jobs:
           version: latest
 
       - id: run
-        name: Pyright
-        run: bash .github/ci/pyright
+        name: Python lint & format checks
+        run: bash .github/ci/python-static
+
+      - uses: LouisBrunner/checks-action@v3.1.0
+        if: always()
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Python lint & format checks
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
+
+      # Cutover: also publish legacy names until branch protection is retargeted.
+      - uses: LouisBrunner/checks-action@v3.1.0
+        if: always()
+        with:
+          token: ${{ github.token }}
+          sha: ${{ inputs.ref }}
+          name: Ruff
+          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
 
       - uses: LouisBrunner/checks-action@v3.1.0
         if: always()
