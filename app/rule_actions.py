@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -345,6 +346,7 @@ async def dispatch_rule_device_actions(
                         succeeded=False,
                     ),
                     before_state=before_state,
+                    completed_at=time.time(),
                     device_id=action.device_id,
                     error=str(exc),
                     family_id=action.family_id,
@@ -379,6 +381,7 @@ async def dispatch_rule_device_actions(
                         succeeded=probable,
                     ),
                     before_state=before_state,
+                    completed_at=time.time(),
                     device_id=action.device_id,
                     error=message if not probable else None,
                     family_id=action.family_id,
@@ -417,6 +420,7 @@ async def dispatch_rule_device_actions(
                     succeeded=True,
                 ),
                 before_state=before_state,
+                completed_at=time.time(),
                 device_id=action.device_id,
                 error=None,
                 family_id=action.family_id,
@@ -586,9 +590,11 @@ def resolve_vizio_identifier_by_label(
 def send_rule_notification_email(
     cache_path: Path,
     *,
+    cancelled_remaining: bool = False,
     device_action_outcomes: tuple[RuleDeviceActionOutcome, ...] = (),
     notification_detail: str | None = None,
     rule: RuleOut,
+    sequence_completed: bool = False,
 ) -> RuleNotificationEmailOutcome:
     """Send the rule notification email when ``notify_on_fire`` is enabled."""
     if not rule.notify_on_fire:
@@ -603,12 +609,16 @@ def send_rule_notification_email(
     params = load_outbound_smtp_params(cache_path)
     if params is None:
         raise RuleActionDispatchError("SMTP is not configured; cannot send rule notification email")
-    subject = f"domesti-bot rule fired: {rule.label}"
+    subject = (
+        f"domesti-bot rule completed: {rule.label}" if sequence_completed else f"domesti-bot rule fired: {rule.label}"
+    )
     plain_body, html_body = build_rule_notification_bodies(
         rule,
         cache_path=cache_path,
+        cancelled_remaining=cancelled_remaining,
         device_action_outcomes=device_action_outcomes,
         notification_detail=notification_detail,
+        sequence_completed=sequence_completed,
     )
     message = build_outbound_message(
         from_address=params.from_address,

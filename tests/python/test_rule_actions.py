@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -526,6 +527,7 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
             action=RuleDeviceActionType.TURN_OFF,
             after_state="off",
             before_state="on",
+            completed_at=1_700_000_000.0,
             device_id="Garage",
             error=None,
             family_id=DeviceFamilyId.KASA,
@@ -549,7 +551,8 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
     assert plain_part is not None
     plain = plain_part.get_content()
     assert isinstance(plain, str)
-    assert "Garage (Kasa): on → off" in plain
+    when = datetime.fromtimestamp(1_700_000_000.0).strftime("%Y-%m-%d %H:%M:%S")
+    assert f"Garage (Kasa): on → off at {when}" in plain
     assert "Garage door is open." in plain
     assert "https://domesti.example.com/#/automations/status/test-rule" in plain
     assert "Sent by: domesti-bot · Rule test-rule (automation)" in plain
