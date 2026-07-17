@@ -396,6 +396,11 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         """Host used for HTTP after the last successful ``fetch``; ``None`` if not connected."""
         return self._host
 
+    @property
+    def hub_mac(self) -> str | None:
+        """Normalized hub MAC after the last successful ``fetch``; ``None`` if not connected."""
+        return self._hub_mac
+
     async def is_closed(self, identifier: str) -> bool:
         door = await self._tailwind_status(identifier)
         return door.state == TailwindDoorState.CLOSED

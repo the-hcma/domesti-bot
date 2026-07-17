@@ -4,6 +4,12 @@ The CLI ``refresh-discovery`` path writes ``device_discovery.sqlite`` while the
 HTTP process keeps live ``*DeviceManager`` maps. Callers
 (``GET /v1/ui/state``) invoke :func:`maybe_sync_discovery_cache` so the UI
 roster tracks cache drift without LAN rediscovery (UDP / mDNS / SSDP).
+
+Drift fingerprints use **stable identity only** — normalized MAC addresses
+(Kasa, Tailwind hub, Vizio) or vendor UUIDs (Sonos RINCON, Cast). IP
+addresses are never part of the fingerprint: they drift with DHCP and must
+not decide roster membership. A host-only change in the cache therefore
+does not trigger a resync; adding / removing a stable identity does.
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ from pathlib import Path
 
 from app import device_discovery_store
 from app.device_enums import DeviceFamilyId
+from app.device_mac import try_normalize_mac
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -23,8 +30,6 @@ from app.vizio_credentials import resolve_vizio_auth_token, vizio_device_id_from
 from app.vizio_device_manager import VizioDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
-
-_FP_SEP = "\x1f"
 
 
 async def maybe_sync_discovery_cache(state: DeviceManagersState) -> bool:
@@ -104,23 +109,31 @@ def _cached_androidtv_uuids(cache_path: Path) -> frozenset[str]:
     return frozenset(uid for _h, _p, _fn, uid, _model, _mac in known if uid)
 
 
-def _cached_kasa_hosts(cache_path: Path) -> frozenset[str]:
+def _cached_kasa_macs(cache_path: Path) -> frozenset[str]:
+    """Normalized MACs from cache rows; MAC-less rows are excluded from the fingerprint."""
+
+    macs: set[str] = set()
+    for _host, _alias, _cfg, _requires_klap, mac in device_discovery_store.load_cached_configs(cache_path):
+        normalized = try_normalize_mac(mac or "")
+        if normalized:
+            macs.add(normalized)
+    return frozenset(macs)
+
+
+def _cached_sonos_uids(cache_path: Path) -> frozenset[str]:
     return frozenset(
-        host for host, _alias, _cfg, _requires_klap, _mac in device_discovery_store.load_cached_configs(cache_path)
+        uid.strip().upper()
+        for uid, _host, _name, _mac in device_discovery_store.load_sonos_zones(cache_path)
+        if uid.strip()
     )
 
 
-def _cached_sonos_keys(cache_path: Path) -> frozenset[str]:
-    return frozenset(
-        _fp(uid, host)
-        for uid, host, _name, _mac in device_discovery_store.load_sonos_zones(cache_path)
-        if uid.strip() and host.strip()
-    )
-
-
-def _cached_tailwind_hosts(cache_path: Path) -> frozenset[str]:
-    host = (device_discovery_store.load_tailwind_host(cache_path) or "").strip()
-    return frozenset({host} if host else ())
+def _cached_tailwind_hub_macs(cache_path: Path) -> frozenset[str]:
+    row = device_discovery_store.load_tailwind_host_row(cache_path)
+    if row is None:
+        return frozenset()
+    mac = try_normalize_mac(row[1] or "")
+    return frozenset({mac} if mac else ())
 
 
 def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[str]:
@@ -149,16 +162,12 @@ def _failed_fp(family: DeviceFamilyId) -> frozenset[str] | None:
     return runtime.discovery_cache_sync_failed.get(family.value)
 
 
-def _fp(*parts: str) -> str:
-    return _FP_SEP.join(parts)
-
-
 def _kasa_needs_sync(state: DeviceManagersState, cache_path: Path) -> bool:
-    cached = _cached_kasa_hosts(cache_path)
+    cached = _cached_kasa_macs(cache_path)
     if not cached:
         return False
     try:
-        live = _live_kasa_accounted_hosts(state.kasa_mgr)
+        live = _live_kasa_macs(state.kasa_mgr, cache_path)
     except NotInitializedError:
         return False
     if cached == live:
@@ -171,28 +180,43 @@ def _live_androidtv_uuids(mgr: object) -> frozenset[str]:
     return frozenset(str(dev.identifier).strip() for dev in switches if str(dev.identifier).strip())
 
 
-def _live_kasa_accounted_hosts(mgr: KasaDeviceManager) -> frozenset[str]:
-    """Hosts the manager already knows about (connected or KLAP-skipped)."""
+def _live_kasa_macs(mgr: KasaDeviceManager, cache_path: Path) -> frozenset[str]:
+    """Normalized MACs the manager accounts for (connected or KLAP-skipped).
 
-    hosts = {(kd._kDevice.host or "").strip() for kd in mgr.switches}
-    hosts.discard("")
-    hosts.update(mgr.skipped_auth_hosts)
-    return frozenset(hosts)
+    Skipped KLAP-auth hosts have no live device object, so their MACs come
+    from the matching cache rows. Endpoints without a known MAC are excluded
+    on both sides — a DHCP address change alone must never register as drift.
+    """
+
+    macs = {kd.mac_address for kd in mgr.switches}
+    macs.discard("")
+    skipped = {(host or "").strip() for host in mgr.skipped_auth_hosts}
+    skipped.discard("")
+    if skipped:
+        for host, _alias, _cfg, _requires_klap, mac in device_discovery_store.load_cached_configs(cache_path):
+            if host.strip() not in skipped:
+                continue
+            normalized = try_normalize_mac(mac or "")
+            if normalized:
+                macs.add(normalized)
+    return frozenset(macs)
 
 
-def _live_sonos_keys(mgr: SonosDeviceManager) -> frozenset[str]:
-    keys: set[str] = set()
-    for sd in mgr.players:
-        uid = (sd.identifier or "").strip()
-        host = (getattr(sd._soco, "ip_address", None) or "").strip()
-        if uid and host:
-            keys.add(_fp(uid, host))
-    return frozenset(keys)
+def _live_sonos_uids(mgr: SonosDeviceManager) -> frozenset[str]:
+    """Fingerprint live zones by RINCON uid, matching ``sonos_known_zones.uuid``.
+
+    ``SonosSpeakerDevice.identifier`` is the MAC (primary UI id) and would
+    never match the cache; the zone's host is excluded so a DHCP move alone
+    never looks like roster drift. UIDs are uppercased so mixed-case cache
+    rows cannot flap against SoCo's usual uppercase ``.uid``.
+    """
+
+    return frozenset(uid.strip().upper() for sd in mgr.players if (uid := (sd.rincon_uid or "")).strip())
 
 
-def _live_tailwind_hosts(mgr: GotailwindDeviceManager) -> frozenset[str]:
-    host = (mgr.host or "").strip()
-    return frozenset({host} if host else ())
+def _live_tailwind_hub_macs(mgr: GotailwindDeviceManager) -> frozenset[str]:
+    mac = try_normalize_mac(mgr.hub_mac or "")
+    return frozenset({mac} if mac else ())
 
 
 def _live_vizio_ids(mgr: VizioDeviceManager) -> frozenset[str]:
@@ -207,11 +231,11 @@ def _sonos_needs_sync(state: DeviceManagersState, cache_path: Path) -> bool:
     mgr = state.sonos_mgr
     if mgr is None:
         return False
-    cached = _cached_sonos_keys(cache_path)
+    cached = _cached_sonos_uids(cache_path)
     if not cached:
         return False
     try:
-        live = _live_sonos_keys(mgr)
+        live = _live_sonos_uids(mgr)
     except NotInitializedError:
         return False
     if cached == live:
@@ -241,10 +265,10 @@ async def _sync_kasa(state: DeviceManagersState, cache_path: Path) -> bool:
     if not _kasa_needs_sync(state, cache_path):
         return False
     mgr = state.kasa_mgr
-    cached = _cached_kasa_hosts(cache_path)
+    cached = _cached_kasa_macs(cache_path)
     _LOGGER.info(
         "Kasa discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_kasa_accounted_hosts(mgr)),
+        sorted(_live_kasa_macs(mgr, cache_path)),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache()
@@ -259,10 +283,10 @@ async def _sync_sonos(state: DeviceManagersState, cache_path: Path) -> bool:
     mgr = state.sonos_mgr
     if mgr is None or not _sonos_needs_sync(state, cache_path):
         return False
-    cached = _cached_sonos_keys(cache_path)
+    cached = _cached_sonos_uids(cache_path)
     _LOGGER.info(
         "Sonos discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_sonos_keys(mgr)),
+        sorted(_live_sonos_uids(mgr)),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache()
@@ -277,10 +301,10 @@ async def _sync_tailwind(state: DeviceManagersState, cache_path: Path) -> bool:
     mgr = state.tailwind_mgr
     if mgr is None or not _tailwind_needs_sync(state, cache_path):
         return False
-    cached = _cached_tailwind_hosts(cache_path)
+    cached = _cached_tailwind_hub_macs(cache_path)
     _LOGGER.info(
         "Tailwind discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_tailwind_hosts(mgr)),
+        sorted(_live_tailwind_hub_macs(mgr)),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache(cache_path=cache_path)
@@ -313,11 +337,11 @@ def _tailwind_needs_sync(state: DeviceManagersState, cache_path: Path) -> bool:
     mgr = state.tailwind_mgr
     if mgr is None:
         return False
-    cached = _cached_tailwind_hosts(cache_path)
+    cached = _cached_tailwind_hub_macs(cache_path)
     if not cached:
         return False
     try:
-        live = _live_tailwind_hosts(mgr)
+        live = _live_tailwind_hub_macs(mgr)
     except NotInitializedError:
         return False
     if cached == live:

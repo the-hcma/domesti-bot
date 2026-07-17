@@ -63,7 +63,7 @@ class SonosTransitionUnavailableError(Exception):
 
 
 class SonosSpeakerDevice(SpeakerDevice):
-    __slots__ = ("_is_playing", "_mac_address", "_rincon_uid", "_soco", "_stream_favorites")
+    __slots__ = ("_host", "_is_playing", "_mac_address", "_rincon_uid", "_soco", "_stream_favorites")
 
     def __init__(
         self,
@@ -76,6 +76,11 @@ class SonosSpeakerDevice(SpeakerDevice):
         stream_favorites: tuple[SonosStreamFavorite, ...] = (),
     ) -> None:
         super().__init__(identifier, display_name=display_name)
+        # Snapshot the LAN address at construction. Reading
+        # ``SoCo.ip_address`` on every UI poll races the state watcher's
+        # concurrent UPnP calls on the same SoCo and can leave
+        # :attr:`is_playing` stuck at ``None`` (yellow tiles).
+        self._host = (getattr(soco_zone, "ip_address", None) or "").strip()
         self._soco = soco_zone
         self._mac_address = mac_address
         self._rincon_uid = (rincon_uid or identifier).strip()
@@ -89,7 +94,7 @@ class SonosSpeakerDevice(SpeakerDevice):
 
     @property
     def host(self) -> str:
-        return (getattr(self._soco, "ip_address", None) or "").strip()
+        return self._host
 
     @property
     def is_playing(self) -> bool | None:
@@ -203,10 +208,12 @@ class SonosSpeakerDevice(SpeakerDevice):
         label = _SONOS_TRANSPORT_LABELS.get(raw, raw.replace("_", " ").lower())
         # Keep :attr:`is_playing` in sync so a manual REPL read of
         # ``transport_state_summary`` and the next UI poll converge on
-        # the same answer.
+        # the same answer. Non-playing transport states (including
+        # ``transitioning``) must clear ``None`` so the UI does not
+        # stay on the yellow ``unknown`` badge after a successful read.
         if label == "playing":
             self._is_playing = True
-        elif label in ("paused", "stopped"):
+        elif label != "unknown":
             self._is_playing = False
         return label
 
@@ -292,7 +299,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         rows: list[tuple[str, str, str | None, str | None]] = []
         for sd in devices:
             zone = sd._soco
-            host = (getattr(zone, "ip_address", None) or "").strip()
+            host = sd.host
             uid = sd.rincon_uid.strip()
             if not host or not uid:
                 continue
@@ -304,7 +311,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 previous_label=prior_label_by_mac.get(sd.mac_address.lower()),
                 current_label=label,
             )
-            rows.append((uid, host, label, sd.mac_address))
+            rows.append((uid.upper(), host, label, sd.mac_address))
             if uid != sd.mac_address:
                 device_discovery_store.migrate_canonical_key_to_mac(
                     self._discovery_cache_path,
@@ -313,6 +320,21 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                     mac=sd.mac_address,
                 )
         device_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
+
+    async def _prime_playback_states(self, devices: list[SonosSpeakerDevice]) -> None:
+        """One concurrent UPnP transport read per zone after discovery.
+
+        Fills :attr:`SonosSpeakerDevice.is_playing` before the first UI
+        poll so tiles are not stuck on ``unknown`` until the watcher
+        runs. Failures are swallowed per zone (``return_exceptions``).
+        """
+
+        if not devices:
+            return
+        await asyncio.gather(
+            *(d.update_playback_state() for d in devices),
+            return_exceptions=True,
+        )
 
     async def _reconnect_from_cache(self) -> list[SonosSpeakerDevice] | None:
         """Return cached zones if every row reconnects with a matching UID; ``None`` otherwise."""
@@ -337,7 +359,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                     exc,
                 )
                 return None
-            if actual != expected_uid:
+            if actual.upper() != expected_uid.strip().upper():
                 _LOGGER.debug(
                     "Sonos cache mismatch: host=%s expected_uid=%s actual_uid=%s",
                     host,
@@ -405,6 +427,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 self._finalize(cached)
                 self._persist_cache(cached)
                 self._last_discovery_source = "cache"
+                await self._prime_playback_states(cached)
                 return
 
         # soco's ``discover`` is annotated ``timeout: int``; round our float
@@ -428,6 +451,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         self._finalize(devices)
         self._persist_cache(devices)
         self._last_discovery_source = "discovery"
+        await self._prime_playback_states(devices)
 
     def get_device_by_alias(self, identifier: str) -> SonosSpeakerDevice | None:
         if self._alias_to_device is None:
@@ -522,6 +546,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             return False
         self._finalize(devices)
         self._last_discovery_source = "cache"
+        await self._prime_playback_states(devices)
         _LOGGER.info(
             "Sonos reload_from_cache: replaced device map from cache (%d zone(s))",
             len(self.players),
