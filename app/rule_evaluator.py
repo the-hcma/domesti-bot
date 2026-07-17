@@ -84,6 +84,13 @@ from app.location_request_coordinator import (
     LocationRequestCoordinator,
 )
 from app.mytracks_store import load_location_history_retention
+from app.pending_fire_notification_store import (
+    append_pending_fire_notification_outcomes,
+    delete_pending_fire_notification,
+    insert_pending_fire_notification,
+    list_pending_fire_notifications,
+    mark_pending_fire_notifications_cancelled_for_rule,
+)
 from app.presence_connection_type import connection_type_is_wifi
 from app.presence_store import (
     UserLocationRecord,
@@ -930,8 +937,13 @@ class RuleEvaluator:
     def _cancel_deferred_device_actions_for_rule(self, rule_id: str) -> None:
         had_entries = any(entry.rule_id == rule_id for entry in self._deferred_device_actions)
         self._deferred_device_actions = [entry for entry in self._deferred_device_actions if entry.rule_id != rule_id]
-        if had_entries and self._cache_path is not None:
-            delete_deferred_device_actions_for_rule(self._cache_path, rule_id)
+        if self._cache_path is not None:
+            if had_entries:
+                delete_deferred_device_actions_for_rule(self._cache_path, rule_id)
+            mark_pending_fire_notifications_cancelled_for_rule(self._cache_path, rule_id)
+            # Wake the deferred loop so cancelled pending emails flush even when
+            # no delayed actions remain to schedule the next due wake.
+            self._deferred_device_actions_wake.set()
 
     def _clear_deferred_accuracy_edges_for_geofence(
         self,
@@ -967,6 +979,7 @@ class RuleEvaluator:
             timeout: float | None = None
             async with self._process_lock:
                 self._prune_stale_deferred_device_actions()
+                await self._flush_ready_pending_fire_notifications()
                 now = self._now_fn()
                 due = [entry for entry in self._deferred_device_actions if entry.due_at <= now]
                 remaining = [entry for entry in self._deferred_device_actions if entry.due_at > now]
@@ -998,6 +1011,20 @@ class RuleEvaluator:
                             device_state,
                             [entry.action],
                         )
+                        if self._cache_path is not None and dispatch_result.action_outcomes:
+                            try:
+                                append_pending_fire_notification_outcomes(
+                                    self._cache_path,
+                                    fire_at=entry.fire_at,
+                                    outcomes=dispatch_result.action_outcomes,
+                                    rule_id=entry.rule_id,
+                                )
+                            except Exception:
+                                _LOGGER.exception(
+                                    "[rules] failed to append pending fire notification outcomes rule_id=%s fire_at=%s",
+                                    entry.rule_id,
+                                    location_epoch_to_iso_z(entry.fire_at),
+                                )
                         if dispatch_result.errors:
                             _LOGGER.warning(
                                 "[rules] delayed device action failed rule_id=%s fire_at=%s "
@@ -1022,6 +1049,8 @@ class RuleEvaluator:
                                 entry.action.action.value,
                             )
                     self._delete_persisted_deferred_device_actions(dispatched_row_ids)
+                    if due:
+                        await self._flush_ready_pending_fire_notifications()
                 if timeout is None and self._deferred_device_actions:
                     next_due = min(entry.due_at for entry in self._deferred_device_actions)
                     timeout = max(0.0, next_due - self._now_fn())
@@ -1061,7 +1090,7 @@ class RuleEvaluator:
         rule_id: str,
         fire_at: float,
         delayed: list[RuleDeviceActionOut],
-    ) -> None:
+    ) -> bool:
         enqueued_any = False
         for action in delayed:
             delay_s = action.delay_s
@@ -1090,6 +1119,7 @@ class RuleEvaluator:
             enqueued_any = True
         if enqueued_any:
             self._deferred_device_actions_wake.set()
+        return enqueued_any
 
     async def _execute_rule(
         self,
@@ -1111,6 +1141,8 @@ class RuleEvaluator:
         performed_side_effect = not rule.device_actions and not rule.notify_on_fire
         device_state = self._device_state_getter()
         dispatch_result = RuleDeviceDispatchResult.empty()
+        deferred_enqueued = False
+        fire_at = self._now_fn()
         if device_state is None:
             if immediate or delayed:
                 errors.append("Device discovery still in progress; actions skipped")
@@ -1125,24 +1157,36 @@ class RuleEvaluator:
                 if not dispatch_result.errors:
                     performed_side_effect = True
             if delayed:
-                self._enqueue_deferred_device_actions(rule.id, self._now_fn(), delayed)
-                performed_side_effect = True
+                deferred_enqueued = self._enqueue_deferred_device_actions(rule.id, fire_at, delayed)
+                if deferred_enqueued:
+                    performed_side_effect = True
         if rule.notify_on_fire and self._cache_path is not None:
             try:
                 ctx = await self._build_evaluation_context(
                     now=datetime.fromtimestamp(self._now_fn(), tz=UTC),
                 )
-                email_outcome = await asyncio.to_thread(
-                    send_rule_notification_email,
-                    self._cache_path,
-                    device_action_outcomes=dispatch_result.action_outcomes,
-                    notification_detail=_notification_detail_from_evaluation(
-                        rule,
-                        ctx,
-                    ),
-                    rule=rule,
+                notification_detail = _notification_detail_from_evaluation(
+                    rule,
+                    ctx,
                 )
-                performed_side_effect = True
+                if deferred_enqueued:
+                    insert_pending_fire_notification(
+                        self._cache_path,
+                        fire_at=fire_at,
+                        notification_detail=notification_detail,
+                        outcomes=dispatch_result.action_outcomes,
+                        rule_id=rule.id,
+                    )
+                    performed_side_effect = True
+                else:
+                    email_outcome = await asyncio.to_thread(
+                        send_rule_notification_email,
+                        self._cache_path,
+                        device_action_outcomes=dispatch_result.action_outcomes,
+                        notification_detail=notification_detail,
+                        rule=rule,
+                    )
+                    performed_side_effect = True
             except RuleActionDispatchError as exc:
                 email_error = str(exc)
                 errors.append(email_error)
@@ -1163,7 +1207,7 @@ class RuleEvaluator:
                 rule.id,
                 runtime.last_error,
             )
-        runtime.last_fired_at = self._now_fn()
+        runtime.last_fired_at = fire_at
         if fire_source in ("device_state", "dwell_satisfied", "eligibility", "scheduled") and _rule_has_dwell_condition(
             rule
         ):
@@ -1195,6 +1239,7 @@ class RuleEvaluator:
             _format_rule_email_outcome_for_log(
                 rule,
                 cache_path=self._cache_path,
+                email_deferred=deferred_enqueued and email_outcome is None and email_error is None,
                 email_error=email_error,
                 email_outcome=email_outcome,
             ),
@@ -1224,6 +1269,84 @@ class RuleEvaluator:
                 event=deferred.event,
             )
         return expired_keys
+
+    async def _flush_ready_pending_fire_notifications(self) -> None:
+        """Send pending notify_on_fire emails whose delayed actions are finished."""
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        try:
+            pending_rows = list_pending_fire_notifications(cache_path)
+        except Exception:
+            _LOGGER.exception("[rules] failed to list pending fire notifications")
+            return
+        if not pending_rows:
+            return
+        try:
+            rules_by_id = {rule.id: rule for rule in list_automation_rules()}
+        except Exception:
+            _LOGGER.exception("[rules] failed to load rules while flushing pending fire notifications")
+            return
+        for pending in pending_rows:
+            if self._has_remaining_deferred_for_fire(pending.rule_id, pending.fire_at):
+                continue
+            rule = rules_by_id.get(pending.rule_id)
+            if rule is None or not rule.notify_on_fire:
+                delete_pending_fire_notification(
+                    cache_path,
+                    fire_at=pending.fire_at,
+                    rule_id=pending.rule_id,
+                )
+                if rule is None:
+                    _LOGGER.warning(
+                        "[rules] dropping pending fire notification for missing rule_id=%s fire_at=%s",
+                        pending.rule_id,
+                        location_epoch_to_iso_z(pending.fire_at),
+                    )
+                continue
+            # Claim the row before SMTP so a crash after a successful send cannot
+            # re-deliver the same pending notification on the next process start.
+            delete_pending_fire_notification(
+                cache_path,
+                fire_at=pending.fire_at,
+                rule_id=pending.rule_id,
+            )
+            try:
+                await asyncio.to_thread(
+                    send_rule_notification_email,
+                    cache_path,
+                    cancelled_remaining=pending.cancelled_remaining,
+                    device_action_outcomes=pending.outcomes,
+                    notification_detail=pending.notification_detail,
+                    rule=rule,
+                    sequence_completed=True,
+                )
+            except RuleActionDispatchError as exc:
+                _LOGGER.error(
+                    "[rules] pending fire notification failed rule_id=%s fire_at=%s: %s",
+                    pending.rule_id,
+                    location_epoch_to_iso_z(pending.fire_at),
+                    exc,
+                )
+                insert_pending_fire_notification(
+                    cache_path,
+                    cancelled_remaining=pending.cancelled_remaining,
+                    fire_at=pending.fire_at,
+                    notification_detail=pending.notification_detail,
+                    outcomes=pending.outcomes,
+                    rule_id=pending.rule_id,
+                )
+                continue
+            _LOGGER.info(
+                "[rules] pending fire notification sent rule_id=%s fire_at=%s outcomes=%d cancelled=%s",
+                pending.rule_id,
+                location_epoch_to_iso_z(pending.fire_at),
+                len(pending.outcomes),
+                pending.cancelled_remaining,
+            )
+
+    def _has_remaining_deferred_for_fire(self, rule_id: str, fire_at: float) -> bool:
+        return any(entry.rule_id == rule_id and entry.fire_at == fire_at for entry in self._deferred_device_actions)
 
     def _load_persisted_rule_state(self) -> None:
         cache_path = self._cache_path
@@ -1255,6 +1378,7 @@ class RuleEvaluator:
             try:
                 async with self._process_lock:
                     self._prune_stale_deferred_device_actions()
+                    await self._flush_ready_pending_fire_notifications()
                     self._refresh_astronomical_schedules_for_new_day()
                     await self._evaluate_scheduled_rules()
                     timezone = ZoneInfo(load_settings_location().timezone)
@@ -2875,6 +2999,7 @@ def _format_rule_email_outcome_for_log(
     rule: RuleOut,
     *,
     cache_path: Path | None,
+    email_deferred: bool = False,
     email_error: str | None = None,
     email_outcome: RuleNotificationEmailOutcome | None = None,
 ) -> str:
@@ -2888,6 +3013,8 @@ def _format_rule_email_outcome_for_log(
     recipient_list = ",".join(recipients)
     if email_error:
         return f"failed to={recipient_list} detail={email_error}"
+    if email_deferred:
+        return f"deferred to={recipient_list}"
     if cache_path is None:
         return f"not_attempted to={recipient_list}"
     return f"not_attempted to={recipient_list}"

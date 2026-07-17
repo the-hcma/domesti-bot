@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
@@ -26,30 +27,45 @@ class DeviceActionEmailSummary:
     no_change_message: str | None
 
 
+# Public message constants (asserted by tests — do not hard-code prose there).
+RULE_FIRE_ACTIONS_CANCELLED_NOTE = "Remaining delayed device actions were cancelled before they ran."
+RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE = (
+    'The automation rule "{label}" ({rule_id}) completed its device-action sequence.'
+)
+RULE_FIRE_JUST_FIRED_TEMPLATE = 'The automation rule "{label}" ({rule_id}) just fired.'
+RULE_FIRE_TIMELINE_HEADING = "Timeline"
+
+
 def build_rule_notification_bodies(
     rule: RuleOut,
     *,
     cache_path: Path | None,
+    cancelled_remaining: bool = False,
     device_action_outcomes: tuple[RuleDeviceActionOutcome, ...] = (),
     notification_detail: str | None = None,
+    sequence_completed: bool = False,
 ) -> tuple[str, str]:
     """Return ``(plain_text, html)`` bodies for a rule fire notification."""
     status_url = rule_automation_status_url(cache_path, rule.id)
     device_summary = summarize_device_action_outcomes(device_action_outcomes)
-    plain_parts = [
-        f'The automation rule "{rule.label}" ({rule.id}) just fired.',
-        "",
-    ]
+    intro = (
+        RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE.format(label=rule.label, rule_id=rule.id)
+        if sequence_completed
+        else RULE_FIRE_JUST_FIRED_TEMPLATE.format(label=rule.label, rule_id=rule.id)
+    )
+    plain_parts = [intro, ""]
     if notification_detail:
         plain_parts.extend([notification_detail, ""])
     if device_summary.changed_lines or device_summary.no_change_message is not None:
-        plain_parts.append("Device actions:")
+        plain_parts.append(f"{RULE_FIRE_TIMELINE_HEADING}:")
         if device_summary.changed_lines:
             plain_parts.extend(f"- {line}" for line in device_summary.changed_lines)
         else:
             assert device_summary.no_change_message is not None
             plain_parts.append(device_summary.no_change_message)
         plain_parts.append("")
+    if cancelled_remaining:
+        plain_parts.extend([RULE_FIRE_ACTIONS_CANCELLED_NOTE, ""])
     if status_url is not None:
         plain_parts.append(f"View live status: {status_url}")
     else:
@@ -60,16 +76,12 @@ def build_rule_notification_bodies(
     if instance_url is not None:
         plain_parts.append(f"Instance: {instance_url}")
 
-    safe_label = escape(rule.label, quote=False)
-    safe_id = escape(rule.id, quote=False)
-    html_parts = [
-        f"<p>The automation rule <strong>{safe_label}</strong> (<code>{safe_id}</code>) just fired.</p>",
-    ]
+    html_parts = [f"<p>{escape(intro, quote=False)}</p>"]
     if notification_detail:
         safe_detail = escape(notification_detail, quote=False).replace("\n", "<br>")
         html_parts.append(f"<p>{safe_detail}</p>")
     if device_summary.changed_lines or device_summary.no_change_message is not None:
-        html_parts.append("<p><strong>Device actions</strong></p>")
+        html_parts.append(f"<p><strong>{escape(RULE_FIRE_TIMELINE_HEADING, quote=False)}</strong></p>")
         if device_summary.changed_lines:
             html_parts.append("<ul>")
             for line in device_summary.changed_lines:
@@ -79,7 +91,10 @@ def build_rule_notification_bodies(
             assert device_summary.no_change_message is not None
             safe_message = escape(device_summary.no_change_message, quote=False)
             html_parts.append(f"<p>{safe_message}</p>")
+    if cancelled_remaining:
+        html_parts.append(f"<p>{escape(RULE_FIRE_ACTIONS_CANCELLED_NOTE, quote=False)}</p>")
     if status_url is not None:
+        safe_label = escape(rule.label, quote=False)
         safe_url = escape(status_url, quote=True)
         html_parts.append(
             f'<p><a href="{safe_url}">View live status for {safe_label}</a></p>',
@@ -104,19 +119,20 @@ def build_rule_notification_bodies(
 def format_device_action_outcome_line(outcome: RuleDeviceActionOutcome) -> str:
     """Format one device outcome line for notification email."""
     family = outcome.family_id.display_name()
+    when = _format_completed_at_local(outcome.completed_at)
     if not outcome.succeeded:
         before = outcome.before_state or "unknown"
         after = outcome.after_state or "unknown"
         detail = f": {outcome.error}" if outcome.error else ""
         if before == after:
-            return f"{outcome.device_id} ({family}): failed{detail}"
-        return f"{outcome.device_id} ({family}): {before} → {after} — failed{detail}"
+            return f"{outcome.device_id} ({family}): failed{detail} at {when}"
+        return f"{outcome.device_id} ({family}): {before} → {after} — failed{detail} at {when}"
     before = outcome.before_state or "unknown"
     after = outcome.after_state or "unknown"
     line = f"{outcome.device_id} ({family}): {before} → {after}"
     if outcome.probable:
         line = f"{line} (probable)"
-    return line
+    return f"{line} at {when}"
 
 
 def format_device_action_outcomes(
@@ -176,3 +192,9 @@ def _device_state_changed(outcome: RuleDeviceActionOutcome) -> bool:
     if before is None or after is None:
         return before != after
     return before != after
+
+
+def _format_completed_at_local(completed_at: float) -> str:
+    """Format an action completion epoch in the system local timezone."""
+
+    return datetime.fromtimestamp(completed_at).strftime("%Y-%m-%d %H:%M:%S")
