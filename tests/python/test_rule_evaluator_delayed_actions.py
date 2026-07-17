@@ -17,7 +17,13 @@ from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
+from app.pending_fire_notification_store import (
+    insert_pending_fire_notification,
+    list_pending_fire_notifications,
+)
 from app.presence_store import UserLocationRecord, upsert_user_location
+from app.rule_actions import RuleActionDispatchError
+from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
@@ -116,6 +122,7 @@ def _power_cycle_rule(
     delay_s: int = 60,
     enabled: bool = True,
     include_immediate: bool = True,
+    notify_on_fire: bool = False,
 ) -> RuleOut:
     actions: list[RuleDeviceActionOut] = []
     if include_immediate:
@@ -150,8 +157,8 @@ def _power_cycle_rule(
         id="hdhomerun-nightly-power-cycle",
         label="Nightly HDHomeRun tuner power cycle",
         min_location_accuracy_m=50,
-        notification_emails=[],
-        notify_on_fire=False,
+        notification_emails=["ops@example.com"] if notify_on_fire else [],
+        notify_on_fire=notify_on_fire,
         triggers=[RuleTrigger.EDGE_TRUE],
     )
 
@@ -604,5 +611,341 @@ async def test_fire_path_does_not_sleep_for_delayed_actions(
         assert device.calls == ["off"]
         assert len(evaluator._deferred_device_actions) == 1
         assert evaluator._deferred_device_actions[0].due_at == clock["now"] + 120.0
+    finally:
+        await evaluator.close()
+
+
+async def _fire_power_cycle_enter(
+    evaluator: RuleEvaluator,
+    db: Path,
+    clock: dict[str, float],
+) -> None:
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.194085,
+            lon=-73.888365,
+            accuracy_m=20,
+            fix_at=clock["now"],
+            reported_at=clock["now"],
+            source="test",
+        ),
+        retention=default_location_history_retention(),
+    )
+    await evaluator.on_location_update("henrique")
+
+
+@pytest.mark.asyncio
+async def test_notify_on_fire_waits_for_delayed_actions_then_sends_timeline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    rule = _power_cycle_rule(delay_s=60, notify_on_fire=True)
+    _write_bundle(bundle, rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    monkeypatch.setenv("DOMESTI_PUBLIC_BASE_URL", "https://domesti.example.com")
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(db, reported_at=clock["now"])
+    device = _FakeKasa("192.168.1.50", "HDHomeRun tuner")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    send_mock = MagicMock(return_value=None)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    evaluator.start_periodic_tick()
+    try:
+        with patch("app.rule_evaluator.send_rule_notification_email", send_mock):
+            await _fire_power_cycle_enter(evaluator, db, clock)
+            assert device.calls == ["off"]
+            assert send_mock.call_count == 0
+            pending = list_pending_fire_notifications(db)
+            assert len(pending) == 1
+            assert len(pending[0].outcomes) == 1
+
+            clock["now"] += 60.0
+            evaluator._deferred_device_actions_wake.set()
+            await _await_calls(device, ["off", "on"])
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while list_pending_fire_notifications(db) and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0)
+            assert send_mock.call_count == 1
+            kwargs = send_mock.call_args.kwargs
+            assert kwargs["sequence_completed"] is True
+            assert kwargs["cancelled_remaining"] is False
+            assert len(kwargs["device_action_outcomes"]) == 2
+            assert list_pending_fire_notifications(db) == []
+    finally:
+        await evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_on_fire_immediate_only_still_sends_at_fire(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersInsideGeofenceCondition(
+                    type="users_inside_geofence",
+                    geofence_id="house",
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[
+            RuleDeviceActionOut(
+                action=RuleDeviceActionType.TURN_OFF,
+                device_id="HDHomeRun tuner",
+                family_id=DeviceFamilyId.KASA,
+            ),
+        ],
+        enabled=True,
+        id="immediate-only",
+        label="Immediate only",
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com"],
+        notify_on_fire=True,
+        triggers=[RuleTrigger.EDGE_TRUE],
+    )
+    _write_bundle(bundle, rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(db, reported_at=clock["now"])
+    device = _FakeKasa("192.168.1.50", "HDHomeRun tuner")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    send_mock = MagicMock(return_value=None)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    evaluator.start_periodic_tick()
+    try:
+        with patch("app.rule_evaluator.send_rule_notification_email", send_mock):
+            await _fire_power_cycle_enter(evaluator, db, clock)
+            assert device.calls == ["off"]
+            assert send_mock.call_count == 1
+            assert send_mock.call_args.kwargs.get("sequence_completed", False) is False
+            assert list_pending_fire_notifications(db) == []
+    finally:
+        await evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_on_fire_cancel_mid_cycle_sends_partial_timeline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    rule = _power_cycle_rule(delay_s=60, notify_on_fire=True)
+    _write_bundle(bundle, rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(db, reported_at=clock["now"])
+    device = _FakeKasa("192.168.1.50", "HDHomeRun tuner")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    send_mock = MagicMock(return_value=None)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    # Skip start_periodic_tick so the deferred loop cannot race the cancel flush.
+    try:
+        with patch("app.rule_evaluator.send_rule_notification_email", send_mock):
+            await _fire_power_cycle_enter(evaluator, db, clock)
+            assert send_mock.call_count == 0
+            assert len(list_pending_fire_notifications(db)) == 1
+            assert len(evaluator._deferred_device_actions) == 1
+
+            disabled = _power_cycle_rule(delay_s=60, enabled=False, notify_on_fire=True)
+            _write_bundle(bundle, disabled)
+            evaluator._prune_stale_deferred_device_actions()
+            await evaluator._flush_ready_pending_fire_notifications()
+            assert send_mock.call_count == 1
+            kwargs = send_mock.call_args.kwargs
+            assert kwargs["cancelled_remaining"] is True
+            assert kwargs["sequence_completed"] is True
+            assert len(kwargs["device_action_outcomes"]) == 1
+            assert list_pending_fire_notifications(db) == []
+            assert evaluator._deferred_device_actions == []
+    finally:
+        await evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_on_fire_smtp_failure_restores_claimed_pending_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    rule = _power_cycle_rule(delay_s=60, notify_on_fire=True)
+    _write_bundle(bundle, rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_120.0}
+    _seed_presence_db(db, reported_at=clock["now"])
+    device = _FakeKasa("192.168.1.50", "HDHomeRun tuner")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    insert_pending_fire_notification(
+        db,
+        fire_at=1_700_000_060.0,
+        notification_detail=None,
+        outcomes=(
+            RuleDeviceActionOutcome(
+                action=RuleDeviceActionType.TURN_OFF,
+                after_state="off",
+                before_state="on",
+                completed_at=1_700_000_060.0,
+                device_id="HDHomeRun tuner",
+                error=None,
+                family_id=DeviceFamilyId.KASA,
+                probable=False,
+                succeeded=True,
+            ),
+        ),
+        rule_id=rule.id,
+    )
+
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    try:
+        with patch(
+            "app.rule_evaluator.send_rule_notification_email",
+            side_effect=RuleActionDispatchError("SMTP down"),
+        ):
+            await evaluator._flush_ready_pending_fire_notifications()
+        pending = list_pending_fire_notifications(db)
+        assert len(pending) == 1
+        assert pending[0].rule_id == rule.id
+        assert len(pending[0].outcomes) == 1
+    finally:
+        await evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_on_fire_orphan_pending_flushes_after_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    rule = _power_cycle_rule(delay_s=60, notify_on_fire=True)
+    _write_bundle(bundle, rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_120.0}
+    _seed_presence_db(db, reported_at=clock["now"])
+    device = _FakeKasa("192.168.1.50", "HDHomeRun tuner")
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([device]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    insert_pending_fire_notification(
+        db,
+        fire_at=1_700_000_060.0,
+        notification_detail=None,
+        outcomes=(
+            RuleDeviceActionOutcome(
+                action=RuleDeviceActionType.TURN_OFF,
+                after_state="off",
+                before_state="on",
+                completed_at=1_700_000_060.0,
+                device_id="HDHomeRun tuner",
+                error=None,
+                family_id=DeviceFamilyId.KASA,
+                probable=False,
+                succeeded=True,
+            ),
+            RuleDeviceActionOutcome(
+                action=RuleDeviceActionType.TURN_ON,
+                after_state="on",
+                before_state="off",
+                completed_at=1_700_000_120.0,
+                device_id="HDHomeRun tuner",
+                error=None,
+                family_id=DeviceFamilyId.KASA,
+                probable=False,
+                succeeded=True,
+            ),
+        ),
+        rule_id=rule.id,
+    )
+    assert list_deferred_device_actions(db) == []
+    assert len(list_pending_fire_notifications(db)) == 1
+
+    send_mock = MagicMock(return_value=None)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    evaluator.start_periodic_tick()
+    try:
+        with patch("app.rule_evaluator.send_rule_notification_email", send_mock):
+            evaluator._deferred_device_actions_wake.set()
+            deadline = asyncio.get_running_loop().time() + 2.0
+            while list_pending_fire_notifications(db) and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0)
+            assert send_mock.call_count == 1
+            kwargs = send_mock.call_args.kwargs
+            assert kwargs["sequence_completed"] is True
+            assert len(kwargs["device_action_outcomes"]) == 2
+            assert list_pending_fire_notifications(db) == []
     finally:
         await evaluator.close()

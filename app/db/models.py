@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Float, Integer, LargeBinary, String, Text
+from sqlalchemy import Float, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -125,6 +125,26 @@ class RuleGeofence(Base):
     radius_m: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     owntracks_rid: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class RulePendingFireNotification(Base):
+    """Deferred ``notify_on_fire`` email waiting for delayed device_actions.
+
+    Keyed by ``(rule_id, fire_at)`` so a sequenced power cycle (immediate off +
+    delayed on) produces one timeline email after every step for that fire has
+    finished. Rows survive process restart alongside ``rule_deferred_device_actions``.
+    """
+
+    __tablename__ = "rule_pending_fire_notifications"
+    __table_args__ = (UniqueConstraint("rule_id", "fire_at", name="uq_pending_fire_notification"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cancelled_remaining: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fire_at: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    notification_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outcomes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 

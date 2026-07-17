@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -12,12 +13,19 @@ from app.mytracks_store import MyTracksPairingSave, save_mytracks_pairing
 from app.outbound_email import domesti_public_base_url
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_notification import (
+    RULE_FIRE_ACTIONS_CANCELLED_NOTE,
+    RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE,
+    RULE_FIRE_JUST_FIRED_TEMPLATE,
+    RULE_FIRE_TIMELINE_HEADING,
     build_rule_notification_bodies,
     format_device_action_outcomes,
     format_devices_already_in_desired_state_message,
     rule_automation_status_url,
     summarize_device_action_outcomes,
 )
+
+_COMPLETED_AT = 1_700_000_000.0
+_COMPLETED_AT_LOCAL = datetime.fromtimestamp(_COMPLETED_AT).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _sample_rule() -> RuleOut:
@@ -79,6 +87,7 @@ def test_format_device_action_outcomes_includes_before_and_after() -> None:
             action=RuleDeviceActionType.TURN_OFF,
             after_state="off",
             before_state="on",
+            completed_at=_COMPLETED_AT,
             device_id="Garage lights",
             error=None,
             family_id=DeviceFamilyId.KASA,
@@ -86,7 +95,7 @@ def test_format_device_action_outcomes_includes_before_and_after() -> None:
             succeeded=True,
         ),
     )
-    assert format_device_action_outcomes(outcomes) == ("Garage lights (Kasa): on → off",)
+    assert format_device_action_outcomes(outcomes) == (f"Garage lights (Kasa): on → off at {_COMPLETED_AT_LOCAL}",)
 
 
 def test_format_device_action_outcomes_omits_unchanged_devices() -> None:
@@ -95,6 +104,7 @@ def test_format_device_action_outcomes_omits_unchanged_devices() -> None:
             action=RuleDeviceActionType.TURN_ON,
             after_state="on",
             before_state="off",
+            completed_at=_COMPLETED_AT,
             device_id="Basement leds",
             error=None,
             family_id=DeviceFamilyId.KASA,
@@ -105,6 +115,7 @@ def test_format_device_action_outcomes_omits_unchanged_devices() -> None:
             action=RuleDeviceActionType.TURN_ON,
             after_state="on",
             before_state="on",
+            completed_at=_COMPLETED_AT,
             device_id="Basement lamp",
             error=None,
             family_id=DeviceFamilyId.KASA,
@@ -112,7 +123,7 @@ def test_format_device_action_outcomes_omits_unchanged_devices() -> None:
             succeeded=True,
         ),
     )
-    assert format_device_action_outcomes(outcomes) == ("Basement leds (Kasa): off → on",)
+    assert format_device_action_outcomes(outcomes) == (f"Basement leds (Kasa): off → on at {_COMPLETED_AT_LOCAL}",)
 
 
 def test_format_devices_already_in_desired_state_message_lists_mixed_targets() -> None:
@@ -121,6 +132,7 @@ def test_format_devices_already_in_desired_state_message_lists_mixed_targets() -
             action=RuleDeviceActionType.TURN_OFF,
             after_state="off",
             before_state="off",
+            completed_at=_COMPLETED_AT,
             device_id="Kitchen TV",
             error=None,
             family_id=DeviceFamilyId.VIZIO,
@@ -131,6 +143,7 @@ def test_format_devices_already_in_desired_state_message_lists_mixed_targets() -
             action=RuleDeviceActionType.PAUSE,
             after_state="paused",
             before_state="paused",
+            completed_at=_COMPLETED_AT,
             device_id="Living room",
             error=None,
             family_id=DeviceFamilyId.SONOS,
@@ -149,6 +162,7 @@ def test_summarize_device_action_outcomes_includes_failed_without_error_text() -
             action=RuleDeviceActionType.TURN_ON,
             after_state="off",
             before_state="off",
+            completed_at=_COMPLETED_AT,
             device_id="Basement leds",
             error=None,
             family_id=DeviceFamilyId.KASA,
@@ -157,7 +171,7 @@ def test_summarize_device_action_outcomes_includes_failed_without_error_text() -
         ),
     )
     summary = summarize_device_action_outcomes(outcomes)
-    assert summary.changed_lines == ("Basement leds (Kasa): failed",)
+    assert summary.changed_lines == (f"Basement leds (Kasa): failed at {_COMPLETED_AT_LOCAL}",)
     assert summary.no_change_message is None
 
 
@@ -167,6 +181,7 @@ def test_summarize_device_action_outcomes_reports_all_already_desired() -> None:
             action=RuleDeviceActionType.TURN_ON,
             after_state="on",
             before_state="on",
+            completed_at=_COMPLETED_AT,
             device_id="Basement leds",
             error=None,
             family_id=DeviceFamilyId.KASA,
@@ -177,6 +192,7 @@ def test_summarize_device_action_outcomes_reports_all_already_desired() -> None:
             action=RuleDeviceActionType.TURN_ON,
             after_state="on",
             before_state="on",
+            completed_at=_COMPLETED_AT,
             device_id="Basement lamp",
             error=None,
             family_id=DeviceFamilyId.KASA,
@@ -200,6 +216,7 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
             action=RuleDeviceActionType.TURN_OFF,
             after_state="off",
             before_state="on",
+            completed_at=_COMPLETED_AT,
             device_id="Kitchen TV",
             error=None,
             family_id=DeviceFamilyId.VIZIO,
@@ -213,15 +230,49 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
         device_action_outcomes=outcomes,
         notification_detail="Everyone left home.",
     )
-    assert "Kitchen TV (Vizio): on → off" in plain
+    assert RULE_FIRE_JUST_FIRED_TEMPLATE.format(label=rule.label, rule_id=rule.id) in plain
+    assert f"{RULE_FIRE_TIMELINE_HEADING}:" in plain
+    assert f"Kitchen TV (Vizio): on → off at {_COMPLETED_AT_LOCAL}" in plain
     assert "Everyone left home." in plain
     assert "https://domesti.example.com/#/automations/status/away-shutdown" in plain
     assert "Instance: https://domesti.example.com" in plain
-    assert "Kitchen TV (Vizio): on → off" in html
+    assert f"Kitchen TV (Vizio): on → off at {_COMPLETED_AT_LOCAL}" in html
     assert 'href="https://domesti.example.com/#/automations/status/away-shutdown"' in html
     assert "Open Automations → Status" not in plain
     assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in plain
     assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in html
+
+
+def test_build_rule_notification_bodies_sequence_completed_includes_cancelled_note(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_PUBLIC_BASE_URL", "https://domesti.example.com")
+    rule = _sample_rule()
+    outcomes = (
+        RuleDeviceActionOutcome(
+            action=RuleDeviceActionType.TURN_OFF,
+            after_state="off",
+            before_state="on",
+            completed_at=_COMPLETED_AT,
+            device_id="Kitchen TV",
+            error=None,
+            family_id=DeviceFamilyId.VIZIO,
+            probable=False,
+            succeeded=True,
+        ),
+    )
+    plain, html = build_rule_notification_bodies(
+        rule,
+        cache_path=tmp_path / "cache.sqlite",
+        cancelled_remaining=True,
+        device_action_outcomes=outcomes,
+        sequence_completed=True,
+    )
+    assert RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE.format(label=rule.label, rule_id=rule.id) in plain
+    assert RULE_FIRE_ACTIONS_CANCELLED_NOTE in plain
+    assert RULE_FIRE_ACTIONS_CANCELLED_NOTE in html
+    assert RULE_FIRE_JUST_FIRED_TEMPLATE.format(label=rule.label, rule_id=rule.id) not in plain
 
 
 def test_build_rule_notification_bodies_shows_all_clear_when_devices_unchanged(
@@ -235,6 +286,7 @@ def test_build_rule_notification_bodies_shows_all_clear_when_devices_unchanged(
             action=RuleDeviceActionType.TURN_ON,
             after_state="on",
             before_state="on",
+            completed_at=_COMPLETED_AT,
             device_id="Basement leds",
             error=None,
             family_id=DeviceFamilyId.KASA,
