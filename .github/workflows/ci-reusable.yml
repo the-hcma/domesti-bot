@@ -45,23 +45,6 @@ jobs:
           name: Python lint & format checks
           conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
 
-      # Cutover: also publish legacy names until branch protection is retargeted.
-      - uses: LouisBrunner/checks-action@v3.1.0
-        if: always()
-        with:
-          token: ${{ github.token }}
-          sha: ${{ inputs.ref }}
-          name: Ruff
-          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
-
-      - uses: LouisBrunner/checks-action@v3.1.0
-        if: always()
-        with:
-          token: ${{ github.token }}
-          sha: ${{ inputs.ref }}
-          name: Pyright
-          conclusion: ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
-
   test:
     name: Pytest (hermetic)
     runs-on: ubuntu-latest
