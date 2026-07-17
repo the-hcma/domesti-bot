@@ -412,7 +412,7 @@ def test_get_v1_ui_state_syncs_kasa_roster_from_cache(tmp_path: Path) -> None:
     payload = response.json()
     kasa = next(f for f in payload["families"] if f["id"] == "kasa")
     assert {d["id"] for d in kasa["devices"]} == {
-        "192.168.1.10",
-        "192.168.1.20",
+        "aa:bb:c0:a8:01:0a",
+        "aa:bb:c0:a8:01:14",
     }
     mock_discover.assert_not_awaited()

@@ -2218,6 +2218,22 @@ function createTilePrefsBadge(device: UIDeviceOut): HTMLSpanElement | null {
   return badge;
 }
 
+function deviceIdentityTooltip(device: UIDeviceOut): string {
+  const lines = [DEVICE_PROPERTIES_MENU_HINT, ""];
+  lines.push(`MAC address: ${device.mac_address}`);
+  const host = (device.host ?? "").trim();
+  if (host) {
+    lines.push(`IP: ${host}`);
+  }
+  for (const detail of device.identity_details ?? []) {
+    const text = detail.trim();
+    if (text) {
+      lines.push(text);
+    }
+  }
+  return lines.join("\n");
+}
+
 function createTileSaturatedHit(
   device: UIDeviceOut,
   controller: DomestiBotController,
@@ -2234,7 +2250,7 @@ function createTileSaturatedHit(
     device.state === "open";
   hit.setAttribute("aria-pressed", isActive ? "true" : "false");
   hit.setAttribute("aria-label", compactTileAriaLabel(device));
-  hit.title = DEVICE_PROPERTIES_MENU_HINT;
+  hit.title = deviceIdentityTooltip(device);
   hit.disabled = !connected;
   appendSaturatedTileVisuals(hit, device, hitClassName === "tile-compact-hit");
   attachTileHitListeners(hit, device, controller);

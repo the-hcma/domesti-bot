@@ -38,7 +38,7 @@ def test_lookup_ip_via_arp_for_mac_parses_macos_table(monkeypatch: pytest.Monkey
         )
 
     monkeypatch.setattr(
-        "app.vizio_mac.subprocess.run",
+        "app.device_mac.subprocess.run",
         lambda *args, **kwargs: _Result(),
     )
     assert lookup_ip_via_arp_for_mac("00:bd:3e:d5:f0:11") == "192.168.86.201"
@@ -78,7 +78,7 @@ def test_lookup_mac_via_arp_parses_macos_output(monkeypatch: pytest.MonkeyPatch)
         stdout = "? (192.168.86.201) at 0:bd:3e:d5:f0:11 on en0 ifscope [ethernet]"
 
     monkeypatch.setattr(
-        "app.vizio_mac.subprocess.run",
+        "app.device_mac.subprocess.run",
         lambda *args, **kwargs: _Result(),
     )
     assert lookup_mac_via_arp("192.168.86.201") == "00:bd:3e:d5:f0:11"

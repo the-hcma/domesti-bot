@@ -26,6 +26,8 @@ from app.vizio_device_manager import VizioDeviceManager
 class _FakeDoor:
     def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
         self.identifier = identifier
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
+        self.door_key = self.identifier
         self.preferred_label = label
         self.is_open = is_open
         self.is_closed = not is_open
@@ -53,6 +55,9 @@ class _FakeKasa:
     def __init__(self, host: str, label: str, *, is_on: bool) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
+        self.identifier = host
+        self.host = host
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_on = is_on
         self.calls: list[str] = []
@@ -83,6 +88,8 @@ class _FakeSonosZone:
         raise_transition_unavailable_on: str | None = None,
     ) -> None:
         self.identifier = identifier
+        self.rincon_uid = identifier
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_playing = is_playing
         self.stream_favorites: tuple = ()
@@ -120,6 +127,7 @@ class _FakeVizioTv:
         power_state: str,
     ) -> None:
         self.identifier = device_id
+        self.mac_address = device_id if device_id.count(":") == 5 else "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self._power_state = power_state
         self.calls: list[str] = []

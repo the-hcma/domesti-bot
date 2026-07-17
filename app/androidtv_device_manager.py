@@ -40,6 +40,7 @@ from pychromecast.discovery import CastBrowser, SimpleCastListener
 from pychromecast.models import CastInfo
 
 from app import device_discovery_store
+from app.device_mac import lookup_mac_via_arp
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
 
@@ -199,7 +200,7 @@ async def discover_cast_adb_specs_via_zeroconf(
 class AndroidTvSwitchDevice(SwitchDevice):
     """Cast-backed switch: *on* means media **playing**; *off* stops playback."""
 
-    __slots__ = ("_cast", "_connect_timeout", "_host_connect_tuple")
+    __slots__ = ("_cast", "_cast_uuid", "_connect_timeout", "_host_connect_tuple", "_mac_address")
 
     def __init__(
         self,
@@ -209,11 +210,23 @@ class AndroidTvSwitchDevice(SwitchDevice):
         connect_timeout: float = 20.0,
         display_name: str | None = None,
         host_connect_tuple: tuple[str, int, uuid.UUID, str | None, str | None] | None = None,
+        mac_address: str,
+        cast_uuid: str | None = None,
     ) -> None:
         super().__init__(identifier, display_name=display_name)
         self._cast = cast
         self._connect_timeout = float(connect_timeout)
         self._host_connect_tuple = host_connect_tuple
+        self._mac_address = mac_address
+        self._cast_uuid = (cast_uuid or identifier).strip()
+
+    @property
+    def cast_uuid(self) -> str:
+        return self._cast_uuid
+
+    @property
+    def mac_address(self) -> str:
+        return self._mac_address
 
     def _ensure_cast_connected(self) -> None:
         """Recreate the PyChromecast socket after :meth:`turn_off` disconnected."""
@@ -356,6 +369,10 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         alias_map: dict[str, AndroidTvSwitchDevice] = {}
         for dev in devices:
             alias_map[dev.identifier] = dev
+            if dev.cast_uuid != dev.identifier:
+                alias_map[dev.cast_uuid] = dev
+            if dev.mac_address and dev.mac_address != dev.identifier:
+                alias_map[dev.mac_address] = dev
             label = dev.preferred_label
             if label != dev.identifier:
                 alias_map[label] = dev
@@ -367,7 +384,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
                 if backend != "androidtv":
                     continue
                 for dev in uniq:
-                    if dev.identifier == key:
+                    if key in {dev.identifier, dev.cast_uuid, dev.mac_address}:
                         dev.set_display_name(disp)
                         break
         self._alias_to_device = self._expand_lookup(uniq)
@@ -436,7 +453,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
 
     async def _connect_devices_from_cache(
         self,
-        known: list[tuple[str, int, str | None, str | None, str | None]],
+        known: list[tuple[str, int, str | None, str | None, str | None, str | None]],
     ) -> list[AndroidTvSwitchDevice]:
         """No-mDNS connect path: build a ``Chromecast`` per cached row using
         ``pychromecast.get_chromecast_from_host`` (which goes straight to TCP
@@ -455,6 +472,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
             friendly: str | None,
             uid_str: str,
             model_name: str | None,
+            cached_mac: str | None,
         ) -> AndroidTvSwitchDevice | None:
             try:
                 host_tuple = (host, port, uuid.UUID(uid_str), model_name, friendly)
@@ -473,14 +491,27 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
                     ex,
                 )
                 return None
+            mac = cached_mac or lookup_mac_via_arp(host)
+            if mac is None:
+                _LOGGER.warning(
+                    "Cast: skipped cached %s (%s:%d) — MAC address required (ARP miss)",
+                    friendly or uid_str,
+                    host,
+                    port,
+                )
+                with contextlib.suppress(Exception):
+                    cc.disconnect()
+                return None
             label = (friendly or "").strip() or uid_str
             host_tuple = (host, port, uuid.UUID(uid_str), model_name, friendly)
             dev = AndroidTvSwitchDevice(
-                uid_str,
+                mac,
                 cc,
                 connect_timeout=self._connection_timeout,
                 display_name=label,
                 host_connect_tuple=host_tuple,
+                mac_address=mac,
+                cast_uuid=uid_str,
             )
             try:
                 dev._cast.media_controller.update_status()
@@ -493,8 +524,8 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
 
         results = await asyncio.gather(
             *(
-                asyncio.to_thread(_connect_one, h, p, fn, uid, model)
-                for h, p, fn, uid, model in known
+                asyncio.to_thread(_connect_one, h, p, fn, uid, model, mac)
+                for h, p, fn, uid, model, mac in known
                 if uid  # safe-guard — caller already filtered, but be explicit
             ),
             return_exceptions=False,
@@ -511,7 +542,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         # :meth:`rediscover`) which forces the LAN-wide browse below.
         if not full_zeroconf and self._discovery_store_path is not None:
             known = device_discovery_store.load_androidtv_known_devices(self._discovery_store_path)
-            if known and all(uid for _, _, _, uid, _ in known):
+            if known and all(uid for _, _, _, uid, _, _ in known):
                 uniq = await self._connect_devices_from_cache(known)
                 self._finalize_devices(uniq)
                 self._last_discovery_source = "cache"
@@ -557,19 +588,31 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
                         uid = str(info.uuid)
                         label = (info.friendly_name or "").strip() or uid
                         port = int(info.port) if info.port else _DEFAULT_CAST_PORT
+                        host_s = str(info.host).strip()
                         host_tuple = (
-                            str(info.host).strip(),
+                            host_s,
                             port,
                             uuid.UUID(uid),
                             (getattr(info, "model_name", None) or "").strip() or None,
                             (info.friendly_name or "").strip() or None,
                         )
+                        mac = lookup_mac_via_arp(host_s)
+                        if mac is None:
+                            _LOGGER.warning(
+                                "Cast: skipped %s — MAC address required (ARP miss)",
+                                label,
+                            )
+                            with contextlib.suppress(Exception):
+                                cc.disconnect()
+                            continue
                         dev = AndroidTvSwitchDevice(
-                            uid,
+                            mac,
                             cc,
                             connect_timeout=self._connection_timeout,
                             display_name=label,
                             host_connect_tuple=host_tuple,
+                            mac_address=mac,
+                            cast_uuid=uid,
                         )
                         try:
                             dev._cast.media_controller.update_status()
@@ -594,7 +637,7 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
         pairs = await asyncio.to_thread(connect_all)
         uniq = [dev for dev, _ in pairs]
         self._finalize_devices(uniq)
-        self._persist_after_fetch(uniq, model_by_uid={d.identifier: m for d, m in pairs})
+        self._persist_after_fetch(uniq, model_by_uid={d.cast_uuid: m for d, m in pairs})
 
     def _persist_after_fetch(
         self,
@@ -606,15 +649,27 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
 
         if self._discovery_store_path is None or not devices:
             return
-        rows: list[tuple[str, int, str | None, str | None, str | None]] = []
+        rows: list[tuple[str, int, str | None, str | None, str | None, str | None]] = []
         for d in devices:
-            host = str(d._cast.socket_client.host)
-            port = int(d._cast.socket_client.port)
+            host = str(d._cast.socket_client.host) if d._cast is not None else ""
+            if not host and d._host_connect_tuple is not None:
+                host = d._host_connect_tuple[0]
+            port = int(d._cast.socket_client.port) if d._cast is not None else _DEFAULT_CAST_PORT
+            if d._cast is None and d._host_connect_tuple is not None:
+                port = int(d._host_connect_tuple[1])
             pl = d.preferred_label
-            friendly = pl if pl != d.identifier else None
-            uid = d.identifier
+            friendly = pl if pl != d.identifier and pl != d.cast_uuid else None
+            uid = d.cast_uuid
             model = (model_by_uid or {}).get(uid)
-            rows.append((host, port, friendly, uid, model))
+            mac = d.mac_address
+            rows.append((host, port, friendly, uid, model, mac))
+            if uid != mac:
+                device_discovery_store.migrate_canonical_key_to_mac(
+                    self._discovery_store_path,
+                    backend="androidtv",
+                    old_key=uid,
+                    mac=mac,
+                )
         rows.sort(key=lambda t: (t[0], t[1]))
         device_discovery_store.save_androidtv_hosts(self._discovery_store_path, rows)
 
@@ -666,12 +721,12 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
             _LOGGER.debug("AndroidTV reload_from_cache: manager not initialized")
             return False
         known = device_discovery_store.load_androidtv_known_devices(self._discovery_store_path)
-        if not known or not all(uid for _h, _p, _fn, uid, _m in known):
+        if not known or not all(uid for _h, _p, _fn, uid, _model, _mac in known):
             _LOGGER.info("AndroidTV reload_from_cache: empty or incomplete cache; keeping prior device map")
             return False
         previous = self._alias_to_device
         uniq = await self._connect_devices_from_cache(known)
-        expected = sum(1 for _h, _p, _fn, uid, _m in known if uid)
+        expected = sum(1 for _h, _p, _fn, uid, _model, _mac in known if uid)
         if len(uniq) != expected:
             for dev in uniq:
                 cast = dev._cast

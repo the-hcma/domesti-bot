@@ -26,6 +26,8 @@ from soco import discover as soco_discover
 from soco.exceptions import SoCoUPnPException
 
 from app import device_discovery_store
+from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
+from app.device_mac import lookup_mac_via_arp, mac_from_sonos_rincon
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SpeakerDeviceManager
 from app.rule_engine import SpeakerDevice
 from app.sonos_stream_favorites import SonosStreamFavorite, load_sonos_stream_favorites
@@ -61,7 +63,7 @@ class SonosTransitionUnavailableError(Exception):
 
 
 class SonosSpeakerDevice(SpeakerDevice):
-    __slots__ = ("_is_playing", "_soco", "_stream_favorites")
+    __slots__ = ("_is_playing", "_mac_address", "_rincon_uid", "_soco", "_stream_favorites")
 
     def __init__(
         self,
@@ -69,10 +71,14 @@ class SonosSpeakerDevice(SpeakerDevice):
         soco_zone: Any,
         *,
         display_name: str | None = None,
+        mac_address: str,
+        rincon_uid: str | None = None,
         stream_favorites: tuple[SonosStreamFavorite, ...] = (),
     ) -> None:
         super().__init__(identifier, display_name=display_name)
         self._soco = soco_zone
+        self._mac_address = mac_address
+        self._rincon_uid = (rincon_uid or identifier).strip()
         self._stream_favorites = stream_favorites
         # Tri-state cache: ``True``/``False`` once we've successfully read
         # the transport state at least once, ``None`` while we still don't
@@ -80,6 +86,10 @@ class SonosSpeakerDevice(SpeakerDevice):
         # ``unknown`` state badges. Live UPnP traffic only happens in
         # :meth:`update_playback_state`; everything else reads this cache.
         self._is_playing: bool | None = None
+
+    @property
+    def host(self) -> str:
+        return (getattr(self._soco, "ip_address", None) or "").strip()
 
     @property
     def is_playing(self) -> bool | None:
@@ -90,6 +100,14 @@ class SonosSpeakerDevice(SpeakerDevice):
         """
 
         return self._is_playing
+
+    @property
+    def mac_address(self) -> str:
+        return self._mac_address
+
+    @property
+    def rincon_uid(self) -> str:
+        return self._rincon_uid
 
     async def pause(self) -> None:
         try:
@@ -245,6 +263,10 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         alias_map: dict[str, SonosSpeakerDevice] = {}
         for sd in devices:
             alias_map[sd.identifier] = sd
+            if sd.rincon_uid and sd.rincon_uid != sd.identifier:
+                alias_map[sd.rincon_uid] = sd
+            if sd.mac_address and sd.mac_address != sd.identifier:
+                alias_map[sd.mac_address] = sd
             label = sd.preferred_label
             if label != sd.identifier:
                 alias_map[label] = sd
@@ -252,21 +274,44 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
 
     def _finalize(self, devices: list[SonosSpeakerDevice]) -> None:
         devices.sort(key=lambda d: d.preferred_label.lower())
+        record_duplicate_preferred_labels(
+            backend="sonos",
+            devices=[(sd.mac_address, sd.preferred_label) for sd in devices],
+        )
         self._alias_to_device = self._expand_lookup(devices)
 
     def _persist_cache(self, devices: list[SonosSpeakerDevice]) -> None:
         if self._discovery_cache_path is None:
             return
-        rows: list[tuple[str, str, str | None]] = []
+        prior_label_by_mac: dict[str, str] = {}
+        for _uid, _host, zone_name, mac in device_discovery_store.load_sonos_zones(self._discovery_cache_path):
+            mac_s = (mac or "").strip().lower()
+            name_s = (zone_name or "").strip()
+            if mac_s and name_s:
+                prior_label_by_mac[mac_s] = name_s
+        rows: list[tuple[str, str, str | None, str | None]] = []
         for sd in devices:
             zone = sd._soco
             host = (getattr(zone, "ip_address", None) or "").strip()
-            uid = sd.identifier.strip()
+            uid = sd.rincon_uid.strip()
             if not host or not uid:
                 continue
             display = getattr(zone, "player_name", None)
             label = (str(display).strip() if display else "") or None
-            rows.append((uid, host, label))
+            note_display_name_rename(
+                backend="sonos",
+                mac_address=sd.mac_address,
+                previous_label=prior_label_by_mac.get(sd.mac_address.lower()),
+                current_label=label,
+            )
+            rows.append((uid, host, label, sd.mac_address))
+            if uid != sd.mac_address:
+                device_discovery_store.migrate_canonical_key_to_mac(
+                    self._discovery_cache_path,
+                    backend="sonos",
+                    old_key=uid,
+                    mac=sd.mac_address,
+                )
         device_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
 
     async def _reconnect_from_cache(self) -> list[SonosSpeakerDevice] | None:
@@ -303,7 +348,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             return zone
 
         devices: list[SonosSpeakerDevice] = []
-        for uid, host, cached_name in cached:
+        for uid, host, cached_name, cached_mac in cached:
             zone = await asyncio.to_thread(_probe_one, host, uid)
             if zone is None:
                 return None
@@ -313,7 +358,10 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 live_name = ""
             cached_label = (cached_name or "").strip()
             label = live_name or cached_label or uid
-            devices.append(self._speaker_device(uid, zone, display_name=label))
+            speaker = self._speaker_device(uid, zone, display_name=label, cached_mac=cached_mac)
+            if speaker is None:
+                return None
+            devices.append(speaker)
         return devices
 
     def _speaker_device(
@@ -322,11 +370,25 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         zone: Any,
         *,
         display_name: str,
-    ) -> SonosSpeakerDevice:
+        cached_mac: str | None = None,
+    ) -> SonosSpeakerDevice | None:
+        mac = mac_from_sonos_rincon(uid) or cached_mac
+        if mac is None:
+            host = (getattr(zone, "ip_address", None) or "").strip()
+            if host:
+                mac = lookup_mac_via_arp(host)
+        if mac is None:
+            _LOGGER.warning(
+                "Skipping Sonos zone %s — MAC address required (RINCON/ARP miss)",
+                uid,
+            )
+            return None
         return SonosSpeakerDevice(
-            uid,
+            mac,
             zone,
             display_name=display_name,
+            mac_address=mac,
+            rincon_uid=uid,
             stream_favorites=self._stream_favorites,
         )
 
@@ -360,6 +422,8 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             uid = getattr(z, "uid", None) or str(id(z))
             name = (getattr(z, "player_name", None) or "").strip() or uid
             sd = self._speaker_device(uid, z, display_name=name)
+            if sd is None:
+                continue
             devices.append(sd)
         self._finalize(devices)
         self._persist_cache(devices)

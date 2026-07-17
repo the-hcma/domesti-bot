@@ -52,6 +52,8 @@ class _FakeDoor:
 
     def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
         self.identifier = identifier
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
+        self.door_key = self.identifier
         self.preferred_label = label
         self.is_open = is_open
         self.is_closed = not is_open
@@ -72,6 +74,9 @@ class _FakeKasa:
     def __init__(self, host: str, label: str, *, is_on: bool) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
+        self.identifier = host
+        self.host = host
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_on = is_on
         self.calls: list[str] = []
@@ -94,6 +99,7 @@ def _client() -> tuple[TestClient, FastAPI]:
 def _kasa_mgr(devices: list[_FakeKasa]) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(devices)
+    mgr.get_device_by_alias.return_value = None
     return cast(KasaDeviceManager, mgr)
 
 

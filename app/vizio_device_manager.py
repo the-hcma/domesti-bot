@@ -79,7 +79,7 @@ class VizioTvEndpoint:
 
 
 class VizioTvDevice(SwitchDevice):
-    __slots__ = ("_client", "_endpoint", "_mac", "_power_unknown")
+    __slots__ = ("_client", "_endpoint", "_mac_address", "_power_unknown")
 
     def __init__(
         self,
@@ -87,12 +87,12 @@ class VizioTvDevice(SwitchDevice):
         client: VizioSmartCastClient,
         *,
         display_name: str | None = None,
-        mac: str | None = None,
+        mac_address: str,
     ) -> None:
         super().__init__(endpoint.device_id, display_name=display_name)
         self._endpoint = endpoint
         self._client = client
-        self._mac = (mac or endpoint.mac or "").strip() or None
+        self._mac_address = mac_address.strip()
         self._power_unknown = False
 
     @property
@@ -100,8 +100,8 @@ class VizioTvDevice(SwitchDevice):
         return self._endpoint
 
     @property
-    def mac(self) -> str | None:
-        return self._mac
+    def mac_address(self) -> str:
+        return self._mac_address
 
     @property
     def preferred_label(self) -> str:
@@ -287,15 +287,14 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     port=ep.port,
                     display_name=tv.preferred_label,
                     model=ep.model,
-                    mac=tv.mac,
+                    mac=tv.mac_address,
                     diid=ep.diid,
                 )
-                if tv.mac:
-                    migrate_vizio_auth_token_host_to_mac(
-                        self._discovery_cache_path,
-                        host=ep.host,
-                        mac=tv.mac,
-                    )
+                migrate_vizio_auth_token_host_to_mac(
+                    self._discovery_cache_path,
+                    host=ep.host,
+                    mac=tv.mac_address,
+                )
 
     async def is_off(self, identifier: str) -> bool:
         tv = self.get_device_by_id(identifier)
@@ -413,7 +412,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         self,
         endpoint: VizioTvEndpoint,
         token: str,
-    ) -> VizioTvDevice:
+    ) -> VizioTvDevice | None:
         client = VizioSmartCastClient(
             endpoint.host,
             port=endpoint.port,
@@ -424,6 +423,13 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         mac = endpoint.mac or info.mac
         if mac is None:
             mac = await resolve_vizio_tv_mac(client, host=endpoint.host)
+        if mac is None:
+            _LOGGER.warning(
+                "Skipping Vizio TV at %s:%s — MAC address required",
+                endpoint.host,
+                endpoint.port,
+            )
+            return None
         label = (endpoint.display_name or info.cast_name or info.model_name or "").strip()
         merged = VizioTvEndpoint(
             host=endpoint.host,
@@ -437,7 +443,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             merged,
             client,
             display_name=label or None,
-            mac=merged.mac,
+            mac_address=mac,
         )
         await tv.refresh_power_state()
         return tv
@@ -544,7 +550,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             out.append(VizioTvEndpoint(host=host, port=port))
         return out
 
-    async def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice:
+    async def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice | None:
         """Return a cached off tile when SmartCast is unreachable at bootstrap."""
         _LOGGER.info(
             "Vizio TV %s bootstrap: SmartCast unreachable at %s:%s; registering as off",
@@ -553,6 +559,13 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             endpoint.port,
         )
         endpoint = await self._endpoint_with_resolved_mac(endpoint)
+        if endpoint.mac is None:
+            _LOGGER.warning(
+                "Skipping offline Vizio TV at %s:%s — MAC address required",
+                endpoint.host,
+                endpoint.port,
+            )
+            return None
         client = VizioSmartCastClient(
             endpoint.host,
             port=endpoint.port,
@@ -564,7 +577,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             endpoint,
             client,
             display_name=label or None,
-            mac=endpoint.mac,
+            mac_address=endpoint.mac,
         )
         tv.set_power(False)
         return tv
@@ -578,7 +591,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         for tv in connected:
             if tv.identifier == endpoint.device_id:
                 return True
-            if endpoint.mac and tv.mac and endpoint.mac == tv.mac:
+            if endpoint.mac and endpoint.mac == tv.mac_address:
                 return True
             if tv.endpoint.host == endpoint.host and tv.endpoint.port == endpoint.port:
                 return True

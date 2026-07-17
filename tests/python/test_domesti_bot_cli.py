@@ -265,7 +265,7 @@ async def test_show_devices_lists_vizio_tvs() -> None:
         port=7345,
         display_name="Kitchen TV",
     )
-    tv = VizioTvDevice(endpoint, MagicMock(), display_name="Kitchen TV")
+    tv = VizioTvDevice(endpoint, MagicMock(), display_name="Kitchen TV", mac_address="00:bd:3e:d5:f0:11")
     tv.set_power(True)
 
     vizio_mgr = MagicMock()
@@ -288,4 +288,6 @@ async def test_show_devices_lists_vizio_tvs() -> None:
     assert "Vizio TVs:" in text
     assert "Kitchen TV" in text
     assert "192.168.86.201" in text
+    assert "MAC address:" in text
+    assert "00:bd:3e:d5:f0:11" in text
     assert "(on)" in text

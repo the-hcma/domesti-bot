@@ -79,6 +79,7 @@ from app.androidtv_device_manager import (
 from app.build_info import format_cli_version_line
 from app.db.secrets import SecretsConfigurationError, save_kasa_credentials_to_db
 from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
+from app.device_label_conflicts import clear_device_label_conflicts, drain_device_label_conflicts
 from app.device_manager import NotInitializedError
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_credentials import resolve_kasa_credentials
@@ -1119,6 +1120,34 @@ def _lex_show_devices_key(label: str, tie: str) -> tuple[str, str]:
     return (label.lower(), tie.lower())
 
 
+def _print_device_identity(
+    theme: _Theme,
+    *,
+    mac_address: str,
+    host: str | None = None,
+    details: list[str] | None = None,
+) -> None:
+    """Indented MAC / IP / family-specific identity under a ``show-devices`` row."""
+
+    print(f"    {theme.meta('MAC address:')} {theme.device(mac_address)}")
+    host_s = (host or "").strip()
+    if host_s:
+        print(f"    {theme.meta('IP:')} {theme.device(host_s)}")
+    for line in details or []:
+        text_line = line.strip()
+        if text_line:
+            print(f"    {theme.meta(text_line)}")
+
+
+def _print_label_conflicts(theme: _Theme) -> None:
+    conflicts = drain_device_label_conflicts()
+    if not conflicts:
+        return
+    print(theme.header("Display name notices:"))
+    for conflict in conflicts:
+        print(f"  {theme.err(conflict.format_message())}")
+
+
 async def _repl_cmd_show_devices(
     *,
     kasa_mgr: KasaDeviceManager,
@@ -1144,14 +1173,14 @@ async def _repl_cmd_show_devices(
             if not devices:
                 print(theme.dim("  (none connected — try discover-androidtv or explicit hosts.)"))
             for d in devices:
-                if d.preferred_label != d.identifier:
-                    print(
-                        f"  {theme.device(repr(d.preferred_label))}  "
-                        f"{theme.meta('[uuid')} {theme.device(repr(d.identifier))}"
-                        f"{theme.meta(']')} {theme.state('(' + d.power_state + ')')}"
-                    )
-                else:
-                    print(f"  {theme.device(repr(d.identifier))}  {theme.state('(' + d.power_state + ')')}")
+                print(f"  {theme.device(repr(d.preferred_label))}  {theme.state('(' + d.power_state + ')')}")
+                cast_details = [f"uuid: {d.identifier}"] if d.identifier != d.mac_address else None
+                _print_device_identity(
+                    theme,
+                    mac_address=d.mac_address,
+                    host=getattr(d, "host", None),
+                    details=cast_details,
+                )
         except NotInitializedError:
             print(theme.dim("  (not available)"))
     print(theme.header("Kasa switches:"))
@@ -1163,14 +1192,16 @@ async def _repl_cmd_show_devices(
         if not rows:
             print(theme.dim("  (none)"))
         for sw in rows:
-            if sw.display_name:
-                print(
-                    f"  {theme.device(repr(sw.preferred_label))}  "
-                    f"{theme.meta('[alias')} {theme.device(repr(sw.identifier))}"
-                    f"{theme.meta(']')} {theme.state('(' + sw.power_state + ')')}"
-                )
-            else:
-                print(f"  {theme.device(repr(sw.identifier))}  {theme.state('(' + sw.power_state + ')')}")
+            print(f"  {theme.device(repr(sw.preferred_label))}  {theme.state('(' + sw.power_state + ')')}")
+            kasa_details: list[str] = []
+            if sw.preferred_label != sw.mac_address:
+                kasa_details.append(f"alias: {sw.preferred_label}")
+            _print_device_identity(
+                theme,
+                mac_address=sw.mac_address,
+                host=sw.host,
+                details=kasa_details,
+            )
     except NotInitializedError:
         print(theme.dim("  (not available)"))
     print(theme.header("Sonos zones:"))
@@ -1187,10 +1218,13 @@ async def _repl_cmd_show_devices(
             else:
                 playbacks = await asyncio.gather(*(asyncio.to_thread(p.transport_state_summary) for p in players))
                 for p, playback in zip(players, playbacks):
-                    print(
-                        f"  {theme.device(repr(p.preferred_label))}  "
-                        f"{theme.meta('[uid')} {theme.meta(p.identifier)}{theme.meta(']')} "
-                        f"{theme.state('(' + playback + ')')}"
+                    print(f"  {theme.device(repr(p.preferred_label))}  {theme.state('(' + playback + ')')}")
+                    sonos_details = [f"RINCON: {p.rincon_uid}"] if p.rincon_uid else None
+                    _print_device_identity(
+                        theme,
+                        mac_address=p.mac_address,
+                        host=p.host,
+                        details=sonos_details,
                     )
         except NotInitializedError:
             print(theme.dim("  (not available)"))
@@ -1209,20 +1243,15 @@ async def _repl_cmd_show_devices(
             )
             if not doors:
                 print(theme.dim("  (none)"))
+            hub_host = (tailwind_mgr.host or "").strip() or None
             for d in doors:
-                if d.display_name:
-                    print(
-                        f"  {theme.device(repr(d.preferred_label))}  "
-                        f"{theme.meta('[id')} {theme.device(repr(d.identifier))}"
-                        f"{theme.meta(', index')} {theme.meta(str(d.door_index))}"
-                        f"{theme.meta(']')} {theme.state('(' + d.door_state + ')')}"
-                    )
-                else:
-                    print(
-                        f"  {theme.device(repr(d.identifier))}  "
-                        f"{theme.meta('[index')} {theme.meta(str(d.door_index))}"
-                        f"{theme.meta(']')} {theme.state('(' + d.door_state + ')')}"
-                    )
+                print(f"  {theme.device(repr(d.preferred_label))}  {theme.state('(' + d.door_state + ')')}")
+                _print_device_identity(
+                    theme,
+                    mac_address=d.mac_address,
+                    host=hub_host,
+                    details=[f"door index: {d.door_index}", f"door id: {d.door_key}"],
+                )
         except NotInitializedError:
             print(theme.dim("  (not available)"))
     print(theme.header("Vizio TVs:"))
@@ -1239,19 +1268,23 @@ async def _repl_cmd_show_devices(
             if not tvs:
                 print(theme.dim("  (none — pair while the TV is on, or turn on a cached TV via the UI/REPL.)"))
             for tv in tvs:
+                print(f"  {theme.device(repr(tv.preferred_label))}  {theme.state('(' + tv.ui_power_state() + ')')}")
                 host_meta = tv.endpoint.host
                 if tv.endpoint.port != 7345:
                     host_meta = f"{host_meta}:{tv.endpoint.port}"
-                if tv.preferred_label != tv.identifier:
-                    print(
-                        f"  {theme.device(repr(tv.preferred_label))}  "
-                        f"{theme.meta('[host')} {theme.device(repr(host_meta))}"
-                        f"{theme.meta(']')} {theme.state('(' + tv.ui_power_state() + ')')}"
-                    )
-                else:
-                    print(f"  {theme.device(repr(tv.identifier))}  {theme.state('(' + tv.ui_power_state() + ')')}")
+                vizio_details: list[str] = []
+                model = (tv.endpoint.model or "").strip()
+                if model:
+                    vizio_details.append(f"model: {model}")
+                _print_device_identity(
+                    theme,
+                    mac_address=tv.mac_address,
+                    host=host_meta,
+                    details=vizio_details,
+                )
         except NotInitializedError:
             print(theme.dim("  (not available)"))
+    _print_label_conflicts(theme)
 
 
 async def _repl_cmd_sonos_pause_resume(
@@ -2204,6 +2237,7 @@ async def bootstrap_device_managers(
 ) -> DeviceManagersState:
     """Create managers, run parallel discovery, and return state (or exit if nothing works)."""
 
+    clear_device_label_conflicts()
     cache_path = Path(args.discovery_cache).expanduser().resolve() if args.discovery_cache else None
     creds, _kasa_creds_source = resolve_kasa_credentials(cache_path=cache_path)
 
@@ -2525,6 +2559,7 @@ async def bootstrap_device_managers(
         )
         print(f"{theme.ok('Ready')} {theme.dim(tail)}", flush=True)
         _maybe_print_kasa_auth_notice(kasa_mgr, theme=theme)
+        _print_label_conflicts(theme)
 
     return DeviceManagersState(
         kasa_mgr=kasa_mgr,

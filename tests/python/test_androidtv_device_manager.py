@@ -146,7 +146,7 @@ async def test_fetch_connects_discovered_casts() -> None:
 
     devices = list(mgr.switches)
     assert len(devices) == 1
-    assert devices[0].identifier == str(uid)
+    assert devices[0].identifier == "aa:bb:c0:a8:01:14"
     assert devices[0].preferred_label == "Office"
 
 
@@ -303,7 +303,7 @@ async def test_fetch_uses_no_mdns_fast_path_when_cache_has_uuids(tmp_path) -> No
     zc_fn.assert_not_called()  # the smoking-gun assertion: zero mDNS traffic.
     assert host_fn.call_count == 2
     ids = sorted(d.identifier for d in mgr.switches)
-    assert ids == sorted([uid_a, uid_b])
+    assert ids == sorted(["aa:bb:0a:00:00:0a", "aa:bb:0a:00:00:0b"])
     assert mgr.last_discovery_source == "cache"
 
 
@@ -344,7 +344,7 @@ async def test_fetch_fast_path_drops_unreachable_cached_device(tmp_path) -> None
 
     zc_fn.assert_not_called()
     # Only the live device survives; the dead one is silently dropped.
-    assert [d.identifier for d in mgr.switches] == [uid_live]
+    assert [d.identifier for d in mgr.switches] == ["aa:bb:0a:00:00:0a"]
     assert mgr.last_discovery_source == "cache"
 
 
@@ -429,7 +429,7 @@ async def test_fetch_mdns_path_persists_uuids_for_next_fast_path(tmp_path) -> No
 
     assert mgr.last_discovery_source == "discovery"
     rows = device_discovery_store.load_androidtv_known_devices(db)
-    assert rows == [("10.0.0.50", 8009, "Den", str(uid), "Nest Audio")]
+    assert rows == [("10.0.0.50", 8009, "Den", str(uid), "Nest Audio", "aa:bb:0a:00:00:32")]
 
 
 @pytest.mark.asyncio
@@ -473,7 +473,7 @@ async def test_fetch_connect_skips_failed_hosts() -> None:
 
     devices = list(mgr.switches)
     assert len(devices) == 1
-    assert devices[0].identifier == str(uid_ok)
+    assert devices[0].identifier == "aa:bb:cc:dd:ee:ff"
 
 
 def test_zeroconf_discovery_wanted_default_on(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -510,7 +510,7 @@ def test_host_hint_from_spec_ipv6_bracketed() -> None:
 async def test_switch_refresh_reads_player_is_playing() -> None:
     cast = MagicMock()
     cast.media_controller.status.player_is_playing = True
-    dev = AndroidTvSwitchDevice("uuid-here", cast, display_name="TV")
+    dev = AndroidTvSwitchDevice("uuid-here", cast, display_name="TV", mac_address="aa:bb:cc:dd:ee:ff")
     await dev.refresh_power_state()
     assert dev.is_on is True
 
@@ -520,7 +520,7 @@ async def test_turn_off_calls_stop_when_session_active() -> None:
     cast = MagicMock()
     cast.media_controller.status.media_session_id = 7
     cast.media_controller.status.player_is_playing = False
-    dev = AndroidTvSwitchDevice("u1", cast)
+    dev = AndroidTvSwitchDevice("u1", cast, mac_address="aa:bb:cc:dd:ee:ff")
     await dev.turn_off()
     cast.media_controller.stop.assert_called_once()
     cast.quit_app.assert_called_once()
@@ -540,11 +540,13 @@ async def test_turn_off_disconnects_when_host_tuple_then_turn_on_reconnects() ->
     st.player_is_playing = False
     cast2.media_controller.status = st
     dev = AndroidTvSwitchDevice(
-        str(uid),
+        "aa:bb:0a:00:00:01",
         cast1,
         connect_timeout=1.0,
         display_name="TV",
         host_connect_tuple=("10.0.0.1", 8009, uid, None, "TV"),
+        mac_address="aa:bb:0a:00:00:01",
+        cast_uuid=str(uid),
     )
     await dev.turn_off()
     cast1.media_controller.stop.assert_not_called()
@@ -569,6 +571,6 @@ async def test_turn_on_play_when_paused() -> None:
     st.player_is_paused = True
     st.player_is_playing = False
     cast.media_controller.status = st
-    dev = AndroidTvSwitchDevice("u2", cast)
+    dev = AndroidTvSwitchDevice("u2", cast, mac_address="aa:bb:cc:dd:ee:ff")
     await dev.turn_on()
     cast.media_controller.play.assert_called_once()

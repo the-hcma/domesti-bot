@@ -276,7 +276,7 @@ def _klap_hosts_for_probe(
         for host in state.kasa_mgr.hosts_requiring_klap_auth:
             host_to_config[host] = None
     if cache_path is not None:
-        for host, _alias, cfg_dict, requires_klap in device_discovery_store.load_cached_configs(cache_path):
+        for host, _alias, cfg_dict, requires_klap, _mac in device_discovery_store.load_cached_configs(cache_path):
             if not requires_klap:
                 continue
             host_to_config.setdefault(host, cfg_dict)

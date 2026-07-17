@@ -558,6 +558,8 @@ class _FakeKasaSwitch:
     def __init__(self, host: str, label: str, *, is_on: bool) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
+        self.host = host
+        self.mac_address = None
         self.identifier = host
         self.preferred_label = label
         self._on = is_on
@@ -570,6 +572,8 @@ class _FakeKasaSwitch:
 class _FakeSonosZone:
     def __init__(self, identifier: str, label: str, *, is_playing: bool | None) -> None:
         self.identifier = identifier
+        self.rincon_uid = identifier
+        self.mac_address = None
         self.preferred_label = label
         self.is_playing = is_playing
 
@@ -577,6 +581,8 @@ class _FakeSonosZone:
 class _FakeTailwindDoor:
     def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
         self.identifier = identifier
+        self.door_key = self.identifier
+        self.mac_address = None
         self.preferred_label = label
         self.is_open = is_open
 

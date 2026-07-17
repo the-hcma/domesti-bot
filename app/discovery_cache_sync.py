@@ -99,21 +99,21 @@ def _any_family_needs_sync(state: DeviceManagersState, cache_path: Path) -> bool
 
 def _cached_androidtv_uuids(cache_path: Path) -> frozenset[str]:
     known = device_discovery_store.load_androidtv_known_devices(cache_path)
-    if not known or not all(uid for _h, _p, _fn, uid, _m in known):
+    if not known or not all(uid for _h, _p, _fn, uid, _model, _mac in known):
         return frozenset()
-    return frozenset(uid for _h, _p, _fn, uid, _m in known if uid)
+    return frozenset(uid for _h, _p, _fn, uid, _model, _mac in known if uid)
 
 
 def _cached_kasa_hosts(cache_path: Path) -> frozenset[str]:
     return frozenset(
-        host for host, _alias, _cfg, _requires_klap in device_discovery_store.load_cached_configs(cache_path)
+        host for host, _alias, _cfg, _requires_klap, _mac in device_discovery_store.load_cached_configs(cache_path)
     )
 
 
 def _cached_sonos_keys(cache_path: Path) -> frozenset[str]:
     return frozenset(
         _fp(uid, host)
-        for uid, host, _name in device_discovery_store.load_sonos_zones(cache_path)
+        for uid, host, _name, _mac in device_discovery_store.load_sonos_zones(cache_path)
         if uid.strip() and host.strip()
     )
 

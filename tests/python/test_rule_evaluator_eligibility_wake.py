@@ -183,6 +183,8 @@ class _FakeKasa:
     def __init__(self, host: str, label: str, *, is_on: bool) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
+        self.host = host
+        self.mac_address = None
         self.identifier = host
         self.preferred_label = label
         self.is_on = is_on

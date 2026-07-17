@@ -30,6 +30,7 @@ from app.vizio_device_manager import VizioDeviceManager
 class _FakeVizioTv:
     def __init__(self, device_id: str, label: str, *, is_on: bool) -> None:
         self.identifier = device_id
+        self.mac_address = device_id if ":" in device_id else "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_on = is_on
         self.calls: list[str] = []
@@ -55,6 +56,7 @@ def _client() -> tuple[TestClient, FastAPI]:
 def _kasa_mgr_empty() -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = ()
+    mgr.get_device_by_alias.return_value = None
     return cast(KasaDeviceManager, mgr)
 
 

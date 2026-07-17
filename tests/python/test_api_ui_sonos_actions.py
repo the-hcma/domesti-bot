@@ -48,6 +48,9 @@ class _FakeKasa:
     def __init__(self, host: str, label: str, *, is_on: bool) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
+        self.identifier = host
+        self.host = host
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_on = is_on
         self.calls: list[str] = []
@@ -84,6 +87,8 @@ class _FakeSonosZone:
         raise_transition_unavailable_on: str | None = None,
     ) -> None:
         self.identifier = identifier
+        self.rincon_uid = identifier
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_playing = is_playing
         self.stream_favorites: tuple = ()
@@ -114,6 +119,7 @@ def _client() -> tuple[TestClient, FastAPI]:
 def _kasa_mgr(devices: list[_FakeKasa]) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(devices)
+    mgr.get_device_by_alias.return_value = None
     return cast(KasaDeviceManager, mgr)
 
 

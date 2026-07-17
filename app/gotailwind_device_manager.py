@@ -38,6 +38,7 @@ from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
 from app import device_discovery_store
+from app.device_mac import lookup_mac_via_arp
 from app.device_manager import AlreadyInitializedError, DoorDeviceManager, NotInitializedError
 from app.rule_engine import DoorDevice
 
@@ -133,7 +134,7 @@ async def discover_tailwind_host(*, timeout: float = 12.0) -> str:
 class GotailwindDevice(DoorDevice):
     """One garage door on a Tailwind controller (``open`` / ``close`` only)."""
 
-    __slots__ = ("_door", "_door_index", "_reported_state", "_tailwind")
+    __slots__ = ("_door", "_door_index", "_door_key", "_mac_address", "_reported_state", "_tailwind")
 
     def __init__(
         self,
@@ -144,11 +145,15 @@ class GotailwindDevice(DoorDevice):
         reported_state: TailwindDoorState,
         door_index: int,
         display_name: str | None = None,
+        door_key: str | None = None,
+        mac_address: str,
     ) -> None:
         super().__init__(identifier, display_name=display_name)
         self._tailwind = tailwind
         self._door = door
         self._door_index = door_index
+        self._door_key = (door_key or identifier).strip()
+        self._mac_address = mac_address
         self._reported_state = reported_state
 
     def _sync_reported_state(self, state: TailwindDoorState) -> None:
@@ -177,12 +182,22 @@ class GotailwindDevice(DoorDevice):
         return self._door_index
 
     @property
+    def door_key(self) -> str:
+        """Vendor door identifier (secondary id when MAC compound form is used)."""
+
+        return self._door_key
+
+    @property
     def is_closed(self) -> bool:
         return self._reported_state == TailwindDoorState.CLOSED
 
     @property
     def is_open(self) -> bool:
         return self._reported_state == TailwindDoorState.OPEN
+
+    @property
+    def mac_address(self) -> str:
+        return self._mac_address
 
     async def open(self) -> None:
         # Symmetric with :meth:`close`: swallow
@@ -226,6 +241,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             Path(display_names_store_path).expanduser().resolve() if display_names_store_path else None
         )
         self._host: str | None = None
+        self._hub_mac: str | None = None
         self._tailwind: Tailwind | None = None
         self._alias_to_device: dict[str, GotailwindDevice] | None = None
 
@@ -272,6 +288,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             self._tailwind = None
         self._alias_to_device = None
         self._host = None
+        self._hub_mac = None
 
     @property
     def doors(self) -> tuple[GotailwindDevice, ...]:
@@ -286,9 +303,11 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         new_map: dict[str, GotailwindDevice] = {}
         for gd in uniq:
             new_map[gd.identifier] = gd
+            if gd.door_key != gd.identifier:
+                new_map[gd.door_key] = gd
             new_map[str(gd.door_index)] = gd
             pl = gd.preferred_label
-            if pl not in (gd.identifier, str(gd.door_index)):
+            if pl not in (gd.identifier, str(gd.door_index), gd.door_key):
                 new_map[pl] = gd
         return new_map
 
@@ -298,7 +317,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
                 if backend != "tailwind":
                     continue
                 for gd in uniq:
-                    if gd.identifier == key:
+                    if key in {gd.identifier, gd.door_key}:
                         gd.set_display_name(disp)
                         break
         self._alias_to_device = self._expand_tailwind_lookup(uniq)
@@ -317,6 +336,23 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             raise AlreadyInitializedError
 
         self._host = await self._resolve_host()
+        cached_mac: str | None = None
+        if self._display_names_store_path is not None:
+            row = device_discovery_store.load_tailwind_host_row(self._display_names_store_path)
+            if row is not None and row[0] == self._host:
+                cached_mac = row[1]
+        self._hub_mac = cached_mac or await asyncio.to_thread(lookup_mac_via_arp, self._host)
+        if self._hub_mac is None:
+            raise RuntimeError(
+                f"Expected a MAC address for Tailwind hub at {self._host!r} "
+                "(ARP/neighbor table miss); cannot admit doors without a hub MAC address"
+            )
+        if self._display_names_store_path is not None:
+            device_discovery_store.save_tailwind_host(
+                self._display_names_store_path,
+                self._host,
+                mac=self._hub_mac,
+            )
         self._tailwind = Tailwind(
             host=self._host,
             token=self._token,
@@ -327,13 +363,24 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         status = await self._tailwind.status()
         uniq: list[GotailwindDevice] = []
         for door_status in status.doors.values():
+            door_id = door_status.door_id
+            canonical = f"{self._hub_mac}:{door_id}"
+            if self._display_names_store_path is not None and door_id != canonical:
+                device_discovery_store.migrate_canonical_key_to_mac(
+                    self._display_names_store_path,
+                    backend="tailwind",
+                    old_key=door_id,
+                    mac=canonical,
+                )
             uniq.append(
                 GotailwindDevice(
-                    identifier=door_status.door_id,
+                    identifier=canonical,
                     tailwind=self._tailwind,
                     door=door_status.index,
                     reported_state=door_status.state,
                     door_index=door_status.index,
+                    door_key=door_id,
+                    mac_address=self._hub_mac,
                 )
             )
         self._finalize_tailwind_devices(uniq)

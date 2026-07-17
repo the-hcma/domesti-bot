@@ -32,6 +32,8 @@ class _FakeKasa:
     def __init__(self, host: str, label: str, *, is_on: bool = False) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
+        self.host = host
+        self.mac_address = None
         self.identifier = host
         self.preferred_label = label
         self.calls: list[str] = []
@@ -53,6 +55,7 @@ class _FakeKasa:
 class _FakeVizioTv:
     def __init__(self, device_id: str, label: str, *, is_on: bool) -> None:
         self.identifier = device_id
+        self.mac_address = device_id if ":" in device_id else None
         self.preferred_label = label
         self.is_on = is_on
         self.calls: list[str] = []
@@ -88,6 +91,7 @@ def _device_state(
 def _kasa_mgr(devices: list[_FakeKasa]) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(devices)
+    mgr.get_device_by_alias.return_value = None
     return cast(KasaDeviceManager, mgr)
 
 
@@ -205,6 +209,8 @@ class _FakeSonosZone:
         is_playing: bool | None = True,
     ) -> None:
         self.identifier = identifier
+        self.rincon_uid = identifier
+        self.mac_address = None
         self.preferred_label = label
         self.is_playing = is_playing
 

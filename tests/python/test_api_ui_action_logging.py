@@ -24,6 +24,9 @@ class _FakeKasa:
     def __init__(self, host: str, label: str, *, is_on: bool) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
+        self.identifier = host
+        self.host = host
+        self.mac_address = "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_on = is_on
 
@@ -42,6 +45,7 @@ def _client() -> TestClient:
 def _kasa_mgr(devices: list[_FakeKasa]) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(devices)
+    mgr.get_device_by_alias.return_value = None
     return cast(KasaDeviceManager, mgr)
 
 

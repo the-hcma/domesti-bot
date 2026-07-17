@@ -63,6 +63,7 @@ def _fake_kasa_mgr(identifiers: list[str]) -> KasaDeviceManager:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(switches)
     mgr.is_on = AsyncMock(return_value=True)
+    mgr.get_device_by_alias.return_value = None
     return cast(KasaDeviceManager, mgr)
 
 

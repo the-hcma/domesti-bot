@@ -535,18 +535,21 @@ Typical causes (check in order):
 
 Device discovery is **cache-first**: the LAN probe runs only when the SQLite discovery cache (`$HOME/.cache/rule-engine/device_discovery.sqlite` by default; override with `--discovery-cache`) is empty for that backend or the cached state fails to reconnect. Pass `--force-discovery` to bypass the cache for all backends.
 
-The cache schema lives in `app/device_discovery_store.py` (facade) and `app/db/` (SQLAlchemy ORM + `bootstrap_schema`). One SQLite file, one table per backend. All schema changes are **additive only** via `CREATE TABLE IF NOT EXISTS` — existing on-disk caches from pre-SQLAlchemy releases keep working; legacy `ALTER TABLE` steps still run for older Cast rows missing `uuid` / `friendly_name`. The `app_secrets` table is new (encrypted Tailwind token and future secrets).
+The cache schema lives in `app/device_discovery_store.py` (facade) and `app/db/` (SQLAlchemy ORM + `bootstrap_schema`). One SQLite file, one table per backend. All schema changes are **additive only** via `CREATE TABLE IF NOT EXISTS` — existing on-disk caches from pre-SQLAlchemy releases keep working; legacy `ALTER TABLE` steps still run for older Cast rows missing `uuid` / `friendly_name` / `mac`. The `app_secrets` table is new (encrypted Tailwind token and future secrets).
+
+**MAC-primary device identity.** The normalized **MAC address** is the required primary `device_id` / `ui_preferences.canonical_key` / `device_display_names.canonical_key` / `UIDeviceOut.id` (and `UIDeviceOut.mac_address`). Externally visible tiles use the human-friendly display name (`preferred_label`). Secondary ids (Kasa host, Sonos `RINCON_*`, Cast UUID, Tailwind door id) remain for transport and fallback lookup only. Shared helpers live in `app/device_mac.py` (`normalize_mac`, ARP lookup, Sonos RINCON parse). Discovery must obtain a MAC (vendor API and/or ARP) before admitting a device — MAC-less endpoints are skipped. The same MAC at a new IP updates the cached host in place and migrates prefs via `migrate_canonical_key_to_mac` (no duplicate tiles).
 
 Per-backend behavior:
 
-| Backend | Cache table | Cache hit ⇒ |
-| --- | --- | --- |
-| **Kasa** | `kasa_discovered_devices` (host, alias, config_json) | Reconnect each cached host with the saved `DeviceConfig`. Falls back to full UDP discovery if **any** host fails to reconnect. |
-| **Cast (AndroidTV)** | `androidtv_discovered_hosts` (host, port, friendly_name, **uuid**, **model_name**) | **No-mDNS fast path** when every row has a non-empty `uuid`: build a host tuple per row and call `pychromecast.get_chromecast_from_host` directly, in parallel, with a short timeout (`_CACHE_FAST_CONNECT_TIMEOUT_S = 2 s`). A dead cached device is dropped with a warning — **no fallback to mDNS** (use `--force-discovery` for that). If any cached row pre-dates the uuid migration (uuid IS NULL), the manager falls back to a targeted/full mDNS browse that rewrites the cache with the new metadata so the *next* startup gets the fast path. |
-| **Sonos** | `sonos_known_zones` (uuid, host, zone_name) | Construct `soco.SoCo(host)` per row and verify `.uid` matches the cached UUID. Mismatch / unreachable host on **any** row falls back to UDP SSDP discovery, then rewrites the cache. |
-| **Tailwind** | `tailwind_last_host` (singleton) | Try the cached host first; on failure, run mDNS discovery and update the cache. |
+| Backend | Cache table | Cache hit ⇒ | Primary UI id |
+| --- | --- | --- | --- |
+| **Kasa** | `kasa_discovered_devices` (host, alias, config_json, **mac**) | Reconnect each cached host with the saved `DeviceConfig`. Falls back to full UDP discovery if **any** host fails to reconnect. | MAC address (sysinfo or ARP); skip if unknown |
+| **Cast (AndroidTV)** | `androidtv_discovered_hosts` (host, port, friendly_name, **uuid**, **model_name**, **mac**) | **No-mDNS fast path** when every row has a non-empty `uuid`: build a host tuple per row and call `pychromecast.get_chromecast_from_host` directly, in parallel, with a short timeout (`_CACHE_FAST_CONNECT_TIMEOUT_S = 2 s`). A dead cached device is dropped with a warning — **no fallback to mDNS** (use `--force-discovery` for that). If any cached row pre-dates the uuid migration (uuid IS NULL), the manager falls back to a targeted/full mDNS browse that rewrites the cache with the new metadata so the *next* startup gets the fast path. | MAC address (ARP); skip if unknown |
+| **Sonos** | `sonos_known_zones` (uuid, host, zone_name, **mac**) | Construct `soco.SoCo(host)` per row and verify `.uid` matches the cached UUID. Mismatch / unreachable host on **any** row falls back to UDP SSDP discovery, then rewrites the cache. | MAC from `RINCON_<12hex>…` or ARP; skip if unknown |
+| **Vizio** | `vizio_known_tvs` (**mac** already primary) | Reconnect by host; MAC relocates via ARP when DHCP moves the TV. | Normalized MAC address |
+| **Tailwind** | `tailwind_last_host` (singleton host + **hub mac**) | Try the cached host first; on failure, run mDNS discovery and update the cache. | `{hub_mac}:{door_id}` (hub MAC required) |
 
-All managers expose a stable identifier (Kasa: alias or host, Cast: UUID, Sonos: `RINCON_*` UID, Tailwind: hostname). Display-name overrides live in `device_display_names`, keyed by `(backend, canonical_key)`.
+All managers expose a stable MAC-rooted identifier as above. Display-name overrides live in `device_display_names`, keyed by `(backend, canonical_key)`.
 
 **`last_discovery_source` reporting**. Each LAN-discovering manager (`KasaDeviceManager`, `SonosDeviceManager`, `AndroidTvDeviceManager`) MUST set `self._last_discovery_source` to `"cache"` or `"discovery"` at the end of `fetch()` and expose it via a `last_discovery_source: str | None` property. The semantics are precise — they directly drive the per-backend "ready" line that the user reads to decide if a slow start is suspicious:
 
