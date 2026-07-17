@@ -311,6 +311,26 @@ async def test_fetch_persists_cache_after_udp_discovery(tmp_path: Path) -> None:
     assert mgr.last_discovery_source == "discovery"
 
 
+@pytest.mark.asyncio
+async def test_fetch_primes_is_playing_cache() -> None:
+    """After discovery, zones should have a definite playback flag so the
+    first UI poll is not stuck on yellow ``unknown``."""
+
+    zone = MagicMock(
+        uid="RINCON_AA112233445501400",
+        player_name="Living room",
+        ip_address="192.168.1.10",
+    )
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "PAUSED_PLAYBACK",
+    }
+    mgr = SonosDeviceManager(discovery_timeout=0.1)
+    with patch("app.sonos_device_manager.soco_discover", return_value={zone}):
+        await mgr.fetch()
+    assert mgr.players[0].is_playing is False
+    zone.get_current_transport_info.assert_called()
+
+
 def test_is_cache_warm_false_without_cache_path() -> None:
     mgr = SonosDeviceManager(discovery_timeout=0.1)
     assert mgr.is_cache_warm is False
@@ -319,6 +339,21 @@ def test_is_cache_warm_false_without_cache_path() -> None:
 def test_is_cache_warm_false_when_cache_file_missing(tmp_path: Path) -> None:
     mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=tmp_path / "absent.sqlite")
     assert mgr.is_cache_warm is False
+
+
+def test_host_is_cached_at_construction() -> None:
+    """``host`` must not touch ``SoCo.ip_address`` after construction.
+
+    Concurrent UI polls reading ``ip_address`` while the watcher runs
+    UPnP on the same SoCo have left ``is_playing`` stuck at ``None`` in
+    production (yellow tiles).
+    """
+
+    zone = MagicMock(uid="u1", player_name="Office", ip_address="192.168.1.50")
+    dev = SonosSpeakerDevice("u1", zone, display_name="Office", mac_address="aa:bb:cc:dd:ee:ff")
+    assert dev.host == "192.168.1.50"
+    zone.ip_address = "10.0.0.1"
+    assert dev.host == "192.168.1.50"
 
 
 def test_is_playing_cache_starts_none() -> None:
@@ -375,6 +410,14 @@ def test_transport_state_summary_updates_is_playing_cache() -> None:
     # ``stopped`` is mapped to "not playing" so a stopped zone shows
     # as ``paused`` in the UI rather than getting stuck on
     # ``unknown`` forever.
+    assert dev.is_playing is False
+
+    zone.get_current_transport_info.return_value = {
+        "current_transport_state": "TRANSITIONING",
+    }
+    assert dev.transport_state_summary() == "transitioning"
+    # Mid-transition must not leave the cache at ``None`` (yellow
+    # ``unknown`` tile) after a successful UPnP read.
     assert dev.is_playing is False
 
 
