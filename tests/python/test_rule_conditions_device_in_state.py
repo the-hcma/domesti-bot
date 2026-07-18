@@ -18,11 +18,13 @@ from app.api.schemas import (
     RuleOut,
     SettingsLocationOut,
 )
+from app.device_display import format_device_display
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, evaluate_rule
+from app.rule_evaluator import _format_unmet_conditions_for_log
 from app.rule_validation import (
     RuleValidationContext,
     build_roster_user_id_lookup,
@@ -207,6 +209,163 @@ def test_devices_any_in_state_unmet_when_all_off() -> None:
     )
     assert result.conditions[0].met is False
     assert "All off" in result.conditions[0].detail
+
+
+def test_devices_any_in_state_detail_falls_back_to_snapshot_display_name() -> None:
+    mac = "e4:fa:c4:2c:6e:18"
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch(
+            "192.168.1.99",
+            "Unrelated",
+            is_on=False,
+            identifier="aa:bb:cc:dd:ee:ff",
+            mac_address="aa:bb:cc:dd:ee:ff",
+        ),
+    )
+    result = evaluate_rule(
+        _device_state_rule(
+            DevicesAnyInStateCondition(
+                type="devices_any_in_state",
+                devices=[
+                    RuleConditionDeviceRefOut(
+                        device_id=mac,
+                        display_name="Snapshot porch",
+                        family_id=DeviceFamilyId.KASA,
+                    ),
+                ],
+                state=DeviceConditionState.ON,
+            ),
+        ),
+        _ctx(now=now, device_state=state),
+    )
+    assert result.conditions[0].met is False
+    assert f"Snapshot porch ({mac})" in result.conditions[0].detail
+
+
+def test_devices_any_in_state_detail_prefers_live_label_over_stale_snapshot() -> None:
+    mac = "e4:fa:c4:2c:6e:18"
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch(
+            "192.168.1.10",
+            "Live porch lights",
+            is_on=False,
+            identifier=mac,
+            mac_address=mac,
+        ),
+    )
+    result = evaluate_rule(
+        _device_state_rule(
+            DevicesAnyInStateCondition(
+                type="devices_any_in_state",
+                devices=[
+                    RuleConditionDeviceRefOut(
+                        device_id=mac,
+                        display_name="Stale porch name",
+                        family_id=DeviceFamilyId.KASA,
+                    ),
+                ],
+                state=DeviceConditionState.ON,
+            ),
+        ),
+        _ctx(now=now, device_state=state),
+    )
+    assert result.conditions[0].met is False
+    assert f"Live porch lights ({mac})" in result.conditions[0].detail
+    assert "Stale porch name" not in result.conditions[0].detail
+
+
+def test_devices_any_in_state_detail_uses_name_mac_format() -> None:
+    mac_a = "e4:fa:c4:2c:6e:18"
+    mac_b = "e4:fa:c4:2c:82:18"
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch(
+            "192.168.1.10",
+            "Porch lights",
+            is_on=False,
+            identifier=mac_a,
+            mac_address=mac_a,
+        ),
+        _FakeKasaSwitch(
+            "192.168.1.11",
+            "Garage lights",
+            is_on=False,
+            identifier=mac_b,
+            mac_address=mac_b,
+        ),
+    )
+    result = evaluate_rule(
+        _device_state_rule(
+            DevicesAnyInStateCondition(
+                type="devices_any_in_state",
+                devices=[
+                    RuleConditionDeviceRefOut(
+                        device_id=mac_a,
+                        family_id=DeviceFamilyId.KASA,
+                    ),
+                    RuleConditionDeviceRefOut(
+                        device_id=mac_b,
+                        family_id=DeviceFamilyId.KASA,
+                    ),
+                ],
+                state=DeviceConditionState.ON,
+            ),
+        ),
+        _ctx(now=now, device_state=state),
+    )
+    assert result.conditions[0].met is False
+    detail = result.conditions[0].detail
+    assert "All off" in detail
+    assert f"Porch lights ({mac_a})" in detail
+    assert f"Garage lights ({mac_b})" in detail
+
+
+def test_devices_any_in_state_skip_log_detail_uses_name_mac_format() -> None:
+    """Skip-log detail wraps condition label + detail the same way as the evaluator."""
+    mac_a = "e4:fa:c4:2c:6e:18"
+    mac_b = "e4:fa:c4:2c:82:18"
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _kasa_device_state(
+        _FakeKasaSwitch(
+            "192.168.1.10",
+            "Porch lights",
+            is_on=False,
+            identifier=mac_a,
+            mac_address=mac_a,
+        ),
+        _FakeKasaSwitch(
+            "192.168.1.11",
+            "Garage lights",
+            is_on=False,
+            identifier=mac_b,
+            mac_address=mac_b,
+        ),
+    )
+    result = evaluate_rule(
+        _device_state_rule(
+            DevicesAnyInStateCondition(
+                type="devices_any_in_state",
+                devices=[
+                    RuleConditionDeviceRefOut(
+                        device_id=mac_a,
+                        family_id=DeviceFamilyId.KASA,
+                    ),
+                    RuleConditionDeviceRefOut(
+                        device_id=mac_b,
+                        family_id=DeviceFamilyId.KASA,
+                    ),
+                ],
+                state=DeviceConditionState.ON,
+            ),
+        ),
+        _ctx(now=now, device_state=state),
+    )
+    log_detail = _format_unmet_conditions_for_log(result)
+    assert "Any device on" in log_detail
+    assert format_device_display(mac_a, "Porch lights") in log_detail
+    assert format_device_display(mac_b, "Garage lights") in log_detail
 
 
 def test_devices_any_in_state_unmet_when_discovery_not_ready() -> None:
@@ -555,12 +714,20 @@ def test_validate_rule_flags_unsupported_family_for_devices_any_in_state() -> No
 
 
 class _FakeKasaSwitch:
-    def __init__(self, host: str, label: str, *, is_on: bool) -> None:
+    def __init__(
+        self,
+        host: str,
+        label: str,
+        *,
+        is_on: bool,
+        identifier: str | None = None,
+        mac_address: str | None = None,
+    ) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
         self.host = host
-        self.mac_address = None
-        self.identifier = host
+        self.mac_address = mac_address
+        self.identifier = host if identifier is None else identifier
         self.preferred_label = label
         self._on = is_on
 
@@ -630,6 +797,7 @@ def _device_state_rule(
 def _kasa_device_state(*switches: _FakeKasaSwitch) -> DeviceManagersState:
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(switches)
+    mgr.get_device_by_alias.return_value = None
     return DeviceManagersState(
         androidtv_mgr=None,
         args=argparse.Namespace(),

@@ -55,6 +55,7 @@ from app.rule_actions import (
     cached_sonos_is_playing,
     cached_tailwind_is_open,
     cached_vizio_is_on,
+    lookup_preferred_label,
 )
 from app.rule_validation import resolve_device_ref_to_backend_id, resolve_roster_user_id
 from app.wifi_home_presence import wifi_home_presence_applies
@@ -403,7 +404,7 @@ def _device_condition_power_labels(
     off_labels: list[str] = []
     missing_labels: list[str] = []
     for ref in devices:
-        label = ref.device_id.strip()
+        label = _device_condition_display_label(ctx, ref)
         is_on = _cached_device_is_on(ctx, ref)
         if is_on is None:
             if ref.family_id in (
@@ -502,6 +503,30 @@ def _device_bool_since_for_ref(
     return ctx.device_bool_since.get((ref.family_id, backend_id))
 
 
+def _device_condition_display_label(
+    ctx: RuleEvaluationContext,
+    ref: RuleConditionDeviceRefOut,
+) -> str:
+    """Return ``Name (mac)`` using live preferred_label when available, else rule snapshot."""
+    device_id = ref.device_id.strip()
+    live: str | None = None
+    if ctx.device_state is not None:
+        live = lookup_preferred_label(
+            ctx.device_state,
+            family_id=ref.family_id,
+            device_id=device_id,
+        )
+    display_name: str | None = None
+    for candidate in (live, ref.display_name):
+        if candidate is None:
+            continue
+        trimmed = candidate.strip()
+        if trimmed != "" and trimmed.casefold() != device_id.casefold():
+            display_name = trimmed
+            break
+    return format_device_display(device_id, display_name)
+
+
 def _device_condition_open_labels(
     devices: list[RuleConditionDeviceRefOut],
     ctx: RuleEvaluationContext,
@@ -513,7 +538,7 @@ def _device_condition_open_labels(
     closed_labels: list[str] = []
     missing_labels: list[str] = []
     for ref in devices:
-        label = ref.device_id.strip()
+        label = _device_condition_display_label(ctx, ref)
         is_open = _cached_device_is_open(ctx, ref)
         if is_open is None:
             if ref.family_id == DeviceFamilyId.TAILWIND:
@@ -839,7 +864,7 @@ def _evaluate_devices_any_in_state_for_s(
     unmet_labels: list[str] = []
     missing_labels: list[str] = []
     for ref in condition.devices:
-        device_label = format_device_display(ref.device_id, ref.display_name)
+        device_label = _device_condition_display_label(ctx, ref)
         matches = _cached_device_matches_state(ctx, ref, condition.state)
         if matches is None:
             if condition.state.supported_by_family(ref.family_id):
@@ -915,7 +940,7 @@ def _evaluate_devices_in_state(
     unmet_labels: list[str] = []
     missing_labels: list[str] = []
     for ref in devices:
-        device_label = format_device_display(ref.device_id, ref.display_name)
+        device_label = _device_condition_display_label(ctx, ref)
         matches = _cached_device_matches_state(ctx, ref, state)
         if matches is None:
             if state.supported_by_family(ref.family_id):
