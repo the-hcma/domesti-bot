@@ -7,8 +7,10 @@ from datetime import datetime
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from app.api.schemas import RuleOut
+from app.automation_rules_loader import AutomationRulesLoadError, load_settings_location
 from app.outbound_email import (
     append_provenance_footer,
     domesti_public_base_url,
@@ -116,10 +118,29 @@ def build_rule_notification_bodies(
     return "\n".join(plain_parts) + "\n", "".join(html_parts)
 
 
+def format_completed_at_local(
+    completed_at: float,
+    *,
+    timezone: str | ZoneInfo | None = None,
+) -> str:
+    """Format an action completion epoch in the home timezone with a zone label.
+
+    Uses ``settings_location.timezone`` when ``timezone`` is omitted (same IANA zone
+    as schedules / astronomical windows). The zone label is the abbreviation when
+    available (e.g. ``EDT``), otherwise the IANA name or UTC offset.
+    """
+    tz, tz_name = _resolve_notification_timezone(timezone)
+    dt = datetime.fromtimestamp(completed_at, tz=tz)
+    zone_label = (dt.tzname() or "").strip()
+    if not zone_label:
+        zone_label = tz_name
+    return f"{dt.strftime('%Y-%m-%d %H:%M:%S')} {zone_label}"
+
+
 def format_device_action_outcome_line(outcome: RuleDeviceActionOutcome) -> str:
     """Format one device outcome line for notification email."""
     family = outcome.family_id.display_name()
-    when = _format_completed_at_local(outcome.completed_at)
+    when = format_completed_at_local(outcome.completed_at)
     if not outcome.succeeded:
         before = outcome.before_state or "unknown"
         after = outcome.after_state or "unknown"
@@ -194,7 +215,33 @@ def _device_state_changed(outcome: RuleDeviceActionOutcome) -> bool:
     return before != after
 
 
-def _format_completed_at_local(completed_at: float) -> str:
-    """Format an action completion epoch in the system local timezone."""
+def _resolve_notification_timezone(
+    timezone: str | ZoneInfo | None,
+) -> tuple[ZoneInfo, str]:
+    """Return ``(ZoneInfo, display_name)`` for rule-fire email timestamps.
 
-    return datetime.fromtimestamp(completed_at).strftime("%Y-%m-%d %H:%M:%S")
+    Falls back to UTC when the home timezone cannot be loaded or is not a valid
+    IANA name so notification formatting never fails solely due to timezone
+    resolution.
+    """
+    if isinstance(timezone, ZoneInfo):
+        key = getattr(timezone, "key", None)
+        return timezone, key if isinstance(key, str) and key else str(timezone)
+    if isinstance(timezone, str):
+        return _zoneinfo_or_utc(timezone)
+    try:
+        name = load_settings_location().timezone
+    except AutomationRulesLoadError:
+        return ZoneInfo("UTC"), "UTC"
+    return _zoneinfo_or_utc(name)
+
+
+def _zoneinfo_or_utc(timezone_name: str) -> tuple[ZoneInfo, str]:
+    """Parse ``timezone_name`` as IANA, or fall back to UTC."""
+    name = timezone_name.strip()
+    if not name:
+        return ZoneInfo("UTC"), "UTC"
+    try:
+        return ZoneInfo(name), name
+    except (KeyError, ValueError):
+        return ZoneInfo("UTC"), "UTC"

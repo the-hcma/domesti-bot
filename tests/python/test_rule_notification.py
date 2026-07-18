@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from app.api.schemas import RuleConditionsOut, RuleOut
+from app.automation_rules_loader import AutomationRulesLoadError
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.mytracks_store import MyTracksPairingSave, save_mytracks_pairing
 from app.outbound_email import domesti_public_base_url
@@ -18,6 +19,7 @@ from app.rule_notification import (
     RULE_FIRE_JUST_FIRED_TEMPLATE,
     RULE_FIRE_TIMELINE_HEADING,
     build_rule_notification_bodies,
+    format_completed_at_local,
     format_device_action_outcomes,
     format_devices_already_in_desired_state_message,
     rule_automation_status_url,
@@ -25,7 +27,18 @@ from app.rule_notification import (
 )
 
 _COMPLETED_AT = 1_700_000_000.0
-_COMPLETED_AT_LOCAL = datetime.fromtimestamp(_COMPLETED_AT).strftime("%Y-%m-%d %H:%M:%S")
+_HOME_TIMEZONE = "America/New_York"
+_COMPLETED_AT_LOCAL = format_completed_at_local(_COMPLETED_AT, timezone=_HOME_TIMEZONE)
+
+
+@pytest.fixture(autouse=True)
+def _home_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = MagicMock()
+    settings.timezone = _HOME_TIMEZONE
+    monkeypatch.setattr(
+        "app.rule_notification.load_settings_location",
+        lambda: settings,
+    )
 
 
 def _sample_rule() -> RuleOut:
@@ -68,6 +81,28 @@ def test_domesti_public_base_url_reads_mytracks_pair_status(
         ),
     )
     assert domesti_public_base_url(cache_path) == "https://home.example.com"
+
+
+def test_format_completed_at_local_includes_timezone_abbreviation() -> None:
+    stamp = format_completed_at_local(_COMPLETED_AT, timezone=_HOME_TIMEZONE)
+    assert stamp == "2023-11-14 17:13:20 EST"
+    assert stamp == _COMPLETED_AT_LOCAL
+
+
+def test_format_completed_at_local_falls_back_to_utc_for_invalid_timezone() -> None:
+    stamp = format_completed_at_local(_COMPLETED_AT, timezone="Not/A_Real_Zone")
+    assert stamp == "2023-11-14 22:13:20 UTC"
+
+
+def test_format_completed_at_local_falls_back_when_rules_file_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.rule_notification.load_settings_location",
+        lambda: (_ for _ in ()).throw(AutomationRulesLoadError("missing")),
+    )
+    stamp = format_completed_at_local(_COMPLETED_AT)
+    assert stamp == "2023-11-14 22:13:20 UTC"
 
 
 def test_rule_automation_status_url_builds_status_deep_link(
