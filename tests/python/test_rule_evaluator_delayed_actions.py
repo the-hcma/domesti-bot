@@ -172,6 +172,20 @@ async def _await_calls(device: _FakeKasa, expected: list[str]) -> None:
     assert device.calls == expected
 
 
+async def _await_send_count(send_mock: MagicMock, expected: int) -> None:
+    """Wait until the notify mock has been called ``expected`` times.
+
+    Pending-fire rows are deleted *before* ``asyncio.to_thread`` finishes the
+    SMTP call, so waiting on an empty pending list races the send mock.
+    """
+    deadline = asyncio.get_running_loop().time() + 2.0
+    while send_mock.call_count < expected:
+        if asyncio.get_running_loop().time() >= deadline:
+            break
+        await asyncio.sleep(0)
+    assert send_mock.call_count == expected
+
+
 @pytest.mark.asyncio
 async def test_immediate_and_delayed_actions_dispatch_in_sequence(
     tmp_path: Path,
@@ -680,10 +694,7 @@ async def test_notify_on_fire_waits_for_delayed_actions_then_sends_timeline(
             clock["now"] += 60.0
             evaluator._deferred_device_actions_wake.set()
             await _await_calls(device, ["off", "on"])
-            deadline = asyncio.get_running_loop().time() + 2.0
-            while list_pending_fire_notifications(db) and asyncio.get_running_loop().time() < deadline:
-                await asyncio.sleep(0)
-            assert send_mock.call_count == 1
+            await _await_send_count(send_mock, 1)
             kwargs = send_mock.call_args.kwargs
             assert kwargs["sequence_completed"] is True
             assert kwargs["cancelled_remaining"] is False
@@ -939,10 +950,7 @@ async def test_notify_on_fire_orphan_pending_flushes_after_restart(
     try:
         with patch("app.rule_evaluator.send_rule_notification_email", send_mock):
             evaluator._deferred_device_actions_wake.set()
-            deadline = asyncio.get_running_loop().time() + 2.0
-            while list_pending_fire_notifications(db) and asyncio.get_running_loop().time() < deadline:
-                await asyncio.sleep(0)
-            assert send_mock.call_count == 1
+            await _await_send_count(send_mock, 1)
             kwargs = send_mock.call_args.kwargs
             assert kwargs["sequence_completed"] is True
             assert len(kwargs["device_action_outcomes"]) == 2

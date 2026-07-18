@@ -22,6 +22,7 @@ from app.api.schemas import (
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.rule_actions import RuleActionDispatchError
+from app.rule_device_id import RULE_DEVICE_ID_DISPLAY_NAME_WARNING
 from app.rule_validation import (
     RosterUserRow,
     RuleValidationContext,
@@ -560,7 +561,7 @@ def test_validate_rule_accepts_kasa_devices_any_off_condition() -> None:
                     state=DeviceConditionState.OFF,
                     devices=[
                         RuleConditionDeviceRefOut(
-                            device_id="Basement lamp",
+                            device_id="aa:bb:cc:dd:ee:01",
                             family_id=DeviceFamilyId.KASA,
                         ),
                     ],
@@ -587,10 +588,56 @@ def test_validate_rule_accepts_kasa_devices_any_off_condition() -> None:
     )
     with patch(
         "app.rule_validation.resolve_kasa_host_by_label",
-        return_value="192.168.1.10",
+        return_value="aa:bb:cc:dd:ee:01",
     ):
         issues = validate_rule(rule, ctx)
     assert issues == []
+
+
+def test_validate_rule_warns_when_kasa_device_id_is_display_name() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyInStateCondition(
+                    type="devices_any_in_state",
+                    state=DeviceConditionState.OFF,
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="Basement lamp",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="kasa-label",
+        label="Kasa label",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.SCHEDULED],
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with patch(
+        "app.rule_validation.resolve_kasa_host_by_label",
+        return_value="aa:bb:cc:dd:ee:01",
+    ):
+        issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "non_canonical_device_id"
+    assert issues[0].detail == RULE_DEVICE_ID_DISPLAY_NAME_WARNING.format(
+        device_id="Basement lamp",
+    )
 
 
 def test_validate_rule_flags_unknown_kasa_devices_any_off_condition() -> None:
@@ -646,7 +693,7 @@ def test_validate_rule_accepts_tailwind_devices_any_open_condition() -> None:
                     state=DeviceConditionState.OPEN,
                     devices=[
                         RuleConditionDeviceRefOut(
-                            device_id="Henrique's side",
+                            device_id="aa:bb:cc:dd:ee:ff:door-1",
                             family_id=DeviceFamilyId.TAILWIND,
                         ),
                     ],
@@ -673,7 +720,7 @@ def test_validate_rule_accepts_tailwind_devices_any_open_condition() -> None:
     )
     with patch(
         "app.rule_validation.resolve_tailwind_identifier_by_label",
-        return_value="door1",
+        return_value="aa:bb:cc:dd:ee:ff:door-1",
     ):
         issues = validate_rule(rule, ctx)
     assert issues == []
@@ -732,7 +779,7 @@ def test_validate_rule_accepts_sonos_device_condition_when_zone_exists() -> None
                     state=DeviceConditionState.ON,
                     devices=[
                         RuleConditionDeviceRefOut(
-                            device_id="Kitchen",
+                            device_id="aa:bb:cc:dd:ee:10",
                             family_id=DeviceFamilyId.SONOS,
                         ),
                     ],
@@ -759,7 +806,7 @@ def test_validate_rule_accepts_sonos_device_condition_when_zone_exists() -> None
     )
     with patch(
         "app.rule_validation.resolve_sonos_identifier_by_label",
-        return_value="RINCON_AAAA",
+        return_value="aa:bb:cc:dd:ee:10",
     ):
         issues = validate_rule(rule, ctx)
     assert issues == []

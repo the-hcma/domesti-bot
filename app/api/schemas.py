@@ -1233,6 +1233,7 @@ class RuleReferenceIssueOut(BaseModel):
         "geofence_edge_grace_disabled",
         "missing_notification_email",
         "missing_smtp",
+        "non_canonical_device_id",
         "unknown_device",
         "unknown_geofence",
         "unknown_user",
