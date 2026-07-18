@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -24,6 +23,7 @@ from app.rule_actions import (
     resolve_kasa_host_by_label,
     send_rule_notification_email,
 )
+from app.rule_notification import format_completed_at_local
 from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
 from app.vizio_device_manager import VizioDeviceManager
@@ -538,6 +538,10 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
     with (
         patch("app.rule_actions.load_outbound_smtp_params", return_value=_smtp_params()),
         patch("app.outbound_email.deliver_email_message", return_value=delivery) as deliver_mock,
+        patch(
+            "app.rule_notification.load_settings_location",
+            return_value=MagicMock(timezone="America/New_York"),
+        ),
     ):
         send_rule_notification_email(
             tmp_path / "cache.sqlite",
@@ -551,7 +555,7 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
     assert plain_part is not None
     plain = plain_part.get_content()
     assert isinstance(plain, str)
-    when = datetime.fromtimestamp(1_700_000_000.0).strftime("%Y-%m-%d %H:%M:%S")
+    when = format_completed_at_local(1_700_000_000.0, timezone="America/New_York")
     assert f"Garage (Kasa): on → off at {when}" in plain
     assert "Garage door is open." in plain
     assert "https://domesti.example.com/#/automations/status/test-rule" in plain
