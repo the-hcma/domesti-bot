@@ -551,10 +551,11 @@ export interface RuleConditionStatusOut {
 export interface RuleReferenceIssueOut {
   kind:
     | "discovery_pending"
+    | "geofence_edge_grace_disabled"
     | "missing_notification_email"
     | "missing_smtp"
+    | "non_canonical_device_id"
     | "unknown_device"
-    | "geofence_edge_grace_disabled"
     | "unknown_geofence"
     | "unknown_user";
   reference: string;

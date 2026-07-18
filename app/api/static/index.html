@@ -730,8 +730,10 @@
     .rules-broken-badge { font-size: 11px; font-weight: 600; line-height: 1; padding: 3px 7px;
       border-radius: 4px; background: var(--danger); color: #fff; cursor: help;
       text-transform: uppercase; letter-spacing: 0.04em; }
+    .rules-broken-badge.rules-warning-badge { background: var(--pending); color: #1a1a1a; }
     .rules-broken-badge:focus { outline: 2px solid var(--danger);
       outline-offset: 2px; }
+    .rules-broken-badge.rules-warning-badge:focus { outline-color: var(--pending); }
     .rules-broken-hover-hint { font-size: 11px; color: var(--muted); white-space: nowrap;
       cursor: help; }
     .rules-broken-popover[hidden] { display: none !important; }

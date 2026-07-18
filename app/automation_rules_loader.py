@@ -16,6 +16,7 @@ from app.api.schemas import (
     VacationModeSettingsOut,
 )
 from app.db.secrets_key import secrets_json_path
+from app.device_enums import DeviceIdResolution
 from app.home_location import HomeLocationRef, resolve_home_location
 
 _AUTOMATION_RULES_EXAMPLE_FILENAME = "automation-rules.json.example"
@@ -28,7 +29,7 @@ class AutomationRulesBundle(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    device_id_resolution: str = "preferred_label"
+    device_id_resolution: DeviceIdResolution = DeviceIdResolution.MAC
     rules: list[RuleOut]
     settings_location: SettingsLocationOut
     vacation_mode: VacationModeSettingsOut = Field(

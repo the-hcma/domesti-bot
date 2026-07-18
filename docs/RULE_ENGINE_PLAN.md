@@ -28,7 +28,7 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 | --- | --- |
 | **Path** | `automation-rules.json` at the **repo/server root** (beside `domesti-bot.config.json`). Committed template: `automation-rules.json.example`. |
 | **Schema** | Same JSON shape as `RuleOut` / `RuleConditionOut` in `web/src/types.ts` (mirrors future Pydantic models). |
-| **Device targets** | Top-level `"device_id_resolution": "preferred_label"` — `device_id` is the tile/REPL display name (e.g. `Front door lights`); the evaluator resolves to Kasa host or Tailwind id via `preferred_label`, like the REPL. |
+| **Device targets** | Top-level `"device_id_resolution": "mac"` — `device_id` is the normalized MAC (or Tailwind `{hub_mac}:{door_id}`). Display names are UI-only; Automations warns on leftover labels. |
 | **Geofences** | Loaded from existing SQLite (`rule_geofences`) by `geofence_id` (`house`, `west-point`, …). Operators define fences in Automations → Geofences; the bundle only references ids. |
 | **Sunset** | `settings_location` block in the bundle (lat/lon/timezone) until `GET/PUT /v1/rules/settings/location` exists; evaluated with **`astral`**. |
 | **UI workflow** | **Inspect** rule wiring in Automations (read-only detail panel). **Persist** by editing `automation-rules.json` + restart — no in-UI save until Phase 2b SQLite CRUD. |

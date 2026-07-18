@@ -482,11 +482,12 @@ export class MockRulesDataSource implements RulesDataSource {
       const state = await api.fetchState();
       const devices: RuleActionDeviceOut[] = [];
       for (const family of state.families) {
-        if (family.id !== "kasa" && family.id !== "tailwind") {
-          continue;
-        }
         for (const device of family.devices) {
-          if (device.kind === "switch" || device.kind === "door") {
+          if (
+            device.kind === "switch" ||
+            device.kind === "door" ||
+            device.kind === "speaker"
+          ) {
             devices.push({
               family_id: family.id,
               device_id: device.id,

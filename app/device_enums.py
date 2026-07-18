@@ -69,6 +69,13 @@ class DeviceFamilyId(StrEnum):
                 return "Vizio"
 
 
+class DeviceIdResolution(StrEnum):
+    """How automation-rule ``device_id`` values are interpreted on disk."""
+
+    MAC = "mac"
+    PREFERRED_LABEL = "preferred_label"
+
+
 class RuleDeviceActionType(StrEnum):
     """Per-device command dispatched when an automation rule fires."""
 

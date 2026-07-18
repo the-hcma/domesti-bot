@@ -217,18 +217,30 @@ export function userDisplayLabel(userId: string, displayName?: string): string {
 
 let brokenRulePopoverIdSeq = 0;
 
+function isNonCanonicalOnly(
+  issues: readonly { kind: string; detail: string }[],
+): boolean {
+  return (
+    issues.length > 0 &&
+    issues.every((issue) => issue.kind === "non_canonical_device_id")
+  );
+}
+
 export function createBrokenRuleBadge(
-  issues: readonly { detail: string }[],
+  issues: readonly { kind: string; detail: string }[],
 ): HTMLSpanElement {
+  const warningOnly = isNonCanonicalOnly(issues);
   const wrap = document.createElement("span");
   wrap.className = "rules-broken-badge-wrap";
 
   const badge = document.createElement("span");
-  badge.className = "rules-broken-badge";
+  badge.className = warningOnly
+    ? "rules-broken-badge rules-warning-badge"
+    : "rules-broken-badge";
   badge.tabIndex = 0;
   const label = document.createElement("span");
   label.className = "rules-broken-badge-label";
-  label.textContent = "Broken";
+  label.textContent = warningOnly ? "Warning" : "Broken";
   badge.append(label);
 
   const hint = document.createElement("span");
@@ -252,9 +264,10 @@ export function createBrokenRuleBadge(
   popover.append(list);
 
   const summary = issues.map((issue) => issue.detail).join("; ");
+  const kindLabel = warningOnly ? "Rule warning" : "Broken rule";
   badge.setAttribute(
     "aria-label",
-    `Broken rule: ${summary}. Hover for details.`,
+    `${kindLabel}: ${summary}. Hover for details.`,
   );
 
   const showPopover = (): void => {

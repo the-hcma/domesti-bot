@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Rewrite automation-rules.json device_ids from display names to MACs.
+
+Uses the discovery cache alias / zone / display-name tables. Unresolved labels
+are left in place (Automations UI will warn via non_canonical_device_id).
+
+Usage:
+  ./scripts/internal/migrate-rule-device-ids
+  ./scripts/internal/migrate-rule-device-ids --dry-run
+  ./scripts/internal/migrate-rule-device-ids --rules-file PATH --cache PATH
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import sys
+from pathlib import Path
+
+
+def _ensure_uv() -> None:
+    if os.environ.get("UV_ACTIVE") or "/.venv/" in (sys.executable or ""):
+        return
+    uv = shutil.which("uv")
+    if uv:
+        os.execv(uv, [uv, "run", sys.argv[0], *sys.argv[1:]])
+
+
+_ensure_uv()
+
+from app.rule_device_id_migrate import migrate_automation_rules_file  # noqa: E402
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=None,
+        help="Discovery SQLite path (default: $HOME/.cache/rule-engine/device_discovery.sqlite)",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Report only; do not write")
+    parser.add_argument(
+        "--rules-file",
+        type=Path,
+        default=None,
+        help="automation-rules.json path (default: operator file beside config)",
+    )
+    args = parser.parse_args()
+    cache = args.cache
+    if cache is None:
+        cache = Path.home() / ".cache" / "rule-engine" / "device_discovery.sqlite"
+    report = migrate_automation_rules_file(
+        rules_path=args.rules_file,
+        cache_path=cache,
+        dry_run=args.dry_run,
+    )
+    print(f"rewritten={len(report.rewritten)} unresolved={len(report.unresolved)}")
+    for rule_id, family, old, new in report.rewritten:
+        print(f"  {rule_id} {family}: {old!r} → {new!r}")
+    for rule_id, family, device_id in report.unresolved:
+        print(f"  UNRESOLVED {rule_id} {family}: {device_id!r}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

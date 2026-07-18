@@ -31,6 +31,7 @@ from app.rule_actions import (
     resolve_tailwind_identifier_by_label,
     resolve_vizio_identifier_by_label,
 )
+from app.rule_device_id import is_canonical_rule_device_id, non_canonical_device_id_detail
 
 
 @dataclass(frozen=True)
@@ -211,19 +212,25 @@ def _device_reference_issue(
             reference=reference,
         )
     try:
-        if _device_reference_resolves(ctx, family_id=family_id, device_id=reference):
-            return None
+        if not _device_reference_resolves(ctx, family_id=family_id, device_id=reference):
+            return RuleReferenceIssueOut(
+                detail=(f'Unknown {family_id.value} device "{reference}" (not found in the current device list).'),
+                kind="unknown_device",
+                reference=reference,
+            )
     except RuleActionDispatchError as exc:
         return RuleReferenceIssueOut(
             detail=str(exc),
             kind="unknown_device",
             reference=reference,
         )
-    return RuleReferenceIssueOut(
-        detail=(f'Unknown {family_id.value} device "{reference}" (not found in the current device list).'),
-        kind="unknown_device",
-        reference=reference,
-    )
+    if not is_canonical_rule_device_id(family_id, reference):
+        return RuleReferenceIssueOut(
+            detail=non_canonical_device_id_detail(reference),
+            kind="non_canonical_device_id",
+            reference=reference,
+        )
+    return None
 
 
 def _backend_device_id_matches_rule_ref(
