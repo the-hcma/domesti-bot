@@ -1,0 +1,49 @@
+---
+description: Human-visible device labels use preferred_label (mac)
+alwaysApply: true
+---
+
+# Human-visible device labels
+
+Canonical detail lives in `docs/AGENTS.md` (**Human-visible device labels**). Keep this rule aligned; do not let the two drift.
+
+Human-visible device labels use **`preferred_label (mac)`** via
+`app.device_display.format_device_display(device_id, display_name)`.
+
+Landed in #514 / #515 / #516 (helpers, rule surfaces, validation).
+
+## Surfaces
+
+Applies to emails, UI copy, rule condition status `detail`, operator-facing log
+prose (e.g. `[rules] skipped … detail=…`, action outcome lines),
+validation/warning messages, and Automations summaries.
+
+## Name resolution order
+
+Pass the best available name into `format_device_display` as `display_name`:
+
+1. Live `preferred_label` when device managers / `device_state` are available
+   (`lookup_preferred_label` in `app.rule_actions`)
+2. Else optional rule/JSON snapshot `display_name` on device refs
+3. Else bare `device_id` (`format_device_display` already returns the id alone
+   when the name is missing or redundant)
+
+## Wire / store / compare
+
+**Store, wire, and compare** as raw MAC `device_id` only. Do not put formatted
+`Name (mac)` strings into ids, keys, or equality checks.
+
+**Structured log keys** like `device_id=aa:bb:…` may stay raw; the human
+`detail=` / message prose must use `format_device_display`.
+
+## Do not reimplement
+
+Call `format_device_display` — do not format inline. Frontend: mirror with the
+existing TypeScript helper (`formatDeviceDisplay` / `resolveDeviceLabel` in
+`web/src/rule-summary.ts`).
+
+## Optional snapshot `display_name`
+
+Optional `display_name` on automation JSON device refs is **non-authoritative**.
+Validate stale snapshots against live `preferred_label` with a **Warning** (not
+Broken) — kind `stale_device_display_name`.
