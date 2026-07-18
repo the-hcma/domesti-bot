@@ -876,6 +876,7 @@ class RulesHubController {
             const entry: RuleDeviceActionOut = {
               family_id: row.device.family_id,
               device_id: row.device.device_id,
+              display_name: row.device.label,
               action: row.actionSelect.value as RuleActionType,
             };
             if (Number.isFinite(delayParsed) && delayParsed > 0) {

@@ -12,6 +12,10 @@ from app.device_enums import DeviceFamilyId
 from app.device_mac import is_normalized_mac, try_normalize_mac
 
 # Public message constants (asserted by tests — do not hard-code prose there).
+RULE_DEVICE_DISPLAY_NAME_STALE_WARNING = (
+    'Stored display_name "{stored}" for device {device_id} no longer matches '
+    'live label "{live}" — update the rule snapshot (device_id stays authoritative).'
+)
 RULE_DEVICE_ID_DISPLAY_NAME_WARNING = (
     'Device id "{device_id}" looks like a display name; store the MAC address '
     "(or Tailwind {{hub_mac}}:{{door_id}}) as the authoritative device_id."
@@ -47,6 +51,20 @@ def is_tailwind_composite_device_id(device_id: str) -> bool:
 def non_canonical_device_id_detail(device_id: str) -> str:
     """Operator-facing warning detail for a display-name style rule device_id."""
     return RULE_DEVICE_ID_DISPLAY_NAME_WARNING.format(device_id=device_id.strip())
+
+
+def stale_device_display_name_detail(
+    *,
+    device_id: str,
+    live: str,
+    stored: str,
+) -> str:
+    """Operator-facing warning when a rule's display_name snapshot is out of date."""
+    return RULE_DEVICE_DISPLAY_NAME_STALE_WARNING.format(
+        device_id=device_id.strip(),
+        live=live.strip(),
+        stored=stored.strip(),
+    )
 
 
 def try_parse_tailwind_composite_device_id(device_id: str) -> tuple[str, str] | None:

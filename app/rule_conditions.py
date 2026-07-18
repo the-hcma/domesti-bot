@@ -42,6 +42,7 @@ from app.api.schemas import (
     UsersOutsideGeofenceForSCondition,
 )
 from app.automation_rules_loader import load_settings_location
+from app.device_display import format_device_display
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
@@ -838,7 +839,7 @@ def _evaluate_devices_any_in_state_for_s(
     unmet_labels: list[str] = []
     missing_labels: list[str] = []
     for ref in condition.devices:
-        device_label = ref.device_id.strip()
+        device_label = format_device_display(ref.device_id, ref.display_name)
         matches = _cached_device_matches_state(ctx, ref, condition.state)
         if matches is None:
             if condition.state.supported_by_family(ref.family_id):
@@ -914,7 +915,7 @@ def _evaluate_devices_in_state(
     unmet_labels: list[str] = []
     missing_labels: list[str] = []
     for ref in devices:
-        device_label = ref.device_id.strip()
+        device_label = format_device_display(ref.device_id, ref.display_name)
         matches = _cached_device_matches_state(ctx, ref, state)
         if matches is None:
             if state.supported_by_family(ref.family_id):

@@ -62,20 +62,39 @@ export function referencesGeofenceId(
   return false;
 }
 
+export function formatDeviceDisplay(
+  deviceId: string,
+  displayName?: string | null,
+): string {
+  const trimmedId = deviceId.trim();
+  const trimmedName = (displayName ?? "").trim();
+  if (
+    trimmedName !== ""
+    && trimmedName.toLowerCase() !== trimmedId.toLowerCase()
+  ) {
+    return `${trimmedName} (${trimmedId})`;
+  }
+  return trimmedId;
+}
+
 export function resolveDeviceLabel(
   familyId: string,
   deviceId: string,
   context: RuleSummaryContext,
+  snapshotDisplayName?: string | null,
 ): string {
   const key = deviceKey(familyId, deviceId);
   const direct = context.deviceLabelByKey.get(key);
+  const snapshot = (snapshotDisplayName ?? "").trim();
+  // Prefer a non-IPv4 roster label; otherwise prefer the rule snapshot.
+  // Skip raw IPv4 roster labels so we do not present IP as a friendly name.
   if (direct !== undefined && direct !== "" && !looksLikeIpv4(direct)) {
-    return direct;
+    return formatDeviceDisplay(deviceId, direct);
   }
-  if (direct !== undefined && direct !== "") {
-    return direct;
+  if (snapshot !== "") {
+    return formatDeviceDisplay(deviceId, snapshot);
   }
-  return deviceId;
+  return formatDeviceDisplay(deviceId, undefined);
 }
 
 export function buildRuleSummaryContext(
@@ -328,7 +347,12 @@ export function formatDeviceStateCondition(
   context: RuleSummaryContext,
 ): string {
   const labels = condition.devices.map((entry) =>
-    resolveDeviceLabel(entry.family_id, entry.device_id, context),
+    resolveDeviceLabel(
+      entry.family_id,
+      entry.device_id,
+      context,
+      entry.display_name,
+    ),
   );
   const joined = joinNames(labels);
   if (condition.type === "devices_any_in_state") {
@@ -414,7 +438,12 @@ export function summarizeRule(
     }
   });
   const actions = rule.device_actions.map((entry) => {
-    const label = resolveDeviceLabel(entry.family_id, entry.device_id, context);
+    const label = resolveDeviceLabel(
+      entry.family_id,
+      entry.device_id,
+      context,
+      entry.display_name,
+    );
     const phrase = formatDeviceActionPhrase(entry.action, label);
     const delay = entry.delay_s;
     if (delay !== undefined && delay !== null && delay > 0) {

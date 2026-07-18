@@ -22,11 +22,14 @@ from app.api.schemas import (
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.rule_actions import RuleActionDispatchError
-from app.rule_device_id import RULE_DEVICE_ID_DISPLAY_NAME_WARNING
+from app.rule_device_id import (
+    RULE_DEVICE_DISPLAY_NAME_STALE_WARNING,
+    RULE_DEVICE_ID_DISPLAY_NAME_WARNING,
+)
 from app.rule_validation import (
     RosterUserRow,
     RuleValidationContext,
-    _device_action_issue,
+    _device_action_issues,
     build_roster_name_hint_lookup,
     build_roster_user_id_lookup,
     resolve_roster_user_id,
@@ -167,9 +170,9 @@ def test_device_action_issue_preserves_ambiguous_device_detail() -> None:
         "app.rule_validation.resolve_kasa_host_by_label",
         side_effect=RuleActionDispatchError("Ambiguous kasa device 'Garage'"),
     ):
-        issue = _device_action_issue(ctx, action)
-    assert issue is not None
-    assert "Ambiguous" in issue.detail
+        issues = _device_action_issues(ctx, action)
+    assert len(issues) == 1
+    assert "Ambiguous" in issues[0].detail
 
 
 def test_validate_rule_flags_unknown_geofence() -> None:
@@ -637,6 +640,54 @@ def test_validate_rule_warns_when_kasa_device_id_is_display_name() -> None:
     assert issues[0].kind == "non_canonical_device_id"
     assert issues[0].detail == RULE_DEVICE_ID_DISPLAY_NAME_WARNING.format(
         device_id="Basement lamp",
+    )
+
+
+def test_validate_rule_warns_when_display_name_is_stale() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=60,
+        device_actions=[
+            RuleDeviceActionOut(
+                action=RuleDeviceActionType.TURN_OFF,
+                device_id="dc:62:79:6c:86:77",
+                display_name="Old HDHomeRun name",
+                family_id=DeviceFamilyId.KASA,
+            ),
+        ],
+        enabled=True,
+        id="stale-label",
+        label="Stale label",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.SCHEDULED],
+        schedule_cron="0 4 * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with (
+        patch(
+            "app.rule_validation.resolve_kasa_host_by_label",
+            return_value="dc:62:79:6c:86:77",
+        ),
+        patch(
+            "app.rule_validation.lookup_preferred_label",
+            return_value="HDHomeRun tuner",
+        ),
+    ):
+        issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "stale_device_display_name"
+    assert issues[0].detail == RULE_DEVICE_DISPLAY_NAME_STALE_WARNING.format(
+        device_id="dc:62:79:6c:86:77",
+        live="HDHomeRun tuner",
+        stored="Old HDHomeRun name",
     )
 
 

@@ -17,6 +17,7 @@ class RuleDeviceActionOutcome:
     before_state: str | None
     completed_at: float
     device_id: str
+    display_name: str | None
     error: str | None
     family_id: DeviceFamilyId
     probable: bool
@@ -32,6 +33,7 @@ class RuleDeviceActionOutcome:
             before_state=_optional_str(raw.get("before_state")),
             completed_at=float(raw["completed_at"]),
             device_id=str(raw["device_id"]),
+            display_name=_optional_str(raw.get("display_name")),
             error=_optional_str(raw.get("error")),
             family_id=DeviceFamilyId(str(raw["family_id"])),
             probable=bool(raw["probable"]),
@@ -47,6 +49,7 @@ class RuleDeviceActionOutcome:
             "before_state": self.before_state,
             "completed_at": self.completed_at,
             "device_id": self.device_id,
+            "display_name": self.display_name,
             "error": self.error,
             "family_id": self.family_id.value,
             "probable": self.probable,

@@ -6,6 +6,7 @@ import logging
 
 from starlette.requests import Request
 
+from app.device_display import format_device_display
 from app.device_enums import UiActionType
 
 
@@ -25,7 +26,7 @@ def log_ui_action(
     if family_id is not None:
         parts.append(f"family={family_id}")
     if device_id is not None:
-        parts.append(f"device={_format_device(device_id, device_label)}")
+        parts.append(f"device={format_device_display(device_id, device_label)}")
     if remaining_detail is not None:
         parts.append(remaining_detail)
     _LOGGER.info(" ".join(parts))
@@ -57,12 +58,6 @@ def _action_log_parts(
         UiActionType.TOGGLE: "toggle",
     }
     return verbs[action], detail
-
-
-def _format_device(device_id: str, device_label: str | None) -> str:
-    if device_label is not None and device_label != device_id:
-        return f"{device_label} ({device_id})"
-    return device_id
 
 
 _LOGGER = logging.getLogger(__name__)

@@ -12,10 +12,12 @@ from app.api.schemas import (
 from app.automation_rules_loader import AutomationRulesBundle
 from app.device_enums import DeviceFamilyId, DeviceIdResolution, RuleDeviceActionType, RuleTrigger
 from app.rule_device_id import (
+    RULE_DEVICE_DISPLAY_NAME_STALE_WARNING,
     RULE_DEVICE_ID_DISPLAY_NAME_WARNING,
     is_canonical_rule_device_id,
     is_tailwind_composite_device_id,
     non_canonical_device_id_detail,
+    stale_device_display_name_detail,
 )
 from app.rule_device_id_migrate import (
     DEVICE_ID_RESOLUTION_MAC,
@@ -124,3 +126,16 @@ def test_migrate_bundle_device_ids_rewrites_labels_via_lookup() -> None:
 def test_non_canonical_device_id_detail_uses_public_constant() -> None:
     detail = non_canonical_device_id_detail("Garage light")
     assert detail == RULE_DEVICE_ID_DISPLAY_NAME_WARNING.format(device_id="Garage light")
+
+
+def test_stale_device_display_name_detail_uses_public_constant() -> None:
+    detail = stale_device_display_name_detail(
+        device_id="aa:bb:cc:dd:ee:ff",
+        live="Kitchen lights",
+        stored="Old kitchen",
+    )
+    assert detail == RULE_DEVICE_DISPLAY_NAME_STALE_WARNING.format(
+        device_id="aa:bb:cc:dd:ee:ff",
+        live="Kitchen lights",
+        stored="Old kitchen",
+    )

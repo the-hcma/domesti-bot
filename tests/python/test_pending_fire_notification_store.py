@@ -34,6 +34,7 @@ def _outcome(
         before_state="on" if action == RuleDeviceActionType.TURN_OFF else "off",
         completed_at=completed_at,
         device_id=device_id,
+        display_name=None,
         error=None,
         family_id=DeviceFamilyId.KASA,
         probable=False,

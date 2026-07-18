@@ -348,6 +348,7 @@ async def dispatch_rule_device_actions(
                     before_state=before_state,
                     completed_at=time.time(),
                     device_id=action.device_id,
+                    display_name=resolve_rule_device_display_name(state, action),
                     error=str(exc),
                     family_id=action.family_id,
                     probable=False,
@@ -383,6 +384,7 @@ async def dispatch_rule_device_actions(
                     before_state=before_state,
                     completed_at=time.time(),
                     device_id=action.device_id,
+                    display_name=resolve_rule_device_display_name(state, action),
                     error=message if not probable else None,
                     family_id=action.family_id,
                     probable=probable,
@@ -422,6 +424,7 @@ async def dispatch_rule_device_actions(
                 before_state=before_state,
                 completed_at=time.time(),
                 device_id=action.device_id,
+                display_name=resolve_rule_device_display_name(state, action),
                 error=None,
                 family_id=action.family_id,
                 probable=False,
@@ -438,6 +441,42 @@ async def dispatch_rule_device_actions(
 def expected_state_after_action(action: RuleDeviceActionOut) -> DeviceConditionState:
     """Return the nominal end state after a successful device action."""
     return expected_state_for_action_type(action.action)
+
+
+def lookup_preferred_label(
+    state: DeviceManagersState,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+) -> str | None:
+    """Return the live ``preferred_label`` for a rule device ref, or ``None`` if unresolved."""
+    try:
+        identifier = _resolve_backend_identifier(state, family_id=family_id, device_id=device_id)
+        if identifier is None:
+            return None
+        match family_id:
+            case DeviceFamilyId.KASA:
+                device = find_kasa_by_host(state.kasa_mgr, identifier)
+                return None if device is None else device.preferred_label
+            case DeviceFamilyId.SONOS:
+                if state.sonos_mgr is None:
+                    return None
+                zone = find_sonos_by_identifier(state.sonos_mgr, identifier)
+                return None if zone is None else zone.preferred_label
+            case DeviceFamilyId.TAILWIND:
+                if state.tailwind_mgr is None:
+                    return None
+                door = find_tailwind_by_identifier(state.tailwind_mgr, identifier)
+                return None if door is None else door.preferred_label
+            case DeviceFamilyId.VIZIO:
+                if state.vizio_mgr is None:
+                    return None
+                tv = find_vizio_by_id(state.vizio_mgr, identifier)
+                return None if tv is None else tv.preferred_label
+            case _:
+                return None
+    except (AttributeError, NotInitializedError, RuleActionDispatchError):
+        return None
 
 
 def partition_device_actions_by_delay(
@@ -488,6 +527,29 @@ def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | 
         raise RuleActionDispatchError(
             f"Ambiguous {DeviceFamilyId.KASA.display_name()} device {device_id!r}; matches: {', '.join(unique)}"
         )
+    return None
+
+
+def resolve_rule_device_display_name(
+    state: DeviceManagersState,
+    action: RuleDeviceActionOut,
+) -> str | None:
+    """Pick a human label for emails: live preferred_label, else rule snapshot."""
+    try:
+        live = lookup_preferred_label(
+            state,
+            family_id=action.family_id,
+            device_id=action.device_id,
+        )
+    except RuleActionDispatchError:
+        live = None
+    device_id = action.device_id.strip()
+    for candidate in (live, action.display_name):
+        if candidate is None:
+            continue
+        trimmed = candidate.strip()
+        if trimmed != "" and trimmed.casefold() != device_id.casefold():
+            return trimmed
     return None
 
 
@@ -674,5 +736,25 @@ def snapshot_device_action_state(
             if is_open is None:
                 return None
             return DeviceConditionState.OPEN if is_open else DeviceConditionState.CLOSED
+        case _:
+            return None
+
+
+def _resolve_backend_identifier(
+    state: DeviceManagersState,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+) -> str | None:
+    """Resolve a rule device_id to the manager's canonical identifier."""
+    match family_id:
+        case DeviceFamilyId.KASA:
+            return resolve_kasa_host_by_label(state.kasa_mgr, device_id)
+        case DeviceFamilyId.SONOS:
+            return resolve_sonos_identifier_by_label(state.sonos_mgr, device_id)
+        case DeviceFamilyId.TAILWIND:
+            return resolve_tailwind_identifier_by_label(state.tailwind_mgr, device_id)
+        case DeviceFamilyId.VIZIO:
+            return resolve_vizio_identifier_by_label(state.vizio_mgr, device_id)
         case _:
             return None
