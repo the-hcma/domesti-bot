@@ -911,6 +911,13 @@ class RuleConditionDeviceRefOut(BaseModel):
     """One device reference inside a device-state rule condition."""
 
     device_id: str
+    display_name: str | None = Field(
+        default=None,
+        description=(
+            "Non-authoritative friendly name snapshot for humans and UI warnings. "
+            "``device_id`` (MAC) remains the authoritative identity."
+        ),
+    )
     family_id: DeviceFamilyId
 
 
@@ -1070,6 +1077,13 @@ class RuleDeviceActionOut(BaseModel):
         ),
     )
     device_id: str
+    display_name: str | None = Field(
+        default=None,
+        description=(
+            "Non-authoritative friendly name snapshot for humans and UI warnings. "
+            "``device_id`` (MAC) remains the authoritative identity."
+        ),
+    )
     family_id: DeviceFamilyId
 
 
@@ -1234,6 +1248,7 @@ class RuleReferenceIssueOut(BaseModel):
         "missing_notification_email",
         "missing_smtp",
         "non_canonical_device_id",
+        "stale_device_display_name",
         "unknown_device",
         "unknown_geofence",
         "unknown_user",

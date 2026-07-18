@@ -529,6 +529,7 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
             before_state="on",
             completed_at=1_700_000_000.0,
             device_id="Garage",
+            display_name=None,
             error=None,
             family_id=DeviceFamilyId.KASA,
             probable=False,

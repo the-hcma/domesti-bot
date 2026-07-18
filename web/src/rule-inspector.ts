@@ -229,7 +229,12 @@ export function mountRuleInspectorPanel(
     actionList.className = "rules-rule-summary-list";
     for (const action of rule.device_actions) {
       const item = document.createElement("li");
-      const label = resolveDeviceLabel(action.family_id, action.device_id, context);
+      const label = resolveDeviceLabel(
+        action.family_id,
+        action.device_id,
+        context,
+        action.display_name,
+      );
       const phrase = formatDeviceActionPhrase(action.action, label);
       const delay = action.delay_s;
       const delaySuffix =

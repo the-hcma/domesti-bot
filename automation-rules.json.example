@@ -5,19 +5,19 @@
     "Copy this file to automation-rules.json in the repo/server root (same directory as domesti-bot.config.json).",
     "settings_location.lat/lon are the configured home point (maps, astronomical schedules, and distance features such as vacation mode). Do not use a geofence center as a substitute. lat=0 and lon=0 together mean home is not configured.",
     "users_min_distance_from_home_m is true when every listed user_id has a usable GPS location at least min_distance_m from settings_location home (AND across users; missing/low-accuracy locations fail closed).",
-    "device_id values are normalized MAC addresses (or Tailwind {hub_mac}:{door_id}). Display names are UI-only; Automations warns if a rule still stores a label. Example MACs below are locally administered placeholders (02:00:…).",
-    "Geofence ids must match Automations → Geofences (house is typical for home; west-point for West Point).",
+    "device_id values are normalized MAC addresses (or Tailwind {hub_mac}:{door_id}) and are authoritative. Optional display_name is a non-authoritative snapshot for humans; Automations warns (Warning badge) if it no longer matches the live preferred_label, and warns if a rule still stores a label as device_id. Example MACs below are locally administered placeholders (02:00:\u2026).",
+    "Geofence ids must match Automations \u2192 Geofences (house is typical for home; west-point for West Point).",
     "Edge-triggered rules that use geofence conditions (users_inside_geofence / users_outside_geofence) rely on accuracy_edge_grace_s (default 120 s). Poor horizontal GPS accuracy can block enter/leave edges without grace; the evaluator also reconciles sustained GPS inside/outside streaks after 10 min.",
-    "SMTP must be configured under Automations → Mail for notification emails to send.",
-    "vacation_mode (optional top-level block; also editable under Automations → Vacation) is a sticky latch: when enabled, arms after all user_ids stay ≥ min_distance_m from settings_location home for hysteresis_s (default 1800), and disarms when any of those users is inside the home geofence (wifi_home_geofence_id or geofences containing home lat/lon). Being closer than min_distance_m without entering the home geofence does not disarm. Without a resolvable home geofence the latch will not arm, and if already armed it fail-safe disarms. notify_on_transition (default true) emails notification_emails on arm/disarm edges; anomaly device emails while armed are separate (#464). Persists armed + far_since across restart. Leave enabled false in the example; operator wiring is local (#465).",
+    "SMTP must be configured under Automations \u2192 Mail for notification emails to send.",
+    "vacation_mode (optional top-level block; also editable under Automations \u2192 Vacation) is a sticky latch: when enabled, arms after all user_ids stay \u2265 min_distance_m from settings_location home for hysteresis_s (default 1800), and disarms when any of those users is inside the home geofence (wifi_home_geofence_id or geofences containing home lat/lon). Being closer than min_distance_m without entering the home geofence does not disarm. Without a resolvable home geofence the latch will not arm, and if already armed it fail-safe disarms. notify_on_transition (default true) emails notification_emails on arm/disarm edges; anomaly device emails while armed are separate (#464). Persists armed + far_since across restart. Leave enabled false in the example; operator wiring is local (#465).",
     "Rule 1 fires when Henrique OR Kristen enters house after sunset (arrival edge, not merely present at sunset).",
     "Rule 2 (evening-lights-off-both-home) runs every 10 min after sunset: when both have been home 10+ min and either arrival light is still on, turn both off.",
-    "Rule 3 (evening-interior-lights-on-anyone-home) uses triggers [edge_true, scheduled] and arms from 25 min before sunset until midnight: at the window open it evaluates once — if Henrique OR Kristen is already home, interior lamps turn on; otherwise the next home geofence enter by either person fires the rule (once per local day). Not a periodic poll.",
+    "Rule 3 (evening-interior-lights-on-anyone-home) uses triggers [edge_true, scheduled] and arms from 25 min before sunset until midnight: at the window open it evaluates once \u2014 if Henrique OR Kristen is already home, interior lamps turn on; otherwise the next home geofence enter by either person fires the rule (once per local day). Not a periodic poll.",
     "Rule 4 (away-shutdown-everyone-outside-20m) runs every 10 min: when Henrique AND Kristen have been outside house 20+ min and any listed light/media device is still on, turn them off (garage doors are not closed).",
     "Rule 5 (away-garage-open-alert) uses dwell_satisfied: when both have been outside house 20+ min and a watched garage door has been open 20+ min, email operator@example.com and resident@example.com (once per away episode).",
     "Rule 6 (morning-master-bedroom-fan-off) runs daily at 7:30am: when Master Bedroom fan is on, turn it off and email operator@example.com.",
     "Rule 7 (daylight-master-bedroom-fan-on-alert) uses device_state trigger only: during astronomical daylight (sunrise to sunset), email operator@example.com when Master Bedroom fan turns on.",
-    "Optional device_actions.delay_s (int seconds, 0–86400): omit or 0 = run on rule fire; >0 schedules that action for fire_time + delay_s. Pending delayed actions are persisted in SQLite (rule_deferred_device_actions) and reloaded on startup, so a follow-up still runs after a process restart during the delay window; they are cancelled if the rule is deleted or disabled before the delay elapses. When notify_on_fire is set and any delay_s > 0 actions are enqueued, the fire email is deferred until every delayed step for that fire finishes (or the remaining steps are cancelled); the email includes a timeline of each step with home-timezone timestamps (settings_location.timezone, including the zone abbreviation such as EDT). Pending deferred emails are stored in rule_pending_fire_notifications. cooldown / fire_once_per_local_day still apply to the rule fire, not each delayed step.",
+    "Optional device_actions.delay_s (int seconds, 0\u201386400): omit or 0 = run on rule fire; >0 schedules that action for fire_time + delay_s. Pending delayed actions are persisted in SQLite (rule_deferred_device_actions) and reloaded on startup, so a follow-up still runs after a process restart during the delay window; they are cancelled if the rule is deleted or disabled before the delay elapses. When notify_on_fire is set and any delay_s > 0 actions are enqueued, the fire email is deferred until every delayed step for that fire finishes (or the remaining steps are cancelled); the email includes a timeline of each step with home-timezone timestamps (settings_location.timezone, including the zone abbreviation such as EDT). Pending deferred emails are stored in rule_pending_fire_notifications. cooldown / fire_once_per_local_day still apply to the rule fire, not each delayed step.",
     "Rule 8 (hdhomerun-nightly-power-cycle, enabled false in the example) shows a sequenced Kasa power cycle: turn_off at 4am cron, then turn_on after delay_s=60. With notify_on_fire true, the operator email waits until the turn_on completes and lists both steps in the timeline."
   ],
   "settings_location": {
@@ -30,24 +30,33 @@
   },
   "vacation_mode": {
     "enabled": false,
-    "user_ids": ["user-a", "user-b"],
+    "user_ids": [
+      "user-a",
+      "user-b"
+    ],
     "min_distance_m": 80000,
     "hysteresis_s": 1800,
     "min_location_accuracy_m": 50,
-    "notification_emails": ["operator@example.com"],
+    "notification_emails": [
+      "operator@example.com"
+    ],
     "notify_on_transition": true
   },
   "rules": [
     {
       "id": "evening-arrival-home-lights",
-      "label": "Evening arrival — front + garage lights",
+      "label": "Evening arrival \u2014 front + garage lights",
       "enabled": true,
-      "triggers": ["edge_true"],
+      "triggers": [
+        "edge_true"
+      ],
       "cooldown_s": 300,
       "min_location_accuracy_m": 50,
       "accuracy_edge_grace_s": 120,
       "notify_on_fire": true,
-      "notification_emails": ["automation@example.com"],
+      "notification_emails": [
+        "automation@example.com"
+      ],
       "conditions": {
         "all": [
           {
@@ -61,12 +70,16 @@
               {
                 "type": "users_inside_geofence",
                 "geofence_id": "house",
-                "user_ids": ["henrique"]
+                "user_ids": [
+                  "henrique"
+                ]
               },
               {
                 "type": "users_inside_geofence",
                 "geofence_id": "house",
-                "user_ids": ["kristen"]
+                "user_ids": [
+                  "kristen"
+                ]
               }
             ]
           }
@@ -76,16 +89,19 @@
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:01",
+          "display_name": "Porch lights",
           "action": "turn_on"
         },
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:02",
+          "display_name": "Garage lights",
           "action": "turn_on"
         },
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:03",
+          "display_name": "Kitchen lights",
           "action": "turn_on"
         }
       ]
@@ -94,7 +110,9 @@
       "id": "evening-lights-off-both-home",
       "label": "Turn off arrival lights when both home 10+ min after sunset",
       "enabled": true,
-      "triggers": ["scheduled"],
+      "triggers": [
+        "scheduled"
+      ],
       "schedule_cron": "*/10 * * * *",
       "cooldown_s": 300,
       "min_location_accuracy_m": 50,
@@ -110,7 +128,10 @@
           {
             "type": "users_inside_geofence_for_s",
             "geofence_id": "house",
-            "user_ids": ["henrique", "kristen"],
+            "user_ids": [
+              "henrique",
+              "kristen"
+            ],
             "min_inside_s": 600
           },
           {
@@ -119,11 +140,13 @@
             "devices": [
               {
                 "family_id": "kasa",
-                "device_id": "02:00:00:00:00:01"
+                "device_id": "02:00:00:00:00:01",
+                "display_name": "Porch lights"
               },
               {
                 "family_id": "kasa",
-                "device_id": "02:00:00:00:00:03"
+                "device_id": "02:00:00:00:00:03",
+                "display_name": "Kitchen lights"
               }
             ]
           }
@@ -133,11 +156,13 @@
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:01",
+          "display_name": "Porch lights",
           "action": "turn_off"
         },
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:03",
+          "display_name": "Kitchen lights",
           "action": "turn_off"
         }
       ]
@@ -146,7 +171,10 @@
       "id": "evening-interior-lights-on-anyone-home",
       "label": "Turn on interior lamps on evening home arrival (25 min before sunset to midnight, once per day)",
       "enabled": true,
-      "triggers": ["edge_true", "scheduled"],
+      "triggers": [
+        "edge_true",
+        "scheduled"
+      ],
       "fire_once_per_local_day": true,
       "cooldown_s": 300,
       "min_location_accuracy_m": 50,
@@ -165,12 +193,16 @@
               {
                 "type": "users_inside_geofence",
                 "geofence_id": "house",
-                "user_ids": ["henrique"]
+                "user_ids": [
+                  "henrique"
+                ]
               },
               {
                 "type": "users_inside_geofence",
                 "geofence_id": "house",
-                "user_ids": ["kristen"]
+                "user_ids": [
+                  "kristen"
+                ]
               }
             ]
           }
@@ -180,16 +212,19 @@
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:05",
+          "display_name": "Basement leds",
           "action": "turn_on"
         },
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:06",
+          "display_name": "Basement lamp",
           "action": "turn_on"
         },
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:07",
+          "display_name": "Hallway lights",
           "action": "turn_on"
         }
       ]
@@ -198,7 +233,9 @@
       "id": "away-shutdown-everyone-outside-20m",
       "label": "Turn off lights and media when everyone away 20+ min",
       "enabled": true,
-      "triggers": ["scheduled"],
+      "triggers": [
+        "scheduled"
+      ],
       "schedule_cron": "*/10 * * * *",
       "cooldown_s": 300,
       "min_location_accuracy_m": 50,
@@ -208,45 +245,140 @@
           {
             "type": "users_outside_geofence_for_s",
             "geofence_id": "house",
-            "user_ids": ["henrique", "kristen"],
+            "user_ids": [
+              "henrique",
+              "kristen"
+            ],
             "min_outside_s": 1200
           },
           {
             "type": "devices_any_in_state",
             "state": "on",
             "devices": [
-              { "family_id": "kasa", "device_id": "02:00:00:00:00:01" },
-              { "family_id": "kasa", "device_id": "02:00:00:00:00:02" },
-              { "family_id": "kasa", "device_id": "02:00:00:00:00:03" },
-              { "family_id": "kasa", "device_id": "02:00:00:00:00:05" },
-              { "family_id": "kasa", "device_id": "02:00:00:00:00:06" },
-              { "family_id": "kasa", "device_id": "02:00:00:00:00:07" },
-              { "family_id": "sonos", "device_id": "02:00:00:00:01:01" },
-              { "family_id": "sonos", "device_id": "02:00:00:00:01:02" },
-              { "family_id": "sonos", "device_id": "02:00:00:00:01:03" },
-              { "family_id": "vizio", "device_id": "02:00:00:00:02:01" }
+              {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:01",
+                "display_name": "Porch lights"
+              },
+              {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:02",
+                "display_name": "Garage lights"
+              },
+              {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:03",
+                "display_name": "Kitchen lights"
+              },
+              {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:05",
+                "display_name": "Basement leds"
+              },
+              {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:06",
+                "display_name": "Basement lamp"
+              },
+              {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:07",
+                "display_name": "Hallway lights"
+              },
+              {
+                "family_id": "sonos",
+                "device_id": "02:00:00:00:01:01",
+                "display_name": "Living room Sonos"
+              },
+              {
+                "family_id": "sonos",
+                "device_id": "02:00:00:00:01:02",
+                "display_name": "Kitchen Sonos"
+              },
+              {
+                "family_id": "sonos",
+                "device_id": "02:00:00:00:01:03",
+                "display_name": "Bedroom Sonos"
+              },
+              {
+                "family_id": "vizio",
+                "device_id": "02:00:00:00:02:01",
+                "display_name": "Kitchen TV"
+              }
             ]
           }
         ]
       },
       "device_actions": [
-        { "family_id": "kasa", "device_id": "02:00:00:00:00:01", "action": "turn_off" },
-        { "family_id": "kasa", "device_id": "02:00:00:00:00:02", "action": "turn_off" },
-        { "family_id": "kasa", "device_id": "02:00:00:00:00:03", "action": "turn_off" },
-        { "family_id": "kasa", "device_id": "02:00:00:00:00:05", "action": "turn_off" },
-        { "family_id": "kasa", "device_id": "02:00:00:00:00:06", "action": "turn_off" },
-        { "family_id": "kasa", "device_id": "02:00:00:00:00:07", "action": "turn_off" },
-        { "family_id": "sonos", "device_id": "02:00:00:00:01:01", "action": "pause" },
-        { "family_id": "sonos", "device_id": "02:00:00:00:01:02", "action": "pause" },
-        { "family_id": "sonos", "device_id": "02:00:00:00:01:03", "action": "pause" },
-        { "family_id": "vizio", "device_id": "02:00:00:00:02:01", "action": "turn_off" }
+        {
+          "family_id": "kasa",
+          "device_id": "02:00:00:00:00:01",
+          "display_name": "Porch lights",
+          "action": "turn_off"
+        },
+        {
+          "family_id": "kasa",
+          "device_id": "02:00:00:00:00:02",
+          "display_name": "Garage lights",
+          "action": "turn_off"
+        },
+        {
+          "family_id": "kasa",
+          "device_id": "02:00:00:00:00:03",
+          "display_name": "Kitchen lights",
+          "action": "turn_off"
+        },
+        {
+          "family_id": "kasa",
+          "device_id": "02:00:00:00:00:05",
+          "display_name": "Basement leds",
+          "action": "turn_off"
+        },
+        {
+          "family_id": "kasa",
+          "device_id": "02:00:00:00:00:06",
+          "display_name": "Basement lamp",
+          "action": "turn_off"
+        },
+        {
+          "family_id": "kasa",
+          "device_id": "02:00:00:00:00:07",
+          "display_name": "Hallway lights",
+          "action": "turn_off"
+        },
+        {
+          "family_id": "sonos",
+          "device_id": "02:00:00:00:01:01",
+          "display_name": "Living room Sonos",
+          "action": "pause"
+        },
+        {
+          "family_id": "sonos",
+          "device_id": "02:00:00:00:01:02",
+          "display_name": "Kitchen Sonos",
+          "action": "pause"
+        },
+        {
+          "family_id": "sonos",
+          "device_id": "02:00:00:00:01:03",
+          "display_name": "Bedroom Sonos",
+          "action": "pause"
+        },
+        {
+          "family_id": "vizio",
+          "device_id": "02:00:00:00:02:01",
+          "display_name": "Kitchen TV",
+          "action": "turn_off"
+        }
       ]
     },
     {
       "id": "away-garage-open-alert",
       "label": "Email when a garage door is open and everyone away 20+ min",
       "enabled": true,
-      "triggers": ["dwell_satisfied"],
+      "triggers": [
+        "dwell_satisfied"
+      ],
       "cooldown_s": 0,
       "min_location_accuracy_m": 50,
       "notify_on_fire": true,
@@ -259,7 +391,10 @@
           {
             "type": "users_outside_geofence_for_s",
             "geofence_id": "house",
-            "user_ids": ["henrique", "kristen"],
+            "user_ids": [
+              "henrique",
+              "kristen"
+            ],
             "min_outside_s": 1200
           },
           {
@@ -267,8 +402,16 @@
             "state": "open",
             "min_duration_s": 1200,
             "devices": [
-              { "family_id": "tailwind", "device_id": "02:00:00:00:03:01:left" },
-              { "family_id": "tailwind", "device_id": "02:00:00:00:03:01:right" }
+              {
+                "family_id": "tailwind",
+                "device_id": "02:00:00:00:03:01:left",
+                "display_name": "Main garage left"
+              },
+              {
+                "family_id": "tailwind",
+                "device_id": "02:00:00:00:03:01:right",
+                "display_name": "Main garage right"
+              }
             ]
           }
         ]
@@ -279,17 +422,23 @@
       "id": "kristen-west-point-arrive",
       "label": "Kristen arrived at West Point",
       "enabled": true,
-      "triggers": ["edge_true"],
+      "triggers": [
+        "edge_true"
+      ],
       "cooldown_s": 120,
       "min_location_accuracy_m": 50,
       "notify_on_fire": true,
-      "notification_emails": ["automation@example.com"],
+      "notification_emails": [
+        "automation@example.com"
+      ],
       "conditions": {
         "all": [
           {
             "type": "users_inside_geofence",
             "geofence_id": "west-point",
-            "user_ids": ["kristen"]
+            "user_ids": [
+              "kristen"
+            ]
           }
         ]
       },
@@ -299,17 +448,23 @@
       "id": "kristen-west-point-leave",
       "label": "Kristen left West Point",
       "enabled": true,
-      "triggers": ["edge_true"],
+      "triggers": [
+        "edge_true"
+      ],
       "cooldown_s": 120,
       "min_location_accuracy_m": 50,
       "notify_on_fire": true,
-      "notification_emails": ["automation@example.com"],
+      "notification_emails": [
+        "automation@example.com"
+      ],
       "conditions": {
         "all": [
           {
             "type": "users_outside_geofence",
             "geofence_id": "west-point",
-            "user_ids": ["kristen"]
+            "user_ids": [
+              "kristen"
+            ]
           }
         ]
       },
@@ -319,19 +474,27 @@
       "id": "morning-master-bedroom-fan-off",
       "label": "Turn off master bedroom fan at 7:30am if on",
       "enabled": true,
-      "triggers": ["scheduled"],
+      "triggers": [
+        "scheduled"
+      ],
       "schedule_cron": "30 7 * * *",
       "cooldown_s": 300,
       "min_location_accuracy_m": 50,
       "notify_on_fire": true,
-      "notification_emails": ["operator@example.com"],
+      "notification_emails": [
+        "operator@example.com"
+      ],
       "conditions": {
         "all": [
           {
             "type": "devices_any_in_state",
             "state": "on",
             "devices": [
-              { "family_id": "kasa", "device_id": "02:00:00:00:00:08" }
+              {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:08",
+                "display_name": "Master bedroom fan"
+              }
             ]
           }
         ]
@@ -340,6 +503,7 @@
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:08",
+          "display_name": "Master bedroom fan",
           "action": "turn_off"
         }
       ]
@@ -348,19 +512,29 @@
       "id": "daylight-master-bedroom-fan-on-alert",
       "label": "Email when master bedroom fan turns on during daylight",
       "enabled": true,
-      "triggers": ["device_state"],
+      "triggers": [
+        "device_state"
+      ],
       "cooldown_s": 1800,
       "min_location_accuracy_m": 50,
       "notify_on_fire": true,
-      "notification_emails": ["operator@example.com"],
+      "notification_emails": [
+        "operator@example.com"
+      ],
       "conditions": {
         "all": [
-          { "type": "daylight" },
+          {
+            "type": "daylight"
+          },
           {
             "type": "devices_any_in_state",
             "state": "on",
             "devices": [
-              { "family_id": "kasa", "device_id": "02:00:00:00:00:08" }
+              {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:08",
+                "display_name": "Master bedroom fan"
+              }
             ]
           }
         ]
@@ -371,7 +545,9 @@
       "id": "hdhomerun-nightly-power-cycle",
       "label": "Nightly HDHomeRun tuner power cycle",
       "enabled": false,
-      "triggers": ["scheduled"],
+      "triggers": [
+        "scheduled"
+      ],
       "schedule_cron": "0 4 * * *",
       "cooldown_s": 300,
       "fire_once_per_local_day": true,
@@ -385,11 +561,13 @@
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:04",
+          "display_name": "HDHomeRun tuner",
           "action": "turn_off"
         },
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:04",
+          "display_name": "HDHomeRun tuner",
           "action": "turn_on",
           "delay_s": 60
         }

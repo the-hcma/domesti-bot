@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from app.api.schemas import RuleOut
 from app.automation_rules_loader import AutomationRulesLoadError, load_settings_location
+from app.device_display import format_device_display
 from app.outbound_email import (
     append_provenance_footer,
     domesti_public_base_url,
@@ -141,16 +142,17 @@ def format_device_action_outcome_line(outcome: RuleDeviceActionOutcome) -> str:
     """Format one device outcome line for notification email."""
     family = outcome.family_id.display_name()
     when = format_completed_at_local(outcome.completed_at)
+    device = format_device_display(outcome.device_id, outcome.display_name)
     if not outcome.succeeded:
         before = outcome.before_state or "unknown"
         after = outcome.after_state or "unknown"
         detail = f": {outcome.error}" if outcome.error else ""
         if before == after:
-            return f"{outcome.device_id} ({family}): failed{detail} at {when}"
-        return f"{outcome.device_id} ({family}): {before} → {after} — failed{detail} at {when}"
+            return f"{device} ({family}): failed{detail} at {when}"
+        return f"{device} ({family}): {before} → {after} — failed{detail} at {when}"
     before = outcome.before_state or "unknown"
     after = outcome.after_state or "unknown"
-    line = f"{outcome.device_id} ({family}): {before} → {after}"
+    line = f"{device} ({family}): {before} → {after}"
     if outcome.probable:
         line = f"{line} (probable)"
     return f"{line} at {when}"

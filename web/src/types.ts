@@ -222,6 +222,8 @@ export interface RuleDeviceActionOut {
   action: RuleActionType;
   delay_s?: number | null;
   device_id: string;
+  /** Non-authoritative friendly name snapshot; device_id (MAC) is authoritative. */
+  display_name?: string | null;
   family_id: string;
 }
 
@@ -301,6 +303,8 @@ export type RuleConditionOut =
 
 export interface RuleConditionDeviceRefOut {
   device_id: string;
+  /** Non-authoritative friendly name snapshot; device_id (MAC) is authoritative. */
+  display_name?: string | null;
   family_id: string;
 }
 
@@ -555,6 +559,7 @@ export interface RuleReferenceIssueOut {
     | "missing_notification_email"
     | "missing_smtp"
     | "non_canonical_device_id"
+    | "stale_device_display_name"
     | "unknown_device"
     | "unknown_geofence"
     | "unknown_user";

@@ -217,19 +217,23 @@ export function userDisplayLabel(userId: string, displayName?: string): string {
 
 let brokenRulePopoverIdSeq = 0;
 
-function isNonCanonicalOnly(
+function isWarningOnly(
   issues: readonly { kind: string; detail: string }[],
 ): boolean {
+  const warningKinds = new Set([
+    "non_canonical_device_id",
+    "stale_device_display_name",
+  ]);
   return (
     issues.length > 0 &&
-    issues.every((issue) => issue.kind === "non_canonical_device_id")
+    issues.every((issue) => warningKinds.has(issue.kind))
   );
 }
 
 export function createBrokenRuleBadge(
   issues: readonly { kind: string; detail: string }[],
 ): HTMLSpanElement {
-  const warningOnly = isNonCanonicalOnly(issues);
+  const warningOnly = isWarningOnly(issues);
   const wrap = document.createElement("span");
   wrap.className = "rules-broken-badge-wrap";
 

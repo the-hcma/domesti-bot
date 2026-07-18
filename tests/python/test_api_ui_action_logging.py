@@ -13,7 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
-from app.api.ui_action_logging import _action_log_parts, _format_device
+from app.api.ui_action_logging import _action_log_parts
+from app.device_display import format_device_display
 from app.device_enums import UiActionType
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
@@ -79,9 +80,9 @@ def test_action_log_parts_bulk_off_keeps_counts() -> None:
 
 
 def test_format_device_includes_canonical_id_when_label_differs() -> None:
-    assert _format_device("10.0.0.1", "Desk") == "Desk (10.0.0.1)"
-    assert _format_device("10.0.0.1", "10.0.0.1") == "10.0.0.1"
-    assert _format_device("10.0.0.1", None) == "10.0.0.1"
+    assert format_device_display("10.0.0.1", "Desk") == "Desk (10.0.0.1)"
+    assert format_device_display("10.0.0.1", "10.0.0.1") == "10.0.0.1"
+    assert format_device_display("10.0.0.1", None) == "10.0.0.1"
 
 
 def test_kasa_toggle_emits_ui_action_log(caplog: pytest.LogCaptureFixture) -> None:

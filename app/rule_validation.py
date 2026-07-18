@@ -26,12 +26,17 @@ from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.rule_actions import (
     RuleActionDispatchError,
+    lookup_preferred_label,
     resolve_kasa_host_by_label,
     resolve_sonos_identifier_by_label,
     resolve_tailwind_identifier_by_label,
     resolve_vizio_identifier_by_label,
 )
-from app.rule_device_id import is_canonical_rule_device_id, non_canonical_device_id_detail
+from app.rule_device_id import (
+    is_canonical_rule_device_id,
+    non_canonical_device_id_detail,
+    stale_device_display_name_detail,
+)
 
 
 @dataclass(frozen=True)
@@ -179,14 +184,15 @@ def validate_rules(
     return {rule.id: validate_rule(rule, ctx) for rule in rules}
 
 
-def _device_action_issue(
+def _device_action_issues(
     ctx: RuleValidationContext,
     action: RuleDeviceActionOut,
-) -> RuleReferenceIssueOut | None:
-    return _device_reference_issue(
+) -> list[RuleReferenceIssueOut]:
+    return _device_reference_issues(
         ctx,
         family_id=action.family_id,
         device_id=action.device_id,
+        display_name=action.display_name,
         context_label="device_actions",
     )
 
@@ -231,6 +237,34 @@ def _device_reference_issue(
             reference=reference,
         )
     return None
+
+
+def _device_reference_issues(
+    ctx: RuleValidationContext,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+    display_name: str | None,
+    context_label: str,
+) -> list[RuleReferenceIssueOut]:
+    issues: list[RuleReferenceIssueOut] = []
+    primary = _device_reference_issue(
+        ctx,
+        family_id=family_id,
+        device_id=device_id,
+        context_label=context_label,
+    )
+    if primary is not None:
+        issues.append(primary)
+    stale = _stale_device_display_name_issue(
+        ctx,
+        family_id=family_id,
+        device_id=device_id,
+        display_name=display_name,
+    )
+    if stale is not None:
+        issues.append(stale)
+    return issues
 
 
 def _backend_device_id_matches_rule_ref(
@@ -325,6 +359,47 @@ def _resolve_device_ref_to_identifier(
             return None
 
 
+def _stale_device_display_name_issue(
+    ctx: RuleValidationContext,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+    display_name: str | None,
+) -> RuleReferenceIssueOut | None:
+    stored = (display_name or "").strip()
+    if stored == "":
+        return None
+    if ctx.device_state is None:
+        return None
+    reference = device_id.strip()
+    if reference == "" or not is_canonical_rule_device_id(family_id, reference):
+        return None
+    try:
+        if not _device_reference_resolves(ctx, family_id=family_id, device_id=reference):
+            return None
+        live = lookup_preferred_label(
+            ctx.device_state,
+            family_id=family_id,
+            device_id=reference,
+        )
+    except RuleActionDispatchError:
+        return None
+    if live is None:
+        return None
+    live_trimmed = live.strip()
+    if live_trimmed == "" or stored.casefold() == live_trimmed.casefold():
+        return None
+    return RuleReferenceIssueOut(
+        detail=stale_device_display_name_detail(
+            device_id=reference,
+            live=live_trimmed,
+            stored=stored,
+        ),
+        kind="stale_device_display_name",
+        reference=reference,
+    )
+
+
 def _unknown_user_issue(
     reference: str,
     ctx: RuleValidationContext,
@@ -349,9 +424,7 @@ def _validate_device_actions(
 ) -> list[RuleReferenceIssueOut]:
     issues: list[RuleReferenceIssueOut] = []
     for action in rule.device_actions:
-        issue = _device_action_issue(ctx, action)
-        if issue is not None:
-            issues.append(issue)
+        issues.extend(_device_action_issues(ctx, action))
     return issues
 
 
@@ -477,15 +550,23 @@ def _validate_device_conditions(
     ctx: RuleValidationContext,
 ) -> list[RuleReferenceIssueOut]:
     issues: list[RuleReferenceIssueOut] = []
-    for family_id, device_id in sorted(collect_rule_device_refs(rule)):
-        issue = _device_reference_issue(
-            ctx,
-            family_id=family_id,
-            device_id=device_id,
-            context_label="conditions",
-        )
-        if issue is not None:
-            issues.append(issue)
+    seen: set[tuple[DeviceFamilyId, str, str]] = set()
+    for devices, _state in _iter_device_state_condition_checks(rule.conditions.all):
+        for ref in devices:
+            stored = (ref.display_name or "").strip()
+            key = (ref.family_id, ref.device_id.strip(), stored)
+            if key in seen:
+                continue
+            seen.add(key)
+            issues.extend(
+                _device_reference_issues(
+                    ctx,
+                    family_id=ref.family_id,
+                    device_id=ref.device_id,
+                    display_name=ref.display_name,
+                    context_label="conditions",
+                ),
+            )
     issues.extend(_validate_device_condition_states(rule))
     return issues
 
