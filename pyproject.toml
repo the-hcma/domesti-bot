@@ -78,6 +78,7 @@ dependencies = [
     "uvicorn[standard]>=0.51.0",
     "watchfiles==1.2.0",
     "wcwidth>=0.8.2",
+    "websockets==16.1",
     "yarl==1.24.2",
     "zeroconf>=0.150.0",
 ]
