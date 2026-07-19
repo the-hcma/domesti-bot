@@ -53,6 +53,8 @@ def test_format_vacation_bool_device_state_by_family() -> None:
     assert format_vacation_bool_device_state(DeviceFamilyId.SONOS, False) == "paused"
     assert format_vacation_bool_device_state(DeviceFamilyId.TAILWIND, True) == "open"
     assert format_vacation_bool_device_state(DeviceFamilyId.TAILWIND, False) == "closed"
+    assert format_vacation_bool_device_state(DeviceFamilyId.EP1, True) == "occupied"
+    assert format_vacation_bool_device_state(DeviceFamilyId.EP1, False) == "clear"
     assert format_vacation_bool_device_state(DeviceFamilyId.KASA, None) == "unknown"
 
 

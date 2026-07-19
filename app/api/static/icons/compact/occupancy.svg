@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Room occupancy sensor (person + presence arc). -->
+  <circle cx="12" cy="7" r="3"/>
+  <path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
+  <path d="M4 12a8 8 0 0 1 16 0"/>
+</svg>

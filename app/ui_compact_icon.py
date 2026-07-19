@@ -161,6 +161,8 @@ def resolve_compact_icon(
     kasa_model: str | None = None,
 ) -> str:
     """Return a stable icon key consumed by ``web/src/main.ts``."""
+    if family_id == "ep1" or kind == "occupancy":
+        return "occupancy"
     if family_id == "sonos" or kind == "speaker":
         return "speaker"
     if family_id == "tailwind" or kind == "door":

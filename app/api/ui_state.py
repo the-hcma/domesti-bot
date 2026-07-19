@@ -48,6 +48,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # Server-owned UI metadata per family. Order in this list is the rendering
 # order on the page (top → bottom rows of tiles); documented on ``UIStateOut``.
+# TODO(ep1/#521): add ("ep1", "Everything Presence One", …) when Ep1DeviceManager
+# ships — without it, EP1 devices would be discovered but omitted from /v1/ui/state.
 _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("kasa", "Lights & plugs", "#3B82F6"),
     ("sonos", "Sonos zones", "#8B5CF6"),

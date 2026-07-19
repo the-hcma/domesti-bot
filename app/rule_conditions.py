@@ -467,13 +467,20 @@ def _cached_device_matches_state(
             if is_open is None:
                 return None
             return not is_open
+        case DeviceConditionState.CLEAR | DeviceConditionState.OCCUPIED:
+            # EP1 occupancy cache is not wired yet (manager lands in a follow-on).
+            return None
 
 
 def _complementary_device_state_label(state: DeviceConditionState) -> str:
     """Return the opposite state label used in unmet any/all status details."""
     match state:
+        case DeviceConditionState.CLEAR:
+            return DeviceConditionState.OCCUPIED.value
         case DeviceConditionState.CLOSED:
             return DeviceConditionState.OPEN.value
+        case DeviceConditionState.OCCUPIED:
+            return DeviceConditionState.CLEAR.value
         case DeviceConditionState.OFF:
             return DeviceConditionState.ON.value
         case DeviceConditionState.ON:

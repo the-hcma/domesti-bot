@@ -584,5 +584,6 @@ def test_ui_state_out_is_a_pydantic_model_with_expected_fields() -> None:
         "host",
         "identity_details",
         "mac_address",
+        "occupancy_readings",
         "stream_favorites",
     }

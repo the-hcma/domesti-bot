@@ -89,6 +89,9 @@ function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
       return ["open", "close"];
     case "speaker":
       return ["pause", "resume"];
+    case "occupancy":
+      // Occupancy sensors are read-only in the rules UI until EP1 actions land.
+      return [];
   }
 }
 

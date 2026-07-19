@@ -13,6 +13,7 @@ import type {
   UIDeviceOut,
   UIDeviceState,
   UIFamilyOut,
+  UIOccupancyReadingsOut,
   UIOperatorAlertOut,
   UIStateOut,
 } from "./types.js";
@@ -1185,6 +1186,9 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
       return "paused";
     case "door":
       return "closed";
+    case "occupancy":
+      // Occupancy tiles are not bulk-off targets; keep the inactive label.
+      return "clear";
   }
 }
 
@@ -1234,6 +1238,12 @@ function nextStateAfterTileToggle(device: UIDeviceOut): UIDeviceState {
       return device.state === "playing" ? "paused" : "playing";
     case "door":
       return device.state === "closed" ? "open" : "closed";
+    case "occupancy":
+      // Sensor-driven; no tile toggle yet — keep current state so optimistic
+      // prediction does not briefly flip occupied/clear before BAD_REQUEST.
+      return device.state === "occupied" || device.state === "clear"
+        ? device.state
+        : "unknown";
   }
 }
 
@@ -1959,22 +1969,44 @@ function attachTileHitListeners(
 function compactTileAriaLabel(device: UIDeviceOut): string {
   const statePhrase =
     device.state === "unknown" ? "state unknown" : `currently ${device.state}`;
-  if (device.kind === "switch") {
-    const next = device.state === "off" ? "turn on" : "turn off";
-    return `${device.label}, ${statePhrase}, tap to ${next}`;
+  switch (device.kind) {
+    case "switch": {
+      const next = device.state === "off" ? "turn on" : "turn off";
+      return `${device.label}, ${statePhrase}, tap to ${next}`;
+    }
+    case "speaker": {
+      const next = device.state === "playing" ? "pause" : "resume";
+      return `${device.label}, ${statePhrase}, tap to ${next}`;
+    }
+    case "door": {
+      const next =
+        device.state === "open"
+          ? "close"
+          : device.state === "closed"
+            ? "open"
+            : "close";
+      return `${device.label}, ${statePhrase}, tap to ${next}`;
+    }
+    case "occupancy": {
+      // Sensor-only for now (no tile toggle); omit actionable "tap to …".
+      const temp = formatOccupancyTemperatureDual(device.occupancy_readings);
+      return temp == null
+        ? `${device.label}, ${statePhrase}, occupancy sensor`
+        : `${device.label}, ${statePhrase}, occupancy sensor, ${temp}`;
+    }
   }
-  if (device.kind === "speaker") {
-    const next = device.state === "playing" ? "pause" : "resume";
-    return `${device.label}, ${statePhrase}, tap to ${next}`;
-  }
-  const next =
-    device.state === "open" ? "close" : device.state === "closed" ? "open" : "close";
-  return `${device.label}, ${statePhrase}, tap to ${next}`;
 }
 
 function compactIconAssetKey(device: UIDeviceOut): string {
   if (device.compact_icon === "garage" || device.kind === "door") {
     return device.state === "open" ? "garage_open" : "garage_closed";
+  }
+  if (
+    device.compact_icon === "occupancy" ||
+    device.kind === "occupancy" ||
+    device.family_id === "ep1"
+  ) {
+    return "occupancy";
   }
   if (
     device.compact_icon === "tv" ||
@@ -2247,7 +2279,8 @@ function createTileSaturatedHit(
   const isActive =
     device.state === "on" ||
     device.state === "playing" ||
-    device.state === "open";
+    device.state === "open" ||
+    device.state === "occupied";
   hit.setAttribute("aria-pressed", isActive ? "true" : "false");
   hit.setAttribute("aria-label", compactTileAriaLabel(device));
   hit.title = deviceIdentityTooltip(device);
@@ -2266,6 +2299,8 @@ function deviceNeedsBulkOff(device: UIDeviceOut): boolean {
       return device.state === "playing" || device.state === "unknown";
     case "door":
       return device.state === "open" || device.state === "unknown";
+    case "occupancy":
+      return false;
   }
 }
 
@@ -2273,10 +2308,36 @@ function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown
   if (state === "unknown") {
     return "unknown";
   }
-  if (state === "on" || state === "playing" || state === "open") {
+  if (
+    state === "on" ||
+    state === "playing" ||
+    state === "open" ||
+    state === "occupied"
+  ) {
     return "active";
   }
   return "inactive";
+}
+
+/** Dual-unit temperature label for occupancy tiles (matches Python ``format_temperature_c_and_f``). */
+function formatOccupancyTemperatureDual(
+  readings: UIOccupancyReadingsOut | null | undefined,
+): string | null {
+  if (readings == null) {
+    return null;
+  }
+  let celsius = readings.temperature_c;
+  let fahrenheit = readings.temperature_f;
+  if (celsius == null && fahrenheit != null) {
+    celsius = ((fahrenheit - 32) * 5) / 9;
+  }
+  if (fahrenheit == null && celsius != null) {
+    fahrenheit = (celsius * 9) / 5 + 32;
+  }
+  if (celsius == null || fahrenheit == null) {
+    return null;
+  }
+  return `${celsius.toFixed(1)} °C / ${fahrenheit.toFixed(1)} °F`;
 }
 
 function isMobileFormFactor(): boolean {
