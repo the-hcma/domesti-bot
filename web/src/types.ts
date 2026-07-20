@@ -16,11 +16,17 @@ export interface HealthOut {
   error: string | null;
 }
 
-export type UIDeviceKind = "switch" | "speaker" | "door";
+/**
+ * Device tile kind. ``occupancy`` is room occupancy (EP1 mmWave/PIR), not
+ * My Tracks presence / user / location.
+ */
+export type UIDeviceKind = "door" | "occupancy" | "speaker" | "switch";
 
 /** Mirror of Python ``DeviceConditionState`` (rules / actions; no ``unknown``). */
 export type DeviceConditionState =
+  | "clear"
   | "closed"
+  | "occupied"
   | "off"
   | "on"
   | "open"
@@ -33,6 +39,18 @@ export type DeviceConditionState =
  * readings (Tailwind OPENING/CLOSING, Sonos pre-poll, Vizio auth gaps).
  */
 export type UIDeviceState = DeviceConditionState | "unknown";
+
+/**
+ * Environmental readings for ``kind=occupancy`` (EP1). Units are fixed:
+ * humidity ``%``, illuminance ``lx``, temperature ``°C`` and ``°F``
+ * (both present when either is known — server derives the missing unit).
+ */
+export interface UIOccupancyReadingsOut {
+  humidity_pct: number | null;
+  illuminance_lx: number | null;
+  temperature_c: number | null;
+  temperature_f: number | null;
+}
 
 export interface UISonosStreamFavoriteOut {
   name: string;
@@ -55,6 +73,8 @@ export interface UIDeviceOut {
   identity_details?: string[];
   exclude_from_global: boolean;
   hide_on_mobile: boolean;
+  /** Temperature / humidity / illuminance for occupancy tiles; null otherwise. */
+  occupancy_readings?: UIOccupancyReadingsOut | null;
   /** Configured radio streams for Sonos zones (empty for other families). */
   stream_favorites: UISonosStreamFavoriteOut[];
 }

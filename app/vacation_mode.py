@@ -37,7 +37,7 @@ from app.automation_rules_loader import (
     load_settings_location,
     load_vacation_mode_settings,
 )
-from app.device_enums import DeviceFamilyId, VacationEmailSource
+from app.device_enums import DeviceConditionState, DeviceFamilyId, VacationEmailSource
 from app.expected_device_change import consume_expected_device_change
 from app.home_location import try_resolve_home_location
 from app.operator_alerts import operator_alert_store
@@ -272,6 +272,8 @@ def format_vacation_bool_device_state(
     if state is None:
         return "unknown"
     match family_id:
+        case DeviceFamilyId.EP1:
+            return DeviceConditionState.OCCUPIED.value if state else DeviceConditionState.CLEAR.value
         case DeviceFamilyId.SONOS:
             return "playing" if state else "paused"
         case DeviceFamilyId.TAILWIND:

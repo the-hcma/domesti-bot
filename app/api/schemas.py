@@ -23,6 +23,7 @@ from app.device_enums import (
 )
 from app.presence_connection_type import normalize_presence_connection_type
 from app.presence_wifi import normalize_wifi_bssid
+from app.temperature_units import celsius_to_fahrenheit, fahrenheit_to_celsius
 
 KasaCredentialsSourceOut = Literal["env", "database", "none"]
 SecretsKeySourceOut = Literal["env", "file", "none"]
@@ -70,6 +71,56 @@ class MetaOut(BaseModel):
     )
 
 
+class UIOccupancyReadingsOut(BaseModel):
+    """Environmental readings from an occupancy-family device (EP1).
+
+    Units are fixed on the wire so clients need not guess. Absent or
+    unavailable ESPHome entities are ``None``. Temperature is exposed in
+    both Celsius and Fahrenheit; when only one is supplied the other is
+    derived (EP1 sensors report °C).
+
+    Nomenclature: room *occupancy* (mmWave / PIR), not My Tracks presence /
+    user / location. The product name is Everything Presence One; the code
+    kind and family slug stay ``occupancy`` / ``ep1``.
+    """
+
+    humidity_pct: float | None = Field(
+        default=None,
+        description="Relative humidity in percent (``%``).",
+    )
+    illuminance_lx: float | None = Field(
+        default=None,
+        description="Ambient illuminance in lux (``lx``).",
+    )
+    temperature_c: float | None = Field(
+        default=None,
+        description="Air temperature in degrees Celsius (``°C``).",
+    )
+    temperature_f: float | None = Field(
+        default=None,
+        description=(
+            "Air temperature in degrees Fahrenheit (``°F``). Derived from "
+            "``temperature_c`` when omitted (and the reverse)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _fill_missing_temperature_unit(self) -> Self:
+        if self.temperature_c is None and self.temperature_f is not None:
+            object.__setattr__(
+                self,
+                "temperature_c",
+                fahrenheit_to_celsius(self.temperature_f),
+            )
+        if self.temperature_f is None and self.temperature_c is not None:
+            object.__setattr__(
+                self,
+                "temperature_f",
+                celsius_to_fahrenheit(self.temperature_c),
+            )
+        return self
+
+
 class UISonosStreamFavoriteOut(BaseModel):
     """One configured Sonos radio stream favorite."""
 
@@ -84,7 +135,7 @@ class UIDeviceOut(BaseModel):
 
     * ``id``: stable per-family **canonical key** also used as
       ``ui_preferences.canonical_key``. Always the normalized MAC address
-      (kasa / sonos / vizio / cast / hub MAC for Tailwind doors). Pair with
+      (kasa / sonos / vizio / cast / hub MAC for Tailwind doors / EP1). Pair with
       ``family_id`` for cross-family uniqueness. Secondary transport ids
       (host, ``RINCON_…``, door id, Cast UUID) stay on the device objects
       for connection — they are not the durable UI id.
@@ -99,14 +150,18 @@ class UIDeviceOut(BaseModel):
       via ``set-display-name`` / discovery alias; never the raw MAC when a
       display name exists).
     * ``kind``: ``"switch"`` (kasa, future androidtv), ``"speaker"``
-      (sonos), or ``"door"`` (tailwind). The UI uses this to pick
-      tile iconography and which action verb to render.
+      (sonos), ``"door"`` (tailwind), or ``"occupancy"`` (ep1 room sensor).
+      The UI uses this to pick tile iconography and which action verb to
+      render. Occupancy is room occupancy, not My Tracks presence.
     * ``state``: family-specific cached state — ``"on"`` / ``"off"`` for
       switches; ``"playing"`` / ``"paused"`` for speakers; ``"open"`` /
-      ``"closed"`` for doors. ``"unknown"`` covers transient cases (a
-      Tailwind door reporting ``OPENING`` / ``CLOSING``, a Sonos zone
-      we haven't polled yet) so the UI never has to crash on
-      unexpected payloads.
+      ``"closed"`` for doors; ``"occupied"`` / ``"clear"`` for occupancy.
+      ``"unknown"`` covers transient cases (a Tailwind door reporting
+      ``OPENING`` / ``CLOSING``, a Sonos zone we haven't polled yet) so the
+      UI never has to crash on unexpected payloads.
+    * ``occupancy_readings``: temperature / humidity / illuminance for
+      ``kind=occupancy`` (null for other kinds). See
+      :class:`UIOccupancyReadingsOut`.
     * ``exclude_from_global``: from the ``ui_preferences`` SQLite table.
       ``False`` (the default) means a global "turn off all" / "close all"
       action will operate on this device; ``True`` means it is skipped.
@@ -126,12 +181,16 @@ class UIDeviceOut(BaseModel):
     )
     family_id: str = Field(..., description="Parent family id (e.g. ``kasa``).")
     label: str = Field(..., description="Human-friendly display name; falls back to ``id``.")
-    kind: str = Field(..., description="``switch``, ``speaker``, or ``door``.")
+    kind: str = Field(
+        ...,
+        description="``switch``, ``speaker``, ``door``, or ``occupancy``.",
+    )
     state: str = Field(
         ...,
         description=(
-            "``on``/``off`` (switch), ``playing``/``paused`` (speaker), or "
-            "``open``/``closed`` (door); ``unknown`` for transient."
+            "``on``/``off`` (switch), ``playing``/``paused`` (speaker), "
+            "``open``/``closed`` (door), or ``occupied``/``clear`` (occupancy); "
+            "``unknown`` for transient."
         ),
     )
     compact_icon: str = Field(
@@ -160,6 +219,10 @@ class UIDeviceOut(BaseModel):
     hide_on_mobile: bool = Field(
         default=False,
         description="True → omit this tile on the compact (phone / tablet) layout.",
+    )
+    occupancy_readings: UIOccupancyReadingsOut | None = Field(
+        default=None,
+        description=("Temperature / humidity / illuminance for ``kind=occupancy``; null for other kinds."),
     )
     stream_favorites: list[UISonosStreamFavoriteOut] = Field(
         default_factory=list,

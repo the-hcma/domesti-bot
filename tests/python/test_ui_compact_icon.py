@@ -5,6 +5,25 @@ from __future__ import annotations
 from app.ui_compact_icon import resolve_compact_icon
 
 
+def test_resolve_compact_icon_ep1_occupancy() -> None:
+    assert (
+        resolve_compact_icon(
+            family_id="ep1",
+            label="Living room",
+            kind="occupancy",
+        )
+        == "occupancy"
+    )
+    assert (
+        resolve_compact_icon(
+            family_id="ep1",
+            label="Hall",
+            kind="switch",
+        )
+        == "occupancy"
+    )
+
+
 def test_resolve_compact_icon_kasa_basement_lamp_is_lamp() -> None:
     assert (
         resolve_compact_icon(

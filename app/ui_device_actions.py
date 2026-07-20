@@ -96,7 +96,7 @@ def _build_device_view(
                 device_id=device_id,
                 cache_path=state.cache_path,
             )
-        case DeviceFamilyId.ANDROIDTV:
+        case DeviceFamilyId.ANDROIDTV | DeviceFamilyId.EP1:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail=f"Unknown family_id: {family.value}",
@@ -120,7 +120,7 @@ async def _flip_tile(
             return await _require_tailwind_mgr(state, family).flip_tile(device_id)
         case DeviceFamilyId.VIZIO:
             return await _require_vizio_mgr(state, family).flip_tile(device_id)
-        case DeviceFamilyId.ANDROIDTV:
+        case DeviceFamilyId.ANDROIDTV | DeviceFamilyId.EP1:
             raise HTTPException(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail=f"Unknown family_id: {family.value}",

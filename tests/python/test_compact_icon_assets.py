@@ -24,6 +24,7 @@ _REQUIRED_KEYS = frozenset(
         "led",
         "lantern",
         "light",
+        "occupancy",
         "outlet",
         "pendant",
         "plug",

@@ -13,9 +13,15 @@ class DeviceConditionState(StrEnum):
 
     The web UI may also report ``\"unknown\"`` for transient readings; that
     value is UI-only and is not a member of this enum.
+
+    ``OCCUPIED`` / ``CLEAR`` are room-occupancy vocabulary for the EP1 family
+    (Everything Presence One). They are distinct from My Tracks presence /
+    user / location terms.
     """
 
+    CLEAR = "clear"
     CLOSED = "closed"
+    OCCUPIED = "occupied"
     OFF = "off"
     ON = "on"
     OPEN = "open"
@@ -25,6 +31,7 @@ class DeviceConditionState(StrEnum):
     def desired_bool(self) -> bool:
         """Return the natural cached bool that means this state is currently true."""
         return self in (
+            DeviceConditionState.OCCUPIED,
             DeviceConditionState.ON,
             DeviceConditionState.OPEN,
             DeviceConditionState.PLAYING,
@@ -33,6 +40,8 @@ class DeviceConditionState(StrEnum):
     def supported_by_family(self, family_id: DeviceFamilyId) -> bool:
         """Return whether ``family_id`` can report this state from cached readings."""
         match self:
+            case DeviceConditionState.CLEAR | DeviceConditionState.OCCUPIED:
+                return family_id == DeviceFamilyId.EP1
             case DeviceConditionState.OPEN | DeviceConditionState.CLOSED:
                 return family_id == DeviceFamilyId.TAILWIND
             case DeviceConditionState.PLAYING | DeviceConditionState.PAUSED:
@@ -49,6 +58,7 @@ class DeviceFamilyId(StrEnum):
     """Stable slug for a device manager family (UI tiles and rule actions)."""
 
     ANDROIDTV = "androidtv"
+    EP1 = "ep1"
     KASA = "kasa"
     SONOS = "sonos"
     TAILWIND = "tailwind"
@@ -59,6 +69,8 @@ class DeviceFamilyId(StrEnum):
         match self:
             case DeviceFamilyId.ANDROIDTV:
                 return "Google Cast"
+            case DeviceFamilyId.EP1:
+                return EP1_DISPLAY_NAME
             case DeviceFamilyId.KASA:
                 return "Kasa"
             case DeviceFamilyId.SONOS:
@@ -74,6 +86,9 @@ class DeviceIdResolution(StrEnum):
 
     MAC = "mac"
     PREFERRED_LABEL = "preferred_label"
+
+
+EP1_DISPLAY_NAME = "Everything Presence One"
 
 
 class RuleDeviceActionType(StrEnum):
