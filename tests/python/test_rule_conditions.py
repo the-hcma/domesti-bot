@@ -1837,6 +1837,6 @@ def test_build_rules_status_from_example_bundle(
     example = repo_root / "automation-rules.json.example"
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     status = build_rules_status(cache_path=tmp_path / "unused.sqlite")
-    assert len(status.rules) == 10
+    assert len(status.rules) == 11
     assert status.sun.sunset_at.endswith("Z")
     assert status.evaluator.last_run_at is not None

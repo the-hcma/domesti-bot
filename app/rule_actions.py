@@ -12,6 +12,7 @@ from kasa.exceptions import _ConnectionError
 
 from app.api.schemas import RuleDeviceActionOut, RuleOut, normalized_rule_notification_emails
 from app.api.ui_state import (
+    find_ep1_by_id,
     find_kasa_by_host,
     find_sonos_by_identifier,
     find_tailwind_by_identifier,
@@ -20,6 +21,7 @@ from app.api.ui_state import (
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
+from app.ep1_device_manager import Ep1DeviceManager
 from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
@@ -225,6 +227,31 @@ def after_state_for_action(
     if observed_after != before_state:
         return observed_after
     return expected
+
+
+def cached_ep1_is_occupied(state: DeviceManagersState, device_id: str) -> bool | None:
+    """Return cached occupancy for an EP1 sensor, or ``None`` when unknown/missing.
+
+    Returns early when the EP1 manager is not configured (before label resolve).
+    """
+    mgr = state.ep1_mgr
+    if mgr is None:
+        return None
+    try:
+        identifier = resolve_ep1_identifier_by_label(mgr, device_id)
+    except RuleActionDispatchError:
+        return None
+    if identifier is None:
+        return None
+    sensor = find_ep1_by_id(mgr, identifier)
+    if sensor is None:
+        return None
+    occupancy = sensor.occupancy_state
+    if occupancy == DeviceConditionState.OCCUPIED.value:
+        return True
+    if occupancy == DeviceConditionState.CLEAR.value:
+        return False
+    return None
 
 
 def cached_kasa_is_on(state: DeviceManagersState, device_id: str) -> bool | None:
@@ -455,6 +482,11 @@ def lookup_preferred_label(
         if identifier is None:
             return None
         match family_id:
+            case DeviceFamilyId.EP1:
+                if state.ep1_mgr is None:
+                    return None
+                sensor = find_ep1_by_id(state.ep1_mgr, identifier)
+                return None if sensor is None else sensor.preferred_label
             case DeviceFamilyId.KASA:
                 device = find_kasa_by_host(state.kasa_mgr, identifier)
                 return None if device is None else device.preferred_label
@@ -492,6 +524,46 @@ def partition_device_actions_by_delay(
         else:
             immediate.append(action)
     return immediate, delayed
+
+
+def resolve_ep1_identifier_by_label(
+    mgr: Ep1DeviceManager | None,
+    device_id: str,
+) -> str | None:
+    """Resolve an EP1 label / MAC to its canonical identifier."""
+    if mgr is None:
+        return None
+    needle = device_id.strip()
+    if not needle:
+        return None
+    found = find_ep1_by_id(mgr, needle)
+    if found is not None:
+        return found.identifier
+    lower_needle = needle.lower()
+    matches: list[str] = []
+    try:
+        sensors = mgr.devices
+    except NotInitializedError:
+        return None
+    for sensor in sensors:
+        key = sensor.identifier or ""
+        if not key:
+            continue
+        candidates = {
+            key.lower(),
+            (sensor.mac_address or "").lower(),
+            sensor.preferred_label.lower(),
+        }
+        if lower_needle in candidates:
+            matches.append(key)
+    unique = sorted(set(matches))
+    if len(unique) == 1:
+        return unique[0]
+    if len(unique) > 1:
+        raise RuleActionDispatchError(
+            f"Ambiguous {DeviceFamilyId.EP1.display_name()} device {device_id!r}; matches: {', '.join(unique)}"
+        )
+    return None
 
 
 def resolve_kasa_host_by_label(mgr: KasaDeviceManager, device_id: str) -> str | None:
@@ -748,6 +820,8 @@ def _resolve_backend_identifier(
 ) -> str | None:
     """Resolve a rule device_id to the manager's canonical identifier."""
     match family_id:
+        case DeviceFamilyId.EP1:
+            return resolve_ep1_identifier_by_label(state.ep1_mgr, device_id)
         case DeviceFamilyId.KASA:
             return resolve_kasa_host_by_label(state.kasa_mgr, device_id)
         case DeviceFamilyId.SONOS:

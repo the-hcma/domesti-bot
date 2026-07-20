@@ -51,6 +51,7 @@ from app.device_enums import (
 )
 from app.home_location import try_resolve_home_location
 from app.rule_actions import (
+    cached_ep1_is_occupied,
     cached_kasa_is_on,
     cached_sonos_is_playing,
     cached_tailwind_is_open,
@@ -329,6 +330,17 @@ def _conditions_are_presence_only(
     )
 
 
+def _cached_device_is_occupied(
+    ctx: RuleEvaluationContext,
+    ref: RuleConditionDeviceRefOut,
+) -> bool | None:
+    if ctx.device_state is None:
+        return None
+    if ref.family_id != DeviceFamilyId.EP1:
+        return None
+    return cached_ep1_is_occupied(ctx.device_state, ref.device_id)
+
+
 def _cached_device_is_on(
     ctx: RuleEvaluationContext,
     ref: RuleConditionDeviceRefOut,
@@ -467,9 +479,13 @@ def _cached_device_matches_state(
             if is_open is None:
                 return None
             return not is_open
-        case DeviceConditionState.CLEAR | DeviceConditionState.OCCUPIED:
-            # EP1 occupancy cache is not wired yet (manager lands in a follow-on).
-            return None
+        case DeviceConditionState.OCCUPIED:
+            return _cached_device_is_occupied(ctx, ref)
+        case DeviceConditionState.CLEAR:
+            is_occupied = _cached_device_is_occupied(ctx, ref)
+            if is_occupied is None:
+                return None
+            return not is_occupied
 
 
 def _complementary_device_state_label(state: DeviceConditionState) -> str:

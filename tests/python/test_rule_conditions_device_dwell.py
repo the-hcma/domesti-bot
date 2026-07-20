@@ -16,10 +16,30 @@ from app.api.schemas import (
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
+from app.ep1_device_manager import Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, evaluate_rule
 from app.rule_validation import build_roster_user_id_lookup
+
+
+def test_devices_any_in_state_for_s_met_when_ep1_occupied_long_enough() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    since = now.timestamp() - 1300.0
+    mac = "02:00:00:00:00:20"
+    state = _ep1_state(_FakeEp1Sensor(mac, "Office EP1", occupied=True))
+    result = evaluate_rule(
+        _occupied_for_s_rule(device_id=mac),
+        _ctx(
+            now=now,
+            device_state=state,
+            device_bool_since={(DeviceFamilyId.EP1, mac): since},
+        ),
+    )
+    assert result.all_met is True
+    assert result.conditions[0].met is True
+    assert "Occupied:" in result.conditions[0].detail
+    assert "Office EP1" in result.conditions[0].detail
 
 
 def test_devices_any_in_state_for_s_met_when_open_long_enough() -> None:
@@ -90,6 +110,22 @@ _SETTINGS = SettingsLocationOut(
 _TZ = ZoneInfo("America/New_York")
 
 
+class _FakeEp1Sensor:
+    def __init__(self, identifier: str, label: str, *, occupied: bool | None) -> None:
+        self.identifier = identifier
+        self.mac_address = identifier
+        self.preferred_label = label
+        self._occupancy_bool = occupied
+
+    @property
+    def occupancy_state(self) -> str:
+        if self._occupancy_bool is True:
+            return DeviceConditionState.OCCUPIED.value
+        if self._occupancy_bool is False:
+            return DeviceConditionState.CLEAR.value
+        return "unknown"
+
+
 class _FakeTailwindDoor:
     def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
         self.identifier = identifier
@@ -119,6 +155,51 @@ def _ctx(
         user_locations={},
         device_state=device_state,
         device_bool_since=device_bool_since or {},
+    )
+
+
+def _ep1_state(*sensors: _FakeEp1Sensor) -> DeviceManagersState:
+    mgr = MagicMock(spec=Ep1DeviceManager)
+    mgr.devices = tuple(sensors)
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        ep1_mgr=mgr,
+        args=argparse.Namespace(),
+        cache_path=None,
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        vizio_mgr=None,
+    )
+
+
+def _occupied_for_s_rule(*, device_id: str, min_duration_s: int = 1200) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyInStateForSCondition(
+                    type="devices_any_in_state_for_s",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id=device_id,
+                            display_name="Office EP1",
+                            family_id=DeviceFamilyId.EP1,
+                        ),
+                    ],
+                    min_duration_s=min_duration_s,
+                    state=DeviceConditionState.OCCUPIED,
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="ep1-occupied-dwell",
+        label="EP1 occupied dwell",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.DWELL_SATISFIED],
     )
 
 

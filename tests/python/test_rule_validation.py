@@ -27,6 +27,7 @@ from app.rule_device_id import (
     RULE_DEVICE_ID_DISPLAY_NAME_WARNING,
 )
 from app.rule_validation import (
+    EP1_DEVICE_ACTIONS_UNSUPPORTED_DETAIL,
     RosterUserRow,
     RuleValidationContext,
     _device_action_issues,
@@ -903,6 +904,89 @@ def test_validate_rule_flags_androidtv_device_condition() -> None:
     details = " ".join(issue.detail for issue in issues)
     assert 'Unknown androidtv device "Living Room TV"' in details
     assert "cannot report state on" in details
+
+
+def test_validate_rule_flags_ep1_device_actions_as_read_only() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=60,
+        device_actions=[
+            RuleDeviceActionOut(
+                action=RuleDeviceActionType.TURN_ON,
+                device_id="02:00:00:00:00:20",
+                display_name="Office EP1",
+                family_id=DeviceFamilyId.EP1,
+            ),
+        ],
+        enabled=True,
+        id="ep1-action",
+        label="EP1 action",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.SCHEDULED],
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "unsupported_device_action"
+    assert issues[0].detail == EP1_DEVICE_ACTIONS_UNSUPPORTED_DETAIL
+
+
+def test_validate_rule_accepts_ep1_occupied_condition() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyInStateCondition(
+                    type="devices_any_in_state",
+                    state=DeviceConditionState.OCCUPIED,
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="02:00:00:00:00:20",
+                            display_name="Office EP1",
+                            family_id=DeviceFamilyId.EP1,
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="ep1-condition",
+        label="EP1 condition",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.SCHEDULED],
+        schedule_cron="*/15 * * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with (
+        patch(
+            "app.rule_validation.resolve_ep1_identifier_by_label",
+            return_value="02:00:00:00:00:20",
+        ),
+        patch(
+            "app.rule_validation.lookup_preferred_label",
+            return_value="Office EP1",
+        ),
+    ):
+        issues = validate_rule(rule, ctx)
+    assert issues == []
 
 
 def test_validate_rule_flags_unknown_sonos_device_condition() -> None:

@@ -604,7 +604,8 @@ export interface RuleReferenceIssueOut {
     | "stale_device_display_name"
     | "unknown_device"
     | "unknown_geofence"
-    | "unknown_user";
+    | "unknown_user"
+    | "unsupported_device_action";
   reference: string;
   detail: string;
 }

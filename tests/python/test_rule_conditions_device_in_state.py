@@ -21,6 +21,7 @@ from app.api.schemas import (
 from app.device_display import format_device_display
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
+from app.ep1_device_manager import Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, evaluate_rule
@@ -638,6 +639,80 @@ def test_devices_all_in_state_met_when_sonos_paused() -> None:
     assert "All paused" in result.conditions[0].detail
 
 
+def test_devices_any_in_state_met_when_ep1_clear() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    mac = "02:00:00:00:00:20"
+    state = _ep1_device_state(_FakeEp1Sensor(mac, "Office EP1", occupied=False))
+    result = evaluate_rule(
+        _device_state_rule(
+            DevicesAnyInStateCondition(
+                type="devices_any_in_state",
+                devices=[
+                    RuleConditionDeviceRefOut(
+                        device_id=mac,
+                        display_name="Office EP1",
+                        family_id=DeviceFamilyId.EP1,
+                    ),
+                ],
+                state=DeviceConditionState.CLEAR,
+            ),
+        ),
+        _ctx(now=now, device_state=state),
+    )
+    assert result.all_met is True
+    assert format_device_display(mac, "Office EP1") in result.conditions[0].detail
+    assert "Clear:" in result.conditions[0].detail
+
+
+def test_devices_any_in_state_met_when_ep1_occupied() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    mac = "02:00:00:00:00:20"
+    state = _ep1_device_state(_FakeEp1Sensor(mac, "Office EP1", occupied=True))
+    result = evaluate_rule(
+        _device_state_rule(
+            DevicesAnyInStateCondition(
+                type="devices_any_in_state",
+                devices=[
+                    RuleConditionDeviceRefOut(
+                        device_id=mac,
+                        display_name="Office EP1",
+                        family_id=DeviceFamilyId.EP1,
+                    ),
+                ],
+                state=DeviceConditionState.OCCUPIED,
+            ),
+        ),
+        _ctx(now=now, device_state=state),
+    )
+    assert result.all_met is True
+    assert format_device_display(mac, "Office EP1") in result.conditions[0].detail
+    assert "Occupied:" in result.conditions[0].detail
+
+
+def test_devices_any_in_state_unmet_when_ep1_occupied_looking_for_clear() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    mac = "02:00:00:00:00:20"
+    state = _ep1_device_state(_FakeEp1Sensor(mac, "Office EP1", occupied=True))
+    result = evaluate_rule(
+        _device_state_rule(
+            DevicesAnyInStateCondition(
+                type="devices_any_in_state",
+                devices=[
+                    RuleConditionDeviceRefOut(
+                        device_id=mac,
+                        display_name="Office EP1",
+                        family_id=DeviceFamilyId.EP1,
+                    ),
+                ],
+                state=DeviceConditionState.CLEAR,
+            ),
+        ),
+        _ctx(now=now, device_state=state),
+    )
+    assert result.all_met is False
+    assert "occupied" in result.conditions[0].detail
+
+
 def test_validate_rule_flags_unsupported_family_for_devices_all_in_state() -> None:
     rule = _device_state_rule(
         DevicesAllInStateCondition(
@@ -711,6 +786,22 @@ def test_validate_rule_flags_unsupported_family_for_devices_any_in_state() -> No
         ),
     )
     assert any("cannot report state open" in issue.detail for issue in issues)
+
+
+class _FakeEp1Sensor:
+    def __init__(self, identifier: str, label: str, *, occupied: bool | None) -> None:
+        self.identifier = identifier
+        self.mac_address = identifier
+        self.preferred_label = label
+        self._occupancy_bool = occupied
+
+    @property
+    def occupancy_state(self) -> str:
+        if self._occupancy_bool is True:
+            return DeviceConditionState.OCCUPIED.value
+        if self._occupancy_bool is False:
+            return DeviceConditionState.CLEAR.value
+        return "unknown"
 
 
 class _FakeKasaSwitch:
@@ -791,6 +882,21 @@ def _device_state_rule(
         notify_on_fire=False,
         triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="*/10 * * * *",
+    )
+
+
+def _ep1_device_state(*sensors: _FakeEp1Sensor) -> DeviceManagersState:
+    mgr = MagicMock(spec=Ep1DeviceManager)
+    mgr.devices = tuple(sensors)
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        ep1_mgr=mgr,
+        args=argparse.Namespace(),
+        cache_path=None,
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        vizio_mgr=None,
     )
 
 
