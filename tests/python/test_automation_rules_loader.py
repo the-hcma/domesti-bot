@@ -21,7 +21,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     bundle = load_automation_rules_bundle()
     assert bundle.version == 1
-    assert len(bundle.rules) == 11
+    assert len(bundle.rules) == 12
     assert bundle.rules[0].id == "evening-arrival-home-lights"
     lights_off = next(rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home")
     assert lights_off.triggers == ["scheduled"]
@@ -37,6 +37,13 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     assert occupied.type == "devices_any_in_state"
     assert occupied.state == "occupied"
     assert occupied.devices[0].family_id == "ep1"
+    ep1_hot = next(rule for rule in bundle.rules if rule.id == "office-ep1-hot-alert")
+    assert ep1_hot.enabled is False
+    hot = ep1_hot.conditions.all[0]
+    assert hot.type == "ep1_reading_compare"
+    assert hot.comparison == "above"
+    assert hot.metric == "temperature_c"
+    assert hot.threshold == 24.0
     power_cycle = next(rule for rule in bundle.rules if rule.id == "hdhomerun-nightly-power-cycle")
     assert power_cycle.enabled is False
     assert power_cycle.device_actions[1].delay_s == 60
@@ -61,6 +68,7 @@ def test_list_automation_rules_returns_all_rules(
         "kristen-west-point-arrive",
         "kristen-west-point-leave",
         "morning-master-bedroom-fan-off",
+        "office-ep1-hot-alert",
         "office-ep1-occupied-alert",
     }
 

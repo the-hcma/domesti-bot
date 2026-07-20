@@ -10,6 +10,7 @@ from app.api.schemas import (
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
+    Ep1ReadingCompareCondition,
     RuleConditionDeviceRefOut,
     RuleConditionOut,
     RuleDeviceActionOut,
@@ -551,6 +552,21 @@ def _iter_device_state_condition_checks(
     return found
 
 
+def _iter_ep1_reading_compare_device_refs(
+    conditions: list[RuleConditionOut],
+) -> list[RuleConditionDeviceRefOut]:
+    """Collect device refs from ``ep1_reading_compare`` conditions."""
+    found: list[RuleConditionDeviceRefOut] = []
+    for condition in conditions:
+        if isinstance(condition, Ep1ReadingCompareCondition):
+            found.append(condition.device)
+        elif isinstance(condition, AllConditionsCondition):
+            found.extend(_iter_ep1_reading_compare_device_refs(condition.conditions))
+        elif isinstance(condition, AnyConditionsCondition):
+            found.extend(_iter_ep1_reading_compare_device_refs(condition.conditions))
+    return found
+
+
 def _validate_device_condition_states(rule: RuleOut) -> list[RuleReferenceIssueOut]:
     """Flag family/state pairs that device state conditions cannot observe."""
     issues: list[RuleReferenceIssueOut] = []
@@ -590,6 +606,21 @@ def _validate_device_conditions(
                     context_label="conditions",
                 ),
             )
+    for ref in _iter_ep1_reading_compare_device_refs(rule.conditions.all):
+        stored = (ref.display_name or "").strip()
+        key = (ref.family_id, ref.device_id.strip(), stored)
+        if key in seen:
+            continue
+        seen.add(key)
+        issues.extend(
+            _device_reference_issues(
+                ctx,
+                family_id=ref.family_id,
+                device_id=ref.device_id,
+                display_name=ref.display_name,
+                context_label="conditions",
+            ),
+        )
     issues.extend(_validate_device_condition_states(rule))
     return issues
 
@@ -604,6 +635,9 @@ def _walk_device_refs(
     ):
         for ref in condition.devices:
             refs.add((ref.family_id, ref.device_id))
+        return
+    if isinstance(condition, Ep1ReadingCompareCondition):
+        refs.add((condition.device.family_id, condition.device.device_id))
         return
     if isinstance(condition, AllConditionsCondition):
         for child in condition.conditions:

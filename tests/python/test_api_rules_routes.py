@@ -84,6 +84,7 @@ def test_get_rules_from_file_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
         "kristen-west-point-arrive",
         "kristen-west-point-leave",
         "morning-master-bedroom-fan-off",
+        "office-ep1-hot-alert",
         "office-ep1-occupied-alert",
     }
     assert ids == expected_ids

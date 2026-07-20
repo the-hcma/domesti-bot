@@ -301,6 +301,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case "devices_all_in_state":
     case "devices_any_in_state":
     case "devices_any_in_state_for_s":
+    case "ep1_reading_compare":
       return null;
     case "all":
     case "any":
@@ -363,6 +364,31 @@ export function formatDeviceStateCondition(
   }
   const need = formatDwellDuration(condition.min_duration_s);
   return `Any of ${joined} ${condition.state} for ${need}+`;
+}
+
+export function formatEp1ReadingCompareCondition(
+  condition: Extract<RuleConditionOut, { type: "ep1_reading_compare" }>,
+  context: RuleSummaryContext,
+): string {
+  const label = resolveDeviceLabel(
+    condition.device.family_id,
+    condition.device.device_id,
+    context,
+    condition.device.display_name,
+  );
+  const metricLabel =
+    condition.metric === "temperature_c"
+      ? "temperature"
+      : condition.metric === "humidity_pct"
+        ? "humidity"
+        : "illuminance";
+  const unit =
+    condition.metric === "temperature_c"
+      ? "°C"
+      : condition.metric === "humidity_pct"
+        ? "%"
+        : "lx";
+  return `${label} ${metricLabel} ${condition.comparison} ${String(condition.threshold)}${unit}`;
 }
 
 export function formatDeviceActionPhrase(
@@ -430,6 +456,10 @@ export function summarizeRule(
       || condition.type === "devices_any_in_state_for_s"
     ) {
       devices.push(formatDeviceStateCondition(condition, context));
+      return;
+    }
+    if (condition.type === "ep1_reading_compare") {
+      devices.push(formatEp1ReadingCompareCondition(condition, context));
       return;
     }
     const timingLine = formatTimingCondition(condition);

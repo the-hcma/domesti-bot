@@ -341,6 +341,13 @@ export type RuleConditionOut =
       devices: RuleConditionDeviceRefOut[];
       min_duration_s: number;
       state: DeviceConditionState;
+    }
+  | {
+      type: "ep1_reading_compare";
+      comparison: "above" | "below";
+      device: RuleConditionDeviceRefOut;
+      metric: "humidity_pct" | "illuminance_lx" | "temperature_c";
+      threshold: number;
     };
 
 export interface RuleConditionDeviceRefOut {

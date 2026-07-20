@@ -26,6 +26,7 @@ from app.api.schemas import (
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
+    Ep1ReadingCompareCondition,
     GeofenceOut,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
@@ -46,12 +47,14 @@ from app.device_display import format_device_display
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
+    Ep1ReadingComparison,
     RuleEvaluationCause,
     RuleTrigger,
 )
 from app.home_location import try_resolve_home_location
 from app.rule_actions import (
     cached_ep1_is_occupied,
+    cached_ep1_reading,
     cached_kasa_is_on,
     cached_sonos_is_playing,
     cached_tailwind_is_open,
@@ -774,6 +777,8 @@ def _evaluate_condition(
         return _evaluate_devices_any_in_state(condition, rule, ctx)
     if isinstance(condition, DevicesAnyInStateForSCondition):
         return _evaluate_devices_any_in_state_for_s(condition, rule, ctx)
+    if isinstance(condition, Ep1ReadingCompareCondition):
+        return _evaluate_ep1_reading_compare(condition, rule, ctx)
     if isinstance(condition, LocalTimeWindowCondition):
         return _evaluate_local_time_window(condition, rule, ctx)
     if isinstance(condition, UsersInsideGeofenceCondition):
@@ -1011,6 +1016,64 @@ def _evaluate_devices_in_state(
     else:
         met = False
         detail = f"Not found: {', '.join(missing_labels)}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=label,
+        met=met,
+    )
+
+
+def _evaluate_ep1_reading_compare(
+    condition: Ep1ReadingCompareCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    del rule  # unused; signature matches sibling evaluators
+    metric = condition.metric
+    unit = metric.unit_label()
+    threshold_label = _format_ep1_reading_value(condition.threshold, unit)
+    label = f"{metric.display_label().capitalize()} {condition.comparison.value} {threshold_label}"
+    device_label = _device_condition_display_label(ctx, condition.device)
+    if ctx.device_state is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="discovery not ready",
+            label=label,
+            met=False,
+        )
+    observed = cached_ep1_reading(
+        ctx.device_state,
+        condition.device.device_id,
+        metric,
+    )
+    if observed is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=f"{device_label}: {metric.display_label()} reading unavailable",
+            label=label,
+            met=False,
+        )
+    observed_label = _format_ep1_reading_value(observed, unit)
+    match condition.comparison:
+        case Ep1ReadingComparison.ABOVE:
+            met = observed > condition.threshold
+        case Ep1ReadingComparison.BELOW:
+            met = observed < condition.threshold
+        case _:
+            raise ValueError(
+                f"Expected Ep1ReadingComparison member, got {condition.comparison!r}",
+            )
+    if met:
+        detail = (
+            f"{device_label}: {metric.display_label()} {observed_label} "
+            f"is {condition.comparison.value} {threshold_label}"
+        )
+    else:
+        detail = (
+            f"{device_label}: {metric.display_label()} {observed_label} "
+            f"is not {condition.comparison.value} {threshold_label}"
+        )
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
@@ -1561,6 +1624,13 @@ def _format_dwell_elapsed_s(elapsed_s: float) -> str:
 
 def _format_dwell_need_s(min_inside_s: int) -> str:
     return _format_dwell_duration_s(min_inside_s)
+
+
+def _format_ep1_reading_value(value: float, unit: str) -> str:
+    """Format an EP1 metric for Status details (value + unit, no trailing .0 noise)."""
+    if value.is_integer():
+        return f"{int(value)}{unit}"
+    return f"{value:.1f}{unit}"
 
 
 def _format_hhmm_display(hhmm: str) -> str:
