@@ -852,13 +852,16 @@ class RuleEvaluator:
         if runtime is not None and runtime.next_evaluate_at is not None:
             return runtime.next_evaluate_at
         if uses_astronomical_repeat_schedule(rule):
-            return next_astronomical_repeat_evaluate_at(
-                rule,
-                settings=settings,
-                timezone=timezone,
-                now=now,
-                due_if_inside_window=True,
-            )
+            try:
+                return next_astronomical_repeat_evaluate_at(
+                    rule,
+                    settings=settings,
+                    timezone=timezone,
+                    now=now,
+                    due_if_inside_window=True,
+                )
+            except ValueError:
+                return None
         return next_scheduled_evaluate_at(
             cron_expr,
             now,
