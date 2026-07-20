@@ -1397,6 +1397,7 @@ class RuleReferenceIssueOut(BaseModel):
         "unknown_device",
         "unknown_geofence",
         "unknown_user",
+        "unsupported_device_action",
     ]
     reference: str
 

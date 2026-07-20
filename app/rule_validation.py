@@ -27,6 +27,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.rule_actions import (
     RuleActionDispatchError,
     lookup_preferred_label,
+    resolve_ep1_identifier_by_label,
     resolve_kasa_host_by_label,
     resolve_sonos_identifier_by_label,
     resolve_tailwind_identifier_by_label,
@@ -36,6 +37,10 @@ from app.rule_device_id import (
     is_canonical_rule_device_id,
     non_canonical_device_id_detail,
     stale_device_display_name_detail,
+)
+
+EP1_DEVICE_ACTIONS_UNSUPPORTED_DETAIL = (
+    "Everything Presence One devices are read-only in automations (occupancy conditions only; no device actions)."
 )
 
 
@@ -134,11 +139,14 @@ def resolve_device_ref_to_backend_id(
     device_ref: str,
 ) -> str | None:
     """Resolve a rule device label/id to the watcher backend identifier."""
-    return _resolve_device_ref_to_identifier(
-        state,
-        family_id=family_id,
-        device_ref=device_ref,
-    )
+    try:
+        return _resolve_device_ref_to_identifier(
+            state,
+            family_id=family_id,
+            device_ref=device_ref,
+        )
+    except RuleActionDispatchError:
+        return None
 
 
 def resolve_roster_user_id(
@@ -188,6 +196,14 @@ def _device_action_issues(
     ctx: RuleValidationContext,
     action: RuleDeviceActionOut,
 ) -> list[RuleReferenceIssueOut]:
+    if action.family_id == DeviceFamilyId.EP1:
+        return [
+            RuleReferenceIssueOut(
+                detail=EP1_DEVICE_ACTIONS_UNSUPPORTED_DETAIL,
+                kind="unsupported_device_action",
+                reference=action.device_id.strip(),
+            ),
+        ]
     return _device_reference_issues(
         ctx,
         family_id=action.family_id,
@@ -278,11 +294,14 @@ def _backend_device_id_matches_rule_ref(
     trimmed_ref = rule_device_ref.strip()
     if trimmed_ref == trimmed_backend:
         return True
-    resolved = _resolve_device_ref_to_identifier(
-        state,
-        family_id=family_id,
-        device_ref=trimmed_ref,
-    )
+    try:
+        resolved = _resolve_device_ref_to_identifier(
+            state,
+            family_id=family_id,
+            device_ref=trimmed_ref,
+        )
+    except RuleActionDispatchError:
+        return False
     return resolved is not None and resolved == trimmed_backend
 
 
@@ -307,6 +326,8 @@ def _device_reference_resolves(
     if state is None:
         return False
     match family_id:
+        case DeviceFamilyId.EP1:
+            return resolve_ep1_identifier_by_label(state.ep1_mgr, device_id) is not None
         case DeviceFamilyId.KASA:
             return resolve_kasa_host_by_label(state.kasa_mgr, device_id) is not None
         case DeviceFamilyId.SONOS:
@@ -344,6 +365,8 @@ def _resolve_device_ref_to_identifier(
     device_ref: str,
 ) -> str | None:
     match family_id:
+        case DeviceFamilyId.EP1:
+            return resolve_ep1_identifier_by_label(state.ep1_mgr, device_ref)
         case DeviceFamilyId.KASA:
             return resolve_kasa_host_by_label(state.kasa_mgr, device_ref)
         case DeviceFamilyId.SONOS:

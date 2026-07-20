@@ -845,6 +845,28 @@ async def bulk_pause_sonos_apply(
     return await _bulk_pause_sonos_apply_impl(state.sonos_mgr, excluded=set())
 
 
+def find_ep1_by_id(mgr: Ep1DeviceManager, device_id: str) -> Ep1Device | None:
+    """Look up an EP1 sensor by MAC / ``identifier``."""
+
+    needle = device_id.strip()
+    if not needle:
+        return None
+    try:
+        sensors = mgr.devices
+    except NotInitializedError:
+        return None
+    lower = needle.lower()
+    for device in sensors:
+        candidates = {
+            (device.identifier or "").lower(),
+            (device.mac_address or "").lower(),
+            device.preferred_label.lower(),
+        }
+        if lower in candidates:
+            return device
+    return None
+
+
 def find_kasa_by_host(mgr: KasaDeviceManager, host: str) -> KasaDevice | None:
     """Look up a kasa device by MAC, host, or other lookup key.
 

@@ -17,8 +17,9 @@
     "Rule 5 (away-garage-open-alert) uses dwell_satisfied: when both have been outside house 20+ min and a watched garage door has been open 20+ min, email operator@example.com and resident@example.com (once per away episode).",
     "Rule 6 (morning-master-bedroom-fan-off) runs daily at 7:30am: when Master Bedroom fan is on, turn it off and email operator@example.com.",
     "Rule 7 (daylight-master-bedroom-fan-on-alert) uses device_state trigger only: during astronomical daylight (sunrise to sunset), email operator@example.com when Master Bedroom fan turns on.",
+    "Rule 8 (office-ep1-occupied-alert, enabled false in the example) shows an EP1 occupancy condition: when the office sensor reports occupied, email operator@example.com. EP1 is read-only — no device_actions for this family.",
     "Optional device_actions.delay_s (int seconds, 0\u201386400): omit or 0 = run on rule fire; >0 schedules that action for fire_time + delay_s. Pending delayed actions are persisted in SQLite (rule_deferred_device_actions) and reloaded on startup, so a follow-up still runs after a process restart during the delay window; they are cancelled if the rule is deleted or disabled before the delay elapses. When notify_on_fire is set and any delay_s > 0 actions are enqueued, the fire email is deferred until every delayed step for that fire finishes (or the remaining steps are cancelled); the email includes a timeline of each step with home-timezone timestamps (settings_location.timezone, including the zone abbreviation such as EDT). Pending deferred emails are stored in rule_pending_fire_notifications. cooldown / fire_once_per_local_day still apply to the rule fire, not each delayed step.",
-    "Rule 8 (hdhomerun-nightly-power-cycle, enabled false in the example) shows a sequenced Kasa power cycle: turn_off at 4am cron, then turn_on after delay_s=60. With notify_on_fire true, the operator email waits until the turn_on completes and lists both steps in the timeline."
+    "Rule 9 (hdhomerun-nightly-power-cycle, enabled false in the example) shows a sequenced Kasa power cycle: turn_off at 4am cron, then turn_on after delay_s=60. With notify_on_fire true, the operator email waits until the turn_on completes and lists both steps in the timeline."
   ],
   "settings_location": {
     "lat": 41.194072,
@@ -534,6 +535,36 @@
                 "family_id": "kasa",
                 "device_id": "02:00:00:00:00:08",
                 "display_name": "Master bedroom fan"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": []
+    },
+    {
+      "id": "office-ep1-occupied-alert",
+      "label": "Office occupied \u2014 notify (EP1 example)",
+      "enabled": false,
+      "triggers": [
+        "device_state"
+      ],
+      "cooldown_s": 300,
+      "min_location_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_emails": [
+        "operator@example.com"
+      ],
+      "conditions": {
+        "all": [
+          {
+            "type": "devices_any_in_state",
+            "state": "occupied",
+            "devices": [
+              {
+                "family_id": "ep1",
+                "device_id": "02:00:00:00:00:20",
+                "display_name": "Office EP1"
               }
             ]
           }
