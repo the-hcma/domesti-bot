@@ -442,6 +442,7 @@ def create_app(args: Any) -> FastAPI:
             state.sonos_mgr,
             state.tailwind_mgr,
             state.androidtv_mgr,
+            state.ep1_mgr,
             state.vizio_mgr,
             cache_path=state.cache_path,
             androidtv_zeroconf_timeout=float(state.args.androidtv_zeroconf_timeout),

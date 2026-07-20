@@ -226,6 +226,7 @@ def _eligibility_fixture(
         sonos_mgr=None,
         tailwind_mgr=None,
         androidtv_mgr=None,
+        ep1_mgr=None,
         vizio_mgr=None,
         cache_path=db,
         args=argparse.Namespace(),

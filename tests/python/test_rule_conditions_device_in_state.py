@@ -800,6 +800,7 @@ def _kasa_device_state(*switches: _FakeKasaSwitch) -> DeviceManagersState:
     mgr.get_device_by_alias.return_value = None
     return DeviceManagersState(
         androidtv_mgr=None,
+        ep1_mgr=None,
         args=argparse.Namespace(),
         cache_path=None,
         kasa_mgr=mgr,
@@ -814,6 +815,7 @@ def _sonos_device_state(*zones: _FakeSonosZone) -> DeviceManagersState:
     mgr.players = tuple(zones)
     return DeviceManagersState(
         androidtv_mgr=None,
+        ep1_mgr=None,
         args=argparse.Namespace(),
         cache_path=None,
         kasa_mgr=MagicMock(spec=KasaDeviceManager),
@@ -828,6 +830,7 @@ def _tailwind_device_state(*doors: _FakeTailwindDoor) -> DeviceManagersState:
     mgr.doors = tuple(doors)
     return DeviceManagersState(
         androidtv_mgr=None,
+        ep1_mgr=None,
         args=argparse.Namespace(),
         cache_path=None,
         kasa_mgr=MagicMock(spec=KasaDeviceManager),

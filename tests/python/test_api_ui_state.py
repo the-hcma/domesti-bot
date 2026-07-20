@@ -164,6 +164,7 @@ def _state(
         sonos_mgr=sonos_mgr,
         tailwind_mgr=tailwind_mgr,
         androidtv_mgr=None,
+        ep1_mgr=None,
         vizio_mgr=vizio_mgr,
         cache_path=cache_path,
         args=argparse.Namespace(),

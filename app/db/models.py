@@ -49,6 +49,18 @@ class DeviceDisplayName(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class Ep1KnownDevice(Base):
+    """Cached Everything Presence One (ESPHome) endpoints."""
+
+    __tablename__ = "ep1_known_devices"
+
+    host: Mapped[str] = mapped_column(String, primary_key=True)
+    port: Mapped[int] = mapped_column(Integer, nullable=False)
+    mac: Mapped[str | None] = mapped_column(String, nullable=True)
+    friendly_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class KasaDiscoveredDevice(Base):
     __tablename__ = "kasa_discovered_devices"
 

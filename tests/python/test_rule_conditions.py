@@ -203,6 +203,7 @@ def _kasa_device_state(*switches: _FakeKasaSwitch) -> DeviceManagersState:
     mgr.switches = tuple(switches)
     return DeviceManagersState(
         androidtv_mgr=None,
+        ep1_mgr=None,
         args=argparse.Namespace(),
         cache_path=None,
         kasa_mgr=mgr,
@@ -1351,6 +1352,7 @@ def _media_device_state(
     vizio_mgr.tvs = vizio_tvs
     return DeviceManagersState(
         androidtv_mgr=None,
+        ep1_mgr=None,
         args=argparse.Namespace(),
         cache_path=None,
         kasa_mgr=kasa_mgr,
@@ -1374,6 +1376,7 @@ def _tailwind_device_state(*doors: _FakeTailwindDoor) -> DeviceManagersState:
     mgr.doors = tuple(doors)
     return DeviceManagersState(
         androidtv_mgr=None,
+        ep1_mgr=None,
         args=argparse.Namespace(),
         cache_path=None,
         kasa_mgr=MagicMock(spec=KasaDeviceManager),

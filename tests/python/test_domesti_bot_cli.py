@@ -281,6 +281,7 @@ async def test_show_devices_lists_vizio_tvs() -> None:
             sonos_mgr=None,
             tailwind_mgr=None,
             androidtv_mgr=None,
+            ep1_mgr=None,
             vizio_mgr=vizio_mgr,
             theme=_Theme(enabled=False),
         )

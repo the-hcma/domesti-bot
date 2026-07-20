@@ -157,6 +157,7 @@ def test_put_vizio_auth_hot_reloads_manager(monkeypatch: pytest.MonkeyPatch, tmp
             sonos_mgr=None,
             tailwind_mgr=None,
             androidtv_mgr=None,
+            ep1_mgr=None,
             vizio_mgr=None,
             cache_path=db,
             args=args,
