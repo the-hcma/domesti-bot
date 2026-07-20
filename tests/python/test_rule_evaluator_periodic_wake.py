@@ -164,3 +164,46 @@ def test_earliest_scheduled_evaluate_at_seeds_missing_runtime(
     assert earliest is not None
     assert earliest >= now
     assert runtime.next_evaluate_at == earliest
+
+
+def test_peek_earliest_scheduled_evaluate_at_does_not_seed_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock, evaluator = _evaluator_for_rules(
+        tmp_path,
+        monkeypatch,
+        _scheduled_rule(rule_id="scheduled-inside"),
+    )
+    del evaluator._rule_state["scheduled-inside"]
+    now = clock["now"]
+
+    earliest = evaluator._peek_earliest_scheduled_evaluate_at(now)
+
+    assert earliest is not None
+    assert earliest >= now
+    assert "scheduled-inside" not in evaluator._rule_state
+
+
+@pytest.mark.asyncio
+async def test_periodic_wake_delay_advances_after_past_due_evaluate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock, evaluator = _evaluator_for_rules(
+        tmp_path,
+        monkeypatch,
+        _scheduled_rule(rule_id="scheduled-inside"),
+    )
+    now = clock["now"]
+    runtime = evaluator._rule_state["scheduled-inside"]
+    runtime.next_evaluate_at = now - 5.0
+
+    assert evaluator._periodic_wake_delay_s(now) == _RULE_EVALUATOR_MIN_SLEEP_S
+
+    await evaluator._evaluate_scheduled_rules()
+
+    assert runtime.next_evaluate_at is not None
+    assert runtime.next_evaluate_at > now
+    after_delay = evaluator._periodic_wake_delay_s(now)
+    assert after_delay > _RULE_EVALUATOR_MIN_SLEEP_S

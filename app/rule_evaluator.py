@@ -802,28 +802,79 @@ class RuleEvaluator:
     ) -> float | None:
         if runtime.next_evaluate_at is not None:
             return runtime.next_evaluate_at
+        runtime.next_evaluate_at = self._peek_runtime_next_evaluate_at(
+            rule,
+            runtime,
+            cron_expr=cron_expr,
+            now=now,
+            settings=settings,
+            timezone=timezone,
+        )
+        return runtime.next_evaluate_at
+
+    def _peek_earliest_scheduled_evaluate_at(self, now_epoch: float) -> float | None:
+        """Read-only earliest due time for sleep scheduling (no ``_rule_state`` writes)."""
+        settings = load_settings_location()
+        timezone = ZoneInfo(settings.timezone)
+        now = datetime.fromtimestamp(now_epoch, tz=timezone)
+        earliest: float | None = None
+        for rule in list_automation_rules():
+            if not rule.enabled or not _rule_uses_scheduled_evaluation_tick(rule):
+                continue
+            cron_expr = self._resolve_schedule_cron(rule, timezone=timezone)
+            if cron_expr == "":
+                continue
+            runtime = self._rule_state.get(rule.id)
+            next_at = self._peek_runtime_next_evaluate_at(
+                rule,
+                runtime,
+                cron_expr=cron_expr,
+                now=now,
+                settings=settings,
+                timezone=timezone,
+            )
+            if next_at is None:
+                continue
+            if earliest is None or next_at < earliest:
+                earliest = next_at
+        return earliest
+
+    def _peek_runtime_next_evaluate_at(
+        self,
+        rule: RuleOut,
+        runtime: _RuleRuntimeState | None,
+        *,
+        cron_expr: str,
+        now: datetime,
+        settings: SettingsLocationOut,
+        timezone: ZoneInfo,
+    ) -> float | None:
+        if runtime is not None and runtime.next_evaluate_at is not None:
+            return runtime.next_evaluate_at
         if uses_astronomical_repeat_schedule(rule):
-            runtime.next_evaluate_at = next_astronomical_repeat_evaluate_at(
+            return next_astronomical_repeat_evaluate_at(
                 rule,
                 settings=settings,
                 timezone=timezone,
                 now=now,
                 due_if_inside_window=True,
             )
-        else:
-            runtime.next_evaluate_at = next_scheduled_evaluate_at(
-                cron_expr,
-                now,
-                timezone,
-                due_if_matching=True,
-            )
-        return runtime.next_evaluate_at
+        return next_scheduled_evaluate_at(
+            cron_expr,
+            now,
+            timezone,
+            due_if_matching=True,
+        )
 
     def _periodic_wake_delay_s(self, now: float) -> float:
         wake_at = now + _RULE_EVALUATOR_MAX_IDLE_S
-        earliest = self._earliest_scheduled_evaluate_at(now)
-        if earliest is not None and earliest < wake_at:
-            wake_at = earliest
+        earliest = self._peek_earliest_scheduled_evaluate_at(now)
+        if earliest is not None:
+            if earliest <= now:
+                # Due now; wake promptly so the locked tick can evaluate and advance.
+                return _RULE_EVALUATOR_MIN_SLEEP_S
+            if earliest < wake_at:
+                wake_at = earliest
         return max(_RULE_EVALUATOR_MIN_SLEEP_S, wake_at - now)
 
     async def _evaluate_scheduled_rules(self) -> None:
@@ -1420,11 +1471,12 @@ class RuleEvaluator:
 
     async def _periodic_loop(self) -> None:
         while not self._stop.is_set():
-            now = self._now_fn()
+            async with self._process_lock:
+                delay = self._periodic_wake_delay_s(self._now_fn())
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),
-                    timeout=self._periodic_wake_delay_s(now),
+                    timeout=delay,
                 )
                 break
             except TimeoutError:
