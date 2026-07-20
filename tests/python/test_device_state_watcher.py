@@ -31,6 +31,7 @@ from app.device_manager import NotInitializedError
 from app.device_state_watcher import (
     DEFAULT_POLL_INTERVAL_S,
     DeviceStateWatcher,
+    Ep1SubscriptionWatcher,
     KasaPollingWatcher,
     SonosPollingWatcher,
     TailwindPollingWatcher,
@@ -41,10 +42,26 @@ from app.device_state_watcher import (
     run_device_state_watchers,
 )
 from app.domesti_bot_cli import DeviceManagersState
+from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
+
+
+def _fake_ep1_mgr(identifiers: list[str]) -> Ep1DeviceManager:
+    """Build a Mock EP1 manager whose ``devices`` exposes occupancy sensors."""
+
+    devices = []
+    for ident in identifiers:
+        device = MagicMock(spec=Ep1Device)
+        device.identifier = ident
+        device.occupancy_state = "unknown"
+        devices.append(device)
+    mgr = MagicMock(spec=Ep1DeviceManager)
+    mgr.devices = tuple(devices)
+    mgr.run_subscription_session = AsyncMock()
+    return cast(Ep1DeviceManager, mgr)
 
 
 def _fake_kasa_mgr(identifiers: list[str]) -> KasaDeviceManager:
@@ -384,10 +401,73 @@ async def test_vizio_watcher_polls_devices_concurrently() -> None:
     await asyncio.wait_for(task, timeout=1.0)
 
 
+@pytest.mark.asyncio
+async def test_ep1_watcher_runs_subscription_per_device() -> None:
+    mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"])
+    session = cast(AsyncMock, mgr.run_subscription_session)
+
+    async def _hold(_device: object, *, stop: asyncio.Event, on_reading_updated: object = None) -> None:
+        del on_reading_updated
+        await stop.wait()
+
+    session.side_effect = _hold
+    watcher = Ep1SubscriptionWatcher(mgr, reconnect_delay_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await _wait_for_await_count(session, 2)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    seen = {c.args[0].identifier for c in session.await_args_list}
+    assert seen == {"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"}
+
+
+@pytest.mark.asyncio
+async def test_ep1_watcher_keeps_going_when_one_device_raises() -> None:
+    mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"])
+    session = cast(AsyncMock, mgr.run_subscription_session)
+    calls: list[str] = []
+
+    async def _session(device: object, *, stop: asyncio.Event, on_reading_updated: object = None) -> None:
+        del on_reading_updated
+        ident = cast(Ep1Device, device).identifier
+        calls.append(ident)
+        if ident.endswith("01") and calls.count(ident) == 1:
+            raise RuntimeError("ep1 boom")
+        await stop.wait()
+
+    session.side_effect = _session
+    watcher = Ep1SubscriptionWatcher(mgr, reconnect_delay_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    for _ in range(100):
+        if "aa:bb:cc:dd:ee:02" in calls and calls.count("aa:bb:cc:dd:ee:01") >= 2:
+            break
+        await asyncio.sleep(0.01)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    assert "aa:bb:cc:dd:ee:02" in calls
+    assert calls.count("aa:bb:cc:dd:ee:01") >= 2
+
+
+@pytest.mark.asyncio
+async def test_ep1_watcher_waits_when_manager_not_initialized() -> None:
+    mgr = MagicMock(spec=Ep1DeviceManager)
+    type(mgr).devices = PropertyMock(side_effect=NotInitializedError)
+    mgr.run_subscription_session = AsyncMock()
+    watcher = Ep1SubscriptionWatcher(mgr, reconnect_delay_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await asyncio.sleep(0.05)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    cast(AsyncMock, mgr.run_subscription_session).assert_not_awaited()
+
+
 def test_build_default_watchers_omits_optional_when_managers_are_none() -> None:
     kasa = _fake_kasa_mgr(["host-a"])
     state = MagicMock(spec=DeviceManagersState)
     state.kasa_mgr = kasa
+    state.ep1_mgr = None
     state.sonos_mgr = None
     state.tailwind_mgr = None
     state.vizio_mgr = None
@@ -401,17 +481,20 @@ def test_build_default_watchers_includes_every_configured_backend() -> None:
     kasa = _fake_kasa_mgr(["host-a"])
     sonos = _fake_sonos_mgr(["RINCON_A"])
     tailwind = _fake_tailwind_mgr(["door-1"])
+    ep1 = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01"])
     state = MagicMock(spec=DeviceManagersState)
     state.kasa_mgr = kasa
+    state.ep1_mgr = ep1
     state.sonos_mgr = sonos
     state.tailwind_mgr = tailwind
     state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
-    assert len(watchers) == 3
+    assert len(watchers) == 4
     assert isinstance(watchers[0], KasaPollingWatcher)
-    assert isinstance(watchers[1], SonosPollingWatcher)
-    assert isinstance(watchers[2], TailwindPollingWatcher)
+    assert isinstance(watchers[1], Ep1SubscriptionWatcher)
+    assert isinstance(watchers[2], SonosPollingWatcher)
+    assert isinstance(watchers[3], TailwindPollingWatcher)
 
 
 def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> None:
@@ -419,6 +502,7 @@ def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> N
     sonos = _fake_sonos_mgr(["RINCON_A"])
     state = MagicMock(spec=DeviceManagersState)
     state.kasa_mgr = kasa
+    state.ep1_mgr = None
     state.sonos_mgr = sonos
     state.tailwind_mgr = None
     state.vizio_mgr = None

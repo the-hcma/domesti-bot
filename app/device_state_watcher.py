@@ -10,16 +10,17 @@ switch, physical garage button, the vendor's own app, ...
 
 This module fixes that. Every supported backend ships a watcher that
 runs forever in the background and reconciles the cached state with the
-device's actual state. The default for all current backends is polling
-(no LAN device library we use exposes a webhook / event stream today);
-when a backend gains a push surface, swap in a subscription-based
-implementation of :class:`DeviceStateWatcher` and the lifespan keeps
-working unchanged.
+device's actual state. Most backends poll on a cadence; EP1 uses a
+push ``subscribe_states`` session (:class:`Ep1SubscriptionWatcher`) because
+aioesphomeapi exposes a native event stream. When another backend gains a
+push surface, swap in a subscription-based implementation of
+:class:`DeviceStateWatcher` the same way.
 
 Watchers run **one asyncio task per backend** (families in parallel).
-Within each family, every device in that sweep is refreshed **concurrently**
-via :func:`_refresh_all_devices_concurrently` so a slow zone or plug does
-not block the rest of the family.
+Within each **polling** family, every device in that sweep is refreshed
+**concurrently** via :func:`_refresh_all_devices_concurrently` so a slow
+zone or plug does not block the rest of the family. Subscription
+watchers instead run **one reconnect loop per device** in parallel.
 
 Lifecycle (see ``app.api.app``):
 
@@ -45,10 +46,11 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
 from typing import Any, Final
 
-from app.device_enums import DeviceFamilyId
+from app.device_enums import DeviceConditionState, DeviceFamilyId
 from app.device_manager import NotInitializedError
 from app.device_state_change import DeviceStateChangeDetector
 from app.domesti_bot_cli import DeviceManagersState
+from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
@@ -56,8 +58,8 @@ from app.vizio_device_manager import VizioDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
 
+_DEFAULT_EP1_RECONNECT_DELAY_S = 5.0
 _VIZIO_WATCHER_REFRESH_TIMEOUT_S = 5.0
-
 # Default cadence between two polls of the same backend. Generous on
 # purpose: LAN devices don't change state often, and the action handlers
 # already refresh on every user click, so the watcher's job is to catch
@@ -87,6 +89,92 @@ class DeviceStateWatcher(ABC):
     @abstractmethod
     async def run(self, *, stop: asyncio.Event) -> None:
         """Begin polling/subscribing. Returns when ``stop`` is set or cancelled."""
+
+
+class Ep1SubscriptionWatcher(DeviceStateWatcher):
+    """Keep EP1 occupancy + climate/light caches fresh via ``subscribe_states``.
+
+    One reconnect loop per discovered sensor runs in parallel. Session
+    failures are logged and retried after ``reconnect_delay_s`` so one
+    bad host never stops the others.
+    """
+
+    def __init__(
+        self,
+        mgr: Ep1DeviceManager,
+        *,
+        change_detector: DeviceStateChangeDetector | None = None,
+        reconnect_delay_s: float = _DEFAULT_EP1_RECONNECT_DELAY_S,
+    ) -> None:
+        self._change_detector = change_detector
+        self._mgr = mgr
+        self._reconnect_delay_s = float(reconnect_delay_s)
+
+    async def run(self, *, stop: asyncio.Event) -> None:
+        try:
+            devices = list(self._mgr.devices)
+        except NotInitializedError:
+            await stop.wait()
+            return
+        if not devices:
+            await stop.wait()
+            return
+
+        tasks = [
+            asyncio.create_task(
+                self._watch_device(device, stop=stop),
+                name=f"state-watcher-{DeviceFamilyId.EP1.value}-{device.identifier}",
+            )
+            for device in devices
+        ]
+        try:
+            await stop.wait()
+        finally:
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    async def _watch_device(self, device: Ep1Device, *, stop: asyncio.Event) -> None:
+        while not stop.is_set():
+            try:
+                await self._mgr.run_subscription_session(
+                    device,
+                    stop=stop,
+                    on_reading_updated=self._note_occupancy if self._change_detector else None,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _log_watcher_refresh_failure(
+                    backend=DeviceFamilyId.EP1.value,
+                    device_id=device.identifier,
+                    exc=exc,
+                )
+            if stop.is_set():
+                return
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=self._reconnect_delay_s)
+            except TimeoutError:
+                pass
+
+    def _note_occupancy(self, device: Ep1Device) -> None:
+        if self._change_detector is None:
+            return
+        state = device.occupancy_state
+        occupied: bool | None
+        if state == DeviceConditionState.OCCUPIED.value:
+            occupied = True
+        elif state == DeviceConditionState.CLEAR.value:
+            occupied = False
+        else:
+            occupied = None
+        self._change_detector.note_bool_state(
+            DeviceFamilyId.EP1,
+            device.identifier,
+            occupied,
+        )
 
 
 class KasaPollingWatcher(DeviceStateWatcher):
@@ -424,6 +512,13 @@ def build_default_watchers(
             interval_s=interval_s,
         ),
     ]
+    if state.ep1_mgr is not None:
+        watchers.append(
+            Ep1SubscriptionWatcher(
+                state.ep1_mgr,
+                change_detector=change_detector,
+            )
+        )
     if state.sonos_mgr is not None:
         watchers.append(
             SonosPollingWatcher(
