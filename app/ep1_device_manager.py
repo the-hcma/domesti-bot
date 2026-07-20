@@ -2,12 +2,14 @@
 
 Cache-first host reconnect; occupancy + climate/light readings from a short
 ``subscribe_states`` dump during :meth:`Ep1DeviceManager.fetch`. Long-lived
-subscriptions belong in the event watcher follow-on (#522).
+subscriptions are owned by :class:`~app.device_state_watcher.Ep1SubscriptionWatcher`
+via :meth:`Ep1DeviceManager.run_subscription_session`.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Callable, Sequence
@@ -193,13 +195,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
     async def fetch(self) -> None:
         if self._fetched:
             raise AlreadyInitializedError("Ep1DeviceManager.fetch() already completed")
-        if self._noise_psk is not None:
-            psk = self._noise_psk
-        else:
-            psk, _source = resolve_ep1_noise_psk(
-                cli_psk=self._cli_noise_psk,
-                cache_path=self._discovery_cache_path,
-            )
+        psk = self._resolved_noise_psk()
         targets = self._initial_targets()
         if not targets:
             self._fetched = True
@@ -241,17 +237,11 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             self._last_discovery_source = None
 
     async def refresh_device_readings(self, identifier: str) -> None:
-        """Re-read one device (for future watcher / Settings test paths)."""
+        """Re-read one device (for Settings test / one-shot paths)."""
         device = self._devices.get(identifier)
         if device is None:
             raise KeyError(identifier)
-        if self._noise_psk is not None:
-            psk = self._noise_psk
-        else:
-            psk, _source = resolve_ep1_noise_psk(
-                cli_psk=self._cli_noise_psk,
-                cache_path=self._discovery_cache_path,
-            )
+        psk = self._resolved_noise_psk()
         if not psk:
             raise RuntimeError("Expected a Noise PSK for EP1 refresh, got none")
         updated = await self._connect_and_read(
@@ -262,6 +252,68 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if updated is None:
             raise RuntimeError(f"EP1 refresh failed for {identifier}")
         self._devices[identifier] = updated
+
+    async def run_subscription_session(
+        self,
+        device: Ep1Device,
+        *,
+        stop: asyncio.Event,
+        on_reading_updated: Callable[[Ep1Device], None] | None = None,
+    ) -> None:
+        """Connect, ``subscribe_states``, and wait until ``stop`` or disconnect.
+
+        One session only — callers (the subscription watcher) own reconnect
+        backoff between sessions. Never blocks the event loop on LAN I/O
+        beyond awaited aioesphomeapi coroutines.
+        """
+
+        psk = self._resolved_noise_psk()
+        if not psk:
+            raise RuntimeError("Expected a Noise PSK for EP1 subscription, got none")
+
+        disconnected = asyncio.Event()
+
+        async def _on_stop(_expected_disconnect: bool) -> None:
+            disconnected.set()
+
+        client = self._api_client_factory(
+            device.host,
+            device.port,
+            password=None,
+            noise_psk=psk,
+            client_info="domesti-bot",
+        )
+        self._clients.append(client)
+        try:
+            await client.connect(on_stop=_on_stop, login=True)
+            entities, _services = await client.list_entities_services()
+            key_to_role = _entity_key_to_role(entities)
+
+            def _on_state(state: EntityState) -> None:
+                _apply_entity_state_to_device(
+                    device,
+                    state,
+                    key_to_role=key_to_role,
+                )
+                if on_reading_updated is not None:
+                    on_reading_updated(device)
+
+            client.subscribe_states(_on_state)
+            stop_task = asyncio.create_task(stop.wait())
+            disc_task = asyncio.create_task(disconnected.wait())
+            try:
+                done, _pending = await asyncio.wait(
+                    {stop_task, disc_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                del done
+            finally:
+                for task in (stop_task, disc_task):
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+        finally:
+            await self._discard_client(client)
 
     def _cache_targets(self) -> list[tuple[str, int]]:
         if self._discovery_cache_path is None:
@@ -306,6 +358,8 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         port: int,
         noise_psk: str,
     ) -> Ep1Device | None:
+        """One-shot connect + state dump; always disconnects before returning."""
+
         client = self._api_client_factory(
             host,
             port,
@@ -314,7 +368,6 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             client_info="domesti-bot",
         )
         self._clients.append(client)
-        keep_client = False
         try:
             await client.connect(login=True)
             info = await client.device_info()
@@ -343,11 +396,9 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 humidity_pct=_float_from_sensor_state(states.get("humidity")),
                 illuminance_lx=_float_from_sensor_state(states.get("illuminance")),
             )
-            keep_client = True
             return device
         finally:
-            if not keep_client:
-                await self._discard_client(client)
+            await self._discard_client(client)
 
     async def _discard_client(self, client: APIClient) -> None:
         if client in self._clients:
@@ -370,6 +421,40 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if cached:
             return cached
         return list(self._configured_hosts)
+
+    def _resolved_noise_psk(self) -> str:
+        if self._noise_psk is not None:
+            return self._noise_psk
+        psk, _source = resolve_ep1_noise_psk(
+            cli_psk=self._cli_noise_psk,
+            cache_path=self._discovery_cache_path,
+        )
+        return psk
+
+
+def _apply_entity_state_to_device(
+    device: Ep1Device,
+    state: EntityState,
+    *,
+    key_to_role: dict[int, str],
+) -> None:
+    role = key_to_role.get(state.key)
+    if role is None:
+        return
+    if role == "occupancy":
+        occupancy = _occupancy_from_state(state)
+        if occupancy is not None:
+            device.apply_entity_state(occupancy=occupancy)
+        return
+    value = _float_from_sensor_state(state)
+    if value is None:
+        return
+    if role == "temperature":
+        device.apply_entity_state(temperature_c=value)
+    elif role == "humidity":
+        device.apply_entity_state(humidity_pct=value)
+    elif role == "illuminance":
+        device.apply_entity_state(illuminance_lx=value)
 
 
 def _entity_key_to_role(entities: Sequence[EntityInfo]) -> dict[int, str]:
