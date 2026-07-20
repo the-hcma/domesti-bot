@@ -147,7 +147,8 @@ _GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
 _DEFERRED_DEVICE_ACTION_DISCOVERY_RETRY_S = 5.0
 _MAX_DEVICE_ACTION_DELAY_S = 86_400  # document; schema enforces
 _MIN_GEOFENCE_OUTSIDE_DWELL_S = 300.0
-_RULE_EVALUATOR_TICK_S = 60.0
+_RULE_EVALUATOR_MAX_IDLE_S = 60.0
+_RULE_EVALUATOR_MIN_SLEEP_S = 0.25
 DeferredGeofenceEvent = Literal["entered", "left"]
 RuleFireSource = Literal[
     "deferred",
@@ -763,6 +764,68 @@ class RuleEvaluator:
         self._geofence_presence_episode[key] = episode
         return episode
 
+    def _earliest_scheduled_evaluate_at(self, now_epoch: float) -> float | None:
+        settings = load_settings_location()
+        timezone = ZoneInfo(settings.timezone)
+        now = datetime.fromtimestamp(now_epoch, tz=timezone)
+        earliest: float | None = None
+        for rule in list_automation_rules():
+            if not rule.enabled or not _rule_uses_scheduled_evaluation_tick(rule):
+                continue
+            cron_expr = self._resolve_schedule_cron(rule, timezone=timezone)
+            if cron_expr == "":
+                continue
+            runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+            next_at = self._ensure_runtime_next_evaluate_at(
+                rule,
+                runtime,
+                cron_expr=cron_expr,
+                now=now,
+                settings=settings,
+                timezone=timezone,
+            )
+            if next_at is None:
+                continue
+            if earliest is None or next_at < earliest:
+                earliest = next_at
+        return earliest
+
+    def _ensure_runtime_next_evaluate_at(
+        self,
+        rule: RuleOut,
+        runtime: _RuleRuntimeState,
+        *,
+        cron_expr: str,
+        now: datetime,
+        settings: SettingsLocationOut,
+        timezone: ZoneInfo,
+    ) -> float | None:
+        if runtime.next_evaluate_at is not None:
+            return runtime.next_evaluate_at
+        if uses_astronomical_repeat_schedule(rule):
+            runtime.next_evaluate_at = next_astronomical_repeat_evaluate_at(
+                rule,
+                settings=settings,
+                timezone=timezone,
+                now=now,
+                due_if_inside_window=True,
+            )
+        else:
+            runtime.next_evaluate_at = next_scheduled_evaluate_at(
+                cron_expr,
+                now,
+                timezone,
+                due_if_matching=True,
+            )
+        return runtime.next_evaluate_at
+
+    def _periodic_wake_delay_s(self, now: float) -> float:
+        wake_at = now + _RULE_EVALUATOR_MAX_IDLE_S
+        earliest = self._earliest_scheduled_evaluate_at(now)
+        if earliest is not None and earliest < wake_at:
+            wake_at = earliest
+        return max(_RULE_EVALUATOR_MIN_SLEEP_S, wake_at - now)
+
     async def _evaluate_scheduled_rules(self) -> None:
         cache_path = self._cache_path
         if cache_path is None:
@@ -779,23 +842,15 @@ class RuleEvaluator:
             if cron_expr == "":
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
-            if runtime.next_evaluate_at is None:
-                if uses_astronomical_repeat_schedule(rule):
-                    runtime.next_evaluate_at = next_astronomical_repeat_evaluate_at(
-                        rule,
-                        settings=settings,
-                        timezone=timezone,
-                        now=now,
-                        due_if_inside_window=True,
-                    )
-                else:
-                    runtime.next_evaluate_at = next_scheduled_evaluate_at(
-                        cron_expr,
-                        now,
-                        timezone,
-                        due_if_matching=True,
-                    )
-            if runtime.next_evaluate_at > now_epoch:
+            self._ensure_runtime_next_evaluate_at(
+                rule,
+                runtime,
+                cron_expr=cron_expr,
+                now=now,
+                settings=settings,
+                timezone=timezone,
+            )
+            if runtime.next_evaluate_at is None or runtime.next_evaluate_at > now_epoch:
                 continue
             eligibility_wake = uses_astronomical_eligibility_wake(rule)
             fire_source: RuleFireSource = "eligibility" if eligibility_wake else "scheduled"
@@ -1365,16 +1420,17 @@ class RuleEvaluator:
 
     async def _periodic_loop(self) -> None:
         while not self._stop.is_set():
+            now = self._now_fn()
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),
-                    timeout=_RULE_EVALUATOR_TICK_S,
+                    timeout=self._periodic_wake_delay_s(now),
                 )
                 break
             except TimeoutError:
                 pass
             self._last_run_at = self._now_fn()
-            self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
+            self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_MAX_IDLE_S
             try:
                 async with self._process_lock:
                     self._prune_stale_deferred_device_actions()
@@ -1738,7 +1794,7 @@ class RuleEvaluator:
         await self._maybe_process_dwell_satisfied(user_id)
         await self._tick_vacation_mode(ctx, now=now)
         self._last_run_at = now
-        self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_TICK_S
+        self._next_sun_check_at = self._last_run_at + _RULE_EVALUATOR_MAX_IDLE_S
 
     async def _maybe_request_locations_for_deferred_edges(self) -> None:
         cache_path = self._cache_path

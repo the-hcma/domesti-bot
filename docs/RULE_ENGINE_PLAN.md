@@ -35,7 +35,7 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 
 ### Evaluation model (location-driven edges)
 
-**Shipped today:** `edge_true` rules fire on **geofence enter/leave transitions** when a live location update arrives on `POST /v1/webhooks/location_update`. **`scheduled`** rules (Phase 2c) re-evaluate on a cron cadence via the 60s evaluator tick. See [Phase 2c](#phase-2c--scheduled-rules-and-device-state-conditions-shipped).
+**Shipped today:** `edge_true` rules fire on **geofence enter/leave transitions** when a live location update arrives on `POST /v1/webhooks/location_update`. **`scheduled`** rules (Phase 2c) re-evaluate when `next_evaluate_at` is due (evaluator loop sleeps until the earliest due time, capped at 60s for housekeeping). See [Phase 2c](#phase-2c--scheduled-rules-and-device-state-conditions-shipped).
 
 Rules fire on location ingest as follows:
 
@@ -1204,7 +1204,7 @@ Use standard **5-field cron** (`minute hour day month weekday`). The home timezo
 
 Semantics (shipped):
 
-- On each evaluator tick (global loop stays **60s**), consider scheduled rules whose `next_evaluate_at <= now`.
+- On each evaluator tick (sleeps until the earliest `next_evaluate_at` or **60s** max idle), consider scheduled rules whose `next_evaluate_at <= now`.
 - Build `RuleEvaluationContext` (presence, sun, geofences, `geofence_inside_since`, device cache) from `app.state.device_state` when needed.
 - If **all** conditions are met and `cooldown_s` has elapsed → run `device_actions` / `notify_on_fire` (same dispatcher as `edge_true`).
 - Set `next_evaluate_at` to the next `croniter` match after `now` regardless of fire outcome (housekeeping cadence).
