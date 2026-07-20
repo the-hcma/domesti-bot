@@ -127,6 +127,8 @@ export type KasaCredentialsSource = "env" | "database" | "none";
 
 export type SecretsKeySource = "env" | "file" | "none";
 
+export type Ep1NoisePreSharedKeySource = "cli" | "env" | "database" | "none";
+
 export type TailwindTokenSource = "cli" | "env" | "database" | "none";
 
 export interface KasaCredentialsSetOut {
@@ -163,6 +165,26 @@ export interface SettingsCredentialsTestOut {
   detail: string;
   ok: boolean;
   source?: SettingsCredentialsTestSource | null;
+}
+
+export interface Ep1NoisePreSharedKeySetOut {
+  configured: boolean;
+  source: Ep1NoisePreSharedKeySource;
+  restart_required: boolean;
+}
+
+export interface Ep1NoisePreSharedKeySettingsOut {
+  configured: boolean;
+  source: Ep1NoisePreSharedKeySource;
+  secrets_key_configured: boolean;
+  secrets_key_source: SecretsKeySource;
+  stored_in_database: boolean;
+  stored_noise_psk: string | null;
+}
+
+export interface Ep1NoisePreSharedKeyTestIn {
+  host?: string | null;
+  noise_psk?: string | null;
 }
 
 export interface TailwindTokenSettingsOut {

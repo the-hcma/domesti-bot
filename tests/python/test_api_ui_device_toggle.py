@@ -269,6 +269,7 @@ def _state(
         sonos_mgr=_sonos_mgr(sonos_zones) if sonos_zones is not None else None,
         tailwind_mgr=_tailwind_mgr(tailwind_doors) if tailwind_doors else None,
         androidtv_mgr=None,
+        ep1_mgr=None,
         vizio_mgr=_vizio_mgr(vizio_tvs) if vizio_tvs is not None else None,
         cache_path=cache_path,
         args=argparse.Namespace(),

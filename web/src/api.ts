@@ -46,6 +46,9 @@ import type {
   KasaCredentialsTestIn,
   MyTracksCredentialsTestIn,
   SettingsCredentialsTestOut,
+  Ep1NoisePreSharedKeySetOut,
+  Ep1NoisePreSharedKeySettingsOut,
+  Ep1NoisePreSharedKeyTestIn,
   TailwindTokenSetOut,
   TailwindTokenSettingsOut,
   TailwindTokenTestIn,
@@ -221,6 +224,9 @@ export const api = {
   clearMyTracksSettings(): Promise<void> {
     return callNoContent("DELETE", "/v1/settings/my-tracks");
   },
+  clearEp1NoisePsk(): Promise<Ep1NoisePreSharedKeySettingsOut> {
+    return call<Ep1NoisePreSharedKeySettingsOut>("DELETE", "/v1/settings/ep1-noise-psk");
+  },
   clearTailwindToken(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("DELETE", "/v1/settings/tailwind-token");
   },
@@ -347,6 +353,9 @@ export const api = {
   fetchKasaCredentialsSettings(): Promise<KasaCredentialsSettingsOut> {
     return call<KasaCredentialsSettingsOut>("GET", "/v1/settings/kasa-credentials");
   },
+  fetchEp1NoisePskSettings(): Promise<Ep1NoisePreSharedKeySettingsOut> {
+    return call<Ep1NoisePreSharedKeySettingsOut>("GET", "/v1/settings/ep1-noise-psk");
+  },
   fetchTailwindTokenSettings(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("GET", "/v1/settings/tailwind-token");
   },
@@ -386,6 +395,11 @@ export const api = {
     return call<KasaCredentialsSetOut>("PUT", "/v1/settings/kasa-credentials", {
       username,
       password,
+    });
+  },
+  putEp1NoisePsk(noisePsk: string): Promise<Ep1NoisePreSharedKeySetOut> {
+    return call<Ep1NoisePreSharedKeySetOut>("PUT", "/v1/settings/ep1-noise-psk", {
+      noise_psk: noisePsk,
     });
   },
   putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
@@ -434,6 +448,15 @@ export const api = {
     return call<SettingsCredentialsTestOut>(
       "POST",
       "/v1/settings/my-tracks/test",
+      input,
+    );
+  },
+  testEp1NoisePsk(
+    input: Ep1NoisePreSharedKeyTestIn = {},
+  ): Promise<SettingsCredentialsTestOut> {
+    return call<SettingsCredentialsTestOut>(
+      "POST",
+      "/v1/settings/ep1-noise-psk/test",
       input,
     );
   },

@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     AndroidTvDiscoveredHost,
     DeviceDisplayName,
+    Ep1KnownDevice,
     KasaDiscoveredDevice,
     SonosKnownZone,
     TailwindLastHost,
@@ -493,6 +494,24 @@ def load_vizio_tvs(
         return out
 
 
+def load_ep1_devices(
+    path: Path,
+) -> list[tuple[str, int, str | None, str | None]]:
+    """Return ``(host, port, mac, friendly_name)`` rows ordered by host."""
+    path = path.expanduser().resolve()
+    if not path.is_file():
+        return []
+    ensure_schema_if_exists(path)
+    with discovery_session(path) as session:
+        rows = session.scalars(select(Ep1KnownDevice).order_by(Ep1KnownDevice.host)).all()
+        out: list[tuple[str, int, str | None, str | None]] = []
+        for row in rows:
+            mac = (row.mac or "").strip() or None
+            name = (row.friendly_name or "").strip() or None
+            out.append((row.host, int(row.port), mac, name))
+        return out
+
+
 def load_ui_preferences(path: Path) -> list[tuple[str, str, bool, bool]]:
     """Return ``(backend, canonical_key, exclude_from_global, hide_on_mobile)`` rows.
 
@@ -560,6 +579,52 @@ def upsert_display_name(
             )
         else:
             row.display_name = display_name.strip()
+            row.updated_at = now
+
+    discovery_write(path, _write)
+
+
+def upsert_ep1_device(
+    path: Path,
+    *,
+    host: str,
+    port: int,
+    mac: str | None,
+    friendly_name: str | None,
+) -> None:
+    """Remember one EP1 endpoint (Noise PSK lives in ``app_secrets``)."""
+    now = time.time()
+    h = host.strip()
+    mac_s: str | None = None
+    if mac:
+        mac_s = try_normalize_mac(mac.strip())
+
+    def _write(session: Session) -> None:
+        preserved_label: str | None = None
+        if mac_s is not None:
+            existing = session.scalar(select(Ep1KnownDevice).where(Ep1KnownDevice.mac == mac_s))
+            if existing is not None and existing.host != h:
+                preserved_label = (existing.friendly_name or "").strip() or None
+                session.delete(existing)
+                session.flush()
+        row = session.get(Ep1KnownDevice, h)
+        label = (friendly_name or "").strip() or preserved_label
+        if row is None:
+            session.add(
+                Ep1KnownDevice(
+                    host=h,
+                    port=port,
+                    mac=mac_s,
+                    friendly_name=label,
+                    updated_at=now,
+                )
+            )
+        else:
+            row.port = port
+            if label is not None:
+                row.friendly_name = label
+            if mac_s is not None:
+                row.mac = mac_s
             row.updated_at = now
 
     discovery_write(path, _write)

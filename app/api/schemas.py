@@ -25,6 +25,7 @@ from app.presence_connection_type import normalize_presence_connection_type
 from app.presence_wifi import normalize_wifi_bssid
 from app.temperature_units import celsius_to_fahrenheit, fahrenheit_to_celsius
 
+Ep1NoisePreSharedKeySourceOut = Literal["cli", "env", "database", "none"]
 KasaCredentialsSourceOut = Literal["env", "database", "none"]
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
@@ -511,6 +512,87 @@ class KasaCredentialsTestIn(BaseModel):
         default=None,
         max_length=256,
         description="Account email override; both username and password must be set to use form credentials.",
+    )
+
+
+class Ep1NoisePreSharedKeySetIn(BaseModel):
+    """Body for ``PUT /v1/settings/ep1-noise-psk``.
+
+    The Noise pre-shared key (PSK) is never returned on GET unless stored.
+    """
+
+    noise_psk: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description=("ESPHome API Noise pre-shared key (PSK), base64, for Everything Presence One."),
+    )
+
+
+class Ep1NoisePreSharedKeySetOut(BaseModel):
+    """Confirmation after persisting an encrypted EP1 Noise pre-shared key (PSK)."""
+
+    configured: bool = Field(
+        ...,
+        description=("True when a Noise pre-shared key (PSK) is now available (env, CLI, or database)."),
+    )
+    source: Ep1NoisePreSharedKeySourceOut = Field(
+        ...,
+        description="Where the active Noise pre-shared key (PSK) is read from after this request.",
+    )
+    restart_required: bool = Field(
+        ...,
+        description=(
+            "True when the running server must restart (or rediscover) before "
+            "EP1 sensors appear if they were previously skipped."
+        ),
+    )
+
+
+class Ep1NoisePreSharedKeySettingsOut(BaseModel):
+    """EP1 Noise pre-shared key (PSK) status."""
+
+    configured: bool = Field(
+        ...,
+        description=("True when CLI, environment, or encrypted database provides a Noise pre-shared key (PSK)."),
+    )
+    source: Ep1NoisePreSharedKeySourceOut = Field(
+        ...,
+        description=(
+            "Active source: ``cli`` → ``--ep1-noise-psk``, ``env`` → ``EP1_NOISE_PSK``, "
+            "``database`` → encrypted SQLite row."
+        ),
+    )
+    secrets_key_configured: bool = Field(
+        ...,
+        description="True when a valid Fernet key is available.",
+    )
+    secrets_key_source: SecretsKeySourceOut = Field(
+        ...,
+        description="Where the Fernet key was loaded from.",
+    )
+    stored_in_database: bool = Field(
+        ...,
+        description="True when an encrypted ``ep1_noise_psk`` row exists.",
+    )
+    stored_noise_psk: str | None = Field(
+        default=None,
+        description=(
+            "Decrypted Noise pre-shared key (PSK) when stored in the database (Settings is API-key protected)."
+        ),
+    )
+
+
+class Ep1NoisePreSharedKeyTestIn(BaseModel):
+    """Optional form overrides for ``POST /v1/settings/ep1-noise-psk/test``."""
+
+    host: str | None = Field(
+        default=None,
+        description="Override EP1 host (optional ``:port``, default port 6053).",
+    )
+    noise_psk: str | None = Field(
+        default=None,
+        description="Override Noise pre-shared key (PSK) for this probe only.",
     )
 
 

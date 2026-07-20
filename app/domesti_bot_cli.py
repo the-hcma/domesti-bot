@@ -81,6 +81,8 @@ from app.db.secrets import SecretsConfigurationError, save_kasa_credentials_to_d
 from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
 from app.device_label_conflicts import clear_device_label_conflicts, drain_device_label_conflicts
 from app.device_manager import NotInitializedError
+from app.ep1_credentials import resolve_ep1_noise_psk
+from app.ep1_device_manager import DEFAULT_EP1_API_PORT, Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_credentials import resolve_kasa_credentials
 from app.kasa_device_manager import KasaDeviceManager
@@ -204,6 +206,7 @@ class _Theme:
 # Lexicographic order by slug (matches lex order of display names: Google Cast, GoTailwind, Kasa, Sonos).
 _FAMILY_BOOT_SLUGS: tuple[str, ...] = (
     "androidtv",
+    "ep1",
     "gotailwind",
     "kasa",
     "sonos",
@@ -211,6 +214,7 @@ _FAMILY_BOOT_SLUGS: tuple[str, ...] = (
 )
 _FAMILY_BOOT_LABEL: dict[str, str] = {
     "androidtv": "Google Cast",
+    "ep1": "Everything Presence One",
     "gotailwind": "GoTailwind",
     "kasa": "Kasa",
     "sonos": "Sonos",
@@ -220,6 +224,7 @@ _FAMILY_BOOT_LABEL: dict[str, str] = {
 # needed because the count is shown as a bare integer (``"0 zones"``, ``"1 zones"``).
 _FAMILY_UNIT_PLURAL: dict[str, str] = {
     "androidtv": "devices",
+    "ep1": "sensors",
     "gotailwind": "doors",
     "kasa": "switches",
     "sonos": "zones",
@@ -232,6 +237,42 @@ _FAMILY_SOURCE_LABEL: dict[str, str] = {
     "cache": "cache",
     "discovery": "LAN discovery",
 }
+
+
+def _parse_ep1_host_specs(cli_hosts: list[str]) -> list[tuple[str, int]]:
+    """Merge ``--ep1-host`` with ``EP1_HOSTS`` into ``(host, port)`` pairs."""
+    specs: list[str] = list(cli_hosts)
+    env = (os.environ.get("EP1_HOSTS") or "").strip()
+    if env:
+        specs.extend(part.strip() for part in env.split(",") if part.strip())
+    out: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    for raw in specs:
+        host, port = _split_host_port(raw, DEFAULT_EP1_API_PORT)
+        key = (host, port)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _split_host_port(spec: str, default_port: int) -> tuple[str, int]:
+    text = spec.strip()
+    if not text:
+        raise ValueError(f"Expected HOST or HOST:PORT, got {spec!r}")
+    if text.count(":") != 1:
+        return text, default_port
+    host, port_s = text.rsplit(":", 1)
+    host = host.strip()
+    port_s = port_s.strip()
+    if not host:
+        raise ValueError(f"Expected HOST or HOST:PORT, got {spec!r}")
+    if not port_s:
+        raise ValueError(f"Expected HOST:PORT with a numeric port, got empty port in {spec!r}")
+    if not port_s.isdigit():
+        raise ValueError(f"Expected HOST:PORT with a numeric port, got {spec!r}")
+    return host, int(port_s)
 
 
 def _bootstrap_family_summary(
@@ -1154,6 +1195,7 @@ async def _repl_cmd_show_devices(
     sonos_mgr: SonosDeviceManager | None,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    ep1_mgr: Ep1DeviceManager | None,
     vizio_mgr: VizioDeviceManager | None,
     theme: _Theme,
 ) -> None:
@@ -1254,6 +1296,27 @@ async def _repl_cmd_show_devices(
                 )
         except NotInitializedError:
             print(theme.dim("  (not available)"))
+    print(theme.header("Everything Presence One:"))
+    if ep1_mgr is None:
+        print(theme.dim("  (not loaded — set --ep1-host / EP1_HOSTS and Noise PSK.)"))
+    else:
+        try:
+            sensors = sorted(
+                ep1_mgr.devices,
+                key=lambda d: _lex_show_devices_key(d.preferred_label, d.identifier),
+            )
+            if not sensors:
+                print(theme.dim("  (none connected)"))
+            for d in sensors:
+                print(f"  {theme.device(repr(d.preferred_label))}  {theme.state('(' + d.occupancy_state + ')')}")
+                _print_device_identity(
+                    theme,
+                    mac_address=d.mac_address if d.mac_address is not None else d.identifier,
+                    host=d.host,
+                    details=None,
+                )
+        except NotInitializedError:
+            print(theme.dim("  (not available)"))
     print(theme.header("Vizio TVs:"))
     if vizio_mgr is None:
         print(
@@ -1323,6 +1386,7 @@ async def dispatch_repl_action(
     sonos_mgr: SonosDeviceManager | None,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    ep1_mgr: Ep1DeviceManager | None,
     vizio_mgr: VizioDeviceManager | None,
     *,
     cache_path: Path | None,
@@ -1437,6 +1501,7 @@ async def dispatch_repl_action(
             sonos_mgr=sonos_mgr,
             tailwind_mgr=tailwind_mgr,
             androidtv_mgr=androidtv_mgr,
+            ep1_mgr=ep1_mgr,
             vizio_mgr=vizio_mgr,
             theme=theme,
         )
@@ -1913,6 +1978,7 @@ async def execute_line_for_api(
     sonos_mgr: SonosDeviceManager | None,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    ep1_mgr: Ep1DeviceManager | None,
     vizio_mgr: VizioDeviceManager | None,
     *,
     cache_path: Path | None,
@@ -1947,6 +2013,7 @@ async def execute_line_for_api(
                 sonos_mgr,
                 tailwind_mgr,
                 androidtv_mgr,
+                ep1_mgr,
                 vizio_mgr,
                 cache_path=cache_path,
                 androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
@@ -1962,6 +2029,7 @@ async def _cmd_loop(
     sonos_mgr: SonosDeviceManager | None,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    ep1_mgr: Ep1DeviceManager | None,
     vizio_mgr: VizioDeviceManager | None,
     *,
     cache_path: Path | None,
@@ -2023,6 +2091,7 @@ async def _cmd_loop(
             sonos_mgr,
             tailwind_mgr,
             androidtv_mgr,
+            ep1_mgr,
             vizio_mgr,
             cache_path=cache_path,
             androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
@@ -2224,6 +2293,7 @@ class DeviceManagersState(NamedTuple):
     sonos_mgr: SonosDeviceManager | None
     tailwind_mgr: GotailwindDeviceManager | None
     androidtv_mgr: AndroidTvDeviceManager | None
+    ep1_mgr: Ep1DeviceManager | None
     vizio_mgr: VizioDeviceManager | None
     cache_path: Path | None
     args: argparse.Namespace
@@ -2254,6 +2324,12 @@ async def bootstrap_device_managers(
         cli_token=args.tailwind_token,
         cache_path=cache_path,
     )
+
+    ep1_psk, _ep1_psk_source = resolve_ep1_noise_psk(
+        cli_psk=getattr(args, "ep1_noise_psk", None),
+        cache_path=cache_path,
+    )
+    ep1_hosts = _parse_ep1_host_specs(list(getattr(args, "ep1_host", None) or []))
 
     async def boot_androidtv() -> dict[str, Any]:
         slug = "androidtv"
@@ -2477,6 +2553,59 @@ async def bootstrap_device_managers(
                 "mgr": None,
             }
 
+    async def boot_ep1() -> dict[str, Any]:
+        slug = "ep1"
+        cached_ep1: list[tuple[str, int, str | None, str | None]] = []
+        if cache_path is not None:
+            cached_ep1 = device_discovery_store.load_ep1_devices(cache_path)
+        if not ep1_hosts and not cached_ep1:
+            return {
+                "slug": slug,
+                "skipped": True,
+                "detail": "no hosts — set --ep1-host or EP1_HOSTS (or wait for Settings cache)",
+                "exc": None,
+                "ok": False,
+                "mgr": None,
+            }
+        if not ep1_psk:
+            return {
+                "slug": slug,
+                "skipped": True,
+                "detail": "no Noise PSK — set EP1_NOISE_PSK or --ep1-noise-psk",
+                "exc": None,
+                "ok": False,
+                "mgr": None,
+            }
+        mgr = Ep1DeviceManager(
+            configured_hosts=ep1_hosts,
+            discovery_cache_path=cache_path,
+            cli_noise_psk=getattr(args, "ep1_noise_psk", None),
+            noise_psk=ep1_psk or None,
+            force_discovery=bool(args.force_discovery),
+        )
+        try:
+            await mgr.fetch()
+            return {
+                "slug": slug,
+                "skipped": False,
+                "detail": "",
+                "exc": None,
+                "ok": True,
+                "mgr": mgr,
+                "source": mgr.last_discovery_source,
+                "count": len(mgr.devices),
+            }
+        except Exception as ex:
+            await mgr.disconnect()
+            return {
+                "slug": slug,
+                "skipped": False,
+                "detail": "",
+                "exc": ex,
+                "ok": False,
+                "mgr": None,
+            }
+
     async def boot_tailwind() -> dict[str, Any]:
         slug = "gotailwind"
         if not token:
@@ -2523,6 +2652,7 @@ async def bootstrap_device_managers(
         _LOGGER.info("[startup] discovering devices (parallel)")
     bundles = await asyncio.gather(
         _timed_family_boot("androidtv", boot_androidtv(), log_progress=log_progress),
+        _timed_family_boot("ep1", boot_ep1(), log_progress=log_progress),
         _timed_family_boot("gotailwind", boot_tailwind(), log_progress=log_progress),
         _timed_family_boot("kasa", boot_kasa(), log_progress=log_progress),
         _timed_family_boot("sonos", boot_sonos(), log_progress=log_progress),
@@ -2534,6 +2664,7 @@ async def bootstrap_device_managers(
             _print_family_parallel_line(theme, slug, by_slug[slug], ok_verb="ready")
 
     androidtv_mgr = by_slug["androidtv"].get("mgr")
+    ep1_mgr = by_slug["ep1"].get("mgr")
     sonos_mgr = by_slug["sonos"].get("mgr")
     tailwind_mgr = by_slug["gotailwind"].get("mgr")
     vizio_mgr = by_slug["vizio"].get("mgr")
@@ -2542,8 +2673,9 @@ async def bootstrap_device_managers(
 
     sonos_ready = sonos_mgr is not None
     androidtv_ready = androidtv_mgr is not None
+    ep1_ready = ep1_mgr is not None
     vizio_ready = vizio_mgr is not None
-    if not kasa_ok and not tw_ok and not sonos_ready and not androidtv_ready and not vizio_ready:
+    if not kasa_ok and not tw_ok and not sonos_ready and not androidtv_ready and not ep1_ready and not vizio_ready:
         print(theme.err("No backends initialized; exiting."), file=sys.stderr)
         raise SystemExit(1)
 
@@ -2551,10 +2683,11 @@ async def bootstrap_device_managers(
         ns = len(_kasa_switch_aliases(kasa_mgr))
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
+        ne = len(ep1_mgr.devices) if ep1_mgr is not None else 0
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (
-            f"({na} Google Cast device(s), {ns} Kasa switch(es), {nz} Sonos zone(s), "
+            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {ns} Kasa switch(es), {nz} Sonos zone(s), "
             f"{nd} Tailwind door(s), {nv} Vizio TV(s)). Tab-complete commands and names."
         )
         print(f"{theme.ok('Ready')} {theme.dim(tail)}", flush=True)
@@ -2566,6 +2699,7 @@ async def bootstrap_device_managers(
         sonos_mgr=sonos_mgr,
         tailwind_mgr=tailwind_mgr,
         androidtv_mgr=androidtv_mgr,
+        ep1_mgr=ep1_mgr,
         vizio_mgr=vizio_mgr,
         cache_path=cache_path,
         args=args,
@@ -2602,6 +2736,8 @@ async def shutdown_device_managers(state: DeviceManagersState) -> None:
                 )
             )
         )
+    if state.ep1_mgr is not None:
+        disconnect_tasks.append(asyncio.create_task(_disconnect_backend_on_shutdown("ep1", state.ep1_mgr.disconnect())))
     disconnect_tasks.append(asyncio.create_task(_disconnect_backend_on_shutdown("kasa", state.kasa_mgr.disconnect())))
     if state.sonos_mgr is not None:
         disconnect_tasks.append(
@@ -2633,6 +2769,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             state.sonos_mgr,
             state.tailwind_mgr,
             state.androidtv_mgr,
+            state.ep1_mgr,
             state.vizio_mgr,
             cache_path=state.cache_path,
             androidtv_zeroconf_timeout=float(state.args.androidtv_zeroconf_timeout),

@@ -156,6 +156,7 @@ def _tailwind_state(*doors: _FakeTailwindDoor) -> DeviceManagersState:
     mgr.doors = tuple(doors)
     return DeviceManagersState(
         androidtv_mgr=None,
+        ep1_mgr=None,
         args=argparse.Namespace(),
         cache_path=None,
         kasa_mgr=MagicMock(spec=KasaDeviceManager),

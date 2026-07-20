@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app import device_discovery_store
 from app.api.schemas import (
+    Ep1NoisePreSharedKeySetIn,
+    Ep1NoisePreSharedKeySetOut,
+    Ep1NoisePreSharedKeySettingsOut,
+    Ep1NoisePreSharedKeyTestIn,
     KasaCredentialsSetIn,
     KasaCredentialsSetOut,
     KasaCredentialsSettingsOut,
@@ -23,26 +29,33 @@ from app.db.secrets import (
     SecretsDecryptError,
     delete_app_secret,
     delete_kasa_credentials_from_db,
+    ep1_noise_psk_stored_in_db,
     kasa_credentials_stored_in_db,
+    load_ep1_noise_psk_from_db,
     load_kasa_credentials_from_db,
     load_tailwind_token_from_db,
+    save_ep1_noise_psk_to_db,
     save_kasa_credentials_to_db,
     save_tailwind_token_to_db,
     secrets_key_configured,
     secrets_key_source,
     tailwind_token_stored_in_db,
 )
-from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _Theme
+from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _parse_ep1_host_specs, _Theme
+from app.ep1_credentials import resolve_ep1_noise_psk
+from app.ep1_device_manager import Ep1DeviceManager
 from app.kasa_credentials import resolve_kasa_credentials
 from app.server_runtime import runtime
 from app.settings_credentials_test import (
     CredentialsTestUnavailableError,
+    probe_ep1_noise_psk,
     probe_kasa_credentials,
     probe_tailwind_token,
 )
 from app.tailwind_credentials import resolve_tailwind_token
 
 router = APIRouter(prefix="/v1/settings", tags=["settings"])
+_LOGGER = logging.getLogger(__name__)
 
 
 def discovery_cache_path_from_request(request: Request) -> Path | None:
@@ -147,6 +160,101 @@ async def put_kasa_credentials(body: KasaCredentialsSetIn, request: Request) -> 
     )
 
 
+@router.delete("/ep1-noise-psk", response_model=Ep1NoisePreSharedKeySettingsOut)
+async def clear_ep1_noise_psk(request: Request) -> Ep1NoisePreSharedKeySettingsOut:
+    """Remove the encrypted database Noise pre-shared key (PSK).
+
+    Environment / CLI values are unchanged.
+    """
+    cache_path = discovery_cache_path_from_request(request)
+    if cache_path is None:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=(
+                "Cannot clear stored EP1 Noise pre-shared key (PSK): server started with "
+                "--no-discovery-cache. Restart with a discovery cache path."
+            ),
+        )
+    delete_app_secret(cache_path, key="ep1_noise_psk")
+    await _reload_ep1_manager()
+    return _ep1_settings_response(request)
+
+
+@router.get("/ep1-noise-psk", response_model=Ep1NoisePreSharedKeySettingsOut)
+async def get_ep1_noise_psk_settings(request: Request) -> Ep1NoisePreSharedKeySettingsOut:
+    """Return EP1 Noise pre-shared key (PSK) status (includes stored DB value when present)."""
+    return _ep1_settings_response(request)
+
+
+@router.post("/ep1-noise-psk/test", response_model=SettingsCredentialsTestOut)
+async def post_ep1_noise_psk_test(
+    body: Ep1NoisePreSharedKeyTestIn,
+    request: Request,
+) -> SettingsCredentialsTestOut:
+    """Probe the ESPHome Noise pre-shared key (PSK) with an ephemeral client."""
+    cache_path = discovery_cache_path_from_request(request)
+    try:
+        result = await probe_ep1_noise_psk(
+            cache_path=cache_path,
+            cli_psk=_cli_ep1_noise_psk(),
+            psk=body.noise_psk,
+            host=body.host,
+        )
+    except CredentialsTestUnavailableError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return SettingsCredentialsTestOut(
+        ok=result.ok,
+        detail=result.detail,
+        source=result.source,
+    )
+
+
+@router.put("/ep1-noise-psk", response_model=Ep1NoisePreSharedKeySetOut)
+async def put_ep1_noise_psk(
+    body: Ep1NoisePreSharedKeySetIn,
+    request: Request,
+) -> Ep1NoisePreSharedKeySetOut:
+    """Encrypt and store the EP1 ESPHome Noise pre-shared key (PSK)."""
+    cache_path = discovery_cache_path_from_request(request)
+    if cache_path is None:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=(
+                "Cannot persist EP1 Noise pre-shared key (PSK): server started with "
+                "--no-discovery-cache. Restart with a discovery cache path."
+            ),
+        )
+    psk = body.noise_psk.strip()
+    if not psk:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail="Expected a non-empty Noise pre-shared key (PSK), got whitespace only",
+        )
+    try:
+        save_ep1_noise_psk_to_db(cache_path, psk)
+    except SecretsConfigurationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    resolved, source = resolve_ep1_noise_psk(
+        cli_psk=_cli_ep1_noise_psk(),
+        cache_path=cache_path,
+    )
+    env_active = source in ("env", "cli")
+    reload_ok = False
+    if not env_active:
+        reload_ok = await _reload_ep1_manager()
+    return Ep1NoisePreSharedKeySetOut(
+        configured=bool(resolved),
+        source=source,
+        restart_required=not env_active and not reload_ok,
+    )
+
+
 @router.delete("/tailwind-token", response_model=TailwindTokenSettingsOut)
 async def clear_tailwind_token(request: Request) -> TailwindTokenSettingsOut:
     """Remove the encrypted database token (environment / CLI tokens are unchanged)."""
@@ -236,12 +344,86 @@ async def put_tailwind_token(body: TailwindTokenSetIn, request: Request) -> Tail
     )
 
 
+def _cli_ep1_noise_psk() -> str | None:
+    args = runtime.cli_args
+    if args is None:
+        return None
+    raw = getattr(args, "ep1_noise_psk", None)
+    return str(raw) if raw else None
+
+
 def _cli_tailwind_token() -> str | None:
     args = runtime.cli_args
     if args is None:
         return None
     raw = getattr(args, "tailwind_token", None)
     return str(raw) if raw else None
+
+
+def _ep1_settings_response(request: Request) -> Ep1NoisePreSharedKeySettingsOut:
+    del request
+    cache_path = runtime.discovery_cache_path()
+    psk, source = resolve_ep1_noise_psk(
+        cli_psk=_cli_ep1_noise_psk(),
+        cache_path=cache_path,
+    )
+    stored = ep1_noise_psk_stored_in_db(cache_path) if cache_path is not None else False
+    stored_psk: str | None = None
+    if cache_path is not None and stored:
+        try:
+            stored_psk = load_ep1_noise_psk_from_db(cache_path)
+        except SecretsDecryptError:
+            stored_psk = None
+    return Ep1NoisePreSharedKeySettingsOut(
+        configured=bool(psk),
+        source=source,
+        secrets_key_configured=secrets_key_configured(),
+        secrets_key_source=secrets_key_source(),
+        stored_in_database=stored,
+        stored_noise_psk=stored_psk if stored and source not in ("env", "cli") else None,
+    )
+
+
+async def _reload_ep1_manager() -> bool:
+    """Rebuild the live EP1 manager after Noise PSK storage changes."""
+    state: DeviceManagersState | None = runtime.device_state
+    if state is None:
+        return False
+    cache_path = runtime.discovery_cache_path()
+    psk, _source = resolve_ep1_noise_psk(
+        cli_psk=_cli_ep1_noise_psk(),
+        cache_path=cache_path,
+    )
+    if state.ep1_mgr is not None:
+        try:
+            await state.ep1_mgr.disconnect()
+        except Exception:
+            _LOGGER.warning("EP1 manager disconnect during Settings reload failed", exc_info=True)
+    cached_rows = device_discovery_store.load_ep1_devices(cache_path) if cache_path is not None else []
+    raw_hosts = getattr(state.args, "ep1_host", None) or []
+    hosts = _parse_ep1_host_specs(list(raw_hosts))
+    if not psk or (not cached_rows and not hosts):
+        runtime.device_state = state._replace(ep1_mgr=None)
+        return False
+    mgr = Ep1DeviceManager(
+        configured_hosts=hosts,
+        discovery_cache_path=cache_path,
+        cli_noise_psk=_cli_ep1_noise_psk(),
+        noise_psk=psk or None,
+        force_discovery=bool(getattr(state.args, "force_discovery", False)),
+    )
+    try:
+        await mgr.fetch()
+    except Exception:
+        await mgr.disconnect()
+        runtime.device_state = state._replace(ep1_mgr=None)
+        return False
+    runtime.device_state = state._replace(ep1_mgr=mgr)
+    try:
+        await runtime.restart_device_state_watchers()
+    except Exception:
+        return False
+    return True
 
 
 def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:

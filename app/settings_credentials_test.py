@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from aioesphomeapi.client import APIClient
+from aioesphomeapi.core import APIConnectionError
 from gotailwind import Tailwind
 from kasa import Device as KDevice
 from kasa.credentials import Credentials
@@ -20,6 +22,8 @@ from kasa.exceptions import AuthenticationError, _ConnectionError
 
 from app import device_discovery_store
 from app.device_enums import SettingsCredentialsTestSource
+from app.ep1_credentials import resolve_ep1_noise_psk
+from app.ep1_device_manager import DEFAULT_EP1_API_PORT
 from app.gotailwind_device_manager import (
     TailwindDiscoveryError,
     discover_tailwind_host,
@@ -169,6 +173,66 @@ async def probe_mytracks_credentials(
     return CredentialsTestResult(
         ok=True,
         detail=f"My Tracks credentials ok ({len(users)} user(s))",
+        source=source,
+    )
+
+
+async def probe_ep1_noise_psk(
+    *,
+    cache_path: Path | None,
+    cli_psk: str | None,
+    psk: str | None = None,
+    host: str | None = None,
+) -> CredentialsTestResult:
+    """One-shot ESPHome connect + device_info with an ephemeral API client."""
+    form_psk = (psk or "").strip()
+    if form_psk:
+        resolved_psk = form_psk
+        source = SettingsCredentialsTestSource.FORM
+    else:
+        resolved_psk, resolved_source = resolve_ep1_noise_psk(
+            cli_psk=cli_psk,
+            cache_path=cache_path,
+        )
+        if not resolved_psk:
+            raise CredentialsTestUnavailableError("No EP1 Noise PSK configured; enter a PSK or save one first")
+        source = SettingsCredentialsTestSource(resolved_source)
+
+    resolved_host, resolved_port = _resolve_ep1_probe_endpoint(
+        cache_path=cache_path,
+        host=host,
+    )
+    client = APIClient(
+        resolved_host,
+        resolved_port,
+        password=None,
+        noise_psk=resolved_psk,
+        client_info="domesti-bot-settings-test",
+    )
+    try:
+        await client.connect(login=True)
+        info = await client.device_info()
+        name = (info.friendly_name or info.name or resolved_host).strip()
+    except APIConnectionError as exc:
+        return CredentialsTestResult(
+            ok=False,
+            detail=f"EP1 Noise PSK probe failed at {resolved_host}:{resolved_port}: {exc}",
+            source=source,
+        )
+    except Exception as exc:
+        return CredentialsTestResult(
+            ok=False,
+            detail=f"EP1 Noise PSK probe failed at {resolved_host}:{resolved_port}: {exc}",
+            source=source,
+        )
+    finally:
+        try:
+            await client.disconnect(force=True)
+        except Exception:
+            pass
+    return CredentialsTestResult(
+        ok=True,
+        detail=f"EP1 Noise PSK ok at {resolved_host}:{resolved_port} ({name})",
         source=source,
     )
 
@@ -342,6 +406,45 @@ def _resolve_kasa_probe_credentials(
             "No Kasa credentials configured; enter account email and password or save them first"
         )
     return creds, SettingsCredentialsTestSource(resolved_source)
+
+
+def _resolve_ep1_probe_endpoint(
+    *,
+    cache_path: Path | None,
+    host: str | None,
+) -> tuple[str, int]:
+    form_host = (host or "").strip()
+    if form_host:
+        return _split_ep1_host_port(form_host)
+    if cache_path is not None:
+        rows = device_discovery_store.load_ep1_devices(cache_path)
+        if rows:
+            h, p, _mac, _name = rows[0]
+            return h, p
+    env_hosts = (os.environ.get("EP1_HOSTS") or "").strip()
+    if env_hosts:
+        first = env_hosts.split(",")[0].strip()
+        if first:
+            return _split_ep1_host_port(first)
+    raise CredentialsTestUnavailableError("No EP1 host configured; enter a host or save a discovered device first")
+
+
+def _split_ep1_host_port(spec: str) -> tuple[str, int]:
+    text = spec.strip()
+    if not text:
+        raise CredentialsTestUnavailableError(f"Expected HOST or HOST:PORT, got {spec!r}")
+    if text.count(":") != 1:
+        return text, DEFAULT_EP1_API_PORT
+    host, port_s = text.rsplit(":", 1)
+    host = host.strip()
+    port_s = port_s.strip()
+    if not host:
+        raise CredentialsTestUnavailableError(f"Expected HOST or HOST:PORT, got {spec!r}")
+    if not port_s:
+        raise CredentialsTestUnavailableError(f"Expected HOST:PORT with a numeric port, got empty port in {spec!r}")
+    if not port_s.isdigit():
+        raise CredentialsTestUnavailableError(f"Expected HOST:PORT with a numeric port, got {spec!r}")
+    return host, int(port_s)
 
 
 async def _resolve_tailwind_probe_host(

@@ -206,6 +206,7 @@ def landing_base_url(rules_hub_browser_cache: Path) -> Iterator[str]:
             sonos_mgr=None,
             tailwind_mgr=None,
             androidtv_mgr=None,
+            ep1_mgr=None,
             vizio_mgr=None,
             cache_path=rules_hub_browser_cache,
             args=argparse.Namespace(),

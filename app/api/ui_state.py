@@ -28,10 +28,18 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from app import device_discovery_store
-from app.api.schemas import UIDeviceOut, UIFamilyOut, UIOperatorAlertOut, UISonosStreamFavoriteOut, UIStateOut
+from app.api.schemas import (
+    UIDeviceOut,
+    UIFamilyOut,
+    UIOccupancyReadingsOut,
+    UIOperatorAlertOut,
+    UISonosStreamFavoriteOut,
+    UIStateOut,
+)
 from app.device_enums import DeviceConditionState, DeviceFamilyId
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
+from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
 from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
@@ -48,9 +56,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # Server-owned UI metadata per family. Order in this list is the rendering
 # order on the page (top → bottom rows of tiles); documented on ``UIStateOut``.
-# TODO(ep1/#521): add ("ep1", "Everything Presence One", …) when Ep1DeviceManager
-# ships — without it, EP1 devices would be discovered but omitted from /v1/ui/state.
 _FAMILIES: tuple[tuple[str, str, str], ...] = (
+    ("ep1", "Everything Presence One", "#0EA5E9"),
     ("kasa", "Lights & plugs", "#3B82F6"),
     ("sonos", "Sonos zones", "#8B5CF6"),
     ("vizio", "Vizio TVs", "#F97316"),
@@ -284,6 +291,65 @@ def _kasa_hardware_model(kd: KasaDevice) -> str | None:
         return None
     text = raw.strip()
     return text or None
+
+
+def _ep1_devices(
+    mgr: Ep1DeviceManager,
+    excluded: set[str],
+    hidden_on_mobile: set[str],
+) -> list[UIDeviceOut]:
+    """One :class:`UIDeviceOut` per EP1 occupancy sensor (read-only).
+
+    When bootstrap left the manager unfetched, treat the family as empty so
+    ``GET /v1/ui/state`` stays usable instead of raising ``500``.
+    """
+
+    out: list[UIDeviceOut] = []
+    try:
+        sensors = mgr.devices
+    except NotInitializedError:
+        _LOGGER.warning("EP1 manager not initialized; omitting occupancy tiles from UI state")
+        return []
+    for device in sensors:
+        key = (device.identifier or "").strip()
+        if not key:
+            continue
+        readings = None
+        if device.temperature_c is not None or device.humidity_pct is not None or device.illuminance_lx is not None:
+            readings = UIOccupancyReadingsOut(
+                temperature_c=device.temperature_c,
+                humidity_pct=device.humidity_pct,
+                illuminance_lx=device.illuminance_lx,
+            )
+        out.append(
+            UIDeviceOut(
+                id=key,
+                family_id=DeviceFamilyId.EP1.value,
+                label=device.preferred_label,
+                kind="occupancy",
+                state=device.occupancy_state,
+                compact_icon=_compact_icon_for_device(
+                    family_id=DeviceFamilyId.EP1.value,
+                    label=device.preferred_label,
+                    kind="occupancy",
+                ),
+                mac_address=device.mac_address or key,
+                host=_optional_host(device.host),
+                identity_details=_identity_details_ep1(device) or [],
+                exclude_from_global=key in excluded,
+                hide_on_mobile=key in hidden_on_mobile,
+                occupancy_readings=readings,
+            )
+        )
+    out.sort(key=lambda d: (d.label.lower(), d.id))
+    return out
+
+
+def _identity_details_ep1(device: Ep1Device) -> list[str] | None:
+    details: list[str] = []
+    if device.port and device.port != 6053:
+        details.append(f"port: {device.port}")
+    return details or None
 
 
 def _kasa_devices(
@@ -648,7 +714,9 @@ def build_ui_state(
     for family_id, label, color in _FAMILIES:
         excluded = _excluded_keys(pref_rows, family_id)
         hidden = _hidden_on_mobile_keys(pref_rows, family_id)
-        if family_id == "kasa":
+        if family_id == "ep1" and state.ep1_mgr is not None:
+            devices = _ep1_devices(state.ep1_mgr, excluded, hidden)
+        elif family_id == "kasa":
             devices = _kasa_devices(state.kasa_mgr, excluded, hidden)
         elif family_id == "sonos" and state.sonos_mgr is not None:
             devices = _sonos_devices(state.sonos_mgr, excluded, hidden)
