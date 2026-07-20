@@ -91,6 +91,41 @@ class DeviceIdResolution(StrEnum):
 EP1_DISPLAY_NAME = "Everything Presence One"
 
 
+class Ep1ReadingComparison(StrEnum):
+    """How an EP1 numeric reading is compared to a rule threshold."""
+
+    ABOVE = "above"
+    BELOW = "below"
+
+
+class Ep1ReadingMetric(StrEnum):
+    """EP1 climate / light fields usable in ``ep1_reading_compare`` conditions."""
+
+    HUMIDITY_PCT = "humidity_pct"
+    ILLUMINANCE_LX = "illuminance_lx"
+    TEMPERATURE_C = "temperature_c"
+
+    def display_label(self) -> str:
+        """Short human label for Status details and summaries."""
+        match self:
+            case Ep1ReadingMetric.HUMIDITY_PCT:
+                return "humidity"
+            case Ep1ReadingMetric.ILLUMINANCE_LX:
+                return "illuminance"
+            case Ep1ReadingMetric.TEMPERATURE_C:
+                return "temperature"
+
+    def unit_label(self) -> str:
+        """Unit suffix for Status details (fixed wire units)."""
+        match self:
+            case Ep1ReadingMetric.HUMIDITY_PCT:
+                return "%"
+            case Ep1ReadingMetric.ILLUMINANCE_LX:
+                return "lx"
+            case Ep1ReadingMetric.TEMPERATURE_C:
+                return "°C"
+
+
 class RuleDeviceActionType(StrEnum):
     """Per-device command dispatched when an automation rule fires."""
 

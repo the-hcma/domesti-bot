@@ -16,6 +16,8 @@ from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
+    Ep1ReadingComparison,
+    Ep1ReadingMetric,
     RuleDeviceActionType,
     RuleTrigger,
     SettingsCredentialsTestSource,
@@ -1091,6 +1093,29 @@ class DevicesAnyInStateForSCondition(BaseModel):
     state: DeviceConditionState
 
 
+class Ep1ReadingCompareCondition(BaseModel):
+    """True when one EP1 metric is above or below ``threshold`` (instant).
+
+    Units are fixed on the wire: ``temperature_c`` (°C), ``humidity_pct`` (%),
+    ``illuminance_lx`` (lx). Authoring is JSON-only for now (no Automations UI).
+    """
+
+    type: Literal["ep1_reading_compare"]
+    comparison: Ep1ReadingComparison
+    device: RuleConditionDeviceRefOut
+    metric: Ep1ReadingMetric
+    threshold: float
+
+    @model_validator(mode="after")
+    def _require_ep1_device_family(self) -> Self:
+        if self.device.family_id != DeviceFamilyId.EP1:
+            raise ValueError(
+                f"Expected device.family_id {DeviceFamilyId.EP1.value!r} for "
+                f"ep1_reading_compare, got {self.device.family_id.value!r}"
+            )
+        return self
+
+
 class LocalTimeWindowCondition(BaseModel):
     type: Literal["local_time_window"]
     end_hhmm: str
@@ -1173,6 +1198,7 @@ RuleConditionOut = Annotated[
     | DevicesAllInStateCondition
     | DevicesAnyInStateCondition
     | DevicesAnyInStateForSCondition
+    | Ep1ReadingCompareCondition
     | LocalTimeWindowCondition
     | UsersInsideGeofenceCondition
     | UsersInsideGeofenceForSCondition

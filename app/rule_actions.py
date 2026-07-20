@@ -18,7 +18,12 @@ from app.api.ui_state import (
     find_tailwind_by_identifier,
     find_vizio_by_id,
 )
-from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleDeviceActionType
+from app.device_enums import (
+    DeviceConditionState,
+    DeviceFamilyId,
+    Ep1ReadingMetric,
+    RuleDeviceActionType,
+)
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1DeviceManager
@@ -252,6 +257,35 @@ def cached_ep1_is_occupied(state: DeviceManagersState, device_id: str) -> bool |
     if occupancy == DeviceConditionState.CLEAR.value:
         return False
     return None
+
+
+def cached_ep1_reading(
+    state: DeviceManagersState,
+    device_id: str,
+    metric: Ep1ReadingMetric,
+) -> float | None:
+    """Return one cached EP1 climate/light reading, or ``None`` when unknown/missing."""
+    mgr = state.ep1_mgr
+    if mgr is None:
+        return None
+    try:
+        identifier = resolve_ep1_identifier_by_label(mgr, device_id)
+    except RuleActionDispatchError:
+        return None
+    if identifier is None:
+        return None
+    sensor = find_ep1_by_id(mgr, identifier)
+    if sensor is None:
+        return None
+    match metric:
+        case Ep1ReadingMetric.HUMIDITY_PCT:
+            return sensor.humidity_pct
+        case Ep1ReadingMetric.ILLUMINANCE_LX:
+            return sensor.illuminance_lx
+        case Ep1ReadingMetric.TEMPERATURE_C:
+            return sensor.temperature_c
+        case _:
+            raise ValueError(f"Expected Ep1ReadingMetric member, got {metric!r}")
 
 
 def cached_kasa_is_on(state: DeviceManagersState, device_id: str) -> bool | None:
