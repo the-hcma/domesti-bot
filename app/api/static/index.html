@@ -915,16 +915,44 @@
     .rules-presence-map-hover-tooltip.is-visible { visibility: visible; opacity: 1; }
     .rules-presence-map-tooltip-line { display: block; }
     .rules-presence-map-tooltip-line + .rules-presence-map-tooltip-line { margin-top: 2px; }
-    .rules-users-section { margin-bottom: 12px; }
+    .rules-users-section { margin-bottom: 8px; }
     .rules-user-details-list { display: flex; flex-direction: column; gap: 8px;
       margin-top: 12px; }
     .rules-user-detail-card { display: flex; flex-direction: column; gap: 4px; }
     .rules-users-sync { display: flex; flex-wrap: wrap; align-items: center;
-      justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-    .rules-home-location-form { display: flex; flex-direction: column; gap: 8px;
-      margin-bottom: 12px; }
+      justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+    .rules-home-location-section .rules-section-title { margin-bottom: 4px; }
+    .rules-home-location-status { margin: 0 0 6px; }
+    .rules-home-location-layout { display: grid;
+      grid-template-columns: 1fr minmax(10rem, 12rem); gap: 10px;
+      align-items: stretch; margin-bottom: 4px; }
+    .rules-home-location-form { display: flex; flex-direction: column; gap: 6px;
+      margin-bottom: 0; min-width: 0; }
+    .rules-home-location-fields { margin-bottom: 0; gap: 8px; }
+    .rules-home-location-section .settings-dialog-field { gap: 3px; flex: 1 1 6rem; }
+    .rules-home-location-section .settings-dialog-field input,
+    .rules-home-location-section .rules-home-location-actions select {
+      font-size: 13px; padding: 5px 8px; }
     .rules-home-location-actions { display: flex; flex-wrap: wrap; align-items: center;
-      gap: 8px; margin-top: 4px; }
+      gap: 6px; margin-top: 2px; }
+    .rules-home-location-map.leaflet-container { width: 100%; height: 140px;
+      border-radius: 8px; border: 1px solid var(--border); background: var(--card-elev); }
+    .rules-home-location-map-empty.leaflet-container { opacity: 0.72; }
+    .rules-home-location-map-pin { background: transparent; border: none; }
+    .rules-users-home-wifi-list { display: flex; flex-direction: column; gap: 4px;
+      margin: 0 0 8px; }
+    .rules-users-home-wifi-row { display: flex; align-items: center; gap: 8px;
+      min-width: 0; }
+    .rules-users-home-wifi-name { flex: 0 1 7.5rem; min-width: 4.5rem; max-width: 9rem;
+      font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis; }
+    .rules-users-home-wifi-select { flex: 1 1 auto; min-width: 0; font: inherit;
+      font-size: 13px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--input-fill); color: var(--fg); }
+    @media (max-width: 560px) {
+      .rules-home-location-layout { grid-template-columns: 1fr; }
+      .rules-home-location-map.leaflet-container { height: 120px; }
+    }
     .rules-day-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
     .rules-day-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
       gap: 4px 8px; }
