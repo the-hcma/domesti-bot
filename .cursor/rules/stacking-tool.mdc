@@ -1,0 +1,42 @@
+---
+description: Choose Graphite vs GitHub Stacked PRs from .github/stacking-tool
+alwaysApply: true
+---
+
+# Stacking tool preference
+
+Before creating branches or submitting/restacking PRs, **read** `.github/stacking-tool`
+(single line: `graphite` or `gh-stack`). Missing or invalid values: **stop and ask** —
+do not guess.
+
+<!-- stacking-tool-canonical-graphite-skill: https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/graphite/SKILL.md -->
+<!-- stacking-tool-canonical-gh-stack-skill: https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/gh-stack/SKILL.md -->
+
+Canonical skills live in **repository-helpers** (not copied into this repo):
+
+- **Graphite:** https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/graphite/SKILL.md
+- **gh-stack:** https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/gh-stack/SKILL.md
+
+Local clone (when `${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}` is synced):
+
+- `${REPOSITORY_HELPERS_DIR}/.cursor/skills/graphite/SKILL.md`
+- `${REPOSITORY_HELPERS_DIR}/.cursor/skills/gh-stack/SKILL.md`
+
+## `graphite`
+
+- Follow the Graphite skill above (`gt create` / `gt submit` / `gt restack`).
+- Prefer repository-helpers `scripts/dev/submit-stack` when available in that clone.
+
+## `gh-stack`
+
+- Follow the gh-stack skill (non-interactive: `view --json`, `submit --auto --open`,
+  named `init`/`add`).
+- Prefer repository-helpers `scripts/dev/submit-stack` / `scripts/dev/ship-and-review`
+  when available (they dispatch via `scripts/lib/stacking-tool`).
+- **Do not** mix with `gt create` / `gt submit` / `gt restack` on the same stack.
+
+## Unchanged regardless of marker
+
+Agent review, CI wait, and reply-before-resolve still follow
+`.cursor/rules/pr-ship-and-review.mdc` and the canonical ship-and-review skill in
+repository-helpers.
