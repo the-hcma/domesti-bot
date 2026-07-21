@@ -5,6 +5,10 @@
 // device, plus per-family and global bulk actions.
 
 import { api, HttpError, isBackendTransportFailure } from "./api.js";
+import {
+  createEp1HeaderStatusStrip,
+  MOCK_EP1_HEADER_STATUS,
+} from "./ep1-header-status.js";
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
 import type {
@@ -774,6 +778,7 @@ class DomestiBotController {
         header.append(menu);
       }
       header.append(createBrandMark(this.meta));
+      appendEp1HeaderStatusStrip(header);
       const actions = document.createElement("div");
       actions.className = "tile-header-actions";
       const globalBtn = document.createElement("button");
@@ -838,6 +843,11 @@ class DomestiBotController {
 
     const controlsEnabled = this.controlsEnabled();
     for (const family of state.families) {
+      // EP1 is sensors-only and lives in the header status strip (#524), not
+      // the family tile grid.
+      if (family.id === "ep1") {
+        continue;
+      }
       this.root.append(
         renderFamily(family, this, this.connected, controlsEnabled),
       );
@@ -1859,6 +1869,21 @@ function appendAboutContent(body: HTMLElement, meta: MetaOut | null): void {
   repo.rel = "noopener noreferrer";
   repo.textContent = ABOUT_REPO_LABEL;
   body.append(tagline, copyright, license, version, repo);
+}
+
+/**
+ * Insert the EP1 occupancy / climate strip into the dashboard header.
+ *
+ * TODO(ep1-header-live): pass ``ep1HeaderStatusFromUiState(state)`` with
+ * ``mock: false`` once an EP1 is on the LAN; drop ``MOCK_EP1_HEADER_STATUS``.
+ */
+function appendEp1HeaderStatusStrip(header: HTMLElement): void {
+  const strip = createEp1HeaderStatusStrip(MOCK_EP1_HEADER_STATUS, {
+    mock: true,
+  });
+  if (strip !== null) {
+    header.append(strip);
+  }
 }
 
 function appendSaturatedTileVisuals(
