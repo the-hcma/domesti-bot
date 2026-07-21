@@ -1872,7 +1872,7 @@ function appendAboutContent(body: HTMLElement, meta: MetaOut | null): void {
 }
 
 /**
- * Insert the EP1 occupancy / climate strip into the dashboard header.
+ * Insert the EP1 climate / light strip into the dashboard header.
  *
  * TODO(ep1-header-live): pass ``ep1HeaderStatusFromUiState(state)`` with
  * ``mock: false`` once an EP1 is on the LAN; drop ``MOCK_EP1_HEADER_STATUS``.
