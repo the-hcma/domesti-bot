@@ -2423,7 +2423,7 @@ function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown
   return "inactive";
 }
 
-/** Dual-unit temperature label for occupancy tiles (matches Python ``format_temperature_c_and_f``). */
+/** Dual-unit temperature for occupancy aria (· matches header metric separators). */
 function formatOccupancyTemperatureDual(
   readings: UIOccupancyReadingsOut | null | undefined,
 ): string | null {
@@ -2441,7 +2441,7 @@ function formatOccupancyTemperatureDual(
   if (celsius == null || fahrenheit == null) {
     return null;
   }
-  return `${celsius.toFixed(1)} °C / ${fahrenheit.toFixed(1)} °F`;
+  return `${celsius.toFixed(1)} °C · ${fahrenheit.toFixed(1)} °F`;
 }
 
 function isMobileFormFactor(): boolean {

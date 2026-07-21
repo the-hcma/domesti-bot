@@ -25,10 +25,10 @@ def chromium_browser() -> Iterator[Any]:
 
 
 @pytest.mark.browser
-def test_ep1_header_status_compact_fits_brand_height_with_2x2_grid(
+def test_ep1_header_status_compact_single_column_stack(
     chromium_browser: Any,
 ) -> None:
-    """Phone: °C above °F in a 2×2 grid; strip height ≤ brand icon (32px)."""
+    """Phone: °C, °F, humidity, lux stacked in one column."""
     style_css = _extract_index_html_style_block()
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{style_css}</style></head>
@@ -41,12 +41,11 @@ def test_ep1_header_status_compact_fits_brand_height_with_2x2_grid(
     <aside class="ep1-header-status" data-mock="true" aria-label="Room sensors">
       <div class="ep1-header-status-device" title="Office EP1">
         <span class="ep1-header-status-metric" data-metric="temperature">
-          <span class="ep1-header-status-full">22.5 °C / 72.5 °F</span>
+          <span class="ep1-header-status-full">22.5 °C</span>
           <span class="ep1-header-status-compact">22.5°C</span>
         </span>
-        <span class="ep1-header-status-metric ep1-header-status-metric-compact-only"
-              data-metric="temperature-f">
-          <span class="ep1-header-status-full"></span>
+        <span class="ep1-header-status-metric" data-metric="temperature-f">
+          <span class="ep1-header-status-full">72.5 °F</span>
           <span class="ep1-header-status-compact">72.5°F</span>
         </span>
         <span class="ep1-header-status-metric" data-metric="humidity">
@@ -77,40 +76,89 @@ def test_ep1_header_status_compact_fits_brand_height_with_2x2_grid(
     page = chromium_browser.new_page(viewport={"width": 390, "height": 844})
     try:
         page.set_content(html)
-        brand_box = page.locator(".brand-mark-svg").bounding_box()
-        header_box = page.locator(".tile-header.tile-header-global").bounding_box()
-        strip_box = page.locator(".ep1-header-status").bounding_box()
-        bulk_box = page.locator(".tile-header-global-off").bounding_box()
-        assert brand_box is not None
-        assert header_box is not None
-        assert strip_box is not None
-        assert bulk_box is not None
-        # Strip must not exceed the brand icon (pre-readings vertical budget).
-        assert strip_box["height"] <= brand_box["height"] + 1
-        # Header stays roughly one control-row tall (brand / icon bulk).
-        assert header_box["height"] <= max(brand_box["height"], bulk_box["height"]) + 8
-
-        temp_c = page.locator(
+        c_box = page.locator(
             '.ep1-header-status-metric[data-metric="temperature"] .ep1-header-status-compact',
-        )
-        temp_f = page.locator(
+        ).bounding_box()
+        f_box = page.locator(
             '.ep1-header-status-metric[data-metric="temperature-f"] .ep1-header-status-compact',
-        )
-        humidity = page.locator(
+        ).bounding_box()
+        humidity_box = page.locator(
             '.ep1-header-status-metric[data-metric="humidity"] .ep1-header-status-compact',
-        )
-        c_box = temp_c.bounding_box()
-        f_box = temp_f.bounding_box()
-        humidity_box = humidity.bounding_box()
+        ).bounding_box()
+        lux_box = page.locator(
+            '.ep1-header-status-metric[data-metric="illuminance"] .ep1-header-status-compact',
+        ).bounding_box()
         assert c_box is not None
         assert f_box is not None
         assert humidity_box is not None
-        # Column 1: °C above °F; humidity sits beside °C (second column).
-        assert c_box["y"] < f_box["y"]
-        assert abs(c_box["y"] - humidity_box["y"]) < 4
-        assert humidity_box["x"] > c_box["x"]
+        assert lux_box is not None
+        # Single column: each metric below the previous, same x.
+        assert c_box["y"] < f_box["y"] < humidity_box["y"] < lux_box["y"]
+        assert abs(c_box["x"] - f_box["x"]) < 4
+        assert abs(c_box["x"] - humidity_box["x"]) < 4
+        assert abs(c_box["x"] - lux_box["x"]) < 4
         assert "OFF" in page.locator(".tile-header-global-off").inner_text()
         assert "all" in page.locator(".tile-header-global-off").inner_text()
+    finally:
+        page.close()
+
+
+@pytest.mark.browser
+def test_ep1_header_status_comfortable_splits_c_and_f_with_dot(
+    chromium_browser: Any,
+) -> None:
+    """Desktop: °C and °F are separate metrics with the same · separator."""
+    style_css = _extract_index_html_style_block()
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>{style_css}</style></head>
+<body>
+<div id="app" data-layout="comfortable">
+  <aside class="ep1-header-status" aria-label="Room sensors">
+    <div class="ep1-header-status-device">
+      <span class="ep1-header-status-metric" data-metric="temperature">
+        <span class="ep1-header-status-full">22.5 °C</span>
+        <span class="ep1-header-status-compact">22.5°C</span>
+      </span>
+      <span class="ep1-header-status-metric" data-metric="temperature-f">
+        <span class="ep1-header-status-full">72.5 °F</span>
+        <span class="ep1-header-status-compact">72.5°F</span>
+      </span>
+      <span class="ep1-header-status-metric" data-metric="humidity">
+        <span class="ep1-header-status-full">42%</span>
+        <span class="ep1-header-status-compact">42%</span>
+      </span>
+    </div>
+  </aside>
+</div>
+</body></html>"""
+    page = chromium_browser.new_page(viewport={"width": 1280, "height": 800})
+    try:
+        page.set_content(html)
+        c_box = page.locator(
+            '.ep1-header-status-metric[data-metric="temperature"] .ep1-header-status-full',
+        ).bounding_box()
+        f_box = page.locator(
+            '.ep1-header-status-metric[data-metric="temperature-f"] .ep1-header-status-full',
+        ).bounding_box()
+        humidity_box = page.locator(
+            '.ep1-header-status-metric[data-metric="humidity"] .ep1-header-status-full',
+        ).bounding_box()
+        assert c_box is not None
+        assert f_box is not None
+        assert humidity_box is not None
+        assert abs(c_box["y"] - f_box["y"]) < 4
+        assert f_box["x"] > c_box["x"]
+        assert humidity_box["x"] > f_box["x"]
+        before = page.evaluate(
+            """() => {
+              const f = document.querySelector(
+                '.ep1-header-status-metric[data-metric="temperature-f"]'
+              );
+              return f ? getComputedStyle(f, '::before').content : null;
+            }""",
+        )
+        assert before is not None
+        assert "·" in before or '"·"' in before or before == '"·"'
     finally:
         page.close()
 
@@ -124,8 +172,11 @@ def test_ep1_header_status_module_readings_only_contract() -> None:
     assert "ep1-header-status-label" not in src
     assert "compactC" in src
     assert "compactF" in src
-    assert 'data-metric="temperature-f"' in src or 'createMetricSpan("temperature-f"' in src
-    assert "°C/" not in src
+    assert "fullC" in src
+    assert "fullF" in src
+    assert 'createMetricSpan("temperature-f"' in src
+    assert "ep1-header-status-metric-compact-only" not in src
+    assert "°C /" not in src
     assert "temperature_c" in src
     assert "humidity_pct" in src
     assert "illuminance_lx" in src
@@ -137,8 +188,7 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "display: flex" in base
     assert "flex: 0 1 auto" in base
     assert "ep1-header-status-label" not in style
-    compact_only = _css_rule_block(style, ".ep1-header-status-metric-compact-only")
-    assert "display: none" in compact_only
+    assert "ep1-header-status-metric-compact-only" not in style
     header = _css_rule_block(
         style,
         '#app[data-layout="compact"] .tile-header.tile-header-global',
@@ -148,23 +198,15 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         style,
         '#app[data-layout="compact"] .ep1-header-status-device',
     )
-    assert "grid-auto-flow: column" in device
-    assert "grid-template-rows: auto auto" in device
-    compact_strip = _css_rule_block(
-        style,
-        '#app[data-layout="compact"] .ep1-header-status',
-    )
-    assert "max-height: 32px" in compact_strip
-    compact_f = _css_rule_block(
-        style,
-        '#app[data-layout="compact"] .ep1-header-status-metric-compact-only',
-    )
-    assert "display: inline" in compact_f
+    assert "flex-direction: column" in device
+    assert "grid-auto-flow: column" not in device
     icons = _css_rule_block(
         style,
         '#app[data-layout="compact"] .tile-header-global-off',
     )
     assert "inline-flex" in icons
+    metric_sep = _css_rule_block(style, ".ep1-header-status-metric ~ .ep1-header-status-metric::before")
+    assert "·" in metric_sep
 
 
 def test_main_uses_icon_bulk_off_on_compact() -> None:
@@ -180,6 +222,7 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     # Landscape phones: height + coarse pointer, not width alone (see COMPACT_LAYOUT_MQ).
     assert "max-height: 560px" in src
     assert "pointer: coarse" in src
+    assert "°C · " in src
 
 
 def test_compact_layout_mq_css_matches_main() -> None:
