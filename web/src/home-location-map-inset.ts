@@ -8,6 +8,7 @@ const UNCONFIGURED_CENTER: L.LatLngExpression = [20, 0];
 
 export interface HomeLocationMapInset {
   destroy(): void;
+  invalidateSize(): void;
   setLocation(lat: number, lon: number, label: string | null): void;
 }
 
@@ -47,6 +48,15 @@ export function mountHomeLocationMapInset(
   let viewLat = options.lat;
   let viewLon = options.lon;
 
+  const recenterAfterSize = (): void => {
+    map.invalidateSize({ animate: false });
+    if (homeIsConfigured(viewLat, viewLon)) {
+      map.setView([viewLat, viewLon], CONFIGURED_ZOOM, { animate: false });
+    } else {
+      map.setView(UNCONFIGURED_CENTER, UNCONFIGURED_ZOOM, { animate: false });
+    }
+  };
+
   const apply = (lat: number, lon: number, label: string | null): void => {
     viewLat = lat;
     viewLon = lon;
@@ -55,7 +65,7 @@ export function mountHomeLocationMapInset(
       marker = null;
     }
     if (!homeIsConfigured(lat, lon)) {
-      map.setView(UNCONFIGURED_CENTER, UNCONFIGURED_ZOOM);
+      map.setView(UNCONFIGURED_CENTER, UNCONFIGURED_ZOOM, { animate: false });
       container.classList.add("rules-home-location-map-empty");
       return;
     }
@@ -64,31 +74,53 @@ export function mountHomeLocationMapInset(
     marker = L.marker([lat, lon], { icon: homeDivIcon() })
       .bindTooltip(tip, { permanent: false })
       .addTo(map);
-    map.setView([lat, lon], CONFIGURED_ZOOM);
-  };
-
-  const recenterAfterSize = (): void => {
-    map.invalidateSize();
-    if (homeIsConfigured(viewLat, viewLon)) {
-      map.setView([viewLat, viewLon], CONFIGURED_ZOOM);
-    } else {
-      map.setView(UNCONFIGURED_CENTER, UNCONFIGURED_ZOOM);
-    }
+    map.setView([lat, lon], CONFIGURED_ZOOM, { animate: false });
   };
 
   apply(options.lat, options.lon, options.label);
 
-  // Dialog layout settles after mount; Leaflet needs a size refresh then
-  // a fresh setView — the first setView often ran at zero container size.
+  // Dialog layout / grid columns often settle after first paint; Leaflet’s first
+  // setView frequently ran at a zero-size container. Re-center whenever the
+  // host gains a real size and after a couple of animation frames.
+  let destroyed = false;
+  const resizeObserver = new ResizeObserver(() => {
+    if (destroyed) {
+      return;
+    }
+    if (container.clientWidth > 0 && container.clientHeight > 0) {
+      recenterAfterSize();
+    }
+  });
+  resizeObserver.observe(container);
   requestAnimationFrame(() => {
+    if (destroyed) {
+      return;
+    }
     recenterAfterSize();
+    requestAnimationFrame(() => {
+      if (destroyed) {
+        return;
+      }
+      recenterAfterSize();
+    });
   });
 
   return {
     destroy(): void {
+      destroyed = true;
+      resizeObserver.disconnect();
       map.remove();
     },
+    invalidateSize(): void {
+      if (destroyed) {
+        return;
+      }
+      recenterAfterSize();
+    },
     setLocation(lat: number, lon: number, label: string | null): void {
+      if (destroyed) {
+        return;
+      }
       apply(lat, lon, label);
       recenterAfterSize();
     },
