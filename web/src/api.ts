@@ -28,6 +28,7 @@ import type {
   MyTracksSyncIn,
   ObservedWifiNetworkOut,
   UserHomeWifiIn,
+  UserHouseholdIn,
   UserOut,
   UserStatusOut,
   RuleOut,
@@ -385,6 +386,16 @@ export const api = {
     return call<UserOut>(
       "PUT",
       `/v1/rules/users/${encodeURIComponent(userId)}/home-wifi`,
+      body,
+    );
+  },
+  putUserHousehold(
+    userId: string,
+    body: UserHouseholdIn,
+  ): Promise<UserOut> {
+    return call<UserOut>(
+      "PUT",
+      `/v1/rules/users/${encodeURIComponent(userId)}/household`,
       body,
     );
   },

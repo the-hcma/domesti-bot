@@ -851,6 +851,7 @@ class UserOut(BaseModel):
     first_name: str
     home_wifi_bssid: str | None = None
     home_wifi_ssid: str | None = None
+    is_household: bool = False
     last_name: str
     tracking_device_label: str
     user_id: str
@@ -905,6 +906,12 @@ class UserHomeWifiIn(BaseModel):
                 f"got wifi_bssid={self.wifi_bssid!r}, wifi_ssid={self.wifi_ssid!r}",
             )
         return self
+
+
+class UserHouseholdIn(BaseModel):
+    """Mark whether a roster user is part of the household."""
+
+    is_household: bool
 
 
 class UserLocationOut(BaseModel):

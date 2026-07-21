@@ -31,6 +31,8 @@ export interface PresenceMapUser {
 }
 
 export interface PresenceMapMountOptions {
+  /** When true, skip zoom chrome and fit a short inset height via CSS. */
+  compact?: boolean;
   geofences: GeofenceOut[];
   /** When true, tooltip title includes ``user_id`` (Users tab). */
   includeUserIdInTooltip?: boolean;
@@ -40,6 +42,7 @@ export interface PresenceMapMountOptions {
 
 export interface PresenceMapController {
   destroy(): void;
+  invalidateSize(): void;
   updateUsers(users: PresenceMapUser[]): void;
 }
 
@@ -452,7 +455,10 @@ export function mountPresenceMap(
   const shellEl = document.createElement("div");
   shellEl.className = "rules-presence-map-shell";
   const mapEl = document.createElement("div");
-  mapEl.className = "rules-presence-map";
+  mapEl.className =
+    options.compact === true
+      ? "rules-presence-map rules-presence-map-compact"
+      : "rules-presence-map";
   const legendEl = document.createElement("div");
   legendEl.className = "rules-presence-map-legend";
   legendEl.hidden = true;
@@ -464,7 +470,7 @@ export function mountPresenceMap(
   const map = L.map(mapEl, {
     attributionControl: false,
     scrollWheelZoom: true,
-    zoomControl: true,
+    zoomControl: options.compact !== true,
   });
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
@@ -670,6 +676,9 @@ export function mountPresenceMap(
       shellTooltip.destroy();
       map.remove();
       rootEl.replaceChildren();
+    },
+    invalidateSize(): void {
+      refreshMapLayout();
     },
     updateUsers(nextUsers: PresenceMapUser[]): void {
       applyUsers(nextUsers);

@@ -20,6 +20,7 @@ import {
   type MyTracksSyncIn,
   type ObservedWifiNetworkOut,
   type UserHomeWifiIn,
+  type UserHouseholdIn,
   type UserLocationOut,
   type UserOut,
   type UserStatusOut,
@@ -60,6 +61,10 @@ export interface RulesDataSource {
   setUserHomeWifi(
     userId: string,
     homeWifi: UserHomeWifiIn,
+  ): Promise<UserOut>;
+  setUserHousehold(
+    userId: string,
+    household: UserHouseholdIn,
   ): Promise<UserOut>;
   syncGeofencesFromMyTracks(
     credentials: MyTracksSyncIn,
@@ -280,6 +285,21 @@ export class MockRulesDataSource implements RulesDataSource {
       ...user,
       home_wifi_bssid: homeWifi.wifi_bssid,
       home_wifi_ssid: homeWifi.wifi_ssid,
+    };
+    return this.saveUser(updated);
+  }
+
+  async setUserHousehold(
+    userId: string,
+    household: UserHouseholdIn,
+  ): Promise<UserOut> {
+    const user = this.store.users.find((row) => row.user_id === userId);
+    if (user === undefined) {
+      throw new Error(`Expected user ${JSON.stringify(userId)}, got none`);
+    }
+    const updated: UserOut = {
+      ...user,
+      is_household: household.is_household,
     };
     return this.saveUser(updated);
   }
@@ -707,6 +727,16 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
       return api.putUserHomeWifi(userId, homeWifi);
     }
     return this.inner.setUserHomeWifi(userId, homeWifi);
+  }
+
+  setUserHousehold(
+    userId: string,
+    household: UserHouseholdIn,
+  ): Promise<UserOut> {
+    if (this.rulesLive) {
+      return api.putUserHousehold(userId, household);
+    }
+    return this.inner.setUserHousehold(userId, household);
   }
 
   saveRule(rule: RuleOut): Promise<RuleOut> {
