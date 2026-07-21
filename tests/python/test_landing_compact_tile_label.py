@@ -28,6 +28,23 @@ _LONG_DEVICE_LABEL = (
     "Basement workshop outlet strip west wall"
 )
 _GLOBAL_BULK_LABEL = "Turn off / pause / close everything"
+# Mirrors createGlobalBulkOffButton compact branch in web/src/main.ts.
+_GLOBAL_BULK_ICON_MARKUP = (
+    '<span class="tile-header-global-off-glyph tile-header-global-off-off"'
+    ' aria-hidden="true">OFF</span>'
+    '<svg class="tile-header-global-off-glyph tile-header-global-off-svg"'
+    ' viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+    '<rect x="6" y="5" width="4" height="14" rx="1"/>'
+    '<rect x="14" y="5" width="4" height="14" rx="1"/></svg>'
+    '<svg class="tile-header-global-off-glyph tile-header-global-off-svg"'
+    ' viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    ' stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"'
+    ' aria-hidden="true">'
+    '<path d="M7 11V8a5 5 0 0 1 10 0v3"/>'
+    '<rect x="5" y="11" width="14" height="10" rx="2"/></svg>'
+    '<span class="tile-header-global-off-glyph tile-header-global-off-all"'
+    ' aria-hidden="true">all</span>'
+)
 # Mobile-mock Kasa names (short room labels + one object-style alias).
 _MOCK_KASA_GRID_TILES: tuple[tuple[str, str], ...] = (
     ("Kitchen", "active"),
@@ -237,11 +254,13 @@ def _build_compact_typography_probe_html(
     safe_label = html.escape(device_label, quote=True)
     bulk_markup = ""
     if include_global_bulk:
-        safe_bulk = html.escape(_GLOBAL_BULK_LABEL, quote=True)
+        safe_aria = html.escape(_GLOBAL_BULK_LABEL, quote=True)
         bulk_markup = f"""
       <header class="tile-header tile-header-global">
         <div class="tile-header-actions">
-          <button type="button" class="btn btn-bulk tile-header-global-off">{safe_bulk}</button>
+          <button type="button"
+                  class="btn btn-bulk tile-header-global-off tile-header-global-off-icons"
+                  aria-label="{safe_aria}">{_GLOBAL_BULK_ICON_MARKUP}</button>
         </div>
       </header>"""
     return f"""<!doctype html>
@@ -324,7 +343,7 @@ def _build_layout_probe_html(
 def _build_mock_kasa_compact_grid_probe_html(style_css: str) -> str:
     """Three-column Kasa grid with mock room names and per-label compact icons."""
     tiles_markup = "\n".join(_mock_kasa_tile_markup(label=label, tone=tone) for label, tone in _MOCK_KASA_GRID_TILES)
-    safe_bulk = html.escape(_GLOBAL_BULK_LABEL, quote=True)
+    safe_aria = html.escape(_GLOBAL_BULK_LABEL, quote=True)
     return f"""<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
@@ -337,7 +356,9 @@ def _build_mock_kasa_compact_grid_probe_html(style_css: str) -> str:
     <div id="app" data-layout="compact">
       <header class="tile-header tile-header-global">
         <div class="tile-header-actions">
-          <button type="button" class="btn btn-bulk tile-header-global-off">{safe_bulk}</button>
+          <button type="button"
+                  class="btn btn-bulk tile-header-global-off tile-header-global-off-icons"
+                  aria-label="{safe_aria}">{_GLOBAL_BULK_ICON_MARKUP}</button>
         </div>
       </header>
       <section class="family" data-connected="true">
