@@ -25,10 +25,10 @@ def chromium_browser() -> Iterator[Any]:
 
 
 @pytest.mark.browser
-def test_ep1_header_status_compact_stacks_readings_leaves_bulk_width(
+def test_ep1_header_status_compact_fits_brand_height_with_2x2_grid(
     chromium_browser: Any,
 ) -> None:
-    """Phone: stacked readings (no label); bulk-off keeps horizontal room."""
+    """Phone: °C above °F in a 2×2 grid; strip height ≤ brand icon (32px)."""
     style_css = _extract_index_html_style_block()
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{style_css}</style></head>
@@ -42,7 +42,12 @@ def test_ep1_header_status_compact_stacks_readings_leaves_bulk_width(
       <div class="ep1-header-status-device" title="Office EP1">
         <span class="ep1-header-status-metric" data-metric="temperature">
           <span class="ep1-header-status-full">22.5 °C / 72.5 °F</span>
-          <span class="ep1-header-status-compact">22.5°C/72.5°F</span>
+          <span class="ep1-header-status-compact">22.5°C</span>
+        </span>
+        <span class="ep1-header-status-metric ep1-header-status-metric-compact-only"
+              data-metric="temperature-f">
+          <span class="ep1-header-status-full"></span>
+          <span class="ep1-header-status-compact">72.5°F</span>
         </span>
         <span class="ep1-header-status-metric" data-metric="humidity">
           <span class="ep1-header-status-full">42%</span>
@@ -55,8 +60,15 @@ def test_ep1_header_status_compact_stacks_readings_leaves_bulk_width(
       </div>
     </aside>
     <div class="tile-header-actions">
-      <button type="button" class="btn btn-bulk tile-header-global-off">
-        Turn off / pause / close everything
+      <button type="button"
+              class="btn btn-bulk tile-header-global-off tile-header-global-off-icons"
+              aria-label="Turn off / pause / close everything">
+        <span class="tile-header-global-off-glyph tile-header-global-off-off"
+              aria-hidden="true">OFF</span>
+        <span class="tile-header-global-off-glyph" aria-hidden="true">||</span>
+        <span class="tile-header-global-off-glyph" aria-hidden="true">🔒</span>
+        <span class="tile-header-global-off-glyph tile-header-global-off-all"
+              aria-hidden="true">all</span>
       </button>
     </div>
   </header>
@@ -65,40 +77,40 @@ def test_ep1_header_status_compact_stacks_readings_leaves_bulk_width(
     page = chromium_browser.new_page(viewport={"width": 390, "height": 844})
     try:
         page.set_content(html)
-        assert page.locator(".ep1-header-status-label").count() == 0
-        assert page.locator('[data-metric="occupancy"]').count() == 0
-        assert "Office EP1" not in page.locator(".ep1-header-status").inner_text()
+        brand_box = page.locator(".brand-mark-svg").bounding_box()
+        header_box = page.locator(".tile-header.tile-header-global").bounding_box()
+        strip_box = page.locator(".ep1-header-status").bounding_box()
+        bulk_box = page.locator(".tile-header-global-off").bounding_box()
+        assert brand_box is not None
+        assert header_box is not None
+        assert strip_box is not None
+        assert bulk_box is not None
+        # Strip must not exceed the brand icon (pre-readings vertical budget).
+        assert strip_box["height"] <= brand_box["height"] + 1
+        # Header stays roughly one control-row tall (brand / icon bulk).
+        assert header_box["height"] <= max(brand_box["height"], bulk_box["height"]) + 8
 
-        temp = page.locator(
+        temp_c = page.locator(
             '.ep1-header-status-metric[data-metric="temperature"] .ep1-header-status-compact',
+        )
+        temp_f = page.locator(
+            '.ep1-header-status-metric[data-metric="temperature-f"] .ep1-header-status-compact',
         )
         humidity = page.locator(
             '.ep1-header-status-metric[data-metric="humidity"] .ep1-header-status-compact',
         )
-        lux = page.locator(
-            '.ep1-header-status-metric[data-metric="illuminance"] .ep1-header-status-compact',
-        )
-        assert temp.evaluate("el => getComputedStyle(el).display") == "inline"
-        assert temp.inner_text() == "22.5°C/72.5°F"
-
-        temp_box = temp.bounding_box()
+        c_box = temp_c.bounding_box()
+        f_box = temp_f.bounding_box()
         humidity_box = humidity.bounding_box()
-        lux_box = lux.bounding_box()
-        assert temp_box is not None
+        assert c_box is not None
+        assert f_box is not None
         assert humidity_box is not None
-        assert lux_box is not None
-        assert temp_box["y"] < humidity_box["y"] < lux_box["y"]
-
-        brand_box = page.locator(".brand-mark").bounding_box()
-        strip_box = page.locator(".ep1-header-status").bounding_box()
-        bulk_box = page.locator(".tile-header-global-off").bounding_box()
-        assert brand_box is not None
-        assert strip_box is not None
-        assert bulk_box is not None
-        # Narrow column beside the icon; bulk button keeps most of the row width.
-        assert strip_box["width"] < 120
-        assert bulk_box["width"] > 180
-        assert strip_box["x"] + strip_box["width"] <= bulk_box["x"] + 2
+        # Column 1: °C above °F; humidity sits beside °C (second column).
+        assert c_box["y"] < f_box["y"]
+        assert abs(c_box["y"] - humidity_box["y"]) < 4
+        assert humidity_box["x"] > c_box["x"]
+        assert "OFF" in page.locator(".tile-header-global-off").inner_text()
+        assert "all" in page.locator(".tile-header-global-off").inner_text()
     finally:
         page.close()
 
@@ -110,15 +122,13 @@ def test_ep1_header_status_module_readings_only_contract() -> None:
     assert "export function createEp1HeaderStatusStrip" in src
     assert "TODO(ep1-header-live)" in src
     assert "ep1-header-status-label" not in src
-    assert "formatEp1HeaderOccupancy" not in src
-    assert 'data-metric="occupancy"' not in src
+    assert "compactC" in src
+    assert "compactF" in src
+    assert 'data-metric="temperature-f"' in src or 'createMetricSpan("temperature-f"' in src
+    assert "°C/" not in src
     assert "temperature_c" in src
-    assert "temperature_f" in src
     assert "humidity_pct" in src
     assert "illuminance_lx" in src
-    assert "°C/" in src
-    assert "°F" in src
-    assert "row.title = snapshot.label" in src
 
 
 def test_index_html_ep1_header_status_css_contract() -> None:
@@ -127,33 +137,46 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "display: flex" in base
     assert "flex: 0 1 auto" in base
     assert "ep1-header-status-label" not in style
-    assert "data-occupancy" not in style
+    compact_only = _css_rule_block(style, ".ep1-header-status-metric-compact-only")
+    assert "display: none" in compact_only
     header = _css_rule_block(
         style,
         '#app[data-layout="compact"] .tile-header.tile-header-global',
     )
     assert "flex-wrap: nowrap" in header
-    compact = _css_rule_block(style, '#app[data-layout="compact"] .ep1-header-status')
-    assert "flex: 0 0 auto" in compact
-    assert "order: 3" not in compact
     device = _css_rule_block(
         style,
         '#app[data-layout="compact"] .ep1-header-status-device',
     )
-    assert "flex-direction: column" in device
-    separators = _css_rule_block(
+    assert "grid-auto-flow: column" in device
+    assert "grid-template-rows: auto auto" in device
+    compact_strip = _css_rule_block(
         style,
-        '#app[data-layout="compact"] .ep1-header-status-metric ~ .ep1-header-status-metric::before',
+        '#app[data-layout="compact"] .ep1-header-status',
     )
-    assert "content: none" in separators
+    assert "max-height: 32px" in compact_strip
+    compact_f = _css_rule_block(
+        style,
+        '#app[data-layout="compact"] .ep1-header-status-metric-compact-only',
+    )
+    assert "display: inline" in compact_f
+    icons = _css_rule_block(
+        style,
+        '#app[data-layout="compact"] .tile-header-global-off',
+    )
+    assert "inline-flex" in icons
 
 
-def test_main_appends_ep1_header_strip_and_skips_ep1_family_tiles() -> None:
+def test_main_uses_icon_bulk_off_on_compact() -> None:
     src = _MAIN_TS.read_text(encoding="utf-8")
+    assert "createGlobalBulkOffButton()" in src
+    assert 'GLOBAL_BULK_OFF_LABEL = "Turn off / pause / close everything"' in src
+    assert "tile-header-global-off-icons" in src
+    assert 'textContent = "OFF"' in src
+    assert 'textContent = "all"' in src
+    assert "createBulkOffPauseIcon" in src
+    assert "createBulkOffPadlockIcon" in src
     assert "appendEp1HeaderStatusStrip(header)" in src
-    assert "createEp1HeaderStatusStrip(MOCK_EP1_HEADER_STATUS" in src
-    assert 'family.id === "ep1"' in src
-    assert 'from "./ep1-header-status.js"' in src
 
 
 def _css_rule_block(style_css: str, selector_needle: str) -> str:

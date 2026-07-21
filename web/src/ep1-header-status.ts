@@ -87,7 +87,7 @@ export function formatEp1HeaderIlluminance(lx: number | null): string | null {
 
 export function formatEp1HeaderTemperature(
   readings: Pick<Ep1HeaderStatusSnapshot, "temperature_c" | "temperature_f">,
-): { compact: string; full: string } | null {
+): { compactC: string; compactF: string; full: string } | null {
   let celsius = readings.temperature_c;
   let fahrenheit = readings.temperature_f;
   if (celsius == null && fahrenheit != null) {
@@ -101,11 +101,11 @@ export function formatEp1HeaderTemperature(
   }
   const cLabel = `${celsius.toFixed(1)} °C`;
   const fLabel = `${fahrenheit.toFixed(1)} °F`;
-  const dual = `${cLabel} / ${fLabel}`;
   return {
-    // Compact layout stacks metrics vertically; keep dual-unit on one line.
-    compact: `${celsius.toFixed(1)}°C/${fahrenheit.toFixed(1)}°F`,
-    full: dual,
+    // Compact phone: °C and °F are separate metrics (2×2 grid with humidity/lux).
+    compactC: `${celsius.toFixed(1)}°C`,
+    compactF: `${fahrenheit.toFixed(1)}°F`,
+    full: `${cLabel} / ${fLabel}`,
   };
 }
 
@@ -121,7 +121,11 @@ function createEp1HeaderStatusDevice(
 
   const temp = formatEp1HeaderTemperature(snapshot);
   if (temp != null) {
-    row.append(createMetricSpan("temperature", temp.full, temp.compact));
+    row.append(createMetricSpan("temperature", temp.full, temp.compactC));
+    // °F is compact-only so comfortable keeps a single dual-unit temperature line.
+    const fahrenheit = createMetricSpan("temperature-f", "", temp.compactF);
+    fahrenheit.classList.add("ep1-header-status-metric-compact-only");
+    row.append(fahrenheit);
   }
 
   const humidity = formatEp1HeaderHumidity(snapshot.humidity_pct);

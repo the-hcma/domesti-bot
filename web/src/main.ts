@@ -38,6 +38,8 @@ const DEVICE_PROPERTIES_EXCLUDE_HELP =
   "Skip this device when using the global Turn off / pause / close everything control. Family bulk buttons and this tile's own toggle still work.";
 const DEVICE_PROPERTIES_EXCLUDE_LABEL =
   "Exclude from Turn off / Pause / Close everything";
+/** Accessible label (and comfortable layout text) for the global bulk-off control. */
+const GLOBAL_BULK_OFF_LABEL = "Turn off / pause / close everything";
 const DEVICE_PROPERTIES_HIDE_HELP =
   "Hide this tile on the compact (phone / tablet) layout. It remains visible and controllable on the desktop web UI.";
 const DEVICE_PROPERTIES_HIDE_LABEL = "Hide on phone / tablet";
@@ -781,10 +783,7 @@ class DomestiBotController {
       appendEp1HeaderStatusStrip(header);
       const actions = document.createElement("div");
       actions.className = "tile-header-actions";
-      const globalBtn = document.createElement("button");
-      globalBtn.type = "button";
-      globalBtn.className = "btn btn-bulk tile-header-global-off";
-      globalBtn.textContent = "Turn off / pause / close everything";
+      const globalBtn = createGlobalBulkOffButton();
       globalBtn.disabled = !this.controlsEnabled();
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
@@ -1384,6 +1383,52 @@ function createBrandMark(meta: MetaOut | null): HTMLElement {
   return wrap;
 }
 
+/** Padlock glyph for compact global bulk-off (close doors). */
+function createBulkOffPadlockIcon(): SVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "tile-header-global-off-glyph tile-header-global-off-svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2.2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const shackle = document.createElementNS(SVG_NS, "path");
+  shackle.setAttribute("d", "M7 11V8a5 5 0 0 1 10 0v3");
+  const body = document.createElementNS(SVG_NS, "rect");
+  body.setAttribute("x", "5");
+  body.setAttribute("y", "11");
+  body.setAttribute("width", "14");
+  body.setAttribute("height", "10");
+  body.setAttribute("rx", "2");
+  svg.append(shackle, body);
+  return svg;
+}
+
+/** Pause bars for compact global bulk-off (Sonos). */
+function createBulkOffPauseIcon(): SVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "tile-header-global-off-glyph tile-header-global-off-svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "currentColor");
+  svg.setAttribute("aria-hidden", "true");
+  const left = document.createElementNS(SVG_NS, "rect");
+  left.setAttribute("x", "6");
+  left.setAttribute("y", "5");
+  left.setAttribute("width", "4");
+  left.setAttribute("height", "14");
+  left.setAttribute("rx", "1");
+  const right = document.createElementNS(SVG_NS, "rect");
+  right.setAttribute("x", "14");
+  right.setAttribute("y", "5");
+  right.setAttribute("width", "4");
+  right.setAttribute("height", "14");
+  right.setAttribute("rx", "1");
+  svg.append(left, right);
+  return svg;
+}
+
 function createFamilyIcon(familyId: string): SVGElement | null {
   // Returns a configured ``<svg>`` element for the family header,
   // or ``null`` if the family doesn't have a registered icon (in
@@ -1411,6 +1456,33 @@ function createFamilyIcon(familyId: string): SVGElement | null {
     svg.append(path);
   }
   return svg;
+}
+
+/**
+ * Global bulk-off control: full label on comfortable; OFF / pause / padlock +
+ * ``all`` on compact so the header keeps room for EP1 readings.
+ */
+function createGlobalBulkOffButton(): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-bulk tile-header-global-off";
+  button.setAttribute("aria-label", GLOBAL_BULK_OFF_LABEL);
+  button.title = GLOBAL_BULK_OFF_LABEL;
+  if (!isMobileFormFactor()) {
+    button.textContent = GLOBAL_BULK_OFF_LABEL;
+    return button;
+  }
+  button.classList.add("tile-header-global-off-icons");
+  const off = document.createElement("span");
+  off.className = "tile-header-global-off-glyph tile-header-global-off-off";
+  off.setAttribute("aria-hidden", "true");
+  off.textContent = "OFF";
+  const all = document.createElement("span");
+  all.className = "tile-header-global-off-glyph tile-header-global-off-all";
+  all.setAttribute("aria-hidden", "true");
+  all.textContent = "all";
+  button.append(off, createBulkOffPauseIcon(), createBulkOffPadlockIcon(), all);
+  return button;
 }
 
 function createSettingsDialogCloseButton(
