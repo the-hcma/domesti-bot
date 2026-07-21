@@ -99,6 +99,7 @@ const MOCK_MY_TRACKS_USERS: UserOut[] = [
     enabled: true,
     home_wifi_bssid: null,
     home_wifi_ssid: null,
+    is_household: true,
   },
   {
     user_id: "kristen",
@@ -109,6 +110,7 @@ const MOCK_MY_TRACKS_USERS: UserOut[] = [
     enabled: true,
     home_wifi_bssid: null,
     home_wifi_ssid: null,
+    is_household: true,
   },
 ];
 

@@ -44,8 +44,12 @@ export function mountHomeLocationMapInset(
   }).addTo(map);
 
   let marker: L.Marker | null = null;
+  let viewLat = options.lat;
+  let viewLon = options.lon;
 
   const apply = (lat: number, lon: number, label: string | null): void => {
+    viewLat = lat;
+    viewLon = lon;
     if (marker !== null) {
       map.removeLayer(marker);
       marker = null;
@@ -63,11 +67,21 @@ export function mountHomeLocationMapInset(
     map.setView([lat, lon], CONFIGURED_ZOOM);
   };
 
+  const recenterAfterSize = (): void => {
+    map.invalidateSize();
+    if (homeIsConfigured(viewLat, viewLon)) {
+      map.setView([viewLat, viewLon], CONFIGURED_ZOOM);
+    } else {
+      map.setView(UNCONFIGURED_CENTER, UNCONFIGURED_ZOOM);
+    }
+  };
+
   apply(options.lat, options.lon, options.label);
 
-  // Dialog layout settles after mount; Leaflet needs a size refresh.
+  // Dialog layout settles after mount; Leaflet needs a size refresh then
+  // a fresh setView — the first setView often ran at zero container size.
   requestAnimationFrame(() => {
-    map.invalidateSize();
+    recenterAfterSize();
   });
 
   return {
@@ -76,7 +90,7 @@ export function mountHomeLocationMapInset(
     },
     setLocation(lat: number, lon: number, label: string | null): void {
       apply(lat, lon, label);
-      map.invalidateSize();
+      recenterAfterSize();
     },
   };
 }

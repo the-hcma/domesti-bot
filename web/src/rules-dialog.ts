@@ -442,15 +442,20 @@ class RulesHubController {
     geofences: GeofenceOut[],
     users: UserStatusOut[],
     options: {
+      compact?: boolean;
       includeUserIdInTooltip?: boolean;
       showUserFilters: boolean;
       showTextDetails: boolean;
     },
   ): void {
     const mount = document.createElement("div");
-    mount.className = "rules-presence-map-mount";
+    mount.className =
+      options.compact === true
+        ? "rules-presence-map-mount rules-presence-map-mount-compact"
+        : "rules-presence-map-mount";
     parent.append(mount);
     this.presenceMap = mountPresenceMap(mount, {
+      compact: options.compact === true,
       geofences,
       users: users.map(userStatusToMapUser),
       showUserFilters: options.showUserFilters,
@@ -1503,48 +1508,54 @@ class RulesHubController {
     });
     syncRow.append(syncMeta, syncBtn);
 
-    const homeLocationSection = this.createHomeLocationSection(homeLocation, mapUsers);
+    const main = document.createElement("div");
+    main.className = "rules-users-main-layout";
+    const left = document.createElement("div");
+    left.className = "rules-users-main-left";
+    const mapsStack = document.createElement("div");
+    mapsStack.className = "rules-users-maps-stack";
 
-    const homeWifiHeading = document.createElement("h3");
-    homeWifiHeading.className = "rules-section-title";
-    homeWifiHeading.textContent = "Home WiFi";
-    const homeWifiLead = document.createElement("p");
-    homeWifiLead.className = "rules-card-meta";
-    homeWifiLead.textContent = "SSID per person (matched by BSSID).";
-    const homeWifiList = document.createElement("div");
-    homeWifiList.className = "rules-users-home-wifi-list";
-    for (const user of rosterUsers) {
-      homeWifiList.append(await this.createHomeWifiRow(user));
-    }
+    const homeMapEl = document.createElement("div");
+    homeMapEl.className = "rules-home-location-map";
+    homeMapEl.setAttribute("role", "img");
+    homeMapEl.setAttribute("aria-label", "Home location map");
+    const presenceMount = document.createElement("div");
+    presenceMount.className = "rules-users-presence-map-inset";
+    mapsStack.append(homeMapEl, presenceMount);
 
-    const mapSection = document.createElement("section");
-    mapSection.className = "rules-users-section";
-
-    this.body.append(
-      lead,
-      syncRow,
-      homeLocationSection,
-      homeWifiHeading,
-      homeWifiLead,
-      homeWifiList,
-      mapSection,
+    const homeBlock = this.mountHomeLocationForm(
+      left,
+      homeLocation,
+      mapUsers,
+      homeMapEl,
     );
+    await this.mountHouseholdAndSharedWifi(left, rosterUsers, homeBlock.sharedWifiSelect);
+
+    main.append(left, mapsStack);
+    this.body.append(lead, syncRow, main);
+
     this.mountUserPresenceMap(
-      mapSection,
+      presenceMount,
       geofences,
       mapUsers,
       {
+        compact: true,
         includeUserIdInTooltip: true,
-        showUserFilters: true,
+        showUserFilters: false,
         showTextDetails: false,
       },
     );
+    requestAnimationFrame(() => {
+      this.presenceMap?.invalidateSize();
+    });
   }
 
-  private createHomeLocationSection(
+  private mountHomeLocationForm(
+    parent: HTMLElement,
     initial: SettingsLocationOut,
     mapUsers: UserStatusOut[],
-  ): HTMLElement {
+    mapEl: HTMLElement,
+  ): { sharedWifiSelect: HTMLSelectElement } {
     const section = document.createElement("section");
     section.className = "rules-users-section rules-home-location-section";
     const heading = document.createElement("h3");
@@ -1552,9 +1563,6 @@ class RulesHubController {
     heading.textContent = "Home location";
     const status = document.createElement("p");
     status.className = "rules-card-meta rules-home-location-status";
-
-    const layout = document.createElement("div");
-    layout.className = "rules-home-location-layout";
 
     const form = document.createElement("form");
     form.className = "rules-home-location-form";
@@ -1625,12 +1633,6 @@ class RulesHubController {
     saveBtn.textContent = "Save home location";
     actions.append(browserBtn, adoptSelect, saveBtn);
     form.append(actions);
-
-    const mapEl = document.createElement("div");
-    mapEl.className = "rules-home-location-map";
-    mapEl.setAttribute("role", "img");
-    mapEl.setAttribute("aria-label", "Home location map");
-    layout.append(form, mapEl);
 
     this.homeLocationMap?.destroy();
     this.homeLocationMap = mountHomeLocationMapInset(mapEl, {
@@ -1762,64 +1764,127 @@ class RulesHubController {
         });
     });
 
-    section.append(heading, status, layout);
-    return section;
+    const sharedWifiSelect = document.createElement("select");
+    sharedWifiSelect.className = "rules-select rules-users-shared-wifi-select";
+    sharedWifiSelect.setAttribute("aria-label", "Home WiFi for household");
+
+    section.append(heading, status, form);
+    parent.append(section);
+    return { sharedWifiSelect };
   }
 
-  private async createHomeWifiRow(user: UserOut): Promise<HTMLElement> {
-    const row = document.createElement("div");
-    row.className = "rules-users-home-wifi-row";
-    const name = document.createElement("span");
-    name.className = "rules-users-home-wifi-name";
-    name.textContent = userDisplayLabel(user.user_id, user.display_name);
-    const select = document.createElement("select");
-    select.className = "rules-select rules-users-home-wifi-select";
-    select.setAttribute(
-      "aria-label",
-      `Home WiFi for ${userDisplayLabel(user.user_id, user.display_name)}`,
-    );
+  private async mountHouseholdAndSharedWifi(
+    parent: HTMLElement,
+    rosterUsers: UserOut[],
+    sharedWifiSelect: HTMLSelectElement,
+  ): Promise<void> {
+    const householdSection = document.createElement("section");
+    householdSection.className = "rules-users-section";
+    const householdHeading = document.createElement("h3");
+    householdHeading.className = "rules-section-title";
+    householdHeading.textContent = "Household";
+    const householdLead = document.createElement("p");
+    householdLead.className = "rules-card-meta";
+    householdLead.textContent = "People who share this home WiFi.";
+    const householdList = document.createElement("div");
+    householdList.className = "rules-users-household-list";
+
+    const wifiSection = document.createElement("section");
+    wifiSection.className = "rules-users-section";
+    const wifiHeading = document.createElement("h3");
+    wifiHeading.className = "rules-section-title";
+    wifiHeading.textContent = "Home WiFi";
+    const wifiLead = document.createElement("p");
+    wifiLead.className = "rules-card-meta";
+    wifiLead.textContent = "One SSID for all household members (matched by BSSID).";
+
     const noneOption = document.createElement("option");
     noneOption.value = "";
     noneOption.textContent = "Not set";
-    select.append(noneOption);
-    let networks: Awaited<ReturnType<RulesDataSource["listUserObservedWifi"]>> = [];
-    try {
-      networks = await this.dataSource.listUserObservedWifi(user.user_id);
-    } catch (err) {
-      console.warn("Failed to load observed WiFi networks", err);
+    sharedWifiSelect.append(noneOption);
+
+    const householdMembers = rosterUsers.filter((user) => user.is_household);
+    const networkByBssid = new Map<string, { wifi_bssid: string; wifi_ssid: string }>();
+    for (const user of householdMembers) {
+      try {
+        const networks = await this.dataSource.listUserObservedWifi(user.user_id);
+        for (const network of networks) {
+          networkByBssid.set(network.wifi_bssid, {
+            wifi_bssid: network.wifi_bssid,
+            wifi_ssid: network.wifi_ssid,
+          });
+        }
+      } catch (err) {
+        console.warn("Failed to load observed WiFi networks", err);
+      }
     }
-    for (const network of networks) {
+    let sharedBssid: string | null = null;
+    let sharedSsid: string | null = null;
+    for (const user of householdMembers) {
+      if (user.home_wifi_bssid !== null) {
+        sharedBssid = user.home_wifi_bssid;
+        sharedSsid = user.home_wifi_ssid;
+        break;
+      }
+    }
+    if (sharedBssid !== null && sharedSsid !== null && !networkByBssid.has(sharedBssid)) {
+      networkByBssid.set(sharedBssid, {
+        wifi_bssid: sharedBssid,
+        wifi_ssid: sharedSsid,
+      });
+    }
+    for (const network of [...networkByBssid.values()].sort((a, b) =>
+      a.wifi_ssid.localeCompare(b.wifi_ssid),
+    )) {
       const option = document.createElement("option");
       option.value = network.wifi_bssid;
       option.textContent = network.wifi_ssid;
       option.dataset.ssid = network.wifi_ssid;
-      select.append(option);
+      sharedWifiSelect.append(option);
     }
-    if (user.home_wifi_bssid !== null) {
-      const hasOption = Array.from(select.options).some(
-        (option) => option.value === user.home_wifi_bssid,
-      );
-      if (!hasOption && user.home_wifi_ssid !== null) {
-        const savedOption = document.createElement("option");
-        savedOption.value = user.home_wifi_bssid;
-        savedOption.textContent = user.home_wifi_ssid;
-        savedOption.dataset.ssid = user.home_wifi_ssid;
-        select.append(savedOption);
-      }
-      select.value = user.home_wifi_bssid;
+    if (sharedBssid !== null) {
+      sharedWifiSelect.value = sharedBssid;
     }
-    select.addEventListener("change", () => {
-      select.disabled = true;
-      void this.saveHomeWifiSelection(user.user_id, select).finally(() => {
-        select.disabled = false;
+
+    sharedWifiSelect.addEventListener("change", () => {
+      sharedWifiSelect.disabled = true;
+      void this.applySharedHomeWifiToHousehold(rosterUsers, sharedWifiSelect).finally(() => {
+        sharedWifiSelect.disabled = false;
       });
     });
-    row.append(name, select);
-    return row;
+
+    for (const user of rosterUsers) {
+      const row = document.createElement("label");
+      row.className = "rules-check-row rules-users-household-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = user.is_household;
+      cb.addEventListener("change", () => {
+        cb.disabled = true;
+        void this.toggleHouseholdMembership(
+          user,
+          cb.checked,
+          sharedWifiSelect,
+        ).finally(() => {
+          cb.disabled = false;
+        });
+      });
+      row.append(
+        cb,
+        document.createTextNode(
+          ` ${userDisplayLabel(user.user_id, user.display_name)}`,
+        ),
+      );
+      householdList.append(row);
+    }
+
+    householdSection.append(householdHeading, householdLead, householdList);
+    wifiSection.append(wifiHeading, wifiLead, sharedWifiSelect);
+    parent.append(householdSection, wifiSection);
   }
 
-  private async saveHomeWifiSelection(
-    userId: string,
+  private async applySharedHomeWifiToHousehold(
+    rosterUsers: UserOut[],
     select: HTMLSelectElement,
   ): Promise<void> {
     const selected = select.options[select.selectedIndex];
@@ -1828,15 +1893,69 @@ class RulesHubController {
       wifiBssid === null
         ? null
         : selected?.dataset.ssid ?? selected?.textContent ?? null;
+    const household = rosterUsers.filter((user) => user.is_household);
+    const failedLabels: string[] = [];
+    for (const user of household) {
+      try {
+        await this.dataSource.setUserHomeWifi(user.user_id, {
+          wifi_bssid: wifiBssid,
+          wifi_ssid: wifiSsid,
+        });
+        user.home_wifi_bssid = wifiBssid;
+        user.home_wifi_ssid = wifiSsid;
+      } catch (err) {
+        const detail =
+          err instanceof Error ? err.message : "Failed to save home WiFi";
+        failedLabels.push(`${user.display_name}: ${detail}`);
+      }
+    }
+    if (failedLabels.length > 0) {
+      showErrorToast(
+        `Home WiFi not saved for ${failedLabels.length} of ${household.length} household member(s): ${failedLabels.join("; ")}`,
+      );
+    }
+  }
+
+  private async toggleHouseholdMembership(
+    user: UserOut,
+    isHousehold: boolean,
+    sharedWifiSelect: HTMLSelectElement,
+  ): Promise<void> {
     try {
-      await this.dataSource.setUserHomeWifi(userId, {
-        wifi_bssid: wifiBssid,
-        wifi_ssid: wifiSsid,
+      const saved = await this.dataSource.setUserHousehold(user.user_id, {
+        is_household: isHousehold,
       });
+      user.is_household = saved.is_household;
+      if (isHousehold) {
+        const selected = sharedWifiSelect.options[sharedWifiSelect.selectedIndex];
+        const wifiBssid =
+          sharedWifiSelect.value === "" ? null : sharedWifiSelect.value;
+        const wifiSsid =
+          wifiBssid === null
+            ? null
+            : selected?.dataset.ssid ?? selected?.textContent ?? null;
+        if (wifiBssid !== null) {
+          const withWifi = await this.dataSource.setUserHomeWifi(user.user_id, {
+            wifi_bssid: wifiBssid,
+            wifi_ssid: wifiSsid,
+          });
+          user.home_wifi_bssid = withWifi.home_wifi_bssid;
+          user.home_wifi_ssid = withWifi.home_wifi_ssid;
+        }
+      } else {
+        const cleared = await this.dataSource.setUserHomeWifi(user.user_id, {
+          wifi_bssid: null,
+          wifi_ssid: null,
+        });
+        user.home_wifi_bssid = cleared.home_wifi_bssid;
+        user.home_wifi_ssid = cleared.home_wifi_ssid;
+      }
+      void this.refresh();
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to save home WiFi";
+        err instanceof Error ? err.message : "Failed to update household";
       showErrorToast(message);
+      void this.refresh();
     }
   }
 

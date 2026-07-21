@@ -179,6 +179,33 @@ def test_put_user_home_wifi_and_list_observed_wifi(tmp_path: Path) -> None:
     assert put.json()["home_wifi_bssid"] == "aa:bb:cc:dd:ee:ff"
 
 
+def test_put_user_household(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Henrique",
+                tracking_device_label="Pixel",
+                enabled=True,
+            ),
+        ],
+    )
+    client = _client(db)
+    put = client.put(
+        "/v1/rules/users/henrique/household",
+        json={"is_household": True},
+    )
+    assert put.status_code == HTTPStatus.OK
+    assert put.json()["is_household"] is True
+    listed = client.get("/v1/rules/users")
+    assert listed.status_code == HTTPStatus.OK
+    assert listed.json()[0]["is_household"] is True
+
+
 def test_put_user_home_wifi_rejects_partial_ssid_without_bssid(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     replace_users(

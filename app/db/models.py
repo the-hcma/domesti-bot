@@ -169,6 +169,7 @@ class RuleUser(Base):
     first_name: Mapped[str] = mapped_column(String, nullable=False)
     home_wifi_bssid: Mapped[str | None] = mapped_column(String, nullable=True)
     home_wifi_ssid: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_household: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_name: Mapped[str] = mapped_column(String, nullable=False, default="")
     tracking_device_label: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)

@@ -921,11 +921,15 @@
     .rules-user-detail-card { display: flex; flex-direction: column; gap: 4px; }
     .rules-users-sync { display: flex; flex-wrap: wrap; align-items: center;
       justify-content: space-between; gap: 6px; margin-bottom: 8px; }
+    .rules-users-main-layout { display: grid;
+      grid-template-columns: 1fr minmax(10rem, 12rem); gap: 10px;
+      align-items: start; }
+    .rules-users-main-left { min-width: 0; display: flex; flex-direction: column;
+      gap: 4px; }
+    .rules-users-maps-stack { display: flex; flex-direction: column; gap: 8px;
+      min-width: 0; }
     .rules-home-location-section .rules-section-title { margin-bottom: 4px; }
     .rules-home-location-status { margin: 0 0 6px; }
-    .rules-home-location-layout { display: grid;
-      grid-template-columns: 1fr minmax(10rem, 12rem); gap: 10px;
-      align-items: stretch; margin-bottom: 4px; }
     .rules-home-location-form { display: flex; flex-direction: column; gap: 6px;
       margin-bottom: 0; min-width: 0; }
     .rules-home-location-fields { margin-bottom: 0; gap: 8px; }
@@ -939,19 +943,21 @@
       border-radius: 8px; border: 1px solid var(--border); background: var(--card-elev); }
     .rules-home-location-map-empty.leaflet-container { opacity: 0.72; }
     .rules-home-location-map-pin { background: transparent; border: none; }
-    .rules-users-home-wifi-list { display: flex; flex-direction: column; gap: 4px;
-      margin: 0 0 8px; }
-    .rules-users-home-wifi-row { display: flex; align-items: center; gap: 8px;
-      min-width: 0; }
-    .rules-users-home-wifi-name { flex: 0 1 7.5rem; min-width: 4.5rem; max-width: 9rem;
-      font-size: 13px; color: var(--fg); white-space: nowrap; overflow: hidden;
-      text-overflow: ellipsis; }
-    .rules-users-home-wifi-select { flex: 1 1 auto; min-width: 0; font: inherit;
-      font-size: 13px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
+    .rules-users-household-list { display: flex; flex-direction: column; gap: 2px;
+      margin: 0 0 4px; }
+    .rules-users-household-row { margin: 2px 0; }
+    .rules-users-shared-wifi-select { display: block; width: auto; max-width: 18rem;
+      min-width: 10rem; font: inherit; font-size: 13px; padding: 4px 8px;
+      border-radius: 6px; border: 1px solid var(--border);
       background: var(--input-fill); color: var(--fg); }
+    .rules-presence-map-mount-compact { gap: 0; }
+    .rules-presence-map-compact.leaflet-container { height: 140px; border-radius: 8px;
+      border: 1px solid var(--border); }
+    .rules-users-presence-map-inset .rules-presence-map-filters { display: none; }
     @media (max-width: 560px) {
-      .rules-home-location-layout { grid-template-columns: 1fr; }
-      .rules-home-location-map.leaflet-container { height: 120px; }
+      .rules-users-main-layout { grid-template-columns: 1fr; }
+      .rules-home-location-map.leaflet-container,
+      .rules-presence-map-compact.leaflet-container { height: 120px; }
     }
     .rules-day-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
     .rules-day-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));

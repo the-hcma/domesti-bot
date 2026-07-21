@@ -559,6 +559,7 @@ export interface UserOut {
   first_name: string;
   home_wifi_bssid: string | null;
   home_wifi_ssid: string | null;
+  is_household: boolean;
   last_name: string;
   tracking_device_label: string;
   user_id: string;
@@ -573,6 +574,10 @@ export interface ObservedWifiNetworkOut {
 export interface UserHomeWifiIn {
   wifi_bssid: string | null;
   wifi_ssid: string | null;
+}
+
+export interface UserHouseholdIn {
+  is_household: boolean;
 }
 
 export interface UserLocationOut {

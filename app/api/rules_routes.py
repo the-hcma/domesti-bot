@@ -18,6 +18,7 @@ from app.api.schemas import (
     SettingsLocationIn,
     SettingsLocationOut,
     UserHomeWifiIn,
+    UserHouseholdIn,
     UserLocationOut,
     UserOut,
     UserStatusOut,
@@ -50,6 +51,7 @@ from app.rules_store import (
     list_users,
     save_geofence,
     set_user_home_wifi,
+    set_user_household,
     user_exists,
 )
 from app.server_runtime import runtime
@@ -147,6 +149,29 @@ async def put_user_home_wifi(
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=str(exc),
+        ) from exc
+    return _user_to_schema(saved)
+
+
+@router.put("/users/{user_id}/household", response_model=UserOut)
+async def put_user_household(
+    user_id: str,
+    body: UserHouseholdIn,
+    request: Request,
+) -> UserOut:
+    """Mark whether ``user_id`` is part of the household."""
+    cache_path = _require_discovery_cache(request)
+    trimmed_user_id = user_id.strip()
+    try:
+        saved = set_user_household(
+            cache_path,
+            trimmed_user_id,
+            is_household=body.is_household,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=f"Unknown user_id {trimmed_user_id!r}",
         ) from exc
     return _user_to_schema(saved)
 
@@ -354,6 +379,7 @@ def _user_to_schema(record: UserRecord) -> UserOut:
         first_name=record.first_name,
         home_wifi_bssid=record.home_wifi_bssid,
         home_wifi_ssid=record.home_wifi_ssid,
+        is_household=record.is_household,
         last_name=record.last_name,
         tracking_device_label=record.tracking_device_label,
         user_id=record.user_id,
@@ -408,7 +434,10 @@ def _users_status(cache_path: Path) -> list[UserStatusOut]:
                 display_name=user.display_name,
                 enabled=user.enabled,
                 first_name=user.first_name,
+                home_wifi_bssid=user.home_wifi_bssid,
+                home_wifi_ssid=user.home_wifi_ssid,
                 inside_geofence_ids=inside_geofence_ids,
+                is_household=user.is_household,
                 last_location=last_location,
                 last_name=user.last_name,
                 tracking_device_label=user.tracking_device_label,

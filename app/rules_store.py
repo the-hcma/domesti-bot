@@ -36,6 +36,7 @@ class UserRecord:
     user_id: str
     home_wifi_bssid: str | None = None
     home_wifi_ssid: str | None = None
+    is_household: bool = False
 
 
 def count_geofences(path: Path) -> int:
@@ -97,9 +98,11 @@ def replace_users(path: Path, users: list[UserRecord]) -> int:
     now = time.time()
 
     def _write(session: Session) -> None:
+        existing_rows = session.scalars(select(RuleUser)).all()
         preserved_home_wifi: dict[str, tuple[str | None, str | None]] = {
-            row.user_id: (row.home_wifi_ssid, row.home_wifi_bssid) for row in session.scalars(select(RuleUser)).all()
+            row.user_id: (row.home_wifi_ssid, row.home_wifi_bssid) for row in existing_rows
         }
+        preserved_household: dict[str, bool] = {row.user_id: bool(row.is_household) for row in existing_rows}
         session.execute(delete(RuleUser))
         for user in users:
             home_wifi_ssid = user.home_wifi_ssid
@@ -109,6 +112,7 @@ def replace_users(path: Path, users: list[UserRecord]) -> int:
                     user.user_id,
                     (None, None),
                 )
+            is_household = preserved_household.get(user.user_id, user.is_household)
             session.add(
                 RuleUser(
                     user_id=user.user_id,
@@ -119,6 +123,7 @@ def replace_users(path: Path, users: list[UserRecord]) -> int:
                     enabled=1 if user.enabled else 0,
                     home_wifi_ssid=home_wifi_ssid,
                     home_wifi_bssid=normalize_wifi_bssid(home_wifi_bssid),
+                    is_household=1 if is_household else 0,
                     updated_at=now,
                 )
             )
@@ -150,6 +155,27 @@ def set_user_home_wifi(
             raise KeyError(trimmed_user_id)
         row.home_wifi_ssid = trimmed_ssid
         row.home_wifi_bssid = normalized_bssid
+        row.updated_at = now
+        return _user_to_record(row)
+
+    return discovery_write(path, _write)
+
+
+def set_user_household(
+    path: Path,
+    user_id: str,
+    *,
+    is_household: bool,
+) -> UserRecord:
+    """Mark whether ``user_id`` is part of the household roster."""
+    trimmed_user_id = user_id.strip()
+    now = time.time()
+
+    def _write(session: Session) -> UserRecord:
+        row = session.get(RuleUser, trimmed_user_id)
+        if row is None:
+            raise KeyError(trimmed_user_id)
+        row.is_household = 1 if is_household else 0
         row.updated_at = now
         return _user_to_record(row)
 
@@ -239,4 +265,5 @@ def _user_to_record(row: RuleUser) -> UserRecord:
         enabled=bool(row.enabled),
         home_wifi_bssid=row.home_wifi_bssid,
         home_wifi_ssid=row.home_wifi_ssid,
+        is_household=bool(row.is_household),
     )
