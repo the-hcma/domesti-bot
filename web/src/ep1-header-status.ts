@@ -1,7 +1,9 @@
 /**
- * Dashboard header strip for EP1 room sensors (occupancy + climate/light).
+ * Dashboard header strip for EP1 climate/light readings.
  *
  * Placement: same row as the global bulk-off control (#524). Read-only.
+ * Occupancy is intentionally omitted from this strip (room sensors still
+ * expose it on tiles / rule conditions elsewhere).
  */
 
 import type { UIDeviceOut, UIOccupancyReadingsOut, UIStateOut } from "./types.js";
@@ -11,7 +13,6 @@ export interface Ep1HeaderStatusSnapshot {
   humidity_pct: number | null;
   illuminance_lx: number | null;
   label: string;
-  occupancy: "clear" | "occupied" | "unknown";
   temperature_c: number | null;
   temperature_f: number | null;
 }
@@ -28,7 +29,6 @@ export const MOCK_EP1_HEADER_STATUS: readonly Ep1HeaderStatusSnapshot[] = [
     humidity_pct: 42,
     illuminance_lx: 180,
     label: "Office EP1",
-    occupancy: "occupied",
     temperature_c: 22.5,
     temperature_f: 72.5,
   },
@@ -85,23 +85,6 @@ export function formatEp1HeaderIlluminance(lx: number | null): string | null {
   return Number.isInteger(lx) ? `${String(lx)} lx` : `${lx.toFixed(1)} lx`;
 }
 
-export function formatEp1HeaderOccupancy(
-  occupancy: Ep1HeaderStatusSnapshot["occupancy"],
-): { compact: string; full: string } {
-  switch (occupancy) {
-    case "occupied":
-      return { compact: "Occ", full: "Occupied" };
-    case "clear":
-      return { compact: "Clr", full: "Clear" };
-    case "unknown":
-      return { compact: "?", full: "Unknown" };
-    default: {
-      const _exhaustive: never = occupancy;
-      throw new Error(`Expected occupancy state, got ${_exhaustive as string}`);
-    }
-  }
-}
-
 export function formatEp1HeaderTemperature(
   readings: Pick<Ep1HeaderStatusSnapshot, "temperature_c" | "temperature_f">,
 ): { compact: string; full: string } | null {
@@ -117,9 +100,12 @@ export function formatEp1HeaderTemperature(
     return null;
   }
   const cLabel = `${celsius.toFixed(1)} °C`;
+  const fLabel = `${fahrenheit.toFixed(1)} °F`;
+  const dual = `${cLabel} / ${fLabel}`;
   return {
-    compact: cLabel,
-    full: `${cLabel} / ${fahrenheit.toFixed(1)} °F`,
+    // Phone strip stays one row: still dual-unit, slightly tighter spacing.
+    compact: `${celsius.toFixed(1)}°C/${fahrenheit.toFixed(1)}°F`,
+    full: dual,
   };
 }
 
@@ -128,17 +114,11 @@ function createEp1HeaderStatusDevice(
 ): HTMLElement {
   const row = document.createElement("div");
   row.className = "ep1-header-status-device";
-  row.dataset["occupancy"] = snapshot.occupancy;
 
   const label = document.createElement("span");
   label.className = "ep1-header-status-label";
   label.textContent = snapshot.label;
   row.append(label);
-
-  const occupancy = formatEp1HeaderOccupancy(snapshot.occupancy);
-  row.append(
-    createMetricSpan("occupancy", occupancy.full, occupancy.compact),
-  );
 
   const temp = formatEp1HeaderTemperature(snapshot);
   if (temp != null) {
@@ -179,15 +159,10 @@ function createMetricSpan(
 function ep1HeaderStatusFromDevice(device: UIDeviceOut): Ep1HeaderStatusSnapshot {
   const readings: UIOccupancyReadingsOut | null | undefined =
     device.occupancy_readings;
-  const occupancy =
-    device.state === "occupied" || device.state === "clear"
-      ? device.state
-      : "unknown";
   return {
     humidity_pct: readings?.humidity_pct ?? null,
     illuminance_lx: readings?.illuminance_lx ?? null,
     label: device.label,
-    occupancy,
     temperature_c: readings?.temperature_c ?? null,
     temperature_f: readings?.temperature_f ?? null,
   };
