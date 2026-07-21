@@ -1,0 +1,70 @@
+---
+description: Use enums for closed string sets in TypeScript (not raw literals)
+alwaysApply: true
+---
+
+# Closed sets use enums (TypeScript)
+
+When a value is drawn from a **fixed, known set** of strings (API enums, device
+families/kinds, layout modes, rule triggers, settings tabs, credential sources,
+toast variants), define a **string enum** (or a const-object enum — see below)
+in `web/src/` (typically next to the domain types in `types.ts` or a small
+`*-enums.ts` module) and compare against enum members — not bare string
+literals.
+
+```ts
+// Good
+enum DeviceKind {
+  Door = "door",
+  Occupancy = "occupancy",
+  Speaker = "speaker",
+  Switch = "switch",
+}
+
+if (device.kind === DeviceKind.Occupancy) {
+  ...
+}
+
+// Avoid in application code
+if (device.kind === "occupancy") {
+  ...
+}
+```
+
+Wire / JSON values stay the same (`"occupancy"`, etc.). Prefer **string enums**
+whose members equal the API wire value so `JSON` and FastAPI payloads need no
+mapping layer.
+
+This mirrors Python’s `StrEnum` rule (`.cursor/rules/python-closed-set-enums.mdc`).
+
+## Const-object alternative (when `enum` is awkward)
+
+If a bundler or `erasableSyntaxOnly`-style constraint makes `enum` undesirable,
+use a const object + derived type (same call-site discipline):
+
+```ts
+export const DeviceKind = {
+  Door: "door",
+  Occupancy: "occupancy",
+  Speaker: "speaker",
+  Switch: "switch",
+} as const;
+export type DeviceKind = (typeof DeviceKind)[keyof typeof DeviceKind];
+
+if (device.kind === DeviceKind.Occupancy) {
+  ...
+}
+```
+
+Do **not** treat a bare string union alone as sufficient when comparisons still
+hard-code `"occupancy"` at call sites — the named members are the point.
+
+## Exceptions
+
+- One-off **user-facing copy** (button labels, toast prose) — those stay string
+  constants / message modules (`test-assert-message-constants.mdc` when asserted
+  in tests).
+- **DOM / CSS / third-party** literals required for interoperability (`"click"`,
+  Leaflet options, `data-*` attribute names).
+- **Test fixture JSON** that must match wire payloads may keep string literals;
+  prefer importing enum members when asserting application branches.
