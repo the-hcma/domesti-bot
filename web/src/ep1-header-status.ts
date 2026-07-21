@@ -87,7 +87,7 @@ export function formatEp1HeaderIlluminance(lx: number | null): string | null {
 
 export function formatEp1HeaderTemperature(
   readings: Pick<Ep1HeaderStatusSnapshot, "temperature_c" | "temperature_f">,
-): { compactC: string; compactF: string; full: string } | null {
+): { compactC: string; compactF: string; fullC: string; fullF: string } | null {
   let celsius = readings.temperature_c;
   let fahrenheit = readings.temperature_f;
   if (celsius == null && fahrenheit != null) {
@@ -99,13 +99,12 @@ export function formatEp1HeaderTemperature(
   if (celsius == null || fahrenheit == null) {
     return null;
   }
-  const cLabel = `${celsius.toFixed(1)} °C`;
-  const fLabel = `${fahrenheit.toFixed(1)} °F`;
   return {
-    // Compact phone: °C and °F are separate metrics (2×2 grid with humidity/lux).
+    // Separate metrics so comfortable uses the same · separator as humidity/lux.
     compactC: `${celsius.toFixed(1)}°C`,
     compactF: `${fahrenheit.toFixed(1)}°F`,
-    full: `${cLabel} / ${fLabel}`,
+    fullC: `${celsius.toFixed(1)} °C`,
+    fullF: `${fahrenheit.toFixed(1)} °F`,
   };
 }
 
@@ -121,11 +120,8 @@ function createEp1HeaderStatusDevice(
 
   const temp = formatEp1HeaderTemperature(snapshot);
   if (temp != null) {
-    row.append(createMetricSpan("temperature", temp.full, temp.compactC));
-    // °F is compact-only so comfortable keeps a single dual-unit temperature line.
-    const fahrenheit = createMetricSpan("temperature-f", "", temp.compactF);
-    fahrenheit.classList.add("ep1-header-status-metric-compact-only");
-    row.append(fahrenheit);
+    row.append(createMetricSpan("temperature", temp.fullC, temp.compactC));
+    row.append(createMetricSpan("temperature-f", temp.fullF, temp.compactF));
   }
 
   const humidity = formatEp1HeaderHumidity(snapshot.humidity_pct);
