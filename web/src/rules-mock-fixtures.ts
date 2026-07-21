@@ -2,7 +2,13 @@
 // Coordinates match ``tests/python/test_rule_engine.py``.
 
 import {
+  AstronomicalWindowBoundary,
+  DeviceFamilyId,
+  RuleActionType,
+  RuleConditionType,
+  RuleTrigger,
   UIDeviceKind,
+  UserLocationSource,
   type GeofenceOut,
   type RuleActionDeviceOut,
   type RuleOut,
@@ -146,7 +152,7 @@ export function createMockStoreSeed(): MockStoreSeed {
         accuracy_m: 12,
         fix_at: isoMinutesAgo(1),
         reported_at: isoMinutesAgo(1),
-        source: "my-tracks",
+        source: UserLocationSource.MyTracks,
       },
       kristen: {
         lat: MOCK_KRISTEN_OUTSIDE_LAT,
@@ -154,7 +160,7 @@ export function createMockStoreSeed(): MockStoreSeed {
         accuracy_m: 18,
         fix_at: isoMinutesAgo(5),
         reported_at: isoMinutesAgo(5),
-        source: "my-tracks",
+        source: UserLocationSource.MyTracks,
       },
     },
     rules: [
@@ -162,7 +168,7 @@ export function createMockStoreSeed(): MockStoreSeed {
         id: "arrive-home-lights",
         label: "Welcome home — lights + garage",
         enabled: false,
-        triggers: ["edge_true"],
+        triggers: [RuleTrigger.EdgeTrue],
         schedule_cron: null,
         cooldown_s: 300,
         min_location_accuracy_m: 50,
@@ -171,28 +177,28 @@ export function createMockStoreSeed(): MockStoreSeed {
         conditions: {
           all: [
             {
-              type: "users_inside_geofence",
+              type: RuleConditionType.UsersInsideGeofence,
               geofence_id: "house",
               user_ids: ["henrique", "kristen"],
             },
-            { type: "after_sunset", offset_minutes: 0, window_end: "midnight" },
+            { type: RuleConditionType.AfterSunset, offset_minutes: 0, window_end: AstronomicalWindowBoundary.Midnight },
           ],
         },
         device_actions: [
           {
-            family_id: "kasa",
+            family_id: DeviceFamilyId.Kasa,
             device_id: "192.168.1.42",
-            action: "turn_on",
+            action: RuleActionType.TurnOn,
           },
           {
-            family_id: "kasa",
+            family_id: DeviceFamilyId.Kasa,
             device_id: "192.168.1.43",
-            action: "turn_on",
+            action: RuleActionType.TurnOn,
           },
           {
-            family_id: "tailwind",
+            family_id: DeviceFamilyId.Tailwind,
             device_id: "main-garage",
-            action: "open",
+            action: RuleActionType.Open,
           },
         ],
       },
@@ -229,19 +235,19 @@ export function createMockStoreSeed(): MockStoreSeed {
     ],
     action_devices: [
       {
-        family_id: "kasa",
+        family_id: DeviceFamilyId.Kasa,
         device_id: "192.168.1.42",
         label: "Kitchen lights",
         kind: UIDeviceKind.Switch,
       },
       {
-        family_id: "kasa",
+        family_id: DeviceFamilyId.Kasa,
         device_id: "192.168.1.43",
         label: "Porch lights",
         kind: UIDeviceKind.Switch,
       },
       {
-        family_id: "tailwind",
+        family_id: DeviceFamilyId.Tailwind,
         device_id: "main-garage",
         label: "Main garage",
         kind: UIDeviceKind.Door,

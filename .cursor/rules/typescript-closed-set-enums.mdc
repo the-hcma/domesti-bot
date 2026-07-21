@@ -7,9 +7,9 @@ alwaysApply: true
 
 When a value is drawn from a **fixed, known set** of strings (API enums, device
 families/kinds, layout modes, rule triggers, settings tabs, credential sources,
-toast variants), define a **const-object enum** in `web/src/` (typically next to
-the domain types in `types.ts` or a small `*-enums.ts` module) and compare
-against named members — not bare string literals.
+toast variants), define a **const-object enum** in `web/src/closed-sets.ts`
+(or next to domain types / a small `*-enums.ts` module) and compare against
+named members — not bare string literals.
 
 ```ts
 // Good — idiomatic, minimal runtime (plain object; no TS enum emit)

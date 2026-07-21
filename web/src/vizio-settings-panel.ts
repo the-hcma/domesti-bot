@@ -1,3 +1,4 @@
+import { ManagedSecretSource } from "./closed-sets.js";
 // Vizio SmartCast TV settings panel (per-TV auth + optional PIN pairing).
 
 import { api, HttpError } from "./api.js";
@@ -232,7 +233,7 @@ export async function mountVizioSettingsPanel(
     tokenInput.required = !paired;
     saveBtn.hidden = paired;
     beginPairBtn.textContent = paired ? "Re-pair" : "Start pairing";
-    clearBtn.disabled = !paired || tv?.auth_source !== "database";
+    clearBtn.disabled = !paired || tv?.auth_source !== ManagedSecretSource.Database;
     syncTestEnabled();
   };
 
@@ -266,13 +267,13 @@ export async function mountVizioSettingsPanel(
     if (tv?.auth_configured) {
       const name = tv.display_name ?? tv.host;
       const label = tv.mac ? `${name} (${tv.mac})` : name;
-      if (tv.auth_source === "cli") {
+      if (tv.auth_source === ManagedSecretSource.Cli) {
         showStatusMessage(
           `${label} uses --vizio-auth-token; per-TV database tokens are ignored until you remove the CLI flag.`,
         );
         return;
       }
-      if (tv.auth_source === "env") {
+      if (tv.auth_source === ManagedSecretSource.Env) {
         showStatusMessage(
           `${label} uses VIZIO_AUTH_TOKEN; no per-TV database token is configured for this host.`,
         );

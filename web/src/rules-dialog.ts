@@ -49,12 +49,18 @@ import {
 import { createAuditedTimeElement } from "./format-timestamp.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
 import {
+  AstronomicalWindowBoundary,
+  ConfirmButtonVariant,
+  MyTracksSyncKind,
+  RuleActionType,
+  RuleConditionType,
+  RuleTrigger,
+  RulesTabId,
   UIDeviceKind,
   type GeofenceOut,
   type UserOut,
   type UserStatusOut,
   type RuleActionDeviceOut,
-  type RuleActionType,
   type RuleConditionOut,
   type RuleDeviceActionOut,
   type RuleOut,
@@ -68,15 +74,6 @@ import {
 /** Match settings home coordinates to a geofence center (meters). */
 const HOME_GEOFENCE_MATCH_TOLERANCE_M = 50;
 
-type RulesTabId =
-  | "conditions"
-  | "geofences"
-  | "mail"
-  | "rules"
-  | "status"
-  | "users"
-  | "vacation";
-
 export type AutomationsHubOpenOptions = {
   ruleId?: string;
   tab?: RulesTabId;
@@ -85,11 +82,11 @@ export type AutomationsHubOpenOptions = {
 function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
   switch (kind) {
     case UIDeviceKind.Switch:
-      return ["turn_on", "turn_off"];
+      return [RuleActionType.TurnOn, RuleActionType.TurnOff];
     case UIDeviceKind.Door:
-      return ["open", "close"];
+      return [RuleActionType.Open, RuleActionType.Close];
     case UIDeviceKind.Speaker:
-      return ["pause", "resume"];
+      return [RuleActionType.Pause, RuleActionType.Resume];
     case UIDeviceKind.Occupancy:
       // Occupancy sensors are read-only in the rules UI until EP1 actions land.
       return [];
@@ -254,7 +251,7 @@ function templateToCondition(
   template: TimeConditionTemplateOut,
 ): RuleConditionOut {
   return {
-    type: "local_time_window",
+    type: RuleConditionType.LocalTimeWindow,
     start_hhmm: template.start_hhmm,
     end_hhmm: template.end_hhmm,
   };
@@ -268,7 +265,7 @@ class RulesHubController {
   private readonly panel: HTMLDivElement;
   private readonly titleWrap: HTMLDivElement;
   private sourcePill: HTMLSpanElement | null = null;
-  private activeTab: RulesTabId = "status";
+  private activeTab: RulesTabId = RulesTabId.Status;
   private dataSource: RulesDataSource;
   private pendingGeofenceFocusId: string | null = null;
   private pendingRuleInspectorId: string | null = null;
@@ -282,7 +279,7 @@ class RulesHubController {
     const targetTab = options.tab ?? this.activeTab;
     this.activeTab = targetTab;
     if (options.ruleId !== undefined) {
-      if (targetTab === "status") {
+      if (targetTab === RulesTabId.Status) {
         this.pendingStatusRuleInspectorId = options.ruleId;
       } else {
         this.pendingRuleInspectorId = options.ruleId;
@@ -305,13 +302,13 @@ class RulesHubController {
     tabBar.className = "rules-tab-bar";
     tabBar.setAttribute("role", "tablist");
     for (const tab of [
-      ["status", "Status"],
-      ["conditions", "Conditions"],
-      ["rules", "Rules"],
-      ["geofences", "Geofences"],
-      ["users", "Users"],
-      ["vacation", "Vacation"],
-      ["mail", "Mail"],
+      [RulesTabId.Status, "Status"],
+      [RulesTabId.Conditions, "Conditions"],
+      [RulesTabId.Rules, "Rules"],
+      [RulesTabId.Geofences, "Geofences"],
+      [RulesTabId.Users, "Users"],
+      [RulesTabId.Vacation, "Vacation"],
+      [RulesTabId.Mail, "Mail"],
     ] as const) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -399,7 +396,7 @@ class RulesHubController {
           opt.textContent = formatActionLabel(action);
           actionSelect.append(opt);
         }
-        const defaultAction = actionOptionsForKind(device.kind)[0] ?? "turn_on";
+        const defaultAction = actionOptionsForKind(device.kind)[0] ?? RuleActionType.TurnOn;
         actionSelect.value = existingAction?.action ?? defaultAction;
         actionSelect.disabled = !checkbox.checked;
         const delayInput = document.createElement("input");
@@ -475,7 +472,7 @@ class RulesHubController {
 
   private async navigateToRule(ruleId: string): Promise<void> {
     this.pendingRuleInspectorId = ruleId;
-    await this.setTab("rules");
+    await this.setTab(RulesTabId.Rules);
   }
 
   private async openRuleEditor(existing: RuleOut | null): Promise<void> {
@@ -547,7 +544,7 @@ class RulesHubController {
     const whoLegend = document.createElement("legend");
     whoField.append(whoLegend);
     const selectedUsers = new Set<string>(
-      existing?.conditions.all.find((c) => c.type === "users_inside_geofence")
+      existing?.conditions.all.find((c) => c.type === RuleConditionType.UsersInsideGeofence)
         ?.user_ids ?? ["henrique", "kristen"],
     );
     const syncWhoLegend = (): void => {
@@ -597,7 +594,7 @@ class RulesHubController {
       whereSelect.append(opt);
     }
     const existingGeofence =
-      existing?.conditions.all.find((c) => c.type === "users_inside_geofence")
+      existing?.conditions.all.find((c) => c.type === RuleConditionType.UsersInsideGeofence)
         ?.geofence_id ?? "house";
     whereSelect.value = existingGeofence;
     whereSelect.addEventListener("change", () => {
@@ -612,8 +609,8 @@ class RulesHubController {
     conditionsField.append(whoField);
 
     const existingDayCondition = existing?.conditions.all.find(
-      (c): c is Extract<RuleConditionOut, { type: "days_of_week" }> =>
-        c.type === "days_of_week",
+      (c): c is Extract<RuleConditionOut, { type: typeof RuleConditionType.DaysOfWeek }> =>
+        c.type === RuleConditionType.DaysOfWeek,
     );
     const dayPicker = createDayOfWeekPicker(
       existingDayCondition?.days ?? ALL_DAYS_OF_WEEK,
@@ -631,7 +628,7 @@ class RulesHubController {
     const sunsetCb = document.createElement("input");
     sunsetCb.type = "checkbox";
     sunsetCb.checked =
-      existing?.conditions.all.some((c) => c.type === "after_sunset") ?? true;
+      existing?.conditions.all.some((c) => c.type === RuleConditionType.AfterSunset) ?? true;
     sunsetRow.append(sunsetCb, document.createTextNode(" After sunset (sunset to midnight)"));
     timeField.append(sunsetRow);
 
@@ -640,7 +637,7 @@ class RulesHubController {
     const sunriseCb = document.createElement("input");
     sunriseCb.type = "checkbox";
     sunriseCb.checked =
-      existing?.conditions.all.some((c) => c.type === "before_sunrise") ?? false;
+      existing?.conditions.all.some((c) => c.type === RuleConditionType.BeforeSunrise) ?? false;
     sunriseRow.append(
       sunriseCb,
       document.createTextNode(" Before sunrise (midnight to sunrise)"),
@@ -648,8 +645,8 @@ class RulesHubController {
     timeField.append(sunriseRow);
 
     const existingWindow = existing?.conditions.all.find(
-      (c): c is Extract<RuleConditionOut, { type: "local_time_window" }> =>
-        c.type === "local_time_window",
+      (c): c is Extract<RuleConditionOut, { type: typeof RuleConditionType.LocalTimeWindow }> =>
+        c.type === RuleConditionType.LocalTimeWindow,
     );
     const clockRow = document.createElement("div");
     clockRow.className = "settings-dialog-field-row rules-editor-clock-row";
@@ -692,8 +689,8 @@ class RulesHubController {
       const selectedTemplateIds = new Set(
         existing?.conditions.all
           .filter(
-            (c): c is Extract<RuleConditionOut, { type: "local_time_window" }> =>
-              c.type === "local_time_window",
+            (c): c is Extract<RuleConditionOut, { type: typeof RuleConditionType.LocalTimeWindow }> =>
+              c.type === RuleConditionType.LocalTimeWindow,
           )
           .map((c) =>
             timeTemplates.find(
@@ -826,28 +823,28 @@ class RulesHubController {
         }
         const conditions: RuleOut["conditions"]["all"] = [
           {
-            type: "users_inside_geofence",
+            type: RuleConditionType.UsersInsideGeofence,
             geofence_id: whereSelect.value,
             user_ids: userIds,
           },
         ];
         if (sunsetCb.checked) {
           conditions.push({
-            type: "after_sunset",
+            type: RuleConditionType.AfterSunset,
             offset_minutes: 0,
-            window_end: "midnight",
+            window_end: AstronomicalWindowBoundary.Midnight,
           });
         }
         if (sunriseCb.checked) {
           conditions.push({
-            type: "before_sunrise",
+            type: RuleConditionType.BeforeSunrise,
             offset_minutes: 0,
-            window_start: "midnight",
+            window_start: AstronomicalWindowBoundary.Midnight,
           });
         }
         if (clockStart.value !== "" && clockEnd.value !== "") {
           conditions.push({
-            type: "local_time_window",
+            type: RuleConditionType.LocalTimeWindow,
             start_hhmm: clockStart.value,
             end_hhmm: clockEnd.value,
           });
@@ -860,7 +857,7 @@ class RulesHubController {
           showErrorToast("Select at least one day of the week.");
           return;
         }
-        conditions.push({ type: "days_of_week", days: selectedDays });
+        conditions.push({ type: RuleConditionType.DaysOfWeek, days: selectedDays });
         for (const cb of timeField.querySelectorAll<HTMLInputElement>(
           "input.rules-template-pick",
         )) {
@@ -915,7 +912,7 @@ class RulesHubController {
           id: ruleId,
           label: labelInput.value.trim(),
           enabled: ruleEnabled,
-          triggers: ["edge_true"],
+          triggers: [RuleTrigger.EdgeTrue],
           schedule_cron: null,
           cooldown_s: Number(cooldownInput.value) || 300,
           min_location_accuracy_m: Number(accuracyInput.value) || DEFAULT_MIN_LOCATION_ACCURACY_M,
@@ -1020,25 +1017,25 @@ class RulesHubController {
       return;
     }
     switch (this.activeTab) {
-      case "status":
+      case RulesTabId.Status:
         await this.renderStatusTab(this.status);
         break;
-      case "conditions":
+      case RulesTabId.Conditions:
         await this.renderConditionsTab(this.status);
         break;
-      case "rules":
+      case RulesTabId.Rules:
         await this.renderRulesTab();
         break;
-      case "geofences":
+      case RulesTabId.Geofences:
         await this.renderGeofencesTab();
         break;
-      case "mail":
+      case RulesTabId.Mail:
         await this.renderMailTab();
         break;
-      case "users":
+      case RulesTabId.Users:
         await this.renderUsersTab();
         break;
-      case "vacation":
+      case RulesTabId.Vacation:
         await this.renderVacationTab();
         break;
     }
@@ -1071,7 +1068,7 @@ class RulesHubController {
     const sunsetMsg = afterSunsetStatusMessage(status.sun);
     const openHomeGeofence = (geofenceId: string | null): void => {
       this.pendingGeofenceFocusId = geofenceId;
-      void this.setTab("geofences");
+      void this.setTab(RulesTabId.Geofences);
     };
 
     const dynamicHeading = document.createElement("h3");
@@ -1131,7 +1128,7 @@ class RulesHubController {
         void confirmAction({
           message: `Delete template "${template.label}"?`,
           confirmLabel: "Delete",
-          variant: "danger",
+          variant: ConfirmButtonVariant.Danger,
         }).then((confirmed) => {
           if (!confirmed) {
             return;
@@ -1203,7 +1200,7 @@ class RulesHubController {
     sunBadge.textContent = sunMsg.dynamicLabel;
     sunBtn.append(sunPrimary, sunBadge);
     sunBtn.addEventListener("click", () => {
-      void this.setTab("conditions");
+      void this.setTab(RulesTabId.Conditions);
     });
 
     const usersHeading = document.createElement("h3");
@@ -1310,7 +1307,7 @@ class RulesHubController {
       }
       if (statusRule !== undefined) {
         const definition = await this.dataSource.getRule(focusRuleId);
-        if (this.activeTab !== "status" || !this.body.contains(ruleList)) {
+        if (this.activeTab !== RulesTabId.Status || !this.body.contains(ruleList)) {
           return;
         }
         if (definition !== null) {
@@ -1393,7 +1390,7 @@ class RulesHubController {
           void confirmAction({
             message: `Delete rule "${rule.label}"?`,
             confirmLabel: "Delete",
-            variant: "danger",
+            variant: ConfirmButtonVariant.Danger,
           }).then((confirmed) => {
             if (!confirmed) {
               return;
@@ -1482,7 +1479,7 @@ class RulesHubController {
     syncBtn.className = "btn btn-secondary";
     syncBtn.textContent = "Sync from My Tracks";
     syncBtn.addEventListener("click", () => {
-      void runMyTracksSyncAction(this.dataSource, "users", () => this.refresh());
+      void runMyTracksSyncAction(this.dataSource, MyTracksSyncKind.Users, () => this.refresh());
     });
     syncRow.append(syncMeta, syncBtn);
 
@@ -1821,7 +1818,7 @@ export function parseAutomationsDeepLink(
       if (ruleId === "") {
         return null;
       }
-      return { tab: "status", ruleId };
+      return { tab: RulesTabId.Status, ruleId };
     } catch {
       return null;
     }
@@ -1831,7 +1828,7 @@ export function parseAutomationsDeepLink(
     return null;
   }
   const tab = tabMatch[1];
-  if (tab === "mail" || tab === "vacation") {
+  if (tab === RulesTabId.Mail || tab === RulesTabId.Vacation) {
     return { tab };
   }
   return null;

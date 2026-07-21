@@ -12,6 +12,13 @@ import {
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
 import {
+  BulkOffScope,
+  CompactIconKey,
+  DataLayout,
+  DeviceFamilyId,
+  ThemePreference,
+  TileTone,
+  ToastVariant,
   UIDeviceKind,
   UIDeviceState,
   type MetaOut,
@@ -426,10 +433,10 @@ class DomestiBotController {
 
   private async onBulkOffFamily(familyId: string): Promise<void> {
     if (
-      familyId !== "kasa" &&
-      familyId !== "sonos" &&
-      familyId !== "tailwind" &&
-      familyId !== "vizio"
+      familyId !== DeviceFamilyId.Kasa &&
+      familyId !== DeviceFamilyId.Sonos &&
+      familyId !== DeviceFamilyId.Tailwind &&
+      familyId !== DeviceFamilyId.Vizio
     ) {
       return;
     }
@@ -451,11 +458,11 @@ class DomestiBotController {
     await this.runActionNowOrBuffer(async () => {
       try {
         let result: UIBulkActionOut;
-        if (familyId === "kasa") {
+        if (familyId === DeviceFamilyId.Kasa) {
           result = await api.bulkOffKasa();
-        } else if (familyId === "sonos") {
+        } else if (familyId === DeviceFamilyId.Sonos) {
           result = await api.pauseAllSonos();
-        } else if (familyId === "vizio") {
+        } else if (familyId === DeviceFamilyId.Vizio) {
           result = await api.bulkOffVizio();
         } else {
           result = await api.closeAllTailwind();
@@ -492,7 +499,7 @@ class DomestiBotController {
         const result = await api.bulkOffGlobal();
         await this.refresh();
         this.renderBulkActionFeedback(
-          "global",
+          BulkOffScope.Global,
           result.affected.length,
           result.skipped.length,
           this.state,
@@ -778,7 +785,7 @@ class DomestiBotController {
     blurFocusedElementInApp(this.root);
     this.root.replaceChildren();
     this.root.dataset["connected"] = this.connected ? "true" : "false";
-    this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
+    this.root.dataset["layout"] = isMobileFormFactor() ? DataLayout.Compact : DataLayout.Comfortable;
     this.renderOperatorAlert(state.operator_alert);
     if (state.families.length > 0) {
       const header = document.createElement("header");
@@ -852,7 +859,7 @@ class DomestiBotController {
     for (const family of state.families) {
       // EP1 is sensors-only and lives in the header status strip (#524), not
       // the family tile grid.
-      if (family.id === "ep1") {
+      if (family.id === DeviceFamilyId.Ep1) {
         continue;
       }
       this.root.append(
@@ -899,27 +906,27 @@ class DomestiBotController {
     // Calling this again *replaces* any current toast and resets
     // the auto-dismiss timer; we only ever show one at a time so a
     // burst of failed clicks doesn't pile up a wall of alerts.
-    this.renderActionToast(message, "error");
+    this.renderActionToast(message, ToastVariant.Error);
   }
 
   private renderActionToast(
     message: string,
-    variant: "error" | "info" | "success",
+    variant: ToastVariant,
   ): void {
     this.dismissActionToast();
 
     const toast = document.createElement("div");
     const variantClass =
-      variant === "success"
+      variant === ToastVariant.Success
         ? "action-toast-success"
-        : variant === "info"
+        : variant === ToastVariant.Info
           ? "action-toast-info"
           : "";
     toast.className =
       variantClass.length > 0
         ? `action-toast ${variantClass}`
         : "action-toast";
-    if (variant === "error") {
+    if (variant === ToastVariant.Error) {
       toast.setAttribute("role", "alert");
       toast.setAttribute("aria-live", "assertive");
     } else {
@@ -957,13 +964,13 @@ class DomestiBotController {
     if (affectedCount === 0) {
       this.renderActionToast(
         bulkOffNothingChangedMessage(scope, skippedCount, state),
-        "info",
+        ToastVariant.Info,
       );
       return;
     }
     this.renderActionToast(
       bulkOffSuccessMessage(scope, affectedCount, skippedCount),
-      "success",
+      ToastVariant.Success,
     );
   }
 
@@ -974,7 +981,7 @@ class DomestiBotController {
         ? err.message
         : String(err);
     this.root.replaceChildren();
-    this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
+    this.root.dataset["layout"] = isMobileFormFactor() ? DataLayout.Compact : DataLayout.Comfortable;
     const errHead = document.createElement("header");
     errHead.className = "tile-header tile-header-sparse";
     errHead.append(createBrandMark(this.meta), createThemeToggleButton());
@@ -999,7 +1006,7 @@ class DomestiBotController {
     // (see ``.tile-spinner`` in ``index.html``) with a short text
     // so screen-reader users get a verbal cue too.
     this.root.replaceChildren();
-    this.root.dataset["layout"] = isMobileFormFactor() ? "compact" : "comfortable";
+    this.root.dataset["layout"] = isMobileFormFactor() ? DataLayout.Compact : DataLayout.Comfortable;
     const loadHead = document.createElement("header");
     loadHead.className = "tile-header tile-header-sparse";
     loadHead.append(createBrandMark(this.meta), createThemeToggleButton());
@@ -1111,12 +1118,12 @@ function applyCompactDefaultTheme(): void {
   if (!window.matchMedia(COMPACT_LAYOUT_MQ).matches) {
     return;
   }
-  document.documentElement.setAttribute("data-theme", "dark");
+  document.documentElement.setAttribute("data-theme", ThemePreference.Dark);
 }
 
 function applyStoredColorTheme(): void {
   const raw = localStorage.getItem(THEME_STORAGE_KEY);
-  const t = raw === "light" || raw === "dark" ? raw : null;
+  const t = raw === ThemePreference.Light || raw === ThemePreference.Dark ? raw : null;
   if (t === null) {
     document.documentElement.removeAttribute("data-theme");
   } else {
@@ -1125,12 +1132,12 @@ function applyStoredColorTheme(): void {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta !== null) {
     const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const dark = t === "dark" || (t === null && systemDark);
+    const dark = t === ThemePreference.Dark || (t === null && systemDark);
     meta.setAttribute("content", dark ? "#15171a" : "#0a0a0a");
   }
   if (themeToggleSingleton !== null) {
     const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const darkNow = t === "dark" || (t === null && systemDark);
+    const darkNow = t === ThemePreference.Dark || (t === null && systemDark);
     themeToggleSingleton.innerHTML = darkNow ? THEME_GLYPH_SUN_SVG : THEME_GLYPH_MOON_SVG;
     const title = darkNow
       ? "Switch to light appearance"
@@ -1147,19 +1154,18 @@ function blurFocusedElementInApp(appRoot: HTMLElement): void {
   }
 }
 
-type BulkOffScope = "global" | "kasa" | "sonos" | "tailwind" | "vizio";
 
 function bulkOffAlreadyDoneMessage(scope: BulkOffScope): string {
   switch (scope) {
-    case "global":
+    case BulkOffScope.Global:
       return "Everything is already off, paused, or closed.";
-    case "kasa":
+    case BulkOffScope.Kasa:
       return "All lights and plugs are already off.";
-    case "sonos":
+    case BulkOffScope.Sonos:
       return "All Sonos zones are already paused.";
-    case "tailwind":
+    case BulkOffScope.Tailwind:
       return "All garage doors are already closed.";
-    case "vizio":
+    case BulkOffScope.Vizio:
       return "All Vizio TVs are already off.";
   }
 }
@@ -1178,11 +1184,11 @@ function bulkOffNothingChangedMessage(
   const needingAny = countDevicesNeedingBulkOff(state, {
     honorExcludeFromGlobal: false,
   });
-  if (scope === "global" && needingAny > 0 && needingGlobal === 0) {
+  if (scope === BulkOffScope.Global && needingAny > 0 && needingGlobal === 0) {
     const deviceWord = needingAny === 1 ? "device is" : "devices are";
     return `No changes — ${String(needingAny)} ${deviceWord} still active but excluded from global all-off.`;
   }
-  if (scope === "global" && skippedCount > 0 && needingGlobal === 0) {
+  if (scope === BulkOffScope.Global && skippedCount > 0 && needingGlobal === 0) {
     return bulkOffAlreadyDoneMessage(scope);
   }
   if (needingAny > 0) {
@@ -1217,27 +1223,27 @@ function bulkOffSuccessMessage(
   const deviceWord = affectedCount === 1 ? "device" : "devices";
   const base = ((): string => {
     switch (scope) {
-      case "global":
+      case BulkOffScope.Global:
         return `Updated ${String(affectedCount)} ${deviceWord}.`;
-      case "kasa":
+      case BulkOffScope.Kasa:
         return affectedCount === 1
           ? "Turned off 1 light or plug."
           : `Turned off ${String(affectedCount)} lights and plugs.`;
-      case "sonos":
+      case BulkOffScope.Sonos:
         return affectedCount === 1
           ? "Paused 1 zone."
           : `Paused ${String(affectedCount)} zones.`;
-      case "tailwind":
+      case BulkOffScope.Tailwind:
         return affectedCount === 1
           ? "Closed 1 garage door."
           : `Closed ${String(affectedCount)} garage doors.`;
-      case "vizio":
+      case BulkOffScope.Vizio:
         return affectedCount === 1
           ? "Turned off 1 TV."
           : `Turned off ${String(affectedCount)} TVs.`;
     }
   })();
-  if (scope === "global" && skippedCount > 0) {
+  if (scope === BulkOffScope.Global && skippedCount > 0) {
     const skipWord = skippedCount === 1 ? "device was" : "devices were";
     return `${base} ${String(skippedCount)} excluded ${skipWord} not changed.`;
   }
@@ -1805,16 +1811,16 @@ function createThemeToggleButton(): HTMLButtonElement {
   btn.className = "btn btn-theme-toggle";
   btn.addEventListener("click", () => {
     const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    const explicit = raw === "light" || raw === "dark" ? raw : null;
+    const explicit = raw === ThemePreference.Light || raw === ThemePreference.Dark ? raw : null;
     const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const darkNow = explicit === "dark" || (explicit === null && systemDark);
-    localStorage.setItem(THEME_STORAGE_KEY, darkNow ? "light" : "dark");
+    const darkNow = explicit === ThemePreference.Dark || (explicit === null && systemDark);
+    localStorage.setItem(THEME_STORAGE_KEY, darkNow ? ThemePreference.Light : ThemePreference.Dark);
     applyStoredColorTheme();
   });
   const mql = window.matchMedia("(prefers-color-scheme: dark)");
   mql.addEventListener("change", () => {
     const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    if (raw !== "light" && raw !== "dark") {
+    if (raw !== ThemePreference.Light && raw !== ThemePreference.Dark) {
       applyStoredColorTheme();
     }
   });
@@ -2103,37 +2109,37 @@ function compactTileAriaLabel(device: UIDeviceOut): string {
 }
 
 function compactIconAssetKey(device: UIDeviceOut): string {
-  if (device.compact_icon === "garage" || device.kind === UIDeviceKind.Door) {
-    return device.state === UIDeviceState.Open ? "garage_open" : "garage_closed";
+  if (device.compact_icon === CompactIconKey.Garage || device.kind === UIDeviceKind.Door) {
+    return device.state === UIDeviceState.Open ? CompactIconKey.GarageOpen : CompactIconKey.GarageClosed;
   }
   if (
-    device.compact_icon === "occupancy" ||
+    device.compact_icon === CompactIconKey.Occupancy ||
     device.kind === UIDeviceKind.Occupancy ||
-    device.family_id === "ep1"
+    device.family_id === DeviceFamilyId.Ep1
   ) {
-    return "occupancy";
+    return CompactIconKey.Occupancy;
   }
   if (
-    device.compact_icon === "tv" ||
-    device.family_id === "vizio"
+    device.compact_icon === CompactIconKey.Tv ||
+    device.family_id === DeviceFamilyId.Vizio
   ) {
     if (device.state === UIDeviceState.Unknown) {
-      return "tv_off";
+      return CompactIconKey.TvOff;
     }
-    return device.state === UIDeviceState.On ? "tv_on" : "tv_off";
+    return device.state === UIDeviceState.On ? CompactIconKey.TvOn : CompactIconKey.TvOff;
   }
   if (
-    device.compact_icon === "speaker" ||
+    device.compact_icon === CompactIconKey.Speaker ||
     device.kind === UIDeviceKind.Speaker ||
-    device.family_id === "sonos"
+    device.family_id === DeviceFamilyId.Sonos
   ) {
     if (device.state === UIDeviceState.Playing) {
-      return "speaker_playing";
+      return CompactIconKey.SpeakerPlaying;
     }
     if (device.state === UIDeviceState.Unknown) {
-      return "speaker_unknown";
+      return CompactIconKey.SpeakerUnknown;
     }
-    return "speaker_paused";
+    return CompactIconKey.SpeakerPaused;
   }
   return device.compact_icon;
 }
@@ -2144,31 +2150,31 @@ function compactIconAssetUrl(key: string): string {
 
 function compactIconCacheCandidates(key: string): string[] {
   if (key.startsWith("speaker_")) {
-    return [key, "speaker"];
+    return [key, CompactIconKey.Speaker];
   }
   if (key.startsWith("garage_")) {
-    return [key, "garage_closed"];
+    return [key, CompactIconKey.GarageClosed];
   }
   if (key.startsWith("tv_")) {
-    return key === "tv_on" ? [key, "tv_off"] : [key, "tv_on"];
+    return key === CompactIconKey.TvOn ? [key, CompactIconKey.TvOff] : [key, CompactIconKey.TvOn];
   }
   return [key];
 }
 
 function compactIconFallbackCandidates(key: string): string[] {
   if (key.startsWith("speaker_")) {
-    return [key, "speaker", "bulb"];
+    return [key, CompactIconKey.Speaker, CompactIconKey.Bulb];
   }
   if (key.startsWith("garage_")) {
-    return [key, "garage_closed", "bulb"];
+    return [key, CompactIconKey.GarageClosed, CompactIconKey.Bulb];
   }
   if (key.startsWith("tv_")) {
-    return [key, "tv_off", "bulb"];
+    return [key, CompactIconKey.TvOff, CompactIconKey.Bulb];
   }
-  if (key === "tv") {
-    return ["tv_off", "tv_on", "bulb"];
+  if (key === CompactIconKey.Tv) {
+    return [CompactIconKey.TvOff, CompactIconKey.TvOn, CompactIconKey.Bulb];
   }
-  return [key, "bulb"];
+  return [key, CompactIconKey.Bulb];
 }
 
 function applyCompactIconMarkupToHost(
@@ -2278,20 +2284,20 @@ function rememberCompactIconMarkup(key: string, markup: string): void {
 
 function warmCompactTileIcons(state: UIStateOut): void {
   const keys = new Set<string>([
-    "bulb",
-    "speaker",
-    "speaker_playing",
-    "speaker_paused",
-    "speaker_unknown",
-    "garage_open",
-    "garage_closed",
-    "tv_on",
-    "tv_off",
+    CompactIconKey.Bulb,
+    CompactIconKey.Speaker,
+    CompactIconKey.SpeakerPlaying,
+    CompactIconKey.SpeakerPaused,
+    CompactIconKey.SpeakerUnknown,
+    CompactIconKey.GarageOpen,
+    CompactIconKey.GarageClosed,
+    CompactIconKey.TvOn,
+    CompactIconKey.TvOff,
   ]);
   for (const family of state.families) {
-    if (family.id === "vizio") {
-      keys.add("tv_on");
-      keys.add("tv_off");
+    if (family.id === DeviceFamilyId.Vizio) {
+      keys.add(CompactIconKey.TvOn);
+      keys.add(CompactIconKey.TvOff);
     }
     for (const device of family.devices) {
       keys.add(compactIconAssetKey(device));
@@ -2409,9 +2415,9 @@ function deviceNeedsBulkOff(device: UIDeviceOut): boolean {
   }
 }
 
-function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown" {
+function deviceStateTone(state: UIDeviceState): TileTone {
   if (state === UIDeviceState.Unknown) {
-    return "unknown";
+    return TileTone.Unknown;
   }
   if (
     state === UIDeviceState.On ||
@@ -2419,9 +2425,9 @@ function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown
     state === UIDeviceState.Open ||
     state === UIDeviceState.Occupied
   ) {
-    return "active";
+    return TileTone.Active;
   }
-  return "inactive";
+  return TileTone.Inactive;
 }
 
 /** Dual-unit temperature for occupancy aria (· matches header metric separators). */
@@ -2599,10 +2605,10 @@ function renderFamily(
   header.append(heading);
 
   if (
-    family.id === "kasa" ||
-    family.id === "sonos" ||
-    family.id === "tailwind" ||
-    family.id === "vizio"
+    family.id === DeviceFamilyId.Kasa ||
+    family.id === DeviceFamilyId.Sonos ||
+    family.id === DeviceFamilyId.Tailwind ||
+    family.id === DeviceFamilyId.Vizio
   ) {
     const bulkBtn = document.createElement("button");
     bulkBtn.type = "button";
@@ -2612,9 +2618,9 @@ function renderFamily(
     // ``--pending`` state badges.
     bulkBtn.className = "btn btn-bulk";
     bulkBtn.textContent =
-      family.id === "kasa" || family.id === "vizio"
+      family.id === DeviceFamilyId.Kasa || family.id === DeviceFamilyId.Vizio
         ? "Turn off all"
-        : family.id === "sonos"
+        : family.id === DeviceFamilyId.Sonos
           ? "Pause all"
           : "Close all";
     bulkBtn.disabled = !controlsEnabled;

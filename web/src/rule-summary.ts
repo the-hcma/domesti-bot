@@ -6,13 +6,15 @@ import {
   WEEKDAY_DAYS,
   WEEKEND_DAYS,
 } from "./rules-ui-helpers.js";
-import type {
-  GeofenceOut,
-  RuleActionDeviceOut,
+import {
+  Ep1ReadingMetric,
   RuleActionType,
-  RuleConditionOut,
-  RuleOut,
-  UserOut,
+  RuleConditionType,
+  type GeofenceOut,
+  type RuleActionDeviceOut,
+  type RuleConditionOut,
+  type RuleOut,
+  type UserOut,
 } from "./types.js";
 
 export interface RuleSummaryContext {
@@ -47,14 +49,14 @@ export function referencesGeofenceId(
   geofenceId: string,
 ): boolean {
   if (
-    condition.type === "users_inside_geofence"
-    || condition.type === "users_inside_geofence_for_s"
-    || condition.type === "users_outside_geofence"
-    || condition.type === "users_outside_geofence_for_s"
+    condition.type === RuleConditionType.UsersInsideGeofence
+    || condition.type === RuleConditionType.UsersInsideGeofenceForS
+    || condition.type === RuleConditionType.UsersOutsideGeofence
+    || condition.type === RuleConditionType.UsersOutsideGeofenceForS
   ) {
     return condition.geofence_id === geofenceId;
   }
-  if (condition.type === "all" || condition.type === "any") {
+  if (condition.type === RuleConditionType.All || condition.type === RuleConditionType.Any) {
     return condition.conditions.some((child) =>
       referencesGeofenceId(child, geofenceId),
     );
@@ -123,18 +125,18 @@ export function collectUserIdsFromConditions(
   const ids = new Set<string>();
   const walk = (condition: RuleConditionOut): void => {
     if (
-      condition.type === "users_inside_geofence"
-      || condition.type === "users_inside_geofence_for_s"
-      || condition.type === "users_min_distance_from_home_m"
-      || condition.type === "users_outside_geofence"
-      || condition.type === "users_outside_geofence_for_s"
+      condition.type === RuleConditionType.UsersInsideGeofence
+      || condition.type === RuleConditionType.UsersInsideGeofenceForS
+      || condition.type === RuleConditionType.UsersMinDistanceFromHomeM
+      || condition.type === RuleConditionType.UsersOutsideGeofence
+      || condition.type === RuleConditionType.UsersOutsideGeofenceForS
     ) {
       for (const userId of condition.user_ids) {
         ids.add(userId);
       }
       return;
     }
-    if (condition.type === "all" || condition.type === "any") {
+    if (condition.type === RuleConditionType.All || condition.type === RuleConditionType.Any) {
       for (const child of condition.conditions) {
         walk(child);
       }
@@ -244,7 +246,7 @@ function formatDistanceMeters(distanceM: number): string {
 }
 
 export function formatGeofenceDwellLabel(
-  condition: Extract<RuleConditionOut, { type: "users_inside_geofence_for_s" }>,
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.UsersInsideGeofenceForS }>,
   context: RuleSummaryContext,
 ): string {
   const names = userDisplayNames(condition.user_ids, context);
@@ -255,7 +257,7 @@ export function formatGeofenceDwellLabel(
 }
 
 export function formatGeofenceAwayDwellLabel(
-  condition: Extract<RuleConditionOut, { type: "users_outside_geofence_for_s" }>,
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.UsersOutsideGeofenceForS }>,
   context: RuleSummaryContext,
 ): string {
   const names = userDisplayNames(condition.user_ids, context);
@@ -266,7 +268,7 @@ export function formatGeofenceAwayDwellLabel(
 }
 
 export function formatMinDistanceFromHomeLabel(
-  condition: Extract<RuleConditionOut, { type: "users_min_distance_from_home_m" }>,
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.UsersMinDistanceFromHomeM }>,
   context: RuleSummaryContext,
 ): string {
   const names = userDisplayNames(condition.user_ids, context);
@@ -278,14 +280,14 @@ export function formatMinDistanceFromHomeLabel(
 export function formatPresenceEventLabel(
   condition: Extract<
     RuleConditionOut,
-    { type: "users_inside_geofence" | "users_outside_geofence" }
+    { type: typeof RuleConditionType.UsersInsideGeofence | typeof RuleConditionType.UsersOutsideGeofence }
   >,
   context: RuleSummaryContext,
 ): string {
   const names = userDisplayNames(condition.user_ids, context);
   const where = geofenceLabel(condition.geofence_id, context);
   const who = joinNames(names);
-  if (condition.type === "users_inside_geofence") {
+  if (condition.type === RuleConditionType.UsersInsideGeofence) {
     return `When ${who} enter ${where}`;
   }
   return `When ${who} leave ${where}`;
@@ -293,20 +295,20 @@ export function formatPresenceEventLabel(
 
 export function formatTimingCondition(condition: RuleConditionOut): string | null {
   switch (condition.type) {
-    case "users_inside_geofence":
-    case "users_inside_geofence_for_s":
-    case "users_min_distance_from_home_m":
-    case "users_outside_geofence":
-    case "users_outside_geofence_for_s":
-    case "devices_all_in_state":
-    case "devices_any_in_state":
-    case "devices_any_in_state_for_s":
-    case "ep1_reading_compare":
+    case RuleConditionType.UsersInsideGeofence:
+    case RuleConditionType.UsersInsideGeofenceForS:
+    case RuleConditionType.UsersMinDistanceFromHomeM:
+    case RuleConditionType.UsersOutsideGeofence:
+    case RuleConditionType.UsersOutsideGeofenceForS:
+    case RuleConditionType.DevicesAllInState:
+    case RuleConditionType.DevicesAnyInState:
+    case RuleConditionType.DevicesAnyInStateForS:
+    case RuleConditionType.Ep1ReadingCompare:
       return null;
-    case "all":
-    case "any":
+    case RuleConditionType.All:
+    case RuleConditionType.Any:
       return null;
-    case "after_sunset": {
+    case RuleConditionType.AfterSunset: {
       const offset = condition.offset_minutes;
       const start =
         offset > 0
@@ -314,7 +316,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
           : "After sunset";
       return `${start} until midnight`;
     }
-    case "before_sunrise": {
+    case RuleConditionType.BeforeSunrise: {
       const offset = condition.offset_minutes;
       const end =
         offset > 0
@@ -322,15 +324,15 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
           : "until sunrise";
       return `After midnight ${end}`;
     }
-    case "daylight":
+    case RuleConditionType.Daylight:
       return "During daylight (sunrise to sunset)";
-    case "after_local_time":
+    case RuleConditionType.AfterLocalTime:
       return `After ${formatLocalTime(condition.time_hhmm)}`;
-    case "before_local_time":
+    case RuleConditionType.BeforeLocalTime:
       return `Before ${formatLocalTime(condition.time_hhmm)}`;
-    case "local_time_window":
+    case RuleConditionType.LocalTimeWindow:
       return `Between ${formatLocalTime(condition.start_hhmm)} and ${formatLocalTime(condition.end_hhmm)}`;
-    case "days_of_week":
+    case RuleConditionType.DaysOfWeek:
       return formatDaysOfWeek(condition.days);
   }
 }
@@ -340,9 +342,9 @@ export function formatDeviceStateCondition(
     RuleConditionOut,
     {
       type:
-        | "devices_all_in_state"
-        | "devices_any_in_state"
-        | "devices_any_in_state_for_s";
+        | typeof RuleConditionType.DevicesAllInState
+        | typeof RuleConditionType.DevicesAnyInState
+        | typeof RuleConditionType.DevicesAnyInStateForS;
     }
   >,
   context: RuleSummaryContext,
@@ -356,10 +358,10 @@ export function formatDeviceStateCondition(
     ),
   );
   const joined = joinNames(labels);
-  if (condition.type === "devices_any_in_state") {
+  if (condition.type === RuleConditionType.DevicesAnyInState) {
     return `Any of ${joined} is ${condition.state}`;
   }
-  if (condition.type === "devices_all_in_state") {
+  if (condition.type === RuleConditionType.DevicesAllInState) {
     return `All of ${joined} are ${condition.state}`;
   }
   const need = formatDwellDuration(condition.min_duration_s);
@@ -367,7 +369,7 @@ export function formatDeviceStateCondition(
 }
 
 export function formatEp1ReadingCompareCondition(
-  condition: Extract<RuleConditionOut, { type: "ep1_reading_compare" }>,
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.Ep1ReadingCompare }>,
   context: RuleSummaryContext,
 ): string {
   const label = resolveDeviceLabel(
@@ -377,15 +379,15 @@ export function formatEp1ReadingCompareCondition(
     condition.device.display_name,
   );
   const metricLabel =
-    condition.metric === "temperature_c"
+    condition.metric === Ep1ReadingMetric.TemperatureC
       ? "temperature"
-      : condition.metric === "humidity_pct"
+      : condition.metric === Ep1ReadingMetric.HumidityPct
         ? "humidity"
         : "illuminance";
   const unit =
-    condition.metric === "temperature_c"
+    condition.metric === Ep1ReadingMetric.TemperatureC
       ? "°C"
-      : condition.metric === "humidity_pct"
+      : condition.metric === Ep1ReadingMetric.HumidityPct
         ? "%"
         : "lx";
   return `${label} ${metricLabel} ${condition.comparison} ${String(condition.threshold)}${unit}`;
@@ -396,17 +398,17 @@ export function formatDeviceActionPhrase(
   deviceLabel: string,
 ): string {
   switch (action) {
-    case "turn_on":
+    case RuleActionType.TurnOn:
       return `Turn on ${deviceLabel}`;
-    case "turn_off":
+    case RuleActionType.TurnOff:
       return `Turn off ${deviceLabel}`;
-    case "open":
+    case RuleActionType.Open:
       return `Open ${deviceLabel}`;
-    case "close":
+    case RuleActionType.Close:
       return `Close ${deviceLabel}`;
-    case "pause":
+    case RuleActionType.Pause:
       return `Pause ${deviceLabel}`;
-    case "resume":
+    case RuleActionType.Resume:
       return `Resume ${deviceLabel}`;
   }
 }
@@ -417,7 +419,7 @@ function walkRuleConditions(
 ): void {
   for (const condition of conditions) {
     visit(condition);
-    if (condition.type === "all" || condition.type === "any") {
+    if (condition.type === RuleConditionType.All || condition.type === RuleConditionType.Any) {
       walkRuleConditions(condition.conditions, visit);
     }
   }
@@ -431,34 +433,34 @@ export function summarizeRule(
   const timing: string[] = [];
   const devices: string[] = [];
   walkRuleConditions(rule.conditions.all, (condition) => {
-    if (condition.type === "users_inside_geofence_for_s") {
+    if (condition.type === RuleConditionType.UsersInsideGeofenceForS) {
       presence.push(formatGeofenceDwellLabel(condition, context));
       return;
     }
-    if (condition.type === "users_outside_geofence_for_s") {
+    if (condition.type === RuleConditionType.UsersOutsideGeofenceForS) {
       presence.push(formatGeofenceAwayDwellLabel(condition, context));
       return;
     }
-    if (condition.type === "users_min_distance_from_home_m") {
+    if (condition.type === RuleConditionType.UsersMinDistanceFromHomeM) {
       presence.push(formatMinDistanceFromHomeLabel(condition, context));
       return;
     }
     if (
-      condition.type === "users_inside_geofence"
-      || condition.type === "users_outside_geofence"
+      condition.type === RuleConditionType.UsersInsideGeofence
+      || condition.type === RuleConditionType.UsersOutsideGeofence
     ) {
       presence.push(formatPresenceEventLabel(condition, context));
       return;
     }
     if (
-      condition.type === "devices_all_in_state"
-      || condition.type === "devices_any_in_state"
-      || condition.type === "devices_any_in_state_for_s"
+      condition.type === RuleConditionType.DevicesAllInState
+      || condition.type === RuleConditionType.DevicesAnyInState
+      || condition.type === RuleConditionType.DevicesAnyInStateForS
     ) {
       devices.push(formatDeviceStateCondition(condition, context));
       return;
     }
-    if (condition.type === "ep1_reading_compare") {
+    if (condition.type === RuleConditionType.Ep1ReadingCompare) {
       devices.push(formatEp1ReadingCompareCondition(condition, context));
       return;
     }

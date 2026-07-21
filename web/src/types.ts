@@ -3,6 +3,27 @@
 // guards the Python side; the TypeScript side is guarded by `tsc --strict`
 // at `pnpm run typecheck`.
 
+import {
+  RuleConditionType,
+  type AstronomicalWindowBoundary,
+  type DiscoveryStatus,
+  type Ep1NoisePreSharedKeySource,
+  type Ep1ReadingComparison,
+  type Ep1ReadingMetric,
+  type KasaCredentialsSource,
+  type RuleActionType,
+  type RuleReferenceIssueKind,
+  type RuleTrigger,
+  type SecretsKeySource,
+  type SettingsCredentialsTestSource,
+  type TailwindTokenSource,
+  type UserLocationSource,
+  type VacationModeTestEmailKind,
+  type VizioAuthSource,
+} from "./closed-sets.js";
+
+export * from "./closed-sets.js";
+
 export interface MetaOut {
   version: string;
   commit: string;
@@ -12,7 +33,7 @@ export interface HealthOut {
   status: string;
   service: string;
   ready: boolean;
-  discovery: "ready" | "in_progress" | "failed";
+  discovery: DiscoveryStatus;
   error: string | null;
 }
 
@@ -136,14 +157,6 @@ export interface UIPreferenceOut {
   hide_on_mobile: boolean;
 }
 
-export type KasaCredentialsSource = "env" | "database" | "none";
-
-export type SecretsKeySource = "env" | "file" | "none";
-
-export type Ep1NoisePreSharedKeySource = "cli" | "env" | "database" | "none";
-
-export type TailwindTokenSource = "cli" | "env" | "database" | "none";
-
 export interface KasaCredentialsSetOut {
   configured: boolean;
   source: KasaCredentialsSource;
@@ -167,12 +180,6 @@ export interface KasaCredentialsTestIn {
   password?: string | null;
   username?: string | null;
 }
-
-export type SettingsCredentialsTestSource =
-  | "cli"
-  | "database"
-  | "env"
-  | "form";
 
 export interface SettingsCredentialsTestOut {
   detail: string;
@@ -220,8 +227,6 @@ export interface TailwindTokenTestIn {
   token?: string | null;
 }
 
-export type VizioAuthSource = "cli" | "env" | "database" | "none";
-
 export interface VizioAuthTestIn {
   token?: string | null;
 }
@@ -263,16 +268,6 @@ export interface VizioPairCompleteOut {
 
 // --- Rule engine (mirror planned ``app/api/schemas.py`` rule models) ---
 
-export type RuleTrigger = "device_state" | "dwell_satisfied" | "edge_true" | "scheduled";
-
-export type RuleActionType =
-  | "turn_on"
-  | "turn_off"
-  | "open"
-  | "close"
-  | "pause"
-  | "resume";
-
 export interface RuleDeviceActionOut {
   action: RuleActionType;
   delay_s?: number | null;
@@ -284,82 +279,82 @@ export interface RuleDeviceActionOut {
 
 export type RuleConditionOut =
   | {
-      type: "users_inside_geofence";
+      type: typeof RuleConditionType.UsersInsideGeofence;
       geofence_id: string;
       user_ids: string[];
     }
   | {
-      type: "users_inside_geofence_for_s";
+      type: typeof RuleConditionType.UsersInsideGeofenceForS;
       geofence_id: string;
       user_ids: string[];
       min_inside_s: number;
     }
   | {
-      type: "users_min_distance_from_home_m";
+      type: typeof RuleConditionType.UsersMinDistanceFromHomeM;
       user_ids: string[];
       min_distance_m: number;
     }
   | {
-      type: "users_outside_geofence";
+      type: typeof RuleConditionType.UsersOutsideGeofence;
       geofence_id: string;
       user_ids: string[];
     }
   | {
-      type: "users_outside_geofence_for_s";
+      type: typeof RuleConditionType.UsersOutsideGeofenceForS;
       geofence_id: string;
       user_ids: string[];
       min_outside_s: number;
     }
   | {
-      type: "after_sunset";
+      type: typeof RuleConditionType.AfterSunset;
       offset_minutes: number;
       /** Default ``midnight`` — evening window ends at local midnight. */
-      window_end?: "midnight";
+      window_end?: AstronomicalWindowBoundary;
     }
   | {
-      type: "all";
+      type: typeof RuleConditionType.All;
       conditions: RuleConditionOut[];
     }
   | {
-      type: "any";
+      type: typeof RuleConditionType.Any;
       conditions: RuleConditionOut[];
     }
   | {
-      type: "before_sunrise";
+      type: typeof RuleConditionType.BeforeSunrise;
       offset_minutes: number;
       /** Default ``midnight`` — morning window starts at local midnight. */
-      window_start?: "midnight";
+      window_start?: AstronomicalWindowBoundary;
     }
-  | { type: "daylight" }
-  | { type: "after_local_time"; time_hhmm: string }
-  | { type: "before_local_time"; time_hhmm: string }
-  | { type: "local_time_window"; start_hhmm: string; end_hhmm: string }
+  | { type: typeof RuleConditionType.Daylight }
+  | { type: typeof RuleConditionType.AfterLocalTime; time_hhmm: string }
+  | { type: typeof RuleConditionType.BeforeLocalTime; time_hhmm: string }
+  | { type: typeof RuleConditionType.LocalTimeWindow; start_hhmm: string; end_hhmm: string }
   | {
       /** JavaScript ``Date.getDay()`` values: 0 = Sunday … 6 = Saturday. */
-      type: "days_of_week";
+      type: typeof RuleConditionType.DaysOfWeek;
       days: number[];
     }
   | {
-      type: "devices_all_in_state";
+      type: typeof RuleConditionType.DevicesAllInState;
       devices: RuleConditionDeviceRefOut[];
       state: DeviceConditionState;
     }
   | {
-      type: "devices_any_in_state";
+      type: typeof RuleConditionType.DevicesAnyInState;
       devices: RuleConditionDeviceRefOut[];
       state: DeviceConditionState;
     }
   | {
-      type: "devices_any_in_state_for_s";
+      type: typeof RuleConditionType.DevicesAnyInStateForS;
       devices: RuleConditionDeviceRefOut[];
       min_duration_s: number;
       state: DeviceConditionState;
     }
   | {
-      type: "ep1_reading_compare";
-      comparison: "above" | "below";
+      type: typeof RuleConditionType.Ep1ReadingCompare;
+      comparison: Ep1ReadingComparison;
       device: RuleConditionDeviceRefOut;
-      metric: "humidity_pct" | "illuminance_lx" | "temperature_c";
+      metric: Ep1ReadingMetric;
       threshold: number;
     };
 
@@ -440,13 +435,13 @@ export interface LocationHistoryRetentionOut {
 export interface MyTracksGeofencesSyncOut {
   geofence_count: number;
   last_synced_at: string | null;
-  source: "my-tracks";
+  source: UserLocationSource;
 }
 
 export interface MyTracksUsersSyncOut {
   last_synced_at: string | null;
   user_count: number;
-  source: "my-tracks";
+  source: UserLocationSource;
   webhook_ready: boolean;
 }
 
@@ -540,7 +535,7 @@ export interface VacationModeSettingsStatusOut extends VacationModeSettingsOut {
 }
 
 export interface VacationModeTestEmailIn {
-  kind: "anomaly" | "arm" | "disarm";
+  kind: VacationModeTestEmailKind;
 }
 
 export interface VacationModeTestEmailOut {
@@ -615,17 +610,7 @@ export interface RuleConditionStatusOut {
 }
 
 export interface RuleReferenceIssueOut {
-  kind:
-    | "discovery_pending"
-    | "geofence_edge_grace_disabled"
-    | "missing_notification_email"
-    | "missing_smtp"
-    | "non_canonical_device_id"
-    | "stale_device_display_name"
-    | "unknown_device"
-    | "unknown_geofence"
-    | "unknown_user"
-    | "unsupported_device_action";
+  kind: RuleReferenceIssueKind;
   reference: string;
   detail: string;
 }

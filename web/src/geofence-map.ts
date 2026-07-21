@@ -1,7 +1,7 @@
 // Geofence list + map editor (Leaflet/OSM). Map draw lands in PR3; form list in PR2.
 
 import type { RulesDataSource } from "./rules-data-source.js";
-import type { GeofenceOut, UserStatusOut } from "./types.js";
+import { ConfirmButtonVariant, MyTracksSyncKind, type GeofenceOut, type UserStatusOut } from "./types.js";
 import { createAuditedTimeElement } from "./format-timestamp.js";
 import { runMyTracksSyncAction } from "./mytracks-sync-dialog.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
@@ -43,7 +43,7 @@ export async function mountGeofenceMapPanel(
   syncBtn.textContent = "Sync from My Tracks";
   syncBtn.dataset.testid = "rules-geofences-sync-btn";
   syncBtn.addEventListener("click", () => {
-    void runMyTracksSyncAction(dataSource, "geofences", () =>
+    void runMyTracksSyncAction(dataSource, MyTracksSyncKind.Geofences, () =>
       mountGeofenceMapPanel(container, dataSource, onChanged),
     );
   });
@@ -129,7 +129,7 @@ export async function mountGeofenceMapPanel(
       void confirmAction({
         message: `Delete geofence "${g.label}"?`,
         confirmLabel: "Delete",
-        variant: "danger",
+        variant: ConfirmButtonVariant.Danger,
       }).then((confirmed) => {
         if (!confirmed) {
           return;

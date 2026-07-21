@@ -6,7 +6,7 @@
  * expose it on tiles / rule conditions elsewhere).
  */
 
-import type { UIDeviceOut, UIOccupancyReadingsOut, UIStateOut } from "./types.js";
+import { DeviceFamilyId, type UIDeviceOut, type UIOccupancyReadingsOut, type UIStateOut } from "./types.js";
 
 /** One EP1 sensor summarized in the header strip. */
 export interface Ep1HeaderStatusSnapshot {
@@ -40,7 +40,7 @@ export function ep1HeaderStatusFromUiState(
 ): Ep1HeaderStatusSnapshot[] {
   const snapshots: Ep1HeaderStatusSnapshot[] = [];
   for (const family of state.families) {
-    if (family.id !== "ep1") {
+    if (family.id !== DeviceFamilyId.Ep1) {
       continue;
     }
     for (const device of family.devices) {

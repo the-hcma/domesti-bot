@@ -11,6 +11,7 @@ import {
 import { referencesGeofenceId } from "./rule-summary.js";
 import {
   UIDeviceKind,
+  UserLocationSource,
   type GeofenceOut,
   type MyTracksGeofencesSyncOut,
   type MyTracksUsersSyncOut,
@@ -212,7 +213,7 @@ export class MockRulesDataSource implements RulesDataSource {
 
   async getMyTracksGeofencesSync(): Promise<MyTracksGeofencesSyncOut> {
     return {
-      source: "my-tracks",
+      source: UserLocationSource.MyTracks,
       last_synced_at: this.store.geofences_sync.last_synced_at,
       geofence_count: this.store.geofences.length,
     };
@@ -220,7 +221,7 @@ export class MockRulesDataSource implements RulesDataSource {
 
   async getMyTracksUsersSync(): Promise<MyTracksUsersSyncOut> {
     return {
-      source: "my-tracks",
+      source: UserLocationSource.MyTracks,
       last_synced_at: this.store.users_sync.last_synced_at,
       user_count: this.store.users.length,
       webhook_ready: true,

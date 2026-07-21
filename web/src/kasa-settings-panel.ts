@@ -1,3 +1,4 @@
+import { KasaCredentialsSource } from "./closed-sets.js";
 // Kasa/Tapo KLAP account credentials for the Settings hub.
 
 import { api, HttpError } from "./api.js";
@@ -137,7 +138,7 @@ export async function mountKasaSettingsPanel(
           ? `, … (+${String(s.skipped_auth_hosts.length - 3)} more)`
           : "";
       const envNote =
-        s.source === "env"
+        s.source === KasaCredentialsSource.Env
           ? " KASA_USERNAME / KASA_PASSWORD override the database."
           : "";
       showStatusMessage(
@@ -145,7 +146,7 @@ export async function mountKasaSettingsPanel(
       );
       return;
     }
-    if (s.source === "env") {
+    if (s.source === KasaCredentialsSource.Env) {
       showStatusMessage(
         "KASA_USERNAME / KASA_PASSWORD override the database until you remove them.",
       );

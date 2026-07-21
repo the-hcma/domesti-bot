@@ -1,7 +1,7 @@
 // Shared Automations hub UI helpers (info badges, family labels, toggles).
 
 import { createAuditedTimeElement } from "./format-timestamp.js";
-import type { RuleTrigger } from "./types.js";
+import { RuleTrigger } from "./types.js";
 
 export const ALL_DAYS_OF_WEEK = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -319,10 +319,10 @@ export function ruleStatusHeadline(rule: {
   last_fired_at: string | null;
   triggers: RuleTrigger[];
 }): string {
-  const hasDeviceState = rule.triggers.includes("device_state");
-  const hasDwellSatisfied = rule.triggers.includes("dwell_satisfied");
-  const hasEdge = rule.triggers.includes("edge_true");
-  const hasScheduled = rule.triggers.includes("scheduled");
+  const hasDeviceState = rule.triggers.includes(RuleTrigger.DeviceState);
+  const hasDwellSatisfied = rule.triggers.includes(RuleTrigger.DwellSatisfied);
+  const hasEdge = rule.triggers.includes(RuleTrigger.EdgeTrue);
+  const hasScheduled = rule.triggers.includes(RuleTrigger.Scheduled);
   if (hasEdge && !hasScheduled && !hasDeviceState && !hasDwellSatisfied) {
     if (rule.condition_currently_true) {
       return "Armed — fires on enter/leave";
@@ -350,7 +350,7 @@ export function ruleStatusHeadline(rule: {
 }
 
 export function ruleLastMetLabel(triggers: RuleTrigger[]): string {
-  if (triggers.includes("edge_true") && !triggers.includes("scheduled")) {
+  if (triggers.includes(RuleTrigger.EdgeTrue) && !triggers.includes(RuleTrigger.Scheduled)) {
     return "Last met ";
   }
   return "Last fired ";
@@ -374,7 +374,7 @@ export function appendRuleLastMetLine(
     fired.append("Never");
   }
   parent.append(fired);
-  if (rule.triggers.includes("scheduled") && rule.next_evaluate_at != null) {
+  if (rule.triggers.includes(RuleTrigger.Scheduled) && rule.next_evaluate_at != null) {
     const next = document.createElement("p");
     next.className = "rules-card-meta";
     next.append(document.createTextNode("Next evaluate "));

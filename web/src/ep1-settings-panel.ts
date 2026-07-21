@@ -1,3 +1,4 @@
+import { ManagedSecretSource } from "./closed-sets.js";
 // Everything Presence One Noise pre-shared key (PSK) settings for Settings hub.
 
 import { api, HttpError } from "./api.js";
