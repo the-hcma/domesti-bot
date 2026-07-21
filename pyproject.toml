@@ -45,6 +45,7 @@ dependencies = [
     "aiohttp>=3.14.1",
     "anyio>=4.14.1",
     "astral>=3.2",
+    "asttokens==3.0.2",
     "asyncclick==8.4.2.1",
     "certifi>=2026.6.17",
     "cffi==2.1.0",
