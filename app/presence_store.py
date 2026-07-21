@@ -90,7 +90,12 @@ def list_observed_wifi_networks_for_user(
     *,
     limit: int = 20,
 ) -> list[ObservedWifiNetwork]:
-    """Return distinct WiFi networks seen in ``user_id`` location history."""
+    """Return distinct WiFi networks seen in ``user_id`` location history.
+
+    Rows are uniqued by SSID (case-sensitive), keeping the most recently reported
+    BSSID for each name. Mesh APs and MAC rotation otherwise flood pickers with
+    many BSSIDs that share one SSID.
+    """
     if limit <= 0:
         raise ValueError(f"Expected limit > 0, got {limit}")
     with discovery_session(path) as session:
@@ -104,23 +109,23 @@ def list_observed_wifi_networks_for_user(
                 RuleUserLocationHistory.id.desc(),
             )
         ).all()
-    latest_by_bssid: dict[str, ObservedWifiNetwork] = {}
+    latest_by_ssid: dict[str, ObservedWifiNetwork] = {}
     for row in rows:
         bssid = normalize_wifi_bssid(row.wifi_bssid)
         ssid = (row.wifi_ssid or "").strip()
         if bssid is None or ssid == "":
             continue
-        if bssid in latest_by_bssid:
+        if ssid in latest_by_ssid:
             continue
-        latest_by_bssid[bssid] = ObservedWifiNetwork(
+        latest_by_ssid[ssid] = ObservedWifiNetwork(
             wifi_ssid=ssid,
             wifi_bssid=bssid,
             last_seen_at=row.reported_at,
         )
-        if len(latest_by_bssid) >= limit:
+        if len(latest_by_ssid) >= limit:
             break
     return sorted(
-        latest_by_bssid.values(),
+        latest_by_ssid.values(),
         key=lambda network: network.last_seen_at,
         reverse=True,
     )

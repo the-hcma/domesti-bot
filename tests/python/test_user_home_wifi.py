@@ -51,7 +51,10 @@ def test_replace_users_preserves_home_wifi(tmp_path: Path) -> None:
     assert saved.home_wifi_bssid == "aa:bb:cc:dd:ee:ff"
 
 
-def test_list_observed_wifi_networks_dedupes_by_bssid(tmp_path: Path) -> None:
+def test_list_observed_wifi_networks_keeps_latest_ssid_rename_as_separate(
+    tmp_path: Path,
+) -> None:
+    """SSID rename on the same BSSID yields two picker rows (one per name)."""
     db = tmp_path / "ui.sqlite"
     retention = default_location_history_retention()
     upsert_user_location(
@@ -85,6 +88,45 @@ def test_list_observed_wifi_networks_dedupes_by_bssid(tmp_path: Path) -> None:
         retention=retention,
     )
     networks = list_observed_wifi_networks_for_user(db, "henrique")
+    assert [n.wifi_ssid for n in networks] == ["HomeNet", "OldLabel"]
+    assert all(n.wifi_bssid == "aa:bb:cc:dd:ee:ff" for n in networks)
+
+
+def test_list_observed_wifi_networks_dedupes_by_ssid(tmp_path: Path) -> None:
+    """Mesh / MAC rotation: many BSSIDs for one SSID collapse to the newest row."""
+    db = tmp_path / "ui.sqlite"
+    retention = default_location_history_retention()
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.0,
+            lon=-73.0,
+            accuracy_m=20,
+            fix_at=100.0,
+            reported_at=100.0,
+            source="my-tracks",
+            wifi_ssid="HomeNet",
+            wifi_bssid="aa:bb:cc:dd:ee:01",
+        ),
+        retention=retention,
+    )
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.0,
+            lon=-73.0,
+            accuracy_m=20,
+            fix_at=200.0,
+            reported_at=200.0,
+            source="my-tracks",
+            wifi_ssid="HomeNet",
+            wifi_bssid="aa:bb:cc:dd:ee:02",
+        ),
+        retention=retention,
+    )
+    networks = list_observed_wifi_networks_for_user(db, "henrique")
     assert len(networks) == 1
     assert networks[0].wifi_ssid == "HomeNet"
-    assert networks[0].wifi_bssid == "aa:bb:cc:dd:ee:ff"
+    assert networks[0].wifi_bssid == "aa:bb:cc:dd:ee:02"
