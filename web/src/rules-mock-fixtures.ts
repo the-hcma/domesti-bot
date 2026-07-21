@@ -1,15 +1,16 @@
 // Seed fixtures for the motivating Henrique + Kristen arrival rule scenario.
 // Coordinates match ``tests/python/test_rule_engine.py``.
 
-import type {
-  GeofenceOut,
-  RuleActionDeviceOut,
-  RuleOut,
-  SettingsLocationOut,
-  TimeConditionTemplateOut,
-  UserLocationOut,
-  UserOut,
-  VacationModeSettingsStatusOut,
+import {
+  UIDeviceKind,
+  type GeofenceOut,
+  type RuleActionDeviceOut,
+  type RuleOut,
+  type SettingsLocationOut,
+  type TimeConditionTemplateOut,
+  type UserLocationOut,
+  type UserOut,
+  type VacationModeSettingsStatusOut,
 } from "./types.js";
 
 export interface MockSmtpConfig {
@@ -231,19 +232,19 @@ export function createMockStoreSeed(): MockStoreSeed {
         family_id: "kasa",
         device_id: "192.168.1.42",
         label: "Kitchen lights",
-        kind: "switch",
+        kind: UIDeviceKind.Switch,
       },
       {
         family_id: "kasa",
         device_id: "192.168.1.43",
         label: "Porch lights",
-        kind: "switch",
+        kind: UIDeviceKind.Switch,
       },
       {
         family_id: "tailwind",
         device_id: "main-garage",
         label: "Main garage",
-        kind: "door",
+        kind: UIDeviceKind.Door,
       },
     ],
   };

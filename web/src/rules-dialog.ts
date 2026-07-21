@@ -48,21 +48,22 @@ import {
 } from "./rules-ui-helpers.js";
 import { createAuditedTimeElement } from "./format-timestamp.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
-import type {
-  GeofenceOut,
-  UserOut,
-  UserStatusOut,
-  RuleActionDeviceOut,
-  RuleActionType,
-  RuleConditionOut,
-  RuleDeviceActionOut,
-  RuleOut,
-  RuleStatusSummaryOut,
-  RulesStatusOut,
-  SettingsLocationOut,
-  TimeConditionTemplateOut,
+import {
   UIDeviceKind,
+  type GeofenceOut,
+  type UserOut,
+  type UserStatusOut,
+  type RuleActionDeviceOut,
+  type RuleActionType,
+  type RuleConditionOut,
+  type RuleDeviceActionOut,
+  type RuleOut,
+  type RuleStatusSummaryOut,
+  type RulesStatusOut,
+  type SettingsLocationOut,
+  type TimeConditionTemplateOut,
 } from "./types.js";
+
 
 /** Match settings home coordinates to a geofence center (meters). */
 const HOME_GEOFENCE_MATCH_TOLERANCE_M = 50;
@@ -83,13 +84,13 @@ export type AutomationsHubOpenOptions = {
 
 function actionOptionsForKind(kind: UIDeviceKind): RuleActionType[] {
   switch (kind) {
-    case "switch":
+    case UIDeviceKind.Switch:
       return ["turn_on", "turn_off"];
-    case "door":
+    case UIDeviceKind.Door:
       return ["open", "close"];
-    case "speaker":
+    case UIDeviceKind.Speaker:
       return ["pause", "resume"];
-    case "occupancy":
+    case UIDeviceKind.Occupancy:
       // Occupancy sensors are read-only in the rules UI until EP1 actions land.
       return [];
   }

@@ -9,31 +9,32 @@ import {
   type MockStoreSeed,
 } from "./rules-mock-fixtures.js";
 import { referencesGeofenceId } from "./rule-summary.js";
-import type {
-  GeofenceOut,
-  MyTracksGeofencesSyncOut,
-  MyTracksUsersSyncOut,
-  MyTracksSettingsIn,
-  MyTracksSettingsOut,
-  MyTracksSyncIn,
-  ObservedWifiNetworkOut,
-  UserHomeWifiIn,
-  UserLocationOut,
-  UserOut,
-  UserStatusOut,
-  RuleActionDeviceOut,
-  RuleOut,
-  RulesStatusOut,
-  SettingsLocationOut,
-  SmtpConfigIn,
-  SmtpConfigOut,
-  SmtpTestEmailIn,
-  SmtpTestEmailOut,
-  TimeConditionTemplateOut,
-  VacationModeSettingsOut,
-  VacationModeSettingsStatusOut,
-  VacationModeTestEmailIn,
-  VacationModeTestEmailOut,
+import {
+  UIDeviceKind,
+  type GeofenceOut,
+  type MyTracksGeofencesSyncOut,
+  type MyTracksUsersSyncOut,
+  type MyTracksSettingsIn,
+  type MyTracksSettingsOut,
+  type MyTracksSyncIn,
+  type ObservedWifiNetworkOut,
+  type UserHomeWifiIn,
+  type UserLocationOut,
+  type UserOut,
+  type UserStatusOut,
+  type RuleActionDeviceOut,
+  type RuleOut,
+  type RulesStatusOut,
+  type SettingsLocationOut,
+  type SmtpConfigIn,
+  type SmtpConfigOut,
+  type SmtpTestEmailIn,
+  type SmtpTestEmailOut,
+  type TimeConditionTemplateOut,
+  type VacationModeSettingsOut,
+  type VacationModeSettingsStatusOut,
+  type VacationModeTestEmailIn,
+  type VacationModeTestEmailOut,
 } from "./types.js";
 
 const FILE_BACKED_RULES_ERROR =
@@ -484,9 +485,9 @@ export class MockRulesDataSource implements RulesDataSource {
       for (const family of state.families) {
         for (const device of family.devices) {
           if (
-            device.kind === "switch" ||
-            device.kind === "door" ||
-            device.kind === "speaker"
+            device.kind === UIDeviceKind.Switch ||
+            device.kind === UIDeviceKind.Door ||
+            device.kind === UIDeviceKind.Speaker
           ) {
             devices.push({
               family_id: family.id,

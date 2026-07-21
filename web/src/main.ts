@@ -11,15 +11,16 @@ import {
 } from "./ep1-header-status.js";
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
-import type {
-  MetaOut,
-  UIBulkActionOut,
-  UIDeviceOut,
+import {
+  UIDeviceKind,
   UIDeviceState,
-  UIFamilyOut,
-  UIOccupancyReadingsOut,
-  UIOperatorAlertOut,
-  UIStateOut,
+  type MetaOut,
+  type UIBulkActionOut,
+  type UIDeviceOut,
+  type UIFamilyOut,
+  type UIOccupancyReadingsOut,
+  type UIOperatorAlertOut,
+  type UIStateOut,
 } from "./types.js";
 
 const APP_ROOT_ID = "app";
@@ -545,7 +546,7 @@ class DomestiBotController {
   private async onToggleDevice(device: UIDeviceOut): Promise<void> {
     const nextState = nextStateAfterTileToggle(device);
     const onFailure =
-      device.kind === "speaker"
+      device.kind === UIDeviceKind.Speaker
         ? (err: unknown) => this.onSpeakerTileActionFailure(device, err)
         : undefined;
     await this.runOptimisticTileAction(
@@ -1196,15 +1197,15 @@ function bulkOffStateForKind(kind: UIDeviceOut["kind"]): UIDeviceState {
   // so the UI can show the post-action state before the round-trip
   // (and the post-action poll) lands.
   switch (kind) {
-    case "switch":
-      return "off";
-    case "speaker":
-      return "paused";
-    case "door":
-      return "closed";
-    case "occupancy":
+    case UIDeviceKind.Switch:
+      return UIDeviceState.Off;
+    case UIDeviceKind.Speaker:
+      return UIDeviceState.Paused;
+    case UIDeviceKind.Door:
+      return UIDeviceState.Closed;
+    case UIDeviceKind.Occupancy:
       // Occupancy tiles are not bulk-off targets; keep the inactive label.
-      return "clear";
+      return UIDeviceState.Clear;
   }
 }
 
@@ -1248,18 +1249,18 @@ function nextStateAfterTileToggle(device: UIDeviceOut): UIDeviceState {
   // family_id. ``unknown`` follows the same default as the aria hint
   // (switch/speaker: not off/playing → activate; door: close).
   switch (device.kind) {
-    case "switch":
-      return device.state === "off" ? "on" : "off";
-    case "speaker":
-      return device.state === "playing" ? "paused" : "playing";
-    case "door":
-      return device.state === "closed" ? "open" : "closed";
-    case "occupancy":
+    case UIDeviceKind.Switch:
+      return device.state === UIDeviceState.Off ? UIDeviceState.On : UIDeviceState.Off;
+    case UIDeviceKind.Speaker:
+      return device.state === UIDeviceState.Playing ? UIDeviceState.Paused : UIDeviceState.Playing;
+    case UIDeviceKind.Door:
+      return device.state === UIDeviceState.Closed ? UIDeviceState.Open : UIDeviceState.Closed;
+    case UIDeviceKind.Occupancy:
       // Sensor-driven; no tile toggle yet — keep current state so optimistic
       // prediction does not briefly flip occupied/clear before BAD_REQUEST.
-      return device.state === "occupied" || device.state === "clear"
+      return device.state === UIDeviceState.Occupied || device.state === UIDeviceState.Clear
         ? device.state
-        : "unknown";
+        : UIDeviceState.Unknown;
   }
 }
 
@@ -2072,26 +2073,26 @@ function attachTileHitListeners(
 
 function compactTileAriaLabel(device: UIDeviceOut): string {
   const statePhrase =
-    device.state === "unknown" ? "state unknown" : `currently ${device.state}`;
+    device.state === UIDeviceState.Unknown ? "state unknown" : `currently ${device.state}`;
   switch (device.kind) {
-    case "switch": {
-      const next = device.state === "off" ? "turn on" : "turn off";
+    case UIDeviceKind.Switch: {
+      const next = device.state === UIDeviceState.Off ? "turn on" : "turn off";
       return `${device.label}, ${statePhrase}, tap to ${next}`;
     }
-    case "speaker": {
-      const next = device.state === "playing" ? "pause" : "resume";
+    case UIDeviceKind.Speaker: {
+      const next = device.state === UIDeviceState.Playing ? "pause" : "resume";
       return `${device.label}, ${statePhrase}, tap to ${next}`;
     }
-    case "door": {
+    case UIDeviceKind.Door: {
       const next =
-        device.state === "open"
+        device.state === UIDeviceState.Open
           ? "close"
-          : device.state === "closed"
+          : device.state === UIDeviceState.Closed
             ? "open"
             : "close";
       return `${device.label}, ${statePhrase}, tap to ${next}`;
     }
-    case "occupancy": {
+    case UIDeviceKind.Occupancy: {
       // Sensor-only for now (no tile toggle); omit actionable "tap to …".
       const temp = formatOccupancyTemperatureDual(device.occupancy_readings);
       return temp == null
@@ -2102,12 +2103,12 @@ function compactTileAriaLabel(device: UIDeviceOut): string {
 }
 
 function compactIconAssetKey(device: UIDeviceOut): string {
-  if (device.compact_icon === "garage" || device.kind === "door") {
-    return device.state === "open" ? "garage_open" : "garage_closed";
+  if (device.compact_icon === "garage" || device.kind === UIDeviceKind.Door) {
+    return device.state === UIDeviceState.Open ? "garage_open" : "garage_closed";
   }
   if (
     device.compact_icon === "occupancy" ||
-    device.kind === "occupancy" ||
+    device.kind === UIDeviceKind.Occupancy ||
     device.family_id === "ep1"
   ) {
     return "occupancy";
@@ -2116,20 +2117,20 @@ function compactIconAssetKey(device: UIDeviceOut): string {
     device.compact_icon === "tv" ||
     device.family_id === "vizio"
   ) {
-    if (device.state === "unknown") {
+    if (device.state === UIDeviceState.Unknown) {
       return "tv_off";
     }
-    return device.state === "on" ? "tv_on" : "tv_off";
+    return device.state === UIDeviceState.On ? "tv_on" : "tv_off";
   }
   if (
     device.compact_icon === "speaker" ||
-    device.kind === "speaker" ||
+    device.kind === UIDeviceKind.Speaker ||
     device.family_id === "sonos"
   ) {
-    if (device.state === "playing") {
+    if (device.state === UIDeviceState.Playing) {
       return "speaker_playing";
     }
-    if (device.state === "unknown") {
+    if (device.state === UIDeviceState.Unknown) {
       return "speaker_unknown";
     }
     return "speaker_paused";
@@ -2381,10 +2382,10 @@ function createTileSaturatedHit(
   hit.className = hitClassName;
   hit.dataset["tone"] = deviceStateTone(device.state);
   const isActive =
-    device.state === "on" ||
-    device.state === "playing" ||
-    device.state === "open" ||
-    device.state === "occupied";
+    device.state === UIDeviceState.On ||
+    device.state === UIDeviceState.Playing ||
+    device.state === UIDeviceState.Open ||
+    device.state === UIDeviceState.Occupied;
   hit.setAttribute("aria-pressed", isActive ? "true" : "false");
   hit.setAttribute("aria-label", compactTileAriaLabel(device));
   hit.title = deviceIdentityTooltip(device);
@@ -2396,27 +2397,27 @@ function createTileSaturatedHit(
 
 function deviceNeedsBulkOff(device: UIDeviceOut): boolean {
   switch (device.kind) {
-    case "switch":
-      return device.state === "on";
-    case "speaker":
+    case UIDeviceKind.Switch:
+      return device.state === UIDeviceState.On;
+    case UIDeviceKind.Speaker:
       // Match doors: unknown may still be playing before the first poll.
-      return device.state === "playing" || device.state === "unknown";
-    case "door":
-      return device.state === "open" || device.state === "unknown";
-    case "occupancy":
+      return device.state === UIDeviceState.Playing || device.state === UIDeviceState.Unknown;
+    case UIDeviceKind.Door:
+      return device.state === UIDeviceState.Open || device.state === UIDeviceState.Unknown;
+    case UIDeviceKind.Occupancy:
       return false;
   }
 }
 
 function deviceStateTone(state: UIDeviceState): "active" | "inactive" | "unknown" {
-  if (state === "unknown") {
+  if (state === UIDeviceState.Unknown) {
     return "unknown";
   }
   if (
-    state === "on" ||
-    state === "playing" ||
-    state === "open" ||
-    state === "occupied"
+    state === UIDeviceState.On ||
+    state === UIDeviceState.Playing ||
+    state === UIDeviceState.Open ||
+    state === UIDeviceState.Occupied
   ) {
     return "active";
   }
@@ -2640,11 +2641,11 @@ function renderFamily(
 }
 
 function tileStateCaption(device: UIDeviceOut): string | null {
-  if (device.state === "unknown") {
+  if (device.state === UIDeviceState.Unknown) {
     return "Unknown";
   }
-  if (device.kind === "switch") {
-    return device.state === "on" ? "On" : "Off";
+  if (device.kind === UIDeviceKind.Switch) {
+    return device.state === UIDeviceState.On ? "On" : "Off";
   }
   return device.state.charAt(0).toUpperCase() + device.state.slice(1);
 }
