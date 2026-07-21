@@ -1,48 +1,18 @@
 ---
-description: Use enums for closed string sets in TypeScript (not raw literals)
+description: Use const-object enums for closed string sets in TypeScript (not raw literals or TS enum)
 alwaysApply: true
 ---
 
-# Closed sets use enums (TypeScript)
+# Closed sets use const-object enums (TypeScript)
 
 When a value is drawn from a **fixed, known set** of strings (API enums, device
 families/kinds, layout modes, rule triggers, settings tabs, credential sources,
-toast variants), define a **string enum** (or a const-object enum — see below)
-in `web/src/` (typically next to the domain types in `types.ts` or a small
-`*-enums.ts` module) and compare against enum members — not bare string
-literals.
+toast variants), define a **const-object enum** in `web/src/` (typically next to
+the domain types in `types.ts` or a small `*-enums.ts` module) and compare
+against named members — not bare string literals.
 
 ```ts
-// Good
-enum DeviceKind {
-  Door = "door",
-  Occupancy = "occupancy",
-  Speaker = "speaker",
-  Switch = "switch",
-}
-
-if (device.kind === DeviceKind.Occupancy) {
-  ...
-}
-
-// Avoid in application code
-if (device.kind === "occupancy") {
-  ...
-}
-```
-
-Wire / JSON values stay the same (`"occupancy"`, etc.). Prefer **string enums**
-whose members equal the API wire value so `JSON` and FastAPI payloads need no
-mapping layer.
-
-This mirrors Python’s `StrEnum` rule (`.cursor/rules/python-closed-set-enums.mdc`).
-
-## Const-object alternative (when `enum` is awkward)
-
-If a bundler or `erasableSyntaxOnly`-style constraint makes `enum` undesirable,
-use a const object + derived type (same call-site discipline):
-
-```ts
+// Good — idiomatic, minimal runtime (plain object; no TS enum emit)
 export const DeviceKind = {
   Door: "door",
   Occupancy: "occupancy",
@@ -54,7 +24,25 @@ export type DeviceKind = (typeof DeviceKind)[keyof typeof DeviceKind];
 if (device.kind === DeviceKind.Occupancy) {
   ...
 }
+
+// Avoid in application code
+if (device.kind === "occupancy") {
+  ...
+}
+
+// Avoid TypeScript `enum` — emits extra runtime code and is awkward with
+// `verbatimModuleSyntax` / `isolatedModules` / bundlers.
+enum DeviceKindBad {
+  Occupancy = "occupancy",
+}
 ```
+
+Wire / JSON values stay the same (`"occupancy"`, etc.). Member values must equal
+the API wire value so `JSON` and FastAPI payloads need no mapping layer.
+
+This mirrors Python’s `StrEnum` rule (`.cursor/rules/python-closed-set-enums.mdc`)
+at the call-site level (named members, not bare literals). Prefer const objects
+over TS `enum` for less JS output and better tooling fit.
 
 Do **not** treat a bare string union alone as sufficient when comparisons still
 hard-code `"occupancy"` at call sites — the named members are the point.

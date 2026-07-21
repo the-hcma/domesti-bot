@@ -20,25 +20,38 @@ export interface HealthOut {
  * Device tile kind. ``occupancy`` is room occupancy (EP1 mmWave/PIR), not
  * My Tracks presence / user / location.
  */
-export type UIDeviceKind = "door" | "occupancy" | "speaker" | "switch";
+export const UIDeviceKind = {
+  Door: "door",
+  Occupancy: "occupancy",
+  Speaker: "speaker",
+  Switch: "switch",
+} as const;
+export type UIDeviceKind = (typeof UIDeviceKind)[keyof typeof UIDeviceKind];
 
 /** Mirror of Python ``DeviceConditionState`` (rules / actions; no ``unknown``). */
+export const DeviceConditionState = {
+  Clear: "clear",
+  Closed: "closed",
+  Occupied: "occupied",
+  Off: "off",
+  On: "on",
+  Open: "open",
+  Paused: "paused",
+  Playing: "playing",
+} as const;
 export type DeviceConditionState =
-  | "clear"
-  | "closed"
-  | "occupied"
-  | "off"
-  | "on"
-  | "open"
-  | "paused"
-  | "playing";
+  (typeof DeviceConditionState)[keyof typeof DeviceConditionState];
 
 /**
  * Tile state from ``GET /v1/ui/state``.
  * UI-only superset of ``DeviceConditionState`` — ``unknown`` covers transient
  * readings (Tailwind OPENING/CLOSING, Sonos pre-poll, Vizio auth gaps).
  */
-export type UIDeviceState = DeviceConditionState | "unknown";
+export const UIDeviceState = {
+  ...DeviceConditionState,
+  Unknown: "unknown",
+} as const;
+export type UIDeviceState = (typeof UIDeviceState)[keyof typeof UIDeviceState];
 
 /**
  * Environmental readings for ``kind=occupancy`` (EP1). Units are fixed:
