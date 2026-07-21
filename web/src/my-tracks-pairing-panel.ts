@@ -5,12 +5,13 @@ import { setAuditedTimestampLine } from "./format-timestamp.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
 import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
-import type {
-  LocationHistoryRetentionIn,
-  MyTracksPairIn,
-  MyTracksPairStatusOut,
-  MyTracksSettingsIn,
-  MyTracksSettingsOut,
+import {
+  ConfirmButtonVariant,
+  type LocationHistoryRetentionIn,
+  type MyTracksPairIn,
+  type MyTracksPairStatusOut,
+  type MyTracksSettingsIn,
+  type MyTracksSettingsOut,
 } from "./types.js";
 
 export interface MyTracksPairingPanelOptions {
@@ -575,7 +576,7 @@ export async function mountMyTracksPairingPanel(
         "This clears the domain, admin username, relay API key, and pairing metadata on domesti-bot. " +
         "my-tracks may still accept the old relay key until you re-pair or clear it there.",
       confirmLabel: "Reset",
-      variant: "danger",
+      variant: ConfirmButtonVariant.Danger,
     }).then((confirmed) => {
       if (!confirmed) {
         return;

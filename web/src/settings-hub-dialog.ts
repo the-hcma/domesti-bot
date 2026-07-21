@@ -7,14 +7,14 @@ import { mountEp1SettingsPanel } from "./ep1-settings-panel.js";
 import { mountTailwindSettingsPanel } from "./tailwind-settings-panel.js";
 import { mountVizioSettingsPanel } from "./vizio-settings-panel.js";
 
-type SettingsTabId = "ep1" | "kasa" | "my-tracks" | "tailwind" | "vizio";
+import { SettingsTabId } from "./closed-sets.js";
 
 const SETTINGS_TABS: readonly [SettingsTabId, string][] = [
-  ["tailwind", "GoTailwind"],
-  ["ep1", "EP1"],
-  ["kasa", "Kasa"],
-  ["my-tracks", "My Tracks"],
-  ["vizio", "Vizio TV"],
+  [SettingsTabId.Tailwind, "GoTailwind"],
+  [SettingsTabId.Ep1, "EP1"],
+  [SettingsTabId.Kasa, "Kasa"],
+  [SettingsTabId.MyTracks, "My Tracks"],
+  [SettingsTabId.Vizio, "Vizio TV"],
 ];
 
 export async function openSettingsHubDialog(options: {
@@ -47,7 +47,7 @@ export async function openSettingsHubDialog(options: {
   const body = document.createElement("div");
   body.className = "settings-dialog-body settings-hub-body";
 
-  let activeTab: SettingsTabId = "tailwind";
+  let activeTab: SettingsTabId = SettingsTabId.Tailwind;
   const tabButtons = new Map<SettingsTabId, HTMLButtonElement>();
 
   for (const [tabId, label] of SETTINGS_TABS) {
@@ -92,24 +92,24 @@ export async function openSettingsHubDialog(options: {
     const mount = document.createElement("div");
     mount.className = "settings-hub-tab-mount";
     body.append(mount);
-    if (tabId === "ep1") {
+    if (tabId === SettingsTabId.Ep1) {
       await mountEp1SettingsPanel(mount, {
         onDevicesChanged: options.onReloadDevices,
       });
       return;
     }
-    if (tabId === "kasa") {
+    if (tabId === SettingsTabId.Kasa) {
       await mountKasaSettingsPanel(mount, {
         onDevicesChanged: options.onReloadDevices,
       });
       return;
     }
-    if (tabId === "my-tracks") {
+    if (tabId === SettingsTabId.MyTracks) {
       const dataSource = await createRulesDataSource();
       await mountMyTracksSettingsPanel(mount, dataSource);
       return;
     }
-    if (tabId === "vizio") {
+    if (tabId === SettingsTabId.Vizio) {
       await mountVizioSettingsPanel(mount, {
         onDevicesChanged: options.onReloadDevices,
       });

@@ -1,3 +1,4 @@
+import { ManagedSecretSource } from "./closed-sets.js";
 // GoTailwind token settings panel for the Settings hub.
 
 import { api, HttpError } from "./api.js";
@@ -125,7 +126,7 @@ export async function mountTailwindSettingsPanel(
       );
       return;
     }
-    if (s.source === "env" || s.source === "cli") {
+    if (s.source === ManagedSecretSource.Env || s.source === ManagedSecretSource.Cli) {
       showStatusMessage(
         "TAILWIND_TOKEN (or --tailwind-token) overrides the database until you remove it.",
       );

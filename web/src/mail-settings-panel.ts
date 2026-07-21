@@ -3,7 +3,7 @@
 import { HttpError } from "./api.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
-import type { SmtpConfigIn, SmtpConfigOut } from "./types.js";
+import { ConfirmButtonVariant, type SmtpConfigIn, type SmtpConfigOut } from "./types.js";
 import { confirmAction } from "./ui-toast.js";
 import { defaultMailDomainFromUi } from "./ui-instance.js";
 
@@ -310,7 +310,7 @@ export async function mountMailSettingsPanel(
       message:
         "This will permanently delete all SMTP settings, including the stored password. Continue?",
       confirmLabel: "Delete",
-      variant: "danger",
+      variant: ConfirmButtonVariant.Danger,
     }).then((confirmed) => {
       if (!confirmed) {
         return;

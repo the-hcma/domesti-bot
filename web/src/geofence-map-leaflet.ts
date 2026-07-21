@@ -13,7 +13,8 @@ import type { RulesDataSource } from "./rules-data-source.js";
 import type { GeofenceDrawToolbar } from "./geofence-map.js";
 import type { GeofenceOut, UserStatusOut, SettingsLocationOut } from "./types.js";
 
-type DrawState = "idle" | "placing-center" | "placing-radius";
+import { GeofenceDrawState } from "./closed-sets.js";
+type DrawState = GeofenceDrawState;
 
 function slugifyGeofenceId(label: string): string {
   return label
@@ -147,7 +148,7 @@ export async function initGeofenceLeafletMap(
   cancelDrawBtn.hidden = true;
   toolbar.drawActions.replaceChildren(drawBtn, cancelDrawBtn);
 
-  let drawState: DrawState = "idle";
+  let drawState: DrawState = GeofenceDrawState.Idle;
   let drawCenter: L.LatLng | null = null;
   let previewCircle: L.Circle | null = null;
   let previewMarker: L.CircleMarker | null = null;
@@ -166,7 +167,7 @@ export async function initGeofenceLeafletMap(
   };
 
   const exitDraw = (): void => {
-    drawState = "idle";
+    drawState = GeofenceDrawState.Idle;
     mapEl.classList.remove("rules-geofence-draw-mode");
     panel.classList.remove("rules-geofence-draw-active");
     drawGroup.classList.remove("rules-geofence-toolbar-draw-active");
@@ -245,7 +246,7 @@ export async function initGeofenceLeafletMap(
   };
 
   drawBtn.addEventListener("click", () => {
-    drawState = "placing-center";
+    drawState = GeofenceDrawState.PlacingCenter;
     mapEl.classList.add("rules-geofence-draw-mode");
     panel.classList.add("rules-geofence-draw-active");
     drawGroup.classList.add("rules-geofence-toolbar-draw-active");
@@ -259,15 +260,15 @@ export async function initGeofenceLeafletMap(
   });
 
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && drawState !== "idle") {
+    if (ev.key === "Escape" && drawState !== GeofenceDrawState.Idle) {
       exitDraw();
     }
   });
 
   map.on("click", (e: L.LeafletMouseEvent) => {
-    if (drawState === "placing-center") {
+    if (drawState === GeofenceDrawState.PlacingCenter) {
       drawCenter = e.latlng;
-      drawState = "placing-radius";
+      drawState = GeofenceDrawState.PlacingRadius;
       toolbar.drawHint.textContent = "Click again to set the radius.";
       previewMarker = L.circleMarker(drawCenter, {
         radius: 5,
@@ -284,7 +285,7 @@ export async function initGeofenceLeafletMap(
         weight: 2,
         dashArray: "6 4",
       }).addTo(map);
-    } else if (drawState === "placing-radius" && drawCenter !== null) {
+    } else if (drawState === GeofenceDrawState.PlacingRadius && drawCenter !== null) {
       const radius = Math.max(10, Math.round(drawCenter.distanceTo(e.latlng)));
       if (previewCircle !== null) {
         map.removeLayer(previewCircle);
@@ -297,7 +298,7 @@ export async function initGeofenceLeafletMap(
         weight: 2,
       }).addTo(map);
       showDrawForm(drawCenter.lat, drawCenter.lng, radius);
-      drawState = "idle";
+      drawState = GeofenceDrawState.Idle;
       mapEl.classList.remove("rules-geofence-draw-mode");
       panel.classList.remove("rules-geofence-draw-active");
       drawGroup.classList.remove("rules-geofence-toolbar-draw-active");
@@ -308,7 +309,7 @@ export async function initGeofenceLeafletMap(
   });
 
   map.on("mousemove", (e: L.LeafletMouseEvent) => {
-    if (drawState === "placing-radius" && drawCenter !== null && previewCircle !== null) {
+    if (drawState === GeofenceDrawState.PlacingRadius && drawCenter !== null && previewCircle !== null) {
       const radius = Math.max(10, Math.round(drawCenter.distanceTo(e.latlng)));
       previewCircle.setRadius(radius);
     }

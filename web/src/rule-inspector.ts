@@ -19,14 +19,16 @@ import {
   createBrokenRuleBadge,
   ruleStatusHeadline,
 } from "./rules-ui-helpers.js";
-import type {
-  GeofenceOut,
-  UserOut,
-  RuleActionDeviceOut,
-  RuleConditionOut,
-  RuleConditionStatusOut,
-  RuleOut,
-  RuleStatusSummaryOut,
+import {
+  RuleConditionType,
+  RuleTrigger,
+  type GeofenceOut,
+  type UserOut,
+  type RuleActionDeviceOut,
+  type RuleConditionOut,
+  type RuleConditionStatusOut,
+  type RuleOut,
+  type RuleStatusSummaryOut,
 } from "./types.js";
 
 export interface RuleInspectorMountOptions {
@@ -43,24 +45,24 @@ function appendConditionTree(
   list.className = "rules-condition-tree";
   for (const condition of conditions) {
     const item = document.createElement("li");
-    if (condition.type === "all" || condition.type === "any") {
-      item.textContent = condition.type === "all" ? "All of" : "Any of";
+    if (condition.type === RuleConditionType.All || condition.type === RuleConditionType.Any) {
+      item.textContent = condition.type === RuleConditionType.All ? "All of" : "Any of";
       appendConditionTree(item, condition.conditions, context);
-    } else if (condition.type === "users_inside_geofence_for_s") {
+    } else if (condition.type === RuleConditionType.UsersInsideGeofenceForS) {
       item.textContent = formatGeofenceDwellLabel(condition, context);
-    } else if (condition.type === "users_outside_geofence_for_s") {
+    } else if (condition.type === RuleConditionType.UsersOutsideGeofenceForS) {
       item.textContent = formatGeofenceAwayDwellLabel(condition, context);
-    } else if (condition.type === "users_min_distance_from_home_m") {
+    } else if (condition.type === RuleConditionType.UsersMinDistanceFromHomeM) {
       item.textContent = formatMinDistanceFromHomeLabel(condition, context);
     } else if (
-      condition.type === "users_inside_geofence"
-      || condition.type === "users_outside_geofence"
+      condition.type === RuleConditionType.UsersInsideGeofence
+      || condition.type === RuleConditionType.UsersOutsideGeofence
     ) {
       item.textContent = formatPresenceEventLabel(condition, context);
     } else if (
-      condition.type === "devices_all_in_state"
-      || condition.type === "devices_any_in_state"
-      || condition.type === "devices_any_in_state_for_s"
+      condition.type === RuleConditionType.DevicesAllInState
+      || condition.type === RuleConditionType.DevicesAnyInState
+      || condition.type === RuleConditionType.DevicesAnyInStateForS
     ) {
       item.textContent = formatDeviceStateCondition(condition, context);
     } else {
@@ -76,19 +78,22 @@ function isEdgePresenceStatusRow(
   triggers: RuleStatusSummaryOut["triggers"],
   cond: RuleConditionStatusOut,
 ): boolean {
-  if (!triggers.includes("edge_true") || triggers.includes("scheduled")) {
+  if (
+    !triggers.includes(RuleTrigger.EdgeTrue)
+    || triggers.includes(RuleTrigger.Scheduled)
+  ) {
     return false;
   }
   if (
-    cond.condition.type === "users_inside_geofence"
-    || cond.condition.type === "users_outside_geofence"
+    cond.condition.type === RuleConditionType.UsersInsideGeofence
+    || cond.condition.type === RuleConditionType.UsersOutsideGeofence
   ) {
     return true;
   }
-  if (cond.condition.type === "any") {
+  if (cond.condition.type === RuleConditionType.Any) {
     return cond.condition.conditions.every(
-      (child) => child.type === "users_inside_geofence"
-        || child.type === "users_outside_geofence",
+      (child) => child.type === RuleConditionType.UsersInsideGeofence
+        || child.type === RuleConditionType.UsersOutsideGeofence,
     );
   }
   return false;
@@ -179,7 +184,7 @@ export function mountRuleInspectorPanel(
   appendDefinitionRow(meta, "Rule id", rule.id);
   appendDefinitionRow(meta, "Enabled", rule.enabled ? "Yes" : "No");
   appendDefinitionRow(meta, "Triggers", rule.triggers.join(", "));
-  if (rule.triggers.includes("scheduled")) {
+  if (rule.triggers.includes(RuleTrigger.Scheduled)) {
     appendDefinitionRow(meta, "Schedule (cron)", rule.schedule_cron ?? "(none)");
   }
   if (rule.fire_once_per_local_day === true) {

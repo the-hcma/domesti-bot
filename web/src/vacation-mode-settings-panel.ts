@@ -1,3 +1,4 @@
+import { VacationModeTestEmailKind } from "./types.js";
 // Vacation mode settings panel (Automations hub).
 
 import { HttpError } from "./api.js";
@@ -184,13 +185,13 @@ export async function mountVacationModeSettingsPanel(
   testRow.className = "rules-mail-test-row";
   const testKind = document.createElement("select");
   const optArm = document.createElement("option");
-  optArm.value = "arm";
+  optArm.value = VacationModeTestEmailKind.Arm;
   optArm.textContent = "Sample: arm (vacation on)";
   const optDisarm = document.createElement("option");
-  optDisarm.value = "disarm";
+  optDisarm.value = VacationModeTestEmailKind.Disarm;
   optDisarm.textContent = "Sample: disarm (vacation off)";
   const optAnomaly = document.createElement("option");
-  optAnomaly.value = "anomaly";
+  optAnomaly.value = VacationModeTestEmailKind.Anomaly;
   optAnomaly.textContent = "Sample: anomaly (device change)";
   testKind.append(optArm, optDisarm, optAnomaly);
   const testBtn = document.createElement("button");
@@ -294,7 +295,7 @@ export async function mountVacationModeSettingsPanel(
     syncActionEnabled();
     status.hidden = false;
     status.textContent = "Sending test email…";
-    const kind = testKind.value as "arm" | "disarm" | "anomaly";
+    const kind = testKind.value as VacationModeTestEmailKind;
     void dataSource
       .sendVacationModeTestEmail({ kind })
       .then((result) => {

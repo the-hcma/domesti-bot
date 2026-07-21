@@ -1,6 +1,7 @@
 // Admin credential prompt for My Tracks roster / geofence sync.
 
 import { HttpError } from "./api.js";
+import { MyTracksSyncKind } from "./closed-sets.js";
 import { appendMyTracksInstanceText } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { preventBrowserAutofill } from "./rules-ui-helpers.js";
@@ -146,7 +147,7 @@ export function promptMyTracksSyncCredentials(
 
 export async function runMyTracksSyncAction(
   dataSource: RulesDataSource,
-  kind: "geofences" | "users",
+  kind: MyTracksSyncKind,
   onComplete: () => void | Promise<void>,
 ): Promise<void> {
   let settings = null as Awaited<ReturnType<RulesDataSource["getMyTracksSettings"]>>;
@@ -164,7 +165,7 @@ export async function runMyTracksSyncAction(
     return;
   }
   try {
-    if (kind === "users") {
+    if (kind === MyTracksSyncKind.Users) {
       const result = await dataSource.syncUsersFromMyTracks({
         username: credentials.username,
         password: credentials.password,

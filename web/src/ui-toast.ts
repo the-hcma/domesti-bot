@@ -1,6 +1,7 @@
 // Dismissible toasts and styled confirm prompts (replaces window.alert/confirm).
 
-export type ToastVariant = "error" | "info" | "success";
+import { ConfirmButtonVariant, ToastVariant } from "./closed-sets.js";
+export { ToastVariant } from "./closed-sets.js";
 
 const DEFAULT_TOAST_MS = 10_000;
 const SUCCESS_TOAST_MS = 5_000;
@@ -21,21 +22,21 @@ function dismissToast(): void {
 
 export function showToast(
   message: string,
-  variant: ToastVariant = "info",
+  variant: ToastVariant = ToastVariant.Info,
   durationMs?: number,
 ): void {
   dismissToast();
 
   const toast = document.createElement("div");
   const variantClass =
-    variant === "success"
+    variant === ToastVariant.Success
       ? "action-toast-success"
-      : variant === "info"
+      : variant === ToastVariant.Info
         ? "action-toast-info"
         : "";
   toast.className =
     variantClass.length > 0 ? `action-toast ${variantClass}` : "action-toast";
-  if (variant === "error") {
+  if (variant === ToastVariant.Error) {
     toast.setAttribute("role", "alert");
     toast.setAttribute("aria-live", "assertive");
   } else {
@@ -62,22 +63,22 @@ export function showToast(
 
   const timeout =
     durationMs
-    ?? (variant === "success" ? SUCCESS_TOAST_MS : DEFAULT_TOAST_MS);
+    ?? (variant === ToastVariant.Success ? SUCCESS_TOAST_MS : DEFAULT_TOAST_MS);
   activeToastTimer = window.setTimeout(() => {
     dismissToast();
   }, timeout);
 }
 
 export function showErrorToast(message: string): void {
-  showToast(message, "error");
+  showToast(message, ToastVariant.Error);
 }
 
 export function showSuccessToast(message: string): void {
-  showToast(message, "success");
+  showToast(message, ToastVariant.Success);
 }
 
 export function showInfoToast(message: string): void {
-  showToast(message, "info");
+  showToast(message, ToastVariant.Info);
 }
 
 export function confirmAction(options: {
@@ -85,7 +86,7 @@ export function confirmAction(options: {
   confirmLabel?: string;
   message: string;
   title?: string;
-  variant?: "danger" | "default";
+  variant?: ConfirmButtonVariant;
 }): Promise<boolean> {
   return new Promise((resolve) => {
     const dialog = document.createElement("dialog");
@@ -118,7 +119,7 @@ export function confirmAction(options: {
     const confirmBtn = document.createElement("button");
     confirmBtn.type = "button";
     confirmBtn.className =
-      options.variant === "danger" ? "btn btn-danger" : "btn";
+      options.variant === ConfirmButtonVariant.Danger ? "btn btn-danger" : "btn";
     confirmBtn.textContent = options.confirmLabel ?? "Confirm";
     actions.append(cancelBtn, confirmBtn);
     body.append(actions);

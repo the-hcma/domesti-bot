@@ -2,7 +2,7 @@
 
 import type { RulesSunOut } from "./types.js";
 
-export type AstronomicalWindowBoundary = "midnight";
+export { AstronomicalWindowBoundary } from "./closed-sets.js";
 
 export const MINUTES_PER_DAY = 24 * 60;
 
