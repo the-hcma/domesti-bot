@@ -36,6 +36,11 @@ export interface PresenceMapMountOptions {
   geofences: GeofenceOut[];
   /** When true, tooltip title includes ``user_id`` (Users tab). */
   includeUserIdInTooltip?: boolean;
+  /**
+   * When false, omit the on-map legend (e.g. Users tab places color swatches
+   * next to household members instead). Defaults to true.
+   */
+  showLegend?: boolean;
   users: PresenceMapUser[];
   showUserFilters: boolean;
 }
@@ -414,6 +419,7 @@ export function mountPresenceMap(
   let users = [...options.users];
   const includeUserIdInTooltip =
     options.includeUserIdInTooltip === true;
+  const showLegend = options.showLegend !== false;
 
   const filtersEl = document.createElement("div");
   filtersEl.className = "rules-presence-map-filters";
@@ -442,7 +448,9 @@ export function mountPresenceMap(
           visibleIds.delete(user.user_id);
         }
         syncUserVisibility();
-        renderPresenceMapLegend(legendEl, users, visibleIds);
+        if (showLegend) {
+          renderPresenceMapLegend(legendEl, users, visibleIds);
+        }
         shellTooltip.refresh();
         fitVisibleBounds();
       });
@@ -462,7 +470,11 @@ export function mountPresenceMap(
   const legendEl = document.createElement("div");
   legendEl.className = "rules-presence-map-legend";
   legendEl.hidden = true;
-  shellEl.append(mapEl, legendEl);
+  if (showLegend) {
+    shellEl.append(mapEl, legendEl);
+  } else {
+    shellEl.append(mapEl);
+  }
   rootEl.append(filtersEl, shellEl);
 
   const tooltipHtmlByUserId = new Map<string, string>();
@@ -654,7 +666,9 @@ export function mountPresenceMap(
       upsertUserLayer(user);
     }
     syncUserVisibility();
-    renderPresenceMapLegend(legendEl, users, visibleIds);
+    if (showLegend) {
+      renderPresenceMapLegend(legendEl, users, visibleIds);
+    }
     shellTooltip.refresh();
   };
 

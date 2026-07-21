@@ -47,10 +47,8 @@ import {
   preventBrowserAutofill,
 } from "./rules-ui-helpers.js";
 import { createAuditedTimeElement } from "./format-timestamp.js";
-import {
-  mountHomeLocationMapInset,
-  type HomeLocationMapInset,
-} from "./home-location-map-inset.js";
+import { mountHomeLocationMapInset, type HomeLocationMapInset } from "./home-location-map-inset.js";
+import { userMarkerColor } from "./map-device-colors.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
 import {
   AstronomicalWindowBoundary,
@@ -444,6 +442,7 @@ class RulesHubController {
     options: {
       compact?: boolean;
       includeUserIdInTooltip?: boolean;
+      showLegend?: boolean;
       showUserFilters: boolean;
       showTextDetails: boolean;
     },
@@ -459,6 +458,7 @@ class RulesHubController {
       geofences,
       users: users.map(userStatusToMapUser),
       showUserFilters: options.showUserFilters,
+      ...(options.showLegend === false ? { showLegend: false as const } : {}),
       ...(options.includeUserIdInTooltip === true
         ? { includeUserIdInTooltip: true as const }
         : {}),
@@ -1515,13 +1515,26 @@ class RulesHubController {
     const mapsStack = document.createElement("div");
     mapsStack.className = "rules-users-maps-stack";
 
+    const homeMapBlock = document.createElement("div");
+    homeMapBlock.className = "rules-users-map-block";
+    const homeMapTitle = document.createElement("h4");
+    homeMapTitle.className = "rules-users-map-title";
+    homeMapTitle.textContent = "Home location";
     const homeMapEl = document.createElement("div");
     homeMapEl.className = "rules-home-location-map";
     homeMapEl.setAttribute("role", "img");
     homeMapEl.setAttribute("aria-label", "Home location map");
+    homeMapBlock.append(homeMapTitle, homeMapEl);
+
+    const presenceMapBlock = document.createElement("div");
+    presenceMapBlock.className = "rules-users-map-block";
+    const presenceMapTitle = document.createElement("h4");
+    presenceMapTitle.className = "rules-users-map-title";
+    presenceMapTitle.textContent = "Live locations";
     const presenceMount = document.createElement("div");
     presenceMount.className = "rules-users-presence-map-inset";
-    mapsStack.append(homeMapEl, presenceMount);
+    presenceMapBlock.append(presenceMapTitle, presenceMount);
+    mapsStack.append(homeMapBlock, presenceMapBlock);
 
     const homeBlock = this.mountHomeLocationForm(
       left,
@@ -1541,11 +1554,16 @@ class RulesHubController {
       {
         compact: true,
         includeUserIdInTooltip: true,
+        showLegend: false,
         showUserFilters: false,
         showTextDetails: false,
       },
     );
+    // Maps were created before the grid had a real width; re-measure now.
+    this.homeLocationMap?.invalidateSize();
+    this.presenceMap?.invalidateSize();
     requestAnimationFrame(() => {
+      this.homeLocationMap?.invalidateSize();
       this.presenceMap?.invalidateSize();
     });
   }
@@ -1785,7 +1803,8 @@ class RulesHubController {
     householdHeading.textContent = "Household";
     const householdLead = document.createElement("p");
     householdLead.className = "rules-card-meta";
-    householdLead.textContent = "People who share this home WiFi.";
+    householdLead.textContent =
+      "People who share this home WiFi. Colored dots match Live locations.";
     const householdList = document.createElement("div");
     householdList.className = "rules-users-household-list";
 
@@ -1865,12 +1884,28 @@ class RulesHubController {
           user,
           cb.checked,
           sharedWifiSelect,
-        ).finally(() => {
-          cb.disabled = false;
-        });
+        )
+          .catch(() => {
+            // Resync from server so checkbox / wifi stay consistent after a partial failure.
+            void this.refresh().catch((refreshErr: unknown) => {
+              console.warn("Failed to refresh Users tab after household error", refreshErr);
+            });
+          })
+          .finally(() => {
+            cb.disabled = false;
+          });
       });
+      const swatch = document.createElement("span");
+      swatch.className = "rules-users-household-swatch";
+      swatch.style.backgroundColor = userMarkerColor(
+        user.tracking_device_label,
+        user.user_id,
+      );
+      swatch.setAttribute("aria-hidden", "true");
+      swatch.title = "Live location marker color";
       row.append(
         cb,
+        swatch,
         document.createTextNode(
           ` ${userDisplayLabel(user.user_id, user.display_name)}`,
         ),
@@ -1916,6 +1951,33 @@ class RulesHubController {
     }
   }
 
+  private async mergeObservedWifiIntoSelect(
+    userId: string,
+    select: HTMLSelectElement,
+  ): Promise<void> {
+    let networks: { wifi_bssid: string; wifi_ssid: string }[] = [];
+    try {
+      networks = await this.dataSource.listUserObservedWifi(userId);
+    } catch (err) {
+      console.warn("Failed to load observed WiFi networks", err);
+      return;
+    }
+    const existing = new Set(
+      [...select.options].map((option) => option.value).filter((value) => value !== ""),
+    );
+    for (const network of networks) {
+      if (existing.has(network.wifi_bssid)) {
+        continue;
+      }
+      existing.add(network.wifi_bssid);
+      const option = document.createElement("option");
+      option.value = network.wifi_bssid;
+      option.textContent = network.wifi_ssid;
+      option.dataset.ssid = network.wifi_ssid;
+      select.append(option);
+    }
+  }
+
   private async toggleHouseholdMembership(
     user: UserOut,
     isHousehold: boolean,
@@ -1942,6 +2004,7 @@ class RulesHubController {
           user.home_wifi_bssid = withWifi.home_wifi_bssid;
           user.home_wifi_ssid = withWifi.home_wifi_ssid;
         }
+        await this.mergeObservedWifiIntoSelect(user.user_id, sharedWifiSelect);
       } else {
         const cleared = await this.dataSource.setUserHomeWifi(user.user_id, {
           wifi_bssid: null,
@@ -1950,12 +2013,11 @@ class RulesHubController {
         user.home_wifi_bssid = cleared.home_wifi_bssid;
         user.home_wifi_ssid = cleared.home_wifi_ssid;
       }
-      void this.refresh();
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update household";
       showErrorToast(message);
-      void this.refresh();
+      throw err;
     }
   }
 

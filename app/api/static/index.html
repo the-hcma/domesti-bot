@@ -928,6 +928,10 @@
       gap: 4px; }
     .rules-users-maps-stack { display: flex; flex-direction: column; gap: 8px;
       min-width: 0; }
+    .rules-users-map-block { display: flex; flex-direction: column; gap: 4px;
+      min-width: 0; }
+    .rules-users-map-title { margin: 0; font-size: 12px; font-weight: 600;
+      color: var(--muted); letter-spacing: 0.02em; }
     .rules-home-location-section .rules-section-title { margin-bottom: 4px; }
     .rules-home-location-status { margin: 0 0 6px; }
     .rules-home-location-form { display: flex; flex-direction: column; gap: 6px;
@@ -945,7 +949,10 @@
     .rules-home-location-map-pin { background: transparent; border: none; }
     .rules-users-household-list { display: flex; flex-direction: column; gap: 2px;
       margin: 0 0 4px; }
-    .rules-users-household-row { margin: 2px 0; }
+    .rules-users-household-row { margin: 2px 0; align-items: center; gap: 6px; }
+    .rules-users-household-swatch { flex: 0 0 auto; width: 12px; height: 12px;
+      border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.2);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
     .rules-users-shared-wifi-select { display: block; width: auto; max-width: 18rem;
       min-width: 10rem; font: inherit; font-size: 13px; padding: 4px 8px;
       border-radius: 6px; border: 1px solid var(--border);
@@ -954,6 +961,7 @@
     .rules-presence-map-compact.leaflet-container { height: 140px; border-radius: 8px;
       border: 1px solid var(--border); }
     .rules-users-presence-map-inset .rules-presence-map-filters { display: none; }
+    .rules-users-presence-map-inset .rules-presence-map-legend { display: none; }
     @media (max-width: 560px) {
       .rules-users-main-layout { grid-template-columns: 1fr; }
       .rules-home-location-map.leaflet-container,
