@@ -177,6 +177,40 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert "createBulkOffPauseIcon" in src
     assert "createBulkOffPadlockIcon" in src
     assert "appendEp1HeaderStatusStrip(header)" in src
+    # Landscape phones: height + coarse pointer, not width alone (see COMPACT_LAYOUT_MQ).
+    assert "max-height: 560px" in src
+    assert "pointer: coarse" in src
+
+
+def test_compact_layout_mq_css_matches_main() -> None:
+    """Phone compact MQ in main.ts and index.html @media must be identical."""
+    main_mq = _compact_layout_mq_from_main(_MAIN_TS.read_text(encoding="utf-8"))
+    css_mq = _compact_layout_mq_from_index_style(_extract_index_html_style_block())
+    assert main_mq == css_mq
+    assert "max-height: 560px" in main_mq
+    assert "hover: none" in main_mq
+    assert "pointer: coarse" in main_mq
+    assert "max-width: 768px" in main_mq
+
+
+def _compact_layout_mq_from_index_style(style: str) -> str:
+    match = re.search(
+        r"@media\s+((?:[^{]|\n)*max-height:\s*560px(?:[^{]|\n)*)\{",
+        style,
+        flags=re.DOTALL,
+    )
+    assert match is not None, "Expected landscape-aware @media in index.html <style>"
+    return _normalize_media_query_clause(match.group(1))
+
+
+def _compact_layout_mq_from_main(src: str) -> str:
+    match = re.search(
+        r'const COMPACT_LAYOUT_MQ\s*=\s*"([^"]+)"',
+        src,
+        flags=re.DOTALL,
+    )
+    assert match is not None, "Expected COMPACT_LAYOUT_MQ string in main.ts"
+    return _normalize_media_query_clause(match.group(1))
 
 
 def _css_rule_block(style_css: str, selector_needle: str) -> str:
@@ -200,3 +234,7 @@ def _extract_index_html_style_block() -> str:
     match = re.search(r"<style>(.*?)</style>", raw, flags=re.DOTALL)
     assert match is not None, "Expected <style> block in index.html"
     return match.group(1)
+
+
+def _normalize_media_query_clause(raw: str) -> str:
+    return re.sub(r"\s+", " ", raw.strip())
