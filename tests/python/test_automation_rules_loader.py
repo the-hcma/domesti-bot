@@ -21,7 +21,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     bundle = load_automation_rules_bundle()
     assert bundle.version == 1
-    assert len(bundle.rules) == 12
+    assert len(bundle.rules) == 13
     assert bundle.rules[0].id == "evening-arrival-home-lights"
     lights_off = next(rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home")
     assert lights_off.triggers == ["scheduled"]
@@ -44,6 +44,17 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     assert hot.comparison == "above"
     assert hot.metric == "temperature_c"
     assert hot.threshold == 24.0
+    dark_lights = next(rule for rule in bundle.rules if rule.id == "daylight-dark-house-lights-on")
+    assert dark_lights.enabled is False
+    assert dark_lights.schedule_cron == "*/5 * * * *"
+    assert dark_lights.conditions.all[0].type == "daylight"
+    lux = dark_lights.conditions.all[1]
+    assert lux.type == "ep1_reading_compare"
+    assert lux.comparison == "below"
+    assert lux.metric == "illuminance_lx"
+    assert lux.threshold == 80.0
+    assert lux.device.display_name == "Window EP1"
+    assert dark_lights.device_actions[0].action == "turn_on"
     power_cycle = next(rule for rule in bundle.rules if rule.id == "hdhomerun-nightly-power-cycle")
     assert power_cycle.enabled is False
     assert power_cycle.device_actions[1].delay_s == 60
@@ -60,6 +71,7 @@ def test_list_automation_rules_returns_all_rules(
     assert {rule.id for rule in rules} == {
         "away-garage-open-alert",
         "away-shutdown-everyone-outside-20m",
+        "daylight-dark-house-lights-on",
         "daylight-master-bedroom-fan-on-alert",
         "evening-arrival-home-lights",
         "evening-interior-lights-on-anyone-home",
