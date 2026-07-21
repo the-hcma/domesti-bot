@@ -95,9 +95,9 @@
     .tile-header-actions { display: flex; flex: 1 1 auto; align-items: stretch;
       justify-content: flex-end; gap: 8px; min-width: 0; }
     .tile-header-global-off { flex: 1 1 auto; min-width: 0; white-space: normal; }
-    /* EP1 header status strip (#524) — climate/light only; same row as bulk-off. */
+    /* EP1 header status strip (#524) — readings only (no device name); same row as bulk-off. */
     .ep1-header-status {
-      display: flex; flex: 1 1 auto; flex-wrap: nowrap; align-items: center;
+      display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center;
       gap: 6px 14px; min-width: 0; color: var(--fg); font-size: 0.92rem;
       line-height: 1.25;
     }
@@ -105,16 +105,12 @@
       display: inline-flex; flex-wrap: nowrap; align-items: baseline;
       gap: 0.35em 0.55em; min-width: 0;
     }
-    .ep1-header-status-label { font-weight: 600; color: var(--fg);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 10em; }
     .ep1-header-status-metric { color: var(--muted); white-space: nowrap; }
     .ep1-header-status-metric ~ .ep1-header-status-metric::before {
       content: "·"; margin-right: 0.55em; color: var(--muted); opacity: 0.7;
     }
     .ep1-header-status-compact { display: none; }
     .ep1-header-status[data-mock="true"],
-    .ep1-header-status[data-mock="true"] .ep1-header-status-label,
     .ep1-header-status[data-mock="true"] .ep1-header-status-device .ep1-header-status-metric {
       color: var(--muted);
     }
@@ -461,25 +457,26 @@
       font-size: var(--compact-global-bulk-px, clamp(12px, 3.2vw, 18px));
       font-weight: 600; text-align: center; line-height: 1.25;
     }
-    /* Keep EP1 readings on the same header row as brand + bulk-off (no wrap). */
+    /* Phone: stack EP1 readings under the brand column height; leave width for bulk-off. */
     #app[data-layout="compact"] .tile-header.tile-header-global {
-      flex-wrap: nowrap; gap: 6px 8px;
+      flex-wrap: nowrap; gap: 6px 8px; align-items: center;
     }
     #app[data-layout="compact"] .ep1-header-status {
-      flex: 1 1 auto; min-width: 0; font-size: 0.68rem; gap: 2px 6px;
-      padding: 0; overflow: hidden;
+      flex: 0 0 auto; min-width: 0; max-width: 6.5rem; font-size: 0.62rem;
+      line-height: 1.1; gap: 0; padding: 0; overflow: hidden; align-self: center;
     }
     #app[data-layout="compact"] .ep1-header-status-device {
-      gap: 0.2em 0.35em; max-width: 100%; overflow: hidden;
+      display: flex; flex-direction: column; flex-wrap: nowrap;
+      align-items: flex-start; justify-content: center; gap: 0;
+      max-width: 100%; overflow: hidden;
     }
     #app[data-layout="compact"] .ep1-header-status-full { display: none; }
     #app[data-layout="compact"] .ep1-header-status-compact { display: inline; }
-    #app[data-layout="compact"] .ep1-header-status-label {
-      max-width: 4.5em;
-    }
-    #app[data-layout="compact"] .ep1-header-status-metric::before,
     #app[data-layout="compact"] .ep1-header-status-metric ~ .ep1-header-status-metric::before {
-      margin-right: 0.35em;
+      content: none; margin: 0;
+    }
+    #app[data-layout="compact"] .tile-header-actions {
+      flex: 1 1 auto; min-width: 0;
     }
     #app[data-layout="compact"] .brand-mark-svg {
       width: 32px; height: 32px;

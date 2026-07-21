@@ -103,7 +103,7 @@ export function formatEp1HeaderTemperature(
   const fLabel = `${fahrenheit.toFixed(1)} °F`;
   const dual = `${cLabel} / ${fLabel}`;
   return {
-    // Phone strip stays one row: still dual-unit, slightly tighter spacing.
+    // Compact layout stacks metrics vertically; keep dual-unit on one line.
     compact: `${celsius.toFixed(1)}°C/${fahrenheit.toFixed(1)}°F`,
     full: dual,
   };
@@ -114,11 +114,10 @@ function createEp1HeaderStatusDevice(
 ): HTMLElement {
   const row = document.createElement("div");
   row.className = "ep1-header-status-device";
-
-  const label = document.createElement("span");
-  label.className = "ep1-header-status-label";
-  label.textContent = snapshot.label;
-  row.append(label);
+  // Readings only in the strip; keep the device name as a tooltip for context.
+  if (snapshot.label !== "") {
+    row.title = snapshot.label;
+  }
 
   const temp = formatEp1HeaderTemperature(snapshot);
   if (temp != null) {
