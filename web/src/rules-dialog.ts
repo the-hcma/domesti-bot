@@ -47,6 +47,10 @@ import {
   preventBrowserAutofill,
 } from "./rules-ui-helpers.js";
 import { createAuditedTimeElement } from "./format-timestamp.js";
+import {
+  mountHomeLocationMapInset,
+  type HomeLocationMapInset,
+} from "./home-location-map-inset.js";
 import { confirmAction, showErrorToast } from "./ui-toast.js";
 import {
   AstronomicalWindowBoundary,
@@ -270,6 +274,10 @@ class RulesHubController {
   private pendingGeofenceFocusId: string | null = null;
   private pendingRuleInspectorId: string | null = null;
   private pendingStatusRuleInspectorId: string | null = null;
+  private homeLocationMap: HomeLocationMapInset | null = null;
+  private homeLocationMapDebounceTimer: ReturnType<typeof window.setTimeout> | null =
+    null;
+  private homeLocationMapGeneration = 0;
   private presenceMap: PresenceMapController | null = null;
   private presencePollTimer: ReturnType<typeof window.setInterval> | null = null;
   private status: RulesStatusOut | null = null;
@@ -327,6 +335,7 @@ class RulesHubController {
     this.dialog.append(this.panel);
     this.dialog.addEventListener("close", () => {
       this.stopPresencePoll();
+      this.clearHomeLocationMap();
       this.presenceMap?.destroy();
       this.presenceMap = null;
       this.dialog.remove();
@@ -1008,8 +1017,19 @@ class RulesHubController {
     }
   }
 
+  private clearHomeLocationMap(): void {
+    if (this.homeLocationMapDebounceTimer !== null) {
+      window.clearTimeout(this.homeLocationMapDebounceTimer);
+      this.homeLocationMapDebounceTimer = null;
+    }
+    this.homeLocationMapGeneration += 1;
+    this.homeLocationMap?.destroy();
+    this.homeLocationMap = null;
+  }
+
   private async renderBody(): Promise<void> {
     this.stopPresencePoll();
+    this.clearHomeLocationMap();
     this.presenceMap?.destroy();
     this.presenceMap = null;
     this.body.replaceChildren();
@@ -1490,8 +1510,7 @@ class RulesHubController {
     homeWifiHeading.textContent = "Home WiFi";
     const homeWifiLead = document.createElement("p");
     homeWifiLead.className = "rules-card-meta";
-    homeWifiLead.textContent =
-      "Pick the network each person uses at home. Labels show the friendly SSID; matching uses the access-point BSSID.";
+    homeWifiLead.textContent = "SSID per person (matched by BSSID).";
     const homeWifiList = document.createElement("div");
     homeWifiList.className = "rules-users-home-wifi-list";
     for (const user of rosterUsers) {
@@ -1527,27 +1546,37 @@ class RulesHubController {
     mapUsers: UserStatusOut[],
   ): HTMLElement {
     const section = document.createElement("section");
-    section.className = "rules-users-section";
+    section.className = "rules-users-section rules-home-location-section";
     const heading = document.createElement("h3");
     heading.className = "rules-section-title";
     heading.textContent = "Home location";
-    const lead = document.createElement("p");
-    lead.className = "rules-card-meta";
-    lead.textContent =
-      "Lat/lon used for astronomy, maps, and distance features (vacation mode). "
-      + "0,0 means home is not configured.";
     const status = document.createElement("p");
-    status.className = "rules-card-meta";
+    status.className = "rules-card-meta rules-home-location-status";
+
+    const layout = document.createElement("div");
+    layout.className = "rules-home-location-layout";
+
     const form = document.createElement("form");
     form.className = "rules-home-location-form";
     form.setAttribute("autocomplete", "off");
 
+    const labelTzRow = document.createElement("div");
+    labelTzRow.className = "settings-dialog-field-row rules-home-location-fields";
     const labelInput = document.createElement("input");
     labelInput.type = "text";
     labelInput.value = initial.home_label ?? "";
     preventBrowserAutofill(labelInput);
-    appendLabeledField(form, createFieldLabel("Label"), labelInput);
+    appendLabeledField(labelTzRow, createFieldLabel("Label"), labelInput);
+    const tzInput = document.createElement("input");
+    tzInput.type = "text";
+    tzInput.required = true;
+    tzInput.value = initial.timezone;
+    preventBrowserAutofill(tzInput);
+    appendLabeledField(labelTzRow, createFieldLabel("Timezone (IANA)"), tzInput);
+    form.append(labelTzRow);
 
+    const latLonRow = document.createElement("div");
+    latLonRow.className = "settings-dialog-field-row rules-home-location-fields";
     const latInput = document.createElement("input");
     latInput.type = "number";
     latInput.step = "any";
@@ -1556,8 +1585,7 @@ class RulesHubController {
     latInput.required = true;
     latInput.value = String(initial.lat);
     preventBrowserAutofill(latInput);
-    appendLabeledField(form, createFieldLabel("Latitude"), latInput);
-
+    appendLabeledField(latLonRow, createFieldLabel("Latitude"), latInput);
     const lonInput = document.createElement("input");
     lonInput.type = "number";
     lonInput.step = "any";
@@ -1566,14 +1594,8 @@ class RulesHubController {
     lonInput.required = true;
     lonInput.value = String(initial.lon);
     preventBrowserAutofill(lonInput);
-    appendLabeledField(form, createFieldLabel("Longitude"), lonInput);
-
-    const tzInput = document.createElement("input");
-    tzInput.type = "text";
-    tzInput.required = true;
-    tzInput.value = initial.timezone;
-    preventBrowserAutofill(tzInput);
-    appendLabeledField(form, createFieldLabel("Timezone (IANA)"), tzInput);
+    appendLabeledField(latLonRow, createFieldLabel("Longitude"), lonInput);
+    form.append(latLonRow);
 
     const actions = document.createElement("div");
     actions.className = "rules-home-location-actions";
@@ -1604,12 +1626,57 @@ class RulesHubController {
     actions.append(browserBtn, adoptSelect, saveBtn);
     form.append(actions);
 
+    const mapEl = document.createElement("div");
+    mapEl.className = "rules-home-location-map";
+    mapEl.setAttribute("role", "img");
+    mapEl.setAttribute("aria-label", "Home location map");
+    layout.append(form, mapEl);
+
+    this.homeLocationMap?.destroy();
+    this.homeLocationMap = mountHomeLocationMapInset(mapEl, {
+      label: initial.home_label,
+      lat: initial.lat,
+      lon: initial.lon,
+    });
+    const mapGeneration = this.homeLocationMapGeneration;
+
+    const syncMapFromInputs = (): void => {
+      if (mapGeneration !== this.homeLocationMapGeneration) {
+        return;
+      }
+      const lat = Number(latInput.value);
+      const lon = Number(lonInput.value);
+      const labelRaw = labelInput.value.trim();
+      this.homeLocationMap?.setLocation(
+        lat,
+        lon,
+        labelRaw === "" ? null : labelRaw,
+      );
+    };
+    const scheduleMapSync = (): void => {
+      if (this.homeLocationMapDebounceTimer !== null) {
+        window.clearTimeout(this.homeLocationMapDebounceTimer);
+      }
+      const scheduledGeneration = this.homeLocationMapGeneration;
+      this.homeLocationMapDebounceTimer = window.setTimeout(() => {
+        this.homeLocationMapDebounceTimer = null;
+        if (scheduledGeneration !== this.homeLocationMapGeneration) {
+          return;
+        }
+        syncMapFromInputs();
+      }, 200);
+    };
+
     const refreshStatus = (location: SettingsLocationOut): void => {
       status.textContent = location.home_configured
         ? `Configured · ${location.lat.toFixed(5)}, ${location.lon.toFixed(5)}`
         : "Not configured (0, 0 sentinel)";
     };
     refreshStatus(initial);
+
+    latInput.addEventListener("input", scheduleMapSync);
+    lonInput.addEventListener("input", scheduleMapSync);
+    labelInput.addEventListener("input", scheduleMapSync);
 
     browserBtn.addEventListener("click", () => {
       if (!("geolocation" in navigator)) {
@@ -1622,6 +1689,7 @@ class RulesHubController {
           latInput.value = String(position.coords.latitude);
           lonInput.value = String(position.coords.longitude);
           browserBtn.disabled = false;
+          syncMapFromInputs();
         },
         (err) => {
           browserBtn.disabled = false;
@@ -1648,6 +1716,7 @@ class RulesHubController {
       latInput.value = String(location.lat);
       lonInput.value = String(location.lon);
       adoptSelect.value = "";
+      syncMapFromInputs();
     });
 
     form.addEventListener("submit", (event) => {
@@ -1677,6 +1746,11 @@ class RulesHubController {
         })
         .then((saved) => {
           refreshStatus(saved);
+          this.homeLocationMap?.setLocation(
+            saved.lat,
+            saved.lon,
+            saved.home_label,
+          );
           void this.refresh();
         })
         .catch((err: unknown) => {
@@ -1688,19 +1762,22 @@ class RulesHubController {
         });
     });
 
-    section.append(heading, lead, status, form);
+    section.append(heading, status, layout);
     return section;
   }
 
   private async createHomeWifiRow(user: UserOut): Promise<HTMLElement> {
     const row = document.createElement("div");
     row.className = "rules-users-home-wifi-row";
-    const label = document.createElement("label");
-    label.className = "settings-dialog-field";
     const name = document.createElement("span");
+    name.className = "rules-users-home-wifi-name";
     name.textContent = userDisplayLabel(user.user_id, user.display_name);
     const select = document.createElement("select");
-    select.className = "rules-select";
+    select.className = "rules-select rules-users-home-wifi-select";
+    select.setAttribute(
+      "aria-label",
+      `Home WiFi for ${userDisplayLabel(user.user_id, user.display_name)}`,
+    );
     const noneOption = document.createElement("option");
     noneOption.value = "";
     noneOption.textContent = "Not set";
@@ -1737,8 +1814,7 @@ class RulesHubController {
         select.disabled = false;
       });
     });
-    label.append(name, select);
-    row.append(label);
+    row.append(name, select);
     return row;
   }
 
