@@ -1039,8 +1039,10 @@
 
     /* Phone / narrow viewport (matches ``COMPACT_LAYOUT_MQ`` in ``main.ts``).
        Collapse outer margin, force the three-column compact grid, and hide
-       per-family bulk actions even if an old bundle left ``data-layout`` stale. */
-    @media (max-width: 768px) {
+       per-family bulk actions even if an old bundle left ``data-layout`` stale.
+       Second clause covers landscape phones whose CSS width exceeds 768. */
+    @media (max-width: 768px),
+           (max-height: 560px) and (hover: none) and (pointer: coarse) {
       main { margin: 0; padding: 10px; max-width: none; }
       #app { gap: 10px; }
       #app .family-header .btn { display: none; }

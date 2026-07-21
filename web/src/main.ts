@@ -24,8 +24,15 @@ import type {
 
 const APP_ROOT_ID = "app";
 
-/** Viewport breakpoint for the saturated three-column compact tile UI. */
-const COMPACT_LAYOUT_MQ = "(max-width: 768px)";
+/** Viewport / device query for compact tiles + compact header chrome.
+ *
+ * Portrait phones match ``max-width: 768px``. Landscape phones often have a CSS
+ * width above 768 (e.g. ~844–932) while height is phone-sized — without the
+ * second clause they incorrectly get comfortable layout (one-line EP1 readings
+ * and the long bulk-off sentence instead of icons).
+ */
+const COMPACT_LAYOUT_MQ =
+  "(max-width: 768px), (max-height: 560px) and (hover: none) and (pointer: coarse)";
 
 /** Compact tile labels: binary-search bounds for fitted label size (px). */
 const COMPACT_LABEL_FONT_MIN_PX = 11;
