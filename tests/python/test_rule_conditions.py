@@ -27,6 +27,7 @@ from app.api.schemas import (
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceForSCondition,
 )
+from app.automation_rules_loader import load_automation_rules_bundle
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleEvaluationCause, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -1837,6 +1838,12 @@ def test_build_rules_status_from_example_bundle(
     example = repo_root / "automation-rules.json.example"
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     status = build_rules_status(cache_path=tmp_path / "unused.sqlite")
-    assert len(status.rules) == 12
+    assert len(status.rules) == 13
     assert status.sun.sunset_at.endswith("Z")
     assert status.evaluator.last_run_at is not None
+    dark = next(row for row in status.rules if row.id == "daylight-dark-house-lights-on")
+    assert dark.enabled is False
+    expected_label = next(
+        rule.label for rule in load_automation_rules_bundle().rules if rule.id == "daylight-dark-house-lights-on"
+    )
+    assert dark.label == expected_label
