@@ -61,12 +61,12 @@ dependencies = [
     "idna>=3.18",
     "lxml==6.1.1",
     "mashumaro==3.22",
-    "playwright==1.61.0",
+    "playwright>=1.61.0",
     "prompt_toolkit>=3.0.43",
     "protobuf>=7.35.1",
     "pychromecast>=14.0.10",
     "pyproj",
-    "pyright==1.1.411",
+    "pyright>=1.1.411",
     # TEMPORARY: pin python-kasa to PR #1692 (IOT KLAP v2 transport selection).
     # Revert to a PyPI ``python-kasa`` release once
     # https://github.com/python-kasa/python-kasa/pull/1692 merges and ships.
@@ -141,11 +141,11 @@ known-first-party = ["app", "config"]
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.4.0",
+    "httpx2>=2.7.0",
     "icecream>=2.2.0",
-    "playwright>=1.60.0",
-    "pyright>=1.1.410",
-    "pytest>=9.1.0",
+    "playwright>=1.61.0",
+    "pyright>=1.1.411",
+    "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.15.17",
