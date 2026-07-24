@@ -1,5 +1,64 @@
 # Changelog
 
+## [1.16.0](https://github.com/the-hcma/domesti-bot/compare/v1.15.0...v1.16.0) (2026-07-24)
+
+
+### Features
+
+* add devices_any_in_state and devices_all_in_state condition types ([#458](https://github.com/the-hcma/domesti-bot/issues/458)) ([3a835b8](https://github.com/the-hcma/domesti-bot/commit/3a835b8a75067b078063b0d2f936447bb24235be))
+* add devices_any_in_state_for_s and fix away-garage false positive ([#454](https://github.com/the-hcma/domesti-bot/issues/454)) ([830eb51](https://github.com/the-hcma/domesti-bot/commit/830eb51b079458da4591bd56d2f4650e8b10a239))
+* add EP1 occupancy kind and sensor reading schema ([#527](https://github.com/the-hcma/domesti-bot/issues/527)) ([3162cd2](https://github.com/the-hcma/domesti-bot/commit/3162cd2897dde7bdc849ee1d7bba979886c945a8))
+* add users_min_distance_from_home_m condition ([#468](https://github.com/the-hcma/domesti-bot/issues/468)) ([a2a11cc](https://github.com/the-hcma/domesti-bot/commit/a2a11ccbc3d0bcba3d5905cedb030a421828978e))
+* compact remote and antenna icons for specialty Kasa plugs ([#494](https://github.com/the-hcma/domesti-bot/issues/494)) ([fe83403](https://github.com/the-hcma/domesti-bot/commit/fe83403631c5d91cc11fb58397b10a61d3585be5))
+* defer rule-fire email until delayed device_actions finish ([#508](https://github.com/the-hcma/domesti-bot/issues/508)) ([1198424](https://github.com/the-hcma/domesti-bot/commit/1198424e6845bedc0eb908d292ae624cf91ef4a1))
+* email unmarked device changes while vacation mode is armed ([#474](https://github.com/the-hcma/domesti-bot/issues/474)) ([09263a6](https://github.com/the-hcma/domesti-bot/commit/09263a65fe11efa9364bf18c47e0303f93b19b52))
+* EP1 event-driven subscribe_states watcher ([#534](https://github.com/the-hcma/domesti-bot/issues/534)) ([7e27b8a](https://github.com/the-hcma/domesti-bot/commit/7e27b8a690aac85b4a837a0f0b95327d3c5f4908))
+* EP1 occupied/clear rule conditions (read-only) ([#535](https://github.com/the-hcma/domesti-bot/issues/535)) ([5aac553](https://github.com/the-hcma/domesti-bot/commit/5aac553c82dac3b1175e3d908544e6d84cf07566))
+* EP1 reading above/below rule conditions (JSON) ([#536](https://github.com/the-hcma/domesti-bot/issues/536)) ([9ff8196](https://github.com/the-hcma/domesti-bot/commit/9ff8196ac4d5595facebeb340d091527b9d54382))
+* Ep1DeviceManager discovery cache and Noise PSK credentials ([#533](https://github.com/the-hcma/domesti-bot/issues/533)) ([efcebdd](https://github.com/the-hcma/domesti-bot/commit/efcebdda92663cb9e82bf7c936263a8acb75b16c))
+* example rule for dark daylight house lights ([#554](https://github.com/the-hcma/domesti-bot/issues/554)) ([#555](https://github.com/the-hcma/domesti-bot/issues/555)) ([618f555](https://github.com/the-hcma/domesti-bot/commit/618f5557c67198af08af09c943534fb17bfcef4f))
+* hide-on-mobile prefs and device properties context menu ([#489](https://github.com/the-hcma/domesti-bot/issues/489)) ([9e498f3](https://github.com/the-hcma/domesti-bot/commit/9e498f39bfce6e2f4b69cc0d86e678ebfab3c5be))
+* household members, shared home WiFi, dual map column on Users ([#551](https://github.com/the-hcma/domesti-bot/issues/551)) ([9c617c7](https://github.com/the-hcma/domesti-bot/commit/9c617c73849b10414277bce2853653bb426b337b))
+* make home location a first-class distance reference ([#466](https://github.com/the-hcma/domesti-bot/issues/466)) ([a3b0ac1](https://github.com/the-hcma/domesti-bot/commit/a3b0ac19759925a8f284fa13adcd2fa525008576))
+* mark expected device changes from UI and rules ([#469](https://github.com/the-hcma/domesti-bot/issues/469)) ([0083559](https://github.com/the-hcma/domesti-bot/commit/0083559b1272b86d5bcd66e691b507ea98c32d92))
+* mock EP1 header status strip on dashboard ([#537](https://github.com/the-hcma/domesti-bot/issues/537)) ([4826f49](https://github.com/the-hcma/domesti-bot/commit/4826f4919f7bb09fa093f3fba1909837bd6dfdb7))
+* optional delay_s on rule device_actions for sequenced fires ([#499](https://github.com/the-hcma/domesti-bot/issues/499)) ([453306e](https://github.com/the-hcma/domesti-bot/commit/453306e1a3a7fbed172b6e67fcc9ff48cda83bc7))
+* require MAC device_id in automation rules ([#511](https://github.com/the-hcma/domesti-bot/issues/511)) ([1b31626](https://github.com/the-hcma/domesti-bot/commit/1b31626acf27a76c3bce718599222230e7e72e42))
+* show device display_name with MAC in rules and emails ([#515](https://github.com/the-hcma/domesti-bot/issues/515)) ([fcecac0](https://github.com/the-hcma/domesti-bot/commit/fcecac0c31a7d19a3d3b96ae5f109aaebba1a05a))
+* show home timezone on rule-fire email timeline stamps ([#510](https://github.com/the-hcma/domesti-bot/issues/510)) ([6f76fbf](https://github.com/the-hcma/domesti-bot/commit/6f76fbf6e91c057a1a3d93a40817ecdd8c6c7af9))
+* sync UI device rosters from discovery cache ([#484](https://github.com/the-hcma/domesti-bot/issues/484)) ([380cec2](https://github.com/the-hcma/domesti-bot/commit/380cec287611e5eba34f22e5a491a5c24a4dec2c))
+* use MAC as primary device id across families ([#501](https://github.com/the-hcma/domesti-bot/issues/501)) ([2bdeb35](https://github.com/the-hcma/domesti-bot/commit/2bdeb3575ebe0a52048c9309123f55917701c398))
+* vacation mode latch with hysteresis and transition emails ([#471](https://github.com/the-hcma/domesti-bot/issues/471)) ([260a796](https://github.com/the-hcma/domesti-bot/commit/260a796c861768b597a46e1779ff34f26cc8be8e))
+* vacation optional transition emails and home-geofence disarm ([#479](https://github.com/the-hcma/domesti-bot/issues/479)) ([0a2cdc1](https://github.com/the-hcma/domesti-bot/commit/0a2cdc1bf7901f4557edda41e9c29e9f4cdafc58))
+* vacation test samples for arm, disarm, and anomaly ([#480](https://github.com/the-hcma/domesti-bot/issues/480)) ([ef4f0d8](https://github.com/the-hcma/domesti-bot/commit/ef4f0d82c8c76d5c9f99865dbeefb42bedcdeed7))
+* **web:** compact Automations Users home location and WiFi layout ([#550](https://github.com/the-hcma/domesti-bot/issues/550)) ([552686c](https://github.com/the-hcma/domesti-bot/commit/552686cb8a0afecb8a72a0910b9af906a4444881))
+
+
+### Bug Fixes
+
+* clarify vacation emails and polish Automations → Vacation UI ([#472](https://github.com/the-hcma/domesti-bot/issues/472)) ([7306201](https://github.com/the-hcma/domesti-bot/commit/73062016d2b42b48cfda72185a983b6d12e43cf1))
+* compact EP1 2x2 readings and icon bulk-off ([#543](https://github.com/the-hcma/domesti-bot/issues/543)) ([6c3e1d2](https://github.com/the-hcma/domesti-bot/commit/6c3e1d2a8b3aa211be1597b6eae37bfaac39c345))
+* EP1 header readings-only and compact vertical stack ([#542](https://github.com/the-hcma/domesti-bot/issues/542)) ([b65a4c6](https://github.com/the-hcma/domesti-bot/commit/b65a4c6fce694e5ea43f50673e9e00357f608000))
+* EP1 header strip climate-only and one-row phone layout ([#541](https://github.com/the-hcma/domesti-bot/issues/541)) ([0a60be5](https://github.com/the-hcma/domesti-bot/commit/0a60be54051694a0144f97319a1c9eca7280b141))
+* evaluate dwell_satisfied once per dwell episode ([#438](https://github.com/the-hcma/domesti-bot/issues/438)) ([#439](https://github.com/the-hcma/domesti-bot/issues/439)) ([3f976e4](https://github.com/the-hcma/domesti-bot/commit/3f976e450bc0bc4e933f840deb297f5367118c81))
+* keep /v1/ui/state usable when Kasa fetch fails at boot ([#476](https://github.com/the-hcma/domesti-bot/issues/476)) ([ae0e735](https://github.com/the-hcma/domesti-bot/commit/ae0e7357071b8ef4b2f008a830947064c06eab87))
+* keep Sonos tiles from sticking on unknown state ([#505](https://github.com/the-hcma/domesti-bot/issues/505)) ([df5b09a](https://github.com/the-hcma/domesti-bot/commit/df5b09a49a0a0153578aed74a88588437fe33a3a))
+* restore PWA connected UI when LAN returns ([#435](https://github.com/the-hcma/domesti-bot/issues/435)) ([#436](https://github.com/the-hcma/domesti-bot/issues/436)) ([a7cd4de](https://github.com/the-hcma/domesti-bot/commit/a7cd4dedd72a28fec4a26a7e26f4498d08a5dad6))
+* show device-properties hint on whole tile hover ([#491](https://github.com/the-hcma/domesti-bot/issues/491)) ([f7d1544](https://github.com/the-hcma/domesti-bot/commit/f7d15449a9c71163f14a31616be7cc09b47e0553))
+* skip timed-out Kasa hosts during cache reconnect ([#477](https://github.com/the-hcma/domesti-bot/issues/477)) ([5b5a997](https://github.com/the-hcma/domesti-bot/commit/5b5a9976db93d82a38fd82f2166be5a889faa442))
+* SQLite QueuePool and single writer thread ([#443](https://github.com/the-hcma/domesti-bot/issues/443)) ([#444](https://github.com/the-hcma/domesti-bot/issues/444)) ([f04e502](https://github.com/the-hcma/domesti-bot/commit/f04e502ed74dc8e1742092c7f6fc50616fbf5950))
+* stack EP1 readings in one column and split °C/°F ([#545](https://github.com/the-hcma/domesti-bot/issues/545)) ([2dbccb9](https://github.com/the-hcma/domesti-bot/commit/2dbccb91210301fd558f38989d9bf23092f35c47))
+* treat landscape phones as compact layout ([#544](https://github.com/the-hcma/domesti-bot/issues/544)) ([fb01f50](https://github.com/the-hcma/domesti-bot/commit/fb01f50c39168ded057e88fae9a635d2a781c160))
+* use Name (mac) in rule condition skip logs ([#516](https://github.com/the-hcma/domesti-bot/issues/516)) ([cfd57c6](https://github.com/the-hcma/domesti-bot/commit/cfd57c6e28feb4f4d1ea403249f147da7631dda7))
+* wake rule evaluator at next_evaluate_at ([#531](https://github.com/the-hcma/domesti-bot/issues/531)) ([#532](https://github.com/the-hcma/domesti-bot/issues/532)) ([6601c66](https://github.com/the-hcma/domesti-bot/commit/6601c6670b22a92e08484d0ec973c44a5346f466))
+* **web:** polish Users household maps and checkbox updates ([#552](https://github.com/the-hcma/domesti-bot/issues/552)) ([c202644](https://github.com/the-hcma/domesti-bot/commit/c2026444ba21cd20baff56ec867a43ba56563df4))
+* **web:** unique SSIDs and single Save on Users tab ([#553](https://github.com/the-hcma/domesti-bot/issues/553)) ([65496a0](https://github.com/the-hcma/domesti-bot/commit/65496a075458dbe096fe1bf5261f7e963abdcaea))
+
+
+### Documentation
+
+* require Name (mac) for human-visible devices ([#517](https://github.com/the-hcma/domesti-bot/issues/517)) ([c84aa89](https://github.com/the-hcma/domesti-bot/commit/c84aa8970a7a29752e299f2e96db25155822e6b2))
+
 ## [1.15.0](https://github.com/the-hcma/domesti-bot/compare/v1.14.0...v1.15.0) (2026-07-08)
 
 
