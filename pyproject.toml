@@ -53,7 +53,7 @@ dependencies = [
     "click>=8.4.2",
     "croniter>=6.2.4",
     "cryptography>=49.0.0",
-    "fastapi>=0.139.0",
+    "fastapi>=0.139.2",
     "gotailwind[cli]",
     "greenlet>=3.5.3",
     "httptools==0.8.0",
