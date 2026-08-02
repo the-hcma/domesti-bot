@@ -18,6 +18,7 @@ from app.device_state_watcher import (
     run_device_state_watchers,
 )
 from app.domesti_bot_cli import DeviceManagersState
+from app.rule_actions import lookup_preferred_label
 from app.rule_evaluator import RuleEvaluator
 from app.vacation_mode import handle_vacation_device_anomaly
 
@@ -138,6 +139,14 @@ class DomestiServerRuntime:
         cache_path = self.discovery_cache_path()
         if cache_path is None:
             return
+        display_name: str | None = None
+        device_state = self.device_state
+        if device_state is not None:
+            display_name = lookup_preferred_label(
+                device_state,
+                family_id=family_id,
+                device_id=device_id,
+            )
 
         def _run() -> None:
             handle_vacation_device_anomaly(
@@ -146,6 +155,7 @@ class DomestiServerRuntime:
                 device_id=device_id,
                 previous=previous,
                 current=current,
+                display_name=display_name,
             )
 
         try:
