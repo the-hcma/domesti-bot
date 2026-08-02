@@ -11,9 +11,10 @@ armed it fail-safe disarms. Transition emails go to ``notification_emails`` on
 both edges when ``notify_on_transition`` is true (default).
 
 While the latch is **armed** and ``enabled`` is true, unmarked device-state
-transitions (not covered by UI/rule :mod:`app.expected_device_change` marks)
-send anomaly emails to the same recipients (#464). When ``enabled`` is false,
-anomaly mail is quiet even if a prior latch row remains armed.
+transitions (not covered by a live UI/rule :mod:`app.expected_device_change`
+mark for the correlation window) send anomaly emails to the same recipients
+(#464). When ``enabled`` is false, anomaly mail is quiet even if a prior latch
+row remains armed.
 
 Restart policy (see also :mod:`app.vacation_mode_store`): persist ``armed`` plus
 ``far_since`` / ``near_since`` clocks; after boot the next tick reconciles clocks
@@ -37,8 +38,9 @@ from app.automation_rules_loader import (
     load_settings_location,
     load_vacation_mode_settings,
 )
+from app.device_display import format_device_display
 from app.device_enums import DeviceConditionState, DeviceFamilyId, VacationEmailSource
-from app.expected_device_change import consume_expected_device_change
+from app.expected_device_change import is_expected_device_change
 from app.home_location import try_resolve_home_location
 from app.operator_alerts import operator_alert_store
 from app.outbound_email import (
@@ -69,6 +71,8 @@ from app.wifi_home_presence import home_geofence_ids
 
 DEFAULT_VACATION_ANOMALY_DEBOUNCE_S = 30.0
 DEFAULT_VACATION_HYSTERESIS_S = 1800.0
+VACATION_ANOMALY_TRANSITION_WHY = "{device_label} went from {prev_label} to {next_label}."
+VACATION_ANOMALY_UNMARKED_ACTION_DETAIL = "domesti-bot did not mark this as a UI or automation action."
 VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER = "No device state was changed and vacation mode was not updated."
 VACATION_SETTINGS_TEST_PREAMBLE = "This is a test email from Automations → Vacation."
 VACATION_SETTINGS_TEST_TRANSITION_DISCLAIMER = "Vacation mode was not actually changed."
@@ -97,8 +101,10 @@ def build_vacation_mode_anomaly_bodies(
     observed_at: datetime,
     source: VacationEmailSource = VacationEmailSource.ANOMALY,
     cache_path: Path | None = None,
+    display_name: str | None = None,
 ) -> tuple[str, str]:
     """Return ``(plain_text, html)`` bodies for a vacation device-anomaly email."""
+    device_label = format_device_display(device_id, display_name)
     family_label = family_id.display_name()
     prev_label = format_vacation_bool_device_state(family_id, previous)
     next_label = format_vacation_bool_device_state(family_id, current)
@@ -106,12 +112,14 @@ def build_vacation_mode_anomaly_bodies(
     provenance = _provenance_footer(source)
     is_test = source == VacationEmailSource.SETTINGS_TEST
     headline = f"Unexpected {family_label} change while vacation mode is on."
-    why = (
-        f"{device_id} went from {prev_label} to {next_label}. "
-        "domesti-bot did not mark this as a UI or automation action."
+    transition = VACATION_ANOMALY_TRANSITION_WHY.format(
+        device_label=device_label,
+        prev_label=prev_label,
+        next_label=next_label,
     )
+    why = f"{transition} {VACATION_ANOMALY_UNMARKED_ACTION_DETAIL}"
     facts = [
-        f"Device: {device_id}",
+        f"Device: {device_label}",
         f"Family: {family_label}",
         f"Change: {prev_label} → {next_label}",
         f"Observed: {when_label}",
@@ -291,14 +299,17 @@ def handle_vacation_device_anomaly(
     current: bool | None,
     now_monotonic: float | None = None,
     observed_at: datetime | None = None,
+    display_name: str | None = None,
 ) -> bool:
     """Send an anomaly email when vacation is armed and the change is unmarked.
 
     Returns whether a message was handed to SMTP. Quiet when disarmed, when
-    ``enabled`` is false, when the change was expected (UI/rule mark consumed),
-    when recipients/SMTP are missing, or when the per-device anti-storm debounce
-    suppresses a repeat. A debounce reservation is rolled back when the send
-    does not complete so missed SMTP does not burn the storm window.
+    ``enabled`` is false, when a UI/rule expected-change mark is still live for
+    this device (non-consuming — the full correlation window suppresses
+    settle/flicker transitions), when recipients/SMTP are missing, or when the
+    per-device anti-storm debounce suppresses a repeat. A debounce reservation
+    is rolled back when the send does not complete so missed SMTP does not burn
+    the storm window.
     """
     state = load_vacation_mode_state(cache_path)
     if not state.armed:
@@ -311,7 +322,7 @@ def handle_vacation_device_anomaly(
     if not settings.enabled:
         return False
     clock = time.monotonic() if now_monotonic is None else now_monotonic
-    if consume_expected_device_change(family_id, device_id, now=clock):
+    if is_expected_device_change(family_id, device_id, now=clock):
         _LOGGER.debug(
             "[vacation] anomaly skipped — expected mark family=%s device_id=%s",
             family_id.value,
@@ -340,6 +351,7 @@ def handle_vacation_device_anomaly(
             previous=previous,
             current=current,
             observed_at=when,
+            display_name=display_name,
         )
     except Exception:
         _vacation_anomaly_debounce.release(family_id, device_id, reserved_at=clock)
@@ -364,6 +376,7 @@ def send_vacation_mode_anomaly_email(
     current: bool | None,
     observed_at: datetime,
     source: VacationEmailSource = VacationEmailSource.ANOMALY,
+    display_name: str | None = None,
 ) -> bool:
     """Email vacation recipients about an unmarked device transition."""
     recipients = normalized_vacation_notification_emails(settings)
@@ -391,10 +404,12 @@ def send_vacation_mode_anomaly_email(
         observed_at=observed_at,
         source=source,
         cache_path=cache_path,
+        display_name=display_name,
     )
+    device_label = format_device_display(device_id, display_name)
     prev_label = format_vacation_bool_device_state(family_id, previous)
     next_label = format_vacation_bool_device_state(family_id, current)
-    subject_core = f"vacation anomaly: {family_id.display_name()} {device_id} {prev_label}→{next_label}"
+    subject_core = f"vacation anomaly: {family_id.display_name()} {device_label} {prev_label}→{next_label}"
     if source == VacationEmailSource.SETTINGS_TEST:
         subject = f"domesti-bot [test] {subject_core}"
     else:

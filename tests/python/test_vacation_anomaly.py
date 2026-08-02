@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from app.api.schemas import VacationModeSettingsOut
 from app.db.engine import dispose_engine
 from app.db.schema import clear_bootstrap_cache
+from app.device_display import format_device_display
 from app.device_enums import DeviceFamilyId, VacationEmailSource
 from app.expected_device_change import (
     expected_device_changes,
@@ -16,6 +17,8 @@ from app.expected_device_change import (
 )
 from app.smtp_service import SmtpConnectionParams
 from app.vacation_mode import (
+    VACATION_ANOMALY_TRANSITION_WHY,
+    VACATION_ANOMALY_UNMARKED_ACTION_DETAIL,
     VACATION_SETTINGS_TEST_ANOMALY_DISCLAIMER,
     VACATION_SETTINGS_TEST_PREAMBLE,
     _vacation_anomaly_debounce,
@@ -35,12 +38,23 @@ def setup_function() -> None:
 def test_build_vacation_mode_anomaly_bodies_html_and_plain() -> None:
     plain, html = build_vacation_mode_anomaly_bodies(
         family_id=DeviceFamilyId.KASA,
-        device_id="porch",
+        device_id="aa:bb:cc:dd:ee:ff",
         previous=True,
         current=False,
         observed_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+        display_name="Porch lights",
     )
-    assert "porch went from on to off." in plain
+    device_label = format_device_display("aa:bb:cc:dd:ee:ff", "Porch lights")
+    assert (
+        VACATION_ANOMALY_TRANSITION_WHY.format(
+            device_label=device_label,
+            prev_label="on",
+            next_label="off",
+        )
+        in plain
+    )
+    assert VACATION_ANOMALY_UNMARKED_ACTION_DETAIL in plain
+    assert f"Device: {device_label}" in plain
     assert "Change: on → off" in plain
     assert "<ul>" in html
     assert "Vacation mode (device anomaly)" in plain
@@ -187,6 +201,38 @@ def test_handle_vacation_device_anomaly_releases_debounce_when_send_fails(
     dispose_engine(db)
 
 
+def test_handle_vacation_device_anomaly_sends_after_expected_window(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "discovery.sqlite"
+    clear_bootstrap_cache()
+    save_vacation_mode_state(db, armed=True, far_since=1.0, near_since=None)
+    mark_expected_device_change(
+        DeviceFamilyId.KASA,
+        "lamp.local",
+        now=50.0,
+        window_s=90.0,
+    )
+    with (
+        patch("app.vacation_mode.load_vacation_mode_settings", return_value=_settings()),
+        patch(
+            "app.vacation_mode.send_vacation_mode_anomaly_email",
+            return_value=True,
+        ) as send,
+    ):
+        sent = handle_vacation_device_anomaly(
+            db,
+            family_id=DeviceFamilyId.KASA,
+            device_id="lamp.local",
+            previous=False,
+            current=True,
+            now_monotonic=150.0,
+        )
+    assert sent is True
+    send.assert_called_once()
+    dispose_engine(db)
+
+
 def test_handle_vacation_device_anomaly_sends_when_armed_unmarked(
     tmp_path: Path,
 ) -> None:
@@ -237,7 +283,7 @@ def test_handle_vacation_device_anomaly_skips_expected_mark(tmp_path: Path) -> N
             return_value=True,
         ) as send,
     ):
-        sent = handle_vacation_device_anomaly(
+        first = handle_vacation_device_anomaly(
             db,
             family_id=DeviceFamilyId.KASA,
             device_id="lamp.local",
@@ -245,7 +291,16 @@ def test_handle_vacation_device_anomaly_skips_expected_mark(tmp_path: Path) -> N
             current=True,
             now_monotonic=55.0,
         )
-    assert sent is False
+        second = handle_vacation_device_anomaly(
+            db,
+            family_id=DeviceFamilyId.KASA,
+            device_id="lamp.local",
+            previous=True,
+            current=False,
+            now_monotonic=70.0,
+        )
+    assert first is False
+    assert second is False
     send.assert_not_called()
     dispose_engine(db)
 
@@ -256,6 +311,7 @@ def test_send_vacation_mode_anomaly_email_uses_smtp_stack(tmp_path: Path) -> Non
     delivery = MagicMock()
     delivery.format_for_log.return_value = "recipient_count=1"
     observed = datetime(2026, 7, 15, 18, 30, tzinfo=UTC)
+    device_label = format_device_display("aa:bb:cc:dd:ee:01", "Left garage")
     with (
         patch(
             "app.vacation_mode.load_outbound_smtp_params",
@@ -271,20 +327,31 @@ def test_send_vacation_mode_anomaly_email_uses_smtp_stack(tmp_path: Path) -> Non
             db,
             settings=_settings(),
             family_id=DeviceFamilyId.TAILWIND,
-            device_id="Left",
+            device_id="aa:bb:cc:dd:ee:01",
             previous=False,
             current=True,
             observed_at=observed,
+            display_name="Left garage",
         )
     assert sent is True
     message = deliver.call_args.args[1]
     assert message["To"] == "ops@example.com"
     assert "vacation anomaly" in message["Subject"]
-    assert "Left" in message["Subject"]
+    assert device_label in message["Subject"]
     body = message.get_body(preferencelist=("plain",)).get_content()
     assert "Unexpected Tailwind change while vacation mode is on." in body
+    assert (
+        VACATION_ANOMALY_TRANSITION_WHY.format(
+            device_label=device_label,
+            prev_label="closed",
+            next_label="open",
+        )
+        in body
+    )
+    assert f"Device: {device_label}" in body
     assert "closed → open" in body
     assert "2026-07-15 18:30:00 UTC" in body
+    assert VACATION_ANOMALY_UNMARKED_ACTION_DETAIL in body
     assert "Sent by: domesti-bot · Vacation mode (device anomaly)" in body
     assert VacationEmailSource.ANOMALY.value == "anomaly"
     clear_failure.assert_called_once()
