@@ -37,6 +37,7 @@ from app.device_enums import DeviceConditionState
 from app.device_mac import try_normalize_mac
 from app.device_manager import AlreadyInitializedError, DeviceManager, NotInitializedError
 from app.ep1_credentials import resolve_ep1_noise_psk
+from app.ep1_header_freshness import EP1_HEADER_EXPECTED_REFRESH_PERIOD_S
 from app.rule_engine import Device
 
 _LOGGER = logging.getLogger(__name__)
@@ -146,6 +147,7 @@ class Ep1Device(Device):
         "_host",
         "_humidity_pct",
         "_illuminance_lx",
+        "_last_heard_at",
         "_mac_address",
         "_occupancy_bool",
         "_port",
@@ -170,6 +172,7 @@ class Ep1Device(Device):
         self._temperature_c: float | None = None
         self._humidity_pct: float | None = None
         self._illuminance_lx: float | None = None
+        self._last_heard_at: float | None = None
         self._readings_updated_at: float | None = None
 
     @property
@@ -183,6 +186,11 @@ class Ep1Device(Device):
     @property
     def illuminance_lx(self) -> float | None:
         return self._illuminance_lx
+
+    @property
+    def last_heard_at(self) -> float | None:
+        """Unix epoch of last subscription activity (connect / state / heartbeat)."""
+        return self._last_heard_at
 
     @property
     def mac_address(self) -> str | None:
@@ -220,8 +228,9 @@ class Ep1Device(Device):
     ) -> None:
         """Merge one or more reading fields into the in-memory cache.
 
-        Only advances :attr:`readings_updated_at` when at least one field is
-        supplied. Unknown (``None``) arguments leave the prior cache untouched.
+        Only advances :attr:`readings_updated_at` (and :attr:`last_heard_at`)
+        when at least one field is supplied. Unknown (``None``) arguments leave
+        the prior cache untouched.
         """
         applied = False
         if occupancy is not None:
@@ -237,7 +246,9 @@ class Ep1Device(Device):
             self._illuminance_lx = illuminance_lx
             applied = True
         if applied:
-            self._readings_updated_at = updated_at if updated_at is not None else time.time()
+            at = updated_at if updated_at is not None else time.time()
+            self._readings_updated_at = at
+            self._last_heard_at = at
 
     def has_any_reading(self) -> bool:
         """True when at least one occupancy / climate / light field is known."""
@@ -272,6 +283,9 @@ class Ep1Device(Device):
             and other.illuminance_lx is None
         ):
             return
+        # Preserve the freshest subscription heartbeat across one-shot merges
+        # (``apply_entity_state`` would otherwise rewind ``last_heard_at``).
+        prior_heard = self._last_heard_at
         self.apply_entity_state(
             occupancy=occupancy,
             temperature_c=other.temperature_c,
@@ -279,6 +293,20 @@ class Ep1Device(Device):
             illuminance_lx=other.illuminance_lx,
             updated_at=other.readings_updated_at,
         )
+        best = prior_heard
+        for candidate in (other.last_heard_at, self._last_heard_at):
+            if candidate is not None and (best is None or candidate > best):
+                best = candidate
+        self._last_heard_at = best
+
+    def note_heard(self, *, at: float | None = None) -> None:
+        """Record subscription activity without requiring a reading change.
+
+        Used for connect success, every ``subscribe_states`` callback, and the
+        quiet-room heartbeat so header freshness does not false-trip offline
+        merely because mmWave / climate values are unchanged.
+        """
+        self._last_heard_at = time.time() if at is None else at
 
     def set_endpoint(self, *, host: str, port: int) -> None:
         self._host = host.strip()
@@ -502,6 +530,8 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             key_to_role = _entity_key_to_role(entities)
 
             def _on_state(state: EntityState) -> None:
+                # Always bump liveness — ESPHome may omit unchanged entities.
+                device.note_heard()
                 _apply_entity_state_to_device(
                     device,
                     state,
@@ -511,8 +541,40 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                     on_reading_updated(device)
 
             client.subscribe_states(_on_state)
+            # Arm liveness only once the subscription is registered — not on bare connect.
+            device.note_heard()
             stop_task = asyncio.create_task(stop.wait())
             disc_task = asyncio.create_task(disconnected.wait())
+            heartbeat_stop = asyncio.Event()
+
+            async def _quiet_room_heartbeat() -> None:
+                """Keep last_heard fresh while the session stays up with no deltas.
+
+                Stops when the outer session ends *or* ESPHome reports disconnect,
+                so a hung TCP session does not keep painting the header green.
+                Inner wait tasks are always cancelled in ``finally`` so a stop-path
+                cancel of this heartbeat does not orphan ``disconnected.wait()``.
+                """
+                while not heartbeat_stop.is_set() and not disconnected.is_set():
+                    stop_wait = asyncio.create_task(heartbeat_stop.wait())
+                    disc_wait = asyncio.create_task(disconnected.wait())
+                    try:
+                        done, _pending = await asyncio.wait(
+                            {stop_wait, disc_wait},
+                            timeout=EP1_HEADER_EXPECTED_REFRESH_PERIOD_S,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if done:
+                            return
+                        device.note_heard()
+                    finally:
+                        for task in (stop_wait, disc_wait):
+                            task.cancel()
+                        for task in (stop_wait, disc_wait):
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await task
+
+            heartbeat_task = asyncio.create_task(_quiet_room_heartbeat())
             try:
                 done, _pending = await asyncio.wait(
                     {stop_task, disc_task},
@@ -520,6 +582,10 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 )
                 del done
             finally:
+                heartbeat_stop.set()
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
                 for task in (stop_task, disc_task):
                     task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):

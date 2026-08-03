@@ -95,6 +95,21 @@ class UIOccupancyReadingsOut(BaseModel):
         default=None,
         description="Ambient illuminance in lux (``lx``).",
     )
+    last_heard_at: float | None = Field(
+        default=None,
+        description=(
+            "Unix epoch seconds of the last EP1 subscription activity "
+            "(connect, ``subscribe_states`` callback, or quiet-room heartbeat). "
+            "Not the same as “climate values changed”."
+        ),
+    )
+    responding: bool = Field(
+        default=False,
+        description=(
+            "True when ``last_heard_at`` is within ``EP1_HEADER_STALE_AFTER_S`` "
+            "(three times the expected refresh period)."
+        ),
+    )
     temperature_c: float | None = Field(
         default=None,
         description="Air temperature in degrees Celsius (``°C``).",

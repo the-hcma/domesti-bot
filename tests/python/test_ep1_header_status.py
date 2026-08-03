@@ -166,21 +166,26 @@ def test_ep1_header_status_comfortable_splits_c_and_f_with_dot(
 def test_ep1_header_status_module_readings_only_contract() -> None:
     src = _EP1_HEADER_TS.read_text(encoding="utf-8")
     assert "export interface Ep1HeaderStatusSnapshot" in src
+    assert "responding: boolean" in src
     assert "export const MOCK_EP1_HEADER_STATUS" not in src
     assert "TODO(ep1-header-live)" not in src
     assert "export function createEp1HeaderStatusStrip" in src
     assert "export function ep1HeaderStatusFromUiState" in src
+    assert "export function ep1HeaderOccupancyGlyphFromUiState" in src
+    assert "export function createEp1HeaderOccupancyGlyph" in src
     assert "ep1-header-status-label" not in src
     assert "compactC" in src
     assert "compactF" in src
     assert "fullC" in src
     assert "fullF" in src
-    assert 'createMetricSpan("temperature-f"' in src
+    assert 'createMetricSpan(\n        "temperature-f"' in src or '"temperature-f"' in src
     assert "ep1-header-status-metric-compact-only" not in src
     assert "°C /" not in src
     assert "temperature_c" in src
     assert "humidity_pct" in src
     assert "illuminance_lx" in src
+    assert 'dataset["responding"]' in src
+    assert "EP1_HEADER_STALE_AFTER_S" in src
 
 
 def test_index_html_ep1_header_status_css_contract() -> None:
@@ -190,6 +195,18 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "flex: 0 1 auto" in base
     assert "ep1-header-status-label" not in style
     assert "ep1-header-status-metric-compact-only" not in style
+    responding = _css_rule_block(
+        style,
+        '.ep1-header-status-metric[data-responding="true"]',
+    )
+    stale = _css_rule_block(
+        style,
+        '.ep1-header-status-metric[data-responding="false"]',
+    )
+    assert "var(--accent)" in responding
+    assert "var(--pending)" in stale
+    glyph = _css_rule_block(style, ".ep1-header-occupancy-glyph")
+    assert "inline-flex" in glyph
     header = _css_rule_block(
         style,
         '#app[data-layout="compact"] .tile-header.tile-header-global',
@@ -221,6 +238,8 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert "createBulkOffPadlockIcon" in src
     assert "appendEp1HeaderStatusStrip(header, state)" in src
     assert "ep1HeaderStatusFromUiState(state)" in src
+    assert "ep1HeaderOccupancyGlyphFromUiState(state)" in src
+    assert "createEp1HeaderOccupancyGlyph(occupancyGlyph)" in src
     assert "MOCK_EP1_HEADER_STATUS" not in src
     assert "TODO(ep1-header-live)" not in src
     # Landscape phones: height + coarse pointer, not width alone (see COMPACT_LAYOUT_MQ).

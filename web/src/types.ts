@@ -82,6 +82,10 @@ export type UIDeviceState = (typeof UIDeviceState)[keyof typeof UIDeviceState];
 export interface UIOccupancyReadingsOut {
   humidity_pct: number | null;
   illuminance_lx: number | null;
+  /** Unix epoch seconds of last EP1 subscription activity. */
+  last_heard_at?: number | null;
+  /** Server-computed: last_heard within EP1_HEADER_STALE_AFTER_S. */
+  responding?: boolean;
   temperature_c: number | null;
   temperature_f: number | null;
 }

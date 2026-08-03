@@ -12,6 +12,14 @@ For the tracking issue and field notes from the first Homey bring-up, see
 - Occupancy tiles (read-only) under the **EP1** family in `/v1/ui/state`
 - Temperature (°C / °F), humidity, and illuminance in the **dashboard header**
   strip when at least one EP1 is connected (no mock / `data-mock` filler)
+- Header metrics are **green** while the sensor is responding and **yellow**
+  when stale (`EP1_HEADER_STALE_AFTER_S` = 3x `EP1_HEADER_EXPECTED_REFRESH_PERIOD_S`,
+  default 15s). Liveness follows subscription activity (`last_heard_at`), not
+  “climate values changed”
+- **Person / ghost** glyph immediately right of the orange bulk-off button
+  (occupied / clear). Multiple EP1s: occupied if any *responding* sensor is
+  occupied, else clear if any responding sensor is clear, else hidden
+  (including when all EP1s are stale)
 - Rule conditions: occupancy device-state and `ep1_reading_compare` (JSON-authored;
   see `automation-rules.json.example`)
 

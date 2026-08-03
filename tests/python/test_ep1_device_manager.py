@@ -278,10 +278,67 @@ async def test_run_subscription_session_applies_states_until_stop(
     on_state_cb[0](SensorState(key=2, state=22.0))
     assert device.occupancy_state == DeviceConditionState.OCCUPIED.value
     assert device.temperature_c == 22.0
+    assert device.last_heard_at is not None
     assert updated == [device.identifier, device.identifier]
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
     client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_subscription_session_notes_heard_after_subscribe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("EP1_NOISE_PSK", "test-psk")
+
+    entities = [
+        BinarySensorInfo(object_id="occupancy", key=1, name="Occupancy"),
+    ]
+    on_state_cb: list[Any] = []
+    client = MagicMock()
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.list_entities_services = AsyncMock(return_value=(entities, []))
+
+    def _subscribe(on_state: Any) -> None:
+        on_state_cb.append(on_state)
+
+    client.subscribe_states = MagicMock(side_effect=_subscribe)
+
+    def _factory(*_a: Any, **_k: Any) -> MagicMock:
+        return client
+
+    mgr = Ep1DeviceManager(
+        configured_hosts=[("192.0.2.10", 6053)],
+        discovery_cache_path=tmp_path / "cache.sqlite",
+        noise_psk="test-psk",
+        api_client_factory=_factory,
+    )
+    device = Ep1Device(
+        "aa:bb:cc:dd:ee:ff",
+        display_name="Office EP1",
+        host="192.0.2.10",
+        port=6053,
+        mac_address="aa:bb:cc:dd:ee:ff",
+    )
+    mgr._devices[device.identifier] = device
+    mgr._fetched = True
+
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        await mgr.run_subscription_session(device, stop=stop)
+
+    task = asyncio.create_task(_run())
+    for _ in range(50):
+        if on_state_cb and device.last_heard_at is not None:
+            break
+        await asyncio.sleep(0.01)
+    assert on_state_cb, "subscribe_states should register before note_heard"
+    assert device.last_heard_at is not None
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
 
 
 @pytest.mark.asyncio

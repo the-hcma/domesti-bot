@@ -105,7 +105,9 @@
       display: inline-flex; flex-wrap: nowrap; align-items: baseline;
       gap: 0.35em 0.55em; min-width: 0;
     }
-    .ep1-header-status-metric { color: var(--muted); white-space: nowrap; }
+    .ep1-header-status-metric { white-space: nowrap; }
+    .ep1-header-status-metric[data-responding="true"] { color: var(--accent); }
+    .ep1-header-status-metric[data-responding="false"] { color: var(--pending); }
     .ep1-header-status-metric ~ .ep1-header-status-metric::before {
       content: "·"; margin-right: 0.55em; color: var(--muted); opacity: 0.7;
     }
@@ -114,6 +116,11 @@
     .ep1-header-status[data-mock="true"] .ep1-header-status-device .ep1-header-status-metric {
       color: var(--muted);
     }
+    .ep1-header-occupancy-glyph {
+      display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
+      min-width: 44px; min-height: 44px; color: var(--fg);
+    }
+    .ep1-header-occupancy-svg { display: block; }
     .btn-theme-toggle { display: inline-flex; align-items: center;
       justify-content: center; min-width: 44px; min-height: 44px;
       padding: 6px; color: var(--fg); flex: 0 0 auto; flex-shrink: 0;
