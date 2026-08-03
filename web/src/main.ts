@@ -6,7 +6,9 @@
 
 import { api, HttpError, isBackendTransportFailure } from "./api.js";
 import {
+  createEp1HeaderOccupancyGlyph,
   createEp1HeaderStatusStrip,
+  ep1HeaderOccupancyGlyphFromUiState,
   ep1HeaderStatusFromUiState,
 } from "./ep1-header-status.js";
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
@@ -803,7 +805,12 @@ class DomestiBotController {
       globalBtn.addEventListener("click", () => {
         void this.onBulkOffGlobal();
       });
-      actions.append(globalBtn, createThemeToggleButton());
+      actions.append(globalBtn);
+      const occupancyGlyph = ep1HeaderOccupancyGlyphFromUiState(state);
+      if (occupancyGlyph !== null) {
+        actions.append(createEp1HeaderOccupancyGlyph(occupancyGlyph));
+      }
+      actions.append(createThemeToggleButton());
       header.append(actions);
       this.root.append(header);
     } else {

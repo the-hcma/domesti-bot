@@ -40,6 +40,7 @@ from app.device_enums import DeviceConditionState, DeviceFamilyId
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
+from app.ep1_header_freshness import ep1_is_responding
 from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDevice, GotailwindDeviceManager
 from app.kasa_device_manager import KasaDevice, KasaDeviceManager
@@ -315,11 +316,17 @@ def _ep1_devices(
         if not key:
             continue
         readings = None
-        if device.temperature_c is not None or device.humidity_pct is not None or device.illuminance_lx is not None:
+        last_heard = device.last_heard_at
+        has_climate = (
+            device.temperature_c is not None or device.humidity_pct is not None or device.illuminance_lx is not None
+        )
+        if has_climate or last_heard is not None:
             readings = UIOccupancyReadingsOut(
                 temperature_c=device.temperature_c,
                 humidity_pct=device.humidity_pct,
                 illuminance_lx=device.illuminance_lx,
+                last_heard_at=last_heard,
+                responding=ep1_is_responding(last_heard),
             )
         out.append(
             UIDeviceOut(
