@@ -69,6 +69,16 @@ def test_ep1_header_status_compact_single_column_stack(
         <span class="tile-header-global-off-glyph tile-header-global-off-all"
               aria-hidden="true">all</span>
       </button>
+      <div class="tile-header-end-icons">
+        <span class="ep1-header-occupancy-glyph" data-occupancy="clear"
+              role="img" aria-label="Room clear">
+          <svg class="ep1-header-occupancy-svg" width="20" height="20"
+               viewBox="0 0 24 24" aria-hidden="true"></svg>
+        </span>
+        <button type="button" class="btn btn-theme-toggle" aria-label="Theme">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"></svg>
+        </button>
+      </div>
     </div>
   </header>
 </div>
@@ -99,6 +109,21 @@ def test_ep1_header_status_compact_single_column_stack(
         assert abs(c_box["x"] - lux_box["x"]) < 4
         assert "OFF" in page.locator(".tile-header-global-off").inner_text()
         assert "all" in page.locator(".tile-header-global-off").inner_text()
+        bulk = page.locator(".tile-header-global-off").bounding_box()
+        end = page.locator(".tile-header-end-icons").bounding_box()
+        glyph = page.locator(".ep1-header-occupancy-glyph").bounding_box()
+        theme = page.locator(".btn-theme-toggle").bounding_box()
+        assert bulk is not None and end is not None
+        assert glyph is not None and theme is not None
+        # Bulk-off sits left of the end-icon pair; pair stays compact.
+        assert bulk["x"] + bulk["width"] <= end["x"] + 2
+        assert end["width"] < bulk["width"]
+        assert glyph["width"] <= 36
+        assert theme["width"] <= 36
+        # Compact end-icons stay short: beat ≤600px .btn { min-height: 44px }.
+        assert glyph["height"] <= 36
+        assert theme["height"] <= 36
+        assert abs(glyph["height"] - theme["height"]) < 8
     finally:
         page.close()
 
@@ -207,6 +232,9 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "var(--pending)" in stale
     glyph = _css_rule_block(style, ".ep1-header-occupancy-glyph")
     assert "inline-flex" in glyph
+    assert "min-width: 44px" not in glyph
+    end_icons = _css_rule_block(style, ".tile-header-end-icons")
+    assert "grid-template-columns: auto auto" in end_icons
     header = _css_rule_block(
         style,
         '#app[data-layout="compact"] .tile-header.tile-header-global',
@@ -223,6 +251,14 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         '#app[data-layout="compact"] .tile-header-global-off',
     )
     assert "inline-flex" in icons
+    compact_theme = _css_rule_block(
+        style,
+        '#app[data-layout="compact"] .btn.btn-theme-toggle',
+    )
+    assert "min-height: 0" in compact_theme
+    theme_toggle = _css_rule_block(style, ".btn.btn-theme-toggle")
+    assert "padding: 4px" in theme_toggle
+    assert "min-height: 0" in theme_toggle
     metric_sep = _css_rule_block(style, ".ep1-header-status-metric ~ .ep1-header-status-metric::before")
     assert "·" in metric_sep
 
@@ -238,10 +274,17 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert "createBulkOffPadlockIcon" in src
     assert "appendEp1HeaderStatusStrip(header, state)" in src
     assert "ep1HeaderStatusFromUiState(state)" in src
+    assert "createTileHeaderEndIcons(state)" in src
+    assert "createTileHeaderEndIcons(null)" in src
     assert "ep1HeaderOccupancyGlyphFromUiState(state)" in src
     assert "createEp1HeaderOccupancyGlyph(occupancyGlyph)" in src
+    assert 'className = "tile-header-end-icons"' in src
     assert "MOCK_EP1_HEADER_STATUS" not in src
     assert "TODO(ep1-header-live)" not in src
+    # Sparse error/loading headers use the same end-icons wrapper as main/empty.
+    assert src.count("createTileHeaderEndIcons(null)") >= 3
+    assert "errHead.append(createBrandMark(this.meta), createTileHeaderEndIcons(null))" in src
+    assert "loadHead.append(createBrandMark(this.meta), createTileHeaderEndIcons(null))" in src
     # Landscape phones: height + coarse pointer, not width alone (see COMPACT_LAYOUT_MQ).
     assert "max-height: 560px" in src
     assert "pointer: coarse" in src
