@@ -10,6 +10,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app import device_discovery_store
 from app.api.schemas import (
+    Ep1CalibrationOffsetFieldOut,
+    Ep1CalibrationOut,
+    Ep1CalibrationSetIn,
+    Ep1DeviceSettingsOut,
+    Ep1DevicesSettingsOut,
     Ep1NoisePreSharedKeySetIn,
     Ep1NoisePreSharedKeySetOut,
     Ep1NoisePreSharedKeySettingsOut,
@@ -41,7 +46,18 @@ from app.db.secrets import (
     secrets_key_source,
     tailwind_token_stored_in_db,
 )
+from app.device_enums import Ep1CalibrationOffsetKind
 from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _parse_ep1_host_specs, _Theme
+from app.ep1_calibration import (
+    Ep1CalibrationError,
+    Ep1CalibrationNotFoundError,
+    Ep1CalibrationOffsetField,
+    Ep1CalibrationSnapshot,
+    Ep1CalibrationValidationError,
+    apply_ep1_calibration_offsets,
+    list_ep1_settings_targets,
+    read_ep1_calibration,
+)
 from app.ep1_credentials import resolve_ep1_noise_psk
 from app.ep1_device_manager import DEFAULT_EP1_ZEROCONF_TIMEOUT_S, Ep1DeviceManager
 from app.kasa_credentials import resolve_kasa_credentials
@@ -160,6 +176,77 @@ async def put_kasa_credentials(body: KasaCredentialsSetIn, request: Request) -> 
     )
 
 
+@router.get("/ep1/devices", response_model=Ep1DevicesSettingsOut)
+async def get_ep1_devices_settings(request: Request) -> Ep1DevicesSettingsOut:
+    """List known EP1 sensors for Settings → Target device."""
+    del request
+    cache_path = runtime.discovery_cache_path()
+    state = runtime.device_state
+    ep1_mgr = state.ep1_mgr if state is not None else None
+    devices = [
+        Ep1DeviceSettingsOut(
+            device_id=row.device_id,
+            display_label=row.display_label,
+            display_name=row.display_name,
+            host=row.host,
+            port=row.port,
+        )
+        for row in list_ep1_settings_targets(cache_path=cache_path, ep1_mgr=ep1_mgr)
+    ]
+    return Ep1DevicesSettingsOut(devices=devices)
+
+
+@router.get(
+    "/ep1/devices/{device_id}/calibration",
+    response_model=Ep1CalibrationOut,
+)
+async def get_ep1_device_calibration(device_id: str, request: Request) -> Ep1CalibrationOut:
+    """Read humidity / illuminance / temperature offsets for one EP1."""
+    del request
+    try:
+        snapshot = await read_ep1_calibration(
+            device_id=device_id,
+            cache_path=runtime.discovery_cache_path(),
+            cli_noise_psk=_cli_ep1_noise_psk(),
+            ep1_mgr=_live_ep1_mgr(),
+        )
+    except Ep1CalibrationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Ep1CalibrationError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _ep1_calibration_out(snapshot)
+
+
+@router.put(
+    "/ep1/devices/{device_id}/calibration",
+    response_model=Ep1CalibrationOut,
+)
+async def put_ep1_device_calibration(
+    device_id: str,
+    body: Ep1CalibrationSetIn,
+    request: Request,
+) -> Ep1CalibrationOut:
+    """Write one or more climate / light calibration offsets on the target EP1."""
+    del request
+    try:
+        snapshot = await apply_ep1_calibration_offsets(
+            device_id=device_id,
+            humidity_offset=body.humidity_offset,
+            illuminance_offset=body.illuminance_offset,
+            temperature_offset=body.temperature_offset,
+            cache_path=runtime.discovery_cache_path(),
+            cli_noise_psk=_cli_ep1_noise_psk(),
+            ep1_mgr=_live_ep1_mgr(),
+        )
+    except Ep1CalibrationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Ep1CalibrationValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Ep1CalibrationError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _ep1_calibration_out(snapshot)
+
+
 @router.delete("/ep1-noise-psk", response_model=Ep1NoisePreSharedKeySettingsOut)
 async def clear_ep1_noise_psk(request: Request) -> Ep1NoisePreSharedKeySettingsOut:
     """Remove the encrypted database Noise pre-shared key (PSK).
@@ -198,7 +285,9 @@ async def post_ep1_noise_psk_test(
             cache_path=cache_path,
             cli_psk=_cli_ep1_noise_psk(),
             psk=body.noise_psk,
+            device_id=body.device_id,
             host=body.host,
+            ep1_mgr=_live_ep1_mgr(),
         )
     except CredentialsTestUnavailableError as exc:
         raise HTTPException(
@@ -360,6 +449,32 @@ def _cli_tailwind_token() -> str | None:
     return str(raw) if raw else None
 
 
+def _ep1_calibration_out(snapshot: Ep1CalibrationSnapshot) -> Ep1CalibrationOut:
+    return Ep1CalibrationOut(
+        device_id=snapshot.device_id,
+        display_label=snapshot.display_label,
+        display_name=snapshot.display_name,
+        host=snapshot.host,
+        humidity=_ep1_offset_field_out(snapshot.offsets[Ep1CalibrationOffsetKind.HUMIDITY]),
+        illuminance=_ep1_offset_field_out(snapshot.offsets[Ep1CalibrationOffsetKind.ILLUMINANCE]),
+        port=snapshot.port,
+        temperature=_ep1_offset_field_out(snapshot.offsets[Ep1CalibrationOffsetKind.TEMPERATURE]),
+    )
+
+
+def _ep1_offset_field_out(field: Ep1CalibrationOffsetField) -> Ep1CalibrationOffsetFieldOut:
+    return Ep1CalibrationOffsetFieldOut(
+        available=field.available,
+        kind=field.kind,
+        max_value=field.max_value,
+        min_value=field.min_value,
+        reading=field.reading,
+        step=field.step,
+        unit=field.unit,
+        value=field.value,
+    )
+
+
 def _ep1_settings_response(request: Request) -> Ep1NoisePreSharedKeySettingsOut:
     del request
     cache_path = runtime.discovery_cache_path()
@@ -382,6 +497,13 @@ def _ep1_settings_response(request: Request) -> Ep1NoisePreSharedKeySettingsOut:
         stored_in_database=stored,
         stored_noise_psk=stored_psk if stored and source not in ("env", "cli") else None,
     )
+
+
+def _live_ep1_mgr() -> Ep1DeviceManager | None:
+    state = runtime.device_state
+    if state is None:
+        return None
+    return state.ep1_mgr
 
 
 async def _reload_ep1_manager() -> bool:

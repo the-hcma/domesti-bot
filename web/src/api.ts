@@ -47,6 +47,9 @@ import type {
   KasaCredentialsTestIn,
   MyTracksCredentialsTestIn,
   SettingsCredentialsTestOut,
+  Ep1CalibrationOut,
+  Ep1CalibrationSetIn,
+  Ep1DevicesSettingsOut,
   Ep1NoisePreSharedKeySetOut,
   Ep1NoisePreSharedKeySettingsOut,
   Ep1NoisePreSharedKeyTestIn,
@@ -354,6 +357,15 @@ export const api = {
   fetchKasaCredentialsSettings(): Promise<KasaCredentialsSettingsOut> {
     return call<KasaCredentialsSettingsOut>("GET", "/v1/settings/kasa-credentials");
   },
+  fetchEp1Calibration(deviceId: string): Promise<Ep1CalibrationOut> {
+    return call<Ep1CalibrationOut>(
+      "GET",
+      `/v1/settings/ep1/devices/${encodeURIComponent(deviceId)}/calibration`,
+    );
+  },
+  fetchEp1Devices(): Promise<Ep1DevicesSettingsOut> {
+    return call<Ep1DevicesSettingsOut>("GET", "/v1/settings/ep1/devices");
+  },
   fetchEp1NoisePskSettings(): Promise<Ep1NoisePreSharedKeySettingsOut> {
     return call<Ep1NoisePreSharedKeySettingsOut>("GET", "/v1/settings/ep1-noise-psk");
   },
@@ -407,6 +419,16 @@ export const api = {
       username,
       password,
     });
+  },
+  putEp1Calibration(
+    deviceId: string,
+    body: Ep1CalibrationSetIn,
+  ): Promise<Ep1CalibrationOut> {
+    return call<Ep1CalibrationOut>(
+      "PUT",
+      `/v1/settings/ep1/devices/${encodeURIComponent(deviceId)}/calibration`,
+      body,
+    );
   },
   putEp1NoisePsk(noisePsk: string): Promise<Ep1NoisePreSharedKeySetOut> {
     return call<Ep1NoisePreSharedKeySetOut>("PUT", "/v1/settings/ep1-noise-psk", {

@@ -7,6 +7,7 @@ import {
   RuleConditionType,
   type AstronomicalWindowBoundary,
   type DiscoveryStatus,
+  type Ep1CalibrationOffsetKind,
   type Ep1NoisePreSharedKeySource,
   type Ep1ReadingComparison,
   type Ep1ReadingMetric,
@@ -191,6 +192,46 @@ export interface SettingsCredentialsTestOut {
   source?: SettingsCredentialsTestSource | null;
 }
 
+export interface Ep1CalibrationOffsetFieldOut {
+  available: boolean;
+  kind: Ep1CalibrationOffsetKind;
+  max_value: number | null;
+  min_value: number | null;
+  reading: number | null;
+  step: number | null;
+  unit: string | null;
+  value: number | null;
+}
+
+export interface Ep1CalibrationOut {
+  device_id: string;
+  display_label: string;
+  display_name: string | null;
+  host: string;
+  humidity: Ep1CalibrationOffsetFieldOut;
+  illuminance: Ep1CalibrationOffsetFieldOut;
+  port: number;
+  temperature: Ep1CalibrationOffsetFieldOut;
+}
+
+export interface Ep1CalibrationSetIn {
+  humidity_offset?: number | null;
+  illuminance_offset?: number | null;
+  temperature_offset?: number | null;
+}
+
+export interface Ep1DeviceSettingsOut {
+  device_id: string;
+  display_label: string;
+  display_name: string | null;
+  host: string;
+  port: number;
+}
+
+export interface Ep1DevicesSettingsOut {
+  devices: Ep1DeviceSettingsOut[];
+}
+
 export interface Ep1NoisePreSharedKeySetOut {
   configured: boolean;
   source: Ep1NoisePreSharedKeySource;
@@ -207,6 +248,7 @@ export interface Ep1NoisePreSharedKeySettingsOut {
 }
 
 export interface Ep1NoisePreSharedKeyTestIn {
+  device_id?: string | null;
   host?: string | null;
   noise_psk?: string | null;
 }

@@ -91,6 +91,14 @@ class DeviceIdResolution(StrEnum):
 EP1_DISPLAY_NAME = "Everything Presence One"
 
 
+class Ep1CalibrationOffsetKind(StrEnum):
+    """ESPHome number offsets exposed under Settings → EP1 calibration."""
+
+    HUMIDITY = "humidity"
+    ILLUMINANCE = "illuminance"
+    TEMPERATURE = "temperature"
+
+
 class Ep1ReadingComparison(StrEnum):
     """How an EP1 numeric reading is compared to a rule threshold."""
 
