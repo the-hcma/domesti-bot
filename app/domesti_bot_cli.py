@@ -85,6 +85,7 @@ from app.ep1_credentials import resolve_ep1_noise_psk
 from app.ep1_device_manager import (
     DEFAULT_EP1_API_PORT,
     DEFAULT_EP1_ZEROCONF_TIMEOUT_S,
+    Ep1Device,
     Ep1DeviceManager,
     Ep1DiscoveryError,
     discover_ep1_hosts,
@@ -115,6 +116,7 @@ COMMANDS = (
     "open-door",
     "pause",
     "quit",
+    "read-ep1",
     "refresh",
     "refresh-discovery",
     "resume",
@@ -126,6 +128,10 @@ COMMANDS = (
 )
 
 DEFAULT_DISCOVERY_DB = Path.home() / ".cache" / "rule-engine" / "device_discovery.sqlite"
+
+EP1_NOT_INITIALIZED_MSG = "EP1 manager is not initialized — try refresh-discovery or discover-ep1."
+EP1_NOT_LOADED_MSG = "EP1 not loaded — set --ep1-host / EP1_HOSTS, allow mDNS discovery, or run discover-ep1 first."
+EP1_READ_FAILED_PREFIX = "EP1 read failed for "
 
 _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("clear-display-name", "Drop the saved friendly label for a device (SQLite cache required)."),
@@ -151,6 +157,10 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("open-door", "Tell Tailwind to fully open a door."),
     ("pause", "Pause playback on a Sonos zone."),
     ("quit", "Leave the REPL (same as exit)."),
+    (
+        "read-ep1",
+        "Live-read Everything Presence One occupancy / climate / lux (optional name, MAC, or id).",
+    ),
     ("refresh", "Reconnect all backends; Kasa may reuse cached discovery."),
     ("refresh-discovery", "Full LAN discovery: Google Cast, EP1, Kasa, Sonos, Tailwind, Vizio."),
     ("resume", "Resume playback on a Sonos zone."),
@@ -159,7 +169,7 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
         "setup-secrets",
         "Create or update domesti-bot.config.json (Fernet key for encrypted DB secrets).",
     ),
-    ("show-devices", "List Google Cast, Kasa, Sonos, Tailwind, and Vizio devices."),
+    ("show-devices", "List Google Cast, Kasa, Sonos, Tailwind, EP1, and Vizio devices."),
     ("turn-off", "Turn a Kasa switch off, or stop media on a Cast target."),
     ("turn-on", "Turn a Kasa switch on, or resume paused Cast media if applicable."),
 )
@@ -690,6 +700,24 @@ def _editing_mode_enum(mode: str) -> EditingMode:
     return EditingMode.VI if mode == "vim" else EditingMode.EMACS
 
 
+def _ep1_readings_summary(device: Ep1Device) -> str:
+    return (
+        f"occupancy={device.occupancy_state} "
+        f"temp_c={device.temperature_c} "
+        f"humidity_pct={device.humidity_pct} "
+        f"illuminance_lx={device.illuminance_lx}"
+    )
+
+
+def _ep1_sensor_count(mgr: Ep1DeviceManager | None) -> int:
+    if mgr is None:
+        return 0
+    try:
+        return len(mgr.devices)
+    except NotInitializedError:
+        return 0
+
+
 def _resolve_cli_target(
     raw: str,
     triples: list[tuple[str, str, str]],
@@ -830,6 +858,22 @@ def _androidtv_switch_count(mgr: AndroidTvDeviceManager | None) -> int:
         return len(mgr.switches)
     except NotInitializedError:
         return 0
+
+
+def _collect_ep1_triples(ep1_mgr: Ep1DeviceManager | None) -> list[tuple[str, str, str]]:
+    triples: list[tuple[str, str, str]] = []
+    if ep1_mgr is None:
+        return triples
+    try:
+        for device in ep1_mgr.devices:
+            triples.append((device.identifier, "ep1", device.identifier))
+            if device.mac_address and device.mac_address != device.identifier:
+                triples.append((device.mac_address, "ep1", device.identifier))
+            if device.preferred_label not in (device.identifier, device.mac_address):
+                triples.append((device.preferred_label, "ep1", device.identifier))
+    except NotInitializedError:
+        pass
+    return triples
 
 
 def _collect_media_triples(sonos_mgr: SonosDeviceManager | None) -> list[tuple[str, str, str]]:
@@ -988,6 +1032,7 @@ class _ReplCompleterRemote(Completer):
             "exit",
             "quit",
             "help",
+            "read-ep1",
             "show-devices",
             "refresh",
             "refresh-discovery",
@@ -1052,6 +1097,7 @@ class _ReplCompleter(Completer):
             "exit",
             "quit",
             "help",
+            "read-ep1",
             "show-devices",
             "refresh",
             "refresh-discovery",
@@ -1181,12 +1227,11 @@ async def _repl_cmd_discover_ep1(
             await ep1_mgr.rediscover(hosts=hosts)
             await _maybe_restart_device_state_watchers_after_ep1()
             for device in ep1_mgr.devices:
-                occ = device.occupancy_state
-                temp = device.temperature_c
-                hum = device.humidity_pct
-                lux = device.illuminance_lx
-                readings = f"occupancy={occ} temp_c={temp} humidity_pct={hum} illuminance_lx={lux}"
-                print(f"  {theme.device(device.preferred_label)} {theme.dim(device.identifier)} {theme.dim(readings)}")
+                print(
+                    f"  {theme.device(device.preferred_label)} "
+                    f"{theme.dim(device.identifier)} "
+                    f"{theme.dim(_ep1_readings_summary(device))}"
+                )
         except Exception as ex:
             print(theme.err(f"EP1 reconnect after browse failed: {ex}"), file=sys.stderr)
             return
@@ -1205,17 +1250,65 @@ async def _repl_cmd_discover_ep1(
             print(
                 f"  {theme.device(device.preferred_label)} "
                 f"{theme.dim(device.identifier)} "
-                f"{
-                    theme.dim(
-                        f'occupancy={device.occupancy_state} temp_c={device.temperature_c} '
-                        f'humidity_pct={device.humidity_pct} illuminance_lx={device.illuminance_lx}'
-                    )
-                }"
+                f"{theme.dim(_ep1_readings_summary(device))}"
             )
         if not mgr.devices:
             print(theme.dim("  (hosts found but connect/read failed — check firmware / Noise PSK)"))
     finally:
         await mgr.disconnect()
+
+
+async def _repl_cmd_read_ep1(
+    arg: str,
+    *,
+    ep1_mgr: Ep1DeviceManager | None,
+    theme: _Theme,
+) -> None:
+    """Live-reconnect and print occupancy / climate / lux for one or all EP1 sensors."""
+
+    if ep1_mgr is None:
+        print(
+            theme.err(EP1_NOT_LOADED_MSG),
+            file=sys.stderr,
+        )
+        return
+    try:
+        devices = list(ep1_mgr.devices)
+    except NotInitializedError:
+        print(theme.err(EP1_NOT_INITIALIZED_MSG), file=sys.stderr)
+        return
+    if not devices:
+        print(theme.dim("  (no EP1 sensors connected)"))
+        return
+
+    needle = arg.strip()
+    selected = devices
+    if needle:
+        triples = _collect_ep1_triples(ep1_mgr)
+        api_id, amb, _meta = _resolve_cli_target(needle, triples)
+        if api_id is None:
+            _report_resolve_failure(theme, "EP1 sensor", needle, amb)
+            return
+        selected = [d for d in devices if d.identifier == api_id]
+        if not selected:
+            print(theme.err(f"EP1 sensor not found: {api_id}"), file=sys.stderr)
+            return
+
+    for device in selected:
+        try:
+            await ep1_mgr.refresh_device_readings(device.identifier)
+        except Exception as ex:
+            print(
+                theme.err(f"{EP1_READ_FAILED_PREFIX}{device.preferred_label}: {ex}"),
+                file=sys.stderr,
+            )
+            continue
+        print(
+            f"  {theme.device(device.preferred_label)} "
+            f"{theme.dim(device.identifier)} "
+            f"{theme.dim(f'{device.host}:{device.port}')} "
+            f"{theme.state(_ep1_readings_summary(device))}"
+        )
 
 
 async def _repl_cmd_dispatch_switch(
@@ -1947,7 +2040,7 @@ async def dispatch_repl_action(
                     "ok": True,
                     "mgr": None,
                     "source": ep1_mgr.last_discovery_source,
-                    "count": len(ep1_mgr.devices),
+                    "count": _ep1_sensor_count(ep1_mgr),
                 }
             except Exception as ex:
                 return {
@@ -2039,7 +2132,7 @@ async def dispatch_repl_action(
         nk = len(_kasa_switch_aliases(kasa_mgr))
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
-        ne = len(ep1_mgr.devices) if ep1_mgr is not None else 0
+        ne = _ep1_sensor_count(ep1_mgr)
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (
@@ -2067,6 +2160,10 @@ async def dispatch_repl_action(
             cache_path=cache_path,
             theme=theme,
         )
+        return
+
+    if cmd == "read-ep1":
+        await _repl_cmd_read_ep1(arg, ep1_mgr=ep1_mgr, theme=theme)
         return
 
     if not arg:
@@ -2847,7 +2944,7 @@ async def bootstrap_device_managers(
         ns = len(_kasa_switch_aliases(kasa_mgr))
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
-        ne = len(ep1_mgr.devices) if ep1_mgr is not None else 0
+        ne = _ep1_sensor_count(ep1_mgr)
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (

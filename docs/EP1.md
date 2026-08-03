@@ -91,6 +91,7 @@ REPL helpers:
 
 ```text
 discover-ep1              # mDNS browse; prints hosts and readings when possible
+read-ep1 [name|mac|id]    # live-read occupancy / temp / humidity / lux (all sensors if no arg)
 refresh-discovery         # includes EP1 rediscover with other backends
 ```
 
