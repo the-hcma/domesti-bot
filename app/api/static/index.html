@@ -95,6 +95,12 @@
     .tile-header-actions { display: flex; flex: 1 1 auto; align-items: stretch;
       justify-content: flex-end; gap: 8px; min-width: 0; }
     .tile-header-global-off { flex: 1 1 auto; min-width: 0; white-space: normal; }
+    /* Occupancy + theme: tight 2-col group flush right; bulk-off takes the middle. */
+    .tile-header-end-icons {
+      display: grid; grid-template-columns: auto auto; align-items: center;
+      justify-content: end; justify-items: center; gap: 2px 4px;
+      flex: 0 0 auto; margin-left: 0;
+    }
     /* EP1 header status strip (#524) — readings only (no device name); same row as bulk-off. */
     .ep1-header-status {
       display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center;
@@ -118,14 +124,15 @@
     }
     .ep1-header-occupancy-glyph {
       display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
-      min-width: 44px; min-height: 44px; color: var(--fg);
+      box-sizing: border-box; padding: 4px; color: var(--fg);
+      min-width: 0; min-height: 0; line-height: 0;
     }
-    .ep1-header-occupancy-svg { display: block; }
-    .btn-theme-toggle { display: inline-flex; align-items: center;
-      justify-content: center; min-width: 44px; min-height: 44px;
-      padding: 6px; color: var(--fg); flex: 0 0 auto; flex-shrink: 0;
-      white-space: nowrap; }
-    .btn-theme-toggle svg { display: block; }
+    .ep1-header-occupancy-svg { display: block; width: 22px; height: 22px; }
+    .btn.btn-theme-toggle { display: inline-flex; align-items: center;
+      justify-content: center; box-sizing: border-box; padding: 4px;
+      min-width: 0; min-height: 0; color: var(--fg); flex: 0 0 auto;
+      flex-shrink: 0; white-space: nowrap; line-height: 0; }
+    .btn.btn-theme-toggle svg { display: block; width: 22px; height: 22px; }
     .brand-mark { position: relative; display: inline-flex;
       flex: 0 0 auto; flex-shrink: 0; align-items: center; color: var(--muted); }
     .brand-mark-icon-btn { display: inline-flex; flex-shrink: 0;
@@ -497,7 +504,19 @@
       content: none; margin: 0;
     }
     #app[data-layout="compact"] .tile-header-actions {
-      flex: 1 1 auto; min-width: 0;
+      flex: 1 1 auto; min-width: 0; gap: 6px; align-items: center;
+    }
+    #app[data-layout="compact"] .tile-header-end-icons {
+      gap: 0 2px;
+    }
+    #app[data-layout="compact"] .ep1-header-occupancy-glyph,
+    #app[data-layout="compact"] .btn.btn-theme-toggle {
+      padding: 2px;
+      min-height: 0;
+    }
+    #app[data-layout="compact"] .ep1-header-occupancy-svg,
+    #app[data-layout="compact"] .btn.btn-theme-toggle svg {
+      width: 20px; height: 20px;
     }
     #app[data-layout="compact"] .brand-mark-svg {
       width: 32px; height: 32px;

@@ -806,11 +806,7 @@ class DomestiBotController {
         void this.onBulkOffGlobal();
       });
       actions.append(globalBtn);
-      const occupancyGlyph = ep1HeaderOccupancyGlyphFromUiState(state);
-      if (occupancyGlyph !== null) {
-        actions.append(createEp1HeaderOccupancyGlyph(occupancyGlyph));
-      }
-      actions.append(createThemeToggleButton());
+      actions.append(createTileHeaderEndIcons(state));
       header.append(actions);
       this.root.append(header);
     } else {
@@ -822,7 +818,7 @@ class DomestiBotController {
       }
       const sparseActions = document.createElement("div");
       sparseActions.className = "tile-header-actions tile-header-actions-sparse";
-      sparseActions.append(createThemeToggleButton());
+      sparseActions.append(createTileHeaderEndIcons(null));
       emptyHead.append(createBrandMark(this.meta), sparseActions);
       this.root.append(emptyHead);
       const panel = document.createElement("section");
@@ -991,7 +987,7 @@ class DomestiBotController {
     this.root.dataset["layout"] = isMobileFormFactor() ? DataLayout.Compact : DataLayout.Comfortable;
     const errHead = document.createElement("header");
     errHead.className = "tile-header tile-header-sparse";
-    errHead.append(createBrandMark(this.meta), createThemeToggleButton());
+    errHead.append(createBrandMark(this.meta), createTileHeaderEndIcons(null));
     this.root.append(errHead);
     const banner = document.createElement("div");
     banner.className = "tile-error";
@@ -1016,7 +1012,7 @@ class DomestiBotController {
     this.root.dataset["layout"] = isMobileFormFactor() ? DataLayout.Compact : DataLayout.Comfortable;
     const loadHead = document.createElement("header");
     loadHead.className = "tile-header tile-header-sparse";
-    loadHead.append(createBrandMark(this.meta), createThemeToggleButton());
+    loadHead.append(createBrandMark(this.meta), createTileHeaderEndIcons(null));
     this.root.append(loadHead);
     const row = document.createElement("div");
     row.className = "tile-loading-row";
@@ -1834,6 +1830,23 @@ function createThemeToggleButton(): HTMLButtonElement {
   themeToggleSingleton = btn;
   applyStoredColorTheme();
   return btn;
+}
+
+/**
+ * Right-flushed end controls: occupancy person/ghost (when known) + theme
+ * toggle in a tight 2-column group so the orange bulk-off can flex mid-row.
+ */
+function createTileHeaderEndIcons(state: UIStateOut | null): HTMLElement {
+  const end = document.createElement("div");
+  end.className = "tile-header-end-icons";
+  if (state !== null) {
+    const occupancyGlyph = ep1HeaderOccupancyGlyphFromUiState(state);
+    if (occupancyGlyph !== null) {
+      end.append(createEp1HeaderOccupancyGlyph(occupancyGlyph));
+    }
+  }
+  end.append(createThemeToggleButton());
+  return end;
 }
 
 function initPwaInstallBanner(): void {
