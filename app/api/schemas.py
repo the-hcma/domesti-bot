@@ -16,6 +16,7 @@ from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
+    Ep1CalibrationOffsetKind,
     Ep1ReadingComparison,
     Ep1ReadingMetric,
     RuleDeviceActionType,
@@ -532,6 +533,89 @@ class KasaCredentialsTestIn(BaseModel):
     )
 
 
+class Ep1CalibrationOffsetFieldOut(BaseModel):
+    """One climate / light calibration offset from the EP1 ESPHome number entity."""
+
+    available: bool = Field(
+        ...,
+        description="False when the firmware does not expose this offset number.",
+    )
+    kind: Ep1CalibrationOffsetKind = Field(
+        ...,
+        description="Offset kind matching ``Ep1CalibrationOffsetKind``.",
+    )
+    max_value: float | None = Field(default=None, description="Firmware maximum (inclusive).")
+    min_value: float | None = Field(default=None, description="Firmware minimum (inclusive).")
+    reading: float | None = Field(
+        default=None,
+        description="Live sensor reading after the offset is applied (``%``, ``lx``, or ``°C``).",
+    )
+    step: float | None = Field(default=None, description="Firmware step size.")
+    unit: str | None = Field(default=None, description="Unit of the offset number (``%``, ``lx``, ``°C``).")
+    value: float | None = Field(default=None, description="Current offset value on the device.")
+
+
+class Ep1CalibrationOut(BaseModel):
+    """Calibration snapshot for one EP1 Settings target."""
+
+    device_id: str = Field(..., description="Normalized MAC address.")
+    display_label: str = Field(
+        ...,
+        description="Human-visible ``preferred_label (mac)`` for the target device.",
+    )
+    display_name: str | None = Field(default=None, description="Preferred label without MAC.")
+    host: str = Field(..., description="ESPHome API host used for this snapshot.")
+    humidity: Ep1CalibrationOffsetFieldOut = Field(..., description="Humidity offset (``%``).")
+    illuminance: Ep1CalibrationOffsetFieldOut = Field(..., description="Illuminance offset (``lx``).")
+    port: int = Field(..., description="ESPHome API port (default 6053).")
+    temperature: Ep1CalibrationOffsetFieldOut = Field(..., description="Temperature offset (``°C``).")
+
+
+class Ep1CalibrationSetIn(BaseModel):
+    """Body for ``PUT /v1/settings/ep1/devices/{device_id}/calibration``.
+
+    Omitted fields are left unchanged on the device.
+    """
+
+    humidity_offset: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Humidity offset in percent (stock firmware −50…50, step 0.1).",
+    )
+    illuminance_offset: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Illuminance offset in lux (stock firmware −50…50, step 1).",
+    )
+    temperature_offset: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Temperature offset in °C (stock firmware −20…20, step 0.1).",
+    )
+
+
+class Ep1DeviceSettingsOut(BaseModel):
+    """One EP1 selectable as Settings Target device."""
+
+    device_id: str = Field(..., description="Normalized MAC address.")
+    display_label: str = Field(
+        ...,
+        description="Human-visible ``preferred_label (mac)`` for dropdown labels.",
+    )
+    display_name: str | None = Field(default=None, description="Preferred label without MAC.")
+    host: str = Field(..., description="Cached / live ESPHome API host.")
+    port: int = Field(..., description="ESPHome API port.")
+
+
+class Ep1DevicesSettingsOut(BaseModel):
+    """Known EP1 devices for Settings → EP1 Target device."""
+
+    devices: list[Ep1DeviceSettingsOut] = Field(
+        default_factory=list,
+        description="Discovered / cached EP1 sensors, sorted by display label.",
+    )
+
+
 class Ep1NoisePreSharedKeySetIn(BaseModel):
     """Body for ``PUT /v1/settings/ep1-noise-psk``.
 
@@ -603,9 +687,13 @@ class Ep1NoisePreSharedKeySettingsOut(BaseModel):
 class Ep1NoisePreSharedKeyTestIn(BaseModel):
     """Optional form overrides for ``POST /v1/settings/ep1-noise-psk/test``."""
 
+    device_id: str | None = Field(
+        default=None,
+        description="Target EP1 MAC from Settings → Target device (preferred over ``host``).",
+    )
     host: str | None = Field(
         default=None,
-        description="Override EP1 host (optional ``:port``, default port 6053).",
+        description="Legacy host override (optional ``:port``); ignored when ``device_id`` is set.",
     )
     noise_psk: str | None = Field(
         default=None,

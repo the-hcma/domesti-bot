@@ -121,13 +121,15 @@ Optional Noise PSK (encrypted firmware only):
 | CLI | `--ep1-noise-psk …` |
 | UI | ☰ → **Settings** → **EP1** |
 
-### Settings Test
+### Settings Test and calibration
 
-☰ → **Settings** → **EP1** → optional **Test host** → **Test**.
+☰ → **Settings** → **EP1** → **Target device** (dropdown of discovered sensors).
 
-- Homey plaintext: leave PSK empty; provide a host (or rely on a cached /
-  discovered endpoint).
-- Encrypted firmware: enter the Noise PSK (and host if needed).
+- Homey plaintext: leave PSK empty; select a target device and tap **Test**.
+- Encrypted firmware: enter the Noise PSK (and select a target).
+- **Humidity / illuminance / temperature offsets** load for the selected target;
+  **Apply offsets** writes changed values to that EP1 only (ESPHome ``number``
+  entities; persisted on-device).
 
 ## Verify
 

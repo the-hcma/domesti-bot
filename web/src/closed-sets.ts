@@ -75,7 +75,15 @@ export const DiscoveryStatus = {
 export type DiscoveryStatus =
   (typeof DiscoveryStatus)[keyof typeof DiscoveryStatus];
 
-/** EP1 reading compare direction. */
+/** EP1 Settings calibration offset kind. */
+export const Ep1CalibrationOffsetKind = {
+  Humidity: "humidity",
+  Illuminance: "illuminance",
+  Temperature: "temperature",
+} as const;
+export type Ep1CalibrationOffsetKind =
+  (typeof Ep1CalibrationOffsetKind)[keyof typeof Ep1CalibrationOffsetKind];
+
 export const Ep1ReadingComparison = {
   Above: "above",
   Below: "below",

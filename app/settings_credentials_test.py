@@ -22,8 +22,9 @@ from kasa.exceptions import AuthenticationError, _ConnectionError
 
 from app import device_discovery_store
 from app.device_enums import SettingsCredentialsTestSource
+from app.ep1_calibration import resolve_ep1_settings_target
 from app.ep1_credentials import resolve_ep1_noise_psk
-from app.ep1_device_manager import DEFAULT_EP1_API_PORT
+from app.ep1_device_manager import DEFAULT_EP1_API_PORT, Ep1DeviceManager
 from app.gotailwind_device_manager import (
     TailwindDiscoveryError,
     discover_tailwind_host,
@@ -48,7 +49,9 @@ from app.vizio_smartcast_client import (
 
 EP1_PROBE_OK_DETAIL = "EP1 API ok at {host}:{port} ({name})"
 EP1_PROBE_OK_PLAINTEXT_SUFFIX = " — plaintext (no Noise PSK)"
-EP1_PROBE_PSK_OR_HOST_REQUIRED = "No EP1 Noise PSK configured; enter a PSK, or a test host for plaintext Homey firmware"
+EP1_PROBE_PSK_OR_HOST_REQUIRED = (
+    "No EP1 Noise PSK configured; enter a PSK, or select a Target device (or host) for plaintext Homey firmware"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +189,9 @@ async def probe_ep1_noise_psk(
     cache_path: Path | None,
     cli_psk: str | None,
     psk: str | None = None,
+    device_id: str | None = None,
     host: str | None = None,
+    ep1_mgr: Ep1DeviceManager | None = None,
 ) -> CredentialsTestResult:
     """One-shot ESPHome connect + device_info with an ephemeral API client.
 
@@ -212,10 +217,12 @@ async def probe_ep1_noise_psk(
     try:
         resolved_host, resolved_port = _resolve_ep1_probe_endpoint(
             cache_path=cache_path,
+            device_id=device_id,
             host=host,
+            ep1_mgr=ep1_mgr,
         )
     except CredentialsTestUnavailableError:
-        if resolved_psk is None and not (host or "").strip():
+        if resolved_psk is None and not (host or "").strip() and not (device_id or "").strip():
             raise CredentialsTestUnavailableError(EP1_PROBE_PSK_OR_HOST_REQUIRED) from None
         raise
 
@@ -431,8 +438,22 @@ def _resolve_kasa_probe_credentials(
 def _resolve_ep1_probe_endpoint(
     *,
     cache_path: Path | None,
+    device_id: str | None = None,
     host: str | None,
+    ep1_mgr: Ep1DeviceManager | None = None,
 ) -> tuple[str, int]:
+    target_id = (device_id or "").strip()
+    if target_id:
+        target = resolve_ep1_settings_target(
+            target_id,
+            cache_path=cache_path,
+            ep1_mgr=ep1_mgr,
+        )
+        if target is None:
+            raise CredentialsTestUnavailableError(
+                f"No EP1 device matched device_id={target_id!r}; discover devices or pick another target"
+            )
+        return target.host, target.port
     form_host = (host or "").strip()
     if form_host:
         return _split_ep1_host_port(form_host)
@@ -446,7 +467,9 @@ def _resolve_ep1_probe_endpoint(
         first = env_hosts.split(",")[0].strip()
         if first:
             return _split_ep1_host_port(first)
-    raise CredentialsTestUnavailableError("No EP1 host configured; enter a host or save a discovered device first")
+    raise CredentialsTestUnavailableError(
+        "No EP1 host configured; select a Target device or save a discovered device first"
+    )
 
 
 def _split_ep1_host_port(spec: str) -> tuple[str, int]:
