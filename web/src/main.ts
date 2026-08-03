@@ -7,7 +7,7 @@
 import { api, HttpError, isBackendTransportFailure } from "./api.js";
 import {
   createEp1HeaderStatusStrip,
-  MOCK_EP1_HEADER_STATUS,
+  ep1HeaderStatusFromUiState,
 } from "./ep1-header-status.js";
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
@@ -795,7 +795,7 @@ class DomestiBotController {
         header.append(menu);
       }
       header.append(createBrandMark(this.meta));
-      appendEp1HeaderStatusStrip(header);
+      appendEp1HeaderStatusStrip(header, state);
       const actions = document.createElement("div");
       actions.className = "tile-header-actions";
       const globalBtn = createGlobalBulkOffButton();
@@ -1958,15 +1958,11 @@ function appendAboutContent(body: HTMLElement, meta: MetaOut | null): void {
 }
 
 /**
- * Insert the EP1 climate / light strip into the dashboard header.
- *
- * TODO(ep1-header-live): pass ``ep1HeaderStatusFromUiState(state)`` with
- * ``mock: false`` once an EP1 is on the LAN; drop ``MOCK_EP1_HEADER_STATUS``.
+ * Insert the EP1 climate / light strip into the dashboard header when live
+ * occupancy sensors are present in ``/v1/ui/state``.
  */
-function appendEp1HeaderStatusStrip(header: HTMLElement): void {
-  const strip = createEp1HeaderStatusStrip(MOCK_EP1_HEADER_STATUS, {
-    mock: true,
-  });
+function appendEp1HeaderStatusStrip(header: HTMLElement, state: UIStateOut): void {
+  const strip = createEp1HeaderStatusStrip(ep1HeaderStatusFromUiState(state));
   if (strip !== null) {
     header.append(strip);
   }

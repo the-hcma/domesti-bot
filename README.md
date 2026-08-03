@@ -7,9 +7,9 @@
 
 A self-hosted home-automation control surface for the devices on your home
 network. `domesti-bot` discovers and controls TP-Link Kasa smart plugs/lights,
-Sonos zones, GoTailwind garage doors, and Vizio SmartCast TVs, then exposes them
-through a tile-based web UI for one-tap control from any phone or laptop on the
-same LAN.
+Sonos zones, GoTailwind garage doors, Vizio SmartCast TVs, and Everything
+Presence One (EP1) occupancy / climate sensors, then exposes them through a
+tile-based web UI for one-tap control from any phone or laptop on the same LAN.
 
 A **file-backed rules engine** drives **Automations**: presence from
 [my-tracks](https://github.com/the-hcma/my-tracks) (geofence enter/leave),
@@ -37,6 +37,12 @@ Linux server that already hosts other always-on services.
   encrypted in the discovery SQLite database (see [Encrypted secrets](#encrypted-secrets)).
 - **Vizio SmartCast TVs** — power on/off per TV (Wake-on-LAN where supported).
   Configure TVs in desktop ☰ → **Settings**.
+- **Everything Presence One (EP1)** — ESPHome native API occupancy sensors with
+  temperature / humidity / illuminance. Homey (or pre-adoption) firmware is
+  **plaintext** (no Noise PSK). LAN mDNS (`_esphomelib._tcp`) discovers units
+  automatically; optional `EP1_HOSTS` / `--ep1-host` when multicast is blocked.
+  Live readings appear in the dashboard header. USB bring-up without Home
+  Assistant: [`docs/EP1.md`](docs/EP1.md).
 - **Automations (rules engine)** — `automation-rules.json` at the server root
   (template: `automation-rules.json.example`). Edge rules on geofence enter/leave;
   scheduled cron rules (sunset, dwell, device on/off, once-per-day). Kasa actions
@@ -56,8 +62,9 @@ Linux server that already hosts other always-on services.
 - **REPL CLI** (`scripts/domesti-bot`) — same discovery / control surface
   exposed as an interactive `prompt_toolkit` shell for scripting and
   troubleshooting, including `setup-secrets` to create `domesti-bot.config.json`.
-- **Continuous state monitoring** — background pollers keep tile state fresh
-  (Kasa, Sonos, Tailwind, Vizio) without manual refresh.
+- **Continuous state monitoring** — background pollers (and EP1 ESPHome
+  subscriptions) keep tile state fresh (Kasa, Sonos, Tailwind, Vizio, EP1)
+  without manual refresh.
 
 ## Quick start
 
@@ -142,6 +149,8 @@ Optional environment variables:
 | `DOMESTI_LISTEN_PORT` | Default TCP port. `0` = OS-allocated (the dev default). |
 | `KASA_USERNAME` / `KASA_PASSWORD` | TP-Link cloud credentials for KLAP-encrypted devices (Tapo / newer Kasa). Required only if you have at least one such device. |
 | `TAILWIND_TOKEN` | GoTailwind Local Control Key (six-digit code from the Tailwind dashboard). Overrides the encrypted DB copy when set. |
+| `EP1_HOSTS` | Comma-separated Everything Presence One hosts (`HOST` or `HOST:PORT`, default port 6053). Optional when mDNS can see `_esphomelib._tcp` on the LAN. |
+| `EP1_NOISE_PSK` | ESPHome API Noise pre-shared key. **Omit** for Homey / plaintext stock firmware; required only when the device has API encryption enabled. |
 
 Pass `--help` to either script for the complete flag list.
 
@@ -188,15 +197,18 @@ After starting the server, the landing page hydrates a tile UI:
 *Compact mobile layout on a phone: family sections (green frame = connected), per-device tiles (green = on / playing, red = off / paused), and the global **Turn off / pause / close everything** control at the top.*
 
 - One section per device family (`Lights & plugs`, `Sonos zones`,
-  `Garage doors`, `Vizio TVs`) with a family-coloured icon and frame.
-- One tile per device. Tap to toggle (on/off, play/pause, open/close); the
-  tile updates optimistically and reconciles with the next background poll
+  `Garage doors`, `Vizio TVs`, occupancy / EP1) with a family-coloured icon and frame.
+- One tile per device. Tap to toggle (on/off, play/pause, open/close) where the
+  family supports actions; EP1 tiles are read-only occupancy. The tile updates
+  optimistically (when applicable) and reconciles with the next background poll
   (every 5 seconds).
+- When an EP1 is connected, the header row shows live temperature, humidity, and
+  illuminance (no mock placeholder).
 - Per-family bulk button (`Turn off all`, `Pause all`, `Close all`) and a
   global `Turn off / pause / close everything` button at the top (warm orange,
   distinct from red per-tile off controls).
 - On **desktop** viewports, a **☰** menu with **Automations** (rules, geofences,
-  users, mail), **Settings** (Tailwind, My Tracks, Vizio), and **About**.
+  users, mail), **Settings** (Tailwind, Kasa, My Tracks, Vizio, EP1), and **About**.
   The menu is hidden on narrow mobile form factors (tiles + PWA install still work).
 - Per-tile "Exclude from all-off" (and analogous) checkbox so the top-of-page
   bulk action skips devices you don't want it touching.
@@ -247,14 +259,14 @@ In-UI rule editing is planned ([`docs/RULE_ENGINE_PLAN.md`](docs/RULE_ENGINE_PLA
 Phase 2b).
 
 **Docs:** [`docs/README.md`](docs/README.md) indexes operator and contributor
-guides.
+guides (including [Everything Presence One](docs/EP1.md) bring-up).
 
 ## Project layout
 
 ```text
 domesti-bot/
 ├── app/                          Domain code (device managers, rule engine)
-│   ├── *_device_manager.py       Per family (kasa, sonos, gotailwind, vizio, …)
+│   ├── *_device_manager.py       Per family (kasa, sonos, gotailwind, vizio, ep1, …)
 │   ├── rule_evaluator.py         Automation evaluation (edge + scheduled)
 │   ├── automation_rules_loader.py  Parse automation-rules.json
 │   ├── db/                       SQLAlchemy models + encrypted secrets

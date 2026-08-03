@@ -46,6 +46,10 @@ from app.vizio_smartcast_client import (
     VizioSmartCastError,
 )
 
+EP1_PROBE_OK_DETAIL = "EP1 API ok at {host}:{port} ({name})"
+EP1_PROBE_OK_PLAINTEXT_SUFFIX = " — plaintext (no Noise PSK)"
+EP1_PROBE_PSK_OR_HOST_REQUIRED = "No EP1 Noise PSK configured; enter a PSK, or a test host for plaintext Homey firmware"
+
 
 @dataclass(frozen=True, slots=True)
 class CredentialsTestResult:
@@ -184,24 +188,37 @@ async def probe_ep1_noise_psk(
     psk: str | None = None,
     host: str | None = None,
 ) -> CredentialsTestResult:
-    """One-shot ESPHome connect + device_info with an ephemeral API client."""
+    """One-shot ESPHome connect + device_info with an ephemeral API client.
+
+    Homey / pre-adoption firmware is plaintext: a resolvable host with an empty
+    PSK is enough. Encrypted firmware still needs a Noise PSK.
+    """
     form_psk = (psk or "").strip()
     if form_psk:
-        resolved_psk = form_psk
+        resolved_psk: str | None = form_psk
         source = SettingsCredentialsTestSource.FORM
     else:
-        resolved_psk, resolved_source = resolve_ep1_noise_psk(
+        resolved_psk_raw, resolved_source = resolve_ep1_noise_psk(
             cli_psk=cli_psk,
             cache_path=cache_path,
         )
-        if not resolved_psk:
-            raise CredentialsTestUnavailableError("No EP1 Noise PSK configured; enter a PSK or save one first")
-        source = SettingsCredentialsTestSource(resolved_source)
+        if resolved_psk_raw:
+            resolved_psk = resolved_psk_raw
+            source = SettingsCredentialsTestSource(resolved_source)
+        else:
+            resolved_psk = None
+            source = SettingsCredentialsTestSource.FORM
 
-    resolved_host, resolved_port = _resolve_ep1_probe_endpoint(
-        cache_path=cache_path,
-        host=host,
-    )
+    try:
+        resolved_host, resolved_port = _resolve_ep1_probe_endpoint(
+            cache_path=cache_path,
+            host=host,
+        )
+    except CredentialsTestUnavailableError:
+        if resolved_psk is None and not (host or "").strip():
+            raise CredentialsTestUnavailableError(EP1_PROBE_PSK_OR_HOST_REQUIRED) from None
+        raise
+
     client = APIClient(
         resolved_host,
         resolved_port,
@@ -216,13 +233,13 @@ async def probe_ep1_noise_psk(
     except APIConnectionError as exc:
         return CredentialsTestResult(
             ok=False,
-            detail=f"EP1 Noise PSK probe failed at {resolved_host}:{resolved_port}: {exc}",
+            detail=f"EP1 probe failed at {resolved_host}:{resolved_port}: {exc}",
             source=source,
         )
     except Exception as exc:
         return CredentialsTestResult(
             ok=False,
-            detail=f"EP1 Noise PSK probe failed at {resolved_host}:{resolved_port}: {exc}",
+            detail=f"EP1 probe failed at {resolved_host}:{resolved_port}: {exc}",
             source=source,
         )
     finally:
@@ -230,9 +247,12 @@ async def probe_ep1_noise_psk(
             await client.disconnect(force=True)
         except Exception:
             pass
+    detail = EP1_PROBE_OK_DETAIL.format(host=resolved_host, port=resolved_port, name=name)
+    if not resolved_psk:
+        detail = f"{detail}{EP1_PROBE_OK_PLAINTEXT_SUFFIX}"
     return CredentialsTestResult(
         ok=True,
-        detail=f"EP1 Noise PSK ok at {resolved_host}:{resolved_port} ({name})",
+        detail=detail,
         source=source,
     )
 

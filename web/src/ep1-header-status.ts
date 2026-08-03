@@ -17,23 +17,6 @@ export interface Ep1HeaderStatusSnapshot {
   temperature_f: number | null;
 }
 
-/**
- * Placeholder readings so the header strip can be designed without LAN hardware.
- *
- * TODO(ep1-header-live): delete this mock and drive the strip from
- * ``ep1HeaderStatusFromUiState(state)`` (or a dedicated UI payload) once an
- * EP1 is discovered on the network.
- */
-export const MOCK_EP1_HEADER_STATUS: readonly Ep1HeaderStatusSnapshot[] = [
-  {
-    humidity_pct: 42,
-    illuminance_lx: 180,
-    label: "Office EP1",
-    temperature_c: 22.5,
-    temperature_f: 72.5,
-  },
-];
-
 /** Build header-strip snapshots from live ``/v1/ui/state`` EP1 tiles. */
 export function ep1HeaderStatusFromUiState(
   state: UIStateOut,
@@ -53,7 +36,6 @@ export function ep1HeaderStatusFromUiState(
 /** Mount the read-only EP1 status strip (or ``null`` when there is nothing to show). */
 export function createEp1HeaderStatusStrip(
   snapshots: readonly Ep1HeaderStatusSnapshot[],
-  options: { mock: boolean },
 ): HTMLElement | null {
   if (snapshots.length === 0) {
     return null;
@@ -61,10 +43,6 @@ export function createEp1HeaderStatusStrip(
   const aside = document.createElement("aside");
   aside.className = "ep1-header-status";
   aside.setAttribute("aria-label", "Room sensors");
-  if (options.mock) {
-    aside.dataset["mock"] = "true";
-    aside.title = "Mock EP1 readings (no sensor on the LAN yet)";
-  }
   for (const snapshot of snapshots) {
     aside.append(createEp1HeaderStatusDevice(snapshot));
   }

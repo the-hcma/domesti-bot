@@ -38,7 +38,7 @@ def test_ep1_header_status_compact_single_column_stack(
     <span class="brand-mark">
       <svg class="brand-mark-svg" width="32" height="32" viewBox="0 0 24 24"></svg>
     </span>
-    <aside class="ep1-header-status" data-mock="true" aria-label="Room sensors">
+    <aside class="ep1-header-status" aria-label="Room sensors">
       <div class="ep1-header-status-device" title="Office EP1">
         <span class="ep1-header-status-metric" data-metric="temperature">
           <span class="ep1-header-status-full">22.5 °C</span>
@@ -166,9 +166,10 @@ def test_ep1_header_status_comfortable_splits_c_and_f_with_dot(
 def test_ep1_header_status_module_readings_only_contract() -> None:
     src = _EP1_HEADER_TS.read_text(encoding="utf-8")
     assert "export interface Ep1HeaderStatusSnapshot" in src
-    assert "export const MOCK_EP1_HEADER_STATUS" in src
+    assert "export const MOCK_EP1_HEADER_STATUS" not in src
+    assert "TODO(ep1-header-live)" not in src
     assert "export function createEp1HeaderStatusStrip" in src
-    assert "TODO(ep1-header-live)" in src
+    assert "export function ep1HeaderStatusFromUiState" in src
     assert "ep1-header-status-label" not in src
     assert "compactC" in src
     assert "compactF" in src
@@ -218,7 +219,10 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert 'textContent = "all"' in src
     assert "createBulkOffPauseIcon" in src
     assert "createBulkOffPadlockIcon" in src
-    assert "appendEp1HeaderStatusStrip(header)" in src
+    assert "appendEp1HeaderStatusStrip(header, state)" in src
+    assert "ep1HeaderStatusFromUiState(state)" in src
+    assert "MOCK_EP1_HEADER_STATUS" not in src
+    assert "TODO(ep1-header-live)" not in src
     # Landscape phones: height + coarse pointer, not width alone (see COMPACT_LAYOUT_MQ).
     assert "max-height: 560px" in src
     assert "pointer: coarse" in src

@@ -43,7 +43,7 @@ from app.db.secrets import (
 )
 from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _parse_ep1_host_specs, _Theme
 from app.ep1_credentials import resolve_ep1_noise_psk
-from app.ep1_device_manager import Ep1DeviceManager
+from app.ep1_device_manager import DEFAULT_EP1_ZEROCONF_TIMEOUT_S, Ep1DeviceManager
 from app.kasa_credentials import resolve_kasa_credentials
 from app.server_runtime import runtime
 from app.settings_credentials_test import (
@@ -402,7 +402,8 @@ async def _reload_ep1_manager() -> bool:
     cached_rows = device_discovery_store.load_ep1_devices(cache_path) if cache_path is not None else []
     raw_hosts = getattr(state.args, "ep1_host", None) or []
     hosts = _parse_ep1_host_specs(list(raw_hosts))
-    if not psk or (not cached_rows and not hosts):
+    want_zeroconf = not bool(getattr(state.args, "no_ep1_zeroconf", False))
+    if not cached_rows and not hosts and not want_zeroconf:
         runtime.device_state = state._replace(ep1_mgr=None)
         return False
     mgr = Ep1DeviceManager(
@@ -411,6 +412,8 @@ async def _reload_ep1_manager() -> bool:
         cli_noise_psk=_cli_ep1_noise_psk(),
         noise_psk=psk or None,
         force_discovery=bool(getattr(state.args, "force_discovery", False)),
+        zeroconf_discovery=want_zeroconf,
+        zeroconf_timeout=float(getattr(state.args, "ep1_zeroconf_timeout", DEFAULT_EP1_ZEROCONF_TIMEOUT_S)),
     )
     try:
         await mgr.fetch()
