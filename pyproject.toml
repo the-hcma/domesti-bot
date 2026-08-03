@@ -42,13 +42,13 @@ classifiers = [
 dependencies = [
     "aioesphomeapi>=45.6.2",
     "aiohappyeyeballs>=2.7.1",
-    "aiohttp>=3.14.1",
+    "aiohttp>=3.14.3",
     "annotated-types==0.8.0",
     "anyio>=4.14.2",
     "astral>=3.2",
     "asttokens==3.0.2",
     "asyncclick==8.4.2.1",
-    "certifi>=2026.6.17",
+    "certifi>=2026.7.22",
     "cffi==2.1.0",
     "charset-normalizer>=3.4.9",
     "click>=8.4.2",
@@ -56,7 +56,7 @@ dependencies = [
     "cryptography>=49.0.0",
     "fastapi>=0.139.2",
     "gotailwind[cli]",
-    "greenlet>=3.5.3",
+    "greenlet>=3.5.4",
     "httptools==0.8.0",
     "httpx>=0.28.1",
     "idna>=3.18",
@@ -83,7 +83,7 @@ dependencies = [
     "watchfiles==1.2.0",
     "wcwidth>=0.8.2",
     "websockets>=16.1.1",
-    "yarl==1.24.2",
+    "yarl>=1.24.5",
     "zeroconf>=0.150.0",
 ]
 
@@ -142,12 +142,12 @@ known-first-party = ["app", "config"]
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.7.0",
+    "httpx2>=2.9.1",
     "icecream>=2.2.0",
     "playwright>=1.61.0",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-xdist>=3.8.0",
-    "ruff>=0.15.17",
+    "ruff>=0.16.0",
 ]
