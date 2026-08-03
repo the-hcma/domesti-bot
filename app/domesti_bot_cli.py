@@ -82,7 +82,13 @@ from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_sec
 from app.device_label_conflicts import clear_device_label_conflicts, drain_device_label_conflicts
 from app.device_manager import NotInitializedError
 from app.ep1_credentials import resolve_ep1_noise_psk
-from app.ep1_device_manager import DEFAULT_EP1_API_PORT, Ep1DeviceManager
+from app.ep1_device_manager import (
+    DEFAULT_EP1_API_PORT,
+    DEFAULT_EP1_ZEROCONF_TIMEOUT_S,
+    Ep1DeviceManager,
+    Ep1DiscoveryError,
+    discover_ep1_hosts,
+)
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_credentials import resolve_kasa_credentials
 from app.kasa_device_manager import KasaDeviceManager
@@ -99,6 +105,7 @@ COMMANDS = (
     "clear-display-name",
     "close-door",
     "discover-androidtv",
+    "discover-ep1",
     "edit-mode",
     "exit",
     "help",
@@ -127,6 +134,10 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
         "discover-androidtv",
         "Cast mDNS browse (PyChromecast); optional seconds timeout; cache when SQLite on.",
     ),
+    (
+        "discover-ep1",
+        "ESPHome mDNS browse for Everything Presence One; optional seconds timeout.",
+    ),
     ("edit-mode", "Switch Emacs vs Vim keys for this session: edit-mode emacs | vim."),
     ("exit", "Leave the REPL."),
     ("help", "Show this list."),
@@ -141,7 +152,7 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("pause", "Pause playback on a Sonos zone."),
     ("quit", "Leave the REPL (same as exit)."),
     ("refresh", "Reconnect all backends; Kasa may reuse cached discovery."),
-    ("refresh-discovery", "Full LAN discovery: Google Cast, Kasa, Sonos, Tailwind, Vizio."),
+    ("refresh-discovery", "Full LAN discovery: Google Cast, EP1, Kasa, Sonos, Tailwind, Vizio."),
     ("resume", "Resume playback on a Sonos zone."),
     ("set-display-name", "Save a friendly label for a device (SQLite cache required)."),
     (
@@ -482,6 +493,30 @@ def _maybe_print_kasa_auth_notice(kasa_mgr: KasaDeviceManager, *, theme: _Theme)
         f"{theme.dim('to enter your Kasa/Tapo email/password (hidden) and rediscover,')}"
     )
     print(f"  {theme.dim('or open Settings → Kasa, or set KASA_USERNAME + KASA_PASSWORD before restart.')}")
+
+
+async def _maybe_restart_device_state_watchers_after_ep1() -> None:
+    """Hot-reload watchers when EP1 rediscover runs under the HTTP server.
+
+    No-op in the standalone REPL (``runtime.device_state`` is unset). Required
+    after ``rediscover`` because ``Ep1SubscriptionWatcher`` holds the previous
+    ``Ep1Device`` instances from startup.
+
+    ``server_runtime`` is imported inside this helper (not at module top level)
+    because a top-level import creates a cycle:
+    ``domesti_bot_cli`` → ``server_runtime`` → ``device_state_watcher`` →
+    ``domesti_bot_cli``.
+    """
+
+    # Circular-import break: see docstring (AGENTS.md module-level import rule).
+    from app.server_runtime import runtime
+
+    if runtime.device_state is None:
+        return
+    try:
+        await runtime.restart_device_state_watchers()
+    except Exception:
+        _LOGGER.warning("EP1 watcher restart after rediscover failed", exc_info=True)
 
 
 async def _repl_cmd_kasa_creds(
@@ -949,6 +984,7 @@ class _ReplCompleterRemote(Completer):
 
         if ctx.command in (
             "discover-androidtv",
+            "discover-ep1",
             "exit",
             "quit",
             "help",
@@ -1012,6 +1048,7 @@ class _ReplCompleter(Completer):
 
         if ctx.command in (
             "discover-androidtv",
+            "discover-ep1",
             "exit",
             "quit",
             "help",
@@ -1097,6 +1134,88 @@ async def _repl_cmd_discover_androidtv(
             theme.dim(f"Saved {len(rows3)} endpoint(s) to discovery cache."),
             flush=True,
         )
+
+
+async def _repl_cmd_discover_ep1(
+    arg: str,
+    *,
+    ep1_mgr: Ep1DeviceManager | None,
+    ep1_zeroconf_timeout: float,
+    cache_path: Path | None,
+    theme: _Theme,
+) -> None:
+    browse_timeout = float(ep1_zeroconf_timeout)
+    if ep1_mgr is not None:
+        browse_timeout = float(ep1_mgr.zeroconf_timeout)
+    tokens = [x.strip() for x in arg.split() if x.strip()]
+    if len(tokens) == 1:
+        try:
+            browse_timeout = float(tokens[0])
+        except ValueError:
+            print(
+                theme.err("Usage: discover-ep1 [browse_seconds]"),
+                file=sys.stderr,
+            )
+            return
+    elif tokens:
+        print(
+            theme.err("Usage: discover-ep1 [browse_seconds]"),
+            file=sys.stderr,
+        )
+        return
+
+    try:
+        hosts = await discover_ep1_hosts(timeout=browse_timeout)
+    except Ep1DiscoveryError as ex:
+        print(theme.err(str(ex)), file=sys.stderr)
+        return
+    except Exception as ex:
+        print(theme.err(f"EP1 browse failed: {ex}"), file=sys.stderr)
+        return
+
+    for host, port in hosts:
+        print(f"  {theme.ok(host)}{theme.dim(f':{port}')}")
+
+    if ep1_mgr is not None:
+        try:
+            await ep1_mgr.rediscover(hosts=hosts)
+            await _maybe_restart_device_state_watchers_after_ep1()
+            for device in ep1_mgr.devices:
+                occ = device.occupancy_state
+                temp = device.temperature_c
+                hum = device.humidity_pct
+                lux = device.illuminance_lx
+                readings = f"occupancy={occ} temp_c={temp} humidity_pct={hum} illuminance_lx={lux}"
+                print(f"  {theme.device(device.preferred_label)} {theme.dim(device.identifier)} {theme.dim(readings)}")
+        except Exception as ex:
+            print(theme.err(f"EP1 reconnect after browse failed: {ex}"), file=sys.stderr)
+            return
+        return
+
+    # No live manager — one-shot connect for operator confirmation.
+    mgr = Ep1DeviceManager(
+        configured_hosts=hosts,
+        discovery_cache_path=cache_path,
+        zeroconf_discovery=False,
+        noise_psk=None,
+    )
+    try:
+        await mgr.fetch()
+        for device in mgr.devices:
+            print(
+                f"  {theme.device(device.preferred_label)} "
+                f"{theme.dim(device.identifier)} "
+                f"{
+                    theme.dim(
+                        f'occupancy={device.occupancy_state} temp_c={device.temperature_c} '
+                        f'humidity_pct={device.humidity_pct} illuminance_lx={device.illuminance_lx}'
+                    )
+                }"
+            )
+        if not mgr.devices:
+            print(theme.dim("  (hosts found but connect/read failed — check firmware / Noise PSK)"))
+    finally:
+        await mgr.disconnect()
 
 
 async def _repl_cmd_dispatch_switch(
@@ -1298,7 +1417,7 @@ async def _repl_cmd_show_devices(
             print(theme.dim("  (not available)"))
     print(theme.header("Everything Presence One:"))
     if ep1_mgr is None:
-        print(theme.dim("  (not loaded — set --ep1-host / EP1_HOSTS and Noise PSK.)"))
+        print(theme.dim("  (not loaded — set --ep1-host / EP1_HOSTS, or allow EP1 mDNS discovery.)"))
     else:
         try:
             sensors = sorted(
@@ -1391,6 +1510,7 @@ async def dispatch_repl_action(
     *,
     cache_path: Path | None,
     androidtv_zeroconf_timeout: float,
+    ep1_zeroconf_timeout: float,
     theme: _Theme,
     cmd: str,
     arg: str,
@@ -1805,6 +1925,40 @@ async def dispatch_repl_action(
                     "mgr": None,
                 }
 
+        async def rd_ep1() -> dict[str, Any]:
+            slug = "ep1"
+            if ep1_mgr is None:
+                return {
+                    "slug": slug,
+                    "skipped": True,
+                    "detail": "not loaded",
+                    "exc": None,
+                    "ok": False,
+                    "mgr": None,
+                }
+            try:
+                await ep1_mgr.rediscover()
+                await _maybe_restart_device_state_watchers_after_ep1()
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "",
+                    "exc": None,
+                    "ok": True,
+                    "mgr": None,
+                    "source": ep1_mgr.last_discovery_source,
+                    "count": len(ep1_mgr.devices),
+                }
+            except Exception as ex:
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "",
+                    "exc": ex,
+                    "ok": False,
+                    "mgr": None,
+                }
+
         async def rd_tailwind() -> dict[str, Any]:
             slug = "gotailwind"
             if tailwind_mgr is None:
@@ -1873,6 +2027,7 @@ async def dispatch_repl_action(
 
         rd_bundles = await asyncio.gather(
             rd_androidtv(),
+            rd_ep1(),
             rd_tailwind(),
             rd_kasa(),
             rd_sonos(),
@@ -1884,10 +2039,11 @@ async def dispatch_repl_action(
         nk = len(_kasa_switch_aliases(kasa_mgr))
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
+        ne = len(ep1_mgr.devices) if ep1_mgr is not None else 0
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (
-            f"({na} Google Cast device(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
+            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
             f"{nd} Tailwind door(s), {nv} Vizio TV(s))."
         )
         print(f"{theme.ok('Discovery refreshed')} {theme.dim(tail)}")
@@ -1898,6 +2054,16 @@ async def dispatch_repl_action(
             arg,
             androidtv_mgr=androidtv_mgr,
             androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
+            cache_path=cache_path,
+            theme=theme,
+        )
+        return
+
+    if cmd == "discover-ep1":
+        await _repl_cmd_discover_ep1(
+            arg,
+            ep1_mgr=ep1_mgr,
+            ep1_zeroconf_timeout=ep1_zeroconf_timeout,
             cache_path=cache_path,
             theme=theme,
         )
@@ -1983,6 +2149,7 @@ async def execute_line_for_api(
     *,
     cache_path: Path | None,
     androidtv_zeroconf_timeout: float,
+    ep1_zeroconf_timeout: float,
     line: str,
 ) -> tuple[str, str, str | None]:
     """Execute one REPL line with plain output (for HTTP). Returns ``(stdout, stderr, error)``.
@@ -2017,6 +2184,7 @@ async def execute_line_for_api(
                 vizio_mgr,
                 cache_path=cache_path,
                 androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
+                ep1_zeroconf_timeout=ep1_zeroconf_timeout,
                 theme=plain,
                 cmd=cmd,
                 arg=arg,
@@ -2034,6 +2202,7 @@ async def _cmd_loop(
     *,
     cache_path: Path | None,
     androidtv_zeroconf_timeout: float,
+    ep1_zeroconf_timeout: float,
     editing_mode: EditingMode,
     theme: _Theme,
 ) -> None:
@@ -2095,6 +2264,7 @@ async def _cmd_loop(
             vizio_mgr,
             cache_path=cache_path,
             androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
+            ep1_zeroconf_timeout=ep1_zeroconf_timeout,
             theme=theme,
             cmd=cmd,
             arg=arg,
@@ -2558,20 +2728,12 @@ async def bootstrap_device_managers(
         cached_ep1: list[tuple[str, int, str | None, str | None]] = []
         if cache_path is not None:
             cached_ep1 = device_discovery_store.load_ep1_devices(cache_path)
-        if not ep1_hosts and not cached_ep1:
+        want_zeroconf = not bool(getattr(args, "no_ep1_zeroconf", False))
+        if not ep1_hosts and not cached_ep1 and not want_zeroconf:
             return {
                 "slug": slug,
                 "skipped": True,
-                "detail": "no hosts — set --ep1-host or EP1_HOSTS (or wait for Settings cache)",
-                "exc": None,
-                "ok": False,
-                "mgr": None,
-            }
-        if not ep1_psk:
-            return {
-                "slug": slug,
-                "skipped": True,
-                "detail": "no Noise PSK — set EP1_NOISE_PSK or --ep1-noise-psk",
+                "detail": "no hosts — set --ep1-host / EP1_HOSTS or allow EP1 mDNS",
                 "exc": None,
                 "ok": False,
                 "mgr": None,
@@ -2582,6 +2744,8 @@ async def bootstrap_device_managers(
             cli_noise_psk=getattr(args, "ep1_noise_psk", None),
             noise_psk=ep1_psk or None,
             force_discovery=bool(args.force_discovery),
+            zeroconf_discovery=want_zeroconf,
+            zeroconf_timeout=float(getattr(args, "ep1_zeroconf_timeout", DEFAULT_EP1_ZEROCONF_TIMEOUT_S)),
         )
         try:
             await mgr.fetch()
@@ -2773,6 +2937,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             state.vizio_mgr,
             cache_path=state.cache_path,
             androidtv_zeroconf_timeout=float(state.args.androidtv_zeroconf_timeout),
+            ep1_zeroconf_timeout=float(getattr(state.args, "ep1_zeroconf_timeout", DEFAULT_EP1_ZEROCONF_TIMEOUT_S)),
             editing_mode=_editing_mode_enum(args.edit_mode),
             theme=theme,
         )
@@ -2958,6 +3123,38 @@ def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argp
         default=8.0,
         metavar="SEC",
         help="Tailwind HTTP request timeout (default: 8)",
+    )
+    p.add_argument(
+        "--ep1-host",
+        action="append",
+        default=None,
+        metavar="HOST[:PORT]",
+        help=(
+            "Known Everything Presence One host or IP (port optional, default 6053; repeatable). "
+            "Also EP1_HOSTS (comma-separated). When unset, mDNS discovers EP1 on the LAN."
+        ),
+    )
+    p.add_argument(
+        "--ep1-noise-psk",
+        type=str,
+        default=(os.environ.get("EP1_NOISE_PSK") or "").strip() or None,
+        metavar="PSK",
+        help=(
+            "ESPHome API Noise pre-shared key (optional for Homey / plaintext firmware). "
+            "Also EP1_NOISE_PSK env or Settings → EP1."
+        ),
+    )
+    p.add_argument(
+        "--ep1-zeroconf-timeout",
+        type=float,
+        default=DEFAULT_EP1_ZEROCONF_TIMEOUT_S,
+        metavar="SEC",
+        help=f"EP1 ESPHome mDNS browse window (default: {DEFAULT_EP1_ZEROCONF_TIMEOUT_S:g})",
+    )
+    p.add_argument(
+        "--no-ep1-zeroconf",
+        action="store_true",
+        help="Do not browse for EP1 via mDNS — only --ep1-host / EP1_HOSTS and discovery cache.",
     )
     p.add_argument(
         "--no-vizio",

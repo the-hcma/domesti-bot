@@ -77,6 +77,7 @@ from app.domesti_bot_cli import (
     execute_line_for_api,
     shutdown_device_managers,
 )
+from app.ep1_device_manager import DEFAULT_EP1_ZEROCONF_TIMEOUT_S
 from app.expected_device_change import mark_expected_device_change
 from app.logging_config import TRACE_LEVEL
 from app.server_runtime import runtime
@@ -446,6 +447,7 @@ def create_app(args: Any) -> FastAPI:
             state.vizio_mgr,
             cache_path=state.cache_path,
             androidtv_zeroconf_timeout=float(state.args.androidtv_zeroconf_timeout),
+            ep1_zeroconf_timeout=float(getattr(state.args, "ep1_zeroconf_timeout", DEFAULT_EP1_ZEROCONF_TIMEOUT_S)),
             line=body.line,
         )
         if api_err:

@@ -1,4 +1,3 @@
-import { ManagedSecretSource } from "./closed-sets.js";
 // Everything Presence One Noise pre-shared key (PSK) settings for Settings hub.
 
 import { api, HttpError } from "./api.js";
@@ -8,6 +7,12 @@ import type { Ep1NoisePreSharedKeySettingsOut } from "./types.js";
 
 const EP1_DOCS_HREF =
   "https://docs.everythingsmart.io/s/products/doc/everything-presence-one-ep1-3R178yZSUP";
+
+export const EP1_SETTINGS_PSK_OPTIONAL_HINT =
+  "Optional for Homey / stock firmware (plaintext API). Required only when the device has ESPHome API encryption enabled.";
+
+export const EP1_SETTINGS_SAVE_REQUIRES_PSK =
+  "Enter a Noise pre-shared key (PSK) to save. For plaintext Homey firmware, leave this blank and use Test (or Clear stored key).";
 
 function appendEp1NoisePskIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
@@ -19,14 +24,19 @@ function appendEp1NoisePskIntro(parent: HTMLElement): void {
   link.textContent = "EP1 documentation";
   intro.append(
     document.createTextNode(
-      "Paste the ESPHome API encryption key — Noise pre-shared key (PSK) — from the ",
+      "Optional ESPHome API encryption key — Noise pre-shared key (PSK) — from the ",
     ),
     link,
     document.createTextNode(
-      ". It is stored encrypted in the discovery database on this server.",
+      ". Homey / pre-adoption firmware needs no PSK. When set, the key is stored encrypted in the discovery database on this server.",
     ),
   );
   parent.append(intro);
+
+  const hint = document.createElement("p");
+  hint.className = "settings-dialog-lead";
+  hint.textContent = EP1_SETTINGS_PSK_OPTIONAL_HINT;
+  parent.append(hint);
 }
 
 export async function mountEp1SettingsPanel(
@@ -53,7 +63,7 @@ export async function mountEp1SettingsPanel(
   labelText.textContent = "Noise pre-shared key (PSK)";
   const secretRow = createSecretInputRow({
     autocomplete: "off",
-    required: true,
+    required: false,
   });
   const input = secretRow.input;
   input.name = "noise_psk";
@@ -102,7 +112,8 @@ export async function mountEp1SettingsPanel(
   let settingsConfigured = false;
 
   const syncTestEnabled = (): void => {
-    testBtn.disabled = !(input.value.trim() !== "" || settingsConfigured);
+    // Host may come from discovery cache / EP1_HOSTS; plaintext Homey needs no PSK.
+    testBtn.disabled = false;
   };
 
   const applyFromSettings = (s: Ep1NoisePreSharedKeySettingsOut): void => {
@@ -110,11 +121,10 @@ export async function mountEp1SettingsPanel(
     storedPsk = s.stored_noise_psk;
     if (storedPsk) {
       input.value = storedPsk;
-      input.required = false;
     } else {
       input.value = "";
-      input.required = true;
     }
+    input.required = false;
     setRevealed(false);
     status.hidden = true;
     syncTestEnabled();
@@ -135,11 +145,14 @@ export async function mountEp1SettingsPanel(
   input.addEventListener("input", () => {
     syncTestEnabled();
   });
+  hostInput.addEventListener("input", () => {
+    syncTestEnabled();
+  });
 
   saveBtn.addEventListener("click", async () => {
     const noisePsk = input.value.trim();
     if (!noisePsk) {
-      showError("Enter a Noise pre-shared key (PSK) before saving.");
+      showError(EP1_SETTINGS_SAVE_REQUIRES_PSK);
       return;
     }
     saveBtn.disabled = true;

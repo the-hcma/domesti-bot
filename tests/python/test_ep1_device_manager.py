@@ -18,7 +18,7 @@ from aioesphomeapi.model import (
 
 from app.device_discovery_store import load_ep1_devices, upsert_ep1_device
 from app.device_enums import DeviceConditionState
-from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
+from app.ep1_device_manager import Ep1Device, Ep1DeviceManager, Ep1DiscoveryError
 
 
 @pytest.mark.asyncio
@@ -88,7 +88,7 @@ async def test_fetch_connects_reads_entities_and_caches(
 
 
 @pytest.mark.asyncio
-async def test_force_discovery_ignores_cache(
+async def test_force_discovery_falls_back_to_cache_when_no_lan_targets(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -102,9 +102,18 @@ async def test_force_discovery_ignores_cache(
         friendly_name="Cached",
     )
 
+    info = MagicMock()
+    info.mac_address = "AA:BB:CC:DD:EE:01"
+    info.friendly_name = "Cached"
+    info.name = "cached"
     client = MagicMock()
     client.connect = AsyncMock()
     client.disconnect = AsyncMock()
+    client.device_info = AsyncMock(return_value=info)
+    client.list_entities_services = AsyncMock(
+        return_value=([BinarySensorInfo(object_id="occupancy", key=1, name="Occupancy")], [])
+    )
+    client.subscribe_states = MagicMock(side_effect=lambda on_state: on_state(BinarySensorState(key=1, state=False)))
     called_hosts: list[tuple[str, int]] = []
 
     def _factory(host: str, port: int, **_k: Any) -> MagicMock:
@@ -115,11 +124,58 @@ async def test_force_discovery_ignores_cache(
         configured_hosts=[],
         discovery_cache_path=cache,
         force_discovery=True,
+        zeroconf_discovery=False,
         api_client_factory=_factory,
     )
     await mgr.fetch()
-    assert called_hosts == []
-    assert mgr.devices == []
+    assert called_hosts == [("192.0.2.99", 6053)]
+    assert [d.host for d in mgr.devices] == ["192.0.2.99"]
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_force_discovery_prefers_configured_hosts_over_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("EP1_NOISE_PSK", "test-psk")
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(
+        cache,
+        host="192.0.2.99",
+        port=6053,
+        mac="aa:bb:cc:dd:ee:01",
+        friendly_name="Cached",
+    )
+
+    info = MagicMock()
+    info.mac_address = "AA:BB:CC:DD:EE:22"
+    info.friendly_name = "Configured"
+    info.name = "configured"
+    client = MagicMock()
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.device_info = AsyncMock(return_value=info)
+    client.list_entities_services = AsyncMock(
+        return_value=([BinarySensorInfo(object_id="occupancy", key=1, name="Occupancy")], [])
+    )
+    client.subscribe_states = MagicMock(side_effect=lambda on_state: on_state(BinarySensorState(key=1, state=True)))
+    called_hosts: list[tuple[str, int]] = []
+
+    def _factory(host: str, port: int, **_k: Any) -> MagicMock:
+        called_hosts.append((host, port))
+        return client
+
+    mgr = Ep1DeviceManager(
+        configured_hosts=[("192.0.2.10", 6053)],
+        discovery_cache_path=cache,
+        force_discovery=True,
+        zeroconf_discovery=False,
+        api_client_factory=_factory,
+    )
+    await mgr.fetch()
+    assert called_hosts == [("192.0.2.10", 6053)]
+    assert [d.host for d in mgr.devices] == ["192.0.2.10"]
     await mgr.disconnect()
 
 
@@ -226,3 +282,148 @@ async def test_run_subscription_session_applies_states_until_stop(
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
     client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_plaintext_without_noise_psk(tmp_path: Path) -> None:
+    entities = [
+        BinarySensorInfo(object_id="occupancy", key=1, name="Occupancy"),
+        SensorInfo(object_id="temperature", key=2, name="Temperature"),
+        SensorInfo(object_id="humidity", key=3, name="Humidity"),
+        SensorInfo(object_id="illuminance", key=4, name="Illuminance"),
+    ]
+    states = [
+        BinarySensorState(key=1, state=False),
+        SensorState(key=2, state=23.5),
+        SensorState(key=3, state=55.0),
+        SensorState(key=4, state=10.0),
+    ]
+    info = MagicMock()
+    info.mac_address = "28:05:A5:28:C8:48"
+    info.friendly_name = "Everything Presence One 28c848"
+    info.name = "everything-presence-one-28c848"
+
+    client = MagicMock()
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.device_info = AsyncMock(return_value=info)
+    client.list_entities_services = AsyncMock(return_value=(entities, []))
+
+    def _subscribe(on_state: Any) -> None:
+        for state in states:
+            on_state(state)
+
+    client.subscribe_states = MagicMock(side_effect=_subscribe)
+    called: list[dict[str, Any]] = []
+
+    def _factory(*_a: Any, **kwargs: Any) -> MagicMock:
+        called.append(kwargs)
+        return client
+
+    mgr = Ep1DeviceManager(
+        configured_hosts=[("192.0.2.10", 6053)],
+        discovery_cache_path=tmp_path / "cache.sqlite",
+        noise_psk=None,
+        zeroconf_discovery=False,
+        api_client_factory=_factory,
+    )
+    await mgr.fetch()
+    assert len(mgr.devices) == 1
+    device = mgr.devices[0]
+    assert device.temperature_c == 23.5
+    assert device.humidity_pct == 55.0
+    assert device.illuminance_lx == 10.0
+    assert device.occupancy_state == DeviceConditionState.CLEAR.value
+    assert called and called[0].get("noise_psk") is None
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_fetch_uses_zeroconf_when_no_hosts(tmp_path: Path) -> None:
+    async def _fake_discover(*, timeout: float) -> list[tuple[str, int]]:
+        assert timeout == 3.0
+        return [("192.0.2.77", 6053)]
+
+    entities = [BinarySensorInfo(object_id="occupancy", key=1, name="Occupancy")]
+    info = MagicMock()
+    info.mac_address = "AA:BB:CC:DD:EE:11"
+    info.friendly_name = "EP1 Zeroconf"
+    info.name = "ep1"
+
+    client = MagicMock()
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.device_info = AsyncMock(return_value=info)
+    client.list_entities_services = AsyncMock(return_value=(entities, []))
+    client.subscribe_states = MagicMock(side_effect=lambda on_state: on_state(BinarySensorState(key=1, state=True)))
+
+    mgr = Ep1DeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=tmp_path / "cache.sqlite",
+        noise_psk=None,
+        zeroconf_timeout=3.0,
+        zeroconf_discover_fn=_fake_discover,
+        api_client_factory=lambda *_a, **_k: client,
+    )
+    await mgr.fetch()
+    assert len(mgr.devices) == 1
+    assert mgr.devices[0].host == "192.0.2.77"
+    assert mgr.last_discovery_source == "discovery"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_rediscover_uses_hosts_override_and_cache_fallback(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(
+        cache,
+        host="192.0.2.99",
+        port=6053,
+        mac="aa:bb:cc:dd:ee:01",
+        friendly_name="Cached",
+    )
+
+    info = MagicMock()
+    info.mac_address = "AA:BB:CC:DD:EE:22"
+    info.friendly_name = "Override"
+    info.name = "override"
+    client = MagicMock()
+    client.connect = AsyncMock()
+    client.disconnect = AsyncMock()
+    client.device_info = AsyncMock(return_value=info)
+    client.list_entities_services = AsyncMock(
+        return_value=([BinarySensorInfo(object_id="occupancy", key=1, name="Occupancy")], [])
+    )
+    client.subscribe_states = MagicMock(side_effect=lambda on_state: on_state(BinarySensorState(key=1, state=False)))
+    called_hosts: list[tuple[str, int]] = []
+
+    def _factory(host: str, port: int, **_k: Any) -> MagicMock:
+        called_hosts.append((host, port))
+        return client
+
+    async def _no_mdns(*, timeout: float) -> list[tuple[str, int]]:
+        del timeout
+        raise Ep1DiscoveryError("none")
+
+    mgr = Ep1DeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=cache,
+        noise_psk=None,
+        zeroconf_discovery=True,
+        zeroconf_discover_fn=_no_mdns,
+        api_client_factory=_factory,
+    )
+    await mgr.fetch()
+    assert [d.host for d in mgr.devices] == ["192.0.2.99"]
+
+    called_hosts.clear()
+    await mgr.rediscover(hosts=[("192.0.2.55", 6053)])
+    assert called_hosts == [("192.0.2.55", 6053)]
+    assert [d.host for d in mgr.devices] == ["192.0.2.55"]
+
+    called_hosts.clear()
+    await mgr.rediscover()
+    # mDNS fails → fall back to cache (may include newly upserted 192.0.2.55)
+    assert called_hosts
+    assert mgr.devices
+    await mgr.disconnect()
