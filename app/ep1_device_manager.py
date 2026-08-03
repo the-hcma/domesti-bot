@@ -218,16 +218,67 @@ class Ep1Device(Device):
         illuminance_lx: float | None = None,
         updated_at: float | None = None,
     ) -> None:
-        """Merge one or more reading fields into the in-memory cache."""
+        """Merge one or more reading fields into the in-memory cache.
+
+        Only advances :attr:`readings_updated_at` when at least one field is
+        supplied. Unknown (``None``) arguments leave the prior cache untouched.
+        """
+        applied = False
         if occupancy is not None:
             self._occupancy_bool = occupancy
+            applied = True
         if temperature_c is not None:
             self._temperature_c = temperature_c
+            applied = True
         if humidity_pct is not None:
             self._humidity_pct = humidity_pct
+            applied = True
         if illuminance_lx is not None:
             self._illuminance_lx = illuminance_lx
-        self._readings_updated_at = updated_at if updated_at is not None else time.time()
+            applied = True
+        if applied:
+            self._readings_updated_at = updated_at if updated_at is not None else time.time()
+
+    def has_any_reading(self) -> bool:
+        """True when at least one occupancy / climate / light field is known."""
+        return (
+            self._occupancy_bool is not None
+            or self._temperature_c is not None
+            or self._humidity_pct is not None
+            or self._illuminance_lx is not None
+        )
+
+    def merge_readings_from(self, other: Ep1Device) -> None:
+        """Copy endpoint + known sensor fields from ``other`` without replacing ``self``.
+
+        Fields that are unknown on ``other`` are left unchanged on ``self``. Callers
+        that require a live sample (e.g. :meth:`Ep1DeviceManager.refresh_device_readings`)
+        must reject empty snapshots before calling this.
+        """
+        occupancy: bool | None
+        if other.occupancy_state == DeviceConditionState.OCCUPIED.value:
+            occupancy = True
+        elif other.occupancy_state == DeviceConditionState.CLEAR.value:
+            occupancy = False
+        else:
+            occupancy = None
+        self.set_endpoint(host=other.host, port=other.port)
+        if other.mac_address is not None:
+            self.set_mac_address(other.mac_address)
+        if (
+            occupancy is None
+            and other.temperature_c is None
+            and other.humidity_pct is None
+            and other.illuminance_lx is None
+        ):
+            return
+        self.apply_entity_state(
+            occupancy=occupancy,
+            temperature_c=other.temperature_c,
+            humidity_pct=other.humidity_pct,
+            illuminance_lx=other.illuminance_lx,
+            updated_at=other.readings_updated_at,
+        )
 
     def set_endpoint(self, *, host: str, port: int) -> None:
         self._host = host.strip()
@@ -340,7 +391,21 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         *,
         hosts: Sequence[tuple[str, int]] | None = None,
     ) -> None:
-        """Force a fresh probe (optional ``hosts`` override); fall back to cache if LAN finds nothing."""
+        """Force a fresh probe (optional ``hosts`` override); fall back to cache if LAN finds nothing.
+
+        On ``fetch`` failure, or when some/all previous sensors fail to
+        reconnect, missing devices are kept from the prior map so a transient
+        outage cannot shrink (or wipe) a working roster.
+
+        ``Ep1Device`` instances do not own ESPHome clients — clients live only on
+        ``self._clients`` and are cleared by :meth:`disconnect`. Restored devices
+        therefore keep cached readings and identity for UI / rules / watchers;
+        :meth:`run_subscription_session` always opens a fresh client. An empty
+        ``_clients`` list after a failed rediscover is intentional.
+        """
+        previous_devices = dict(self._devices)
+        previous_fetched = self._fetched
+        previous_source = self._last_discovery_source
         await self.disconnect()
         self._devices.clear()
         self._fetched = False
@@ -351,25 +416,55 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             self._configured_hosts = [(h.strip(), int(p)) for h, p in hosts if str(h).strip()]
         try:
             await self.fetch()
+            restored = 0
+            for identifier, device in previous_devices.items():
+                if identifier not in self._devices:
+                    self._devices[identifier] = device
+                    restored += 1
+            if restored:
+                _LOGGER.warning(
+                    "EP1 rediscover kept %d previous sensor(s) that did not reconnect",
+                    restored,
+                )
+                if not self._fetched:
+                    self._fetched = previous_fetched
+                if self._last_discovery_source is None and previous_source is not None:
+                    self._last_discovery_source = previous_source
+        except Exception:
+            self._devices = previous_devices
+            self._fetched = previous_fetched
+            self._last_discovery_source = previous_source
+            raise
         finally:
             self._force_discovery = previous
             if hosts is not None:
                 self._configured_hosts = previous_hosts
 
     async def refresh_device_readings(self, identifier: str) -> None:
-        """Re-read one device (for Settings test / one-shot paths)."""
+        """Re-read one device in place (Settings test / ``read-ep1`` / one-shot paths).
+
+        Updates the existing :class:`Ep1Device` so subscription watchers that
+        already hold the object keep seeing live readings.
+        """
         device = self._devices.get(identifier)
         if device is None:
             raise KeyError(identifier)
         psk = self._resolved_noise_psk()
-        updated = await self._connect_and_read(
+        snapshot = await self._connect_and_read(
             host=device.host,
             port=device.port,
             noise_psk=psk,
         )
-        if updated is None:
+        if snapshot is None:
             raise RuntimeError(f"EP1 refresh failed for {identifier}")
-        self._devices[identifier] = updated
+        # Occupancy is the live contract for ``read-ep1``; climate-only / empty
+        # collects must not advance ``readings_updated_at`` over cached values.
+        if snapshot.occupancy_state not in (
+            DeviceConditionState.OCCUPIED.value,
+            DeviceConditionState.CLEAR.value,
+        ):
+            raise RuntimeError(f"EP1 refresh collected no occupancy reading for {identifier}")
+        device.merge_readings_from(snapshot)
 
     async def run_subscription_session(
         self,
