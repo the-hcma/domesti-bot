@@ -3,7 +3,7 @@
 import { api, HttpError } from "./api.js";
 import { Ep1CalibrationOffsetKind } from "./closed-sets.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
-import { showSuccessToast } from "./ui-toast.js";
+import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type {
   Ep1CalibrationOffsetFieldOut,
   Ep1CalibrationOut,
@@ -18,6 +18,23 @@ export const EP1_SETTINGS_APPLY_OFFSETS_LABEL = "Apply offsets";
 export const EP1_SETTINGS_CALIBRATION_LEGEND = "Calibration offsets";
 export const EP1_SETTINGS_NO_DEVICES =
   "No EP1 devices discovered yet. Run discovery (or set EP1_HOSTS), then reopen Settings.";
+export const EP1_SETTINGS_OFFSET_OUT_OF_RANGE = (
+  kindLabel: string,
+  min: number | null,
+  max: number | null,
+  value: number,
+): string => {
+  if (min != null && max != null) {
+    return `${kindLabel} must be between ${String(min)} and ${String(max)} (got ${String(value)}).`;
+  }
+  if (min != null) {
+    return `${kindLabel} must be ≥ ${String(min)} (got ${String(value)}).`;
+  }
+  if (max != null) {
+    return `${kindLabel} must be ≤ ${String(max)} (got ${String(value)}).`;
+  }
+  return `${kindLabel} is out of range (got ${String(value)}).`;
+};
 export const EP1_SETTINGS_PSK_LEGEND = "Noise pre-shared key";
 export const EP1_SETTINGS_PSK_OPTIONAL_HINT =
   "Optional for Homey / stock firmware (plaintext API). Required only when the device has ESPHome API encryption enabled.";
@@ -56,7 +73,7 @@ function appendCalibrationIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
   intro.className = "settings-dialog-lead";
   intro.textContent =
-    "Climate and light calibration offsets are stored on the selected EP1 (ESPHome number entities). Apply writes only the fields you change.";
+    "Offsets are additive adjustments stored on the EP1 (not absolute targets). Stock firmware ranges: temperature −20…20 °C, humidity −50…50 %, illuminance −50…50 lx. Apply writes only the fields you change, then waits for the live reading to refresh.";
   parent.append(intro);
 }
 
@@ -88,9 +105,11 @@ function createOffsetField(options: {
 }): {
   input: HTMLInputElement;
   reading: HTMLElement;
+  rangeHint: HTMLElement;
   root: HTMLLabelElement;
   applyField: (field: Ep1CalibrationOffsetFieldOut | null) => void;
   changedValue: () => number | null;
+  validateChanged: () => string | null;
 } {
   const root = document.createElement("label");
   root.className = "settings-dialog-field ep1-offset-field";
@@ -106,31 +125,66 @@ function createOffsetField(options: {
   reading.className = "ep1-offset-reading";
   reading.hidden = true;
   controls.append(input, reading);
-  root.append(labelText, controls);
+  const rangeHint = document.createElement("span");
+  rangeHint.className = "ep1-offset-range-hint";
+  rangeHint.hidden = true;
+  root.append(labelText, controls, rangeHint);
 
   let baseline: number | null = null;
+  let maxValue: number | null = null;
+  let minValue: number | null = null;
 
   const applyField = (field: Ep1CalibrationOffsetFieldOut | null): void => {
     if (field == null || !field.available) {
       input.disabled = true;
       input.value = "";
       baseline = null;
+      minValue = null;
+      maxValue = null;
+      input.removeAttribute("min");
+      input.removeAttribute("max");
+      input.removeAttribute("step");
       reading.hidden = true;
       reading.textContent = "";
+      rangeHint.hidden = true;
+      rangeHint.textContent = "";
       return;
     }
     input.disabled = false;
+    minValue = field.min_value;
+    maxValue = field.max_value;
     if (field.min_value != null) {
       input.min = String(field.min_value);
+    } else {
+      input.removeAttribute("min");
     }
     if (field.max_value != null) {
       input.max = String(field.max_value);
+    } else {
+      input.removeAttribute("max");
     }
     if (field.step != null) {
       input.step = String(field.step);
+    } else {
+      input.removeAttribute("step");
     }
     baseline = field.value;
     input.value = field.value == null ? "" : String(field.value);
+    if (field.min_value != null && field.max_value != null) {
+      const step =
+        field.step != null ? ` · step ${String(field.step)}` : "";
+      rangeHint.hidden = false;
+      rangeHint.textContent = `Range ${String(field.min_value)}…${String(field.max_value)}${step}`;
+    } else if (field.min_value != null) {
+      rangeHint.hidden = false;
+      rangeHint.textContent = `Min ${String(field.min_value)}`;
+    } else if (field.max_value != null) {
+      rangeHint.hidden = false;
+      rangeHint.textContent = `Max ${String(field.max_value)}`;
+    } else {
+      rangeHint.hidden = true;
+      rangeHint.textContent = "";
+    }
     if (field.reading == null) {
       reading.hidden = true;
       reading.textContent = "";
@@ -159,7 +213,39 @@ function createOffsetField(options: {
     return next;
   };
 
-  return { applyField, changedValue, input, reading, root };
+  const validateChanged = (): string | null => {
+    const next = changedValue();
+    if (next == null) {
+      return null;
+    }
+    if (minValue != null && next < minValue) {
+      return EP1_SETTINGS_OFFSET_OUT_OF_RANGE(
+        options.label,
+        minValue,
+        maxValue,
+        next,
+      );
+    }
+    if (maxValue != null && next > maxValue) {
+      return EP1_SETTINGS_OFFSET_OUT_OF_RANGE(
+        options.label,
+        minValue,
+        maxValue,
+        next,
+      );
+    }
+    return null;
+  };
+
+  return {
+    applyField,
+    changedValue,
+    input,
+    rangeHint,
+    reading,
+    root,
+    validateChanged,
+  };
 }
 
 function fillDeviceSelect(
@@ -186,6 +272,43 @@ function fillDeviceSelect(
       select.value = only.device_id;
     }
   }
+}
+
+function formatOffsetsAppliedMessage(
+  snap: Ep1CalibrationOut,
+  body: {
+    humidity_offset: number | null;
+    illuminance_offset: number | null;
+    temperature_offset: number | null;
+  },
+): string {
+  if (!snap.offsets_confirmed) {
+    return (
+      `Offsets were sent to ${snap.display_label}, but the device did not confirm ` +
+      `the new values yet. Re-check calibration in a moment.`
+    );
+  }
+  const parts = [`Offsets applied on ${snap.display_label}`];
+  const readingBits: string[] = [];
+  if (body.temperature_offset != null && snap.temperature.reading != null) {
+    readingBits.push(`temp ${snap.temperature.reading.toFixed(2)} °C`);
+  }
+  if (body.humidity_offset != null && snap.humidity.reading != null) {
+    readingBits.push(`humidity ${snap.humidity.reading.toFixed(2)}%`);
+  }
+  if (body.illuminance_offset != null && snap.illuminance.reading != null) {
+    readingBits.push(`illuminance ${snap.illuminance.reading.toFixed(2)} lx`);
+  }
+  if (readingBits.length > 0) {
+    if (snap.readings_refreshed) {
+      parts.push(`live ${readingBits.join(", ")}`);
+    } else {
+      parts.push(
+        `readings may still be catching up (${readingBits.join(", ")})`,
+      );
+    }
+  }
+  return `${parts.join(" — ")}.`;
 }
 
 function hasDevicesLabel(count: number): string {
@@ -404,6 +527,14 @@ export async function mountEp1SettingsPanel(
     status.hidden = false;
     status.textContent = message;
     status.classList.add("settings-dialog-status-error");
+    showErrorToast(message);
+  };
+
+  const showSuccess = (message: string): void => {
+    status.hidden = false;
+    status.classList.remove("settings-dialog-status-error");
+    status.textContent = message;
+    showSuccessToast(message);
   };
 
   try {
@@ -432,7 +563,7 @@ export async function mountEp1SettingsPanel(
     try {
       const out = await api.putEp1NoisePsk(noisePsk);
       applyFromSettings(await api.fetchEp1NoisePskSettings());
-      showSuccessToast(
+      showSuccess(
         out.restart_required
           ? "EP1 Noise pre-shared key saved — restart the server to apply."
           : "EP1 Noise pre-shared key saved.",
@@ -464,6 +595,13 @@ export async function mountEp1SettingsPanel(
       showError("Change at least one offset before applying.");
       return;
     }
+    for (const field of [temperatureField, humidityField, illuminanceField]) {
+      const rangeError = field.validateChanged();
+      if (rangeError != null) {
+        showError(rangeError);
+        return;
+      }
+    }
     applyOffsetsBtn.disabled = true;
     try {
       const snap = await api.putEp1Calibration(deviceId, body);
@@ -471,10 +609,12 @@ export async function mountEp1SettingsPanel(
         return;
       }
       applyCalibration(snap);
-      status.hidden = false;
-      status.classList.remove("settings-dialog-status-error");
-      status.textContent = `Offsets applied on ${snap.display_label}.`;
-      showSuccessToast(`EP1 offsets saved on ${snap.display_label}.`);
+      const message = formatOffsetsAppliedMessage(snap, body);
+      if (!snap.offsets_confirmed) {
+        showError(message);
+      } else {
+        showSuccess(message);
+      }
     } catch (err) {
       if (selectedValue(calibrationTarget.select) !== deviceId) {
         return;
@@ -506,9 +646,11 @@ export async function mountEp1SettingsPanel(
       ) {
         return;
       }
-      status.hidden = false;
-      status.classList.toggle("settings-dialog-status-error", !result.ok);
-      status.textContent = result.detail;
+      if (result.ok) {
+        showSuccess(result.detail);
+      } else {
+        showError(result.detail);
+      }
     } catch (err) {
       if (
         generation !== pskTestGeneration ||
@@ -529,7 +671,7 @@ export async function mountEp1SettingsPanel(
     try {
       await api.clearEp1NoisePsk();
       applyFromSettings(await api.fetchEp1NoisePskSettings());
-      showSuccessToast("Stored EP1 Noise pre-shared key cleared.");
+      showSuccess("Stored EP1 Noise pre-shared key cleared.");
       await options.onDevicesChanged?.();
     } catch (err) {
       showError(err instanceof HttpError ? err.detail || err.message : String(err));

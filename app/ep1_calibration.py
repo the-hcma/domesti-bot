@@ -12,7 +12,7 @@ import asyncio
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from aioesphomeapi.client import APIClient
@@ -44,11 +44,13 @@ EP1_CALIBRATION_OFFSET_UNAVAILABLE = (
 )
 EP1_CALIBRATION_STATE_TIMEOUT = "Timed out waiting for EP1 calibration states at {host}:{port}"
 
+_NUMBER_VALUE_ABS_TOL = 1e-6
 _OFFSET_ENTITY_ALIASES: dict[Ep1CalibrationOffsetKind, tuple[str, ...]] = {
     Ep1CalibrationOffsetKind.HUMIDITY: ("humidity_offset",),
     Ep1CalibrationOffsetKind.ILLUMINANCE: ("illuminance_offset", "illuminance_offset_ui"),
     Ep1CalibrationOffsetKind.TEMPERATURE: ("temperature_offset",),
 }
+_POST_WRITE_TIMEOUT_S = 8.0
 _READING_ENTITY_ALIASES: dict[Ep1CalibrationOffsetKind, tuple[str, ...]] = {
     Ep1CalibrationOffsetKind.HUMIDITY: ("humidity", "humidity_sensor"),
     Ep1CalibrationOffsetKind.ILLUMINANCE: ("illuminance", "illuminance_sensor"),
@@ -93,6 +95,16 @@ class Ep1CalibrationSnapshot:
     host: str
     offsets: Mapping[Ep1CalibrationOffsetKind, Ep1CalibrationOffsetField]
     port: int
+    offsets_confirmed: bool = True
+    readings_refreshed: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class Ep1CalibrationWriteSettle:
+    """Post-write wait outcome for offset numbers vs linked sensor refresh."""
+
+    offsets_confirmed: bool
+    readings_refreshed: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,12 +171,41 @@ async def apply_ep1_calibration_offsets(
                 )
             _validate_offset_in_range(kind=kind, number=number, value=value)
             pending_writes.append((number, float(value)))
+        sensors_by_kind = _sensor_entities_by_reading_kind(entities)
+        sensor_key_by_kind = {kind: int(sensors_by_kind[kind].key) for kind in updates if kind in sensors_by_kind}
+        number_keys = {int(number.key) for number, _value in pending_writes}
+        # Capture number + sensor states *before* the write so we can skip
+        # sensor-refresh wait for offsets that are already at the requested value.
+        baseline_keys = set(sensor_key_by_kind.values()) | number_keys
+        baseline_states = await _collect_states_async(client, baseline_keys) if baseline_keys else {}
+        unchanged_kinds = {
+            kind
+            for kind, number, value in (
+                (k, kind_to_number[k], float(updates[k])) for k in updates if k in kind_to_number
+            )
+            if _number_state_matches_expected(baseline_states.get(int(number.key)), value)
+        }
+        sensor_keys = {key for kind, key in sensor_key_by_kind.items() if kind not in unchanged_kinds}
+        sensor_baselines = {key: _float_from_sensor_state(baseline_states.get(key)) for key in sensor_keys}
         for number, value in pending_writes:
             # aioesphomeapi ``number_command`` is sync (sends NumberCommandRequest).
             client.number_command(int(number.key), value)
-        # Brief settle so subscribe_states sees the new number + refreshed sensors.
-        await asyncio.sleep(0.35)
-        return await _snapshot_from_client(client, target=target, entities=entities)
+        settle = await _wait_for_calibration_write_effects(
+            client,
+            expected_numbers={int(number.key): value for number, value in pending_writes},
+            sensor_keys=sensor_keys,
+            sensor_baselines=sensor_baselines,
+            host=target.host,
+            port=target.port,
+        )
+        snapshot = await _snapshot_from_client(client, target=target, entities=entities)
+        if settle.offsets_confirmed and settle.readings_refreshed:
+            return snapshot
+        return replace(
+            snapshot,
+            offsets_confirmed=settle.offsets_confirmed,
+            readings_refreshed=settle.readings_refreshed,
+        )
     except APIConnectionError as exc:
         raise Ep1CalibrationError(f"EP1 calibration write failed at {target.host}:{target.port}: {exc}") from exc
     finally:
@@ -346,6 +387,13 @@ def _number_entities_by_offset_kind(
     return out
 
 
+def _number_state_matches_expected(state: EntityState | None, expected: float) -> bool:
+    actual = _float_from_number_state(state)
+    if actual is None:
+        return False
+    return abs(actual - expected) <= max(_NUMBER_VALUE_ABS_TOL, abs(expected) * 1e-9)
+
+
 def _offset_field_unavailable(kind: Ep1CalibrationOffsetKind) -> Ep1CalibrationOffsetField:
     return Ep1CalibrationOffsetField(
         available=False,
@@ -416,6 +464,18 @@ def _sensor_entities_by_reading_kind(
             continue
         out[kind] = entity
     return out
+
+
+def _sensor_reading_changed(
+    *,
+    baseline: float | None,
+    current: float | None,
+) -> bool:
+    """True only when both sides are known and differ (no baseline ⇒ not a refresh)."""
+
+    if current is None or baseline is None:
+        return False
+    return abs(current - baseline) > _NUMBER_VALUE_ABS_TOL
 
 
 async def _snapshot_from_client(
@@ -522,3 +582,132 @@ def _validate_offset_in_range(
         raise Ep1CalibrationValidationError(f"Expected a finite {kind.value} offset, got {value!r}")
     if value < lo or value > hi:
         raise Ep1CalibrationValidationError(f"Expected {kind.value} offset in [{lo}, {hi}], got {value}")
+
+
+async def _wait_for_calibration_write_effects(
+    client: APIClient,
+    *,
+    expected_numbers: Mapping[int, float],
+    sensor_keys: set[int],
+    sensor_baselines: Mapping[int, float | None] | None = None,
+    host: str = "",
+    port: int = 0,
+    timeout_s: float = _POST_WRITE_TIMEOUT_S,
+) -> Ep1CalibrationWriteSettle:
+    """Wait until written offset numbers stick and linked sensors refresh.
+
+    Stock EP1 firmware applies offsets via sensor filters and only republishes
+    illuminance/temperature/humidity after the next sensor update (often >1s).
+    Returning a snapshot too early shows the new offset beside a stale live
+    reading, which looks like Apply did nothing.
+
+    ``sensor_baselines`` must be captured *before* ``number_command``. After
+    offset numbers confirm, only *subsequent* sensor state callbacks may
+    satisfy the refresh wait (pre-write baselines are kept — never re-locked
+    from the subscribe dump). Number confirm and sensor refresh are reported
+    separately; soft-timeouts prefer a snapshot over raising after the write.
+    """
+
+    if not expected_numbers:
+        return Ep1CalibrationWriteSettle(offsets_confirmed=True, readings_refreshed=True)
+
+    baselines = dict(sensor_baselines or {})
+    collected: dict[int, EntityState] = {}
+    confirmed_numbers: set[int] = set()
+    refreshed_sensors: set[int] = set()
+    required_sensors: set[int] = set(sensor_keys)
+    numbers_ready = asyncio.Event()
+    sensors_ready = asyncio.Event()
+    accept_sensor_refresh = False
+    watch_keys = set(expected_numbers) | set(sensor_keys)
+    sensors_unverified = False
+
+    def _arm_sensor_refresh_wait() -> None:
+        nonlocal accept_sensor_refresh, sensors_unverified
+        # Keep pre-write baselines. Re-locking from ``collected`` can freeze an
+        # already-refreshed reading as the baseline (multi-offset / early dump)
+        # or treat a pre-confirm natural republish as success. Only *new*
+        # post-confirm sensor callbacks may satisfy the wait.
+        required_sensors.clear()
+        required_sensors.update(key for key in sensor_keys if baselines.get(key) is not None)
+        if sensor_keys and not required_sensors:
+            # Linked sensors existed but none had a known baseline — unverified.
+            sensors_unverified = True
+            sensors_ready.set()
+            accept_sensor_refresh = False
+            return
+        if not required_sensors:
+            sensors_ready.set()
+            accept_sensor_refresh = False
+            return
+        accept_sensor_refresh = True
+
+    def _on_state(state: EntityState) -> None:
+        key = int(state.key)
+        if key not in watch_keys:
+            return
+        collected[key] = state
+        if key in expected_numbers and _number_state_matches_expected(state, expected_numbers[key]):
+            confirmed_numbers.add(key)
+            if confirmed_numbers >= set(expected_numbers) and not numbers_ready.is_set():
+                numbers_ready.set()
+                if sensor_keys:
+                    _arm_sensor_refresh_wait()
+        if (
+            accept_sensor_refresh
+            and key in required_sensors
+            and _sensor_reading_changed(
+                baseline=baselines.get(key),
+                current=_float_from_sensor_state(state),
+            )
+        ):
+            refreshed_sensors.add(key)
+            if refreshed_sensors >= required_sensors:
+                sensors_ready.set()
+
+    client.subscribe_states(_on_state)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    try:
+        await asyncio.wait_for(numbers_ready.wait(), timeout=timeout_s)
+    except TimeoutError:
+        # number_command already ran; prefer returning a snapshot over 502 so
+        # the UI can show whatever stuck rather than a hard failure.
+        _LOGGER.info(
+            "EP1 calibration post-write: offset numbers not confirmed after %.1fs "
+            "(confirmed=%s expected=%s host=%s port=%s)",
+            timeout_s,
+            sorted(confirmed_numbers),
+            sorted(expected_numbers),
+            host or "?",
+            port or "?",
+        )
+        return Ep1CalibrationWriteSettle(offsets_confirmed=False, readings_refreshed=False)
+
+    if not sensor_keys:
+        return Ep1CalibrationWriteSettle(offsets_confirmed=True, readings_refreshed=True)
+
+    if sensors_ready.is_set() and not required_sensors:
+        return Ep1CalibrationWriteSettle(
+            offsets_confirmed=True,
+            readings_refreshed=not sensors_unverified,
+        )
+
+    remaining = deadline - loop.time()
+    if remaining <= 0:
+        _LOGGER.info(
+            "EP1 calibration post-write: no time left to wait for sensor refresh (sensors=%s)",
+            sorted(required_sensors),
+        )
+        return Ep1CalibrationWriteSettle(offsets_confirmed=True, readings_refreshed=False)
+    try:
+        await asyncio.wait_for(sensors_ready.wait(), timeout=remaining)
+    except TimeoutError:
+        _LOGGER.info(
+            "EP1 calibration post-write: sensor refresh timed out after %.1fs (refreshed=%s expected=%s)",
+            remaining,
+            sorted(refreshed_sensors),
+            sorted(required_sensors),
+        )
+        return Ep1CalibrationWriteSettle(offsets_confirmed=True, readings_refreshed=False)
+    return Ep1CalibrationWriteSettle(offsets_confirmed=True, readings_refreshed=True)

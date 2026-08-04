@@ -457,7 +457,9 @@ def _ep1_calibration_out(snapshot: Ep1CalibrationSnapshot) -> Ep1CalibrationOut:
         host=snapshot.host,
         humidity=_ep1_offset_field_out(snapshot.offsets[Ep1CalibrationOffsetKind.HUMIDITY]),
         illuminance=_ep1_offset_field_out(snapshot.offsets[Ep1CalibrationOffsetKind.ILLUMINANCE]),
+        offsets_confirmed=snapshot.offsets_confirmed,
         port=snapshot.port,
+        readings_refreshed=snapshot.readings_refreshed,
         temperature=_ep1_offset_field_out(snapshot.offsets[Ep1CalibrationOffsetKind.TEMPERATURE]),
     )
 
