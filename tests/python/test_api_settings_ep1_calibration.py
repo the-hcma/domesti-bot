@@ -132,6 +132,8 @@ def test_get_ep1_calibration_returns_snapshot(tmp_path: Path) -> None:
     assert body["illuminance"]["unit"] == "lx"
     assert body["temperature"]["available"] is True
     assert body["humidity"]["reading"] == 40.0
+    assert body["offsets_confirmed"] is True
+    assert body["readings_refreshed"] is True
     read_mock.assert_awaited_once()
 
 
@@ -171,7 +173,10 @@ def test_put_ep1_calibration_writes_offsets(tmp_path: Path) -> None:
             json={"illuminance_offset": 7},
         )
     assert response.status_code == HTTPStatus.OK
-    assert response.json()["illuminance"]["value"] == 7.0
+    body = response.json()
+    assert body["illuminance"]["value"] == 7.0
+    assert body["offsets_confirmed"] is True
+    assert body["readings_refreshed"] is True
     apply_mock.assert_awaited_once()
     assert apply_mock.await_args is not None
     kwargs = apply_mock.await_args.kwargs

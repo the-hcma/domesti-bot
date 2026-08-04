@@ -567,7 +567,22 @@ class Ep1CalibrationOut(BaseModel):
     host: str = Field(..., description="ESPHome API host used for this snapshot.")
     humidity: Ep1CalibrationOffsetFieldOut = Field(..., description="Humidity offset (``%``).")
     illuminance: Ep1CalibrationOffsetFieldOut = Field(..., description="Illuminance offset (``lx``).")
+    offsets_confirmed: bool = Field(
+        default=True,
+        description=(
+            "True when written offset numbers were observed to stick after Apply; "
+            "False when the post-write number wait timed out (device may still update later)."
+        ),
+    )
     port: int = Field(..., description="ESPHome API port (default 6053).")
+    readings_refreshed: bool = Field(
+        default=True,
+        description=(
+            "True when linked sensor readings were observed to change after an Apply write; "
+            "False when the post-write sensor wait timed out or could not be verified "
+            "(offsets may still have stuck)."
+        ),
+    )
     temperature: Ep1CalibrationOffsetFieldOut = Field(..., description="Temperature offset (``°C``).")
 
 

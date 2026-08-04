@@ -210,7 +210,9 @@ export interface Ep1CalibrationOut {
   host: string;
   humidity: Ep1CalibrationOffsetFieldOut;
   illuminance: Ep1CalibrationOffsetFieldOut;
+  offsets_confirmed: boolean;
   port: number;
+  readings_refreshed: boolean;
   temperature: Ep1CalibrationOffsetFieldOut;
 }
 
