@@ -15,13 +15,17 @@ const EP1_DOCS_HREF =
   "https://docs.everythingsmart.io/s/products/doc/everything-presence-one-ep1-3R178yZSUP";
 
 export const EP1_SETTINGS_APPLY_OFFSETS_LABEL = "Apply offsets";
+export const EP1_SETTINGS_CALIBRATION_LEGEND = "Calibration offsets";
 export const EP1_SETTINGS_NO_DEVICES =
   "No EP1 devices discovered yet. Run discovery (or set EP1_HOSTS), then reopen Settings.";
+export const EP1_SETTINGS_PSK_LEGEND = "Noise pre-shared key";
 export const EP1_SETTINGS_PSK_OPTIONAL_HINT =
   "Optional for Homey / stock firmware (plaintext API). Required only when the device has ESPHome API encryption enabled.";
 export const EP1_SETTINGS_SAVE_REQUIRES_PSK =
   "Enter a Noise pre-shared key (PSK) to save. For plaintext Homey firmware, leave this blank and use Test (or Clear stored key).";
 export const EP1_SETTINGS_TARGET_DEVICE_LABEL = "Target device";
+export const EP1_SETTINGS_TEST_TOOLTIP =
+  "Probes the selected EP1 over the LAN with the PSK in the form (or the stored key / plaintext Homey). Does not change live discovery or device state.";
 
 function appendEp1NoisePskIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
@@ -56,6 +60,28 @@ function appendCalibrationIntro(parent: HTMLElement): void {
   parent.append(intro);
 }
 
+function createDeviceSelect(name: string): {
+  emptyHint: HTMLParagraphElement;
+  label: HTMLLabelElement;
+  select: HTMLSelectElement;
+} {
+  const label = document.createElement("label");
+  label.className = "settings-dialog-field";
+  const labelText = document.createElement("span");
+  labelText.textContent = EP1_SETTINGS_TARGET_DEVICE_LABEL;
+  const select = document.createElement("select");
+  select.name = name;
+  select.required = false;
+  label.append(labelText, select);
+
+  const emptyHint = document.createElement("p");
+  emptyHint.className = "settings-dialog-lead";
+  emptyHint.textContent = EP1_SETTINGS_NO_DEVICES;
+  emptyHint.hidden = true;
+
+  return { emptyHint, label, select };
+}
+
 function createOffsetField(options: {
   kind: Ep1CalibrationOffsetKind;
   label: string;
@@ -67,17 +93,20 @@ function createOffsetField(options: {
   changedValue: () => number | null;
 } {
   const root = document.createElement("label");
-  root.className = "settings-dialog-field";
+  root.className = "settings-dialog-field ep1-offset-field";
   const labelText = document.createElement("span");
   labelText.textContent = options.label;
+  const controls = document.createElement("div");
+  controls.className = "ep1-offset-field-controls";
   const input = document.createElement("input");
   input.type = "number";
   input.name = `${options.kind}_offset`;
   input.autocomplete = "off";
-  const reading = document.createElement("p");
-  reading.className = "settings-dialog-lead";
+  const reading = document.createElement("span");
+  reading.className = "ep1-offset-reading";
   reading.hidden = true;
-  root.append(labelText, input, reading);
+  controls.append(input, reading);
+  root.append(labelText, controls);
 
   let baseline: number | null = null;
 
@@ -108,7 +137,7 @@ function createOffsetField(options: {
     } else {
       const unit = field.unit ? ` ${field.unit}` : "";
       reading.hidden = false;
-      reading.textContent = `Live reading: ${field.reading}${unit}`;
+      reading.textContent = `Live: ${field.reading.toFixed(2)}${unit}`;
     }
   };
 
@@ -133,6 +162,41 @@ function createOffsetField(options: {
   return { applyField, changedValue, input, reading, root };
 }
 
+function fillDeviceSelect(
+  select: HTMLSelectElement,
+  rows: readonly Ep1DeviceSettingsOut[],
+  previous: string | null,
+): void {
+  select.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = hasDevicesLabel(rows.length);
+  select.append(placeholder);
+  for (const row of rows) {
+    const option = document.createElement("option");
+    option.value = row.device_id;
+    option.textContent = row.display_label;
+    select.append(option);
+  }
+  if (previous != null && rows.some((row) => row.device_id === previous)) {
+    select.value = previous;
+  } else if (rows.length === 1) {
+    const only = rows[0];
+    if (only != null) {
+      select.value = only.device_id;
+    }
+  }
+}
+
+function hasDevicesLabel(count: number): string {
+  return count === 0 ? "No devices available" : "Select a device…";
+}
+
+function selectedValue(select: HTMLSelectElement): string | null {
+  const value = select.value.trim();
+  return value === "" ? null : value;
+}
+
 export async function mountEp1SettingsPanel(
   container: HTMLElement,
   options: {
@@ -145,11 +209,16 @@ export async function mountEp1SettingsPanel(
   form.className = "ep1-settings-form";
   form.noValidate = true;
 
-  appendEp1NoisePskIntro(form);
-
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
   status.hidden = true;
+
+  const pskSection = document.createElement("fieldset");
+  pskSection.className = "settings-dialog-fieldset ep1-psk-section";
+  const pskLegend = document.createElement("legend");
+  pskLegend.textContent = EP1_SETTINGS_PSK_LEGEND;
+  pskSection.append(pskLegend);
+  appendEp1NoisePskIntro(pskSection);
 
   const label = document.createElement("label");
   label.className = "settings-dialog-field";
@@ -162,9 +231,7 @@ export async function mountEp1SettingsPanel(
   const input = secretRow.input;
   input.name = "noise_psk";
   let storedPsk: string | null = null;
-  let revealed = false;
   const setRevealed = (next: boolean): void => {
-    revealed = next;
     if (next && !input.value && storedPsk) {
       input.value = storedPsk;
     }
@@ -173,20 +240,40 @@ export async function mountEp1SettingsPanel(
   setRevealed(false);
   label.append(labelText, secretRow.row);
 
-  const targetLabel = document.createElement("label");
-  targetLabel.className = "settings-dialog-field";
-  const targetLabelText = document.createElement("span");
-  targetLabelText.textContent = EP1_SETTINGS_TARGET_DEVICE_LABEL;
-  const targetSelect = document.createElement("select");
-  targetSelect.name = "device_id";
-  targetSelect.required = false;
-  targetLabel.append(targetLabelText, targetSelect);
+  const pskTarget = createDeviceSelect("psk_device_id");
+  const pskActions = document.createElement("div");
+  pskActions.className = "settings-dialog-actions";
+  const testBtn = document.createElement("button");
+  testBtn.type = "button";
+  testBtn.className = "btn btn-secondary";
+  testBtn.textContent = "Test";
+  testBtn.title = EP1_SETTINGS_TEST_TOOLTIP;
+  testBtn.disabled = true;
+  const clearBtn = document.createElement("button");
+  clearBtn.type = "button";
+  clearBtn.className = "btn btn-secondary";
+  clearBtn.textContent = "Clear stored key";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "btn";
+  saveBtn.textContent = "Save";
+  pskActions.append(testBtn, clearBtn, saveBtn);
+  pskSection.append(
+    label,
+    pskTarget.label,
+    pskTarget.emptyHint,
+    pskActions,
+  );
 
-  const emptyDevices = document.createElement("p");
-  emptyDevices.className = "settings-dialog-lead";
-  emptyDevices.textContent = EP1_SETTINGS_NO_DEVICES;
-  emptyDevices.hidden = true;
+  const calibrationSection = document.createElement("fieldset");
+  calibrationSection.className =
+    "settings-dialog-fieldset ep1-calibration-section";
+  const calibrationLegend = document.createElement("legend");
+  calibrationLegend.textContent = EP1_SETTINGS_CALIBRATION_LEGEND;
+  calibrationSection.append(calibrationLegend);
+  appendCalibrationIntro(calibrationSection);
 
+  const calibrationTarget = createDeviceSelect("calibration_device_id");
   const humidityField = createOffsetField({
     kind: Ep1CalibrationOffsetKind.Humidity,
     label: "Humidity offset (%)",
@@ -199,57 +286,51 @@ export async function mountEp1SettingsPanel(
     kind: Ep1CalibrationOffsetKind.Temperature,
     label: "Temperature offset (°C)",
   });
+  const offsetsStack = document.createElement("div");
+  offsetsStack.className = "ep1-calibration-offsets";
+  offsetsStack.append(
+    temperatureField.root,
+    humidityField.root,
+    illuminanceField.root,
+  );
 
-  const calibrationIntro = document.createElement("div");
-  appendCalibrationIntro(calibrationIntro);
-
-  const actions = document.createElement("div");
-  actions.className = "settings-dialog-actions";
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.className = "btn";
-  saveBtn.textContent = "Save";
+  const calibrationActions = document.createElement("div");
+  calibrationActions.className = "settings-dialog-actions";
   const applyOffsetsBtn = document.createElement("button");
   applyOffsetsBtn.type = "button";
   applyOffsetsBtn.className = "btn";
   applyOffsetsBtn.textContent = EP1_SETTINGS_APPLY_OFFSETS_LABEL;
-  const testBtn = document.createElement("button");
-  testBtn.type = "button";
-  testBtn.className = "btn btn-secondary";
-  testBtn.textContent = "Test";
-  testBtn.disabled = true;
-  const clearBtn = document.createElement("button");
-  clearBtn.type = "button";
-  clearBtn.className = "btn btn-secondary";
-  clearBtn.textContent = "Clear stored key";
-  actions.append(saveBtn, applyOffsetsBtn, testBtn, clearBtn);
-  form.append(
-    status,
-    label,
-    targetLabel,
-    emptyDevices,
-    calibrationIntro,
-    temperatureField.root,
-    humidityField.root,
-    illuminanceField.root,
-    actions,
+  calibrationActions.append(applyOffsetsBtn);
+  calibrationSection.append(
+    calibrationTarget.label,
+    calibrationTarget.emptyHint,
+    offsetsStack,
+    calibrationActions,
   );
+
+  form.append(status, pskSection, calibrationSection);
   container.append(form);
 
   let devices: Ep1DeviceSettingsOut[] = [];
   let calibrationLoadGeneration = 0;
+  let calibrationLoading = false;
+  let pskTestGeneration = 0;
 
-  const selectedDeviceId = (): string | null => {
-    const value = targetSelect.value.trim();
-    return value === "" ? null : value;
+  const syncPskTargetControls = (): void => {
+    const hasDevices = devices.length > 0;
+    pskTarget.emptyHint.hidden = hasDevices;
+    pskTarget.select.disabled = !hasDevices;
+    testBtn.disabled = !hasDevices || selectedValue(pskTarget.select) == null;
   };
 
-  const syncTargetControls = (): void => {
+  const syncCalibrationTargetControls = (): void => {
     const hasDevices = devices.length > 0;
-    emptyDevices.hidden = hasDevices;
-    targetSelect.disabled = !hasDevices;
-    applyOffsetsBtn.disabled = !hasDevices || selectedDeviceId() == null;
-    testBtn.disabled = !hasDevices || selectedDeviceId() == null;
+    calibrationTarget.emptyHint.hidden = hasDevices;
+    calibrationTarget.select.disabled = !hasDevices;
+    applyOffsetsBtn.disabled =
+      calibrationLoading ||
+      !hasDevices ||
+      selectedValue(calibrationTarget.select) == null;
   };
 
   const applyCalibration = (snap: Ep1CalibrationOut | null): void => {
@@ -259,55 +340,52 @@ export async function mountEp1SettingsPanel(
   };
 
   const loadCalibrationForSelection = async (): Promise<void> => {
-    const deviceId = selectedDeviceId();
+    const deviceId = selectedValue(calibrationTarget.select);
     const generation = ++calibrationLoadGeneration;
+    calibrationLoading = true;
+    applyCalibration(null);
+    syncCalibrationTargetControls();
     if (deviceId == null) {
-      applyCalibration(null);
-      syncTargetControls();
+      if (generation === calibrationLoadGeneration) {
+        calibrationLoading = false;
+        syncCalibrationTargetControls();
+      }
       return;
     }
     try {
       const snap = await api.fetchEp1Calibration(deviceId);
-      if (generation !== calibrationLoadGeneration || selectedDeviceId() !== deviceId) {
+      if (
+        generation !== calibrationLoadGeneration ||
+        selectedValue(calibrationTarget.select) !== deviceId
+      ) {
         return;
       }
       applyCalibration(snap);
       status.hidden = true;
     } catch (err) {
-      if (generation !== calibrationLoadGeneration || selectedDeviceId() !== deviceId) {
+      if (
+        generation !== calibrationLoadGeneration ||
+        selectedValue(calibrationTarget.select) !== deviceId
+      ) {
         return;
       }
       applyCalibration(null);
       showError(err instanceof HttpError ? err.detail || err.message : String(err));
     }
     if (generation === calibrationLoadGeneration) {
-      syncTargetControls();
+      calibrationLoading = false;
+      syncCalibrationTargetControls();
     }
   };
 
   const fillDevices = (rows: Ep1DeviceSettingsOut[]): void => {
+    const previousPsk = selectedValue(pskTarget.select);
+    const previousCalibration = selectedValue(calibrationTarget.select);
     devices = rows;
-    const previous = selectedDeviceId();
-    targetSelect.replaceChildren();
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = hasDevicesLabel(rows.length);
-    targetSelect.append(placeholder);
-    for (const row of rows) {
-      const option = document.createElement("option");
-      option.value = row.device_id;
-      option.textContent = row.display_label;
-      targetSelect.append(option);
-    }
-    if (previous != null && rows.some((row) => row.device_id === previous)) {
-      targetSelect.value = previous;
-    } else if (rows.length === 1) {
-      const only = rows[0];
-      if (only != null) {
-        targetSelect.value = only.device_id;
-      }
-    }
-    syncTargetControls();
+    fillDeviceSelect(pskTarget.select, rows, previousPsk);
+    fillDeviceSelect(calibrationTarget.select, rows, previousCalibration);
+    syncPskTargetControls();
+    syncCalibrationTargetControls();
   };
 
   const applyFromSettings = (s: Ep1NoisePreSharedKeySettingsOut): void => {
@@ -336,7 +414,11 @@ export async function mountEp1SettingsPanel(
     showError(err instanceof HttpError ? err.detail || err.message : String(err));
   }
 
-  targetSelect.addEventListener("change", () => {
+  pskTarget.select.addEventListener("change", () => {
+    pskTestGeneration += 1;
+    syncPskTargetControls();
+  });
+  calibrationTarget.select.addEventListener("change", () => {
     void loadCalibrationForSelection();
   });
 
@@ -364,7 +446,7 @@ export async function mountEp1SettingsPanel(
   });
 
   applyOffsetsBtn.addEventListener("click", async () => {
-    const deviceId = selectedDeviceId();
+    const deviceId = selectedValue(calibrationTarget.select);
     if (deviceId == null) {
       showError(EP1_SETTINGS_NO_DEVICES);
       return;
@@ -385,37 +467,60 @@ export async function mountEp1SettingsPanel(
     applyOffsetsBtn.disabled = true;
     try {
       const snap = await api.putEp1Calibration(deviceId, body);
+      if (selectedValue(calibrationTarget.select) !== deviceId) {
+        return;
+      }
       applyCalibration(snap);
       status.hidden = false;
       status.classList.remove("settings-dialog-status-error");
       status.textContent = `Offsets applied on ${snap.display_label}.`;
       showSuccessToast(`EP1 offsets saved on ${snap.display_label}.`);
     } catch (err) {
+      if (selectedValue(calibrationTarget.select) !== deviceId) {
+        return;
+      }
       showError(err instanceof HttpError ? err.detail || err.message : String(err));
     } finally {
-      syncTargetControls();
+      if (selectedValue(calibrationTarget.select) === deviceId) {
+        syncCalibrationTargetControls();
+      }
     }
   });
 
   testBtn.addEventListener("click", async () => {
-    const deviceId = selectedDeviceId();
+    const deviceId = selectedValue(pskTarget.select);
     if (deviceId == null) {
       showError(EP1_SETTINGS_NO_DEVICES);
       return;
     }
+    const generation = ++pskTestGeneration;
     testBtn.disabled = true;
     try {
       const result = await api.testEp1NoisePsk({
         noise_psk: input.value.trim() || null,
         device_id: deviceId,
       });
+      if (
+        generation !== pskTestGeneration ||
+        selectedValue(pskTarget.select) !== deviceId
+      ) {
+        return;
+      }
       status.hidden = false;
       status.classList.toggle("settings-dialog-status-error", !result.ok);
       status.textContent = result.detail;
     } catch (err) {
+      if (
+        generation !== pskTestGeneration ||
+        selectedValue(pskTarget.select) !== deviceId
+      ) {
+        return;
+      }
       showError(err instanceof HttpError ? err.detail || err.message : String(err));
     } finally {
-      syncTargetControls();
+      if (generation === pskTestGeneration) {
+        syncPskTargetControls();
+      }
     }
   });
 
@@ -432,8 +537,4 @@ export async function mountEp1SettingsPanel(
       clearBtn.disabled = false;
     }
   });
-}
-
-function hasDevicesLabel(count: number): string {
-  return count === 0 ? "No devices available" : "Select a device…";
 }
