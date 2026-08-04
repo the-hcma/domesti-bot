@@ -84,6 +84,19 @@ export const Ep1CalibrationOffsetKind = {
 export type Ep1CalibrationOffsetKind =
   (typeof Ep1CalibrationOffsetKind)[keyof typeof Ep1CalibrationOffsetKind];
 
+/** EP1 Settings mmWave occupancy tuning knob kind. */
+export const Ep1OccupancyTuningKind = {
+  MaxDistance: "max_distance",
+  MinDistance: "min_distance",
+  OffLatency: "off_latency",
+  OnLatency: "on_latency",
+  SustainSensitivity: "sustain_sensitivity",
+  TriggerDistance: "trigger_distance",
+  TriggerSensitivity: "trigger_sensitivity",
+} as const;
+export type Ep1OccupancyTuningKind =
+  (typeof Ep1OccupancyTuningKind)[keyof typeof Ep1OccupancyTuningKind];
+
 export const Ep1ReadingComparison = {
   Above: "above",
   Below: "below",

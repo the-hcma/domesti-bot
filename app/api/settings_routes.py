@@ -19,6 +19,9 @@ from app.api.schemas import (
     Ep1NoisePreSharedKeySetOut,
     Ep1NoisePreSharedKeySettingsOut,
     Ep1NoisePreSharedKeyTestIn,
+    Ep1OccupancyTuningFieldOut,
+    Ep1OccupancyTuningOut,
+    Ep1OccupancyTuningSetIn,
     KasaCredentialsSetIn,
     KasaCredentialsSetOut,
     KasaCredentialsSettingsOut,
@@ -46,7 +49,7 @@ from app.db.secrets import (
     secrets_key_source,
     tailwind_token_stored_in_db,
 )
-from app.device_enums import Ep1CalibrationOffsetKind
+from app.device_enums import Ep1CalibrationOffsetKind, Ep1OccupancyTuningKind
 from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _parse_ep1_host_specs, _Theme
 from app.ep1_calibration import (
     Ep1CalibrationError,
@@ -60,6 +63,15 @@ from app.ep1_calibration import (
 )
 from app.ep1_credentials import resolve_ep1_noise_psk
 from app.ep1_device_manager import DEFAULT_EP1_ZEROCONF_TIMEOUT_S, Ep1DeviceManager
+from app.ep1_occupancy_tuning import (
+    Ep1OccupancyTuningError,
+    Ep1OccupancyTuningField,
+    Ep1OccupancyTuningNotFoundError,
+    Ep1OccupancyTuningSnapshot,
+    Ep1OccupancyTuningValidationError,
+    apply_ep1_occupancy_tuning,
+    read_ep1_occupancy_tuning,
+)
 from app.kasa_credentials import resolve_kasa_credentials
 from app.server_runtime import runtime
 from app.settings_credentials_test import (
@@ -245,6 +257,61 @@ async def put_ep1_device_calibration(
     except Ep1CalibrationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
     return _ep1_calibration_out(snapshot)
+
+
+@router.get(
+    "/ep1/devices/{device_id}/occupancy-tuning",
+    response_model=Ep1OccupancyTuningOut,
+)
+async def get_ep1_device_occupancy_tuning(device_id: str, request: Request) -> Ep1OccupancyTuningOut:
+    """Read mmWave distance / sensitivity / latency knobs for one EP1."""
+    del request
+    try:
+        snapshot = await read_ep1_occupancy_tuning(
+            device_id=device_id,
+            cache_path=runtime.discovery_cache_path(),
+            cli_noise_psk=_cli_ep1_noise_psk(),
+            ep1_mgr=_live_ep1_mgr(),
+        )
+    except Ep1OccupancyTuningNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Ep1OccupancyTuningError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _ep1_occupancy_tuning_out(snapshot)
+
+
+@router.put(
+    "/ep1/devices/{device_id}/occupancy-tuning",
+    response_model=Ep1OccupancyTuningOut,
+)
+async def put_ep1_device_occupancy_tuning(
+    device_id: str,
+    body: Ep1OccupancyTuningSetIn,
+    request: Request,
+) -> Ep1OccupancyTuningOut:
+    """Write mmWave occupancy tuning knobs on the target EP1 (auto Set Distance / Sensitivity)."""
+    del request
+    try:
+        snapshot = await apply_ep1_occupancy_tuning(
+            device_id=device_id,
+            max_distance=body.max_distance,
+            min_distance=body.min_distance,
+            off_latency=body.off_latency,
+            on_latency=body.on_latency,
+            sustain_sensitivity=body.sustain_sensitivity,
+            trigger_distance=body.trigger_distance,
+            trigger_sensitivity=body.trigger_sensitivity,
+            cache_path=runtime.discovery_cache_path(),
+            cli_noise_psk=_cli_ep1_noise_psk(),
+            ep1_mgr=_live_ep1_mgr(),
+        )
+    except Ep1OccupancyTuningNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Ep1OccupancyTuningValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Ep1OccupancyTuningError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _ep1_occupancy_tuning_out(snapshot)
 
 
 @router.delete("/ep1-noise-psk", response_model=Ep1NoisePreSharedKeySettingsOut)
@@ -461,6 +528,38 @@ def _ep1_calibration_out(snapshot: Ep1CalibrationSnapshot) -> Ep1CalibrationOut:
         port=snapshot.port,
         readings_refreshed=snapshot.readings_refreshed,
         temperature=_ep1_offset_field_out(snapshot.offsets[Ep1CalibrationOffsetKind.TEMPERATURE]),
+    )
+
+
+def _ep1_occupancy_tuning_field_out(field: Ep1OccupancyTuningField) -> Ep1OccupancyTuningFieldOut:
+    return Ep1OccupancyTuningFieldOut(
+        available=field.available,
+        kind=field.kind,
+        max_value=field.max_value,
+        min_value=field.min_value,
+        step=field.step,
+        unit=field.unit,
+        value=field.value,
+    )
+
+
+def _ep1_occupancy_tuning_out(snapshot: Ep1OccupancyTuningSnapshot) -> Ep1OccupancyTuningOut:
+    return Ep1OccupancyTuningOut(
+        device_id=snapshot.device_id,
+        display_label=snapshot.display_label,
+        display_name=snapshot.display_name,
+        distance_applied=snapshot.distance_applied,
+        host=snapshot.host,
+        knobs_confirmed=snapshot.knobs_confirmed,
+        max_distance=_ep1_occupancy_tuning_field_out(snapshot.knobs[Ep1OccupancyTuningKind.MAX_DISTANCE]),
+        min_distance=_ep1_occupancy_tuning_field_out(snapshot.knobs[Ep1OccupancyTuningKind.MIN_DISTANCE]),
+        off_latency=_ep1_occupancy_tuning_field_out(snapshot.knobs[Ep1OccupancyTuningKind.OFF_LATENCY]),
+        on_latency=_ep1_occupancy_tuning_field_out(snapshot.knobs[Ep1OccupancyTuningKind.ON_LATENCY]),
+        port=snapshot.port,
+        sensitivity_applied=snapshot.sensitivity_applied,
+        sustain_sensitivity=_ep1_occupancy_tuning_field_out(snapshot.knobs[Ep1OccupancyTuningKind.SUSTAIN_SENSITIVITY]),
+        trigger_distance=_ep1_occupancy_tuning_field_out(snapshot.knobs[Ep1OccupancyTuningKind.TRIGGER_DISTANCE]),
+        trigger_sensitivity=_ep1_occupancy_tuning_field_out(snapshot.knobs[Ep1OccupancyTuningKind.TRIGGER_SENSITIVITY]),
     )
 
 

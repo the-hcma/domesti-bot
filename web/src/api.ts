@@ -53,6 +53,8 @@ import type {
   Ep1NoisePreSharedKeySetOut,
   Ep1NoisePreSharedKeySettingsOut,
   Ep1NoisePreSharedKeyTestIn,
+  Ep1OccupancyTuningOut,
+  Ep1OccupancyTuningSetIn,
   TailwindTokenSetOut,
   TailwindTokenSettingsOut,
   TailwindTokenTestIn,
@@ -369,6 +371,12 @@ export const api = {
   fetchEp1NoisePskSettings(): Promise<Ep1NoisePreSharedKeySettingsOut> {
     return call<Ep1NoisePreSharedKeySettingsOut>("GET", "/v1/settings/ep1-noise-psk");
   },
+  fetchEp1OccupancyTuning(deviceId: string): Promise<Ep1OccupancyTuningOut> {
+    return call<Ep1OccupancyTuningOut>(
+      "GET",
+      `/v1/settings/ep1/devices/${encodeURIComponent(deviceId)}/occupancy-tuning`,
+    );
+  },
   fetchTailwindTokenSettings(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("GET", "/v1/settings/tailwind-token");
   },
@@ -434,6 +442,16 @@ export const api = {
     return call<Ep1NoisePreSharedKeySetOut>("PUT", "/v1/settings/ep1-noise-psk", {
       noise_psk: noisePsk,
     });
+  },
+  putEp1OccupancyTuning(
+    deviceId: string,
+    body: Ep1OccupancyTuningSetIn,
+  ): Promise<Ep1OccupancyTuningOut> {
+    return call<Ep1OccupancyTuningOut>(
+      "PUT",
+      `/v1/settings/ep1/devices/${encodeURIComponent(deviceId)}/occupancy-tuning`,
+      body,
+    );
   },
   putTailwindToken(token: string): Promise<TailwindTokenSetOut> {
     return call<TailwindTokenSetOut>("PUT", "/v1/settings/tailwind-token", { token });
