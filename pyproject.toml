@@ -53,7 +53,7 @@ dependencies = [
     "charset-normalizer>=3.4.9",
     "click>=8.4.2",
     "croniter>=6.2.4",
-    "cryptography>=49.0.0",
+    "cryptography>=50.0.0",
     "fastapi>=0.139.2",
     "gotailwind[cli]",
     "greenlet>=3.5.4",
