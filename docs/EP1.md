@@ -42,7 +42,9 @@ red after power-on — that means “ready for USB setup,” not “join my SSID
 2. Select:
    - **Hardware revision** — from the sticker (Rev 1.6 / 1.5 / 1.3–1.4)
    - **mmWave sensor** — SEN0609 (~after Mar 2024) or SEN0395 (earlier)
-   - **Bluetooth proxy** — prefer **No** (fewer Wi‑Fi issues)
+   - **Bluetooth proxy** — select **Yes** only for BLE work such as
+     [#526](https://github.com/the-hcma/domesti-bot/issues/526); otherwise
+     prefer **No** (fewer Wi‑Fi issues)
    - **CO2 module** — only if installed
    - **Firmware channel** — **Stable**
    - **Platform** — **Homey** is the recommended path for domesti-bot
@@ -173,6 +175,48 @@ factor, factory-reset mmWave, …) stay unused by tiles / header / Settings v1.
 Factory-reset mmWave remains available via ESPHome / Home Assistant if a module
 is stuck.
 
+## BLE phone proximity
+
+[#526](https://github.com/the-hcma/domesti-bot/issues/526) is evaluating BLE
+phone proximity separately from the completed occupancy / climate work in
+[#519](https://github.com/the-hcma/domesti-bot/issues/519).
+
+Two firmware/API paths are possible:
+
+- **Raw advertisements (Path A)** — a BLE-enabled EP1 can expose
+  `subscribe_bluetooth_le_raw_advertisements` through the ESPHome native API.
+  domesti-bot can derive its own trusted-phone signal from address, RSSI, and
+  advertisement data without Home Assistant.
+- **Firmware entities** — custom ESPHome YAML could instead expose stable
+  `ble_presence` / `ble_rssi` / phone-distance entities. The tested Homey
+  stock image did not create those phone-proximity entities.
+
+Both paths require an EP1 image flashed with **Bluetooth proxy enabled**. A
+Homey image without that component cannot supply BLE data; reflash the
+BLE-enabled variant before attempting product integration. Do not enable or
+change the proxy configuration from a diagnostic probe.
+
+### Live native-API spike (2026-08-05)
+
+The plaintext Homey EP1 at `192.168.86.214:6053` (`28:05:a5:28:c8:48`) accepted
+an unauthenticated native-API connection. `list_entities_services` returned 41
+entities, including the `bluetooth_proxy` select, but no `ble_presence`,
+`ble_rssi`, or phone-distance entity. A 20-second raw-advertisement
+subscription succeeded without Home Assistant connected, but delivered **zero**
+advertisement records, so there are no address/RSSI/address-type/data samples
+to report.
+
+This proves that the current image advertises a Bluetooth Proxy control and
+accepts the raw BLE RPC; it does **not** prove that its scanner is enabled or
+that it can receive advertisements. Treat the current result as “BLE data
+unavailable pending firmware/proxy verification,” rather than proof that the
+hardware is No-BLE. Re-run the non-mutating maintainer probe after flashing or
+enabling a known BLE-capable image:
+
+```bash
+uv run scripts/internal/probe-ep1-ble --duration 30
+```
+
 ## Troubleshooting
 
 | Symptom | Check |
@@ -181,6 +225,7 @@ is stuck.
 | Connect fails with encryption errors | Homey should be plaintext — clear any stored PSK. Encrypted YAML needs the matching key. |
 | Header empty | No EP1 in UI state yet (discovery/connect failed), or zero devices after MAC filter. |
 | Blinking red, no Wi‑Fi SSID | Expected — use the USB flasher / ESPHome Web Wi‑Fi step, not a soft-AP. |
+| BLE probe accepts the RPC but prints zero advertisements | Confirm the firmware was flashed with Bluetooth proxy enabled and that its scanner/proxy is enabled; then rerun `uv run scripts/internal/probe-ep1-ble --duration 30`. |
 | IP changed after DHCP | Cache updates on successful reconnect; mDNS rediscover (`discover-ep1` / `refresh-discovery`) if stuck. |
 | Occupied when the room is empty | Not a UI bug — occupancy mirrors the ESPHome binary. Checklist: (1) placement (fans, HVAC, curtains, plants, vibrating mounts, mirrors/glass, motion through thin walls); (2) quality USB supply (≥1A); (3) lower **max distance** to the room size; (4) lower trigger/sustain sensitivity; (5) raise on-latency slightly; (6) power-cycle / factory-reset mmWave via ESPHome if still stuck. Vendor: [How to Tune Your EP1 Sensor](https://docs.everythingsmart.io/s/products/doc/how-to-tune-your-ep1-sensor-eJwL48QXTH). Adjust knobs under Settings → EP1 → Occupancy tuning. |
 
