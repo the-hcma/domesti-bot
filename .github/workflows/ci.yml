@@ -21,6 +21,11 @@ on:
 # the PR commit and block merge even when pull_request CI passed. pull_request
 # actions are also split (opened/synchronize vs edited) so review-bot description
 # patches do not cancel an in-flight test run for the same commit.
+# Cancel in-progress reruns for the same trigger only. push and pull_request must
+# not share a group: cancel-in-progress would leave CANCELLED required checks on
+# the PR commit and block merge even when pull_request CI passed. pull_request
+# actions are also split (opened/synchronize vs edited) so review-bot description
+# patches do not cancel an in-flight test run for the same commit.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.event.action || github.event_name }}
   cancel-in-progress: true
