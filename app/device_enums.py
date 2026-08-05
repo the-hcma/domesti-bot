@@ -91,6 +91,13 @@ class DeviceIdResolution(StrEnum):
 EP1_DISPLAY_NAME = "Everything Presence One"
 
 
+class Ep1BluetoothProxyState(StrEnum):
+    """ESPHome ``bluetooth_proxy`` select options (wire values match firmware)."""
+
+    DISABLED = "Disabled"
+    ENABLED = "Enabled"
+
+
 class Ep1CalibrationOffsetKind(StrEnum):
     """ESPHome number offsets exposed under Settings → EP1 calibration."""
 

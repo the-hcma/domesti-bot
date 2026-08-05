@@ -738,13 +738,22 @@
     .vizio-pairing-section { gap: 6px; padding: 10px 12px; }
     .vizio-pairing-section .settings-dialog-field { flex: 0 0 auto; }
     .ep1-settings-form { gap: 10px; }
+    .ep1-settings-form > .settings-dialog-field,
     .ep1-settings-form > .settings-dialog-fieldset { flex: 0 0 auto; }
     .ep1-psk-section,
+    .ep1-ble-section,
     .ep1-calibration-section { gap: 6px; padding: 10px 12px; }
     .ep1-psk-section .settings-dialog-field,
+    .ep1-ble-section .settings-dialog-field,
     .ep1-calibration-section .settings-dialog-field { flex: 0 0 auto; }
     .ep1-psk-section .settings-dialog-lead,
+    .ep1-ble-section .settings-dialog-lead,
     .ep1-calibration-section .settings-dialog-lead { font-size: 13px; line-height: 1.35; }
+    .ep1-ble-results { margin: 0; padding-left: 1.25rem; font-size: 13px;
+      max-height: 10rem; overflow: auto; }
+    .ep1-ble-results li { margin: 0.15rem 0; }
+    .ep1-ble-known-beacon { font-weight: 600; }
+    .ep1-ble-status { margin: 0; }
     .ep1-calibration-offsets { display: flex; flex-direction: column; gap: 4px; }
     .ep1-offset-field { gap: 2px; margin: 0; }
     .ep1-offset-field-controls { display: flex; align-items: center; gap: 8px; }
