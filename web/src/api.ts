@@ -47,6 +47,10 @@ import type {
   KasaCredentialsTestIn,
   MyTracksCredentialsTestIn,
   SettingsCredentialsTestOut,
+  Ep1BluetoothProxyOut,
+  Ep1BluetoothProxySetIn,
+  Ep1BluetoothProxyTestIn,
+  Ep1BluetoothProxyTestOut,
   Ep1CalibrationOut,
   Ep1CalibrationSetIn,
   Ep1DevicesSettingsOut,
@@ -359,6 +363,12 @@ export const api = {
   fetchKasaCredentialsSettings(): Promise<KasaCredentialsSettingsOut> {
     return call<KasaCredentialsSettingsOut>("GET", "/v1/settings/kasa-credentials");
   },
+  fetchEp1BluetoothProxy(deviceId: string): Promise<Ep1BluetoothProxyOut> {
+    return call<Ep1BluetoothProxyOut>(
+      "GET",
+      `/v1/settings/ep1/devices/${encodeURIComponent(deviceId)}/bluetooth-proxy`,
+    );
+  },
   fetchEp1Calibration(deviceId: string): Promise<Ep1CalibrationOut> {
     return call<Ep1CalibrationOut>(
       "GET",
@@ -427,6 +437,16 @@ export const api = {
       username,
       password,
     });
+  },
+  putEp1BluetoothProxy(
+    deviceId: string,
+    body: Ep1BluetoothProxySetIn,
+  ): Promise<Ep1BluetoothProxyOut> {
+    return call<Ep1BluetoothProxyOut>(
+      "PUT",
+      `/v1/settings/ep1/devices/${encodeURIComponent(deviceId)}/bluetooth-proxy`,
+      body,
+    );
   },
   putEp1Calibration(
     deviceId: string,
@@ -499,6 +519,16 @@ export const api = {
     return call<SettingsCredentialsTestOut>(
       "POST",
       "/v1/settings/my-tracks/test",
+      input,
+    );
+  },
+  testEp1BluetoothProxy(
+    deviceId: string,
+    input: Ep1BluetoothProxyTestIn = {},
+  ): Promise<Ep1BluetoothProxyTestOut> {
+    return call<Ep1BluetoothProxyTestOut>(
+      "POST",
+      `/v1/settings/ep1/devices/${encodeURIComponent(deviceId)}/bluetooth-proxy/test`,
       input,
     );
   },

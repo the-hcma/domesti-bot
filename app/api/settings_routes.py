@@ -10,6 +10,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app import device_discovery_store
 from app.api.schemas import (
+    Ep1BleAdvertisementSampleOut,
+    Ep1BluetoothProxyOut,
+    Ep1BluetoothProxySetIn,
+    Ep1BluetoothProxyTestIn,
+    Ep1BluetoothProxyTestOut,
     Ep1CalibrationOffsetFieldOut,
     Ep1CalibrationOut,
     Ep1CalibrationSetIn,
@@ -51,6 +56,18 @@ from app.db.secrets import (
 )
 from app.device_enums import Ep1CalibrationOffsetKind, Ep1OccupancyTuningKind
 from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _parse_ep1_host_specs, _Theme
+from app.ep1_bluetooth_proxy import (
+    DEFAULT_BLE_LISTEN_DURATION_S,
+    Ep1BleAdvertisementSample,
+    Ep1BluetoothProxyError,
+    Ep1BluetoothProxyNotFoundError,
+    Ep1BluetoothProxySnapshot,
+    Ep1BluetoothProxyTestResult,
+    Ep1BluetoothProxyValidationError,
+    probe_ep1_bluetooth_proxy,
+    read_ep1_bluetooth_proxy,
+    set_ep1_bluetooth_proxy,
+)
 from app.ep1_calibration import (
     Ep1CalibrationError,
     Ep1CalibrationNotFoundError,
@@ -206,6 +223,85 @@ async def get_ep1_devices_settings(request: Request) -> Ep1DevicesSettingsOut:
         for row in list_ep1_settings_targets(cache_path=cache_path, ep1_mgr=ep1_mgr)
     ]
     return Ep1DevicesSettingsOut(devices=devices)
+
+
+@router.get(
+    "/ep1/devices/{device_id}/bluetooth-proxy",
+    response_model=Ep1BluetoothProxyOut,
+)
+async def get_ep1_device_bluetooth_proxy(device_id: str, request: Request) -> Ep1BluetoothProxyOut:
+    """Read the ``bluetooth_proxy`` select state for one EP1."""
+    del request
+    try:
+        snapshot = await read_ep1_bluetooth_proxy(
+            device_id=device_id,
+            cache_path=runtime.discovery_cache_path(),
+            cli_noise_psk=_cli_ep1_noise_psk(),
+            ep1_mgr=_live_ep1_mgr(),
+        )
+    except Ep1BluetoothProxyNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Ep1BluetoothProxyError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _ep1_bluetooth_proxy_out(snapshot)
+
+
+@router.put(
+    "/ep1/devices/{device_id}/bluetooth-proxy",
+    response_model=Ep1BluetoothProxyOut,
+)
+async def put_ep1_device_bluetooth_proxy(
+    device_id: str,
+    body: Ep1BluetoothProxySetIn,
+    request: Request,
+) -> Ep1BluetoothProxyOut:
+    """Enable or disable the EP1 ``bluetooth_proxy`` select entity."""
+    del request
+    try:
+        snapshot = await set_ep1_bluetooth_proxy(
+            device_id=device_id,
+            enabled=body.enabled,
+            cache_path=runtime.discovery_cache_path(),
+            cli_noise_psk=_cli_ep1_noise_psk(),
+            ep1_mgr=_live_ep1_mgr(),
+        )
+    except Ep1BluetoothProxyNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Ep1BluetoothProxyValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Ep1BluetoothProxyError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _ep1_bluetooth_proxy_out(snapshot)
+
+
+@router.post(
+    "/ep1/devices/{device_id}/bluetooth-proxy/test",
+    response_model=Ep1BluetoothProxyTestOut,
+)
+async def post_ep1_device_bluetooth_proxy_test(
+    device_id: str,
+    body: Ep1BluetoothProxyTestIn,
+    request: Request,
+) -> Ep1BluetoothProxyTestOut:
+    """Enable ``bluetooth_proxy`` if needed and listen for BLE advertisements."""
+    del request
+    duration_s = body.duration_s if body.duration_s is not None else DEFAULT_BLE_LISTEN_DURATION_S
+    try:
+        result = await probe_ep1_bluetooth_proxy(
+            device_id=device_id,
+            duration_s=duration_s,
+            enable_if_needed=body.enable_if_needed,
+            cache_path=runtime.discovery_cache_path(),
+            cli_noise_psk=_cli_ep1_noise_psk(),
+            ep1_mgr=_live_ep1_mgr(),
+        )
+    except Ep1BluetoothProxyNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except Ep1BluetoothProxyValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except Ep1BluetoothProxyError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _ep1_bluetooth_proxy_test_out(result)
 
 
 @router.get(
@@ -514,6 +610,40 @@ def _cli_tailwind_token() -> str | None:
         return None
     raw = getattr(args, "tailwind_token", None)
     return str(raw) if raw else None
+
+
+def _ep1_ble_advertisement_sample_out(sample: Ep1BleAdvertisementSample) -> Ep1BleAdvertisementSampleOut:
+    return Ep1BleAdvertisementSampleOut(
+        address=sample.address,
+        address_type=sample.address_type,
+        data_length=sample.data_length,
+        known_test_beacon_label=sample.known_test_beacon_label,
+        rssi=sample.rssi,
+    )
+
+
+def _ep1_bluetooth_proxy_out(snapshot: Ep1BluetoothProxySnapshot) -> Ep1BluetoothProxyOut:
+    return Ep1BluetoothProxyOut(
+        available=snapshot.available,
+        device_id=snapshot.device_id,
+        display_label=snapshot.display_label,
+        display_name=snapshot.display_name,
+        host=snapshot.host,
+        options=list(snapshot.options),
+        port=snapshot.port,
+        state=snapshot.state,
+    )
+
+
+def _ep1_bluetooth_proxy_test_out(result: Ep1BluetoothProxyTestResult) -> Ep1BluetoothProxyTestOut:
+    return Ep1BluetoothProxyTestOut(
+        detail=result.detail,
+        devices=[_ep1_ble_advertisement_sample_out(sample) for sample in result.samples],
+        duration_s=result.duration_s,
+        ok=result.ok,
+        proxy_state=result.proxy_state,
+        proxy_was_enabled=result.proxy_was_enabled,
+    )
 
 
 def _ep1_calibration_out(snapshot: Ep1CalibrationSnapshot) -> Ep1CalibrationOut:

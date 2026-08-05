@@ -76,6 +76,14 @@ export type DiscoveryStatus =
   (typeof DiscoveryStatus)[keyof typeof DiscoveryStatus];
 
 /** EP1 Settings calibration offset kind. */
+/** ESPHome ``bluetooth_proxy`` select options (wire values match firmware). */
+export const Ep1BluetoothProxyState = {
+  Disabled: "Disabled",
+  Enabled: "Enabled",
+} as const;
+export type Ep1BluetoothProxyState =
+  (typeof Ep1BluetoothProxyState)[keyof typeof Ep1BluetoothProxyState];
+
 export const Ep1CalibrationOffsetKind = {
   Humidity: "humidity",
   Illuminance: "illuminance",

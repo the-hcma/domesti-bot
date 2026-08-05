@@ -124,12 +124,18 @@ Optional Noise PSK (encrypted firmware only):
 | CLI | `--ep1-noise-psk …` |
 | UI | ☰ → **Settings** → **EP1** |
 
-### Settings Test, calibration, and occupancy tuning
+### Settings Test, calibration, occupancy, and Bluetooth proxy
 
-☰ → **Settings** → **EP1** → **Target device** (shared dropdown for Test, offsets, and occupancy).
+☰ → **Settings** → **EP1** → **Target device** (shared dropdown for Test, BLE,
+offsets, and occupancy).
 
 - Homey plaintext: leave PSK empty; select a target device and tap **Test**.
 - Encrypted firmware: enter the Noise PSK (and select a target).
+- **Bluetooth proxy** — enable/disable the on-device `bluetooth_proxy` select
+  (`Disabled` / `Enabled`). **Enable and Test** turns the proxy on if needed,
+  listens ~20s for raw BLE advertisements, and lists MAC + RSSI (API-key
+  protected Settings). Empty results usually mean the proxy is on but the
+  scanner still delivers no ads ([#590](https://github.com/the-hcma/domesti-bot/issues/590)).
 - **Humidity / illuminance / temperature offsets** load for the selected target;
   **Apply offsets** writes changed values to that EP1 only (ESPHome `number`
   entities; persisted on-device).

@@ -2,12 +2,15 @@
 
 import { api, HttpError } from "./api.js";
 import {
+  Ep1BluetoothProxyState,
   Ep1CalibrationOffsetKind,
   Ep1OccupancyTuningKind,
 } from "./closed-sets.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
 import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type {
+  Ep1BleAdvertisementSampleOut,
+  Ep1BluetoothProxyOut,
   Ep1CalibrationOffsetFieldOut,
   Ep1CalibrationOut,
   Ep1DeviceSettingsOut,
@@ -24,6 +27,17 @@ const EP1_TUNE_DOCS_HREF =
 
 export const EP1_SETTINGS_APPLY_OCCUPANCY_LABEL = "Apply occupancy tuning";
 export const EP1_SETTINGS_APPLY_OFFSETS_LABEL = "Apply offsets";
+export const EP1_SETTINGS_BLE_ENABLE_AND_TEST_LABEL = "Enable and Test";
+export const EP1_SETTINGS_BLE_ENABLE_AND_TEST_TOOLTIP =
+  "Turns Bluetooth Proxy on if needed, listens for nearby BLE advertisements (~20s), and lists devices heard. Does not change live managers beyond the on-device proxy select.";
+export const EP1_SETTINGS_BLE_LEGEND = "Bluetooth proxy";
+export const EP1_SETTINGS_BLE_NO_DEVICES =
+  "No BLE advertisements received. Confirm a beacon is transmitting near the EP1 (see #590).";
+export const EP1_SETTINGS_BLE_STATE_UNAVAILABLE =
+  "This EP1 firmware does not expose a bluetooth_proxy select.";
+export const EP1_SETTINGS_BLE_STATE_UNKNOWN =
+  "Could not read bluetooth_proxy state from this EP1. Retry or check the connection.";
+export const EP1_SETTINGS_BLE_TOGGLE_LABEL = "Bluetooth Proxy enabled";
 export const EP1_SETTINGS_CALIBRATION_LEGEND = "Calibration offsets";
 export const EP1_SETTINGS_NO_DEVICES =
   "No EP1 devices discovered yet. Run discovery (or set EP1_HOSTS), then reopen Settings.";
@@ -63,6 +77,13 @@ export const EP1_SETTINGS_TARGET_DEVICE_LABEL = "Target device";
 export const EP1_SETTINGS_TEST_TOOLTIP =
   "Probes the selected EP1 over the LAN with the PSK in the form (or the stored key / plaintext Homey). Does not change live discovery or device state.";
 
+function appendBleIntro(parent: HTMLElement): void {
+  const intro = document.createElement("p");
+  intro.className = "settings-dialog-lead";
+  intro.textContent =
+    "Stock EP1 firmware exposes a Bluetooth Proxy select (Disabled / Enabled). Enable it so the sensor can stream nearby BLE advertisements for proximity work. Enable and Test listens briefly and lists MAC + RSSI.";
+  parent.append(intro);
+}
 function appendCalibrationIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
   intro.className = "settings-dialog-lead";
@@ -548,6 +569,54 @@ export async function mountEp1SettingsPanel(
 
   const deviceTarget = createDeviceSelect("device_id");
 
+  const bleSection = document.createElement("fieldset");
+  bleSection.className = "settings-dialog-fieldset ep1-ble-section";
+  const bleLegend = document.createElement("legend");
+  bleLegend.textContent = EP1_SETTINGS_BLE_LEGEND;
+  bleSection.append(bleLegend);
+  appendBleIntro(bleSection);
+
+  const bleUnavailable = document.createElement("p");
+  bleUnavailable.className = "settings-dialog-lead";
+  bleUnavailable.textContent = EP1_SETTINGS_BLE_STATE_UNAVAILABLE;
+  bleUnavailable.hidden = true;
+
+  const bleToggleLabel = document.createElement("label");
+  bleToggleLabel.className = "settings-dialog-checkbox";
+  const bleToggle = document.createElement("input");
+  bleToggle.type = "checkbox";
+  bleToggle.name = "bluetooth_proxy_enabled";
+  bleToggle.disabled = true;
+  const bleToggleText = document.createElement("span");
+  bleToggleText.textContent = EP1_SETTINGS_BLE_TOGGLE_LABEL;
+  bleToggleLabel.append(bleToggle, bleToggleText);
+
+  const bleActions = document.createElement("div");
+  bleActions.className = "settings-dialog-actions";
+  const bleEnableTestBtn = document.createElement("button");
+  bleEnableTestBtn.type = "button";
+  bleEnableTestBtn.className = "btn";
+  bleEnableTestBtn.textContent = EP1_SETTINGS_BLE_ENABLE_AND_TEST_LABEL;
+  bleEnableTestBtn.title = EP1_SETTINGS_BLE_ENABLE_AND_TEST_TOOLTIP;
+  bleEnableTestBtn.disabled = true;
+  bleActions.append(bleEnableTestBtn);
+
+  const bleStatus = document.createElement("p");
+  bleStatus.className = "settings-dialog-lead ep1-ble-status";
+  bleStatus.hidden = true;
+
+  const bleResults = document.createElement("ul");
+  bleResults.className = "ep1-ble-results";
+  bleResults.hidden = true;
+
+  bleSection.append(
+    bleUnavailable,
+    bleToggleLabel,
+    bleActions,
+    bleStatus,
+    bleResults,
+  );
+
   const pskSection = document.createElement("fieldset");
   pskSection.className = "settings-dialog-fieldset ep1-psk-section";
   const pskLegend = document.createElement("legend");
@@ -701,6 +770,7 @@ export async function mountEp1SettingsPanel(
     status,
     deviceTarget.label,
     deviceTarget.emptyHint,
+    bleSection,
     pskSection,
     calibrationSection,
     occupancySection,
@@ -711,6 +781,72 @@ export async function mountEp1SettingsPanel(
   let deviceLoadGeneration = 0;
   let deviceLoading = false;
   let pskTestGeneration = 0;
+  let bleProxy: Ep1BluetoothProxyOut | null = null;
+  let bleBusy = false;
+  let bleToggleProgrammatic = false;
+
+  const renderBleDevices = (
+    rows: Ep1BleAdvertisementSampleOut[],
+    detail: string | null,
+  ): void => {
+    bleResults.replaceChildren();
+    if (detail) {
+      bleStatus.hidden = false;
+      bleStatus.textContent = detail;
+    } else {
+      bleStatus.hidden = true;
+      bleStatus.textContent = "";
+    }
+    if (rows.length === 0) {
+      bleResults.hidden = true;
+      return;
+    }
+    bleResults.hidden = false;
+    for (const row of rows) {
+      const item = document.createElement("li");
+      const rssi =
+        row.rssi == null ? "RSSI unknown" : `${String(row.rssi)} dBm`;
+      const dataLen =
+        row.data_length == null
+          ? ""
+          : ` · ${String(row.data_length)} byte payload`;
+      const known =
+        row.known_test_beacon_label == null || row.known_test_beacon_label === ""
+          ? ""
+          : ` (known test beacon: ${row.known_test_beacon_label})`;
+      if (known !== "") {
+        item.classList.add("ep1-ble-known-beacon");
+      }
+      item.textContent = `${row.address} — ${rssi}${dataLen}${known}`;
+      bleResults.append(item);
+    }
+  };
+
+  const applyBleProxy = (snap: Ep1BluetoothProxyOut | null): void => {
+    bleProxy = snap;
+    const entityPresent = snap?.available === true;
+    const stateKnown =
+      snap?.state === Ep1BluetoothProxyState.Enabled ||
+      snap?.state === Ep1BluetoothProxyState.Disabled;
+    const controlsReady = entityPresent && stateKnown;
+    if (!entityPresent && snap != null) {
+      bleUnavailable.textContent = EP1_SETTINGS_BLE_STATE_UNAVAILABLE;
+    } else if (entityPresent && !stateKnown) {
+      bleUnavailable.textContent = EP1_SETTINGS_BLE_STATE_UNKNOWN;
+    } else {
+      bleUnavailable.textContent = EP1_SETTINGS_BLE_STATE_UNAVAILABLE;
+    }
+    bleUnavailable.hidden = controlsReady || snap == null;
+    bleToggle.disabled = !controlsReady || bleBusy || deviceLoading;
+    bleToggleProgrammatic = true;
+    bleToggle.checked = snap?.state === Ep1BluetoothProxyState.Enabled;
+    bleToggleProgrammatic = false;
+    bleEnableTestBtn.disabled =
+      !controlsReady ||
+      bleBusy ||
+      deviceLoading ||
+      selectedValue(deviceTarget.select) == null;
+  };
 
   const syncDeviceControls = (): void => {
     const hasDevices = devices.length > 0;
@@ -722,6 +858,7 @@ export async function mountEp1SettingsPanel(
       deviceLoading || !hasDevices || selected == null;
     applyOccupancyBtn.disabled =
       deviceLoading || !hasDevices || selected == null;
+    applyBleProxy(bleProxy);
   };
 
   const applyCalibration = (snap: Ep1CalibrationOut | null): void => {
@@ -746,6 +883,8 @@ export async function mountEp1SettingsPanel(
     deviceLoading = true;
     applyCalibration(null);
     applyOccupancy(null);
+    applyBleProxy(null);
+    renderBleDevices([], null);
     syncDeviceControls();
     if (deviceId == null) {
       if (generation === deviceLoadGeneration) {
@@ -755,10 +894,12 @@ export async function mountEp1SettingsPanel(
       return;
     }
     try {
-      const [calibrationResult, occupancyResult] = await Promise.allSettled([
-        api.fetchEp1Calibration(deviceId),
-        api.fetchEp1OccupancyTuning(deviceId),
-      ]);
+      const [calibrationResult, occupancyResult, bleResult] =
+        await Promise.allSettled([
+          api.fetchEp1Calibration(deviceId),
+          api.fetchEp1OccupancyTuning(deviceId),
+          api.fetchEp1BluetoothProxy(deviceId),
+        ]);
       if (
         generation !== deviceLoadGeneration ||
         selectedValue(deviceTarget.select) !== deviceId
@@ -771,12 +912,15 @@ export async function mountEp1SettingsPanel(
       applyOccupancy(
         occupancyResult.status === "fulfilled" ? occupancyResult.value : null,
       );
+      applyBleProxy(bleResult.status === "fulfilled" ? bleResult.value : null);
       const failure =
         calibrationResult.status === "rejected"
           ? calibrationResult.reason
           : occupancyResult.status === "rejected"
             ? occupancyResult.reason
-            : null;
+            : bleResult.status === "rejected"
+              ? bleResult.reason
+              : null;
       if (failure == null) {
         status.hidden = true;
       } else {
@@ -838,6 +982,97 @@ export async function mountEp1SettingsPanel(
   deviceTarget.select.addEventListener("change", () => {
     pskTestGeneration += 1;
     void loadDevicePanels();
+  });
+
+  bleToggle.addEventListener("change", async () => {
+    if (bleToggleProgrammatic) {
+      return;
+    }
+    const deviceId = selectedValue(deviceTarget.select);
+    if (deviceId == null || bleProxy?.available !== true || bleProxy.state == null) {
+      bleToggleProgrammatic = true;
+      bleToggle.checked = false;
+      bleToggleProgrammatic = false;
+      return;
+    }
+    const enabled = bleToggle.checked;
+    bleBusy = true;
+    syncDeviceControls();
+    try {
+      const snap = await api.putEp1BluetoothProxy(deviceId, { enabled });
+      if (selectedValue(deviceTarget.select) !== deviceId) {
+        return;
+      }
+      applyBleProxy(snap);
+      showSuccess(
+        enabled
+          ? "Bluetooth Proxy enabled on the EP1."
+          : "Bluetooth Proxy disabled on the EP1.",
+      );
+    } catch (err) {
+      if (selectedValue(deviceTarget.select) !== deviceId) {
+        return;
+      }
+      bleToggleProgrammatic = true;
+      bleToggle.checked = !enabled;
+      bleToggleProgrammatic = false;
+      showError(err instanceof HttpError ? err.detail || err.message : String(err));
+    } finally {
+      bleBusy = false;
+      syncDeviceControls();
+    }
+  });
+
+  bleEnableTestBtn.addEventListener("click", async () => {
+    const deviceId = selectedValue(deviceTarget.select);
+    if (deviceId == null) {
+      showError(EP1_SETTINGS_NO_DEVICES);
+      return;
+    }
+    bleBusy = true;
+    bleEnableTestBtn.textContent = "Listening…";
+    renderBleDevices([], "Listening for BLE advertisements…");
+    syncDeviceControls();
+    try {
+      const result = await api.testEp1BluetoothProxy(deviceId, {
+        enable_if_needed: true,
+      });
+      if (selectedValue(deviceTarget.select) !== deviceId) {
+        return;
+      }
+      if (result.proxy_state != null) {
+        applyBleProxy({
+          available: true,
+          device_id: deviceId,
+          display_label: bleProxy?.display_label ?? deviceId,
+          display_name: bleProxy?.display_name ?? null,
+          host: bleProxy?.host ?? "",
+          options: bleProxy?.options ?? [
+            Ep1BluetoothProxyState.Disabled,
+            Ep1BluetoothProxyState.Enabled,
+          ],
+          port: bleProxy?.port ?? 6053,
+          state: result.proxy_state,
+        });
+      }
+      if (result.devices.length === 0) {
+        renderBleDevices([], result.detail || EP1_SETTINGS_BLE_NO_DEVICES);
+        showSuccess(result.detail || EP1_SETTINGS_BLE_NO_DEVICES);
+      } else {
+        renderBleDevices(result.devices, result.detail);
+        showSuccess(result.detail);
+      }
+    } catch (err) {
+      if (selectedValue(deviceTarget.select) !== deviceId) {
+        return;
+      }
+      renderBleDevices([], null);
+      showError(err instanceof HttpError ? err.detail || err.message : String(err));
+    } finally {
+      bleBusy = false;
+      bleEnableTestBtn.textContent = EP1_SETTINGS_BLE_ENABLE_AND_TEST_LABEL;
+      syncDeviceControls();
+    }
   });
 
   saveBtn.addEventListener("click", async () => {

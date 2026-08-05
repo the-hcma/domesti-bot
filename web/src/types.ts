@@ -7,6 +7,7 @@ import {
   RuleConditionType,
   type AstronomicalWindowBoundary,
   type DiscoveryStatus,
+  type Ep1BluetoothProxyState,
   type Ep1CalibrationOffsetKind,
   type Ep1NoisePreSharedKeySource,
   type Ep1OccupancyTuningKind,
@@ -191,6 +192,43 @@ export interface SettingsCredentialsTestOut {
   detail: string;
   ok: boolean;
   source?: SettingsCredentialsTestSource | null;
+}
+
+export interface Ep1BleAdvertisementSampleOut {
+  address: string;
+  address_type: number | string | null;
+  data_length: number | null;
+  known_test_beacon_label: string | null;
+  rssi: number | null;
+}
+
+export interface Ep1BluetoothProxyOut {
+  available: boolean;
+  device_id: string;
+  display_label: string;
+  display_name: string | null;
+  host: string;
+  options: string[];
+  port: number;
+  state: Ep1BluetoothProxyState | null;
+}
+
+export interface Ep1BluetoothProxySetIn {
+  enabled: boolean;
+}
+
+export interface Ep1BluetoothProxyTestIn {
+  duration_s?: number | null;
+  enable_if_needed?: boolean;
+}
+
+export interface Ep1BluetoothProxyTestOut {
+  detail: string;
+  devices: Ep1BleAdvertisementSampleOut[];
+  duration_s: number;
+  ok: boolean;
+  proxy_state: Ep1BluetoothProxyState | null;
+  proxy_was_enabled: boolean;
 }
 
 export interface Ep1CalibrationOffsetFieldOut {

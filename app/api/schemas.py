@@ -16,6 +16,7 @@ from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
+    Ep1BluetoothProxyState,
     Ep1CalibrationOffsetKind,
     Ep1OccupancyTuningKind,
     Ep1ReadingComparison,
@@ -531,6 +532,95 @@ class KasaCredentialsTestIn(BaseModel):
         default=None,
         max_length=256,
         description="Account email override; both username and password must be set to use form credentials.",
+    )
+
+
+class Ep1BleAdvertisementSampleOut(BaseModel):
+    """One BLE advertisement sample from an EP1 bluetooth proxy listen."""
+
+    address: str = Field(..., description="BLE device address (colon-separated hex).")
+    address_type: int | str | None = Field(
+        default=None,
+        description="Advertisement address type from ESPHome when present.",
+    )
+    data_length: int | None = Field(
+        default=None,
+        description="Advertisement payload length in bytes when known.",
+    )
+    known_test_beacon_label: str | None = Field(
+        default=None,
+        description="Operator label when ``address`` matches a known test beacon MAC.",
+    )
+    rssi: int | None = Field(default=None, description="Received signal strength (dBm) when known.")
+
+
+class Ep1BluetoothProxyOut(BaseModel):
+    """``bluetooth_proxy`` select snapshot for one EP1 Settings target."""
+
+    available: bool = Field(
+        ...,
+        description="False when the firmware does not expose the ``bluetooth_proxy`` select.",
+    )
+    device_id: str = Field(..., description="Normalized MAC address.")
+    display_label: str = Field(
+        ...,
+        description="Human-visible ``preferred_label (mac)`` for the target device.",
+    )
+    display_name: str | None = Field(default=None, description="Preferred label without MAC.")
+    host: str = Field(..., description="ESPHome API host used for this snapshot.")
+    options: list[str] = Field(
+        default_factory=list,
+        description="Select options from firmware (typically ``Disabled`` / ``Enabled``).",
+    )
+    port: int = Field(..., description="ESPHome API port (default 6053).")
+    state: Ep1BluetoothProxyState | None = Field(
+        default=None,
+        description="Current ``bluetooth_proxy`` value when the select entity exists.",
+    )
+
+
+class Ep1BluetoothProxySetIn(BaseModel):
+    """Body for ``PUT /v1/settings/ep1/devices/{device_id}/bluetooth-proxy``."""
+
+    enabled: bool = Field(..., description="True to set ``Enabled``; false for ``Disabled``.")
+
+
+class Ep1BluetoothProxyTestIn(BaseModel):
+    """Body for ``POST /v1/settings/ep1/devices/{device_id}/bluetooth-proxy/test``."""
+
+    duration_s: float | None = Field(
+        default=None,
+        gt=0,
+        le=60,
+        allow_inf_nan=False,
+        description="Listen window in seconds; server default when omitted.",
+    )
+    enable_if_needed: bool = Field(
+        default=True,
+        description="When true, enable ``bluetooth_proxy`` before listening if currently Disabled.",
+    )
+
+
+class Ep1BluetoothProxyTestOut(BaseModel):
+    """Outcome of an EP1 bluetooth proxy Enable-and-Test listen."""
+
+    detail: str = Field(..., description="Human-readable probe summary.")
+    devices: list[Ep1BleAdvertisementSampleOut] = Field(
+        default_factory=list,
+        description="Unique BLE addresses heard during the listen window (strongest RSSI kept).",
+    )
+    duration_s: float = Field(..., description="Actual listen duration in seconds.")
+    ok: bool = Field(
+        ...,
+        description="True when the probe completed; false only on connection/entity failures (HTTP 502).",
+    )
+    proxy_state: Ep1BluetoothProxyState | None = Field(
+        default=None,
+        description="``bluetooth_proxy`` value after any enable step.",
+    )
+    proxy_was_enabled: bool = Field(
+        ...,
+        description="True when ``bluetooth_proxy`` was already Enabled before the test started.",
     )
 
 
