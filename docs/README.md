@@ -4,7 +4,7 @@ Operator and contributor guides for this repository. For day-to-day device contr
 
 | Document | Audience | Contents |
 | --- | --- | --- |
-| [EP1.md](EP1.md) | Operators | Everything Presence One USB bring-up (no Home Assistant), Homey plaintext API, mDNS discovery, Settings / CLI |
+| [EP1.md](EP1.md) | Operators | Everything Presence One USB bring-up (no Home Assistant), Homey plaintext API, mDNS discovery, Settings / CLI, BLE phone TX notes |
 | [RULE_ENGINE_PLAN.md](RULE_ENGINE_PLAN.md) | Operators + contributors | File-backed automations, triggers, conditions, Phase 2 roadmap |
 | [MY_TRACKS_INTEGRATION_PLAN.md](MY_TRACKS_INTEGRATION_PLAN.md) | Operators | Pairing, webhooks, roster/geofence sync with [my-tracks](https://github.com/the-hcma/my-tracks) |
 | [PLAN.md](PLAN.md) | Contributors | Remaining UI/sync work (WebSocket push, etc.) |
