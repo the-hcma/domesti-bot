@@ -9,6 +9,7 @@ import {
   type DiscoveryStatus,
   type Ep1CalibrationOffsetKind,
   type Ep1NoisePreSharedKeySource,
+  type Ep1OccupancyTuningKind,
   type Ep1ReadingComparison,
   type Ep1ReadingMetric,
   type KasaCredentialsSource,
@@ -253,6 +254,44 @@ export interface Ep1NoisePreSharedKeyTestIn {
   device_id?: string | null;
   host?: string | null;
   noise_psk?: string | null;
+}
+
+export interface Ep1OccupancyTuningFieldOut {
+  available: boolean;
+  kind: Ep1OccupancyTuningKind;
+  max_value: number | null;
+  min_value: number | null;
+  step: number | null;
+  unit: string | null;
+  value: number | null;
+}
+
+export interface Ep1OccupancyTuningOut {
+  device_id: string;
+  display_label: string;
+  display_name: string | null;
+  distance_applied: boolean;
+  host: string;
+  knobs_confirmed: boolean;
+  max_distance: Ep1OccupancyTuningFieldOut;
+  min_distance: Ep1OccupancyTuningFieldOut;
+  off_latency: Ep1OccupancyTuningFieldOut;
+  on_latency: Ep1OccupancyTuningFieldOut;
+  port: number;
+  sensitivity_applied: boolean;
+  sustain_sensitivity: Ep1OccupancyTuningFieldOut;
+  trigger_distance: Ep1OccupancyTuningFieldOut;
+  trigger_sensitivity: Ep1OccupancyTuningFieldOut;
+}
+
+export interface Ep1OccupancyTuningSetIn {
+  max_distance?: number | null;
+  min_distance?: number | null;
+  off_latency?: number | null;
+  on_latency?: number | null;
+  sustain_sensitivity?: number | null;
+  trigger_distance?: number | null;
+  trigger_sensitivity?: number | null;
 }
 
 export interface TailwindTokenSettingsOut {

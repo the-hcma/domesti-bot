@@ -121,15 +121,27 @@ Optional Noise PSK (encrypted firmware only):
 | CLI | `--ep1-noise-psk …` |
 | UI | ☰ → **Settings** → **EP1** |
 
-### Settings Test and calibration
+### Settings Test, calibration, and occupancy tuning
 
-☰ → **Settings** → **EP1** → **Target device** (dropdown of discovered sensors).
+☰ → **Settings** → **EP1** → **Target device** (shared dropdown for Test, offsets, and occupancy).
 
 - Homey plaintext: leave PSK empty; select a target device and tap **Test**.
 - Encrypted firmware: enter the Noise PSK (and select a target).
 - **Humidity / illuminance / temperature offsets** load for the selected target;
-  **Apply offsets** writes changed values to that EP1 only (ESPHome ``number``
+  **Apply offsets** writes changed values to that EP1 only (ESPHome `number`
   entities; persisted on-device).
+- **Occupancy tuning** (SEN0609 mmWave): min/max distance, trigger distance,
+  trigger/sustain sensitivity, on/off latency. **Apply occupancy tuning** writes
+  changed numbers, then automatically presses firmware **Set Distance** (after
+  min/max distance changes) and **Set Sensitivity** (after sensitivity changes).
+  Latency and trigger distance apply via the number's own `set_action`.
+  SEN0395 exposes a subset (single sensitivity, latencies, and a single
+  `mmwave_distance` maximum that applies without Set Distance); missing knobs
+  show as unavailable.
+
+domesti-bot **mirrors** the combined `occupancy` binary for tiles and rules —
+it does not invent presence. False “occupied when empty” is almost always
+placement, power, or mmWave tuning (see Troubleshooting).
 
 ## Verify
 
@@ -145,13 +157,21 @@ domesti-bot maps ESPHome entities by `object_id` / name aliases:
 
 | Role | Typical `object_id` | Type |
 | --- | --- | --- |
-| Occupancy | `occupancy` | Binary sensor |
+| Occupancy | `occupancy` | Binary sensor (tiles / rules) |
 | Temperature | `temperature` / `temperature_sensor` | Sensor (°C) |
 | Humidity | `humidity` / `humidity_sensor` | Sensor (%) |
 | Illuminance | `illuminance` / `illuminance_sensor` | Sensor (lx) |
+| Temp / humidity / lux offsets | `temperature_offset`, `humidity_offset`, `illuminance_offset` | Number (Settings → Calibration) |
+| mmWave min / max distance | `mmwave_minimum_distance`, `mmwave_max_distance` | Number (Settings → Occupancy; needs Set Distance) |
+| mmWave trigger distance | `mmwave_trigger_distance` | Number (Settings → Occupancy) |
+| mmWave sustain / trigger sensitivity | `mmwave_sustain_sensitivity`, `mmwave_trigger_sensitivity` | Number (Settings → Occupancy; needs Set Sensitivity) |
+| mmWave on / off latency | `mmwave_on_latency`, `mmwave_off_latency` | Number (Settings → Occupancy) |
+| Set Distance / Set Sensitivity | `set_distance`, `set_sensitivity` | Button (pressed automatically after Apply) |
 
-Other EP1 entities (mmWave knobs, PIR, LEDs, firmware update, …) are ignored by
-the tile / header path today.
+Other EP1 entities (raw `mmwave` / `pir` binaries, LEDs, firmware update, threshold
+factor, factory-reset mmWave, …) stay unused by tiles / header / Settings v1.
+Factory-reset mmWave remains available via ESPHome / Home Assistant if a module
+is stuck.
 
 ## Troubleshooting
 
@@ -162,10 +182,13 @@ the tile / header path today.
 | Header empty | No EP1 in UI state yet (discovery/connect failed), or zero devices after MAC filter. |
 | Blinking red, no Wi‑Fi SSID | Expected — use the USB flasher / ESPHome Web Wi‑Fi step, not a soft-AP. |
 | IP changed after DHCP | Cache updates on successful reconnect; mDNS rediscover (`discover-ep1` / `refresh-discovery`) if stuck. |
+| Occupied when the room is empty | Not a UI bug — occupancy mirrors the ESPHome binary. Checklist: (1) placement (fans, HVAC, curtains, plants, vibrating mounts, mirrors/glass, motion through thin walls); (2) quality USB supply (≥1A); (3) lower **max distance** to the room size; (4) lower trigger/sustain sensitivity; (5) raise on-latency slightly; (6) power-cycle / factory-reset mmWave via ESPHome if still stuck. Vendor: [How to Tune Your EP1 Sensor](https://docs.everythingsmart.io/s/products/doc/how-to-tune-your-ep1-sensor-eJwL48QXTH). Adjust knobs under Settings → EP1 → Occupancy tuning. |
 
 ## Related
 
 - Root [README](../README.md) — feature list and env vars
 - [`automation-rules.json.example`](../automation-rules.json.example) — EP1 rule examples
 - Vendor docs: [EP1](https://docs.everythingsmart.io/s/products/doc/everything-presence-one-ep1-3R178yZSUP),
-  [USB flasher](https://docs.everythingsmart.io/flash/everything-presence-one.html)
+  [USB flasher](https://docs.everythingsmart.io/flash/everything-presence-one.html),
+  [Tune guide](https://docs.everythingsmart.io/s/products/doc/how-to-tune-your-ep1-sensor-eJwL48QXTH)
+- Tracking: [#582](https://github.com/the-hcma/domesti-bot/issues/582)

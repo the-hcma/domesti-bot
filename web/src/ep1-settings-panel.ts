@@ -1,7 +1,10 @@
-// Everything Presence One settings: Noise PSK + climate/light calibration.
+// Everything Presence One settings: Noise PSK + calibration + occupancy tuning.
 
 import { api, HttpError } from "./api.js";
-import { Ep1CalibrationOffsetKind } from "./closed-sets.js";
+import {
+  Ep1CalibrationOffsetKind,
+  Ep1OccupancyTuningKind,
+} from "./closed-sets.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
 import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type {
@@ -9,15 +12,24 @@ import type {
   Ep1CalibrationOut,
   Ep1DeviceSettingsOut,
   Ep1NoisePreSharedKeySettingsOut,
+  Ep1OccupancyTuningFieldOut,
+  Ep1OccupancyTuningOut,
+  Ep1OccupancyTuningSetIn,
 } from "./types.js";
 
 const EP1_DOCS_HREF =
   "https://docs.everythingsmart.io/s/products/doc/everything-presence-one-ep1-3R178yZSUP";
+const EP1_TUNE_DOCS_HREF =
+  "https://docs.everythingsmart.io/s/products/doc/how-to-tune-your-ep1-sensor-eJwL48QXTH";
 
+export const EP1_SETTINGS_APPLY_OCCUPANCY_LABEL = "Apply occupancy tuning";
 export const EP1_SETTINGS_APPLY_OFFSETS_LABEL = "Apply offsets";
 export const EP1_SETTINGS_CALIBRATION_LEGEND = "Calibration offsets";
 export const EP1_SETTINGS_NO_DEVICES =
   "No EP1 devices discovered yet. Run discovery (or set EP1_HOSTS), then reopen Settings.";
+export const EP1_SETTINGS_OCCUPANCY_APPLY_NOTE =
+  "Changing min/max distance presses firmware Set Distance; changing trigger/sustain sensitivity presses Set Sensitivity. Latency and trigger distance apply immediately.";
+export const EP1_SETTINGS_OCCUPANCY_LEGEND = "Occupancy tuning";
 export const EP1_SETTINGS_OFFSET_OUT_OF_RANGE = (
   kindLabel: string,
   min: number | null,
@@ -40,9 +52,24 @@ export const EP1_SETTINGS_PSK_OPTIONAL_HINT =
   "Optional for Homey / stock firmware (plaintext API). Required only when the device has ESPHome API encryption enabled.";
 export const EP1_SETTINGS_SAVE_REQUIRES_PSK =
   "Enter a Noise pre-shared key (PSK) to save. For plaintext Homey firmware, leave this blank and use Test (or Clear stored key).";
+export const EP1_SETTINGS_STEP_MISALIGNED = (
+  kindLabel: string,
+  step: number,
+  min: number,
+  value: number,
+): string =>
+  `${kindLabel}: use a value in steps of ${String(step)} from ${String(min)}. Got ${String(value)}.`;
 export const EP1_SETTINGS_TARGET_DEVICE_LABEL = "Target device";
 export const EP1_SETTINGS_TEST_TOOLTIP =
   "Probes the selected EP1 over the LAN with the PSK in the form (or the stored key / plaintext Homey). Does not change live discovery or device state.";
+
+function appendCalibrationIntro(parent: HTMLElement): void {
+  const intro = document.createElement("p");
+  intro.className = "settings-dialog-lead";
+  intro.textContent =
+    "Offsets are additive adjustments stored on the EP1 (not absolute targets). Stock firmware ranges: temperature −20…20 °C, humidity −50…50 %, illuminance −50…50 lx. Apply writes only the fields you change, then waits for the live reading to refresh.";
+  parent.append(intro);
+}
 
 function appendEp1NoisePskIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
@@ -69,11 +96,22 @@ function appendEp1NoisePskIntro(parent: HTMLElement): void {
   parent.append(hint);
 }
 
-function appendCalibrationIntro(parent: HTMLElement): void {
+function appendOccupancyIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
   intro.className = "settings-dialog-lead";
-  intro.textContent =
-    "Offsets are additive adjustments stored on the EP1 (not absolute targets). Stock firmware ranges: temperature −20…20 °C, humidity −50…50 %, illuminance −50…50 lx. Apply writes only the fields you change, then waits for the live reading to refresh.";
+  const link = document.createElement("a");
+  link.href = EP1_TUNE_DOCS_HREF;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = "vendor tune guide";
+  intro.append(
+    document.createTextNode(
+      "mmWave knobs for false-presence tuning (SEN0609). Domesti-bot mirrors the combined occupancy binary — it does not invent presence. See the ",
+    ),
+    link,
+    document.createTextNode(". "),
+    document.createTextNode(EP1_SETTINGS_OCCUPANCY_APPLY_NOTE),
+  );
   parent.append(intro);
 }
 
@@ -97,6 +135,161 @@ function createDeviceSelect(name: string): {
   emptyHint.hidden = true;
 
   return { emptyHint, label, select };
+}
+
+function createKnobField(options: {
+  kind: Ep1OccupancyTuningKind;
+  label: string;
+}): {
+  input: HTMLInputElement;
+  rangeHint: HTMLElement;
+  root: HTMLLabelElement;
+  applyField: (field: Ep1OccupancyTuningFieldOut | null) => void;
+  changedValue: () => number | null;
+  validateChanged: () => string | null;
+} {
+  const root = document.createElement("label");
+  root.className = "settings-dialog-field ep1-offset-field";
+  const labelText = document.createElement("span");
+  labelText.textContent = options.label;
+  const controls = document.createElement("div");
+  controls.className = "ep1-offset-field-controls";
+  const input = document.createElement("input");
+  input.type = "number";
+  input.name = options.kind;
+  input.autocomplete = "off";
+  controls.append(input);
+  const rangeHint = document.createElement("span");
+  rangeHint.className = "ep1-offset-range-hint";
+  rangeHint.hidden = true;
+  root.append(labelText, controls, rangeHint);
+
+  let baseline: number | null = null;
+  let maxValue: number | null = null;
+  let minValue: number | null = null;
+  let stepValue: number | null = null;
+
+  const applyField = (field: Ep1OccupancyTuningFieldOut | null): void => {
+    if (field == null || !field.available) {
+      input.disabled = true;
+      input.value = "";
+      baseline = null;
+      minValue = null;
+      maxValue = null;
+      stepValue = null;
+      input.removeAttribute("min");
+      input.removeAttribute("max");
+      input.removeAttribute("step");
+      rangeHint.hidden = true;
+      rangeHint.textContent = "";
+      return;
+    }
+    input.disabled = false;
+    minValue = field.min_value;
+    maxValue = field.max_value;
+    stepValue = field.step;
+    if (field.min_value != null) {
+      input.min = String(field.min_value);
+    } else {
+      input.removeAttribute("min");
+    }
+    if (field.max_value != null) {
+      input.max = String(field.max_value);
+    } else {
+      input.removeAttribute("max");
+    }
+    if (field.step != null) {
+      input.step = String(field.step);
+    } else {
+      input.removeAttribute("step");
+    }
+    baseline = field.value;
+    input.value = field.value == null ? "" : String(field.value);
+    if (field.min_value != null && field.max_value != null) {
+      const step =
+        field.step != null ? ` · step ${String(field.step)}` : "";
+      const unit = field.unit ? ` ${field.unit}` : "";
+      rangeHint.hidden = false;
+      rangeHint.textContent = `Range ${String(field.min_value)}…${String(field.max_value)}${unit}${step}`;
+    } else if (field.min_value != null) {
+      rangeHint.hidden = false;
+      rangeHint.textContent = `Min ${String(field.min_value)}${field.unit ? ` ${field.unit}` : ""}`;
+    } else if (field.max_value != null) {
+      rangeHint.hidden = false;
+      rangeHint.textContent = `Max ${String(field.max_value)}${field.unit ? ` ${field.unit}` : ""}`;
+    } else {
+      rangeHint.hidden = true;
+      rangeHint.textContent = "";
+    }
+  };
+
+  const changedValue = (): number | null => {
+    if (input.disabled) {
+      return null;
+    }
+    const raw = input.value.trim();
+    if (raw === "") {
+      return null;
+    }
+    const next = Number(raw);
+    if (!Number.isFinite(next)) {
+      return null;
+    }
+    if (baseline != null && next === baseline) {
+      return null;
+    }
+    return next;
+  };
+
+  const validateChanged = (): string | null => {
+    const next = changedValue();
+    if (next == null) {
+      return null;
+    }
+    if (minValue != null && next < minValue) {
+      return EP1_SETTINGS_OFFSET_OUT_OF_RANGE(
+        options.label,
+        minValue,
+        maxValue,
+        next,
+      );
+    }
+    if (maxValue != null && next > maxValue) {
+      return EP1_SETTINGS_OFFSET_OUT_OF_RANGE(
+        options.label,
+        minValue,
+        maxValue,
+        next,
+      );
+    }
+    if (
+      stepValue != null &&
+      stepValue > 0 &&
+      minValue != null &&
+      next !== minValue &&
+      next !== maxValue
+    ) {
+      const steps = (next - minValue) / stepValue;
+      if (Math.abs(steps - Math.round(steps)) > 1e-6) {
+        return EP1_SETTINGS_STEP_MISALIGNED(
+          options.label,
+          stepValue,
+          minValue,
+          next,
+        );
+      }
+    }
+    return null;
+  };
+
+  return {
+    applyField,
+    changedValue,
+    input,
+    rangeHint,
+    root,
+    validateChanged,
+  };
 }
 
 function createOffsetField(options: {
@@ -274,6 +467,23 @@ function fillDeviceSelect(
   }
 }
 
+function formatOccupancyAppliedMessage(snap: Ep1OccupancyTuningOut): string {
+  if (!snap.knobs_confirmed) {
+    return (
+      `Occupancy tuning was sent to ${snap.display_label}, but the device did not confirm ` +
+      `the new values yet. Re-check Settings in a moment.`
+    );
+  }
+  const parts = [`Occupancy tuning applied on ${snap.display_label}`];
+  if (snap.distance_applied) {
+    parts.push("Set Distance pressed");
+  }
+  if (snap.sensitivity_applied) {
+    parts.push("Set Sensitivity pressed");
+  }
+  return `${parts.join(" — ")}.`;
+}
+
 function formatOffsetsAppliedMessage(
   snap: Ep1CalibrationOut,
   body: {
@@ -336,6 +546,8 @@ export async function mountEp1SettingsPanel(
   status.className = "settings-dialog-status";
   status.hidden = true;
 
+  const deviceTarget = createDeviceSelect("device_id");
+
   const pskSection = document.createElement("fieldset");
   pskSection.className = "settings-dialog-fieldset ep1-psk-section";
   const pskLegend = document.createElement("legend");
@@ -363,7 +575,6 @@ export async function mountEp1SettingsPanel(
   setRevealed(false);
   label.append(labelText, secretRow.row);
 
-  const pskTarget = createDeviceSelect("psk_device_id");
   const pskActions = document.createElement("div");
   pskActions.className = "settings-dialog-actions";
   const testBtn = document.createElement("button");
@@ -381,12 +592,7 @@ export async function mountEp1SettingsPanel(
   saveBtn.className = "btn";
   saveBtn.textContent = "Save";
   pskActions.append(testBtn, clearBtn, saveBtn);
-  pskSection.append(
-    label,
-    pskTarget.label,
-    pskTarget.emptyHint,
-    pskActions,
-  );
+  pskSection.append(label, pskActions);
 
   const calibrationSection = document.createElement("fieldset");
   calibrationSection.className =
@@ -396,7 +602,6 @@ export async function mountEp1SettingsPanel(
   calibrationSection.append(calibrationLegend);
   appendCalibrationIntro(calibrationSection);
 
-  const calibrationTarget = createDeviceSelect("calibration_device_id");
   const humidityField = createOffsetField({
     kind: Ep1CalibrationOffsetKind.Humidity,
     label: "Humidity offset (%)",
@@ -424,36 +629,99 @@ export async function mountEp1SettingsPanel(
   applyOffsetsBtn.className = "btn";
   applyOffsetsBtn.textContent = EP1_SETTINGS_APPLY_OFFSETS_LABEL;
   calibrationActions.append(applyOffsetsBtn);
-  calibrationSection.append(
-    calibrationTarget.label,
-    calibrationTarget.emptyHint,
-    offsetsStack,
-    calibrationActions,
-  );
+  calibrationSection.append(offsetsStack, calibrationActions);
 
-  form.append(status, pskSection, calibrationSection);
+  const occupancySection = document.createElement("fieldset");
+  occupancySection.className =
+    "settings-dialog-fieldset ep1-calibration-section";
+  const occupancyLegend = document.createElement("legend");
+  occupancyLegend.textContent = EP1_SETTINGS_OCCUPANCY_LEGEND;
+  occupancySection.append(occupancyLegend);
+  appendOccupancyIntro(occupancySection);
+
+  const maxDistanceField = createKnobField({
+    kind: Ep1OccupancyTuningKind.MaxDistance,
+    label: "Max distance (m)",
+  });
+  const minDistanceField = createKnobField({
+    kind: Ep1OccupancyTuningKind.MinDistance,
+    label: "Min distance (m)",
+  });
+  const offLatencyField = createKnobField({
+    kind: Ep1OccupancyTuningKind.OffLatency,
+    label: "Off latency (s)",
+  });
+  const onLatencyField = createKnobField({
+    kind: Ep1OccupancyTuningKind.OnLatency,
+    label: "On latency (s)",
+  });
+  const sustainSensitivityField = createKnobField({
+    kind: Ep1OccupancyTuningKind.SustainSensitivity,
+    label: "Sustain sensitivity",
+  });
+  const triggerDistanceField = createKnobField({
+    kind: Ep1OccupancyTuningKind.TriggerDistance,
+    label: "Trigger distance (m)",
+  });
+  const triggerSensitivityField = createKnobField({
+    kind: Ep1OccupancyTuningKind.TriggerSensitivity,
+    label: "Trigger sensitivity",
+  });
+  const knobsStack = document.createElement("div");
+  knobsStack.className = "ep1-calibration-offsets";
+  knobsStack.append(
+    minDistanceField.root,
+    maxDistanceField.root,
+    triggerDistanceField.root,
+    triggerSensitivityField.root,
+    sustainSensitivityField.root,
+    onLatencyField.root,
+    offLatencyField.root,
+  );
+  const occupancyKnobFields = [
+    minDistanceField,
+    maxDistanceField,
+    triggerDistanceField,
+    triggerSensitivityField,
+    sustainSensitivityField,
+    onLatencyField,
+    offLatencyField,
+  ];
+
+  const occupancyActions = document.createElement("div");
+  occupancyActions.className = "settings-dialog-actions";
+  const applyOccupancyBtn = document.createElement("button");
+  applyOccupancyBtn.type = "button";
+  applyOccupancyBtn.className = "btn";
+  applyOccupancyBtn.textContent = EP1_SETTINGS_APPLY_OCCUPANCY_LABEL;
+  occupancyActions.append(applyOccupancyBtn);
+  occupancySection.append(knobsStack, occupancyActions);
+
+  form.append(
+    status,
+    deviceTarget.label,
+    deviceTarget.emptyHint,
+    pskSection,
+    calibrationSection,
+    occupancySection,
+  );
   container.append(form);
 
   let devices: Ep1DeviceSettingsOut[] = [];
-  let calibrationLoadGeneration = 0;
-  let calibrationLoading = false;
+  let deviceLoadGeneration = 0;
+  let deviceLoading = false;
   let pskTestGeneration = 0;
 
-  const syncPskTargetControls = (): void => {
+  const syncDeviceControls = (): void => {
     const hasDevices = devices.length > 0;
-    pskTarget.emptyHint.hidden = hasDevices;
-    pskTarget.select.disabled = !hasDevices;
-    testBtn.disabled = !hasDevices || selectedValue(pskTarget.select) == null;
-  };
-
-  const syncCalibrationTargetControls = (): void => {
-    const hasDevices = devices.length > 0;
-    calibrationTarget.emptyHint.hidden = hasDevices;
-    calibrationTarget.select.disabled = !hasDevices;
+    const selected = selectedValue(deviceTarget.select);
+    deviceTarget.emptyHint.hidden = hasDevices;
+    deviceTarget.select.disabled = !hasDevices;
+    testBtn.disabled = !hasDevices || selected == null;
     applyOffsetsBtn.disabled =
-      calibrationLoading ||
-      !hasDevices ||
-      selectedValue(calibrationTarget.select) == null;
+      deviceLoading || !hasDevices || selected == null;
+    applyOccupancyBtn.disabled =
+      deviceLoading || !hasDevices || selected == null;
   };
 
   const applyCalibration = (snap: Ep1CalibrationOut | null): void => {
@@ -462,53 +730,75 @@ export async function mountEp1SettingsPanel(
     temperatureField.applyField(snap?.temperature ?? null);
   };
 
-  const loadCalibrationForSelection = async (): Promise<void> => {
-    const deviceId = selectedValue(calibrationTarget.select);
-    const generation = ++calibrationLoadGeneration;
-    calibrationLoading = true;
+  const applyOccupancy = (snap: Ep1OccupancyTuningOut | null): void => {
+    maxDistanceField.applyField(snap?.max_distance ?? null);
+    minDistanceField.applyField(snap?.min_distance ?? null);
+    offLatencyField.applyField(snap?.off_latency ?? null);
+    onLatencyField.applyField(snap?.on_latency ?? null);
+    sustainSensitivityField.applyField(snap?.sustain_sensitivity ?? null);
+    triggerDistanceField.applyField(snap?.trigger_distance ?? null);
+    triggerSensitivityField.applyField(snap?.trigger_sensitivity ?? null);
+  };
+
+  const loadDevicePanels = async (): Promise<void> => {
+    const deviceId = selectedValue(deviceTarget.select);
+    const generation = ++deviceLoadGeneration;
+    deviceLoading = true;
     applyCalibration(null);
-    syncCalibrationTargetControls();
+    applyOccupancy(null);
+    syncDeviceControls();
     if (deviceId == null) {
-      if (generation === calibrationLoadGeneration) {
-        calibrationLoading = false;
-        syncCalibrationTargetControls();
+      if (generation === deviceLoadGeneration) {
+        deviceLoading = false;
+        syncDeviceControls();
       }
       return;
     }
     try {
-      const snap = await api.fetchEp1Calibration(deviceId);
+      const [calibrationResult, occupancyResult] = await Promise.allSettled([
+        api.fetchEp1Calibration(deviceId),
+        api.fetchEp1OccupancyTuning(deviceId),
+      ]);
       if (
-        generation !== calibrationLoadGeneration ||
-        selectedValue(calibrationTarget.select) !== deviceId
+        generation !== deviceLoadGeneration ||
+        selectedValue(deviceTarget.select) !== deviceId
       ) {
         return;
       }
-      applyCalibration(snap);
-      status.hidden = true;
-    } catch (err) {
-      if (
-        generation !== calibrationLoadGeneration ||
-        selectedValue(calibrationTarget.select) !== deviceId
-      ) {
-        return;
+      applyCalibration(
+        calibrationResult.status === "fulfilled" ? calibrationResult.value : null,
+      );
+      applyOccupancy(
+        occupancyResult.status === "fulfilled" ? occupancyResult.value : null,
+      );
+      const failure =
+        calibrationResult.status === "rejected"
+          ? calibrationResult.reason
+          : occupancyResult.status === "rejected"
+            ? occupancyResult.reason
+            : null;
+      if (failure == null) {
+        status.hidden = true;
+      } else {
+        showError(
+          failure instanceof HttpError
+            ? failure.detail || failure.message
+            : String(failure),
+        );
       }
-      applyCalibration(null);
-      showError(err instanceof HttpError ? err.detail || err.message : String(err));
-    }
-    if (generation === calibrationLoadGeneration) {
-      calibrationLoading = false;
-      syncCalibrationTargetControls();
+    } finally {
+      if (generation === deviceLoadGeneration) {
+        deviceLoading = false;
+        syncDeviceControls();
+      }
     }
   };
 
   const fillDevices = (rows: Ep1DeviceSettingsOut[]): void => {
-    const previousPsk = selectedValue(pskTarget.select);
-    const previousCalibration = selectedValue(calibrationTarget.select);
+    const previous = selectedValue(deviceTarget.select);
     devices = rows;
-    fillDeviceSelect(pskTarget.select, rows, previousPsk);
-    fillDeviceSelect(calibrationTarget.select, rows, previousCalibration);
-    syncPskTargetControls();
-    syncCalibrationTargetControls();
+    fillDeviceSelect(deviceTarget.select, rows, previous);
+    syncDeviceControls();
   };
 
   const applyFromSettings = (s: Ep1NoisePreSharedKeySettingsOut): void => {
@@ -540,17 +830,14 @@ export async function mountEp1SettingsPanel(
   try {
     applyFromSettings(await api.fetchEp1NoisePskSettings());
     fillDevices((await api.fetchEp1Devices()).devices);
-    await loadCalibrationForSelection();
+    await loadDevicePanels();
   } catch (err) {
     showError(err instanceof HttpError ? err.detail || err.message : String(err));
   }
 
-  pskTarget.select.addEventListener("change", () => {
+  deviceTarget.select.addEventListener("change", () => {
     pskTestGeneration += 1;
-    syncPskTargetControls();
-  });
-  calibrationTarget.select.addEventListener("change", () => {
-    void loadCalibrationForSelection();
+    void loadDevicePanels();
   });
 
   saveBtn.addEventListener("click", async () => {
@@ -577,7 +864,7 @@ export async function mountEp1SettingsPanel(
   });
 
   applyOffsetsBtn.addEventListener("click", async () => {
-    const deviceId = selectedValue(calibrationTarget.select);
+    const deviceId = selectedValue(deviceTarget.select);
     if (deviceId == null) {
       showError(EP1_SETTINGS_NO_DEVICES);
       return;
@@ -605,7 +892,7 @@ export async function mountEp1SettingsPanel(
     applyOffsetsBtn.disabled = true;
     try {
       const snap = await api.putEp1Calibration(deviceId, body);
-      if (selectedValue(calibrationTarget.select) !== deviceId) {
+      if (selectedValue(deviceTarget.select) !== deviceId) {
         return;
       }
       applyCalibration(snap);
@@ -616,19 +903,78 @@ export async function mountEp1SettingsPanel(
         showSuccess(message);
       }
     } catch (err) {
-      if (selectedValue(calibrationTarget.select) !== deviceId) {
+      if (selectedValue(deviceTarget.select) !== deviceId) {
         return;
       }
       showError(err instanceof HttpError ? err.detail || err.message : String(err));
     } finally {
-      if (selectedValue(calibrationTarget.select) === deviceId) {
-        syncCalibrationTargetControls();
+      if (selectedValue(deviceTarget.select) === deviceId) {
+        syncDeviceControls();
+      }
+    }
+  });
+
+  applyOccupancyBtn.addEventListener("click", async () => {
+    const deviceId = selectedValue(deviceTarget.select);
+    if (deviceId == null) {
+      showError(EP1_SETTINGS_NO_DEVICES);
+      return;
+    }
+    const body: Ep1OccupancyTuningSetIn = {
+      max_distance: maxDistanceField.changedValue(),
+      min_distance: minDistanceField.changedValue(),
+      off_latency: offLatencyField.changedValue(),
+      on_latency: onLatencyField.changedValue(),
+      sustain_sensitivity: sustainSensitivityField.changedValue(),
+      trigger_distance: triggerDistanceField.changedValue(),
+      trigger_sensitivity: triggerSensitivityField.changedValue(),
+    };
+    if (
+      body.max_distance == null &&
+      body.min_distance == null &&
+      body.off_latency == null &&
+      body.on_latency == null &&
+      body.sustain_sensitivity == null &&
+      body.trigger_distance == null &&
+      body.trigger_sensitivity == null
+    ) {
+      showError("Change at least one occupancy knob before applying.");
+      return;
+    }
+    for (const field of occupancyKnobFields) {
+      const rangeError = field.validateChanged();
+      if (rangeError != null) {
+        showError(rangeError);
+        return;
+      }
+    }
+    applyOccupancyBtn.disabled = true;
+    try {
+      const snap = await api.putEp1OccupancyTuning(deviceId, body);
+      if (selectedValue(deviceTarget.select) !== deviceId) {
+        return;
+      }
+      applyOccupancy(snap);
+      const message = formatOccupancyAppliedMessage(snap);
+      if (!snap.knobs_confirmed) {
+        showError(message);
+      } else {
+        showSuccess(message);
+      }
+    } catch (err) {
+      if (selectedValue(deviceTarget.select) !== deviceId) {
+        return;
+      }
+      showError(err instanceof HttpError ? err.detail || err.message : String(err));
+    } finally {
+      if (selectedValue(deviceTarget.select) === deviceId) {
+        syncDeviceControls();
       }
     }
   });
 
   testBtn.addEventListener("click", async () => {
-    const deviceId = selectedValue(pskTarget.select);
+    const deviceId = selectedValue(deviceTarget.select);
     if (deviceId == null) {
       showError(EP1_SETTINGS_NO_DEVICES);
       return;
@@ -642,7 +988,7 @@ export async function mountEp1SettingsPanel(
       });
       if (
         generation !== pskTestGeneration ||
-        selectedValue(pskTarget.select) !== deviceId
+        selectedValue(deviceTarget.select) !== deviceId
       ) {
         return;
       }
@@ -654,14 +1000,14 @@ export async function mountEp1SettingsPanel(
     } catch (err) {
       if (
         generation !== pskTestGeneration ||
-        selectedValue(pskTarget.select) !== deviceId
+        selectedValue(deviceTarget.select) !== deviceId
       ) {
         return;
       }
       showError(err instanceof HttpError ? err.detail || err.message : String(err));
     } finally {
       if (generation === pskTestGeneration) {
-        syncPskTargetControls();
+        syncDeviceControls();
       }
     }
   });

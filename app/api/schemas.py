@@ -17,6 +17,7 @@ from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
     Ep1CalibrationOffsetKind,
+    Ep1OccupancyTuningKind,
     Ep1ReadingComparison,
     Ep1ReadingMetric,
     RuleDeviceActionType,
@@ -606,6 +607,129 @@ class Ep1CalibrationSetIn(BaseModel):
         default=None,
         allow_inf_nan=False,
         description="Temperature offset in °C (stock firmware −20…20, step 0.1).",
+    )
+
+
+class Ep1OccupancyTuningFieldOut(BaseModel):
+    """One mmWave occupancy tuning number from the EP1 ESPHome entity."""
+
+    available: bool = Field(
+        ...,
+        description="False when the firmware does not expose this number entity.",
+    )
+    kind: Ep1OccupancyTuningKind = Field(
+        ...,
+        description="Knob kind matching ``Ep1OccupancyTuningKind``.",
+    )
+    max_value: float | None = Field(default=None, description="Firmware maximum (inclusive).")
+    min_value: float | None = Field(default=None, description="Firmware minimum (inclusive).")
+    step: float | None = Field(default=None, description="Firmware step size.")
+    unit: str | None = Field(default=None, description="Unit of the number (``m``, ``seconds``, …).")
+    value: float | None = Field(default=None, description="Current value on the device.")
+
+
+class Ep1OccupancyTuningOut(BaseModel):
+    """mmWave occupancy tuning snapshot for one EP1 Settings target."""
+
+    device_id: str = Field(..., description="Normalized MAC address.")
+    display_label: str = Field(
+        ...,
+        description="Human-visible ``preferred_label (mac)`` for the target device.",
+    )
+    display_name: str | None = Field(default=None, description="Preferred label without MAC.")
+    distance_applied: bool = Field(
+        default=False,
+        description=(
+            "True when this response followed an Apply that pressed firmware ``Set Distance`` "
+            "(after min/max distance writes)."
+        ),
+    )
+    host: str = Field(..., description="ESPHome API host used for this snapshot.")
+    knobs_confirmed: bool = Field(
+        default=True,
+        description=(
+            "True when written number values were observed to stick after Apply; "
+            "False when the post-write number wait timed out."
+        ),
+    )
+    max_distance: Ep1OccupancyTuningFieldOut = Field(
+        ...,
+        description="Maximum detection distance (SEN0609; meters).",
+    )
+    min_distance: Ep1OccupancyTuningFieldOut = Field(
+        ...,
+        description="Minimum detection distance (SEN0609; meters).",
+    )
+    off_latency: Ep1OccupancyTuningFieldOut = Field(
+        ...,
+        description="Delay before clearing mmWave presence (seconds).",
+    )
+    on_latency: Ep1OccupancyTuningFieldOut = Field(
+        ...,
+        description="Delay before reporting mmWave presence (seconds).",
+    )
+    port: int = Field(..., description="ESPHome API port (default 6053).")
+    sensitivity_applied: bool = Field(
+        default=False,
+        description=(
+            "True when this response followed an Apply that pressed firmware ``Set Sensitivity`` "
+            "(after trigger/sustain sensitivity writes)."
+        ),
+    )
+    sustain_sensitivity: Ep1OccupancyTuningFieldOut = Field(
+        ...,
+        description="Sustain / occupancy sensitivity (0–9; SEN0395 single sensitivity maps here).",
+    )
+    trigger_distance: Ep1OccupancyTuningFieldOut = Field(
+        ...,
+        description="Initial trigger distance (SEN0609; meters).",
+    )
+    trigger_sensitivity: Ep1OccupancyTuningFieldOut = Field(
+        ...,
+        description="Trigger sensitivity for initial motion (SEN0609; 0–9).",
+    )
+
+
+class Ep1OccupancyTuningSetIn(BaseModel):
+    """Body for ``PUT /v1/settings/ep1/devices/{device_id}/occupancy-tuning``.
+
+    Omitted fields are left unchanged on the device.
+    """
+
+    max_distance: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Maximum detection distance in meters (SEN0609; requires Set Distance).",
+    )
+    min_distance: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Minimum detection distance in meters (SEN0609; requires Set Distance).",
+    )
+    off_latency: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="mmWave off latency in seconds.",
+    )
+    on_latency: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="mmWave on latency in seconds.",
+    )
+    sustain_sensitivity: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Sustain sensitivity 0–9 (SEN0609 requires Set Sensitivity).",
+    )
+    trigger_distance: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Trigger distance in meters (SEN0609).",
+    )
+    trigger_sensitivity: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Trigger sensitivity 0–9 (SEN0609 requires Set Sensitivity).",
     )
 
 

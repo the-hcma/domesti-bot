@@ -99,6 +99,25 @@ class Ep1CalibrationOffsetKind(StrEnum):
     TEMPERATURE = "temperature"
 
 
+class Ep1OccupancyApplyButton(StrEnum):
+    """ESPHome button roles pressed after mmWave occupancy number writes."""
+
+    SET_DISTANCE = "set_distance"
+    SET_SENSITIVITY = "set_sensitivity"
+
+
+class Ep1OccupancyTuningKind(StrEnum):
+    """ESPHome mmWave number knobs exposed under Settings → EP1 occupancy tuning."""
+
+    MAX_DISTANCE = "max_distance"
+    MIN_DISTANCE = "min_distance"
+    OFF_LATENCY = "off_latency"
+    ON_LATENCY = "on_latency"
+    SUSTAIN_SENSITIVITY = "sustain_sensitivity"
+    TRIGGER_DISTANCE = "trigger_distance"
+    TRIGGER_SENSITIVITY = "trigger_sensitivity"
+
+
 class Ep1ReadingComparison(StrEnum):
     """How an EP1 numeric reading is compared to a rule threshold."""
 
