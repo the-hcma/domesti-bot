@@ -906,6 +906,27 @@
     .rules-vacation-mount .settings-dialog-field input,
     .rules-vacation-mount .settings-dialog-field select { width: 100%; box-sizing: border-box; }
     .rules-vacation-armed { margin: 0; font-size: 14px; font-weight: 600; color: var(--fg); }
+    .rules-sensor-mount { display: flex; flex-direction: column; gap: 12px; }
+    .rules-sensor-retention .settings-dialog-fieldset { gap: 8px; }
+    .rules-sensor-retention .settings-dialog-field { margin-bottom: 0; max-width: 12rem; }
+    .rules-sensor-retention .settings-dialog-field input { width: 100%; box-sizing: border-box; }
+    .rules-sensor-list { display: flex; flex-direction: column; gap: 12px; }
+    .rules-sensor-card { display: flex; flex-direction: column; gap: 8px;
+      padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--panel-2, var(--panel)); }
+    .rules-sensor-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--fg); }
+    .rules-sensor-meta { margin: 0; font-size: 12px; color: var(--muted); }
+    .rules-sensor-controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
+    .rules-sensor-controls .settings-dialog-field { flex: 1 1 8rem; min-width: 7rem;
+      margin-bottom: 0; }
+    .rules-sensor-controls .settings-dialog-field select { width: 100%; box-sizing: border-box; }
+    .rules-sensor-enabled { display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; color: var(--fg); white-space: nowrap; }
+    .rules-sensor-chart-wrap { width: 100%; overflow: hidden; }
+    .rules-sensor-chart { display: block; width: 100%; max-width: 36rem; height: 4.5rem;
+      color: var(--accent, #16a34a); background: color-mix(in srgb, var(--fg) 4%, transparent);
+      border-radius: 6px; }
+    .rules-sensor-chart-empty { fill: var(--muted); font-size: 11px; }
     .rules-mail-test-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .rules-mail-test-row input { flex: 1 1 12rem; min-width: 0; font: inherit;
       padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);

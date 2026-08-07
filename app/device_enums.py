@@ -206,6 +206,60 @@ class RuleTrigger(StrEnum):
     SCHEDULED = "scheduled"
 
 
+class SensorChartWindow(StrEnum):
+    """Time window for Automations → Data sensor charts."""
+
+    LAST_5_MINUTES = "last_5_minutes"
+    LAST_DAY = "last_day"
+    LAST_HOUR = "last_hour"
+    LAST_MINUTE = "last_minute"
+
+    def duration_s(self) -> float:
+        """Return how far back samples are included for this window."""
+        match self:
+            case SensorChartWindow.LAST_MINUTE:
+                return 60.0
+            case SensorChartWindow.LAST_5_MINUTES:
+                return 300.0
+            case SensorChartWindow.LAST_HOUR:
+                return 3600.0
+            case SensorChartWindow.LAST_DAY:
+                return 86_400.0
+
+
+class SensorCollectionKey(StrEnum):
+    """Collectible sensor reading keys (EP1 v1; MAC device_id + this key)."""
+
+    HUMIDITY_PCT = "humidity_pct"
+    ILLUMINANCE_LX = "illuminance_lx"
+    OCCUPANCY = "occupancy"
+    TEMPERATURE_C = "temperature_c"
+
+    def display_label(self) -> str:
+        """Short human label for Automations → Data rows."""
+        match self:
+            case SensorCollectionKey.HUMIDITY_PCT:
+                return "humidity"
+            case SensorCollectionKey.ILLUMINANCE_LX:
+                return "illuminance"
+            case SensorCollectionKey.OCCUPANCY:
+                return "occupancy"
+            case SensorCollectionKey.TEMPERATURE_C:
+                return "temperature"
+
+    def unit_label(self) -> str | None:
+        """Unit suffix when known; occupancy is unitless binary."""
+        match self:
+            case SensorCollectionKey.HUMIDITY_PCT:
+                return "%"
+            case SensorCollectionKey.ILLUMINANCE_LX:
+                return "lx"
+            case SensorCollectionKey.OCCUPANCY:
+                return None
+            case SensorCollectionKey.TEMPERATURE_C:
+                return "°C"
+
+
 class SettingsCredentialsTestSource(StrEnum):
     """Where credentials used by a Settings Test probe were resolved from."""
 

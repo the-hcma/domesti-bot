@@ -38,6 +38,14 @@ import type {
   SmtpConfigOut,
   SmtpTestEmailIn,
   SmtpTestEmailOut,
+  SensorChartWindow,
+  SensorCollectionConfigIn,
+  SensorCollectionKey,
+  SensorCollectionRetentionIn,
+  SensorCollectionRetentionOut,
+  SensorCollectionSamplesOut,
+  SensorCollectionSensorOut,
+  SensorCollectionSensorsOut,
   VacationModeSettingsOut,
   VacationModeSettingsStatusOut,
   VacationModeTestEmailIn,
@@ -327,6 +335,47 @@ export const api = {
   },
   fetchVacationModeSettings(): Promise<VacationModeSettingsStatusOut> {
     return call<VacationModeSettingsStatusOut>("GET", "/v1/rules/settings/vacation-mode");
+  },
+  fetchSensorCollectionSensors(): Promise<SensorCollectionSensorsOut> {
+    return call<SensorCollectionSensorsOut>("GET", "/v1/sensor-collection/sensors");
+  },
+  fetchSensorCollectionRetention(): Promise<SensorCollectionRetentionOut> {
+    return call<SensorCollectionRetentionOut>("GET", "/v1/sensor-collection/retention");
+  },
+  fetchSensorCollectionSamples(
+    deviceId: string,
+    sensorKey: SensorCollectionKey,
+    window: SensorChartWindow,
+  ): Promise<SensorCollectionSamplesOut> {
+    const params = new URLSearchParams({
+      device_id: deviceId,
+      sensor_key: sensorKey,
+      window,
+    });
+    return call<SensorCollectionSamplesOut>(
+      "GET",
+      `/v1/sensor-collection/samples?${params.toString()}`,
+    );
+  },
+  putSensorCollectionRetention(
+    body: SensorCollectionRetentionIn,
+  ): Promise<SensorCollectionRetentionOut> {
+    return call<SensorCollectionRetentionOut>(
+      "PUT",
+      "/v1/sensor-collection/retention",
+      body,
+    );
+  },
+  putSensorCollectionSensor(
+    deviceId: string,
+    sensorKey: SensorCollectionKey,
+    body: SensorCollectionConfigIn,
+  ): Promise<SensorCollectionSensorOut> {
+    return call<SensorCollectionSensorOut>(
+      "PUT",
+      `/v1/sensor-collection/sensors/${encodeURIComponent(deviceId)}/${encodeURIComponent(sensorKey)}`,
+      body,
+    );
   },
   putVacationModeSettings(
     settings: VacationModeSettingsOut,

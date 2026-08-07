@@ -20,6 +20,7 @@ from app.device_state_watcher import (
 from app.domesti_bot_cli import DeviceManagersState
 from app.rule_actions import lookup_preferred_label
 from app.rule_evaluator import RuleEvaluator
+from app.sensor_collection import run_sensor_collection_sampler
 from app.vacation_mode import handle_vacation_device_anomaly
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,6 +47,8 @@ class DomestiServerRuntime:
     discovery_task: asyncio.Task[None] | None
     lifespan_generation: int
     rule_evaluator: RuleEvaluator | None
+    sensor_collection_stop: asyncio.Event | None
+    sensor_collection_task: asyncio.Task[None] | None
     shutdown_requested: asyncio.Event | None
     watcher_stop: asyncio.Event | None
     watcher_task: asyncio.Task[None] | None
@@ -68,6 +71,8 @@ class DomestiServerRuntime:
         self.shutdown_requested = asyncio.Event()
         self.watcher_stop = asyncio.Event()
         self.watcher_task = None
+        self.sensor_collection_stop = asyncio.Event()
+        self.sensor_collection_task = None
         self.discovery_task = None
         if self.rule_evaluator is not None:
             self.rule_evaluator.request_shutdown()
@@ -106,6 +111,8 @@ class DomestiServerRuntime:
         self.discovery_task = None
         self.lifespan_generation = 0
         self.rule_evaluator = None
+        self.sensor_collection_stop = None
+        self.sensor_collection_task = None
         self.shutdown_requested = None
         self._vacation_anomaly_tasks = set()
         self.watcher_stop = None
@@ -173,9 +180,32 @@ class DomestiServerRuntime:
             self.shutdown_requested.set()
         if self.watcher_stop is not None:
             self.watcher_stop.set()
+        if self.sensor_collection_stop is not None:
+            self.sensor_collection_stop.set()
         evaluator = self.rule_evaluator
         if evaluator is not None:
             evaluator.request_shutdown()
+
+    def start_sensor_collection_sampler(self) -> None:
+        """Start the Automations → Data sampler after discovery is ready."""
+        cache_path = self.discovery_cache_path()
+        if cache_path is None:
+            _LOGGER.info("[sensor-collection] skipped — no discovery cache path configured")
+            return
+        if self.sensor_collection_task is not None and not self.sensor_collection_task.done():
+            return
+        stop = self.sensor_collection_stop
+        if stop is None:
+            stop = asyncio.Event()
+            self.sensor_collection_stop = stop
+        self.sensor_collection_task = asyncio.create_task(
+            run_sensor_collection_sampler(
+                cache_path=cache_path,
+                device_state_getter=lambda: self.device_state,
+                stop=stop,
+            ),
+            name="sensor-collection-sampler",
+        )
 
     async def restart_device_state_watchers(self) -> None:
         """Rebuild background polling after a hot-reloaded device manager."""
@@ -241,6 +271,10 @@ class DomestiServerRuntime:
             self.watcher_stop.set()
         if self.watcher_task is not None and not self.watcher_task.done():
             self.watcher_task.cancel()
+        if self.sensor_collection_stop is not None:
+            self.sensor_collection_stop.set()
+        if self.sensor_collection_task is not None and not self.sensor_collection_task.done():
+            self.sensor_collection_task.cancel()
         if self.discovery_task is not None and not self.discovery_task.done():
             self.discovery_task.cancel()
         for task in list(self._vacation_anomaly_tasks):

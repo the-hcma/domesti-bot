@@ -224,6 +224,7 @@ export type RuleTrigger = (typeof RuleTrigger)[keyof typeof RuleTrigger];
 /** Automations hub top-level tabs. */
 export const RulesTabId = {
   Conditions: "conditions",
+  Data: "data",
   Geofences: "geofences",
   Mail: "mail",
   Rules: "rules",
@@ -232,6 +233,37 @@ export const RulesTabId = {
   Vacation: "vacation",
 } as const;
 export type RulesTabId = (typeof RulesTabId)[keyof typeof RulesTabId];
+
+/** Chart time window for Automations → Data. */
+export const SensorChartWindow = {
+  Last5Minutes: "last_5_minutes",
+  LastDay: "last_day",
+  LastHour: "last_hour",
+  LastMinute: "last_minute",
+} as const;
+export type SensorChartWindow =
+  (typeof SensorChartWindow)[keyof typeof SensorChartWindow];
+
+/** Collectible sensor reading keys (EP1 v1). */
+export const SensorCollectionKey = {
+  HumidityPct: "humidity_pct",
+  IlluminanceLx: "illuminance_lx",
+  Occupancy: "occupancy",
+  TemperatureC: "temperature_c",
+} as const;
+export type SensorCollectionKey =
+  (typeof SensorCollectionKey)[keyof typeof SensorCollectionKey];
+
+/** Sample interval presets (seconds) for Automations → Data. */
+export const SensorCollectionIntervalS = {
+  Five: 5,
+  Fifteen: 15,
+  FiveMinutes: 300,
+  OneMinute: 60,
+  Thirty: 30,
+} as const;
+export type SensorCollectionIntervalS =
+  (typeof SensorCollectionIntervalS)[keyof typeof SensorCollectionIntervalS];
 
 /** Fernet secrets-key resolution. */
 export const SecretsKeySource = {

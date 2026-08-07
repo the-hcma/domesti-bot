@@ -226,6 +226,52 @@ class RuleUserLocationHistory(Base):
     wifi_ssid: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
+class SensorCollectionConfig(Base):
+    """Per-sensor enable + sample interval for Automations → Data."""
+
+    __tablename__ = "sensor_collection_config"
+
+    device_id: Mapped[str] = mapped_column(String, primary_key=True)
+    sensor_key: Mapped[str] = mapped_column(String, primary_key=True)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    family_id: Mapped[str] = mapped_column(String, nullable=False)
+    interval_s: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class SensorCollectionSettings(Base):
+    """Singleton row for Automations → Data global settings (retention)."""
+
+    __tablename__ = "sensor_collection_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    retention_max_age_days: Mapped[float] = mapped_column(Float, nullable=False)
+    retention_unlimited: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class SensorSample(Base):
+    """Timestamped sensor reading collected by the background sampler."""
+
+    __tablename__ = "sensor_samples"
+    __table_args__ = (
+        UniqueConstraint(
+            "device_id",
+            "sensor_key",
+            "recorded_at",
+            name="uq_sensor_samples_device_key_recorded",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    device_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    family_id: Mapped[str] = mapped_column(String, nullable=False)
+    recorded_at: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    sensor_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    unit: Mapped[str | None] = mapped_column(String, nullable=True)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class SonosKnownZone(Base):
     __tablename__ = "sonos_known_zones"
 

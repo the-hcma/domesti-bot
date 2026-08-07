@@ -32,6 +32,14 @@ import {
   type SmtpConfigOut,
   type SmtpTestEmailIn,
   type SmtpTestEmailOut,
+  type SensorChartWindow,
+  type SensorCollectionConfigIn,
+  type SensorCollectionKey,
+  type SensorCollectionRetentionIn,
+  type SensorCollectionRetentionOut,
+  type SensorCollectionSamplesOut,
+  type SensorCollectionSensorOut,
+  type SensorCollectionSensorsOut,
   type TimeConditionTemplateOut,
   type VacationModeSettingsOut,
   type VacationModeSettingsStatusOut,
@@ -81,9 +89,24 @@ export interface RulesDataSource {
   setRuleEnabled(ruleId: string, enabled: boolean): Promise<RuleOut>;
   getSettingsLocation(): Promise<SettingsLocationOut>;
   getSmtpConfig(): Promise<SmtpConfigOut | null>;
+  getSensorCollectionSamples(
+    deviceId: string,
+    sensorKey: SensorCollectionKey,
+    window: SensorChartWindow,
+  ): Promise<SensorCollectionSamplesOut>;
+  getSensorCollectionRetention(): Promise<SensorCollectionRetentionOut>;
+  getSensorCollectionSensors(): Promise<SensorCollectionSensorsOut>;
   getVacationModeSettings(): Promise<VacationModeSettingsStatusOut>;
   saveSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut>;
   resetSmtpConfig(): Promise<void>;
+  saveSensorCollectionRetention(
+    body: SensorCollectionRetentionIn,
+  ): Promise<SensorCollectionRetentionOut>;
+  saveSensorCollectionSensor(
+    deviceId: string,
+    sensorKey: SensorCollectionKey,
+    body: SensorCollectionConfigIn,
+  ): Promise<SensorCollectionSensorOut>;
   saveSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut>;
   saveVacationModeSettings(
     settings: VacationModeSettingsOut,
@@ -417,6 +440,28 @@ export class MockRulesDataSource implements RulesDataSource {
     };
   }
 
+  async getSensorCollectionSamples(
+    deviceId: string,
+    sensorKey: SensorCollectionKey,
+    window: SensorChartWindow,
+  ): Promise<SensorCollectionSamplesOut> {
+    return {
+      as_of: Date.now() / 1000,
+      device_id: deviceId,
+      points: [],
+      sensor_key: sensorKey,
+      window,
+    };
+  }
+
+  async getSensorCollectionRetention(): Promise<SensorCollectionRetentionOut> {
+    return { max_age_days: 60, unlimited: false };
+  }
+
+  async getSensorCollectionSensors(): Promise<SensorCollectionSensorsOut> {
+    return { sensors: [] };
+  }
+
   async getVacationModeSettings(): Promise<VacationModeSettingsStatusOut> {
     return structuredClone(this.store.vacation_mode);
   }
@@ -445,6 +490,34 @@ export class MockRulesDataSource implements RulesDataSource {
   async resetSmtpConfig(): Promise<void> {
     this.store.smtp_config = null;
     this.store.smtp_last_test_recipient = null;
+  }
+
+  async saveSensorCollectionRetention(
+    body: SensorCollectionRetentionIn,
+  ): Promise<SensorCollectionRetentionOut> {
+    return {
+      max_age_days: body.unlimited ? 60 : body.max_age_days,
+      unlimited: body.unlimited,
+    };
+  }
+
+  async saveSensorCollectionSensor(
+    deviceId: string,
+    sensorKey: SensorCollectionKey,
+    body: SensorCollectionConfigIn,
+  ): Promise<SensorCollectionSensorOut> {
+    return {
+      device_display: deviceId,
+      device_id: deviceId,
+      display_name: deviceId,
+      enabled: body.enabled,
+      family_id: "ep1",
+      interval_s: body.interval_s,
+      last_sample_at: null,
+      last_value: null,
+      sensor_key: sensorKey,
+      unit: null,
+    };
   }
 
   async saveSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {
@@ -626,6 +699,22 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     return api.fetchSmtpConfig();
   }
 
+  getSensorCollectionSamples(
+    deviceId: string,
+    sensorKey: SensorCollectionKey,
+    window: SensorChartWindow,
+  ): Promise<SensorCollectionSamplesOut> {
+    return api.fetchSensorCollectionSamples(deviceId, sensorKey, window);
+  }
+
+  getSensorCollectionRetention(): Promise<SensorCollectionRetentionOut> {
+    return api.fetchSensorCollectionRetention();
+  }
+
+  getSensorCollectionSensors(): Promise<SensorCollectionSensorsOut> {
+    return api.fetchSensorCollectionSensors();
+  }
+
   async getVacationModeSettings(): Promise<VacationModeSettingsStatusOut> {
     if (this.rulesLive) {
       try {
@@ -757,6 +846,20 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
 
   saveSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {
     return api.putSmtpConfig(config);
+  }
+
+  saveSensorCollectionRetention(
+    body: SensorCollectionRetentionIn,
+  ): Promise<SensorCollectionRetentionOut> {
+    return api.putSensorCollectionRetention(body);
+  }
+
+  saveSensorCollectionSensor(
+    deviceId: string,
+    sensorKey: SensorCollectionKey,
+    body: SensorCollectionConfigIn,
+  ): Promise<SensorCollectionSensorOut> {
+    return api.putSensorCollectionSensor(deviceId, sensorKey, body);
   }
 
   saveTimeConditionTemplate(

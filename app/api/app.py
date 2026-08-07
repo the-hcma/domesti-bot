@@ -37,6 +37,7 @@ from app.api.schemas import (
     UISonosSetIn,
     UIStateOut,
 )
+from app.api.sensor_collection_routes import router as sensor_collection_router
 from app.api.settings_routes import router as settings_router
 from app.api.smtp_routes import router as smtp_router
 from app.api.ui_action_logging import log_ui_action
@@ -290,6 +291,7 @@ def create_app(args: Any) -> FastAPI:
                 poll_interval_s,
                 len(watchers),
             )
+            runtime.start_sensor_collection_sampler()
 
         runtime.discovery_task = asyncio.create_task(
             _run_discovery(),
@@ -321,6 +323,18 @@ def create_app(args: Any) -> FastAPI:
                     pass
                 except Exception:
                     _LOGGER.warning("[shutdown] watcher task raised", exc_info=True)
+            sensor_task = runtime.sensor_collection_task
+            if sensor_task is not None and not sensor_task.done():
+                _LOGGER.info("[shutdown] stopping sensor collection sampler")
+                try:
+                    await sensor_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    _LOGGER.warning(
+                        "[shutdown] sensor collection task raised",
+                        exc_info=True,
+                    )
             _LOGGER.info(
                 "[shutdown] state watchers stopped in %.3fs",
                 time.monotonic() - shutdown_started,
@@ -348,6 +362,7 @@ def create_app(args: Any) -> FastAPI:
     app.include_router(mytracks_rules_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(location_update_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(rules_router, dependencies=[Depends(_verify_api_key)])
+    app.include_router(sensor_collection_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(webhooks_router)
     app.add_middleware(_AccessLogMiddleware)
     app.add_middleware(
