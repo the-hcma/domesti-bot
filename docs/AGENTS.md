@@ -11,9 +11,9 @@ This file defines the non-negotiable standards for all contributors (human or AI
   ~/work/ai/repository-helpers/scripts/dev/start-development --refresh
   ~/work/ai/repository-helpers/scripts/dev/start-development
   ```
-  - **`--refresh`** (first): syncs `main` with Graphite (`gt sync`), prunes merged worktrees and branches, pulls latest `main`, and ensures the systemd user unit (`domesti-bot.service` from `etc/systemd/`) is installed and running via `setup-service`. Exits immediately — it does **not** prompt for a worktree.
+  - **`--refresh`** (first): syncs `main` via the stacking-tool marker (this repo: `gh-stack`), prunes merged worktrees and branches, pulls latest `main`, and ensures the systemd user unit (`domesti-bot.service` from `etc/systemd/`) is installed and running via `setup-service`. Exits immediately — it does **not** prompt for a worktree.
   - **plain** (second): repeats the sync/cleanup, then prompts you to name a new worktree for the upcoming work. Pass `--worktree <name> --no-interactive` to skip the prompt.
-- Both commands are required. This replaces any manual `gt sync --force` step.
+- Both commands are required. This replaces any manual stack-sync step.
 - After `start-development` finishes, **`cd` into the stack worktree** (`.worktrees/<stack-name>-wt`) before any other work. Do not stay in the primary clone.
 
 ### Main worktree is off-limits (agents)
@@ -25,7 +25,7 @@ The **primary clone** (repo root — first entry in `git worktree list`, usually
 - Edit, create, or delete source files, config, or lockfiles
 - Run `uv sync`, tests, builds, or formatters
 - Run `dep-updater` with `--dir` pointing at the primary clone (it may fast-forward `main` and mutate git state)
-- Run `gt create`, `gt modify`, `gt submit`, `gt sync`, `gt restack`, or other Graphite/git write operations
+- Run `gh stack` / `gt` write operations, commits, or checkouts
 - Leave uncommitted changes, stray branches, or detached HEAD state
 
 **Always** do implementation, investigation that mutates state, and validation in a **stack worktree** under `.worktrees/<stack-name>-wt`. Pass that path to tools (`--dir`, `cd`, etc.).
@@ -109,7 +109,7 @@ domesti-bot/
 ├── AGENTS.md → docs/AGENTS.md            Symlink so Cursor / agent tools auto-discover at root
 ├── docs/
 │   ├── AGENTS.md                         (this file — canonical location)
-│   └── GRAPHITE.md                        Forward reference; not yet authored
+│   └── STACKING.md                        gh-stack + GitHub merge queue
 ├── .github/workflows/                    See "CI Checks" below
 ├── pyproject.toml                        Deps, pytest config, tool config
 ├── pyrightconfig.json                    pyright include/exclude + Python version
@@ -457,25 +457,25 @@ New senders must comply from day one and ship hermetic tests for provenance (and
 
 ## Commits, Stacking & Pull Requests
 
-> See **`docs/GRAPHITE.md`** for stacked PRs, merge queue (`merge-it` label), and GitHub ruleset bypass for `graphite-app`. Conventions below match sibling repos in the org.
+> See **`docs/STACKING.md`** for gh-stack stacked PRs and GitHub’s native merge queue.
+> Stacking backend is `.github/stacking-tool` (`gh-stack`). Prefer repository-helpers
+> `scripts/dev/submit-stack` / `scripts/dev/ship-and-review`.
 
-- This project uses **Graphite (`gt`)** for branch stacking. All work happens in stacked branches.
+- This project uses **`gh stack`** for branch stacking. All work happens in stacked branches.
 - **Never commit or push directly to `main`.** `main` is updated only via merged PRs. Enforcement layers, in order of strength:
-  - **Client-side pre-push hook** (`scripts/hooks/pre-push`, wired by running `./scripts/install-hooks` once per clone). Aborts any `git push` whose remote ref is `refs/heads/main` with a tutorial message pointing at `gt` / `gh pr create`. Bypass for the rare mirror/rescue case: `git push --no-verify origin main`.
+  - **Client-side pre-push hook** (`scripts/hooks/pre-push`, wired by running `./scripts/install-hooks` once per clone). Aborts any `git push` whose remote ref is `refs/heads/main` with a tutorial message pointing at `gh stack` / `gh pr create`. Bypass for the rare mirror/rescue case: `git push --no-verify origin main`.
   - **Cursor rule** (`.cursor/rules/pr-workflow.mdc`, `alwaysApply: true`) tells the agent to refuse any "commit to main" intent and to open a PR instead. Applies to every agent session.
-  - **Server-side branch protection** is the strongest layer but requires GitHub Pro on private repos (or making this repo public). Until either is in place we rely on the two layers above; once enabled, swap in the ruleset documented in `.cursor/rules/pr-workflow.mdc`.
+  - **Server-side** ruleset **`protect-main`** with GitHub **`merge_queue`** (squash) plus classic branch protection (see `docs/STACKING.md`).
 - **Worktree-per-stack.** Every new stack/PR is created in its own Git worktree via `~/work/ai/repository-helpers/scripts/dev/start-development` so concurrent stacks stay isolated.
-- **Branch / commit creation**: `gt create --all --message "feat: descriptive message"`. Always use full flags (`--all`, `--message`), never the combined `-am`.
-- **Amending an existing PR** (corrections, review fixes, fixups): `gt modify --no-edit` (staged changes only) or `gt modify --all --message "updated msg"`. Do not create new commits on the same branch for these — fold them in.
-- **Squashing fixups before submit**: `git reset --soft HEAD~<n>` to collapse, then `gt modify --no-edit` to fold into the top commit.
-- **Submitting**: `gt submit --no-interactive --publish` — pushes the branch and creates a ready-for-review (non-draft) PR. `--publish` belongs on `gt submit`, never on `gt create`.
-- **Filling in PR description** after submit (Graphite doesn't take a body flag):
+- **Branch / commit creation**: `gh stack init <stack>/<topic>` (first layer) or `gh stack add <stack>/<topic>` (dependent layer), then `git add` + `git commit` with a Conventional Commit message. Always pass branch names to `init`/`add` (non-interactive).
+- **Amending an existing PR** (corrections, review fixes, fixups): commit on the same branch (`git commit --amend` only when hooks allow and the commit is unpushed / you intend a force-with-lease via stack push), or add fixup commits and fold before submit. Prefer `git commit` + `gh stack submit` to update the open PR.
+- **Submitting**: prefer `~/work/ai/repository-helpers/scripts/dev/submit-stack` (local gates + `gh stack submit --auto --open --remote origin`). Bare: `gh stack submit --auto --open --remote origin`.
+- **Filling in PR description** after submit when needed:
   ```
-  gh api repos/the-hcma/domesti-bot/pulls/<pr> --method PATCH --field body="..."
+  gh pr edit <pr> --body "..."
   ```
-- **Sync**: `gt sync --force` after upstream PRs land.
-- **View stack health**: `gt log short` — verify parent order, no "needs restack", no diverged branches.
-- **Pruning**: periodically `gt fetch --prune && git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -D`.
+- **Sync / rebase**: `gh stack sync` / `gh stack rebase` after upstream PRs land (or `start-development --refresh`).
+- **View stack health**: `gh stack view --json` (never interactive `gh stack view` without `--json`).
 - **Commit messages** follow Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`, `perf:`.
 - **GPG-signed commits.** `commit.gpgsign = true` in git config; signing key uploaded to GitHub so commits show as "Verified".
 - **No AI attribution.** Do not add `Co-Authored-By: Claude`, `Generated-By:`, or similar to commit messages or PR descriptions.
@@ -494,16 +494,16 @@ New senders must comply from day one and ship hermetic tests for provenance (and
    shellcheck $(git ls-files scripts | grep -Ev '\.(py|md|txt|yml|yaml|json|toml)$')
    uv run --with pip-audit pip-audit                 # CVE check on runtime deps (daily in CI)
    ```
-2. **Submit**: `gt submit --no-interactive --publish`.
+2. **Submit**: `~/work/ai/repository-helpers/scripts/dev/submit-stack` (or `gh stack submit --auto --open --remote origin`).
 3. **Verify stack on GitHub**:
    ```
    gh pr view <pr> --json number,title,baseRefName,mergeable,mergeStateStatus,files
    ```
    `mergeable` must be `MERGEABLE`; `mergeStateStatus` must be `CLEAN` or `BLOCKED` (never `DIRTY` / `CONFLICTING`).
-4. **Verify title and description** against the actual diff — titles written before a rebase/restack go stale fast. Update via `gh api ... --method PATCH --field title=... --field body=...`.
-5. **Wait for CI** to pass. Do not ask the user to test before CI is green. Poll with short waits: `sleep 10 && gh pr checks <pr>`.
+4. **Verify title and description** against the actual diff — titles written before a rebase go stale fast. Update via `gh pr edit …`.
+5. **Wait for CI** to pass. Do not ask the user to test before CI is green. Prefer `~/work/ai/repository-helpers/scripts/dev/post-pr-submission-checks --pr <pr>`.
 6. **User testing & approval** — explicit user approval is required before merge.
-7. **Merge**: add the `merge-it` label via `gh pr edit <pr> --add-label merge-it` to enqueue on the **Graphite merge queue** (see `docs/GRAPHITE.md`). **Never** run `gh pr merge` directly. **Always ask the user for explicit confirmation before adding the merge label** — it starts automated queue processing.
+7. **Merge**: enqueue on **GitHub’s merge queue** with `gh pr merge <pr> --auto --squash` (or Enable auto-merge in the UI). See `docs/STACKING.md`. Do **not** use the `merge-it` label. **Always ask the user for explicit confirmation before enabling auto-merge.**
 
 ### Single Responsibility per PR
 
@@ -615,7 +615,7 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 
 CI lives in `.github/workflows/`:
 
-- **`ci.yml`** — runs on every PR (skipping merge-queue staging branches and already-merged PRs). Jobs after `Guard` run **in parallel**:
+- **`ci.yml`** — runs on every PR and on `merge_group` (GitHub merge queue; skips legacy Graphite staging branches and already-merged PRs). Jobs after `Guard` run **in parallel**:
   - `Python lint & format checks` — one `uv sync --group dev`, then ruff check/format + pyright (via `.github/ci/python-static`)
   - `Pytest (hermetic)` — `uv sync --group dev`, then `uv run pytest -m "not integration and not browser" -n auto` (**pytest-xdist**)
   - `Pytest (browser layout)` — `uv sync --group dev`, `playwright install --with-deps chromium`, then `uv run pytest -m "browser and not integration"` (single process; parallel to hermetic job)
@@ -626,8 +626,8 @@ CI lives in `.github/workflows/`:
 - **`cve-check.yml`** — `pip-audit --strict` daily at 08:00 UTC against the synced uv environment.
 - **`cleanup-branch-on-merge.yml`** — deletes the head branch when a PR is merged.
 - **`cleanup-merged-branches.yml`** — daily sweep for stragglers (merged or closed >30 days).
-- **`merged-pr-closer.yml`** — closes open PRs whose changes have already landed on `main` (handles Graphite merge-queue cases where child PRs are left open).
-- **`dependabot-auto-merge.yml`** — auto-labels Dependabot PRs with `merge-it`.
+- **`merged-pr-closer.yml`** — closes open PRs whose changes have already landed on `main` (handles leftover stack / MQ edge cases).
+- **`dependabot-auto-merge.yml`** — enables GitHub auto-merge (squash) on Dependabot PRs for the native merge queue.
 
 Dependabot itself is configured in **`.github/dependabot.yml`**: weekly Monday sweeps across `pip` (root `pyproject.toml`), `npm` (`/web`), and `github-actions` (`/`), all labeled `dependencies` so the auto-merge workflow picks them up. Patch + minor bumps are grouped into a handful of named buckets (`fastapi-stack`, `pytest-stack`, `typescript`, `esbuild`) to keep the PR count down; major bumps continue to land as individual PRs for review. Version-update PRs use a **10-day cooldown** (`cooldown: default-days: 10`); **security updates are not cooldown-gated**.
 

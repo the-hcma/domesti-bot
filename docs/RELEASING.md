@@ -18,7 +18,7 @@ Release Please walks **every** commit on `main` since the last tag. If a PR is m
 
 This repository allows **squash merge only** (merge commits and rebase merges are disabled in GitHub settings). Squash uses the PR title as the commit subject and an empty squash body (`squash_merge_commit_message: BLANK`), which matches the assert step in `.github/workflows/release-please.yml`.
 
-The Graphite merge queue on `main` must use **squash** as its merge strategy (not merge commits). See [`docs/GRAPHITE.md`](GRAPHITE.md).
+The GitHub merge queue on `main` must use **squash** as its merge strategy (not merge commits). See [`docs/STACKING.md`](STACKING.md).
 
 Duplicate lines in [release PR #112](https://github.com/the-hcma/domesti-bot/pull/112) came from merge commits on `main` before squash-only was enforced.
 
