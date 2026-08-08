@@ -14,6 +14,7 @@ import {
   type Ep1ReadingComparison,
   type Ep1ReadingMetric,
   type KasaCredentialsSource,
+  type KasaPirRange,
   type RuleActionType,
   type RuleReferenceIssueKind,
   type RuleTrigger,
@@ -188,6 +189,43 @@ export interface KasaCredentialsSettingsOut {
 export interface KasaCredentialsTestIn {
   password?: string | null;
   username?: string | null;
+}
+
+export interface KasaDeviceSettingsOut {
+  device_id: string;
+  display_label: string;
+  display_name: string | null;
+  host: string;
+  model: string | null;
+}
+
+export interface KasaDevicesSettingsOut {
+  devices: KasaDeviceSettingsOut[];
+}
+
+export interface KasaMotionTuningOut {
+  ambient_available: boolean;
+  ambient_light: number | null;
+  ambient_light_enabled: boolean | null;
+  device_id: string;
+  display_label: string;
+  display_name: string | null;
+  host: string;
+  knobs_confirmed: boolean;
+  model: string | null;
+  pir_enabled: boolean;
+  pir_percent: number | null;
+  pir_range: KasaPirRange;
+  pir_range_choices: KasaPirRange[];
+  pir_threshold: number;
+  pir_triggered: boolean;
+}
+
+export interface KasaMotionTuningSetIn {
+  ambient_light_enabled?: boolean | null;
+  pir_enabled?: boolean | null;
+  pir_range?: KasaPirRange | null;
+  pir_threshold?: number | null;
 }
 
 export interface SettingsCredentialsTestOut {

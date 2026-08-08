@@ -53,6 +53,9 @@ import type {
   KasaCredentialsSetOut,
   KasaCredentialsSettingsOut,
   KasaCredentialsTestIn,
+  KasaDevicesSettingsOut,
+  KasaMotionTuningOut,
+  KasaMotionTuningSetIn,
   MyTracksCredentialsTestIn,
   SettingsCredentialsTestOut,
   Ep1BluetoothProxyOut,
@@ -416,6 +419,15 @@ export const api = {
   fetchKasaCredentialsSettings(): Promise<KasaCredentialsSettingsOut> {
     return call<KasaCredentialsSettingsOut>("GET", "/v1/settings/kasa-credentials");
   },
+  fetchKasaMotionDevices(): Promise<KasaDevicesSettingsOut> {
+    return call<KasaDevicesSettingsOut>("GET", "/v1/settings/kasa/devices");
+  },
+  fetchKasaMotionTuning(deviceId: string): Promise<KasaMotionTuningOut> {
+    return call<KasaMotionTuningOut>(
+      "GET",
+      `/v1/settings/kasa/devices/${encodeURIComponent(deviceId)}/motion-tuning`,
+    );
+  },
   fetchEp1BluetoothProxy(deviceId: string): Promise<Ep1BluetoothProxyOut> {
     return call<Ep1BluetoothProxyOut>(
       "GET",
@@ -490,6 +502,16 @@ export const api = {
       username,
       password,
     });
+  },
+  putKasaMotionTuning(
+    deviceId: string,
+    body: KasaMotionTuningSetIn,
+  ): Promise<KasaMotionTuningOut> {
+    return call<KasaMotionTuningOut>(
+      "PUT",
+      `/v1/settings/kasa/devices/${encodeURIComponent(deviceId)}/motion-tuning`,
+      body,
+    );
   },
   putEp1BluetoothProxy(
     deviceId: string,

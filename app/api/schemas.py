@@ -21,6 +21,7 @@ from app.device_enums import (
     Ep1OccupancyTuningKind,
     Ep1ReadingComparison,
     Ep1ReadingMetric,
+    KasaPirRange,
     RuleDeviceActionType,
     RuleTrigger,
     SensorChartWindow,
@@ -534,6 +535,101 @@ class KasaCredentialsTestIn(BaseModel):
         default=None,
         max_length=256,
         description="Account email override; both username and password must be set to use form credentials.",
+    )
+
+
+class KasaDeviceSettingsOut(BaseModel):
+    """One motion-capable Kasa switch selectable in Settings → Kasa."""
+
+    device_id: str = Field(..., description="Normalized MAC address.")
+    display_label: str = Field(
+        ...,
+        description="Human-visible ``preferred_label (mac)`` for dropdown labels.",
+    )
+    display_name: str | None = Field(default=None, description="Preferred label without MAC.")
+    host: str = Field(..., description="LAN host / IP for the switch.")
+    model: str | None = Field(default=None, description="Vendor model string when known (e.g. KS200M(US)).")
+
+
+class KasaDevicesSettingsOut(BaseModel):
+    """Motion-capable Kasa devices for Settings → Kasa Target device."""
+
+    devices: list[KasaDeviceSettingsOut] = Field(
+        default_factory=list,
+        description="Live switches that expose the python-kasa motion module, sorted by display label.",
+    )
+
+
+class KasaMotionTuningOut(BaseModel):
+    """PIR / ambient config + live sensors for one Kasa Settings target."""
+
+    ambient_available: bool = Field(
+        ...,
+        description="True when the device exposes the ambient (LAS) module.",
+    )
+    ambient_light: int | None = Field(
+        default=None,
+        description="Live ambient light sensor reading (percent) when ambient is available.",
+    )
+    ambient_light_enabled: bool | None = Field(
+        default=None,
+        description="Ambient light gate enable; null when ambient module is absent.",
+    )
+    device_id: str = Field(..., description="Normalized MAC address.")
+    display_label: str = Field(
+        ...,
+        description="Human-visible ``preferred_label (mac)`` for the target device.",
+    )
+    display_name: str | None = Field(default=None, description="Preferred label without MAC.")
+    host: str = Field(..., description="LAN host used for this snapshot.")
+    knobs_confirmed: bool = Field(
+        default=True,
+        description=(
+            "True when written config values were observed to stick after Apply; "
+            "False when the post-write re-read did not match the request."
+        ),
+    )
+    model: str | None = Field(default=None, description="Vendor model string when known.")
+    pir_enabled: bool = Field(..., description="PIR motion detection enable.")
+    pir_percent: float | None = Field(
+        default=None,
+        description="Live PIR percentile sensor (ADC-derived; polled snapshot).",
+    )
+    pir_range: KasaPirRange = Field(..., description="Motion sensor range preset (Far / Mid / Near / Custom).")
+    pir_range_choices: list[KasaPirRange] = Field(
+        ...,
+        description="Range presets supported by this device.",
+    )
+    pir_threshold: int = Field(
+        ...,
+        description="Motion sensor threshold (0–100; Custom range uses this value).",
+    )
+    pir_triggered: bool = Field(
+        ...,
+        description="Live PIR triggered sensor (polled ADC snapshot; short motion can be missed).",
+    )
+
+
+class KasaMotionTuningSetIn(BaseModel):
+    """Body for ``PUT /v1/settings/kasa/devices/{device_id}/motion-tuning``.
+
+    Omitted fields are left unchanged on the device.
+    """
+
+    ambient_light_enabled: bool | None = Field(
+        default=None,
+        description="Enable or disable ambient light gating (requires ambient module).",
+    )
+    pir_enabled: bool | None = Field(default=None, description="Enable or disable PIR.")
+    pir_range: KasaPirRange | None = Field(
+        default=None,
+        description="Motion sensor range preset (Far / Mid / Near / Custom).",
+    )
+    pir_threshold: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Motion sensor threshold 0–100 (writes Custom range on the device).",
     )
 
 

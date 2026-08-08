@@ -31,6 +31,10 @@ from app.api.schemas import (
     KasaCredentialsSetOut,
     KasaCredentialsSettingsOut,
     KasaCredentialsTestIn,
+    KasaDeviceSettingsOut,
+    KasaDevicesSettingsOut,
+    KasaMotionTuningOut,
+    KasaMotionTuningSetIn,
     SettingsCredentialsTestOut,
     TailwindTokenSetIn,
     TailwindTokenSetOut,
@@ -90,6 +94,16 @@ from app.ep1_occupancy_tuning import (
     read_ep1_occupancy_tuning,
 )
 from app.kasa_credentials import resolve_kasa_credentials
+from app.kasa_device_manager import KasaDeviceManager
+from app.kasa_motion_tuning import (
+    KasaMotionTuningError,
+    KasaMotionTuningNotFoundError,
+    KasaMotionTuningSnapshot,
+    KasaMotionTuningValidationError,
+    apply_kasa_motion_tuning,
+    list_kasa_motion_settings_targets,
+    read_kasa_motion_tuning,
+)
 from app.server_runtime import runtime
 from app.settings_credentials_test import (
     CredentialsTestUnavailableError,
@@ -203,6 +217,71 @@ async def put_kasa_credentials(body: KasaCredentialsSetIn, request: Request) -> 
         source=source,
         restart_required=not env_active and not reload_ok,
     )
+
+
+@router.get("/kasa/devices", response_model=KasaDevicesSettingsOut)
+async def get_kasa_motion_devices_settings(request: Request) -> KasaDevicesSettingsOut:
+    """List live Kasa switches that expose PIR (motion) for Settings → Target device."""
+    del request
+    devices = [
+        KasaDeviceSettingsOut(
+            device_id=row.device_id,
+            display_label=row.display_label,
+            display_name=row.display_name,
+            host=row.host,
+            model=row.model,
+        )
+        for row in list_kasa_motion_settings_targets(kasa_mgr=_live_kasa_mgr())
+    ]
+    return KasaDevicesSettingsOut(devices=devices)
+
+
+@router.get(
+    "/kasa/devices/{device_id}/motion-tuning",
+    response_model=KasaMotionTuningOut,
+)
+async def get_kasa_device_motion_tuning(device_id: str, request: Request) -> KasaMotionTuningOut:
+    """Read PIR / ambient config and live sensors for one motion-capable Kasa switch."""
+    del request
+    try:
+        snapshot = await read_kasa_motion_tuning(
+            device_id=device_id,
+            kasa_mgr=_live_kasa_mgr(),
+        )
+    except KasaMotionTuningNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except KasaMotionTuningError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _kasa_motion_tuning_out(snapshot)
+
+
+@router.put(
+    "/kasa/devices/{device_id}/motion-tuning",
+    response_model=KasaMotionTuningOut,
+)
+async def put_kasa_device_motion_tuning(
+    device_id: str,
+    body: KasaMotionTuningSetIn,
+    request: Request,
+) -> KasaMotionTuningOut:
+    """Write PIR / ambient config knobs on the target Kasa switch."""
+    del request
+    try:
+        snapshot = await apply_kasa_motion_tuning(
+            device_id=device_id,
+            ambient_light_enabled=body.ambient_light_enabled,
+            kasa_mgr=_live_kasa_mgr(),
+            pir_enabled=body.pir_enabled,
+            pir_range=body.pir_range,
+            pir_threshold=body.pir_threshold,
+        )
+    except KasaMotionTuningNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
+    except KasaMotionTuningValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except KasaMotionTuningError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    return _kasa_motion_tuning_out(snapshot)
 
 
 @router.get("/ep1/devices", response_model=Ep1DevicesSettingsOut)
@@ -737,6 +816,13 @@ def _live_ep1_mgr() -> Ep1DeviceManager | None:
     return state.ep1_mgr
 
 
+def _live_kasa_mgr() -> KasaDeviceManager | None:
+    state = runtime.device_state
+    if state is None:
+        return None
+    return state.kasa_mgr
+
+
 async def _reload_ep1_manager() -> bool:
     """Rebuild the live EP1 manager after Noise PSK storage changes."""
     state: DeviceManagersState | None = runtime.device_state
@@ -780,6 +866,26 @@ async def _reload_ep1_manager() -> bool:
     except Exception:
         return False
     return True
+
+
+def _kasa_motion_tuning_out(snapshot: KasaMotionTuningSnapshot) -> KasaMotionTuningOut:
+    return KasaMotionTuningOut(
+        ambient_available=snapshot.ambient_available,
+        ambient_light=snapshot.ambient_light,
+        ambient_light_enabled=snapshot.ambient_light_enabled,
+        device_id=snapshot.device_id,
+        display_label=snapshot.display_label,
+        display_name=snapshot.display_name,
+        host=snapshot.host,
+        knobs_confirmed=snapshot.knobs_confirmed,
+        model=snapshot.model,
+        pir_enabled=snapshot.pir_enabled,
+        pir_percent=snapshot.pir_percent,
+        pir_range=snapshot.pir_range,
+        pir_range_choices=list(snapshot.pir_range_choices),
+        pir_threshold=snapshot.pir_threshold,
+        pir_triggered=snapshot.pir_triggered,
+    )
 
 
 def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:
