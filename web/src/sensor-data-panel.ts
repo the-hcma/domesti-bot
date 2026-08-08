@@ -27,6 +27,9 @@ const CHART_PAD_TOP = 28;
 const CHART_POINT_MIN_SPACING_PX = 12;
 const CHART_WIDTH = 720;
 const DEFAULT_RETENTION_DAYS = 60;
+/** Shown when the operator dismisses the prune confirmation dialog. */
+export const RETENTION_PRUNE_CANCELLED_STATUS =
+  "Retention save cancelled — no samples were pruned.";
 const INTERVAL_OPTIONS: readonly {
   label: string;
   value: SensorCollectionIntervalS;
@@ -298,9 +301,9 @@ function renderSparkline(
 
   const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
   title.setAttribute("class", "rules-sensor-chart-title");
-  title.setAttribute("x", String(plotLeft));
+  title.setAttribute("x", String(plotRight));
   title.setAttribute("y", "14");
-  title.setAttribute("text-anchor", "start");
+  title.setAttribute("text-anchor", "end");
   title.setAttribute("dominant-baseline", "hanging");
   title.textContent = sensorKeyLabel(sensorKey);
   svg.append(title);
@@ -607,6 +610,22 @@ export async function mountSensorDataPanel(
   }
 }
 
+/** Confirm copy when saving retention would delete existing samples. */
+export function retentionPruneConfirmMessage(
+  samplesToPrune: number,
+  maxAgeDays: number,
+): string {
+  const sampleNoun = samplesToPrune === 1 ? "sample" : "samples";
+  const dayLabel = Number.isInteger(maxAgeDays)
+    ? String(maxAgeDays)
+    : maxAgeDays.toFixed(1);
+  const dayNoun = maxAgeDays === 1 ? "day" : "days";
+  return (
+    `This will permanently delete ${samplesToPrune} ${sampleNoun} ` +
+    `older than ${dayLabel} ${dayNoun}. Continue?`
+  );
+}
+
 function mountRetentionForm(
   container: HTMLElement,
   initial: SensorCollectionRetentionOut,
@@ -627,15 +646,18 @@ function mountRetentionForm(
   help.textContent =
     "Older samples are pruned automatically. Default is two months (60 days).";
 
+  const row = document.createElement("div");
+  row.className = "rules-sensor-retention-row";
+
   const unlimitedLabel = document.createElement("label");
   unlimitedLabel.className = "rules-sensor-enabled";
   const unlimitedCb = document.createElement("input");
   unlimitedCb.type = "checkbox";
   unlimitedCb.checked = current.unlimited;
-  unlimitedLabel.append(unlimitedCb, document.createTextNode(" Keep forever (no age prune)"));
+  unlimitedLabel.append(unlimitedCb, document.createTextNode(" Keep forever"));
 
   const daysField = document.createElement("div");
-  daysField.className = "settings-dialog-field";
+  daysField.className = "settings-dialog-field rules-sensor-field-inline";
   daysField.append(createFieldLabel("Keep for (days)"));
   const daysInput = document.createElement("input");
   daysInput.type = "number";
@@ -650,9 +672,7 @@ function mountRetentionForm(
   saveBtn.className = "btn";
   saveBtn.textContent = "Save retention";
 
-  const daysRow = document.createElement("div");
-  daysRow.className = "settings-dialog-field-row rules-sensor-retention-row";
-  daysRow.append(daysField, saveBtn);
+  row.append(unlimitedLabel, daysField, saveBtn);
 
   const syncEnabled = (): void => {
     daysInput.disabled = unlimitedCb.checked;
@@ -668,17 +688,31 @@ function mountRetentionForm(
         status.textContent = "Enter a retention of at least 1 day, or enable keep forever.";
         return;
       }
+      const body = {
+        max_age_days:
+          Number.isFinite(maxAgeDays) && maxAgeDays > 0
+            ? maxAgeDays
+            : DEFAULT_RETENTION_DAYS,
+        unlimited: unlimitedCb.checked,
+      };
       saveBtn.disabled = true;
       unlimitedCb.disabled = true;
       daysInput.disabled = true;
       try {
-        current = await dataSource.saveSensorCollectionRetention({
-          max_age_days:
-            Number.isFinite(maxAgeDays) && maxAgeDays > 0
-              ? maxAgeDays
-              : DEFAULT_RETENTION_DAYS,
-          unlimited: unlimitedCb.checked,
-        });
+        if (!body.unlimited) {
+          const preview = await dataSource.previewSensorCollectionRetentionPrune(body);
+          if (preview.samples_to_prune > 0) {
+            const confirmed = window.confirm(
+              retentionPruneConfirmMessage(preview.samples_to_prune, body.max_age_days),
+            );
+            if (!confirmed) {
+              status.hidden = false;
+              status.textContent = RETENTION_PRUNE_CANCELLED_STATUS;
+              return;
+            }
+          }
+        }
+        current = await dataSource.saveSensorCollectionRetention(body);
         daysInput.value = String(current.max_age_days);
         unlimitedCb.checked = current.unlimited;
         showSuccessToast(
@@ -697,7 +731,7 @@ function mountRetentionForm(
     })();
   });
 
-  fieldset.append(help, unlimitedLabel, daysRow);
+  fieldset.append(help, row);
   container.append(fieldset);
 }
 

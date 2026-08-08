@@ -37,6 +37,7 @@ import {
   type SensorCollectionKey,
   type SensorCollectionRetentionIn,
   type SensorCollectionRetentionOut,
+  type SensorCollectionRetentionPrunePreviewOut,
   type SensorCollectionSamplesOut,
   type SensorCollectionSensorOut,
   type SensorCollectionSensorsOut,
@@ -98,6 +99,9 @@ export interface RulesDataSource {
   getSensorCollectionRetention(): Promise<SensorCollectionRetentionOut>;
   getSensorCollectionSensors(): Promise<SensorCollectionSensorsOut>;
   getVacationModeSettings(): Promise<VacationModeSettingsStatusOut>;
+  previewSensorCollectionRetentionPrune(
+    body: SensorCollectionRetentionIn,
+  ): Promise<SensorCollectionRetentionPrunePreviewOut>;
   saveSettingsLocation(location: SettingsLocationOut): Promise<SettingsLocationOut>;
   resetSmtpConfig(): Promise<void>;
   saveSensorCollectionRetention(
@@ -468,6 +472,13 @@ export class MockRulesDataSource implements RulesDataSource {
     return structuredClone(this.store.vacation_mode);
   }
 
+  async previewSensorCollectionRetentionPrune(
+    body: SensorCollectionRetentionIn,
+  ): Promise<SensorCollectionRetentionPrunePreviewOut> {
+    void body;
+    return { samples_to_prune: 0 };
+  }
+
   async saveSettingsLocation(
     location: SettingsLocationOut,
   ): Promise<SettingsLocationOut> {
@@ -740,6 +751,12 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
       }
     }
     return this.inner.getVacationModeSettings();
+  }
+
+  previewSensorCollectionRetentionPrune(
+    body: SensorCollectionRetentionIn,
+  ): Promise<SensorCollectionRetentionPrunePreviewOut> {
+    return api.postSensorCollectionRetentionPrunePreview(body);
   }
 
   async getStatus(): Promise<RulesStatusOut> {
