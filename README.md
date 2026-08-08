@@ -312,8 +312,8 @@ documented in [`docs/AGENTS.md`](docs/AGENTS.md). Notable rules:
 - `uv` for dependency management — never `pip` directly.
 - Methods and module-level functions sorted alphabetically inside each class.
 - Sigs require `from __future__ import annotations`.
-- All commits via Graphite-stacked PRs; `main` is protected, direct pushes
-  are blocked at the server.
+- All commits via gh-stack stacked PRs; `main` is protected by GitHub’s merge
+  queue (squash), and direct pushes are blocked.
 - Conventional Commit messages, GPG-signed.
 
 ## Production deployment
@@ -340,28 +340,30 @@ requests, and PRs are all on the table — whether you've spotted a typo,
 hit an edge case with your specific Kasa/Sonos/Tailwind hardware, or want to
 add a brand-new device family, the door is open.
 
-The project uses [Graphite](https://graphite.dev) for stacked PRs. The
-practical workflow is:
+The project uses [`gh stack`](https://github.com/github/gh-stack) for stacked PRs
+and GitHub’s native merge queue. The practical workflow is:
 
 ```bash
-# 1. Start a stack from main
-gt create feat/your-idea
+# 1. Start a stack worktree, then init a branch from main
+~/work/ai/repository-helpers/scripts/dev/start-development --worktree your-idea --no-interactive
+cd .worktrees/your-idea-wt
+gh stack init feat/your-idea
 
 # 2. Make the change, run the local gates (pyright + pytest, see Development)
 #    Each gate is also enforced in CI.
 
 # 3. Commit + open PR
-gt create --all --message "feat: short description"
-gt submit --no-interactive --publish
+git add -A && git commit -m "feat: short description"
+~/work/ai/repository-helpers/scripts/dev/submit-stack
 ```
 
 For larger changes, stack the work into focused PRs so each one is
 independently reviewable. The [stack of PRs](https://github.com/the-hcma/domesti-bot/pulls)
 visible on this repo is itself an example of the pattern.
 
-The full Git / commit / PR conventions, including the merge-it label flow and
-the protected-`main` ruleset, live in [`docs/AGENTS.md`](docs/AGENTS.md) under
-the *Commits, Stacking & Pull Requests* section.
+The full Git / commit / PR conventions, including GitHub merge-queue enqueue
+(`gh pr merge --auto --squash`) and the protected-`main` ruleset, live in
+[`docs/AGENTS.md`](docs/AGENTS.md) and [`docs/STACKING.md`](docs/STACKING.md).
 
 ## License
 

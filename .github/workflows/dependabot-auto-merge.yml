@@ -1,23 +1,25 @@
 name: Dependabot Auto Merge
 
-# Automatically add the "merge-it" label to Dependabot PRs so they are
-# picked up by the Graphite merge queue without manual intervention.
+# Enable GitHub auto-merge (squash) so Dependabot PRs enter the native
+# merge queue once required checks pass. Do not use the merge-it label —
+# that enqueues Graphite MQ on other org repos.
 on:
-  pull_request:
-    types: [opened, reopened]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
+  contents: write
   pull-requests: write
 
 jobs:
-  label:
-    if: github.actor == 'dependabot[bot]'
+  enable-auto-merge:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
-      - name: Add merge-it label
+      - name: Enable auto-merge (squash)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: gh pr edit "${PR}" --add-label merge-it --repo "${REPO}"
+        run: gh pr merge "${PR}" --repo "${REPO}" --auto --squash

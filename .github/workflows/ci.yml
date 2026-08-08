@@ -1,9 +1,8 @@
 name: CI
 
 on:
-  # Omitting push: main — once a merge queue is enabled it validates the
-  # integrated state itself; a second CI run after merge duplicates work
-  # without adding signal. Until then, PR validation is sufficient.
+  # Omitting push: main — the merge queue validates the integrated state;
+  # a second CI run after merge duplicates work without adding signal.
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review, edited]
 
@@ -11,6 +10,9 @@ on:
     branches-ignore:
       - main
       - '**/graphite-base/**'
+      # GitHub merge queue temporary branches — use merge_group, not push.
+      - 'gh-readonly-queue/**'
+  merge_group:
   schedule:
     # Weekly full suite — catches new CVEs and regressions between PRs.
     - cron: '0 7 * * 4'
@@ -22,7 +24,7 @@ on:
 # actions are also split (opened/synchronize vs edited) so review-bot description
 # patches do not cancel an in-flight test run for the same commit.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.event.action || github.event_name }}
+  group: ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}-${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}-${{ github.event.action || github.event_name }}
   cancel-in-progress: true
 jobs:
   guard:
@@ -103,7 +105,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
 
       - uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -120,7 +122,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
 
       - uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -137,7 +139,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
 
       - uses: astral-sh/setup-uv@v9.0.0
         with:
@@ -154,7 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -170,7 +172,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
 
       - uses: actions/setup-node@v7.0.0
         with:
@@ -192,7 +194,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
 
       - name: Install actionlint
         run: |
@@ -212,9 +214,9 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
       - name: Secret Scan
         env:
-          GITLEAKS_BASE: ${{ github.event.pull_request.base.sha || '' }}
-          GITLEAKS_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          GITLEAKS_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+          GITLEAKS_HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: bash .github/ci/secret-scan

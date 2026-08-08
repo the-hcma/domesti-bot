@@ -17,7 +17,8 @@ The **primary clone** at the repo root (first line of `git worktree list`) is th
 
 - File edits, dependency installs, tests, builds, linters, formatters
 - `dep-updater --dir <repo-root>` (fast-forwards the primary clone and changes git state)
-- `gt create` / `gt modify` / `gt submit` / `gt sync` / `gt restack` / commits / checkouts
+- `gh stack init` / `gh stack add` / `gh stack submit` / `gh stack sync` / `gh stack rebase` /
+  `gt create` / `gt modify` / `gt submit` / `gt sync` / `gt restack` / commits / checkouts
 - Leaving uncommitted changes or stray branches
 
 ## Read-only on main is OK
@@ -34,5 +35,4 @@ git worktree add --detach /tmp/repo-inspect-<id> origin/main
 git worktree remove --force /tmp/repo-inspect-<id>
 ```
 
-`start-development` may sync the main worktree for environment setup; that does **not** grant permission to implement or run mutating commands there.
-
+`start-development` may sync the main worktree for environment sync only; that does **not** grant permission to implement or run mutating commands there.
