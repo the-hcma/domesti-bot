@@ -116,8 +116,11 @@ from a clone once the merge queue is enabled.
 
 ### CI and merge queue
 
-- CI runs on `merge_group` and ignores pushes to `gh-readonly-queue/**` (see `.github/workflows/ci.yml`).
-- Legacy Graphite staging skips (`gtmq_merge_*`, `graphite-base/**`) remain for leftover branches.
+- CI **runs** on `merge_group` (required status checks for GitHub’s merge queue) and
+  **ignores pushes** to `gh-readonly-queue/**` so those temporary branches do not
+  double-trigger via the `push` event.
+- Guard still skips legacy Graphite staging (`gtmq_merge_*`) only — do **not** skip
+  `merge_group` / `gh-readonly-queue/*` in Guard or required checks never pass in queue.
 - `merged-pr-closer.yml` still closes child PRs left open after a stack lands.
 
 ---

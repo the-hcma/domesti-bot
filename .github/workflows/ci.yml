@@ -59,9 +59,11 @@ jobs:
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
           PR_STATE: ${{ steps.pr-state.outputs.state }}
         run: |
-          # Skip merge-queue staging branches — the merge queue validates the
-          # integrated state itself; CI there duplicates work.
-          # Skip when the PR is already merged — Graphite pushes a restack
+          # Skip Graphite MQ staging branches only (gtmq_merge_*). GitHub's
+          # native merge queue uses merge_group events — those MUST run CI
+          # (required checks). Pushes to gh-readonly-queue/** are ignored via
+          # branches-ignore above so they do not double-trigger.
+          # Skip when the PR is already merged — Graphite may push a restack
           # commit to the next branch after a merge lands, which would otherwise
           # trigger a redundant CI run on an already-validated diff.
           if [[ "$HEAD_REF" == gtmq_merge_* ]] || [[ "$PR_STATE" == "MERGED" ]]; then
