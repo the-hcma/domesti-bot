@@ -2,6 +2,7 @@ import { KasaCredentialsSource, type KasaPirRange } from "./closed-sets.js";
 // Kasa/Tapo KLAP account credentials + motion (PIR) tuning for the Settings hub.
 
 import { api, HttpError } from "./api.js";
+import { createFieldLabel, createInfoBadge } from "./rules-ui-helpers.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
 import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type {
@@ -11,12 +12,37 @@ import type {
   KasaMotionTuningSetIn,
 } from "./types.js";
 
+export const KASA_MOTION_SETTINGS_AMBIENT_ENABLED_INFO_DETAIL =
+  "When on, the switch’s ambient light sensor can gate motion-based lighting (for example “motion when dark” in the Kasa app). Domesti-bot only toggles the sensor enable — Smart Control rules stay in the Kasa app.";
+export const KASA_MOTION_SETTINGS_AMBIENT_ENABLED_INFO_EXAMPLE =
+  "Leave enabled if you want day/night gating; disable to ignore ambient light.";
+export const KASA_MOTION_SETTINGS_AMBIENT_ENABLED_LABEL = "Ambient light enabled";
 export const KASA_MOTION_SETTINGS_APPLY_LABEL = "Apply motion tuning";
 export const KASA_MOTION_SETTINGS_APPLY_UNCONFIRMED =
   "Motion settings were sent, but the switch did not confirm all values. Refresh and retry.";
 export const KASA_MOTION_SETTINGS_LEGEND = "Motion (PIR) tuning";
+export const KASA_MOTION_SETTINGS_LIVE_SENSORS_HEADING = "Live sensors";
+export const KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_DETAIL =
+  "Read-only polled snapshots from the switch. They are not editable here — use Refresh sensors to update. Short motion can be missed between polls.";
+export const KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_EXAMPLE =
+  "Wave at the switch, then Refresh sensors — PIR triggered may flip to yes and PIR percent rises.";
 export const KASA_MOTION_SETTINGS_NO_DEVICES =
   "No Kasa switches with PIR/motion were discovered. KS200M-class wall switches appear here after discovery.";
+export const KASA_MOTION_SETTINGS_PIR_ENABLED_INFO_DETAIL =
+  "Turns the wall-switch motion (PIR) detector on or off. When off, the switch will not report motion for Smart Control or automations that depend on it.";
+export const KASA_MOTION_SETTINGS_PIR_ENABLED_INFO_EXAMPLE =
+  "Disable PIR temporarily while painting near the switch so lights do not keep firing.";
+export const KASA_MOTION_SETTINGS_PIR_ENABLED_LABEL = "PIR enabled";
+export const KASA_MOTION_SETTINGS_PIR_RANGE_INFO_DETAIL =
+  "Preset detection distance: Near (~5 ft), Mid (~15 ft), Far (~25 ft), or Custom. Choosing a preset updates the device range; setting a threshold writes Custom.";
+export const KASA_MOTION_SETTINGS_PIR_RANGE_INFO_EXAMPLE =
+  "Use Near in a hallway so motion past the doorway does not trip the light.";
+export const KASA_MOTION_SETTINGS_PIR_RANGE_LABEL = "PIR range";
+export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_DETAIL =
+  "Fine sensitivity from 0–100. Writing a threshold puts the device into Custom range (preset Near/Mid/Far is not applied in the same Apply).";
+export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_EXAMPLE =
+  "Raise the threshold if pets or hallway traffic keep triggering Mid/Far.";
+export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_LABEL = "PIR threshold (0–100)";
 export const KASA_MOTION_SETTINGS_REFRESH_LABEL = "Refresh sensors";
 export const KASA_MOTION_SETTINGS_TARGET_DEVICE_LABEL = "Target device";
 
@@ -32,7 +58,7 @@ function appendMotionIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
   intro.className = "settings-dialog-lead";
   intro.textContent =
-    "Configure PIR range / threshold and ambient light gating on motion-capable wall switches (for example KS200M). Triggered state is a polled ADC snapshot — short motion can be missed between refreshes.";
+    "Edit PIR enable / range / threshold and ambient-light enable on motion-capable wall switches (for example KS200M). PIR triggered, PIR percent, and ambient light below are live read-only sensors — refresh to update; short motion can be missed between polls.";
   parent.append(intro);
 }
 
@@ -56,6 +82,29 @@ function createDeviceSelect(): {
   emptyHint.hidden = true;
 
   return { emptyHint, label, select };
+}
+
+/** Label text associated via ``htmlFor``; info badge stays outside the ``<label>``. */
+function createMotionField(
+  label: string,
+  info: { detail: string; example: string },
+  control: HTMLElement,
+): HTMLDivElement {
+  const root = document.createElement("div");
+  root.className = "settings-dialog-field";
+  const controlId =
+    control.id !== ""
+      ? control.id
+      : `kasa-motion-${control.getAttribute("name") ?? "field"}`;
+  control.id = controlId;
+  const labelRow = document.createElement("span");
+  labelRow.className = "rules-field-label-row";
+  const textLabel = document.createElement("label");
+  textLabel.htmlFor = controlId;
+  textLabel.textContent = label;
+  labelRow.append(textLabel, createInfoBadge(label, info.detail, info.example));
+  root.append(labelRow, control);
+  return root;
 }
 
 function selectedValue(select: HTMLSelectElement): string | null {
@@ -134,7 +183,7 @@ export async function mountKasaSettingsPanel(
   actions.append(saveBtn, testBtn, clearBtn);
 
   const credsSection = document.createElement("fieldset");
-  credsSection.className = "settings-dialog-fieldset";
+  credsSection.className = "settings-dialog-fieldset kasa-credentials-section";
   const credsLegend = document.createElement("legend");
   credsLegend.textContent = "KLAP credentials";
   credsSection.append(credsLegend, status, emailLabel, passwordLabel, actions);
@@ -153,51 +202,68 @@ export async function mountKasaSettingsPanel(
   motionStatus.className = "settings-dialog-status";
   motionStatus.hidden = true;
 
-  const pirEnabledLabel = document.createElement("label");
-  pirEnabledLabel.className = "settings-dialog-field settings-dialog-checkbox";
   const pirEnabledInput = document.createElement("input");
   pirEnabledInput.type = "checkbox";
   pirEnabledInput.name = "pir_enabled";
-  const pirEnabledText = document.createElement("span");
-  pirEnabledText.textContent = "PIR enabled";
-  pirEnabledLabel.append(pirEnabledInput, pirEnabledText);
+  const pirEnabledField = createMotionField(
+    KASA_MOTION_SETTINGS_PIR_ENABLED_LABEL,
+    {
+      detail: KASA_MOTION_SETTINGS_PIR_ENABLED_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_PIR_ENABLED_INFO_EXAMPLE,
+    },
+    pirEnabledInput,
+  );
 
-  const pirRangeLabel = document.createElement("label");
-  pirRangeLabel.className = "settings-dialog-field";
-  const pirRangeText = document.createElement("span");
-  pirRangeText.textContent = "PIR range";
   const pirRangeSelect = document.createElement("select");
   pirRangeSelect.name = "pir_range";
-  pirRangeLabel.append(pirRangeText, pirRangeSelect);
+  const pirRangeField = createMotionField(
+    KASA_MOTION_SETTINGS_PIR_RANGE_LABEL,
+    {
+      detail: KASA_MOTION_SETTINGS_PIR_RANGE_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_PIR_RANGE_INFO_EXAMPLE,
+    },
+    pirRangeSelect,
+  );
 
-  const pirThresholdLabel = document.createElement("label");
-  pirThresholdLabel.className = "settings-dialog-field";
-  const pirThresholdText = document.createElement("span");
-  pirThresholdText.textContent = "PIR threshold (0–100)";
   const pirThresholdInput = document.createElement("input");
   pirThresholdInput.type = "number";
   pirThresholdInput.name = "pir_threshold";
   pirThresholdInput.min = "0";
   pirThresholdInput.max = "100";
   pirThresholdInput.step = "1";
-  pirThresholdLabel.append(pirThresholdText, pirThresholdInput);
+  const pirThresholdField = createMotionField(
+    KASA_MOTION_SETTINGS_PIR_THRESHOLD_LABEL,
+    {
+      detail: KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_EXAMPLE,
+    },
+    pirThresholdInput,
+  );
 
-  const ambientEnabledLabel = document.createElement("label");
-  ambientEnabledLabel.className = "settings-dialog-field settings-dialog-checkbox";
+  const knobsRow = document.createElement("div");
+  knobsRow.className = "settings-dialog-field-row kasa-motion-knobs-row";
+  knobsRow.append(pirEnabledField, pirRangeField, pirThresholdField);
+
   const ambientEnabledInput = document.createElement("input");
   ambientEnabledInput.type = "checkbox";
   ambientEnabledInput.name = "ambient_light_enabled";
-  const ambientEnabledText = document.createElement("span");
-  ambientEnabledText.textContent = "Ambient light enabled";
-  ambientEnabledLabel.append(ambientEnabledInput, ambientEnabledText);
+  const ambientEnabledField = createMotionField(
+    KASA_MOTION_SETTINGS_AMBIENT_ENABLED_LABEL,
+    {
+      detail: KASA_MOTION_SETTINGS_AMBIENT_ENABLED_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_AMBIENT_ENABLED_INFO_EXAMPLE,
+    },
+    ambientEnabledInput,
+  );
 
-  const knobsStack = document.createElement("div");
-  knobsStack.className = "ep1-calibration-offsets";
-  knobsStack.append(
-    pirEnabledLabel,
-    pirRangeLabel,
-    pirThresholdLabel,
-    ambientEnabledLabel,
+  const liveSensorsHeading = document.createElement("h3");
+  liveSensorsHeading.className =
+    "settings-dialog-subheading kasa-motion-sensors-heading";
+  liveSensorsHeading.append(
+    createFieldLabel(KASA_MOTION_SETTINGS_LIVE_SENSORS_HEADING, {
+      detail: KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_EXAMPLE,
+    }),
   );
 
   const sensors = document.createElement("dl");
@@ -235,7 +301,14 @@ export async function mountKasaSettingsPanel(
   refreshMotionBtn.textContent = KASA_MOTION_SETTINGS_REFRESH_LABEL;
   motionActions.append(applyMotionBtn, refreshMotionBtn);
 
-  motionSection.append(motionStatus, knobsStack, sensors, motionActions);
+  motionSection.append(
+    motionStatus,
+    knobsRow,
+    ambientEnabledField,
+    liveSensorsHeading,
+    sensors,
+    motionActions,
+  );
   form.append(credsSection, motionSection);
   container.append(form);
 
@@ -282,7 +355,7 @@ export async function mountKasaSettingsPanel(
     refreshMotionBtn.disabled =
       deviceLoading || !hasDevices || selected == null;
     const ambientReady = baseline?.ambient_available === true;
-    ambientEnabledLabel.hidden = !ambientReady && baseline != null;
+    ambientEnabledField.hidden = !ambientReady && baseline != null;
     ambientEnabledInput.disabled = !ambientReady || deviceLoading;
   };
 
