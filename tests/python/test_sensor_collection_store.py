@@ -119,6 +119,42 @@ def test_list_sensor_samples_filters_by_chart_window(tmp_path: Path) -> None:
     assert [p.value for p in hour] == [42.0, 41.0, 40.0]
 
 
+def test_list_sensor_samples_last_week_window(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    device_id = "aa:bb:cc:dd:ee:ff"
+    key = SensorCollectionKey.OCCUPANCY
+    now = 1_700_000_000.0
+    insert_sensor_sample(
+        db,
+        device_id=device_id,
+        family_id="ep1",
+        recorded_at=now - 100_000,
+        sensor_key=key,
+        unit=None,
+        value=1.0,
+        now=now,
+    )
+    insert_sensor_sample(
+        db,
+        device_id=device_id,
+        family_id="ep1",
+        recorded_at=now - 700_000,
+        sensor_key=key,
+        unit=None,
+        value=0.0,
+        now=now,
+    )
+    week = list_sensor_samples(
+        db,
+        device_id=device_id,
+        sensor_key=key,
+        window=SensorChartWindow.LAST_WEEK,
+        now=now,
+    )
+    assert [p.value for p in week] == [1.0]
+    assert SensorChartWindow.LAST_WEEK.duration_s() == 604_800.0
+
+
 def test_default_retention_is_two_months(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     retention = load_sensor_collection_retention(db)

@@ -240,6 +240,7 @@ export const SensorChartWindow = {
   LastDay: "last_day",
   LastHour: "last_hour",
   LastMinute: "last_minute",
+  LastWeek: "last_week",
 } as const;
 export type SensorChartWindow =
   (typeof SensorChartWindow)[keyof typeof SensorChartWindow];
@@ -264,6 +265,16 @@ export const SensorCollectionIntervalS = {
 } as const;
 export type SensorCollectionIntervalS =
   (typeof SensorCollectionIntervalS)[keyof typeof SensorCollectionIntervalS];
+
+/**
+ * Frequency select sentinel for Automations → Data when collection is off.
+ * Not a real interval; maps to ``enabled=false`` on save.
+ */
+export const SensorCollectionFrequencyChoice = {
+  DontCollect: "off",
+} as const;
+export type SensorCollectionFrequencyChoice =
+  (typeof SensorCollectionFrequencyChoice)[keyof typeof SensorCollectionFrequencyChoice];
 
 /** Fernet secrets-key resolution. */
 export const SecretsKeySource = {

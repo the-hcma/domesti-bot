@@ -93,6 +93,7 @@ export interface RulesDataSource {
     deviceId: string,
     sensorKey: SensorCollectionKey,
     window: SensorChartWindow,
+    asOf?: number | null,
   ): Promise<SensorCollectionSamplesOut>;
   getSensorCollectionRetention(): Promise<SensorCollectionRetentionOut>;
   getSensorCollectionSensors(): Promise<SensorCollectionSensorsOut>;
@@ -444,9 +445,10 @@ export class MockRulesDataSource implements RulesDataSource {
     deviceId: string,
     sensorKey: SensorCollectionKey,
     window: SensorChartWindow,
+    asOf?: number | null,
   ): Promise<SensorCollectionSamplesOut> {
     return {
-      as_of: Date.now() / 1000,
+      as_of: asOf ?? Date.now() / 1000,
       device_id: deviceId,
       points: [],
       sensor_key: sensorKey,
@@ -716,8 +718,9 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
     deviceId: string,
     sensorKey: SensorCollectionKey,
     window: SensorChartWindow,
+    asOf?: number | null,
   ): Promise<SensorCollectionSamplesOut> {
-    return api.fetchSensorCollectionSamples(deviceId, sensorKey, window);
+    return api.fetchSensorCollectionSamples(deviceId, sensorKey, window, asOf);
   }
 
   getSensorCollectionRetention(): Promise<SensorCollectionRetentionOut> {

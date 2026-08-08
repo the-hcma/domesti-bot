@@ -213,6 +213,7 @@ class SensorChartWindow(StrEnum):
     LAST_DAY = "last_day"
     LAST_HOUR = "last_hour"
     LAST_MINUTE = "last_minute"
+    LAST_WEEK = "last_week"
 
     def duration_s(self) -> float:
         """Return how far back samples are included for this window."""
@@ -225,6 +226,8 @@ class SensorChartWindow(StrEnum):
                 return 3600.0
             case SensorChartWindow.LAST_DAY:
                 return 86_400.0
+            case SensorChartWindow.LAST_WEEK:
+                return 604_800.0
 
 
 class SensorCollectionKey(StrEnum):

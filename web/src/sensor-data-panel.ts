@@ -3,6 +3,7 @@
 import { HttpError } from "./api.js";
 import {
   SensorChartWindow,
+  SensorCollectionFrequencyChoice,
   SensorCollectionIntervalS,
   SensorCollectionKey,
 } from "./closed-sets.js";
@@ -18,6 +19,7 @@ import { showSuccessToast } from "./ui-toast.js";
 const CHART_HEIGHT = 168;
 const CHART_PAD_BOTTOM = 28;
 const CHART_PAD_LEFT = 48;
+const CHART_PAD_LEFT_OCCUPANCY = 72;
 const CHART_PAD_RIGHT = 12;
 const CHART_PAD_TOP = 12;
 const CHART_WIDTH = 720;
@@ -41,6 +43,7 @@ const WINDOW_OPTIONS: readonly {
   { label: "Last 5 minutes", value: SensorChartWindow.Last5Minutes },
   { label: "Last hour", value: SensorChartWindow.LastHour },
   { label: "Last day", value: SensorChartWindow.LastDay },
+  { label: "Last week", value: SensorChartWindow.LastWeek },
 ];
 
 function formatError(err: unknown): string {
@@ -81,9 +84,26 @@ function formatAxisReading(value: number): string {
   return value.toFixed(2);
 }
 
+function formatOccupancyReading(value: number): string {
+  return value >= 0.5 ? "occupied" : "empty";
+}
+
+function formatReadingValue(
+  value: number,
+  sensorKey: SensorCollectionKey,
+): string {
+  if (sensorKey === SensorCollectionKey.Occupancy) {
+    return formatOccupancyReading(value);
+  }
+  return formatAxisReading(value);
+}
+
 function formatAxisTime(epochS: number, window: SensorChartWindow): string {
   const when = new Date(epochS * 1000);
-  if (window === SensorChartWindow.LastDay) {
+  if (
+    window === SensorChartWindow.LastDay ||
+    window === SensorChartWindow.LastWeek
+  ) {
     // Compact so three ticks fit on phone-width cards.
     return when.toLocaleString(undefined, {
       day: "numeric",
@@ -109,19 +129,29 @@ function formatLastSample(
   at: number | null,
   value: number | null,
   unit: string | null,
+  sensorKey: SensorCollectionKey,
 ): string {
   if (at === null || value === null) {
     return "No samples yet";
   }
   const when = new Date(at * 1000).toLocaleString();
+  if (sensorKey === SensorCollectionKey.Occupancy) {
+    return `Last: ${formatOccupancyReading(value)} · ${when}`;
+  }
   const unitSuffix = unit === null || unit === "" ? "" : ` ${unit}`;
   return `Last: ${value}${unitSuffix} · ${when}`;
 }
 
-function formatSampleTooltip(point: SensorCollectionSampleOut): string {
+function formatSampleTooltip(
+  point: SensorCollectionSampleOut,
+  sensorKey: SensorCollectionKey,
+): string {
+  const when = new Date(point.recorded_at * 1000).toLocaleString();
+  if (sensorKey === SensorCollectionKey.Occupancy) {
+    return `${formatOccupancyReading(point.value)} · ${when}`;
+  }
   const unitSuffix =
     point.unit === null || point.unit === "" ? "" : ` ${point.unit}`;
-  const when = new Date(point.recorded_at * 1000).toLocaleString();
   return `${formatAxisReading(point.value)}${unitSuffix} · ${when}`;
 }
 
@@ -131,6 +161,7 @@ function renderSparkline(
   points: SensorCollectionSampleOut[],
   window: SensorChartWindow,
   asOf: number,
+  sensorKey: SensorCollectionKey,
 ): void {
   while (svg.firstChild !== null) {
     svg.removeChild(svg.firstChild);
@@ -158,7 +189,8 @@ function renderSparkline(
   );
   svg.setAttribute("preserveAspectRatio", "none");
 
-  const plotLeft = CHART_PAD_LEFT;
+  const isOccupancy = sensorKey === SensorCollectionKey.Occupancy;
+  const plotLeft = isOccupancy ? CHART_PAD_LEFT_OCCUPANCY : CHART_PAD_LEFT;
   const plotRight = chartWidth - CHART_PAD_RIGHT;
   const plotTop = CHART_PAD_TOP;
   const plotBottom = chartHeight - CHART_PAD_BOTTOM;
@@ -180,12 +212,22 @@ function renderSparkline(
   const durationS = windowDurationS(window);
   const end = asOf;
   const start = end - durationS;
-  const values = points.map((p) => p.value);
-  let minV = Math.min(...values);
-  let maxV = Math.max(...values);
-  if (minV === maxV) {
-    minV -= 1;
-    maxV += 1;
+  let minV: number;
+  let maxV: number;
+  let yTicks: number[];
+  if (isOccupancy) {
+    minV = 0;
+    maxV = 1;
+    yTicks = [0, 1];
+  } else {
+    const values = points.map((p) => p.value);
+    minV = Math.min(...values);
+    maxV = Math.max(...values);
+    if (minV === maxV) {
+      minV -= 1;
+      maxV += 1;
+    }
+    yTicks = [minV, (minV + maxV) / 2, maxV];
   }
 
   const xForTime = (epochS: number): number =>
@@ -208,7 +250,6 @@ function renderSparkline(
   yAxis.setAttribute("y2", String(plotBottom));
   axis.append(xAxis, yAxis);
 
-  const yTicks = [minV, (minV + maxV) / 2, maxV];
   for (const tick of yTicks) {
     const y = yForValue(tick);
     const grid = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -223,14 +264,17 @@ function renderSparkline(
     label.setAttribute("y", String(y));
     label.setAttribute("text-anchor", "end");
     label.setAttribute("dominant-baseline", "middle");
-    label.textContent = formatAxisReading(tick);
+    label.textContent = formatReadingValue(tick, sensorKey);
     axis.append(grid, label);
   }
 
-  const xTicks =
-    chartWidth < 420 || window === SensorChartWindow.LastDay
-      ? [start, end]
-      : [start, start + durationS / 2, end];
+  const useCompactXTicks =
+    chartWidth < 420 ||
+    window === SensorChartWindow.LastDay ||
+    window === SensorChartWindow.LastWeek;
+  const xTicks = useCompactXTicks
+    ? [start, end]
+    : [start, start + durationS / 2, end];
   for (let i = 0; i < xTicks.length; i += 1) {
     const tick = xTicks[i]!;
     const x = xForTime(tick);
@@ -272,7 +316,7 @@ function renderSparkline(
     point,
     cx: xForTime(point.recorded_at),
     cy: yForValue(point.value),
-    tipText: formatSampleTooltip(point),
+    tipText: formatSampleTooltip(point, sensorKey),
   }));
   const placeTooltipAt = (
     tipText: string,
@@ -385,6 +429,8 @@ function windowDurationS(window: SensorChartWindow): number {
       return 3600;
     case SensorChartWindow.LastDay:
       return 86_400;
+    case SensorChartWindow.LastWeek:
+      return 604_800;
     default: {
       const _exhaustive: never = window;
       return _exhaustive;
@@ -404,7 +450,7 @@ export async function mountSensorDataPanel(
   const lead = document.createElement("p");
   lead.className = "settings-dialog-lead";
   lead.textContent =
-    "Collect sensor readings into SQLite and inspect them on a chart. Enable a sensor, pick a sample frequency, then choose a time window.";
+    "Collect sensor readings into SQLite and inspect them on a chart. Pick a sample frequency (or don't collect), then choose a time window.";
 
   const retentionMount = document.createElement("div");
   retentionMount.className = "rules-sensor-retention";
@@ -542,6 +588,18 @@ function mountRetentionForm(
   container.append(fieldset);
 }
 
+function syncIntervalSelect(
+  select: HTMLSelectElement,
+  enabled: boolean,
+  intervalS: number,
+): void {
+  if (!enabled) {
+    select.value = SensorCollectionFrequencyChoice.DontCollect;
+    return;
+  }
+  select.value = String(intervalS);
+}
+
 function buildSensorCard(
   initial: SensorCollectionSensorOut,
   dataSource: RulesDataSource,
@@ -549,6 +607,11 @@ function buildSensorCard(
 ): HTMLElement {
   let current = initial;
   let chartWindow: SensorChartWindow = SensorChartWindow.Last5Minutes;
+  /** ``null`` means live window ending at server now. */
+  let chartAsOf: number | null = null;
+  let lastWindowEnd = Date.now() / 1000;
+  /** Last server ``as_of`` from a live (no offset) fetch; used to snap Next to live. */
+  let liveWindowEnd = lastWindowEnd;
 
   const card = document.createElement("section");
   card.className = "rules-sensor-card";
@@ -563,35 +626,31 @@ function buildSensorCard(
     current.last_sample_at,
     current.last_value,
     current.unit,
+    current.sensor_key,
   );
 
   const controls = document.createElement("div");
   controls.className = "rules-sensor-controls";
 
-  const enabledLabel = document.createElement("label");
-  enabledLabel.className = "rules-sensor-enabled";
-  const enabledCb = document.createElement("input");
-  enabledCb.type = "checkbox";
-  enabledCb.checked = current.enabled;
-  enabledLabel.append(enabledCb, document.createTextNode(" Collect"));
-
   const intervalField = document.createElement("div");
-  intervalField.className = "settings-dialog-field";
+  intervalField.className = "settings-dialog-field rules-sensor-field-inline";
   intervalField.append(createFieldLabel("Frequency"));
   const intervalSelect = document.createElement("select");
+  const dontCollectOpt = document.createElement("option");
+  dontCollectOpt.value = SensorCollectionFrequencyChoice.DontCollect;
+  dontCollectOpt.textContent = "Don't collect";
+  intervalSelect.append(dontCollectOpt);
   for (const opt of INTERVAL_OPTIONS) {
     const option = document.createElement("option");
     option.value = String(opt.value);
     option.textContent = opt.label;
-    if (opt.value === current.interval_s) {
-      option.selected = true;
-    }
     intervalSelect.append(option);
   }
+  syncIntervalSelect(intervalSelect, current.enabled, current.interval_s);
   intervalField.append(intervalSelect);
 
   const windowField = document.createElement("div");
-  windowField.className = "settings-dialog-field";
+  windowField.className = "settings-dialog-field rules-sensor-field-inline";
   windowField.append(createFieldLabel("Chart window"));
   const windowSelect = document.createElement("select");
   for (const opt of WINDOW_OPTIONS) {
@@ -605,7 +664,23 @@ function buildSensorCard(
   }
   windowField.append(windowSelect);
 
-  controls.append(enabledLabel, intervalField, windowField);
+  controls.append(intervalField, windowField);
+
+  const chartNav = document.createElement("div");
+  chartNav.className = "rules-sensor-chart-nav";
+
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button";
+  prevBtn.className = "btn rules-sensor-chart-nav-btn";
+  prevBtn.setAttribute("aria-label", "Previous period");
+  prevBtn.textContent = "‹";
+
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.className = "btn rules-sensor-chart-nav-btn";
+  nextBtn.setAttribute("aria-label", "Next period");
+  nextBtn.textContent = "›";
+  nextBtn.disabled = true;
 
   const chartWrap = document.createElement("div");
   chartWrap.className = "rules-sensor-chart-wrap";
@@ -617,23 +692,56 @@ function buildSensorCard(
   tooltip.setAttribute("role", "tooltip");
   chartWrap.append(svg, tooltip);
 
-  card.append(title, meta, controls, chartWrap);
+  chartNav.append(prevBtn, chartWrap, nextBtn);
+
+  card.append(title, meta, controls, chartNav);
 
   let chartRequestGeneration = 0;
+
+  const syncNavButtons = (): void => {
+    nextBtn.disabled = chartAsOf === null;
+  };
 
   const refreshChart = async (): Promise<void> => {
     const generation = ++chartRequestGeneration;
     const requestedWindow = chartWindow;
+    const requestedAsOf = chartAsOf;
     try {
       const samples = await dataSource.getSensorCollectionSamples(
         current.device_id,
         current.sensor_key,
         requestedWindow,
+        requestedAsOf,
       );
       if (generation !== chartRequestGeneration) {
         return;
       }
-      renderSparkline(svg, tooltip, samples.points, requestedWindow, samples.as_of);
+      lastWindowEnd = samples.as_of;
+      if (requestedAsOf === null) {
+        liveWindowEnd = samples.as_of;
+        chartAsOf = null;
+      } else if (Math.abs(samples.as_of - requestedAsOf) < 0.5) {
+        // Keep explicit offset when the server honored it.
+        chartAsOf = samples.as_of;
+      } else {
+        // Server clamped toward now — treat as live if near wall clock.
+        const skew = Date.now() / 1000 - samples.as_of;
+        if (skew < 2) {
+          liveWindowEnd = samples.as_of;
+          chartAsOf = null;
+        } else {
+          chartAsOf = samples.as_of;
+        }
+      }
+      syncNavButtons();
+      renderSparkline(
+        svg,
+        tooltip,
+        samples.points,
+        requestedWindow,
+        samples.as_of,
+        current.sensor_key,
+      );
     } catch (err) {
       if (generation !== chartRequestGeneration) {
         return;
@@ -645,11 +753,17 @@ function buildSensorCard(
 
   const persistConfig = async (): Promise<void> => {
     status.hidden = true;
+    const raw = intervalSelect.value;
+    const enabled = raw !== SensorCollectionFrequencyChoice.DontCollect;
+    const intervalS = enabled
+      ? Number(raw)
+      : current.interval_s > 0
+        ? current.interval_s
+        : SensorCollectionIntervalS.Fifteen;
     const next = {
-      enabled: enabledCb.checked,
-      interval_s: Number(intervalSelect.value),
+      enabled,
+      interval_s: intervalS,
     };
-    enabledCb.disabled = true;
     intervalSelect.disabled = true;
     try {
       current = await dataSource.saveSensorCollectionSensor(
@@ -657,12 +771,12 @@ function buildSensorCard(
         current.sensor_key,
         next,
       );
-      enabledCb.checked = current.enabled;
-      intervalSelect.value = String(current.interval_s);
+      syncIntervalSelect(intervalSelect, current.enabled, current.interval_s);
       meta.textContent = formatLastSample(
         current.last_sample_at,
         current.last_value,
         current.unit,
+        current.sensor_key,
       );
       showSuccessToast(
         current.enabled
@@ -673,22 +787,42 @@ function buildSensorCard(
     } catch (err) {
       status.hidden = false;
       status.textContent = `Could not save: ${formatError(err)}`;
-      enabledCb.checked = current.enabled;
-      intervalSelect.value = String(current.interval_s);
+      syncIntervalSelect(intervalSelect, current.enabled, current.interval_s);
     } finally {
-      enabledCb.disabled = false;
       intervalSelect.disabled = false;
     }
   };
 
-  enabledCb.addEventListener("change", () => {
-    void persistConfig();
-  });
   intervalSelect.addEventListener("change", () => {
     void persistConfig();
   });
   windowSelect.addEventListener("change", () => {
     chartWindow = windowSelect.value as SensorChartWindow;
+    chartAsOf = null;
+    syncNavButtons();
+    void refreshChart();
+  });
+  prevBtn.addEventListener("click", () => {
+    const duration = windowDurationS(chartWindow);
+    chartAsOf = (chartAsOf ?? lastWindowEnd) - duration;
+    syncNavButtons();
+    void refreshChart();
+  });
+  nextBtn.addEventListener("click", () => {
+    if (chartAsOf === null) {
+      return;
+    }
+    const duration = windowDurationS(chartWindow);
+    const nextEnd = chartAsOf + duration;
+    // Snap to live when Next would reach (or pass) the last known live end —
+    // comparing to Date.now() fails after a pause because the prior live end
+    // has already receded into the past.
+    if (nextEnd >= liveWindowEnd - 1) {
+      chartAsOf = null;
+    } else {
+      chartAsOf = nextEnd;
+    }
+    syncNavButtons();
     void refreshChart();
   });
 

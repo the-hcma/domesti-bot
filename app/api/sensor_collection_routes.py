@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from http import HTTPStatus
 from pathlib import Path
@@ -79,19 +80,36 @@ async def get_sensor_collection_samples(
     device_id: str = Query(..., min_length=1),
     sensor_key: SensorCollectionKey = Query(...),
     window: SensorChartWindow = Query(default=SensorChartWindow.LAST_5_MINUTES),
+    as_of: float | None = Query(
+        default=None,
+        description=(
+            "Unix epoch seconds for the chart window end. "
+            "Omit for server now; pass a past time to shift the window (period nav)."
+        ),
+    ),
 ) -> SensorCollectionSamplesOut:
     """Return persisted samples for a chart time window."""
     cache_path = _require_discovery_cache(request)
-    as_of = time.time()
+    now = time.time()
+    if as_of is None:
+        window_end = now
+    else:
+        if not math.isfinite(as_of):
+            raise HTTPException(
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                detail="Expected finite as_of unix epoch seconds",
+            )
+        # Clamp to server now so clients cannot request a future window end.
+        window_end = min(as_of, now)
     points = list_sensor_samples(
         cache_path,
         device_id=device_id.strip(),
         sensor_key=sensor_key,
         window=window,
-        now=as_of,
+        now=window_end,
     )
     return SensorCollectionSamplesOut(
-        as_of=as_of,
+        as_of=window_end,
         device_id=device_id.strip(),
         points=[
             SensorCollectionSampleOut(
