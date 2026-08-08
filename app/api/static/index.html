@@ -700,6 +700,7 @@
     .settings-hub-tab-mount { padding-top: 4px; }
     .settings-dialog-field { display: flex; flex-direction: column; gap: 6px;
       flex: 1 1 12rem; min-width: 0; }
+    .settings-dialog-field[hidden] { display: none !important; }
     .settings-dialog-field-row { display: flex; flex-wrap: wrap; gap: 12px;
       align-items: flex-end; margin-bottom: 12px; }
     .settings-dialog-field-row .settings-dialog-field { margin-bottom: 0; }
@@ -746,6 +747,23 @@
     .ep1-psk-section .settings-dialog-field,
     .ep1-ble-section .settings-dialog-field,
     .ep1-calibration-section .settings-dialog-field { flex: 0 0 auto; }
+    /* Same column flex-grow trap as EP1/Vizio: global field flex-basis 12rem
+       stretches email/password and opens a large gap above the action row. */
+    .kasa-settings-form { gap: 10px; padding: 0; }
+    .kasa-settings-form > .settings-dialog-field,
+    .kasa-settings-form > .settings-dialog-fieldset { flex: 0 0 auto; }
+    .kasa-credentials-section { gap: 6px; padding: 10px 12px; }
+    .kasa-credentials-section .settings-dialog-field { flex: 0 0 auto; }
+    .kasa-motion-knobs-row { margin-bottom: 0; align-items: flex-end; gap: 10px; }
+    .kasa-motion-knobs-row .settings-dialog-field { flex: 1 1 7rem; min-width: 0; }
+    .kasa-settings-form .settings-dialog-field > input[type="checkbox"] {
+      width: auto; align-self: flex-start; margin: 2px 0 0; padding: 0;
+      border: none; background: transparent; accent-color: var(--accent); }
+    .kasa-motion-sensors-heading { margin: 2px 0 0; }
+    .kasa-motion-sensors { display: grid; grid-template-columns: max-content 1fr;
+      column-gap: 12px; row-gap: 2px; margin: 0; }
+    .kasa-motion-sensors dt { margin: 0; font-weight: 600; color: var(--fg); }
+    .kasa-motion-sensors dd { margin: 0; }
     .ep1-psk-section .settings-dialog-lead,
     .ep1-ble-section .settings-dialog-lead,
     .ep1-calibration-section .settings-dialog-lead { font-size: 13px; line-height: 1.35; }
