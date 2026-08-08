@@ -160,6 +160,15 @@ class Ep1ReadingMetric(StrEnum):
                 return "°C"
 
 
+class KasaPirRange(StrEnum):
+    """python-kasa ``Motion.range`` / ``Motion.ranges`` choice labels (KS200M PIR)."""
+
+    CUSTOM = "Custom"
+    FAR = "Far"
+    MID = "Mid"
+    NEAR = "Near"
+
+
 class RuleDeviceActionType(StrEnum):
     """Per-device command dispatched when an automation rule fires."""
 

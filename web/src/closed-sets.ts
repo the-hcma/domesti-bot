@@ -139,6 +139,15 @@ export const KasaCredentialsSource = {
 export type KasaCredentialsSource =
   (typeof KasaCredentialsSource)[keyof typeof KasaCredentialsSource];
 
+/** Kasa PIR motion sensor range preset (python-kasa ``Motion.ranges``). */
+export const KasaPirRange = {
+  Custom: "Custom",
+  Far: "Far",
+  Mid: "Mid",
+  Near: "Near",
+} as const;
+export type KasaPirRange = (typeof KasaPirRange)[keyof typeof KasaPirRange];
+
 /** EP1 / Tailwind / Vizio token or PSK resolution (includes CLI). */
 export const ManagedSecretSource = {
   Cli: "cli",
