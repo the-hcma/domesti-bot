@@ -15,8 +15,12 @@ import type {
 } from "./types.js";
 import { showSuccessToast } from "./ui-toast.js";
 
-const CHART_HEIGHT = 72;
-const CHART_WIDTH = 280;
+const CHART_HEIGHT = 168;
+const CHART_PAD_BOTTOM = 28;
+const CHART_PAD_LEFT = 48;
+const CHART_PAD_RIGHT = 12;
+const CHART_PAD_TOP = 12;
+const CHART_WIDTH = 720;
 const DEFAULT_RETENTION_DAYS = 60;
 const INTERVAL_OPTIONS: readonly {
   label: string;
@@ -63,6 +67,44 @@ function sensorKeyLabel(key: SensorCollectionKey): string {
   }
 }
 
+function formatAxisReading(value: number): string {
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  const abs = Math.abs(value);
+  if (abs >= 100) {
+    return value.toFixed(0);
+  }
+  if (abs >= 10) {
+    return value.toFixed(1);
+  }
+  return value.toFixed(2);
+}
+
+function formatAxisTime(epochS: number, window: SensorChartWindow): string {
+  const when = new Date(epochS * 1000);
+  if (window === SensorChartWindow.LastDay) {
+    // Compact so three ticks fit on phone-width cards.
+    return when.toLocaleString(undefined, {
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      month: "numeric",
+    });
+  }
+  if (window === SensorChartWindow.LastHour) {
+    return when.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+  return when.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function formatLastSample(
   at: number | null,
   value: number | null,
@@ -76,8 +118,16 @@ function formatLastSample(
   return `Last: ${value}${unitSuffix} · ${when}`;
 }
 
+function formatSampleTooltip(point: SensorCollectionSampleOut): string {
+  const unitSuffix =
+    point.unit === null || point.unit === "" ? "" : ` ${point.unit}`;
+  const when = new Date(point.recorded_at * 1000).toLocaleString();
+  return `${formatAxisReading(point.value)}${unitSuffix} · ${when}`;
+}
+
 function renderSparkline(
   svg: SVGSVGElement,
+  tooltip: HTMLElement,
   points: SensorCollectionSampleOut[],
   window: SensorChartWindow,
   asOf: number,
@@ -85,19 +135,48 @@ function renderSparkline(
   while (svg.firstChild !== null) {
     svg.removeChild(svg.firstChild);
   }
-  svg.setAttribute("viewBox", `0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`);
+  tooltip.hidden = true;
+  tooltip.textContent = "";
+
+  const wrap = svg.parentElement;
+  const chartWidth =
+    wrap !== null && wrap.clientWidth > 0
+      ? Math.round(wrap.clientWidth)
+      : CHART_WIDTH;
+  const chartHeight =
+    wrap !== null && wrap.clientHeight > 0
+      ? Math.round(wrap.clientHeight)
+      : CHART_HEIGHT;
+
+  svg.setAttribute("viewBox", `0 0 ${chartWidth} ${chartHeight}`);
   svg.setAttribute("role", "img");
-  const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  empty.setAttribute("x", String(CHART_WIDTH / 2));
-  empty.setAttribute("y", String(CHART_HEIGHT / 2));
-  empty.setAttribute("text-anchor", "middle");
-  empty.setAttribute("dominant-baseline", "middle");
-  empty.setAttribute("class", "rules-sensor-chart-empty");
+  svg.setAttribute(
+    "aria-label",
+    points.length === 0
+      ? "Sensor readings chart (no points in this window)"
+      : `Sensor readings chart with ${points.length} samples`,
+  );
+  svg.setAttribute("preserveAspectRatio", "none");
+
+  const plotLeft = CHART_PAD_LEFT;
+  const plotRight = chartWidth - CHART_PAD_RIGHT;
+  const plotTop = CHART_PAD_TOP;
+  const plotBottom = chartHeight - CHART_PAD_BOTTOM;
+  const plotW = plotRight - plotLeft;
+  const plotH = plotBottom - plotTop;
+
   if (points.length === 0) {
+    const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    empty.setAttribute("x", String((plotLeft + plotRight) / 2));
+    empty.setAttribute("y", String((plotTop + plotBottom) / 2));
+    empty.setAttribute("text-anchor", "middle");
+    empty.setAttribute("dominant-baseline", "middle");
+    empty.setAttribute("class", "rules-sensor-chart-empty");
     empty.textContent = "No points in this window";
     svg.append(empty);
     return;
   }
+
   const durationS = windowDurationS(window);
   const end = asOf;
   const start = end - durationS;
@@ -108,16 +187,69 @@ function renderSparkline(
     minV -= 1;
     maxV += 1;
   }
-  const padY = 6;
-  const usableH = CHART_HEIGHT - padY * 2;
+
+  const xForTime = (epochS: number): number =>
+    plotLeft +
+    ((Math.max(start, Math.min(end, epochS)) - start) / durationS) * plotW;
+  const yForValue = (value: number): number =>
+    plotBottom - ((value - minV) / (maxV - minV)) * plotH;
+
+  const axis = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  axis.setAttribute("class", "rules-sensor-chart-axis");
+  const xAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  xAxis.setAttribute("x1", String(plotLeft));
+  xAxis.setAttribute("y1", String(plotBottom));
+  xAxis.setAttribute("x2", String(plotRight));
+  xAxis.setAttribute("y2", String(plotBottom));
+  const yAxis = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  yAxis.setAttribute("x1", String(plotLeft));
+  yAxis.setAttribute("y1", String(plotTop));
+  yAxis.setAttribute("x2", String(plotLeft));
+  yAxis.setAttribute("y2", String(plotBottom));
+  axis.append(xAxis, yAxis);
+
+  const yTicks = [minV, (minV + maxV) / 2, maxV];
+  for (const tick of yTicks) {
+    const y = yForValue(tick);
+    const grid = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    grid.setAttribute("class", "rules-sensor-chart-grid");
+    grid.setAttribute("x1", String(plotLeft));
+    grid.setAttribute("y1", String(y));
+    grid.setAttribute("x2", String(plotRight));
+    grid.setAttribute("y2", String(y));
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("class", "rules-sensor-chart-tick");
+    label.setAttribute("x", String(plotLeft - 6));
+    label.setAttribute("y", String(y));
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("dominant-baseline", "middle");
+    label.textContent = formatAxisReading(tick);
+    axis.append(grid, label);
+  }
+
+  const xTicks =
+    chartWidth < 420 || window === SensorChartWindow.LastDay
+      ? [start, end]
+      : [start, start + durationS / 2, end];
+  for (let i = 0; i < xTicks.length; i += 1) {
+    const tick = xTicks[i]!;
+    const x = xForTime(tick);
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("class", "rules-sensor-chart-tick");
+    label.setAttribute("x", String(x));
+    label.setAttribute("y", String(plotBottom + 14));
+    label.setAttribute(
+      "text-anchor",
+      i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle",
+    );
+    label.textContent = formatAxisTime(tick, window);
+    axis.append(label);
+  }
+  svg.append(axis);
+
   const coords = points.map((point) => {
-    const x =
-      ((Math.max(start, Math.min(end, point.recorded_at)) - start) / durationS) *
-      CHART_WIDTH;
-    const y =
-      padY +
-      usableH -
-      ((point.value - minV) / (maxV - minV)) * usableH;
+    const x = xForTime(point.recorded_at);
+    const y = yForValue(point.value);
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   const polyline = document.createElementNS(
@@ -131,6 +263,116 @@ function renderSparkline(
   polyline.setAttribute("stroke-linecap", "round");
   polyline.setAttribute("points", coords.join(" "));
   svg.append(polyline);
+
+  const pointsLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  pointsLayer.setAttribute("class", "rules-sensor-chart-points");
+  // Cap keyboard targets so dense windows (e.g. 1-day @ 5s) stay usable.
+  const enableKeyboardHits = points.length <= 96;
+  const plotted = points.map((point) => ({
+    point,
+    cx: xForTime(point.recorded_at),
+    cy: yForValue(point.value),
+    tipText: formatSampleTooltip(point),
+  }));
+  const placeTooltipAt = (
+    tipText: string,
+    clientX: number,
+    clientY: number,
+  ): void => {
+    tooltip.hidden = false;
+    tooltip.textContent = tipText;
+    const host = tooltip.offsetParent;
+    if (!(host instanceof HTMLElement)) {
+      return;
+    }
+    const wrapRect = host.getBoundingClientRect();
+    const left = clientX - wrapRect.left + 10;
+    const top = clientY - wrapRect.top - 28;
+    tooltip.style.left = `${Math.max(4, Math.min(left, wrapRect.width - tooltip.offsetWidth - 4))}px`;
+    tooltip.style.top = `${Math.max(4, Math.min(top, wrapRect.height - tooltip.offsetHeight - 4))}px`;
+  };
+  const nearestPlotted = (
+    localX: number,
+  ): (typeof plotted)[number] | null => {
+    if (plotted.length === 0) {
+      return null;
+    }
+    let best = plotted[0]!;
+    let bestDist = Math.abs(best.cx - localX);
+    for (let i = 1; i < plotted.length; i += 1) {
+      const candidate = plotted[i]!;
+      const dist = Math.abs(candidate.cx - localX);
+      if (dist < bestDist) {
+        best = candidate;
+        bestDist = dist;
+      }
+    }
+    return best;
+  };
+  const clientToSvgX = (clientX: number, clientY: number): number | null => {
+    const ctm = svg.getScreenCTM();
+    if (ctm === null) {
+      return null;
+    }
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    return pt.matrixTransform(ctm.inverse()).x;
+  };
+
+  for (const item of plotted) {
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    dot.setAttribute("class", "rules-sensor-chart-point");
+    dot.setAttribute("cx", String(item.cx));
+    dot.setAttribute("cy", String(item.cy));
+    dot.setAttribute("r", "2.75");
+    pointsLayer.append(dot);
+    if (!enableKeyboardHits) {
+      continue;
+    }
+    const hit = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    hit.setAttribute("class", "rules-sensor-chart-point-hit");
+    hit.setAttribute("cx", String(item.cx));
+    hit.setAttribute("cy", String(item.cy));
+    hit.setAttribute("r", "7");
+    hit.setAttribute("tabindex", "0");
+    hit.setAttribute("role", "img");
+    hit.setAttribute("aria-label", item.tipText);
+    hit.setAttribute("pointer-events", "none");
+    hit.addEventListener("focus", () => {
+      const rect = hit.getBoundingClientRect();
+      placeTooltipAt(item.tipText, rect.left + rect.width / 2, rect.top);
+    });
+    hit.addEventListener("blur", () => {
+      tooltip.hidden = true;
+    });
+    pointsLayer.append(hit);
+  }
+
+  // Single plot overlay: nearest-by-x lookup stays accurate in dense windows.
+  const plotHit = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  plotHit.setAttribute("class", "rules-sensor-chart-plot-hit");
+  plotHit.setAttribute("x", String(plotLeft));
+  plotHit.setAttribute("y", String(plotTop));
+  plotHit.setAttribute("width", String(plotW));
+  plotHit.setAttribute("height", String(plotH));
+  plotHit.setAttribute("fill", "transparent");
+  plotHit.addEventListener("pointermove", (event) => {
+    const localX = clientToSvgX(event.clientX, event.clientY);
+    if (localX === null) {
+      return;
+    }
+    const nearest = nearestPlotted(localX);
+    if (nearest === null) {
+      return;
+    }
+    placeTooltipAt(nearest.tipText, event.clientX, event.clientY);
+  });
+  plotHit.addEventListener("pointerleave", () => {
+    tooltip.hidden = true;
+  });
+  pointsLayer.append(plotHit);
+  svg.append(pointsLayer);
 }
 
 function windowDurationS(window: SensorChartWindow): number {
@@ -249,6 +491,10 @@ function mountRetentionForm(
   saveBtn.className = "btn";
   saveBtn.textContent = "Save retention";
 
+  const daysRow = document.createElement("div");
+  daysRow.className = "settings-dialog-field-row rules-sensor-retention-row";
+  daysRow.append(daysField, saveBtn);
+
   const syncEnabled = (): void => {
     daysInput.disabled = unlimitedCb.checked;
   };
@@ -292,7 +538,7 @@ function mountRetentionForm(
     })();
   });
 
-  fieldset.append(help, unlimitedLabel, daysField, saveBtn);
+  fieldset.append(help, unlimitedLabel, daysRow);
   container.append(fieldset);
 }
 
@@ -365,7 +611,11 @@ function buildSensorCard(
   chartWrap.className = "rules-sensor-chart-wrap";
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.classList.add("rules-sensor-chart");
-  chartWrap.append(svg);
+  const tooltip = document.createElement("div");
+  tooltip.className = "rules-sensor-chart-tooltip";
+  tooltip.hidden = true;
+  tooltip.setAttribute("role", "tooltip");
+  chartWrap.append(svg, tooltip);
 
   card.append(title, meta, controls, chartWrap);
 
@@ -383,7 +633,7 @@ function buildSensorCard(
       if (generation !== chartRequestGeneration) {
         return;
       }
-      renderSparkline(svg, samples.points, requestedWindow, samples.as_of);
+      renderSparkline(svg, tooltip, samples.points, requestedWindow, samples.as_of);
     } catch (err) {
       if (generation !== chartRequestGeneration) {
         return;
