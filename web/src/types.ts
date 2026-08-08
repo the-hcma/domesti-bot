@@ -700,6 +700,10 @@ export interface SensorCollectionRetentionOut {
   unlimited: boolean;
 }
 
+export interface SensorCollectionRetentionPrunePreviewOut {
+  samples_to_prune: number;
+}
+
 export interface SensorCollectionSampleOut {
   recorded_at: number;
   unit: string | null;

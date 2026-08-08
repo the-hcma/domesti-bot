@@ -2149,6 +2149,12 @@ class SensorCollectionRetentionOut(BaseModel):
     unlimited: bool
 
 
+class SensorCollectionRetentionPrunePreviewOut(BaseModel):
+    """How many samples a proposed retention policy would delete."""
+
+    samples_to_prune: int = Field(..., ge=0)
+
+
 class SensorCollectionSampleOut(BaseModel):
     """One persisted sensor reading point."""
 
