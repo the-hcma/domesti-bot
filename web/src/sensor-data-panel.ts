@@ -18,10 +18,13 @@ import { showSuccessToast } from "./ui-toast.js";
 
 const CHART_HEIGHT = 168;
 const CHART_PAD_BOTTOM = 28;
-const CHART_PAD_LEFT = 48;
+const CHART_PAD_LEFT = 56;
 const CHART_PAD_LEFT_OCCUPANCY = 72;
 const CHART_PAD_RIGHT = 12;
-const CHART_PAD_TOP = 12;
+/** Room for the in-chart title above the plot. */
+const CHART_PAD_TOP = 28;
+/** Target horizontal spacing (px) between visible sample markers. */
+const CHART_POINT_MIN_SPACING_PX = 12;
 const CHART_WIDTH = 720;
 const DEFAULT_RETENTION_DAYS = 60;
 const INTERVAL_OPTIONS: readonly {
@@ -91,11 +94,16 @@ function formatOccupancyReading(value: number): string {
 function formatReadingValue(
   value: number,
   sensorKey: SensorCollectionKey,
+  unit: string | null,
 ): string {
   if (sensorKey === SensorCollectionKey.Occupancy) {
     return formatOccupancyReading(value);
   }
-  return formatAxisReading(value);
+  const reading = formatAxisReading(value);
+  if (unit === null || unit === "") {
+    return reading;
+  }
+  return `${reading} ${unit}`;
 }
 
 function formatAxisTime(epochS: number, window: SensorChartWindow): string {
@@ -139,7 +147,7 @@ function formatLastSample(
     return `Last: ${formatOccupancyReading(value)} · ${when}`;
   }
   const unitSuffix = unit === null || unit === "" ? "" : ` ${unit}`;
-  return `Last: ${value}${unitSuffix} · ${when}`;
+  return `Last: ${value.toFixed(2)}${unitSuffix} · ${when}`;
 }
 
 function formatSampleTooltip(
@@ -155,6 +163,95 @@ function formatSampleTooltip(
   return `${formatAxisReading(point.value)}${unitSuffix} · ${when}`;
 }
 
+/**
+ * Keep first/last samples, value extrema, and time-bucketed representatives so
+ * wide windows stay readable without stacking markers — even when sample
+ * cadence is irregular — while the visible polyline still spans the true
+ * min/max in the window.
+ */
+function downsampleChartPoints(
+  points: readonly SensorCollectionSampleOut[],
+  maxPoints: number,
+): SensorCollectionSampleOut[] {
+  if (points.length <= maxPoints || maxPoints <= 0) {
+    return [...points];
+  }
+  if (maxPoints === 1) {
+    return [points[points.length - 1]!];
+  }
+
+  const lastIdx = points.length - 1;
+  const t0 = points[0]!.recorded_at;
+  const t1 = points[lastIdx]!.recorded_at;
+  const span = Math.max(t1 - t0, Number.EPSILON);
+
+  const selectedIdx = new Set<number>([0, lastIdx]);
+  let minIdx = 0;
+  let maxIdx = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const value = points[i]!.value;
+    if (value < points[minIdx]!.value) {
+      minIdx = i;
+    }
+    if (value > points[maxIdx]!.value) {
+      maxIdx = i;
+    }
+  }
+  selectedIdx.add(minIdx);
+  selectedIdx.add(maxIdx);
+
+  const nearestIndexAt = (targetAt: number): number => {
+    let bestIdx = 0;
+    let bestDist = Math.abs(points[0]!.recorded_at - targetAt);
+    for (let i = 1; i < points.length; i += 1) {
+      const dist = Math.abs(points[i]!.recorded_at - targetAt);
+      if (dist < bestDist) {
+        bestIdx = i;
+        bestDist = dist;
+      }
+    }
+    return bestIdx;
+  };
+
+  for (let i = 0; i < maxPoints; i += 1) {
+    const targetAt = t0 + (i / (maxPoints - 1)) * span;
+    selectedIdx.add(nearestIndexAt(targetAt));
+    if (selectedIdx.size >= maxPoints) {
+      break;
+    }
+  }
+
+  return [...selectedIdx]
+    .sort((a, b) => a - b)
+    .map((idx) => points[idx]!);
+}
+
+function maxVisibleChartPoints(
+  window: SensorChartWindow,
+  plotWidthPx: number,
+): number {
+  const byWidth = Math.max(
+    8,
+    Math.floor(plotWidthPx / CHART_POINT_MIN_SPACING_PX),
+  );
+  switch (window) {
+    case SensorChartWindow.LastMinute:
+      return Math.min(byWidth, 48);
+    case SensorChartWindow.Last5Minutes:
+      return Math.min(byWidth, 60);
+    case SensorChartWindow.LastHour:
+      return Math.min(byWidth, 72);
+    case SensorChartWindow.LastDay:
+      return Math.min(byWidth, 48);
+    case SensorChartWindow.LastWeek:
+      return Math.min(byWidth, 56);
+    default: {
+      const _exhaustive: never = window;
+      return _exhaustive;
+    }
+  }
+}
+
 function renderSparkline(
   svg: SVGSVGElement,
   tooltip: HTMLElement,
@@ -162,6 +259,7 @@ function renderSparkline(
   window: SensorChartWindow,
   asOf: number,
   sensorKey: SensorCollectionKey,
+  unit: string | null,
 ): void {
   while (svg.firstChild !== null) {
     svg.removeChild(svg.firstChild);
@@ -181,11 +279,12 @@ function renderSparkline(
 
   svg.setAttribute("viewBox", `0 0 ${chartWidth} ${chartHeight}`);
   svg.setAttribute("role", "img");
+  const sampleNoun = points.length === 1 ? "sample" : "samples";
   svg.setAttribute(
     "aria-label",
     points.length === 0
-      ? "Sensor readings chart (no points in this window)"
-      : `Sensor readings chart with ${points.length} samples`,
+      ? `${sensorKeyLabel(sensorKey)} chart (no points in this window)`
+      : `${sensorKeyLabel(sensorKey)} chart with ${points.length} ${sampleNoun}`,
   );
   svg.setAttribute("preserveAspectRatio", "none");
 
@@ -196,6 +295,15 @@ function renderSparkline(
   const plotBottom = chartHeight - CHART_PAD_BOTTOM;
   const plotW = plotRight - plotLeft;
   const plotH = plotBottom - plotTop;
+
+  const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  title.setAttribute("class", "rules-sensor-chart-title");
+  title.setAttribute("x", String(plotLeft));
+  title.setAttribute("y", "14");
+  title.setAttribute("text-anchor", "start");
+  title.setAttribute("dominant-baseline", "hanging");
+  title.textContent = sensorKeyLabel(sensorKey);
+  svg.append(title);
 
   if (points.length === 0) {
     const empty = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -209,6 +317,11 @@ function renderSparkline(
     return;
   }
 
+  const displayPoints = downsampleChartPoints(
+    points,
+    maxVisibleChartPoints(window, plotW),
+  );
+
   const durationS = windowDurationS(window);
   const end = asOf;
   const start = end - durationS;
@@ -220,7 +333,7 @@ function renderSparkline(
     maxV = 1;
     yTicks = [0, 1];
   } else {
-    const values = points.map((p) => p.value);
+    const values = displayPoints.map((p) => p.value);
     minV = Math.min(...values);
     maxV = Math.max(...values);
     if (minV === maxV) {
@@ -264,7 +377,7 @@ function renderSparkline(
     label.setAttribute("y", String(y));
     label.setAttribute("text-anchor", "end");
     label.setAttribute("dominant-baseline", "middle");
-    label.textContent = formatReadingValue(tick, sensorKey);
+    label.textContent = formatReadingValue(tick, sensorKey, unit);
     axis.append(grid, label);
   }
 
@@ -291,7 +404,7 @@ function renderSparkline(
   }
   svg.append(axis);
 
-  const coords = points.map((point) => {
+  const coords = displayPoints.map((point) => {
     const x = xForTime(point.recorded_at);
     const y = yForValue(point.value);
     return `${x.toFixed(1)},${y.toFixed(1)}`;
@@ -310,9 +423,9 @@ function renderSparkline(
 
   const pointsLayer = document.createElementNS("http://www.w3.org/2000/svg", "g");
   pointsLayer.setAttribute("class", "rules-sensor-chart-points");
-  // Cap keyboard targets so dense windows (e.g. 1-day @ 5s) stay usable.
-  const enableKeyboardHits = points.length <= 96;
-  const plotted = points.map((point) => ({
+  // Cap keyboard targets so dense windows stay usable after downsampling.
+  const enableKeyboardHits = displayPoints.length <= 96;
+  const plotted = displayPoints.map((point) => ({
     point,
     cx: xForTime(point.recorded_at),
     cy: yForValue(point.value),
@@ -741,6 +854,7 @@ function buildSensorCard(
         requestedWindow,
         samples.as_of,
         current.sensor_key,
+        current.unit,
       );
     } catch (err) {
       if (generation !== chartRequestGeneration) {
