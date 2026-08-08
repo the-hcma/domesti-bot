@@ -597,7 +597,7 @@ wheels = [
 
 [[package]]
 name = "domesti-bot"
-version = "1.15.0"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "aioesphomeapi", version = "45.6.2", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'" },
