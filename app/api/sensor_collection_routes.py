@@ -56,11 +56,6 @@ async def put_sensor_collection_retention(
 ) -> SensorCollectionRetentionOut:
     """Update sample retention and prune immediately when age-limited."""
     cache_path = _require_discovery_cache(request)
-    if not body.unlimited and body.max_age_days <= 0:
-        raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-            detail=(f"Expected retention max_age_days > 0 when limited, got {body.max_age_days}"),
-        )
     try:
         saved = save_sensor_collection_retention(
             cache_path,

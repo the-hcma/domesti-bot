@@ -65,8 +65,11 @@ def build_sensor_collection_rows(
     """Merge live collectible sensors with SQLite config + latest samples."""
     configs = {(row.device_id, row.sensor_key): row for row in list_sensor_collection_configs(path)}
     out: list[SensorCollectionRow] = []
+    seen: set[tuple[str, SensorCollectionKey]] = set()
     for sensor in list_collectible_sensors(state):
-        config = configs.get((sensor.device_id, sensor.sensor_key))
+        key = (sensor.device_id, sensor.sensor_key)
+        seen.add(key)
+        config = configs.get(key)
         latest = latest_sensor_sample(
             path,
             device_id=sensor.device_id,
@@ -86,6 +89,33 @@ def build_sensor_collection_rows(
                 last_value=None if latest is None else latest.value,
                 sensor_key=sensor.sensor_key,
                 unit=sensor.sensor_key.unit_label(),
+            )
+        )
+    for key, config in configs.items():
+        if key in seen:
+            continue
+        device_id, sensor_key = key
+        latest = latest_sensor_sample(
+            path,
+            device_id=device_id,
+            sensor_key=sensor_key,
+        )
+        try:
+            family_id = DeviceFamilyId(config.family_id)
+        except ValueError:
+            family_id = DeviceFamilyId.EP1
+        out.append(
+            SensorCollectionRow(
+                device_display=format_device_display(device_id, device_id),
+                device_id=device_id,
+                display_name=device_id,
+                enabled=config.enabled,
+                family_id=family_id,
+                interval_s=config.interval_s,
+                last_sample_at=None if latest is None else latest.recorded_at,
+                last_value=None if latest is None else latest.value,
+                sensor_key=sensor_key,
+                unit=sensor_key.unit_label(),
             )
         )
     out.sort(key=lambda row: (row.device_display.lower(), row.sensor_key.value))

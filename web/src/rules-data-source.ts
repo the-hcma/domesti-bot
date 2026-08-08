@@ -455,11 +455,11 @@ export class MockRulesDataSource implements RulesDataSource {
   }
 
   async getSensorCollectionRetention(): Promise<SensorCollectionRetentionOut> {
-    return { max_age_days: 60, unlimited: false };
+    return structuredClone(this.store.sensor_collection_retention);
   }
 
   async getSensorCollectionSensors(): Promise<SensorCollectionSensorsOut> {
-    return { sensors: [] };
+    return { sensors: structuredClone(this.store.sensor_collection_sensors) };
   }
 
   async getVacationModeSettings(): Promise<VacationModeSettingsStatusOut> {
@@ -495,10 +495,14 @@ export class MockRulesDataSource implements RulesDataSource {
   async saveSensorCollectionRetention(
     body: SensorCollectionRetentionIn,
   ): Promise<SensorCollectionRetentionOut> {
-    return {
-      max_age_days: body.unlimited ? 60 : body.max_age_days,
+    const saved: SensorCollectionRetentionOut = {
+      max_age_days: body.unlimited
+        ? this.store.sensor_collection_retention.max_age_days
+        : body.max_age_days,
       unlimited: body.unlimited,
     };
+    this.store.sensor_collection_retention = structuredClone(saved);
+    return structuredClone(saved);
   }
 
   async saveSensorCollectionSensor(
@@ -506,18 +510,27 @@ export class MockRulesDataSource implements RulesDataSource {
     sensorKey: SensorCollectionKey,
     body: SensorCollectionConfigIn,
   ): Promise<SensorCollectionSensorOut> {
-    return {
-      device_display: deviceId,
+    const existing = this.store.sensor_collection_sensors.find(
+      (row) => row.device_id === deviceId && row.sensor_key === sensorKey,
+    );
+    const saved: SensorCollectionSensorOut = {
+      device_display: existing?.device_display ?? deviceId,
       device_id: deviceId,
-      display_name: deviceId,
+      display_name: existing?.display_name ?? deviceId,
       enabled: body.enabled,
-      family_id: "ep1",
+      family_id: existing?.family_id ?? "ep1",
       interval_s: body.interval_s,
-      last_sample_at: null,
-      last_value: null,
+      last_sample_at: existing?.last_sample_at ?? null,
+      last_value: existing?.last_value ?? null,
       sensor_key: sensorKey,
-      unit: null,
+      unit: existing?.unit ?? null,
     };
+    if (existing === undefined) {
+      this.store.sensor_collection_sensors.push(structuredClone(saved));
+    } else {
+      Object.assign(existing, structuredClone(saved));
+    }
+    return structuredClone(saved);
   }
 
   async saveSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {

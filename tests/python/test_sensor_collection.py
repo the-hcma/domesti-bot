@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -21,23 +23,6 @@ from app.sensor_collection_store import (
     list_sensor_samples,
     save_sensor_collection_config,
 )
-
-
-def _ep1_device(
-    *,
-    device_id: str = "aa:bb:cc:dd:ee:ff",
-    occupancy: str = DeviceConditionState.OCCUPIED.value,
-    temperature_c: float = 21.5,
-) -> MagicMock:
-    device = MagicMock()
-    device.identifier = device_id
-    device.mac_address = device_id
-    device.preferred_label = "Office"
-    device.occupancy_state = occupancy
-    device.temperature_c = temperature_c
-    device.humidity_pct = 45.0
-    device.illuminance_lx = 120.0
-    return device
 
 
 @pytest.mark.asyncio
@@ -80,47 +65,69 @@ async def test_sampler_writes_enabled_sensor_and_respects_interval(
         )
 
     task = asyncio.create_task(_run())
-    await asyncio.sleep(0)
-    await asyncio.sleep(0.05)
-    first = latest_sensor_sample(
-        db,
-        device_id=device_id,
-        sensor_key=SensorCollectionKey.TEMPERATURE_C,
-    )
-    assert first is not None
-    assert first.value == 21.5
+    try:
+        await _wait_until(
+            lambda: (
+                latest_sensor_sample(
+                    db,
+                    device_id=device_id,
+                    sensor_key=SensorCollectionKey.TEMPERATURE_C,
+                )
+                is not None
+            )
+        )
+        first = latest_sensor_sample(
+            db,
+            device_id=device_id,
+            sensor_key=SensorCollectionKey.TEMPERATURE_C,
+        )
+        assert first is not None
+        assert first.value == 21.5
 
-    clock["t"] = 1_010.0
-    await asyncio.sleep(0.05)
-    still_one = list_sensor_samples(
-        db,
-        device_id=device_id,
-        sensor_key=SensorCollectionKey.TEMPERATURE_C,
-        window=SensorChartWindow.LAST_HOUR,
-        now=clock["t"],
-    )
-    assert len(still_one) == 1
+        clock["t"] = 1_010.0
+        await asyncio.sleep(0.02)
+        still_one = list_sensor_samples(
+            db,
+            device_id=device_id,
+            sensor_key=SensorCollectionKey.TEMPERATURE_C,
+            window=SensorChartWindow.LAST_HOUR,
+            now=clock["t"],
+        )
+        assert len(still_one) == 1
 
-    clock["t"] = 1_040.0
-    await asyncio.sleep(0.05)
-    two = list_sensor_samples(
-        db,
-        device_id=device_id,
-        sensor_key=SensorCollectionKey.TEMPERATURE_C,
-        window=SensorChartWindow.LAST_HOUR,
-        now=clock["t"],
-    )
-    assert len(two) == 2
+        clock["t"] = 1_040.0
+        await _wait_until(
+            lambda: (
+                len(
+                    list_sensor_samples(
+                        db,
+                        device_id=device_id,
+                        sensor_key=SensorCollectionKey.TEMPERATURE_C,
+                        window=SensorChartWindow.LAST_HOUR,
+                        now=clock["t"],
+                    )
+                )
+                >= 2
+            )
+        )
+        two = list_sensor_samples(
+            db,
+            device_id=device_id,
+            sensor_key=SensorCollectionKey.TEMPERATURE_C,
+            window=SensorChartWindow.LAST_HOUR,
+            now=clock["t"],
+        )
+        assert len(two) == 2
 
-    occupancy = latest_sensor_sample(
-        db,
-        device_id=device_id,
-        sensor_key=SensorCollectionKey.OCCUPANCY,
-    )
-    assert occupancy is None
-
-    stop.set()
-    await task
+        occupancy = latest_sensor_sample(
+            db,
+            device_id=device_id,
+            sensor_key=SensorCollectionKey.OCCUPANCY,
+        )
+        assert occupancy is None
+    finally:
+        stop.set()
+        await task
 
 
 @pytest.mark.asyncio
@@ -160,16 +167,17 @@ async def test_sampler_honors_interval_when_reading_unavailable(
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("app.sensor_collection.read_sensor_value", _counting_read)
         task = asyncio.create_task(_run())
-        await asyncio.sleep(0)
-        await asyncio.sleep(0.05)
-        assert read_calls["n"] == 1
-        await asyncio.sleep(0.08)
-        assert read_calls["n"] == 1
-        clock["t"] = 1_040.0
-        await asyncio.sleep(0.05)
-        assert read_calls["n"] == 2
-        stop.set()
-        await task
+        try:
+            await _wait_until(lambda: read_calls["n"] >= 1)
+            assert read_calls["n"] == 1
+            await asyncio.sleep(0.08)
+            assert read_calls["n"] == 1
+            clock["t"] = 1_040.0
+            await _wait_until(lambda: read_calls["n"] >= 2)
+            assert read_calls["n"] == 2
+        finally:
+            stop.set()
+            await task
 
 
 @pytest.mark.asyncio
@@ -202,15 +210,43 @@ async def test_sampler_prunes_stale_samples_without_enabled_sensors(
         )
 
     task = asyncio.create_task(_run())
-    await asyncio.sleep(0)
-    await asyncio.sleep(0.05)
-    assert (
-        latest_sensor_sample(
-            db,
-            device_id=device_id,
-            sensor_key=SensorCollectionKey.TEMPERATURE_C,
+    try:
+        await _wait_until(
+            lambda: (
+                latest_sensor_sample(
+                    db,
+                    device_id=device_id,
+                    sensor_key=SensorCollectionKey.TEMPERATURE_C,
+                )
+                is None
+            )
         )
-        is None
-    )
-    stop.set()
-    await task
+    finally:
+        stop.set()
+        await task
+
+
+def _ep1_device(
+    *,
+    device_id: str = "aa:bb:cc:dd:ee:ff",
+    occupancy: str = DeviceConditionState.OCCUPIED.value,
+    temperature_c: float = 21.5,
+) -> MagicMock:
+    device = MagicMock()
+    device.identifier = device_id
+    device.mac_address = device_id
+    device.preferred_label = "Office"
+    device.occupancy_state = occupancy
+    device.temperature_c = temperature_c
+    device.humidity_pct = 45.0
+    device.illuminance_lx = 120.0
+    return device
+
+
+async def _wait_until(predicate: Callable[[], bool], *, timeout_s: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(0.005)
+    raise AssertionError("Expected condition within timeout, got timeout")

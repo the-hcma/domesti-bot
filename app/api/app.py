@@ -265,6 +265,7 @@ def create_app(args: Any) -> FastAPI:
                 "[startup] device discovery complete in %.1fs",
                 (runtime.discovery_completed_at or started) - started,
             )
+            runtime.start_sensor_collection_sampler()
             try:
                 poll_interval_s = poll_interval_from_env()
             except ValueError as exc:
@@ -291,7 +292,6 @@ def create_app(args: Any) -> FastAPI:
                 poll_interval_s,
                 len(watchers),
             )
-            runtime.start_sensor_collection_sampler()
 
         runtime.discovery_task = asyncio.create_task(
             _run_discovery(),

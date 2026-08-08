@@ -263,6 +263,9 @@ function mountRetentionForm(
         status.textContent = "Enter a retention of at least 1 day, or enable keep forever.";
         return;
       }
+      saveBtn.disabled = true;
+      unlimitedCb.disabled = true;
+      daysInput.disabled = true;
       try {
         current = await dataSource.saveSensorCollectionRetention({
           max_age_days:
@@ -273,7 +276,6 @@ function mountRetentionForm(
         });
         daysInput.value = String(current.max_age_days);
         unlimitedCb.checked = current.unlimited;
-        syncEnabled();
         showSuccessToast(
           current.unlimited
             ? "Sensor sample retention: keep forever"
@@ -282,6 +284,10 @@ function mountRetentionForm(
       } catch (err) {
         status.hidden = false;
         status.textContent = `Could not save retention: ${formatError(err)}`;
+      } finally {
+        saveBtn.disabled = false;
+        unlimitedCb.disabled = false;
+        syncEnabled();
       }
     })();
   });

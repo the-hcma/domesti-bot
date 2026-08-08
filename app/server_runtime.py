@@ -206,6 +206,7 @@ class DomestiServerRuntime:
             ),
             name="sensor-collection-sampler",
         )
+        self.sensor_collection_task.add_done_callback(_log_sensor_collection_task_result)
 
     async def restart_device_state_watchers(self) -> None:
         """Rebuild background polling after a hot-reloaded device manager."""
@@ -299,3 +300,14 @@ class DomestiServerRuntime:
 
 
 runtime = DomestiServerRuntime()
+
+
+def _log_sensor_collection_task_result(task: asyncio.Task[None]) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        _LOGGER.error(
+            "[sensor-collection] sampler task failed",
+            exc_info=exc,
+        )
