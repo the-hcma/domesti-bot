@@ -23,6 +23,8 @@ from app.device_enums import (
     Ep1ReadingMetric,
     RuleDeviceActionType,
     RuleTrigger,
+    SensorChartWindow,
+    SensorCollectionKey,
     SettingsCredentialsTestSource,
     VacationModeTestEmailKind,
 )
@@ -2010,6 +2012,90 @@ class SettingsLocationOut(SettingsLocationIn):
     def home_configured(self) -> bool:
         """True when lat/lon are not the ``0.0``/``0.0`` unconfigured sentinel."""
         return not (self.lat == 0.0 and self.lon == 0.0)
+
+
+class SensorCollectionConfigIn(BaseModel):
+    """Body for ``PUT /v1/sensor-collection/sensors/{device_id}/{sensor_key}``."""
+
+    enabled: bool = Field(..., description="When false, no new samples are written.")
+    interval_s: int = Field(
+        ...,
+        description="Sample interval seconds (preset: 5 / 15 / 30 / 60 / 300).",
+    )
+
+
+class SensorCollectionRetentionIn(BaseModel):
+    """Body for ``PUT /v1/sensor-collection/retention``."""
+
+    max_age_days: float = Field(
+        default=60.0,
+        allow_inf_nan=False,
+        description=(
+            "Keep samples newer than this many days. Ignored when unlimited (may be 0); must be > 0 when limited."
+        ),
+    )
+    unlimited: bool = Field(
+        default=False,
+        description="When true, samples are never pruned by age.",
+    )
+
+    @model_validator(mode="after")
+    def _require_positive_days_when_limited(self) -> Self:
+        if not self.unlimited and self.max_age_days <= 0:
+            raise ValueError(f"Expected retention max_age_days > 0 when limited, got {self.max_age_days}")
+        return self
+
+
+class SensorCollectionRetentionOut(BaseModel):
+    """Effective sensor-sample retention policy."""
+
+    max_age_days: float
+    unlimited: bool
+
+
+class SensorCollectionSampleOut(BaseModel):
+    """One persisted sensor reading point."""
+
+    recorded_at: float = Field(..., description="Unix epoch seconds when sampled.")
+    unit: str | None = Field(default=None, description="Unit label when known.")
+    value: float = Field(..., description="Numeric reading (occupancy is 0/1).")
+
+
+class SensorCollectionSamplesOut(BaseModel):
+    """Samples for one sensor within a chart window."""
+
+    as_of: float = Field(
+        ...,
+        description="Unix epoch seconds used as the chart window end (server clock).",
+    )
+    device_id: str
+    points: list[SensorCollectionSampleOut] = Field(default_factory=list)
+    sensor_key: SensorCollectionKey
+    window: SensorChartWindow
+
+
+class SensorCollectionSensorOut(BaseModel):
+    """One collectible sensor with config and latest sample summary."""
+
+    device_display: str = Field(
+        ...,
+        description="Human-visible ``preferred_label (mac)`` via format_device_display.",
+    )
+    device_id: str
+    display_name: str
+    enabled: bool
+    family_id: DeviceFamilyId
+    interval_s: int
+    last_sample_at: float | None = None
+    last_value: float | None = None
+    sensor_key: SensorCollectionKey
+    unit: str | None = None
+
+
+class SensorCollectionSensorsOut(BaseModel):
+    """Catalog of collectible sensors for Automations → Data."""
+
+    sensors: list[SensorCollectionSensorOut] = Field(default_factory=list)
 
 
 class VacationModeSettingsOut(BaseModel):

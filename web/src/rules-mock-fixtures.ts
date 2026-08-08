@@ -12,6 +12,8 @@ import {
   type GeofenceOut,
   type RuleActionDeviceOut,
   type RuleOut,
+  type SensorCollectionRetentionOut,
+  type SensorCollectionSensorOut,
   type SettingsLocationOut,
   type TimeConditionTemplateOut,
   type UserLocationOut,
@@ -58,6 +60,8 @@ export interface MockStoreSeed {
   user_locations: Record<string, UserLocationOut>;
   rules: RuleOut[];
   rule_last_fired_at: Record<string, string | null>;
+  sensor_collection_retention: SensorCollectionRetentionOut;
+  sensor_collection_sensors: SensorCollectionSensorOut[];
   settings_location: SettingsLocationOut;
   action_devices: RuleActionDeviceOut[];
   time_condition_templates: TimeConditionTemplateOut[];
@@ -208,6 +212,11 @@ export function createMockStoreSeed(): MockStoreSeed {
     rule_last_fired_at: {
       "arrive-home-lights": null,
     },
+    sensor_collection_retention: {
+      max_age_days: 60,
+      unlimited: false,
+    },
+    sensor_collection_sensors: [],
     settings_location: {
       home_configured: true,
       lat: MOCK_HOUSE_CENTER_LAT,

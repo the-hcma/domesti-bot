@@ -345,6 +345,7 @@ class RulesHubController {
       [RulesTabId.Rules, "Rules"],
       [RulesTabId.Geofences, "Geofences"],
       [RulesTabId.Users, "Users"],
+      [RulesTabId.Data, "Data"],
       [RulesTabId.Vacation, "Vacation"],
       [RulesTabId.Mail, "Mail"],
     ] as const) {
@@ -1089,6 +1090,9 @@ class RulesHubController {
       case RulesTabId.Mail:
         await this.renderMailTab();
         break;
+      case RulesTabId.Data:
+        await this.renderDataTab();
+        break;
       case RulesTabId.Users:
         await this.renderUsersTab();
         break;
@@ -1096,6 +1100,14 @@ class RulesHubController {
         await this.renderVacationTab();
         break;
     }
+  }
+
+  private async renderDataTab(): Promise<void> {
+    const mount = document.createElement("div");
+    mount.className = "rules-sensor-mount";
+    this.body.append(mount);
+    const { mountSensorDataPanel } = await import("./sensor-data-panel.js");
+    await mountSensorDataPanel(mount, this.dataSource);
   }
 
   private async renderMailTab(): Promise<void> {
@@ -2117,12 +2129,16 @@ export function parseAutomationsDeepLink(
       return null;
     }
   }
-  const tabMatch = /^\/automations\/(mail|vacation)(?:[/?#].*)?$/.exec(raw);
+  const tabMatch = /^\/automations\/(data|mail|vacation)(?:[/?#].*)?$/.exec(raw);
   if (tabMatch === null) {
     return null;
   }
   const tab = tabMatch[1];
-  if (tab === RulesTabId.Mail || tab === RulesTabId.Vacation) {
+  if (
+    tab === RulesTabId.Data ||
+    tab === RulesTabId.Mail ||
+    tab === RulesTabId.Vacation
+  ) {
     return { tab };
   }
   return null;

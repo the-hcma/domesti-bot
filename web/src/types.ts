@@ -18,6 +18,8 @@ import {
   type RuleReferenceIssueKind,
   type RuleTrigger,
   type SecretsKeySource,
+  type SensorChartWindow,
+  type SensorCollectionKey,
   type SettingsCredentialsTestSource,
   type TailwindTokenSource,
   type UserLocationSource,
@@ -643,6 +645,52 @@ export interface SmtpTestEmailIn extends SmtpConfigIn {
 export interface SmtpTestEmailOut {
   message: string;
   ok: boolean;
+}
+
+export interface SensorCollectionConfigIn {
+  enabled: boolean;
+  interval_s: number;
+}
+
+export interface SensorCollectionRetentionIn {
+  max_age_days: number;
+  unlimited: boolean;
+}
+
+export interface SensorCollectionRetentionOut {
+  max_age_days: number;
+  unlimited: boolean;
+}
+
+export interface SensorCollectionSampleOut {
+  recorded_at: number;
+  unit: string | null;
+  value: number;
+}
+
+export interface SensorCollectionSamplesOut {
+  as_of: number;
+  device_id: string;
+  points: SensorCollectionSampleOut[];
+  sensor_key: SensorCollectionKey;
+  window: SensorChartWindow;
+}
+
+export interface SensorCollectionSensorOut {
+  device_display: string;
+  device_id: string;
+  display_name: string;
+  enabled: boolean;
+  family_id: string;
+  interval_s: number;
+  last_sample_at: number | null;
+  last_value: number | null;
+  sensor_key: SensorCollectionKey;
+  unit: string | null;
+}
+
+export interface SensorCollectionSensorsOut {
+  sensors: SensorCollectionSensorOut[];
 }
 
 export interface VacationModeSettingsOut {
