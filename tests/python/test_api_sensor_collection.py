@@ -216,6 +216,45 @@ def test_get_and_put_retention(tmp_path: Path) -> None:
     assert again.json()["max_age_days"] == 90.0
 
 
+def test_post_retention_prune_preview_counts_old_samples(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    now = wall_time()
+    insert_sensor_sample(
+        db,
+        device_id="aa:bb:cc:dd:ee:ff",
+        family_id="ep1",
+        recorded_at=now - 10 * 86_400,
+        sensor_key=SensorCollectionKey.TEMPERATURE_C,
+        unit="°C",
+        value=1.0,
+        now=now,
+    )
+    insert_sensor_sample(
+        db,
+        device_id="aa:bb:cc:dd:ee:ff",
+        family_id="ep1",
+        recorded_at=now - 1 * 86_400,
+        sensor_key=SensorCollectionKey.TEMPERATURE_C,
+        unit="°C",
+        value=2.0,
+        now=now,
+    )
+    preview = client.post(
+        "/v1/sensor-collection/retention/prune-preview",
+        json={"max_age_days": 7, "unlimited": False},
+    )
+    assert preview.status_code == HTTPStatus.OK
+    assert preview.json() == {"samples_to_prune": 1}
+
+    unlimited = client.post(
+        "/v1/sensor-collection/retention/prune-preview",
+        json={"max_age_days": 7, "unlimited": True},
+    )
+    assert unlimited.status_code == HTTPStatus.OK
+    assert unlimited.json() == {"samples_to_prune": 0}
+
+
 def test_put_retention_unlimited_allows_zero_max_age_days(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)

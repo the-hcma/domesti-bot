@@ -11,6 +11,7 @@ from app.db.models import SensorSample
 from app.db.session import discovery_session
 from app.device_enums import SensorChartWindow, SensorCollectionKey
 from app.sensor_collection_store import (
+    count_sensor_samples_to_prune,
     insert_sensor_sample,
     list_sensor_samples,
     load_sensor_collection_config,
@@ -160,6 +161,36 @@ def test_default_retention_is_two_months(tmp_path: Path) -> None:
     retention = load_sensor_collection_retention(db)
     assert retention.unlimited is False
     assert retention.max_age_days == 60.0
+
+
+def test_count_sensor_samples_to_prune_respects_proposed_window(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    device_id = "aa:bb:cc:dd:ee:ff"
+    key = SensorCollectionKey.TEMPERATURE_C
+    save_sensor_collection_retention(db, max_age_days=60.0, unlimited=True)
+    now = 1_700_000_000.0
+    insert_sensor_sample(
+        db,
+        device_id=device_id,
+        family_id="ep1",
+        recorded_at=now - 10 * 86_400,
+        sensor_key=key,
+        unit="°C",
+        value=1.0,
+        now=now,
+    )
+    insert_sensor_sample(
+        db,
+        device_id=device_id,
+        family_id="ep1",
+        recorded_at=now - 1 * 86_400,
+        sensor_key=key,
+        unit="°C",
+        value=2.0,
+        now=now,
+    )
+    assert count_sensor_samples_to_prune(db, max_age_days=7.0, unlimited=False, now=now) == 1
+    assert count_sensor_samples_to_prune(db, max_age_days=7.0, unlimited=True, now=now) == 0
 
 
 def test_insert_prunes_by_configured_retention(tmp_path: Path) -> None:

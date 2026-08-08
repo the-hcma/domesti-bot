@@ -13,6 +13,7 @@ from app.api.schemas import (
     SensorCollectionConfigIn,
     SensorCollectionRetentionIn,
     SensorCollectionRetentionOut,
+    SensorCollectionRetentionPrunePreviewOut,
     SensorCollectionSampleOut,
     SensorCollectionSamplesOut,
     SensorCollectionSensorOut,
@@ -27,6 +28,7 @@ from app.sensor_collection import (
 )
 from app.sensor_collection_store import (
     SENSOR_COLLECTION_INTERVAL_PRESETS_S,
+    count_sensor_samples_to_prune,
     list_sensor_samples,
     load_sensor_collection_retention,
     save_sensor_collection_config,
@@ -48,6 +50,30 @@ async def get_sensor_collection_retention(
         max_age_days=retention.max_age_days,
         unlimited=retention.unlimited,
     )
+
+
+@router.post(
+    "/retention/prune-preview",
+    response_model=SensorCollectionRetentionPrunePreviewOut,
+)
+async def post_sensor_collection_retention_prune_preview(
+    body: SensorCollectionRetentionIn,
+    request: Request,
+) -> SensorCollectionRetentionPrunePreviewOut:
+    """Count samples that would be deleted if ``body`` were saved now."""
+    cache_path = _require_discovery_cache(request)
+    try:
+        samples_to_prune = count_sensor_samples_to_prune(
+            cache_path,
+            max_age_days=body.max_age_days,
+            unlimited=body.unlimited,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return SensorCollectionRetentionPrunePreviewOut(samples_to_prune=samples_to_prune)
 
 
 @router.put("/retention", response_model=SensorCollectionRetentionOut)

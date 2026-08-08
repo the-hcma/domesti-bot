@@ -43,6 +43,7 @@ import type {
   SensorCollectionKey,
   SensorCollectionRetentionIn,
   SensorCollectionRetentionOut,
+  SensorCollectionRetentionPrunePreviewOut,
   SensorCollectionSamplesOut,
   SensorCollectionSensorOut,
   SensorCollectionSensorsOut,
@@ -359,6 +360,15 @@ export const api = {
     return call<SensorCollectionSamplesOut>(
       "GET",
       `/v1/sensor-collection/samples?${params.toString()}`,
+    );
+  },
+  postSensorCollectionRetentionPrunePreview(
+    body: SensorCollectionRetentionIn,
+  ): Promise<SensorCollectionRetentionPrunePreviewOut> {
+    return call<SensorCollectionRetentionPrunePreviewOut>(
+      "POST",
+      "/v1/sensor-collection/retention/prune-preview",
+      body,
     );
   },
   putSensorCollectionRetention(

@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import SensorCollectionConfig, SensorCollectionSettings, SensorSample
@@ -49,6 +49,33 @@ class SensorSampleRecord:
     sensor_key: SensorCollectionKey
     unit: str | None
     value: float
+
+
+def count_sensor_samples_to_prune(
+    path: Path,
+    *,
+    max_age_days: float,
+    unlimited: bool,
+    now: float | None = None,
+) -> int:
+    """Return how many samples the proposed retention would delete.
+
+    Unlimited policies never prune. Limited policies count rows older than
+    ``now - max_age_days`` (wall clock when ``now`` is omitted).
+    """
+    if unlimited:
+        return 0
+    if max_age_days <= 0:
+        raise ValueError(f"Expected retention max_age_days > 0 when limited, got {max_age_days}")
+    if not math.isfinite(max_age_days):
+        raise ValueError(f"Expected finite retention max_age_days, got {max_age_days}")
+    end = time.time() if now is None else now
+    cutoff = end - max_age_days * 86_400.0
+    with discovery_session(path) as session:
+        counted = session.scalar(
+            select(func.count()).select_from(SensorSample).where(SensorSample.recorded_at < cutoff)
+        )
+        return int(counted or 0)
 
 
 def default_sensor_collection_retention() -> SensorCollectionRetentionRecord:
