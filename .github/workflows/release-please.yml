@@ -24,10 +24,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
+      # Config/manifest own release-type + uv.lock self-version bump (extra-files).
       - uses: googleapis/release-please-action@v5
         id: release
         with:
-          release-type: python
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
       - name: Assert release-please acted on releasable commits
         if: github.event_name == 'push'
@@ -165,9 +167,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v9.0.0
 
-      - name: Install Python dependencies (dev)
-        run: uv sync --group dev
-
+      # python-static asserts uv.lock before sync, then setup-python (uv sync) + lints.
       - name: Python lint & format checks
         run: bash .github/ci/python-static
 

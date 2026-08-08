@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Fail when uv.lock's editable project version drifts from pyproject.toml.
+# Catches silent release-please extra-files jsonpath misses on release PRs.
+# Must run before `uv sync`: sync can rewrite uv.lock from pyproject and would
+# make a stale committed lock look green.
+# Uses uv-managed Python (no project sync) — does not require system python3≥3.11.
+# See googleapis/release-please#2561 and repository-helpers#457.
+set -euo pipefail
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "ERROR: assert-uv-lock-version requires uv on PATH (run after setup-uv)" >&2
+  exit 1
+fi
+
+# Install the pin from .python-version (or uv default) without syncing the project.
+uv python install
+uv run --no-project python - <<'PY'
+from __future__ import annotations
+
+import sys
+import tomllib
+from pathlib import Path
+
+pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+project = pyproject.get("project") or {}
+name = project.get("name")
+expected = project.get("version")
+if not isinstance(name, str) or not name:
+    print("ERROR: pyproject.toml missing project.name", file=sys.stderr)
+    raise SystemExit(1)
+if not isinstance(expected, str) or not expected:
+    print("ERROR: pyproject.toml missing project.version", file=sys.stderr)
+    raise SystemExit(1)
+
+lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
+actual = None
+for package in lock.get("package") or []:
+    if package.get("name") == name:
+        actual = package.get("version")
+        break
+
+if actual is None:
+    print(f"ERROR: uv.lock has no package entry for {name!r}", file=sys.stderr)
+    raise SystemExit(1)
+if actual != expected:
+    print(
+        f"ERROR: uv.lock version for {name!r} is {actual!r}, "
+        f"expected {expected!r} (matches pyproject.toml)",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+print(f"OK: {name} version {expected} matches in pyproject.toml and uv.lock")
+PY

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # One sync for ruff + pyright (shared venv). Prefer this in CI over separate jobs.
+# Assert against the committed lock before setup-python's `uv sync` — sync can
+# rewrite uv.lock from pyproject and would hide release-please extra-files misses.
+# assert-uv-lock-version uses uv-managed Python (no sync); requires setup-uv first.
+bash .github/ci/assert-uv-lock-version
 bash .github/ci/setup-python
 uv run ruff check app config tests scripts
 uv run ruff format --check app config tests scripts
