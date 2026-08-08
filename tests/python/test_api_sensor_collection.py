@@ -115,6 +115,79 @@ def test_get_samples_respects_window(tmp_path: Path) -> None:
     assert 22.0 not in values
 
 
+def test_get_samples_accepts_as_of_and_last_week(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    device_id = "aa:bb:cc:dd:ee:ff"
+    key = SensorCollectionKey.TEMPERATURE_C
+    as_of = 1_700_000_000.0
+    insert_sensor_sample(
+        db,
+        device_id=device_id,
+        family_id="ep1",
+        recorded_at=as_of - 86_400,
+        sensor_key=key,
+        unit="°C",
+        value=18.0,
+        now=as_of,
+    )
+    insert_sensor_sample(
+        db,
+        device_id=device_id,
+        family_id="ep1",
+        recorded_at=as_of - 500_000,
+        sensor_key=key,
+        unit="°C",
+        value=17.0,
+        now=as_of,
+    )
+    insert_sensor_sample(
+        db,
+        device_id=device_id,
+        family_id="ep1",
+        recorded_at=as_of - 700_000,
+        sensor_key=key,
+        unit="°C",
+        value=16.0,
+        now=as_of,
+    )
+
+    response = client.get(
+        "/v1/sensor-collection/samples",
+        params={
+            "device_id": device_id,
+            "sensor_key": key.value,
+            "window": SensorChartWindow.LAST_WEEK.value,
+            "as_of": as_of,
+        },
+    )
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["as_of"] == as_of
+    assert body["window"] == SensorChartWindow.LAST_WEEK.value
+    values = [point["value"] for point in body["points"]]
+    assert values == [17.0, 18.0]
+
+
+def test_get_samples_clamps_future_as_of(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    before = wall_time()
+    future = before + 86_400
+    response = client.get(
+        "/v1/sensor-collection/samples",
+        params={
+            "device_id": "aa:bb:cc:dd:ee:ff",
+            "sensor_key": SensorCollectionKey.OCCUPANCY.value,
+            "window": SensorChartWindow.LAST_HOUR.value,
+            "as_of": future,
+        },
+    )
+    after = wall_time()
+    assert response.status_code == HTTPStatus.OK
+    assert before - 1 <= response.json()["as_of"] <= after + 1
+
+
 def test_put_sensor_rejects_bad_interval(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)

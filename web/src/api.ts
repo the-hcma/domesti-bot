@@ -346,12 +346,16 @@ export const api = {
     deviceId: string,
     sensorKey: SensorCollectionKey,
     window: SensorChartWindow,
+    asOf?: number | null,
   ): Promise<SensorCollectionSamplesOut> {
     const params = new URLSearchParams({
       device_id: deviceId,
       sensor_key: sensorKey,
       window,
     });
+    if (asOf !== undefined && asOf !== null) {
+      params.set("as_of", String(asOf));
+    }
     return call<SensorCollectionSamplesOut>(
       "GET",
       `/v1/sensor-collection/samples?${params.toString()}`,
