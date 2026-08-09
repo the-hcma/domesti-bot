@@ -15,6 +15,7 @@ from app.device_enums import KasaPirRange
 from app.kasa_device_manager import KasaDevice
 from app.kasa_motion_tuning import (
     KASA_MOTION_TUNING_DEVICE_NOT_FOUND,
+    KASA_MOTION_TUNING_INACTIVITY_TIMEOUT_RANGE,
     KASA_MOTION_TUNING_THRESHOLD_RANGE,
     KasaMotionTuningNotFoundError,
     KasaMotionTuningValidationError,
@@ -76,6 +77,16 @@ def test_list_kasa_motion_settings_targets_tolerates_uninitialized_manager() -> 
 
 
 @pytest.mark.asyncio
+async def test_read_kasa_motion_tuning_defaults_missing_inactivity_timeout() -> None:
+    kd, motion, ambient = _fake_motion_device()
+    motion.inactivity_timeout = None
+    mgr = SimpleNamespace(switches=(kd,))
+    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
+    assert snap.inactivity_timeout_ms == 0
+    del ambient
+
+
+@pytest.mark.asyncio
 async def test_read_kasa_motion_tuning_returns_snapshot() -> None:
     kd, motion, ambient = _fake_motion_device()
     mgr = SimpleNamespace(switches=(kd,))
@@ -84,6 +95,7 @@ async def test_read_kasa_motion_tuning_returns_snapshot() -> None:
     assert snap.pir_enabled is True
     assert snap.pir_range is KasaPirRange.MID
     assert snap.pir_threshold == 50
+    assert snap.inactivity_timeout_ms == 60_000
     assert snap.pir_triggered is False
     assert snap.ambient_available is True
     assert snap.ambient_light_enabled is True
@@ -113,17 +125,20 @@ async def test_apply_kasa_motion_tuning_writes_knobs() -> None:
         pir_enabled=False,
         pir_range=KasaPirRange.NEAR,
         pir_threshold=40,
+        inactivity_timeout_ms=120_000,
         ambient_light_enabled=False,
     )
     motion.set_enabled.assert_awaited_once_with(False)
     motion._set_range_from_str.assert_not_awaited()
     motion.set_threshold.assert_awaited_once_with(40)
+    motion.set_inactivity_timeout.assert_awaited_once_with(120_000)
     ambient.set_enabled.assert_awaited_once_with(False)
     assert snap.knobs_confirmed is True
     assert snap.pir_enabled is False
     # Threshold write forces Custom; concurrent Near is skipped on purpose.
     assert snap.pir_range is KasaPirRange.CUSTOM
     assert snap.pir_threshold == 40
+    assert snap.inactivity_timeout_ms == 120_000
     assert snap.ambient_light_enabled is False
 
 
@@ -138,9 +153,23 @@ async def test_apply_range_only_writes_preset() -> None:
     )
     motion._set_range_from_str.assert_awaited_once_with("Near")
     motion.set_threshold.assert_not_awaited()
+    motion.set_inactivity_timeout.assert_not_awaited()
     assert snap.pir_range is KasaPirRange.NEAR
     assert snap.knobs_confirmed is True
     del ambient
+
+
+@pytest.mark.asyncio
+async def test_apply_kasa_motion_tuning_rejects_bad_inactivity_timeout() -> None:
+    kd, _motion, _ambient = _fake_motion_device()
+    mgr = SimpleNamespace(switches=(kd,))
+    with pytest.raises(KasaMotionTuningValidationError) as exc_info:
+        await apply_kasa_motion_tuning(
+            device_id=kd.identifier,
+            kasa_mgr=mgr,  # type: ignore[arg-type]
+            inactivity_timeout_ms=-1,
+        )
+    assert str(exc_info.value) == KASA_MOTION_TUNING_INACTIVITY_TIMEOUT_RANGE.format(value=-1)
 
 
 @pytest.mark.asyncio
@@ -220,11 +249,13 @@ def _fake_motion_device(*, with_ambient: bool = True) -> tuple[KasaDevice, Magic
     motion.range = Range.Mid
     motion.ranges = ["Far", "Mid", "Near", "Custom"]
     motion.threshold = 50
+    motion.inactivity_timeout = 60_000
     motion.pir_triggered = False
     motion.pir_percent = -1.07
     motion.set_enabled = AsyncMock()
     motion._set_range_from_str = AsyncMock()
     motion.set_threshold = AsyncMock()
+    motion.set_inactivity_timeout = AsyncMock()
 
     ambient: MagicMock | None = None
     modules: dict[Any, Any] = {Module.IotMotion: motion}
@@ -256,9 +287,14 @@ def _fake_motion_device(*, with_ambient: bool = True) -> tuple[KasaDevice, Magic
         motion.range = Range.Custom
         return {}
 
+    async def _set_inactivity_timeout(timeout: int) -> dict[str, Any]:
+        motion.inactivity_timeout = timeout
+        return {}
+
     motion.set_enabled.side_effect = _set_enabled
     motion._set_range_from_str.side_effect = _set_range_from_str
     motion.set_threshold.side_effect = _set_threshold
+    motion.set_inactivity_timeout.side_effect = _set_inactivity_timeout
     if ambient is not None:
 
         async def _set_ambient(state: bool) -> dict[str, Any]:

@@ -582,6 +582,14 @@ class KasaMotionTuningOut(BaseModel):
     )
     display_name: str | None = Field(default=None, description="Preferred label without MAC.")
     host: str = Field(..., description="LAN host used for this snapshot.")
+    inactivity_timeout_ms: int = Field(
+        ...,
+        description=(
+            "How long the switch keeps the light on after last motion (device "
+            "``cold_time`` / inactivity timeout), in milliseconds."
+        ),
+        ge=0,
+    )
     knobs_confirmed: bool = Field(
         default=True,
         description=(
@@ -619,6 +627,14 @@ class KasaMotionTuningSetIn(BaseModel):
     ambient_light_enabled: bool | None = Field(
         default=None,
         description="Enable or disable ambient light gating (requires ambient module).",
+    )
+    inactivity_timeout_ms: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Linger after motion in milliseconds (device ``cold_time``). "
+            "Smart Control rules in the Kasa app can overwrite this."
+        ),
     )
     pir_enabled: bool | None = Field(default=None, description="Enable or disable PIR.")
     pir_range: KasaPirRange | None = Field(
