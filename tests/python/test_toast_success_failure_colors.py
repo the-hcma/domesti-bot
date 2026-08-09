@@ -4,11 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_INDEX_HTML = _REPO_ROOT / "app" / "api" / "static" / "index.html"
-_SETTINGS_STATUS_TS = _REPO_ROOT / "web" / "src" / "settings-status.ts"
-_UI_TOAST_TS = _REPO_ROOT / "web" / "src" / "ui-toast.ts"
-
 
 def test_action_toast_variants_use_explicit_tone_classes() -> None:
     css = _INDEX_HTML.read_text(encoding="utf-8")
@@ -32,3 +27,11 @@ def test_settings_dialog_status_tones_are_colored() -> None:
     assert "settings-dialog-status-error" in status_ts
     assert "settings-dialog-status-success" in status_ts
     assert "setSettingsDialogStatus" in status_ts
+
+
+_INDEX_HTML = (
+    Path(__file__).resolve().parents[2] / "app" / "api" / "static" / "index.html"
+)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SETTINGS_STATUS_TS = _REPO_ROOT / "web" / "src" / "settings-status.ts"
+_UI_TOAST_TS = _REPO_ROOT / "web" / "src" / "ui-toast.ts"

@@ -139,13 +139,6 @@ class DomestiBotController {
   // from background gets a fresh grace even when the last poll was minutes ago.
   private static readonly CONNECTION_RECONNECT_GRACE_MS = 3000;
 
-  // How long a recoverable action error (e.g. Sonos 409 "queue is
-  // empty") stays visible before auto-dismissing. Long enough to
-  // read a one-sentence hint, short enough not to overstay if the
-  // user has already moved on. A subsequent action error replaces
-  // the current toast immediately and restarts the timer; clicking
-  // the ``×`` button dismisses on demand.
-
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
   private bufferedActions: Array<() => Promise<void>> = [];
@@ -163,12 +156,6 @@ class DomestiBotController {
   private static readonly POLL_TRANSPORT_FAILURES_BEFORE_VERIFY = 1;
   private refreshInFlight = false;
   private pollTimer: number | null = null;
-  // The recoverable-action toast lives outside ``#app`` so it
-  // survives the ``replaceChildren()`` calls inside ``render()``.
-  // ``null`` means no toast is currently mounted; the timer is
-  // cleared whenever we dismiss or replace the toast so we don't
-  // accidentally remove a *newer* toast when an older one's timer
-  // fires.
   // Keyed by ``familyId\u0000deviceId``. Survives across polls so the
   // tile keeps showing the predicted state even when the backend
   // momentarily disagrees (transient OPENING, slow Kasa cloud sync,
