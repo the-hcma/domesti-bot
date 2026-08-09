@@ -16,6 +16,14 @@ import type {
   KasaMotionTuningSetIn,
 } from "./types.js";
 
+export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_INFO_DETAIL =
+  "Brightness threshold for the ambient day/night gate while motion is inactive. Pick a device preset (cloudy, dawn, …) or enter a custom value. Smart Control rules that decide “motion when dark” still live in the Kasa app.";
+export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_INFO_EXAMPLE =
+  "Choose “dawn” so hallway motion only turns the light on when it is already fairly dark.";
+export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_LABEL =
+  "Ambient brightness limit";
+export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_PRESET_LABEL =
+  "Ambient limit preset";
 export const KASA_MOTION_SETTINGS_AMBIENT_ENABLED_INFO_DETAIL =
   "When on, the switch’s ambient light sensor can gate motion-based lighting (for example “motion when dark” in the Kasa app). Domesti-bot only toggles the sensor enable — Smart Control rules stay in the Kasa app.";
 export const KASA_MOTION_SETTINGS_AMBIENT_ENABLED_INFO_EXAMPLE =
@@ -24,6 +32,11 @@ export const KASA_MOTION_SETTINGS_AMBIENT_ENABLED_LABEL = "Ambient light enabled
 export const KASA_MOTION_SETTINGS_APPLY_LABEL = "Apply motion tuning";
 export const KASA_MOTION_SETTINGS_APPLY_UNCONFIRMED =
   "Motion settings were sent, but the switch did not confirm all values. Refresh and retry.";
+export const KASA_MOTION_SETTINGS_DEBUG_SENSORS_HEADING = "Debug sensors";
+export const KASA_MOTION_SETTINGS_DEBUG_SENSORS_INFO_DETAIL =
+  "Low-level Motion ADC and signed PIR value from python-kasa. Useful when calibrating sensitivity; not needed for day-to-day tuning.";
+export const KASA_MOTION_SETTINGS_DEBUG_SENSORS_INFO_EXAMPLE =
+  "If PIR percent looks stuck, compare ADC value against ADC min / mid / max after Refresh sensors.";
 export const KASA_MOTION_SETTINGS_LEGEND = "Motion (PIR) tuning";
 export const KASA_MOTION_SETTINGS_LINGER_INFO_DETAIL =
   "How long the light stays on after the last motion detection (device inactivity timeout / cold time). The Kasa app’s default Smart Control rule can overwrite this back to about 60 seconds — delete or edit that rule if changes do not stick.";
@@ -54,6 +67,32 @@ export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_EXAMPLE =
 export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_LABEL = "PIR threshold (0–100)";
 export const KASA_MOTION_SETTINGS_REFRESH_LABEL = "Refresh sensors";
 export const KASA_MOTION_SETTINGS_TARGET_DEVICE_LABEL = "Target device";
+
+const KASA_MOTION_AMBIENT_LIMIT_CUSTOM = "__custom__";
+
+/**
+ * Build ``ambient_brightness_limit`` for Apply when the field differs from baseline.
+ */
+export function kasaAmbientBrightnessLimitIfChanged(
+  limitRaw: string,
+  baselineLimit: number | null,
+): { error: string } | { value: number | null } {
+  const trimmed = limitRaw.trim();
+  if (trimmed === "") {
+    return { value: null };
+  }
+  const next = Number(trimmed);
+  if (!Number.isFinite(next) || !Number.isInteger(next)) {
+    return { error: "Ambient brightness limit must be a whole number." };
+  }
+  if (next < 0) {
+    return { error: "Ambient brightness limit must be 0 or greater." };
+  }
+  if (baselineLimit != null && next === baselineLimit) {
+    return { value: null };
+  }
+  return { value: next };
+}
 
 /**
  * Build ``inactivity_timeout_ms`` for Apply when the linger field differs from
@@ -102,7 +141,7 @@ function appendMotionIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
   intro.className = "settings-dialog-lead";
   intro.textContent =
-    "Edit PIR range / threshold, linger after motion, enable switches, and ambient-light enable on motion-capable wall switches (for example KS200M). PIR triggered, PIR percent, and ambient light below are live read-only sensors — refresh to update; short motion can be missed between polls.";
+    "Edit PIR range / threshold, linger after motion, ambient brightness limit, and enable switches on motion-capable wall switches (for example KS200M). Live sensors and debug ADC readings below are read-only — refresh to update; short motion can be missed between polls. Smart Control schedules stay in the Kasa app.";
   parent.append(intro);
 }
 
@@ -149,6 +188,26 @@ function createMotionField(
   labelRow.append(textLabel, createInfoBadge(label, info.detail, info.example));
   root.append(labelRow, control);
   return root;
+}
+
+function createSensorItem(label: string): {
+  item: HTMLDivElement;
+  value: HTMLSpanElement;
+} {
+  const item = document.createElement("div");
+  item.className = "kasa-motion-sensor";
+  const labelEl = document.createElement("span");
+  labelEl.className = "kasa-motion-sensor-label";
+  labelEl.textContent = label;
+  const value = document.createElement("span");
+  value.className = "kasa-motion-sensor-value";
+  value.textContent = "—";
+  item.append(labelEl, value);
+  return { item, value };
+}
+
+function formatOptionalNumber(value: number | null): string {
+  return value == null ? "—" : String(value);
 }
 
 function selectedValue(select: HTMLSelectElement): string | null {
@@ -318,6 +377,36 @@ export async function mountKasaSettingsPanel(
   checksRow.className = "settings-dialog-field-row kasa-motion-checks-row";
   checksRow.append(pirEnabledField, ambientEnabledField);
 
+  const ambientLimitPresetSelect = document.createElement("select");
+  ambientLimitPresetSelect.name = "ambient_brightness_limit_preset";
+  const ambientLimitPresetField = createMotionField(
+    KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_PRESET_LABEL,
+    {
+      detail: KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_INFO_EXAMPLE,
+    },
+    ambientLimitPresetSelect,
+  );
+
+  const ambientLimitInput = document.createElement("input");
+  ambientLimitInput.type = "number";
+  ambientLimitInput.name = "ambient_brightness_limit";
+  ambientLimitInput.min = "0";
+  ambientLimitInput.step = "1";
+  const ambientLimitField = createMotionField(
+    KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_LABEL,
+    {
+      detail: KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_INFO_EXAMPLE,
+    },
+    ambientLimitInput,
+  );
+
+  const ambientLimitRow = document.createElement("div");
+  ambientLimitRow.className =
+    "settings-dialog-field-row kasa-motion-knobs-row kasa-motion-ambient-limit-row";
+  ambientLimitRow.append(ambientLimitPresetField, ambientLimitField);
+
   const liveSensorsHeading = document.createElement("h3");
   liveSensorsHeading.className =
     "settings-dialog-subheading kasa-motion-sensors-heading";
@@ -330,34 +419,36 @@ export async function mountKasaSettingsPanel(
 
   const sensors = document.createElement("div");
   sensors.className = "settings-dialog-lead kasa-motion-sensors";
-  const triggeredItem = document.createElement("div");
-  triggeredItem.className = "kasa-motion-sensor";
-  const triggeredLabel = document.createElement("span");
-  triggeredLabel.className = "kasa-motion-sensor-label";
-  triggeredLabel.textContent = "PIR triggered";
-  const triggeredDd = document.createElement("span");
-  triggeredDd.className = "kasa-motion-sensor-value";
-  triggeredDd.textContent = "—";
-  triggeredItem.append(triggeredLabel, triggeredDd);
-  const percentItem = document.createElement("div");
-  percentItem.className = "kasa-motion-sensor";
-  const percentLabel = document.createElement("span");
-  percentLabel.className = "kasa-motion-sensor-label";
-  percentLabel.textContent = "PIR percent";
-  const percentDd = document.createElement("span");
-  percentDd.className = "kasa-motion-sensor-value";
-  percentDd.textContent = "—";
-  percentItem.append(percentLabel, percentDd);
-  const ambientItem = document.createElement("div");
-  ambientItem.className = "kasa-motion-sensor";
-  const ambientLabel = document.createElement("span");
-  ambientLabel.className = "kasa-motion-sensor-label";
-  ambientLabel.textContent = "Ambient light";
-  const ambientDd = document.createElement("span");
-  ambientDd.className = "kasa-motion-sensor-value";
-  ambientDd.textContent = "—";
-  ambientItem.append(ambientLabel, ambientDd);
-  sensors.append(triggeredItem, percentItem, ambientItem);
+  const triggered = createSensorItem("PIR triggered");
+  const percent = createSensorItem("PIR percent");
+  const ambientLight = createSensorItem("Ambient light");
+  sensors.append(triggered.item, percent.item, ambientLight.item);
+
+  const debugSensorsHeading = document.createElement("h3");
+  debugSensorsHeading.className =
+    "settings-dialog-subheading kasa-motion-sensors-heading kasa-motion-debug-heading";
+  debugSensorsHeading.append(
+    createFieldLabel(KASA_MOTION_SETTINGS_DEBUG_SENSORS_HEADING, {
+      detail: KASA_MOTION_SETTINGS_DEBUG_SENSORS_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_DEBUG_SENSORS_INFO_EXAMPLE,
+    }),
+  );
+
+  const debugSensors = document.createElement("div");
+  debugSensors.className =
+    "settings-dialog-lead kasa-motion-sensors kasa-motion-debug-sensors";
+  const pirValue = createSensorItem("PIR value");
+  const adcValue = createSensorItem("ADC value");
+  const adcMin = createSensorItem("ADC min");
+  const adcMid = createSensorItem("ADC mid");
+  const adcMax = createSensorItem("ADC max");
+  debugSensors.append(
+    pirValue.item,
+    adcValue.item,
+    adcMin.item,
+    adcMid.item,
+    adcMax.item,
+  );
 
   const motionActions = document.createElement("div");
   motionActions.className = "settings-dialog-actions";
@@ -375,8 +466,11 @@ export async function mountKasaSettingsPanel(
     motionStatus,
     knobsRow,
     checksRow,
+    ambientLimitRow,
     liveSensorsHeading,
     sensors,
+    debugSensorsHeading,
+    debugSensors,
     motionActions,
   );
   form.append(credsSection, motionSection);
@@ -429,6 +523,30 @@ export async function mountKasaSettingsPanel(
     const ambientReady = baseline?.ambient_available === true;
     ambientEnabledField.hidden = !ambientReady && baseline != null;
     ambientEnabledInput.disabled = !ambientReady || deviceLoading;
+    ambientLimitRow.hidden = !ambientReady && baseline != null;
+    ambientLimitPresetSelect.disabled = !ambientReady || deviceLoading;
+    ambientLimitInput.disabled = !ambientReady || deviceLoading;
+  };
+
+  const syncAmbientLimitPresetSelection = (): void => {
+    const raw = ambientLimitInput.value.trim();
+    const next = Number(raw);
+    let matched = false;
+    if (raw !== "" && Number.isFinite(next) && Number.isInteger(next)) {
+      for (const option of Array.from(ambientLimitPresetSelect.options)) {
+        if (
+          option.value !== KASA_MOTION_AMBIENT_LIMIT_CUSTOM &&
+          Number(option.value) === next
+        ) {
+          ambientLimitPresetSelect.value = option.value;
+          matched = true;
+          break;
+        }
+      }
+    }
+    if (!matched) {
+      ambientLimitPresetSelect.value = KASA_MOTION_AMBIENT_LIMIT_CUSTOM;
+    }
   };
 
   const applyMotionSnapshot = (snap: KasaMotionTuningOut | null): void => {
@@ -439,9 +557,16 @@ export async function mountKasaSettingsPanel(
       pirThresholdInput.value = "";
       lingerInput.value = "";
       ambientEnabledInput.checked = false;
-      triggeredDd.textContent = "—";
-      percentDd.textContent = "—";
-      ambientDd.textContent = "—";
+      ambientLimitPresetSelect.replaceChildren();
+      ambientLimitInput.value = "";
+      triggered.value.textContent = "—";
+      percent.value.textContent = "—";
+      ambientLight.value.textContent = "—";
+      pirValue.value.textContent = "—";
+      adcValue.value.textContent = "—";
+      adcMin.value.textContent = "—";
+      adcMid.value.textContent = "—";
+      adcMax.value.textContent = "—";
       syncMotionControls();
       return;
     }
@@ -459,11 +584,32 @@ export async function mountKasaSettingsPanel(
     pirThresholdInput.value = String(snap.pir_threshold);
     lingerInput.value = String(kasaLingerDisplaySeconds(snap.inactivity_timeout_ms));
     ambientEnabledInput.checked = snap.ambient_light_enabled === true;
-    triggeredDd.textContent = snap.pir_triggered ? "yes" : "no";
-    percentDd.textContent =
+    ambientLimitPresetSelect.replaceChildren();
+    for (const preset of snap.ambient_brightness_limit_presets) {
+      const option = document.createElement("option");
+      option.value = String(preset.value);
+      option.textContent = `${preset.name} (${String(preset.value)})`;
+      ambientLimitPresetSelect.append(option);
+    }
+    const customOption = document.createElement("option");
+    customOption.value = KASA_MOTION_AMBIENT_LIMIT_CUSTOM;
+    customOption.textContent = "Custom";
+    ambientLimitPresetSelect.append(customOption);
+    ambientLimitInput.value =
+      snap.ambient_brightness_limit == null
+        ? ""
+        : String(snap.ambient_brightness_limit);
+    syncAmbientLimitPresetSelection();
+    triggered.value.textContent = snap.pir_triggered ? "yes" : "no";
+    percent.value.textContent =
       snap.pir_percent == null ? "—" : snap.pir_percent.toFixed(2);
-    ambientDd.textContent =
+    ambientLight.value.textContent =
       snap.ambient_light == null ? "—" : `${String(snap.ambient_light)}%`;
+    pirValue.value.textContent = formatOptionalNumber(snap.pir_value);
+    adcValue.value.textContent = formatOptionalNumber(snap.adc_value);
+    adcMin.value.textContent = formatOptionalNumber(snap.adc_min);
+    adcMid.value.textContent = formatOptionalNumber(snap.adc_mid);
+    adcMax.value.textContent = formatOptionalNumber(snap.adc_max);
     syncMotionControls();
   };
 
@@ -752,6 +898,17 @@ export async function mountKasaSettingsPanel(
     void loadMotionPanel();
   });
 
+  ambientLimitPresetSelect.addEventListener("change", () => {
+    if (ambientLimitPresetSelect.value === KASA_MOTION_AMBIENT_LIMIT_CUSTOM) {
+      return;
+    }
+    ambientLimitInput.value = ambientLimitPresetSelect.value;
+  });
+
+  ambientLimitInput.addEventListener("input", () => {
+    syncAmbientLimitPresetSelection();
+  });
+
   refreshMotionBtn.addEventListener("click", () => {
     void loadMotionPanel();
   });
@@ -808,13 +965,25 @@ export async function mountKasaSettingsPanel(
         if (nextAmbient !== (baseline.ambient_light_enabled === true)) {
           body.ambient_light_enabled = nextAmbient;
         }
+        const limitResult = kasaAmbientBrightnessLimitIfChanged(
+          ambientLimitInput.value,
+          baseline.ambient_brightness_limit,
+        );
+        if ("error" in limitResult) {
+          showMotionStatus(limitResult.error, ToastVariant.Error);
+          return;
+        }
+        if (limitResult.value != null) {
+          body.ambient_brightness_limit = limitResult.value;
+        }
       }
       if (
         body.pir_enabled == null &&
         body.pir_range == null &&
         body.pir_threshold == null &&
         body.inactivity_timeout_ms == null &&
-        body.ambient_light_enabled == null
+        body.ambient_light_enabled == null &&
+        body.ambient_brightness_limit == null
       ) {
         showMotionStatus("No motion settings changed.", ToastVariant.Info);
         return;

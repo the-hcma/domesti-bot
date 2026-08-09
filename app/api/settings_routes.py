@@ -27,6 +27,7 @@ from app.api.schemas import (
     Ep1OccupancyTuningFieldOut,
     Ep1OccupancyTuningOut,
     Ep1OccupancyTuningSetIn,
+    KasaAmbientBrightnessPresetOut,
     KasaCredentialsSetIn,
     KasaCredentialsSetOut,
     KasaCredentialsSettingsOut,
@@ -269,6 +270,7 @@ async def put_kasa_device_motion_tuning(
     try:
         snapshot = await apply_kasa_motion_tuning(
             device_id=device_id,
+            ambient_brightness_limit=body.ambient_brightness_limit,
             ambient_light_enabled=body.ambient_light_enabled,
             inactivity_timeout_ms=body.inactivity_timeout_ms,
             kasa_mgr=_live_kasa_mgr(),
@@ -871,7 +873,16 @@ async def _reload_ep1_manager() -> bool:
 
 def _kasa_motion_tuning_out(snapshot: KasaMotionTuningSnapshot) -> KasaMotionTuningOut:
     return KasaMotionTuningOut(
+        adc_max=snapshot.adc_max,
+        adc_mid=snapshot.adc_mid,
+        adc_min=snapshot.adc_min,
+        adc_value=snapshot.adc_value,
         ambient_available=snapshot.ambient_available,
+        ambient_brightness_limit=snapshot.ambient_brightness_limit,
+        ambient_brightness_limit_presets=[
+            KasaAmbientBrightnessPresetOut(name=preset.name, value=preset.value)
+            for preset in snapshot.ambient_brightness_limit_presets
+        ],
         ambient_light=snapshot.ambient_light,
         ambient_light_enabled=snapshot.ambient_light_enabled,
         device_id=snapshot.device_id,
@@ -887,6 +898,7 @@ def _kasa_motion_tuning_out(snapshot: KasaMotionTuningSnapshot) -> KasaMotionTun
         pir_range_choices=list(snapshot.pir_range_choices),
         pir_threshold=snapshot.pir_threshold,
         pir_triggered=snapshot.pir_triggered,
+        pir_value=snapshot.pir_value,
     )
 
 

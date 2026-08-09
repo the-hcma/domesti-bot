@@ -14,9 +14,11 @@ from kasa.module import Module
 from app.device_enums import KasaPirRange
 from app.kasa_device_manager import KasaDevice
 from app.kasa_motion_tuning import (
+    KASA_MOTION_TUNING_BRIGHTNESS_LIMIT_RANGE,
     KASA_MOTION_TUNING_DEVICE_NOT_FOUND,
     KASA_MOTION_TUNING_INACTIVITY_TIMEOUT_RANGE,
     KASA_MOTION_TUNING_THRESHOLD_RANGE,
+    KasaAmbientBrightnessPreset,
     KasaMotionTuningNotFoundError,
     KasaMotionTuningValidationError,
     apply_kasa_motion_tuning,
@@ -89,12 +91,14 @@ async def test_apply_kasa_motion_tuning_writes_knobs() -> None:
         pir_threshold=40,
         inactivity_timeout_ms=120_000,
         ambient_light_enabled=False,
+        ambient_brightness_limit=11,
     )
     motion.set_enabled.assert_awaited_once_with(False)
     motion._set_range_from_str.assert_not_awaited()
     motion.set_threshold.assert_awaited_once_with(40)
     motion.set_inactivity_timeout.assert_awaited_once_with(120_000)
     ambient.set_enabled.assert_awaited_once_with(False)
+    ambient.set_brightness_limit.assert_awaited_once_with(11)
     assert snap.knobs_confirmed is True
     assert snap.pir_enabled is False
     # Threshold write forces Custom; concurrent Near is skipped on purpose.
@@ -102,6 +106,7 @@ async def test_apply_kasa_motion_tuning_writes_knobs() -> None:
     assert snap.pir_threshold == 40
     assert snap.inactivity_timeout_ms == 120_000
     assert snap.ambient_light_enabled is False
+    assert snap.ambient_brightness_limit == 11
 
 
 @pytest.mark.asyncio
@@ -119,6 +124,19 @@ async def test_apply_range_only_writes_preset() -> None:
     assert snap.pir_range is KasaPirRange.NEAR
     assert snap.knobs_confirmed is True
     del ambient
+
+
+@pytest.mark.asyncio
+async def test_apply_kasa_motion_tuning_rejects_bad_brightness_limit() -> None:
+    kd, _motion, _ambient = _fake_motion_device()
+    mgr = SimpleNamespace(switches=(kd,))
+    with pytest.raises(KasaMotionTuningValidationError) as exc_info:
+        await apply_kasa_motion_tuning(
+            device_id=kd.identifier,
+            kasa_mgr=mgr,  # type: ignore[arg-type]
+            ambient_brightness_limit=-1,
+        )
+    assert str(exc_info.value) == KASA_MOTION_TUNING_BRIGHTNESS_LIMIT_RANGE.format(value=-1)
 
 
 @pytest.mark.asyncio
@@ -157,6 +175,20 @@ async def test_apply_kasa_motion_tuning_rejects_ambient_without_module() -> None
             device_id=kd.identifier,
             kasa_mgr=mgr,  # type: ignore[arg-type]
             ambient_light_enabled=True,
+        )
+    motion.set_enabled.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_apply_kasa_motion_tuning_rejects_brightness_limit_without_module() -> None:
+    kd, motion, ambient = _fake_motion_device(with_ambient=False)
+    assert ambient is None
+    mgr = SimpleNamespace(switches=(kd,))
+    with pytest.raises(KasaMotionTuningValidationError, match="ambient"):
+        await apply_kasa_motion_tuning(
+            device_id=kd.identifier,
+            kasa_mgr=mgr,  # type: ignore[arg-type]
+            ambient_brightness_limit=15,
         )
     motion.set_enabled.assert_not_awaited()
 
@@ -203,14 +235,65 @@ async def test_read_kasa_motion_tuning_returns_snapshot() -> None:
     assert snap.pir_threshold == 50
     assert snap.inactivity_timeout_ms == 60_000
     assert snap.pir_triggered is False
+    assert snap.pir_value == -22
+    assert snap.adc_min == 0
+    assert snap.adc_mid == 2047
+    assert snap.adc_max == 4095
+    assert snap.adc_value == 2000
     assert snap.ambient_available is True
     assert snap.ambient_light_enabled is True
     assert snap.ambient_light == 64
+    assert snap.ambient_brightness_limit == 15
+    assert snap.ambient_brightness_limit_presets == (
+        KasaAmbientBrightnessPreset(name="cloudy", value=15),
+        KasaAmbientBrightnessPreset(name="overcast", value=11),
+        KasaAmbientBrightnessPreset(name="dawn", value=8),
+        KasaAmbientBrightnessPreset(name="custom", value=94),
+    )
     assert KasaPirRange.MID in snap.pir_range_choices
     update = kd._kDevice.update
     assert isinstance(update, AsyncMock)
     update.assert_awaited()
     del motion, ambient
+
+
+@pytest.mark.asyncio
+async def test_read_brightness_limit_uses_raw_level_array_index() -> None:
+    """dark_index must address raw level_array, not the filtered presets tuple."""
+
+    kd, _motion, ambient = _fake_motion_device()
+    assert ambient is not None
+    ambient.config = {
+        "dark_index": 2,
+        "enable": 1,
+        "level_array": [
+            {"name": ""},  # dropped by preset parser
+            {"adc": 300, "name": "overcast", "value": 11},
+            {"adc": 222, "name": "dawn", "value": 8},
+        ],
+    }
+    ambient.presets = ambient.config["level_array"]
+    mgr = SimpleNamespace(switches=(kd,))
+    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
+    assert snap.ambient_brightness_limit == 8
+    assert snap.ambient_brightness_limit_presets == (
+        KasaAmbientBrightnessPreset(name="overcast", value=11),
+        KasaAmbientBrightnessPreset(name="dawn", value=8),
+    )
+
+
+@pytest.mark.asyncio
+async def test_read_motion_debug_sensors_survive_partial_failure() -> None:
+    kd, motion, ambient = _fake_motion_device()
+    type(motion).pir_value = property(lambda self: (_ for _ in ()).throw(RuntimeError("adc missing")))
+    mgr = SimpleNamespace(switches=(kd,))
+    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
+    assert snap.pir_value is None
+    assert snap.adc_min == 0
+    assert snap.adc_mid == 2047
+    assert snap.adc_max == 4095
+    assert snap.adc_value == 2000
+    del ambient
 
 
 @pytest.mark.asyncio
@@ -252,6 +335,11 @@ def _fake_motion_device(*, with_ambient: bool = True) -> tuple[KasaDevice, Magic
     motion.inactivity_timeout = 60_000
     motion.pir_triggered = False
     motion.pir_percent = -1.07
+    motion.pir_value = -22
+    motion.adc_min = 0
+    motion.adc_mid = 2047
+    motion.adc_max = 4095
+    motion.adc_value = 2000
     motion.set_enabled = AsyncMock()
     motion._set_range_from_str = AsyncMock()
     motion.set_threshold = AsyncMock()
@@ -263,7 +351,15 @@ def _fake_motion_device(*, with_ambient: bool = True) -> tuple[KasaDevice, Magic
         ambient = MagicMock(spec=AmbientLight)
         ambient.enabled = True
         ambient.ambientlight_brightness = 64
+        ambient.presets = [
+            {"adc": 390, "name": "cloudy", "value": 15},
+            {"adc": 300, "name": "overcast", "value": 11},
+            {"adc": 222, "name": "dawn", "value": 8},
+            {"adc": 2400, "name": "custom", "value": 94},
+        ]
+        ambient.config = {"dark_index": 0, "enable": 1, "level_array": ambient.presets}
         ambient.set_enabled = AsyncMock()
+        ambient.set_brightness_limit = AsyncMock()
         modules[Module.IotAmbientLight] = ambient
 
     k_device = MagicMock()
@@ -301,7 +397,21 @@ def _fake_motion_device(*, with_ambient: bool = True) -> tuple[KasaDevice, Magic
             ambient.enabled = state
             return {}
 
+        async def _set_brightness_limit(value: int) -> dict[str, Any]:
+            # Mimic selecting/updating the custom preset slot used by dark_index.
+            ambient.presets = [
+                *ambient.presets[:-1],
+                {"adc": 2400, "name": "custom", "value": value},
+            ]
+            ambient.config = {
+                "dark_index": len(ambient.presets) - 1,
+                "enable": int(ambient.enabled),
+                "level_array": ambient.presets,
+            }
+            return {}
+
         ambient.set_enabled.side_effect = _set_ambient
+        ambient.set_brightness_limit.side_effect = _set_brightness_limit
 
     kd = KasaDevice(
         "98:25:4a:64:ac:90",

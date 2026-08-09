@@ -25,6 +25,7 @@ from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
 
+KASA_MOTION_TUNING_BRIGHTNESS_LIMIT_RANGE = "Expected ambient_brightness_limit >= 0, got {value}"
 KASA_MOTION_TUNING_DEVICE_NOT_FOUND = "No Kasa motion device matched device_id={device_id!r}"
 KASA_MOTION_TUNING_INACTIVITY_TIMEOUT_RANGE = "Expected inactivity_timeout_ms >= 0, got {value}"
 KASA_MOTION_TUNING_MANAGER_UNAVAILABLE = (
@@ -32,6 +33,7 @@ KASA_MOTION_TUNING_MANAGER_UNAVAILABLE = (
 )
 KASA_MOTION_TUNING_MODULE_UNAVAILABLE = "Kasa device {display} has no motion (PIR) module after update"
 KASA_MOTION_TUNING_THRESHOLD_RANGE = "Expected pir_threshold in [0, 100], got {value}"
+_AMBIENT_BRIGHTNESS_LIMIT_MIN = 0
 _INACTIVITY_TIMEOUT_MS_MIN = 0
 _PIR_THRESHOLD_MAX = 100
 _PIR_THRESHOLD_MIN = 0
@@ -50,6 +52,14 @@ class KasaMotionTuningValidationError(KasaMotionTuningError):
 
 
 @dataclass(frozen=True, slots=True)
+class KasaAmbientBrightnessPreset:
+    """One device-defined ambient brightness-limit preset (``level_array`` entry)."""
+
+    name: str
+    value: int
+
+
+@dataclass(frozen=True, slots=True)
 class KasaMotionSettingsTarget:
     """One motion-capable Kasa switch for Settings → Target device."""
 
@@ -64,7 +74,13 @@ class KasaMotionSettingsTarget:
 class KasaMotionTuningSnapshot:
     """PIR / ambient config + live sensors for one Kasa switch."""
 
+    adc_max: int | None
+    adc_mid: int | None
+    adc_min: int | None
+    adc_value: int | None
     ambient_available: bool
+    ambient_brightness_limit: int | None
+    ambient_brightness_limit_presets: tuple[KasaAmbientBrightnessPreset, ...]
     ambient_light: int | None
     ambient_light_enabled: bool | None
     device_id: str
@@ -79,12 +95,14 @@ class KasaMotionTuningSnapshot:
     pir_range_choices: tuple[KasaPirRange, ...]
     pir_threshold: int
     pir_triggered: bool
+    pir_value: int | None
     knobs_confirmed: bool = True
 
 
 async def apply_kasa_motion_tuning(
     *,
     device_id: str,
+    ambient_brightness_limit: int | None = None,
     ambient_light_enabled: bool | None = None,
     inactivity_timeout_ms: int | None = None,
     kasa_mgr: KasaDeviceManager | None,
@@ -104,6 +122,7 @@ async def apply_kasa_motion_tuning(
     updates_requested = any(
         value is not None
         for value in (
+            ambient_brightness_limit,
             ambient_light_enabled,
             inactivity_timeout_ms,
             pir_enabled,
@@ -113,6 +132,11 @@ async def apply_kasa_motion_tuning(
     )
     if not updates_requested:
         return await read_kasa_motion_tuning(device_id=device_id, kasa_mgr=kasa_mgr)
+
+    if ambient_brightness_limit is not None and ambient_brightness_limit < _AMBIENT_BRIGHTNESS_LIMIT_MIN:
+        raise KasaMotionTuningValidationError(
+            KASA_MOTION_TUNING_BRIGHTNESS_LIMIT_RANGE.format(value=ambient_brightness_limit)
+        )
 
     if inactivity_timeout_ms is not None and inactivity_timeout_ms < _INACTIVITY_TIMEOUT_MS_MIN:
         raise KasaMotionTuningValidationError(
@@ -138,10 +162,10 @@ async def apply_kasa_motion_tuning(
         )
 
     ambient = _ambient_module(kd._kDevice)
-    if ambient_light_enabled is not None and ambient is None:
+    if (ambient_light_enabled is not None or ambient_brightness_limit is not None) and ambient is None:
         raise KasaMotionTuningValidationError(
             f"Kasa device {format_device_display(kd.identifier, kd.preferred_label)} "
-            "has no ambient light module; cannot set ambient_light_enabled"
+            "has no ambient light module; cannot set ambient knobs"
         )
 
     try:
@@ -155,8 +179,11 @@ async def apply_kasa_motion_tuning(
             await motion._set_range_from_str(pir_range.value)
         if inactivity_timeout_ms is not None:
             await motion.set_inactivity_timeout(inactivity_timeout_ms)
-        if ambient_light_enabled is not None and ambient is not None:
-            await ambient.set_enabled(ambient_light_enabled)
+        if ambient is not None:
+            if ambient_light_enabled is not None:
+                await ambient.set_enabled(ambient_light_enabled)
+            if ambient_brightness_limit is not None:
+                await ambient.set_brightness_limit(ambient_brightness_limit)
         await kd._kDevice.update()
     except KasaMotionTuningError:
         raise
@@ -169,6 +196,7 @@ async def apply_kasa_motion_tuning(
     snapshot = _snapshot_from_device(kd)
     confirmed = _knobs_match_request(
         snapshot,
+        ambient_brightness_limit=ambient_brightness_limit,
         ambient_light_enabled=ambient_light_enabled,
         inactivity_timeout_ms=inactivity_timeout_ms,
         pir_enabled=pir_enabled,
@@ -178,7 +206,13 @@ async def apply_kasa_motion_tuning(
     if confirmed:
         return snapshot
     return KasaMotionTuningSnapshot(
+        adc_max=snapshot.adc_max,
+        adc_mid=snapshot.adc_mid,
+        adc_min=snapshot.adc_min,
+        adc_value=snapshot.adc_value,
         ambient_available=snapshot.ambient_available,
+        ambient_brightness_limit=snapshot.ambient_brightness_limit,
+        ambient_brightness_limit_presets=snapshot.ambient_brightness_limit_presets,
         ambient_light=snapshot.ambient_light,
         ambient_light_enabled=snapshot.ambient_light_enabled,
         device_id=snapshot.device_id,
@@ -194,6 +228,7 @@ async def apply_kasa_motion_tuning(
         pir_range_choices=snapshot.pir_range_choices,
         pir_threshold=snapshot.pir_threshold,
         pir_triggered=snapshot.pir_triggered,
+        pir_value=snapshot.pir_value,
     )
 
 
@@ -259,6 +294,20 @@ async def read_kasa_motion_tuning(
     return _snapshot_from_device(kd)
 
 
+def _ambient_brightness_limit_at_index(raw_levels: object, dark_index: int) -> int | None:
+    if not isinstance(raw_levels, Sequence) or isinstance(raw_levels, (str, bytes)):
+        return None
+    if not (0 <= dark_index < len(raw_levels)):
+        return None
+    item = raw_levels[dark_index]
+    if not isinstance(item, dict):
+        return None
+    value = item.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
 def _ambient_module(dev: KDevice) -> AmbientLight | None:
     module = dev.modules.get(Module.IotAmbientLight)
     if module is None:
@@ -284,6 +333,7 @@ def _device_model(dev: KDevice) -> str | None:
 def _knobs_match_request(
     snapshot: KasaMotionTuningSnapshot,
     *,
+    ambient_brightness_limit: int | None,
     ambient_light_enabled: bool | None,
     inactivity_timeout_ms: int | None,
     pir_enabled: bool | None,
@@ -300,6 +350,9 @@ def _knobs_match_request(
         return False
     if ambient_light_enabled is not None:
         if snapshot.ambient_light_enabled is not ambient_light_enabled:
+            return False
+    if ambient_brightness_limit is not None:
+        if snapshot.ambient_brightness_limit != ambient_brightness_limit:
             return False
     return True
 
@@ -321,6 +374,66 @@ def _motion_module(dev: KDevice) -> Motion | None:
         _LOGGER.warning("Unexpected motion module type for %s: %r", getattr(dev, "host", None), type(module))
         return None
     return module
+
+
+def _optional_motion_int(motion: Motion, attr: str, *, host: str) -> int | None:
+    """Read one Motion int sensor/config field; return None on missing/bad values."""
+
+    try:
+        raw = getattr(motion, attr)
+    except Exception as exc:
+        _LOGGER.warning("Failed reading Motion.%s on %s: %r", attr, host, exc)
+        return None
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        _LOGGER.warning("Failed converting Motion.%s on %s: %r", attr, host, exc)
+        return None
+
+
+def _parse_ambient_brightness(
+    ambient: AmbientLight,
+) -> tuple[int | None, tuple[KasaAmbientBrightnessPreset, ...]]:
+    """Return ``(current_limit, presets)`` from ambient ``dark_index`` + ``level_array``.
+
+    ``dark_index`` indexes the raw ``config["level_array"]`` list. Look up the current
+    limit from that raw list so filtered/malformed preset drops cannot shift the index.
+    """
+
+    try:
+        config = ambient.config
+        raw_levels = config["level_array"]
+        dark_index = int(config["dark_index"])
+    except Exception as exc:
+        _LOGGER.warning(
+            "Failed reading ambient dark_index / level_array on %s: %r",
+            getattr(ambient, "device", None),
+            exc,
+        )
+        return None, ()
+
+    presets = _parse_ambient_presets(raw_levels)
+    limit = _ambient_brightness_limit_at_index(raw_levels, dark_index)
+    return limit, presets
+
+
+def _parse_ambient_presets(raw: object) -> tuple[KasaAmbientBrightnessPreset, ...]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return ()
+    parsed: list[KasaAmbientBrightnessPreset] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        value = item.get("value")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        parsed.append(KasaAmbientBrightnessPreset(name=name.strip(), value=int(value)))
+    return tuple(parsed)
 
 
 def _parse_pir_range(raw: object) -> KasaPirRange:
@@ -397,8 +510,17 @@ def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
         raise
     except Exception as exc:
         raise KasaMotionTuningError(f"Failed reading Kasa motion state on {display}: {exc!r}") from exc
+
+    adc_max = _optional_motion_int(motion, "adc_max", host=kd.host)
+    adc_mid = _optional_motion_int(motion, "adc_mid", host=kd.host)
+    adc_min = _optional_motion_int(motion, "adc_min", host=kd.host)
+    adc_value = _optional_motion_int(motion, "adc_value", host=kd.host)
+    pir_value = _optional_motion_int(motion, "pir_value", host=kd.host)
+
     ambient_enabled: bool | None = None
     ambient_light: int | None = None
+    ambient_brightness_limit: int | None = None
+    ambient_presets: tuple[KasaAmbientBrightnessPreset, ...] = ()
     if ambient is not None:
         try:
             ambient_enabled = bool(ambient.enabled)
@@ -409,8 +531,22 @@ def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
                 kd.host,
                 exc,
             )
+        try:
+            ambient_brightness_limit, ambient_presets = _parse_ambient_brightness(ambient)
+        except Exception as exc:
+            _LOGGER.warning(
+                "Failed reading ambient brightness limit on %s: %r",
+                kd.host,
+                exc,
+            )
     return KasaMotionTuningSnapshot(
+        adc_max=adc_max,
+        adc_mid=adc_mid,
+        adc_min=adc_min,
+        adc_value=adc_value,
         ambient_available=ambient is not None,
+        ambient_brightness_limit=ambient_brightness_limit,
+        ambient_brightness_limit_presets=ambient_presets,
         ambient_light=ambient_light,
         ambient_light_enabled=ambient_enabled,
         device_id=kd.identifier,
@@ -425,4 +561,5 @@ def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
         pir_range_choices=choices,
         pir_threshold=pir_threshold,
         pir_triggered=pir_triggered,
+        pir_value=pir_value,
     )

@@ -770,13 +770,18 @@
       width: auto; align-self: flex-start; margin: 2px 0 0; padding: 0;
       border: none; background: transparent; accent-color: var(--accent); }
     .kasa-motion-sensors-heading { margin: 2px 0 0; }
+    .kasa-motion-debug-heading { margin-top: 6px; color: var(--muted); }
     .kasa-motion-sensors { display: flex; flex-wrap: wrap; align-items: baseline;
       column-gap: 20px; row-gap: 4px; margin: 0; }
+    .kasa-motion-debug-sensors { color: var(--muted); font-size: 12px; }
     .kasa-motion-sensor { display: flex; align-items: baseline; gap: 0.35rem;
       white-space: nowrap; }
     .kasa-motion-sensor-label { margin: 0; font-weight: 600; color: var(--fg); }
+    .kasa-motion-debug-sensors .kasa-motion-sensor-label { color: var(--muted);
+      font-weight: 500; }
     .kasa-motion-sensor-label::after { content: ":"; }
     .kasa-motion-sensor-value { margin: 0; }
+    .kasa-motion-ambient-limit-row { margin-top: 0; }
     .ep1-psk-section .settings-dialog-lead,
     .ep1-ble-section .settings-dialog-lead,
     .ep1-calibration-section .settings-dialog-lead { font-size: 13px; line-height: 1.35; }
