@@ -376,6 +376,23 @@ def _motion_module(dev: KDevice) -> Motion | None:
     return module
 
 
+def _optional_motion_int(motion: Motion, attr: str, *, host: str) -> int | None:
+    """Read one Motion int sensor/config field; return None on missing/bad values."""
+
+    try:
+        raw = getattr(motion, attr)
+    except Exception as exc:
+        _LOGGER.warning("Failed reading Motion.%s on %s: %r", attr, host, exc)
+        return None
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        _LOGGER.warning("Failed converting Motion.%s on %s: %r", attr, host, exc)
+        return None
+
+
 def _parse_ambient_brightness(
     ambient: AmbientLight,
 ) -> tuple[int | None, tuple[KasaAmbientBrightnessPreset, ...]]:
@@ -494,23 +511,11 @@ def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
     except Exception as exc:
         raise KasaMotionTuningError(f"Failed reading Kasa motion state on {display}: {exc!r}") from exc
 
-    adc_max: int | None = None
-    adc_mid: int | None = None
-    adc_min: int | None = None
-    adc_value: int | None = None
-    pir_value: int | None = None
-    try:
-        adc_max = int(motion.adc_max)
-        adc_mid = int(motion.adc_mid)
-        adc_min = int(motion.adc_min)
-        adc_value = int(motion.adc_value)
-        pir_value = int(motion.pir_value)
-    except Exception as exc:
-        _LOGGER.warning(
-            "Failed reading Motion ADC / pir_value on %s: %r",
-            kd.host,
-            exc,
-        )
+    adc_max = _optional_motion_int(motion, "adc_max", host=kd.host)
+    adc_mid = _optional_motion_int(motion, "adc_mid", host=kd.host)
+    adc_min = _optional_motion_int(motion, "adc_min", host=kd.host)
+    adc_value = _optional_motion_int(motion, "adc_value", host=kd.host)
+    pir_value = _optional_motion_int(motion, "pir_value", host=kd.host)
 
     ambient_enabled: bool | None = None
     ambient_light: int | None = None

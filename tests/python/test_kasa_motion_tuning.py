@@ -283,6 +283,20 @@ async def test_read_brightness_limit_uses_raw_level_array_index() -> None:
 
 
 @pytest.mark.asyncio
+async def test_read_motion_debug_sensors_survive_partial_failure() -> None:
+    kd, motion, ambient = _fake_motion_device()
+    type(motion).pir_value = property(lambda self: (_ for _ in ()).throw(RuntimeError("adc missing")))
+    mgr = SimpleNamespace(switches=(kd,))
+    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
+    assert snap.pir_value is None
+    assert snap.adc_min == 0
+    assert snap.adc_mid == 2047
+    assert snap.adc_max == 4095
+    assert snap.adc_value == 2000
+    del ambient
+
+
+@pytest.mark.asyncio
 async def test_read_kasa_motion_tuning_unknown_device() -> None:
     mgr = SimpleNamespace(switches=())
     with pytest.raises(KasaMotionTuningNotFoundError, match="aa:bb:cc:dd:ee:ff"):
