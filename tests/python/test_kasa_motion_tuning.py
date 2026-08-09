@@ -150,6 +150,19 @@ async def test_apply_range_only_writes_preset() -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_kasa_motion_tuning_rejects_bad_inactivity_timeout() -> None:
+    kd, _motion, _ambient = _fake_motion_device()
+    mgr = SimpleNamespace(switches=(kd,))
+    with pytest.raises(KasaMotionTuningValidationError) as exc_info:
+        await apply_kasa_motion_tuning(
+            device_id=kd.identifier,
+            kasa_mgr=mgr,  # type: ignore[arg-type]
+            inactivity_timeout_ms=-1,
+        )
+    assert str(exc_info.value) == KASA_MOTION_TUNING_INACTIVITY_TIMEOUT_RANGE.format(value=-1)
+
+
+@pytest.mark.asyncio
 async def test_apply_kasa_motion_tuning_rejects_bad_threshold() -> None:
     kd, _motion, _ambient = _fake_motion_device()
     mgr = SimpleNamespace(switches=(kd,))
@@ -160,19 +173,6 @@ async def test_apply_kasa_motion_tuning_rejects_bad_threshold() -> None:
             pir_threshold=101,
         )
     assert KASA_MOTION_TUNING_THRESHOLD_RANGE.format(value=101)
-
-
-@pytest.mark.asyncio
-async def test_apply_kasa_motion_tuning_rejects_bad_inactivity_timeout() -> None:
-    kd, _motion, _ambient = _fake_motion_device()
-    mgr = SimpleNamespace(switches=(kd,))
-    with pytest.raises(KasaMotionTuningValidationError, match="inactivity_timeout_ms"):
-        await apply_kasa_motion_tuning(
-            device_id=kd.identifier,
-            kasa_mgr=mgr,  # type: ignore[arg-type]
-            inactivity_timeout_ms=-1,
-        )
-    assert KASA_MOTION_TUNING_INACTIVITY_TIMEOUT_RANGE.format(value=-1)
 
 
 @pytest.mark.asyncio

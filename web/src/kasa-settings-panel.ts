@@ -51,6 +51,38 @@ export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_LABEL = "PIR threshold (0–100)
 export const KASA_MOTION_SETTINGS_REFRESH_LABEL = "Refresh sensors";
 export const KASA_MOTION_SETTINGS_TARGET_DEVICE_LABEL = "Target device";
 
+/**
+ * Build ``inactivity_timeout_ms`` for Apply when the linger field differs from
+ * the displayed baseline. Comparing display seconds (not raw ms) avoids rewriting
+ * a non-whole-second device value (e.g. 1500 → shown as 2) on unrelated edits.
+ */
+export function kasaInactivityTimeoutMsIfLingerChanged(
+  lingerSecondsRaw: string,
+  baselineInactivityTimeoutMs: number,
+): { error: string } | { ms: number | null } {
+  const trimmed = lingerSecondsRaw.trim();
+  if (trimmed === "") {
+    return { ms: null };
+  }
+  const nextLingerSeconds = Number(trimmed);
+  if (!Number.isFinite(nextLingerSeconds)) {
+    return { ms: null };
+  }
+  if (nextLingerSeconds < 0) {
+    return { error: "Linger after motion must be 0 or greater." };
+  }
+  const nextSeconds = Math.trunc(nextLingerSeconds);
+  if (nextSeconds === kasaLingerDisplaySeconds(baselineInactivityTimeoutMs)) {
+    return { ms: null };
+  }
+  return { ms: nextSeconds * 1000 };
+}
+
+/** Whole seconds shown in the linger field for a device timeout in milliseconds. */
+export function kasaLingerDisplaySeconds(inactivityTimeoutMs: number): number {
+  return Math.round(inactivityTimeoutMs / 1000);
+}
+
 function appendKasaIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
   intro.className = "settings-dialog-lead";
@@ -416,7 +448,7 @@ export async function mountKasaSettingsPanel(
       pirRangeSelect.append(option);
     }
     pirThresholdInput.value = String(snap.pir_threshold);
-    lingerInput.value = String(Math.round(snap.inactivity_timeout_ms / 1000));
+    lingerInput.value = String(kasaLingerDisplaySeconds(snap.inactivity_timeout_ms));
     ambientEnabledInput.checked = snap.ambient_light_enabled === true;
     triggeredDd.textContent = snap.pir_triggered ? "yes" : "no";
     percentDd.textContent =
@@ -732,20 +764,16 @@ export async function mountKasaSettingsPanel(
           body.pir_range = nextRange;
         }
       }
-      const lingerRaw = lingerInput.value.trim();
-      const nextLingerSeconds = Number(lingerRaw);
-      if (
-        lingerRaw !== "" &&
-        Number.isFinite(nextLingerSeconds)
-      ) {
-        if (nextLingerSeconds < 0) {
-          showMotionStatus("Linger after motion must be 0 or greater.");
-          return;
-        }
-        const nextLingerMs = Math.trunc(nextLingerSeconds) * 1000;
-        if (nextLingerMs !== baseline.inactivity_timeout_ms) {
-          body.inactivity_timeout_ms = nextLingerMs;
-        }
+      const lingerResult = kasaInactivityTimeoutMsIfLingerChanged(
+        lingerInput.value,
+        baseline.inactivity_timeout_ms,
+      );
+      if ("error" in lingerResult) {
+        showMotionStatus(lingerResult.error);
+        return;
+      }
+      if (lingerResult.ms != null) {
+        body.inactivity_timeout_ms = lingerResult.ms;
       }
       if (baseline.ambient_available) {
         const nextAmbient = ambientEnabledInput.checked;
