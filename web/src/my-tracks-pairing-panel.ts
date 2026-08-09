@@ -156,12 +156,16 @@ function renderPairStatus(
     return;
   }
   if (status?.last_pair_error) {
-    statusEl.hidden = false;
-    statusEl.textContent = `Last pairing failed: ${status.last_pair_error}`;
+    setSettingsDialogStatus(
+      statusEl,
+      `Last pairing failed: ${status.last_pair_error}`,
+      ToastVariant.Error,
+    );
     return;
   }
   statusEl.hidden = true;
   statusEl.textContent = "";
+  setSettingsDialogStatusTone(statusEl, null);
 }
 
 function updatePairButtonLabel(
