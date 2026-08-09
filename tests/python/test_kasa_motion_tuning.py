@@ -77,6 +77,16 @@ def test_list_kasa_motion_settings_targets_tolerates_uninitialized_manager() -> 
 
 
 @pytest.mark.asyncio
+async def test_read_kasa_motion_tuning_defaults_missing_inactivity_timeout() -> None:
+    kd, motion, ambient = _fake_motion_device()
+    motion.inactivity_timeout = None
+    mgr = SimpleNamespace(switches=(kd,))
+    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
+    assert snap.inactivity_timeout_ms == 0
+    del ambient
+
+
+@pytest.mark.asyncio
 async def test_read_kasa_motion_tuning_returns_snapshot() -> None:
     kd, motion, ambient = _fake_motion_device()
     mgr = SimpleNamespace(switches=(kd,))

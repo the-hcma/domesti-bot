@@ -390,7 +390,9 @@ def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
         pir_percent = float(motion.pir_percent)
         pir_threshold = int(motion.threshold)
         pir_triggered = bool(motion.pir_triggered)
-        inactivity_timeout_ms = int(motion.inactivity_timeout)
+        raw_timeout = motion.inactivity_timeout
+        # python-kasa leaves this unset until cold_time is present in get_config.
+        inactivity_timeout_ms = 0 if raw_timeout is None else int(raw_timeout)
     except KasaMotionTuningError:
         raise
     except Exception as exc:

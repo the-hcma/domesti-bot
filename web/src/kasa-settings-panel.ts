@@ -75,7 +75,11 @@ export function kasaInactivityTimeoutMsIfLingerChanged(
   if (nextSeconds === kasaLingerDisplaySeconds(baselineInactivityTimeoutMs)) {
     return { ms: null };
   }
-  return { ms: nextSeconds * 1000 };
+  const nextMs = nextSeconds * 1000;
+  if (!Number.isSafeInteger(nextMs)) {
+    return { error: "Linger after motion is too large." };
+  }
+  return { ms: nextMs };
 }
 
 /** Whole seconds shown in the linger field for a device timeout in milliseconds. */
