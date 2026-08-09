@@ -1,13 +1,15 @@
-import { VacationModeTestEmailKind } from "./types.js";
 // Vacation mode settings panel (Automations hub).
 
 import { HttpError } from "./api.js";
+import { ToastVariant } from "./closed-sets.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
-import type {
-  UserOut,
-  VacationModeSettingsOut,
-  VacationModeSettingsStatusOut,
+import { setSettingsDialogStatus } from "./settings-status.js";
+import {
+  VacationModeTestEmailKind,
+  type UserOut,
+  type VacationModeSettingsOut,
+  type VacationModeSettingsStatusOut,
 } from "./types.js";
 import { showSuccessToast } from "./ui-toast.js";
 
@@ -52,6 +54,14 @@ export async function mountVacationModeSettingsPanel(
   container.replaceChildren();
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
+
+  const showStatusMessage = (
+    message: string,
+    tone: ToastVariant = ToastVariant.Info,
+  ): void => {
+    setSettingsDialogStatus(status, message, tone);
+  };
+
   status.hidden = true;
 
   let current: VacationModeSettingsStatusOut | null = null;
@@ -62,8 +72,10 @@ export async function mountVacationModeSettingsPanel(
       dataSource.listUsers(),
     ]);
   } catch (err) {
-    status.hidden = false;
-    status.textContent = `Could not load vacation mode: ${formatError(err)}`;
+    showStatusMessage(
+      `Could not load vacation mode: ${formatError(err)}`,
+      ToastVariant.Error,
+    );
   }
 
   const lead = document.createElement("p");
@@ -233,18 +245,18 @@ export async function mountVacationModeSettingsPanel(
     const hysteresis = Number(hysteresisInput.value);
     const accuracy = Number(accuracyInput.value);
     if (!Number.isFinite(minDistance) || minDistance <= 0) {
-      status.hidden = false;
-      status.textContent = "Expected min distance > 0";
+      showStatusMessage("Expected min distance > 0", ToastVariant.Error);
       return null;
     }
     if (!Number.isFinite(hysteresis) || hysteresis < 1) {
-      status.hidden = false;
-      status.textContent = "Expected wait time ≥ 1 second";
+      showStatusMessage("Expected wait time ≥ 1 second", ToastVariant.Error);
       return null;
     }
     if (!Number.isFinite(accuracy) || accuracy < 1) {
-      status.hidden = false;
-      status.textContent = "Expected min location accuracy ≥ 1";
+      showStatusMessage(
+        "Expected min location accuracy ≥ 1",
+        ToastVariant.Error,
+      );
       return null;
     }
     return settingsFromForm(
@@ -266,18 +278,20 @@ export async function mountVacationModeSettingsPanel(
     }
     busy = true;
     syncActionEnabled();
-    status.hidden = false;
-    status.textContent = "Saving…";
+    showStatusMessage("Saving…", ToastVariant.Info);
     void dataSource
       .saveVacationModeSettings(settings)
       .then((saved) => {
         armedBadge.textContent =
           saved.armed === true ? "Latch: on (armed)" : "Latch: off (disarmed)";
-        status.textContent = "Saved.";
+        showStatusMessage("Saved.", ToastVariant.Success);
         showSuccessToast("Vacation mode settings saved.");
       })
       .catch((err: unknown) => {
-        status.textContent = `Save failed: ${formatError(err)}`;
+        showStatusMessage(
+          `Save failed: ${formatError(err)}`,
+          ToastVariant.Error,
+        );
       })
       .finally(() => {
         busy = false;
@@ -287,27 +301,34 @@ export async function mountVacationModeSettingsPanel(
 
   testBtn.addEventListener("click", () => {
     if (parseEmailList(emailsInput.value).length === 0) {
-      status.hidden = false;
-      status.textContent = "Add at least one notification email before testing.";
+      showStatusMessage(
+        "Add at least one notification email before testing.",
+        ToastVariant.Error,
+      );
       return;
     }
     busy = true;
     syncActionEnabled();
-    status.hidden = false;
-    status.textContent = "Sending test email…";
+    showStatusMessage("Sending test email…", ToastVariant.Info);
     const kind = testKind.value as VacationModeTestEmailKind;
     void dataSource
       .sendVacationModeTestEmail({ kind })
       .then((result) => {
         if (result.ok) {
-          status.textContent = result.message;
+          showStatusMessage(result.message, ToastVariant.Success);
           showSuccessToast(result.message);
         } else {
-          status.textContent = `Test failed: ${result.message}`;
+          showStatusMessage(
+            `Test failed: ${result.message}`,
+            ToastVariant.Error,
+          );
         }
       })
       .catch((err: unknown) => {
-        status.textContent = `Test failed: ${formatError(err)}`;
+        showStatusMessage(
+          `Test failed: ${formatError(err)}`,
+          ToastVariant.Error,
+        );
       })
       .finally(() => {
         busy = false;

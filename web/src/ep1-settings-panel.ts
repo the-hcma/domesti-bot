@@ -5,8 +5,13 @@ import {
   Ep1BluetoothProxyState,
   Ep1CalibrationOffsetKind,
   Ep1OccupancyTuningKind,
+  ToastVariant,
 } from "./closed-sets.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
+import {
+  setSettingsDialogStatus,
+  setSettingsDialogStatusTone,
+} from "./settings-status.js";
 import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type {
   Ep1BleAdvertisementSampleOut,
@@ -923,6 +928,7 @@ export async function mountEp1SettingsPanel(
               : null;
       if (failure == null) {
         status.hidden = true;
+        setSettingsDialogStatusTone(status, null);
       } else {
         showError(
           failure instanceof HttpError
@@ -955,19 +961,16 @@ export async function mountEp1SettingsPanel(
     input.required = false;
     setRevealed(false);
     status.hidden = true;
+    setSettingsDialogStatusTone(status, null);
   };
 
   const showError = (message: string): void => {
-    status.hidden = false;
-    status.textContent = message;
-    status.classList.add("settings-dialog-status-error");
+    setSettingsDialogStatus(status, message, ToastVariant.Error);
     showErrorToast(message);
   };
 
   const showSuccess = (message: string): void => {
-    status.hidden = false;
-    status.classList.remove("settings-dialog-status-error");
-    status.textContent = message;
+    setSettingsDialogStatus(status, message, ToastVariant.Success);
     showSuccessToast(message);
   };
 

@@ -1,8 +1,12 @@
-import { ManagedSecretSource } from "./closed-sets.js";
+import { ManagedSecretSource, ToastVariant } from "./closed-sets.js";
 // Vizio SmartCast TV settings panel (per-TV auth + optional PIN pairing).
 
 import { api, HttpError } from "./api.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
+import {
+  clearSettingsDialogStatus,
+  setSettingsDialogStatus,
+} from "./settings-status.js";
 import { showSuccessToast } from "./ui-toast.js";
 import type { VizioPairBeginOut, VizioTvSettingsOut } from "./types.js";
 
@@ -193,24 +197,26 @@ export async function mountVizioSettingsPanel(
     );
   };
 
-  const showStatusMessage = (message: string): void => {
-    status.textContent = message;
-    status.hidden = false;
+  const showStatusMessage = (
+    message: string,
+    tone: ToastVariant = ToastVariant.Info,
+  ): void => {
+    setSettingsDialogStatus(status, message, tone);
   };
 
   const hideStatus = (): void => {
-    status.textContent = "";
-    status.hidden = true;
+    clearSettingsDialogStatus(status);
   };
 
-  const showPairStatus = (message: string): void => {
-    pairStatus.textContent = message;
-    pairStatus.hidden = false;
+  const showPairStatus = (
+    message: string,
+    tone: ToastVariant = ToastVariant.Info,
+  ): void => {
+    setSettingsDialogStatus(pairStatus, message, tone);
   };
 
   const hidePairStatus = (): void => {
-    pairStatus.textContent = "";
-    pairStatus.hidden = true;
+    clearSettingsDialogStatus(pairStatus);
   };
 
   const applyTokenFieldsFromTv = (tv: VizioTvSettingsOut | undefined): void => {
@@ -301,6 +307,7 @@ export async function mountVizioSettingsPanel(
     } catch (err) {
       showStatusMessage(
         err instanceof HttpError ? err.detail : "Could not load Vizio TV status.",
+        ToastVariant.Error,
       );
     }
   };
@@ -314,11 +321,11 @@ export async function mountVizioSettingsPanel(
       const host = hostInput.value.trim();
       const token = tokenInput.value.trim();
       if (!host) {
-        showStatusMessage("Enter the TV host before saving.");
+        showStatusMessage("Enter the TV host before saving.", ToastVariant.Error);
         return;
       }
       if (!token) {
-        showStatusMessage("Enter an auth token before saving.");
+        showStatusMessage("Enter an auth token before saving.", ToastVariant.Error);
         return;
       }
       saveBtn.disabled = true;
@@ -329,6 +336,7 @@ export async function mountVizioSettingsPanel(
         if (out.restart_required) {
           showStatusMessage(
             "Token saved. Restart domesti-bot so the TV tile appears.",
+            ToastVariant.Success,
           );
         } else {
           await refreshStatus();
@@ -337,6 +345,7 @@ export async function mountVizioSettingsPanel(
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Save failed.",
+          ToastVariant.Error,
         );
       } finally {
         saveBtn.disabled = false;
@@ -358,7 +367,7 @@ export async function mountVizioSettingsPanel(
     void (async () => {
       const host = hostInput.value.trim();
       if (!host) {
-        showStatusMessage("Enter the TV host before testing.");
+        showStatusMessage("Enter the TV host before testing.", ToastVariant.Error);
         return;
       }
       const token = tokenInput.value.trim();
@@ -379,10 +388,14 @@ export async function mountVizioSettingsPanel(
           deviceId,
           token !== "" ? { token } : {},
         );
-        showStatusMessage(result.detail);
+        showStatusMessage(
+          result.detail,
+          result.ok ? ToastVariant.Success : ToastVariant.Error,
+        );
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Test failed.",
+          ToastVariant.Error,
         );
       } finally {
         syncTestEnabled();
@@ -394,7 +407,10 @@ export async function mountVizioSettingsPanel(
     void (async () => {
       const host = hostInput.value.trim();
       if (!host) {
-        showPairStatus("Enter the TV host before starting pairing.");
+        showPairStatus(
+          "Enter the TV host before starting pairing.",
+          ToastVariant.Error,
+        );
         return;
       }
       beginPairBtn.disabled = true;
@@ -407,6 +423,7 @@ export async function mountVizioSettingsPanel(
       } catch (err) {
         showPairStatus(
           err instanceof HttpError ? err.detail : "Could not start pairing.",
+          ToastVariant.Error,
         );
       } finally {
         beginPairBtn.disabled = false;
@@ -417,12 +434,12 @@ export async function mountVizioSettingsPanel(
   completePairBtn.addEventListener("click", () => {
     void (async () => {
       if (pendingPair === null) {
-        showPairStatus("Start pairing first.");
+        showPairStatus("Start pairing first.", ToastVariant.Error);
         return;
       }
       const pin = pinInput.value.trim();
       if (!pin) {
-        showPairStatus("Enter the PIN from the TV.");
+        showPairStatus("Enter the PIN from the TV.", ToastVariant.Error);
         return;
       }
       completePairBtn.disabled = true;
@@ -439,6 +456,7 @@ export async function mountVizioSettingsPanel(
         if (out.restart_required) {
           showStatusMessage(
             "Pairing complete. Restart domesti-bot so the TV tile appears.",
+            ToastVariant.Success,
           );
         } else {
           await refreshStatus();
@@ -447,6 +465,7 @@ export async function mountVizioSettingsPanel(
       } catch (err) {
         showPairStatus(
           err instanceof HttpError ? err.detail : "Pairing failed.",
+          ToastVariant.Error,
         );
       } finally {
         completePairBtn.disabled = false;
@@ -472,6 +491,7 @@ export async function mountVizioSettingsPanel(
       } catch (err) {
         showPairStatus(
           err instanceof HttpError ? err.detail : "Cancel failed.",
+          ToastVariant.Error,
         );
       } finally {
         cancelPairBtn.disabled = false;
@@ -483,7 +503,7 @@ export async function mountVizioSettingsPanel(
     void (async () => {
       const host = hostInput.value.trim();
       if (!host) {
-        showStatusMessage("Enter the TV host before clearing.");
+        showStatusMessage("Enter the TV host before clearing.", ToastVariant.Error);
         return;
       }
       let deviceId = vizioDeviceIdFromHostInput(host);
@@ -508,6 +528,7 @@ export async function mountVizioSettingsPanel(
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Clear failed.",
+          ToastVariant.Error,
         );
       } finally {
         clearBtn.disabled = false;

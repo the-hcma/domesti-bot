@@ -1,0 +1,41 @@
+---
+description: Toast and Settings status outcomes — green success, red failure
+globs: web/src/**,app/api/static/index.html
+alwaysApply: false
+---
+
+# Toast / action feedback colors
+
+Canonical detail lives in `docs/AGENTS.md` (**Action / status toast colors**). Keep this
+rule aligned; do not let the two drift.
+
+User-visible **toasts** and Settings **status lines** for completed actions must be
+unambiguously colored:
+
+- **Green** (`ToastVariant.Success` / `--accent`) when an action **succeeded**
+- **Red** (`ToastVariant.Error` / `--danger`) when an action **failed** or was rejected
+- **Neutral / info** (`ToastVariant.Info`) only for in-progress copy (“Testing…”,
+  “Saving…”) or non-outcome hints — **not** for a finished success or failure
+
+## Toasts
+
+1. Prefer `showSuccessToast` / `showErrorToast` / `showInfoToast` from
+   `web/src/ui-toast.ts` (or `showToast(..., ToastVariant.Success|Error|Info)`).
+2. Do **not** use an untyped/default toast for a success or failure outcome.
+3. Do **not** use `showInfoToast` for a completed action that clearly succeeded or
+   failed.
+4. Prefer the shared helper over a second toast renderer. If a private mount path
+   remains, it must call `actionToastClassName` (or apply the same
+   `action-toast-*` classes).
+5. Error toasts use the explicit `action-toast-error` class — do not rely on bare
+   `.action-toast` defaulting to danger red.
+
+Align with `typescript-closed-set-enums.mdc` (`ToastVariant`) and
+`test-assert-message-constants.mdc` when copy is asserted in tests.
+
+## Settings status lines
+
+Inline `.settings-dialog-status` used for Test / Save / Apply **outcomes** must set
+`settings-dialog-status-success` or `settings-dialog-status-error` (prefer
+`setSettingsDialogStatus` in `web/src/settings-status.ts`). Progressive
+“Testing…” / “Saving…” may use `ToastVariant.Info`.

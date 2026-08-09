@@ -1,9 +1,13 @@
-import { KasaCredentialsSource, type KasaPirRange } from "./closed-sets.js";
+import { KasaCredentialsSource, ToastVariant, type KasaPirRange } from "./closed-sets.js";
 // Kasa/Tapo KLAP account credentials + motion (PIR) tuning for the Settings hub.
 
 import { api, HttpError } from "./api.js";
 import { createFieldLabel, createInfoBadge } from "./rules-ui-helpers.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
+import {
+  clearSettingsDialogStatus,
+  setSettingsDialogStatus,
+} from "./settings-status.js";
 import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type {
   KasaCredentialsSettingsOut,
@@ -390,24 +394,26 @@ export async function mountKasaSettingsPanel(
     testBtn.disabled = !(formReady || settingsConfigured);
   };
 
-  const showStatusMessage = (message: string): void => {
-    status.textContent = message;
-    status.hidden = false;
+  const showStatusMessage = (
+    message: string,
+    tone: ToastVariant = ToastVariant.Info,
+  ): void => {
+    setSettingsDialogStatus(status, message, tone);
   };
 
   const hideStatus = (): void => {
-    status.textContent = "";
-    status.hidden = true;
+    clearSettingsDialogStatus(status);
   };
 
-  const showMotionStatus = (message: string): void => {
-    motionStatus.textContent = message;
-    motionStatus.hidden = false;
+  const showMotionStatus = (
+    message: string,
+    tone: ToastVariant = ToastVariant.Info,
+  ): void => {
+    setSettingsDialogStatus(motionStatus, message, tone);
   };
 
   const hideMotionStatus = (): void => {
-    motionStatus.textContent = "";
-    motionStatus.hidden = true;
+    clearSettingsDialogStatus(motionStatus);
   };
 
   const syncMotionControls = (): void => {
@@ -496,6 +502,7 @@ export async function mountKasaSettingsPanel(
         err instanceof HttpError
           ? err.detail || err.message
           : "Could not load motion tuning.",
+        ToastVariant.Error,
       );
     } finally {
       if (generation === deviceLoadGeneration) {
@@ -541,6 +548,7 @@ export async function mountKasaSettingsPanel(
         err instanceof HttpError
           ? err.detail || err.message
           : "Could not load motion-capable Kasa devices.",
+        ToastVariant.Error,
       );
     }
   };
@@ -621,6 +629,7 @@ export async function mountKasaSettingsPanel(
     } catch (err) {
       showStatusMessage(
         err instanceof HttpError ? err.detail : "Could not load credential status.",
+        ToastVariant.Error,
       );
     }
   };
@@ -630,11 +639,17 @@ export async function mountKasaSettingsPanel(
       const username = emailInput.value.trim();
       const password = passwordInput.value;
       if (!username) {
-        showStatusMessage("Enter the Kasa/Tapo account email before saving.");
+        showStatusMessage(
+          "Enter the Kasa/Tapo account email before saving.",
+          ToastVariant.Error,
+        );
         return;
       }
       if (!password) {
-        showStatusMessage("Enter the account password before saving.");
+        showStatusMessage(
+          "Enter the account password before saving.",
+          ToastVariant.Error,
+        );
         return;
       }
       saveBtn.disabled = true;
@@ -645,6 +660,7 @@ export async function mountKasaSettingsPanel(
         if (out.restart_required) {
           showStatusMessage(
             "Credentials saved. Restart domesti-bot (or remove KASA_USERNAME / KASA_PASSWORD) so devices use them.",
+            ToastVariant.Success,
           );
         } else {
           await options.onDevicesChanged?.();
@@ -662,6 +678,7 @@ export async function mountKasaSettingsPanel(
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Save failed.",
+          ToastVariant.Error,
         );
       } finally {
         saveBtn.disabled = false;
@@ -691,10 +708,14 @@ export async function mountKasaSettingsPanel(
         const result = await api.testKasaCredentials(
           formReady ? { username, password } : {},
         );
-        showStatusMessage(result.detail);
+        showStatusMessage(
+          result.detail,
+          result.ok ? ToastVariant.Success : ToastVariant.Error,
+        );
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Test failed.",
+          ToastVariant.Error,
         );
       } finally {
         syncTestEnabled();
@@ -721,6 +742,7 @@ export async function mountKasaSettingsPanel(
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Clear failed.",
+          ToastVariant.Error,
         );
       }
     })();
@@ -754,7 +776,10 @@ export async function mountKasaSettingsPanel(
         nextThreshold !== baseline.pir_threshold
       ) {
         if (nextThreshold < 0 || nextThreshold > 100) {
-          showMotionStatus("PIR threshold must be between 0 and 100.");
+          showMotionStatus(
+            "PIR threshold must be between 0 and 100.",
+            ToastVariant.Error,
+          );
           return;
         }
         body.pir_threshold = Math.trunc(nextThreshold);
@@ -772,7 +797,7 @@ export async function mountKasaSettingsPanel(
         baseline.inactivity_timeout_ms,
       );
       if ("error" in lingerResult) {
-        showMotionStatus(lingerResult.error);
+        showMotionStatus(lingerResult.error, ToastVariant.Error);
         return;
       }
       if (lingerResult.ms != null) {
@@ -791,7 +816,7 @@ export async function mountKasaSettingsPanel(
         body.inactivity_timeout_ms == null &&
         body.ambient_light_enabled == null
       ) {
-        showMotionStatus("No motion settings changed.");
+        showMotionStatus("No motion settings changed.", ToastVariant.Info);
         return;
       }
       applyMotionBtn.disabled = true;
@@ -807,13 +832,17 @@ export async function mountKasaSettingsPanel(
           hideMotionStatus();
         } else {
           showErrorToast(KASA_MOTION_SETTINGS_APPLY_UNCONFIRMED);
-          showMotionStatus(KASA_MOTION_SETTINGS_APPLY_UNCONFIRMED);
+          showMotionStatus(
+            KASA_MOTION_SETTINGS_APPLY_UNCONFIRMED,
+            ToastVariant.Error,
+          );
         }
       } catch (err) {
         showMotionStatus(
           err instanceof HttpError
             ? err.detail || err.message
             : "Apply motion tuning failed.",
+          ToastVariant.Error,
         );
       } finally {
         syncMotionControls();

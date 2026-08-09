@@ -1,12 +1,14 @@
 // My Tracks connection settings (domain + default admin username).
 
 import { HttpError, api } from "./api.js";
+import { ToastVariant } from "./closed-sets.js";
 import { mountMyTracksPairingPanel } from "./my-tracks-pairing-panel.js";
 import { appendMyTracksInstanceText, myTracksHostLabel } from "./mytracks-ui-helpers.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
-import { showErrorToast, showSuccessToast } from "./ui-toast.js";
+import { setSettingsDialogStatus } from "./settings-status.js";
 import type { MyTracksSettingsIn } from "./types.js";
+import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 
 function appendLabeledField(
   parent: HTMLElement,
@@ -35,14 +37,24 @@ export async function mountMyTracksSettingsPanel(
 
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
+
+  const showStatusMessage = (
+    message: string,
+    tone: ToastVariant = ToastVariant.Info,
+  ): void => {
+    setSettingsDialogStatus(status, message, tone);
+  };
+
   status.hidden = true;
 
   let existing = null as Awaited<ReturnType<RulesDataSource["getMyTracksSettings"]>>;
   try {
     existing = await dataSource.getMyTracksSettings();
   } catch (err) {
-    status.hidden = false;
-    status.textContent = `Could not load My Tracks settings: ${formatError(err)}`;
+    showStatusMessage(
+      `Could not load My Tracks settings: ${formatError(err)}`,
+      ToastVariant.Error,
+    );
   }
 
   const lead = document.createElement("p");
@@ -138,25 +150,31 @@ export async function mountMyTracksSettingsPanel(
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
     if (password === "") {
-      status.hidden = false;
-      status.textContent = "Enter the admin password before testing.";
+      showStatusMessage(
+        "Enter the admin password before testing.",
+        ToastVariant.Error,
+      );
       return;
     }
     if (domain === "" || username === "") {
-      status.hidden = false;
-      status.textContent = "Enter domain and username before testing.";
+      showStatusMessage(
+        "Enter domain and username before testing.",
+        ToastVariant.Error,
+      );
       return;
     }
     testBtn.disabled = true;
-    status.hidden = false;
-    status.textContent = "Testing credentials…";
+    showStatusMessage("Testing credentials…", ToastVariant.Info);
     void api
       .testMyTracksCredentials({ domain, username, password })
       .then((result) => {
-        status.textContent = result.detail;
+        showStatusMessage(
+          result.detail,
+          result.ok ? ToastVariant.Success : ToastVariant.Error,
+        );
       })
       .catch((err: unknown) => {
-        status.textContent = formatError(err);
+        showStatusMessage(formatError(err), ToastVariant.Error);
       })
       .finally(() => {
         syncTestEnabled();

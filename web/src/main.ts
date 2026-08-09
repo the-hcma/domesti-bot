@@ -11,8 +11,8 @@ import {
   ep1HeaderOccupancyGlyphFromUiState,
   ep1HeaderStatusFromUiState,
 } from "./ep1-header-status.js";
-import { openSettingsHubDialog } from "./settings-hub-dialog.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
+import { openSettingsHubDialog } from "./settings-hub-dialog.js";
 import {
   BulkOffScope,
   CompactIconKey,
@@ -20,7 +20,6 @@ import {
   DeviceFamilyId,
   ThemePreference,
   TileTone,
-  ToastVariant,
   UIDeviceKind,
   UIDeviceState,
   type MetaOut,
@@ -31,6 +30,11 @@ import {
   type UIOperatorAlertOut,
   type UIStateOut,
 } from "./types.js";
+import {
+  showErrorToast,
+  showInfoToast,
+  showSuccessToast,
+} from "./ui-toast.js";
 
 const APP_ROOT_ID = "app";
 
@@ -141,7 +145,6 @@ class DomestiBotController {
   // user has already moved on. A subsequent action error replaces
   // the current toast immediately and restarts the timer; clicking
   // the ``×`` button dismisses on demand.
-  private static readonly ACTION_ERROR_TOAST_MS = 10000;
 
   private readonly root: HTMLElement;
   private state: UIStateOut | null = null;
@@ -166,8 +169,6 @@ class DomestiBotController {
   // cleared whenever we dismiss or replace the toast so we don't
   // accidentally remove a *newer* toast when an older one's timer
   // fires.
-  private actionToast: HTMLDivElement | null = null;
-  private actionToastTimer: number | null = null;
   // Keyed by ``familyId\u0000deviceId``. Survives across polls so the
   // tile keeps showing the predicted state even when the backend
   // momentarily disagrees (transient OPENING, slow Kasa cloud sync,
@@ -546,7 +547,7 @@ class DomestiBotController {
     err: unknown,
   ): void {
     if (err instanceof HttpError && err.status === 409) {
-      this.renderActionError(err.detail);
+      showErrorToast(err.detail);
     } else {
       console.warn(`[domesti-bot] toggle ${device.label} failed`, err);
     }
@@ -872,17 +873,6 @@ class DomestiBotController {
     this.restoreScrollAfterRender(scrollX, scrollY);
   }
 
-  private dismissActionToast(): void {
-    if (this.actionToastTimer !== null) {
-      window.clearTimeout(this.actionToastTimer);
-      this.actionToastTimer = null;
-    }
-    if (this.actionToast !== null) {
-      this.actionToast.remove();
-      this.actionToast = null;
-    }
-  }
-
   private dismissOperatorAlert(alert: UIOperatorAlertOut): void {
     try {
       localStorage.setItem(this.operatorAlertStorageKey(alert), "1");
@@ -899,65 +889,6 @@ class DomestiBotController {
     }
   }
 
-  private renderActionError(message: string): void {
-    // Recoverable per-action error (e.g. a Sonos 409 from an empty
-    // queue). Distinct from ``renderError``, which is destructive
-    // and reserved for fatal/bootstrap failures. The toast lives in
-    // ``document.body`` rather than ``this.root`` so it survives
-    // the ``replaceChildren()`` inside ``render()`` — otherwise the
-    // background poll would tear it down as soon as it arrived.
-    // Calling this again *replaces* any current toast and resets
-    // the auto-dismiss timer; we only ever show one at a time so a
-    // burst of failed clicks doesn't pile up a wall of alerts.
-    this.renderActionToast(message, ToastVariant.Error);
-  }
-
-  private renderActionToast(
-    message: string,
-    variant: ToastVariant,
-  ): void {
-    this.dismissActionToast();
-
-    const toast = document.createElement("div");
-    const variantClass =
-      variant === ToastVariant.Success
-        ? "action-toast-success"
-        : variant === ToastVariant.Info
-          ? "action-toast-info"
-          : "";
-    toast.className =
-      variantClass.length > 0
-        ? `action-toast ${variantClass}`
-        : "action-toast";
-    if (variant === ToastVariant.Error) {
-      toast.setAttribute("role", "alert");
-      toast.setAttribute("aria-live", "assertive");
-    } else {
-      toast.setAttribute("role", "status");
-      toast.setAttribute("aria-live", "polite");
-    }
-
-    const text = document.createElement("span");
-    text.className = "action-toast-message";
-    text.textContent = message;
-
-    const dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.className = "action-toast-dismiss";
-    dismiss.setAttribute("aria-label", "Dismiss");
-    dismiss.textContent = "\u00d7";
-    dismiss.addEventListener("click", () => {
-      this.dismissActionToast();
-    });
-
-    toast.append(text, dismiss);
-    document.body.append(toast);
-    this.actionToast = toast;
-    this.actionToastTimer = window.setTimeout(() => {
-      this.dismissActionToast();
-    }, DomestiBotController.ACTION_ERROR_TOAST_MS);
-  }
-
   private renderBulkActionFeedback(
     scope: BulkOffScope,
     affectedCount: number,
@@ -965,15 +896,11 @@ class DomestiBotController {
     state: UIStateOut | null,
   ): void {
     if (affectedCount === 0) {
-      this.renderActionToast(
-        bulkOffNothingChangedMessage(scope, skippedCount, state),
-        ToastVariant.Info,
-      );
+      showInfoToast(bulkOffNothingChangedMessage(scope, skippedCount, state));
       return;
     }
-    this.renderActionToast(
+    showSuccessToast(
       bulkOffSuccessMessage(scope, affectedCount, skippedCount),
-      ToastVariant.Success,
     );
   }
 

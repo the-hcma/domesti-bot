@@ -1,10 +1,14 @@
 // My Tracks domesti-bot pairing and location-history retention settings.
 
 import { api, HttpError } from "./api.js";
+import { ToastVariant } from "./closed-sets.js";
 import { setAuditedTimestampLine } from "./format-timestamp.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
-import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
+import {
+  setSettingsDialogStatus,
+  setSettingsDialogStatusTone,
+} from "./settings-status.js";
 import {
   ConfirmButtonVariant,
   type LocationHistoryRetentionIn,
@@ -13,6 +17,7 @@ import {
   type MyTracksSettingsIn,
   type MyTracksSettingsOut,
 } from "./types.js";
+import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
 
 export interface MyTracksPairingPanelOptions {
   clearConnectionFields: () => void;
@@ -107,6 +112,7 @@ function renderPairStatus(
 ): void {
   if (status?.paired_at) {
     statusEl.hidden = false;
+    setSettingsDialogStatusTone(statusEl, ToastVariant.Info);
     statusEl.replaceChildren();
     const remoteRequests = status.mytracks_remote_request_location_enabled;
     const remoteLabel = remoteRequests === true
@@ -500,7 +506,11 @@ export async function mountMyTracksPairingPanel(
       syncRetentionSaveState();
       syncResetButtonState();
     } catch (err) {
-      status.textContent = `Could not load pairing status: ${formatError(err)}`;
+      setSettingsDialogStatus(
+        status,
+        `Could not load pairing status: ${formatError(err)}`,
+        ToastVariant.Error,
+      );
     }
   }
 
@@ -522,7 +532,7 @@ export async function mountMyTracksPairingPanel(
         savedConnection = await options.saveConnectionSettings(connection);
       } catch (err) {
         const message = formatError(err);
-        status.textContent = message;
+        setSettingsDialogStatus(status, message, ToastVariant.Error);
         showErrorToast(message);
         return;
       }
@@ -546,7 +556,7 @@ export async function mountMyTracksPairingPanel(
         showSuccessToast(rePair ? "My Tracks re-pairing complete." : "My Tracks pairing complete.");
       } catch (err) {
         const message = formatError(err);
-        status.textContent = message;
+        setSettingsDialogStatus(status, message, ToastVariant.Error);
         showErrorToast(message);
         await refreshStatus();
       }
@@ -564,7 +574,7 @@ export async function mountMyTracksPairingPanel(
       })
       .catch((err: unknown) => {
         const message = formatError(err);
-        status.textContent = message;
+        setSettingsDialogStatus(status, message, ToastVariant.Error);
         showErrorToast(message);
       });
   });
@@ -602,7 +612,7 @@ export async function mountMyTracksPairingPanel(
         })
         .catch((err: unknown) => {
           const message = formatError(err);
-          status.textContent = message;
+          setSettingsDialogStatus(status, message, ToastVariant.Error);
           showErrorToast(message);
         });
     });

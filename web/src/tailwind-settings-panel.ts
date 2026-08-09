@@ -1,8 +1,12 @@
-import { ManagedSecretSource } from "./closed-sets.js";
+import { ManagedSecretSource, ToastVariant } from "./closed-sets.js";
 // GoTailwind token settings panel for the Settings hub.
 
 import { api, HttpError } from "./api.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
+import {
+  clearSettingsDialogStatus,
+  setSettingsDialogStatus,
+} from "./settings-status.js";
 import { showSuccessToast } from "./ui-toast.js";
 import type { TailwindTokenSettingsOut } from "./types.js";
 
@@ -109,14 +113,15 @@ export async function mountTailwindSettingsPanel(
     syncTestEnabled();
   };
 
-  const showStatusMessage = (message: string): void => {
-    status.textContent = message;
-    status.hidden = false;
+  const showStatusMessage = (
+    message: string,
+    tone: ToastVariant = ToastVariant.Info,
+  ): void => {
+    setSettingsDialogStatus(status, message, tone);
   };
 
   const hideStatus = (): void => {
-    status.textContent = "";
-    status.hidden = true;
+    clearSettingsDialogStatus(status);
   };
 
   const updateStatusHint = (s: TailwindTokenSettingsOut): void => {
@@ -143,6 +148,7 @@ export async function mountTailwindSettingsPanel(
     } catch (err) {
       showStatusMessage(
         err instanceof HttpError ? err.detail : "Could not load token status.",
+        ToastVariant.Error,
       );
     }
   };
@@ -151,7 +157,7 @@ export async function mountTailwindSettingsPanel(
     void (async () => {
       const token = input.value.trim();
       if (!token) {
-        showStatusMessage("Enter a token before saving.");
+        showStatusMessage("Enter a token before saving.", ToastVariant.Error);
         return;
       }
       saveBtn.disabled = true;
@@ -164,6 +170,7 @@ export async function mountTailwindSettingsPanel(
         if (out.restart_required) {
           showStatusMessage(
             "Token saved. Restart domesti-bot (or remove TAILWIND_TOKEN) so garage doors use it.",
+            ToastVariant.Success,
           );
         } else {
           updateStatusHint(s);
@@ -172,6 +179,7 @@ export async function mountTailwindSettingsPanel(
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Save failed.",
+          ToastVariant.Error,
         );
       } finally {
         saveBtn.disabled = false;
@@ -196,10 +204,14 @@ export async function mountTailwindSettingsPanel(
         const result = await api.testTailwindToken(
           token !== "" ? { token } : {},
         );
-        showStatusMessage(result.detail);
+        showStatusMessage(
+          result.detail,
+          result.ok ? ToastVariant.Success : ToastVariant.Error,
+        );
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Test failed.",
+          ToastVariant.Error,
         );
       } finally {
         syncTestEnabled();
@@ -223,6 +235,7 @@ export async function mountTailwindSettingsPanel(
       } catch (err) {
         showStatusMessage(
           err instanceof HttpError ? err.detail : "Clear failed.",
+          ToastVariant.Error,
         );
       }
     })();

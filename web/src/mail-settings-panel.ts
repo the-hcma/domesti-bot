@@ -1,11 +1,13 @@
 // SMTP / mail settings panel (persisted via ``/v1/settings/smtp`` when available).
 
 import { HttpError } from "./api.js";
+import { ToastVariant } from "./closed-sets.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
+import { setSettingsDialogStatus } from "./settings-status.js";
 import { ConfirmButtonVariant, type SmtpConfigIn, type SmtpConfigOut } from "./types.js";
-import { confirmAction } from "./ui-toast.js";
 import { defaultMailDomainFromUi } from "./ui-instance.js";
+import { confirmAction } from "./ui-toast.js";
 
 const DEFAULT_SMTP_HOST = "localhost";
 const DEFAULT_SMTP_PORT = 25;
@@ -87,12 +89,22 @@ export async function mountMailSettingsPanel(
   status.className = "settings-dialog-status";
   status.hidden = true;
 
+  const showStatusMessage = (
+    message: string,
+    tone: ToastVariant = ToastVariant.Info,
+  ): void => {
+    setSettingsDialogStatus(status, message, tone);
+  };
+
+
   let existing: SmtpConfigOut | null = null;
   try {
     existing = await dataSource.getSmtpConfig();
   } catch (err) {
-    status.hidden = false;
-    status.textContent = `Could not load SMTP settings: ${formatMailError(err)}`;
+    showStatusMessage(
+      `Could not load SMTP settings: ${formatMailError(err)}`,
+      ToastVariant.Error,
+    );
   }
   const defaults = configToForm(existing);
   let testPassed = existing !== null;
@@ -180,16 +192,17 @@ export async function mountMailSettingsPanel(
     void dataSource
       .saveSmtpConfig(readDraft())
       .then((saved) => {
-        status.hidden = false;
-        status.textContent = `Saved SMTP settings for ${saved.host}:${saved.port}`;
+        showStatusMessage(
+          `Saved SMTP settings for ${saved.host}:${saved.port}`,
+          ToastVariant.Success,
+        );
         passwordInput.value = "";
         passwordInput.placeholder = "leave blank to keep current";
         resetBtn.disabled = false;
         fromAddressManual = true;
       })
       .catch((err: unknown) => {
-        status.hidden = false;
-        status.textContent = formatMailError(err);
+        showStatusMessage(formatMailError(err), ToastVariant.Error);
       });
   };
 
@@ -265,35 +278,40 @@ export async function mountMailSettingsPanel(
   testRow.append(testTo, testBtn);
 
   testBtn.addEventListener("click", () => {
-    status.hidden = false;
     if (hostInput.value.trim() === "") {
-      status.textContent = "Expected SMTP host, got empty value";
+      showStatusMessage("Expected SMTP host, got empty value", ToastVariant.Error);
       return;
     }
     if (domainInput.value.trim() === "") {
-      status.textContent = "Expected mail domain, got empty value";
+      showStatusMessage("Expected mail domain, got empty value", ToastVariant.Error);
       return;
     }
     if (testTo.value.trim() === "") {
-      status.textContent = "Expected recipient email, got empty value";
+      showStatusMessage(
+        "Expected recipient email, got empty value",
+        ToastVariant.Error,
+      );
       return;
     }
     testBtn.disabled = true;
-    status.textContent = "Sending test email…";
+    showStatusMessage("Sending test email…", ToastVariant.Info);
     void dataSource
       .sendSmtpTestEmail({
         ...readDraft(),
         to_address: testTo.value.trim(),
       })
       .then((result) => {
-        status.textContent = result.message;
+        showStatusMessage(
+          result.message,
+          result.ok ? ToastVariant.Success : ToastVariant.Error,
+        );
         if (result.ok) {
           testPassed = true;
           syncSaveEnabled();
         }
       })
       .catch((err: unknown) => {
-        status.textContent = formatMailError(err);
+        showStatusMessage(formatMailError(err), ToastVariant.Error);
       })
       .finally(() => {
         testBtn.disabled = false;
@@ -321,8 +339,7 @@ export async function mountMailSettingsPanel(
           void mountMailSettingsPanel(container, dataSource);
         })
         .catch((err: unknown) => {
-          status.hidden = false;
-          status.textContent = formatMailError(err);
+          showStatusMessage(formatMailError(err), ToastVariant.Error);
         });
     });
   });
