@@ -32,22 +32,12 @@ export const KASA_MOTION_SETTINGS_AMBIENT_ENABLED_LABEL = "Ambient light enabled
 export const KASA_MOTION_SETTINGS_APPLY_LABEL = "Apply motion tuning";
 export const KASA_MOTION_SETTINGS_APPLY_UNCONFIRMED =
   "Motion settings were sent, but the switch did not confirm all values. Refresh and retry.";
-export const KASA_MOTION_SETTINGS_DEBUG_SENSORS_HEADING = "Debug sensors";
-export const KASA_MOTION_SETTINGS_DEBUG_SENSORS_INFO_DETAIL =
-  "Low-level Motion ADC and signed PIR value from python-kasa. Useful when calibrating sensitivity; not needed for day-to-day tuning.";
-export const KASA_MOTION_SETTINGS_DEBUG_SENSORS_INFO_EXAMPLE =
-  "If PIR percent looks stuck, compare ADC value against ADC min / mid / max after Refresh sensors.";
 export const KASA_MOTION_SETTINGS_LEGEND = "Motion (PIR) tuning";
 export const KASA_MOTION_SETTINGS_LINGER_INFO_DETAIL =
   "How long the light stays on after the last motion detection (device inactivity timeout / cold time). The Kasa app’s default Smart Control rule can overwrite this back to about 60 seconds — delete or edit that rule if changes do not stick.";
 export const KASA_MOTION_SETTINGS_LINGER_INFO_EXAMPLE =
   "Set 120 so a hallway light stays on for two minutes after you walk past.";
 export const KASA_MOTION_SETTINGS_LINGER_LABEL = "Linger after motion (s)";
-export const KASA_MOTION_SETTINGS_LIVE_SENSORS_HEADING = "Live sensors";
-export const KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_DETAIL =
-  "Read-only polled snapshots from the switch. They are not editable here — use Refresh sensors to update. Short motion can be missed between polls.";
-export const KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_EXAMPLE =
-  "Wave at the switch, then Refresh sensors — PIR triggered may flip to yes and PIR percent rises.";
 export const KASA_MOTION_SETTINGS_NO_DEVICES =
   "No Kasa switches with PIR/motion were discovered. KS200M-class wall switches appear here after discovery.";
 export const KASA_MOTION_SETTINGS_PIR_ENABLED_INFO_DETAIL =
@@ -66,6 +56,11 @@ export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_EXAMPLE =
   "Raise the threshold if pets or hallway traffic keep triggering Mid/Far.";
 export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_LABEL = "PIR threshold (0–100)";
 export const KASA_MOTION_SETTINGS_REFRESH_LABEL = "Refresh sensors";
+export const KASA_MOTION_SETTINGS_SENSORS_HEADING = "Sensors";
+export const KASA_MOTION_SETTINGS_SENSORS_INFO_DETAIL =
+  "Read-only polled snapshots from the switch: live PIR / ambient readings plus low-level Motion ADC and signed PIR value. They are not editable here — use Refresh sensors to update. Short motion can be missed between polls.";
+export const KASA_MOTION_SETTINGS_SENSORS_INFO_EXAMPLE =
+  "Wave at the switch, then Refresh sensors — PIR triggered may flip to yes; if percent looks stuck, compare ADC value against ADC min / mid / max.";
 export const KASA_MOTION_SETTINGS_TARGET_DEVICE_LABEL = "Target device";
 
 const KASA_MOTION_AMBIENT_LIMIT_CUSTOM = "__custom__";
@@ -141,7 +136,7 @@ function appendMotionIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
   intro.className = "settings-dialog-lead";
   intro.textContent =
-    "Edit PIR range / threshold, linger after motion, ambient brightness limit, and enable switches on motion-capable wall switches (for example KS200M). Live sensors and debug ADC readings below are read-only — refresh to update; short motion can be missed between polls. Smart Control schedules stay in the Kasa app.";
+    "Edit PIR range / threshold, linger after motion, ambient brightness limit, and enable switches on motion-capable wall switches (for example KS200M). Sensor readings below are read-only — refresh to update; short motion can be missed between polls. Smart Control schedules stay in the Kasa app.";
   parent.append(intro);
 }
 
@@ -174,7 +169,11 @@ function createMotionField(
   control: HTMLElement,
 ): HTMLDivElement {
   const root = document.createElement("div");
-  root.className = "settings-dialog-field";
+  const isCheckbox =
+    control instanceof HTMLInputElement && control.type === "checkbox";
+  root.className = isCheckbox
+    ? "settings-dialog-field kasa-motion-check-field"
+    : "settings-dialog-field";
   const controlId =
     control.id !== ""
       ? control.id
@@ -186,7 +185,12 @@ function createMotionField(
   textLabel.htmlFor = controlId;
   textLabel.textContent = label;
   labelRow.append(textLabel, createInfoBadge(label, info.detail, info.example));
-  root.append(labelRow, control);
+  if (isCheckbox) {
+    // Checkbox + label + info on one row (badge remains outside the label).
+    root.append(control, labelRow);
+  } else {
+    root.append(labelRow, control);
+  }
   return root;
 }
 
@@ -407,13 +411,13 @@ export async function mountKasaSettingsPanel(
     "settings-dialog-field-row kasa-motion-knobs-row kasa-motion-ambient-limit-row";
   ambientLimitRow.append(ambientLimitPresetField, ambientLimitField);
 
-  const liveSensorsHeading = document.createElement("h3");
-  liveSensorsHeading.className =
+  const sensorsHeading = document.createElement("h3");
+  sensorsHeading.className =
     "settings-dialog-subheading kasa-motion-sensors-heading";
-  liveSensorsHeading.append(
-    createFieldLabel(KASA_MOTION_SETTINGS_LIVE_SENSORS_HEADING, {
-      detail: KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_DETAIL,
-      example: KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_EXAMPLE,
+  sensorsHeading.append(
+    createFieldLabel(KASA_MOTION_SETTINGS_SENSORS_HEADING, {
+      detail: KASA_MOTION_SETTINGS_SENSORS_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_SENSORS_INFO_EXAMPLE,
     }),
   );
 
@@ -423,16 +427,6 @@ export async function mountKasaSettingsPanel(
   const percent = createSensorItem("PIR percent");
   const ambientLight = createSensorItem("Ambient light");
   sensors.append(triggered.item, percent.item, ambientLight.item);
-
-  const debugSensorsHeading = document.createElement("h3");
-  debugSensorsHeading.className =
-    "settings-dialog-subheading kasa-motion-sensors-heading kasa-motion-debug-heading";
-  debugSensorsHeading.append(
-    createFieldLabel(KASA_MOTION_SETTINGS_DEBUG_SENSORS_HEADING, {
-      detail: KASA_MOTION_SETTINGS_DEBUG_SENSORS_INFO_DETAIL,
-      example: KASA_MOTION_SETTINGS_DEBUG_SENSORS_INFO_EXAMPLE,
-    }),
-  );
 
   const debugSensors = document.createElement("div");
   debugSensors.className =
@@ -467,9 +461,8 @@ export async function mountKasaSettingsPanel(
     knobsRow,
     checksRow,
     ambientLimitRow,
-    liveSensorsHeading,
+    sensorsHeading,
     sensors,
-    debugSensorsHeading,
     debugSensors,
     motionActions,
   );

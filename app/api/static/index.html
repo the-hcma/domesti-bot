@@ -698,9 +698,9 @@
     .settings-dialog-status-success { color: var(--accent); }
     .settings-dialog.settings-hub-dialog { position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%); margin: 0;
-      max-width: min(40rem, calc(100vw - 2rem));
-      width: min(40rem, calc(100vw - 2rem)); }
-    .settings-hub-body { min-height: min(40vh, 360px); }
+      max-width: min(48rem, calc(100vw - 2rem));
+      width: min(48rem, calc(100vw - 2rem)); }
+    .settings-hub-body { min-height: min(40vh, 360px); min-width: 0; }
     .settings-hub-body:has(.mytracks-settings-tab) { min-height: 0; }
     .settings-hub-tab-mount { padding-top: 4px; }
     .settings-dialog-field { display: flex; flex-direction: column; gap: 6px;
@@ -754,34 +754,47 @@
     .ep1-calibration-section .settings-dialog-field { flex: 0 0 auto; }
     /* Same column flex-grow trap as EP1/Vizio: global field flex-basis 12rem
        stretches email/password and opens a large gap above the action row. */
-    .kasa-settings-form { gap: 10px; padding: 0; }
+    .kasa-settings-form { gap: 10px; padding: 0; min-width: 0; }
     .kasa-settings-form > .settings-dialog-field,
-    .kasa-settings-form > .settings-dialog-fieldset { flex: 0 0 auto; }
+    .kasa-settings-form > .settings-dialog-fieldset { flex: 0 0 auto; min-width: 0; }
     .kasa-credentials-section { gap: 6px; padding: 10px 12px; }
     .kasa-credentials-section .settings-dialog-field { flex: 0 0 auto; }
     .kasa-motion-knobs-row { margin-bottom: 0; align-items: flex-end; gap: 10px;
-      flex-wrap: nowrap; }
-    .kasa-motion-knobs-row .settings-dialog-field { flex: 1 1 0; min-width: 0; }
+      flex-wrap: wrap; }
+    .kasa-motion-knobs-row .settings-dialog-field { flex: 1 1 8.5rem; min-width: 0; }
     .kasa-motion-knobs-row .rules-field-label-row,
     .kasa-motion-knobs-row .rules-field-label-row label { white-space: nowrap; }
-    .kasa-motion-checks-row { margin-bottom: 0; align-items: flex-start; gap: 16px; }
+    .kasa-motion-checks-row { margin-bottom: 0; align-items: center; gap: 16px;
+      flex-wrap: wrap; }
     .kasa-motion-checks-row .settings-dialog-field { flex: 0 0 auto; }
-    .kasa-settings-form .settings-dialog-field > input[type="checkbox"] {
-      width: auto; align-self: flex-start; margin: 2px 0 0; padding: 0;
+    .kasa-motion-check-field { flex-direction: row; align-items: center; gap: 8px; }
+    .kasa-settings-form .kasa-motion-check-field > input[type="checkbox"] {
+      width: auto; flex: 0 0 auto; align-self: center; margin: 0; padding: 0;
       border: none; background: transparent; accent-color: var(--accent); }
     .kasa-motion-sensors-heading { margin: 2px 0 0; }
-    .kasa-motion-debug-heading { margin-top: 6px; color: var(--muted); }
     .kasa-motion-sensors { display: flex; flex-wrap: wrap; align-items: baseline;
-      column-gap: 20px; row-gap: 4px; margin: 0; }
+      column-gap: 20px; row-gap: 4px; margin: 0; min-width: 0; }
     .kasa-motion-debug-sensors { color: var(--muted); font-size: 12px; }
     .kasa-motion-sensor { display: flex; align-items: baseline; gap: 0.35rem;
-      white-space: nowrap; }
+      white-space: nowrap; max-width: 100%; }
     .kasa-motion-sensor-label { margin: 0; font-weight: 600; color: var(--fg); }
     .kasa-motion-debug-sensors .kasa-motion-sensor-label { color: var(--muted);
       font-weight: 500; }
     .kasa-motion-sensor-label::after { content: ":"; }
     .kasa-motion-sensor-value { margin: 0; }
     .kasa-motion-ambient-limit-row { margin-top: 0; }
+    /* Keep info popovers inside the Settings hub card (right-edge badges
+       would otherwise overflow past the dialog with left:0 anchoring). */
+    .settings-hub-dialog .rules-info-popover:not([hidden]) {
+      max-width: min(20rem, calc(100vw - 4rem));
+      box-sizing: border-box; overflow-wrap: anywhere; word-break: break-word; }
+    .settings-hub-dialog .kasa-motion-knobs-row .settings-dialog-field:last-child
+      .rules-info-popover:not([hidden]),
+    .settings-hub-dialog .kasa-motion-checks-row .settings-dialog-field:last-child
+      .rules-info-popover:not([hidden]),
+    .settings-hub-dialog .kasa-motion-ambient-limit-row .settings-dialog-field:last-child
+      .rules-info-popover:not([hidden]) {
+      left: auto; right: 0; }
     .ep1-psk-section .settings-dialog-lead,
     .ep1-ble-section .settings-dialog-lead,
     .ep1-calibration-section .settings-dialog-lead { font-size: 13px; line-height: 1.35; }
