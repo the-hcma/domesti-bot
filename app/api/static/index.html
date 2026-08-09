@@ -754,8 +754,11 @@
     .kasa-settings-form > .settings-dialog-fieldset { flex: 0 0 auto; }
     .kasa-credentials-section { gap: 6px; padding: 10px 12px; }
     .kasa-credentials-section .settings-dialog-field { flex: 0 0 auto; }
-    .kasa-motion-knobs-row { margin-bottom: 0; align-items: flex-end; gap: 10px; }
-    .kasa-motion-knobs-row .settings-dialog-field { flex: 1 1 7rem; min-width: 0; }
+    .kasa-motion-knobs-row { margin-bottom: 0; align-items: flex-end; gap: 10px;
+      flex-wrap: nowrap; }
+    .kasa-motion-knobs-row .settings-dialog-field { flex: 1 1 0; min-width: 0; }
+    .kasa-motion-knobs-row .rules-field-label-row,
+    .kasa-motion-knobs-row .rules-field-label-row label { white-space: nowrap; }
     .kasa-motion-checks-row { margin-bottom: 0; align-items: flex-start; gap: 16px; }
     .kasa-motion-checks-row .settings-dialog-field { flex: 0 0 auto; }
     .kasa-settings-form .settings-dialog-field > input[type="checkbox"] {

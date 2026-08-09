@@ -25,7 +25,7 @@ export const KASA_MOTION_SETTINGS_LINGER_INFO_DETAIL =
   "How long the light stays on after the last motion detection (device inactivity timeout / cold time). The Kasa app’s default Smart Control rule can overwrite this back to about 60 seconds — delete or edit that rule if changes do not stick.";
 export const KASA_MOTION_SETTINGS_LINGER_INFO_EXAMPLE =
   "Set 120 so a hallway light stays on for two minutes after you walk past.";
-export const KASA_MOTION_SETTINGS_LINGER_LABEL = "Linger after motion (seconds)";
+export const KASA_MOTION_SETTINGS_LINGER_LABEL = "Linger after motion (s)";
 export const KASA_MOTION_SETTINGS_LIVE_SENSORS_HEADING = "Live sensors";
 export const KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_DETAIL =
   "Read-only polled snapshots from the switch. They are not editable here — use Refresh sensors to update. Short motion can be missed between polls.";
