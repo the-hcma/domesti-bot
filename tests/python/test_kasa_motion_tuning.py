@@ -77,44 +77,6 @@ def test_list_kasa_motion_settings_targets_tolerates_uninitialized_manager() -> 
 
 
 @pytest.mark.asyncio
-async def test_read_kasa_motion_tuning_defaults_missing_inactivity_timeout() -> None:
-    kd, motion, ambient = _fake_motion_device()
-    motion.inactivity_timeout = None
-    mgr = SimpleNamespace(switches=(kd,))
-    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
-    assert snap.inactivity_timeout_ms == 0
-    del ambient
-
-
-@pytest.mark.asyncio
-async def test_read_kasa_motion_tuning_returns_snapshot() -> None:
-    kd, motion, ambient = _fake_motion_device()
-    mgr = SimpleNamespace(switches=(kd,))
-    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
-    assert snap.device_id == "98:25:4a:64:ac:90"
-    assert snap.pir_enabled is True
-    assert snap.pir_range is KasaPirRange.MID
-    assert snap.pir_threshold == 50
-    assert snap.inactivity_timeout_ms == 60_000
-    assert snap.pir_triggered is False
-    assert snap.ambient_available is True
-    assert snap.ambient_light_enabled is True
-    assert snap.ambient_light == 64
-    assert KasaPirRange.MID in snap.pir_range_choices
-    update = kd._kDevice.update
-    assert isinstance(update, AsyncMock)
-    update.assert_awaited()
-    del motion, ambient
-
-
-@pytest.mark.asyncio
-async def test_read_kasa_motion_tuning_unknown_device() -> None:
-    mgr = SimpleNamespace(switches=())
-    with pytest.raises(KasaMotionTuningNotFoundError, match="aa:bb:cc:dd:ee:ff"):
-        await read_kasa_motion_tuning(device_id="aa:bb:cc:dd:ee:ff", kasa_mgr=mgr)  # type: ignore[arg-type]
-
-
-@pytest.mark.asyncio
 async def test_apply_kasa_motion_tuning_writes_knobs() -> None:
     kd, motion, ambient = _fake_motion_device()
     assert ambient is not None
@@ -218,6 +180,44 @@ async def test_apply_marks_unconfirmed_when_device_does_not_stick() -> None:
     assert snap.knobs_confirmed is False
     assert snap.pir_range is KasaPirRange.MID
     del ambient
+
+
+@pytest.mark.asyncio
+async def test_read_kasa_motion_tuning_defaults_missing_inactivity_timeout() -> None:
+    kd, motion, ambient = _fake_motion_device()
+    motion.inactivity_timeout = None
+    mgr = SimpleNamespace(switches=(kd,))
+    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
+    assert snap.inactivity_timeout_ms == 0
+    del ambient
+
+
+@pytest.mark.asyncio
+async def test_read_kasa_motion_tuning_returns_snapshot() -> None:
+    kd, motion, ambient = _fake_motion_device()
+    mgr = SimpleNamespace(switches=(kd,))
+    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
+    assert snap.device_id == "98:25:4a:64:ac:90"
+    assert snap.pir_enabled is True
+    assert snap.pir_range is KasaPirRange.MID
+    assert snap.pir_threshold == 50
+    assert snap.inactivity_timeout_ms == 60_000
+    assert snap.pir_triggered is False
+    assert snap.ambient_available is True
+    assert snap.ambient_light_enabled is True
+    assert snap.ambient_light == 64
+    assert KasaPirRange.MID in snap.pir_range_choices
+    update = kd._kDevice.update
+    assert isinstance(update, AsyncMock)
+    update.assert_awaited()
+    del motion, ambient
+
+
+@pytest.mark.asyncio
+async def test_read_kasa_motion_tuning_unknown_device() -> None:
+    mgr = SimpleNamespace(switches=())
+    with pytest.raises(KasaMotionTuningNotFoundError, match="aa:bb:cc:dd:ee:ff"):
+        await read_kasa_motion_tuning(device_id="aa:bb:cc:dd:ee:ff", kasa_mgr=mgr)  # type: ignore[arg-type]
 
 
 def test_not_found_message_constant() -> None:

@@ -65,17 +65,16 @@ export function kasaInactivityTimeoutMsIfLingerChanged(
     return { ms: null };
   }
   const nextLingerSeconds = Number(trimmed);
-  if (!Number.isFinite(nextLingerSeconds)) {
-    return { ms: null };
+  if (!Number.isFinite(nextLingerSeconds) || !Number.isInteger(nextLingerSeconds)) {
+    return { error: "Linger after motion must be a whole number of seconds." };
   }
   if (nextLingerSeconds < 0) {
     return { error: "Linger after motion must be 0 or greater." };
   }
-  const nextSeconds = Math.trunc(nextLingerSeconds);
-  if (nextSeconds === kasaLingerDisplaySeconds(baselineInactivityTimeoutMs)) {
+  if (nextLingerSeconds === kasaLingerDisplaySeconds(baselineInactivityTimeoutMs)) {
     return { ms: null };
   }
-  const nextMs = nextSeconds * 1000;
+  const nextMs = nextLingerSeconds * 1000;
   if (!Number.isSafeInteger(nextMs)) {
     return { error: "Linger after motion is too large." };
   }
