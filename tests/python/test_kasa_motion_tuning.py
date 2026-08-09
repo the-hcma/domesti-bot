@@ -258,6 +258,31 @@ async def test_read_kasa_motion_tuning_returns_snapshot() -> None:
 
 
 @pytest.mark.asyncio
+async def test_read_brightness_limit_uses_raw_level_array_index() -> None:
+    """dark_index must address raw level_array, not the filtered presets tuple."""
+
+    kd, _motion, ambient = _fake_motion_device()
+    assert ambient is not None
+    ambient.config = {
+        "dark_index": 2,
+        "enable": 1,
+        "level_array": [
+            {"name": ""},  # dropped by preset parser
+            {"adc": 300, "name": "overcast", "value": 11},
+            {"adc": 222, "name": "dawn", "value": 8},
+        ],
+    }
+    ambient.presets = ambient.config["level_array"]
+    mgr = SimpleNamespace(switches=(kd,))
+    snap = await read_kasa_motion_tuning(device_id=kd.identifier, kasa_mgr=mgr)  # type: ignore[arg-type]
+    assert snap.ambient_brightness_limit == 8
+    assert snap.ambient_brightness_limit_presets == (
+        KasaAmbientBrightnessPreset(name="overcast", value=11),
+        KasaAmbientBrightnessPreset(name="dawn", value=8),
+    )
+
+
+@pytest.mark.asyncio
 async def test_read_kasa_motion_tuning_unknown_device() -> None:
     mgr = SimpleNamespace(switches=())
     with pytest.raises(KasaMotionTuningNotFoundError, match="aa:bb:cc:dd:ee:ff"):

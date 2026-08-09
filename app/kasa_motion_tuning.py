@@ -294,6 +294,20 @@ async def read_kasa_motion_tuning(
     return _snapshot_from_device(kd)
 
 
+def _ambient_brightness_limit_at_index(raw_levels: object, dark_index: int) -> int | None:
+    if not isinstance(raw_levels, Sequence) or isinstance(raw_levels, (str, bytes)):
+        return None
+    if not (0 <= dark_index < len(raw_levels)):
+        return None
+    item = raw_levels[dark_index]
+    if not isinstance(item, dict):
+        return None
+    value = item.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value)
+
+
 def _ambient_module(dev: KDevice) -> AmbientLight | None:
     module = dev.modules.get(Module.IotAmbientLight)
     if module is None:
@@ -365,21 +379,27 @@ def _motion_module(dev: KDevice) -> Motion | None:
 def _parse_ambient_brightness(
     ambient: AmbientLight,
 ) -> tuple[int | None, tuple[KasaAmbientBrightnessPreset, ...]]:
-    """Return ``(current_limit, presets)`` from ambient ``dark_index`` + ``level_array``."""
+    """Return ``(current_limit, presets)`` from ambient ``dark_index`` + ``level_array``.
 
-    presets = _parse_ambient_presets(ambient.presets)
+    ``dark_index`` indexes the raw ``config["level_array"]`` list. Look up the current
+    limit from that raw list so filtered/malformed preset drops cannot shift the index.
+    """
+
     try:
-        dark_index = int(ambient.config["dark_index"])
+        config = ambient.config
+        raw_levels = config["level_array"]
+        dark_index = int(config["dark_index"])
     except Exception as exc:
         _LOGGER.warning(
-            "Failed reading ambient dark_index on %s: %r",
+            "Failed reading ambient dark_index / level_array on %s: %r",
             getattr(ambient, "device", None),
             exc,
         )
-        return None, presets
-    if 0 <= dark_index < len(presets):
-        return presets[dark_index].value, presets
-    return None, presets
+        return None, ()
+
+    presets = _parse_ambient_presets(raw_levels)
+    limit = _ambient_brightness_limit_at_index(raw_levels, dark_index)
+    return limit, presets
 
 
 def _parse_ambient_presets(raw: object) -> tuple[KasaAmbientBrightnessPreset, ...]:
