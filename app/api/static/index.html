@@ -239,18 +239,20 @@
        replaces the current one and resets the 10s auto-dismiss timer.
        Phone-friendly: the ``calc(100vw - …)`` cap lets the toast hug
        the screen edge on narrow viewports without ever overflowing. */
-    .action-toast-success { border-color: var(--accent);
-      background: color-mix(in srgb, var(--accent) 18%, var(--card));
-      color: var(--fg); }
-    .action-toast-info { border-color: var(--border);
-      background: var(--card); color: var(--fg); }
     .action-toast { position: fixed; top: 16px; left: 50%;
       transform: translateX(-50%); z-index: 1000;
       max-width: min(480px, calc(100vw - 32px));
-      background: var(--danger); color: white; padding: 10px 14px;
+      padding: 10px 14px; border: 1px solid var(--border);
       border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
       display: flex; align-items: flex-start; gap: 12px;
       animation: action-toast-in 180ms ease-out; }
+    .action-toast-error { border-color: var(--danger);
+      background: var(--danger); color: white; }
+    .action-toast-info { border-color: var(--border);
+      background: var(--card); color: var(--fg); }
+    .action-toast-success { border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 18%, var(--card));
+      color: var(--fg); }
     .action-toast-message { flex: 1; line-height: 1.4; }
     .action-toast-dismiss { background: transparent; color: inherit;
       border: 0; font-size: 18px; line-height: 1; padding: 0 4px;
@@ -691,6 +693,9 @@
     .settings-dialog h2 { margin: 0; font-size: 1.15rem; }
     .settings-dialog-lead, .settings-dialog-status { margin: 0; font-size: 14px;
       line-height: 1.45; color: var(--muted); }
+    .settings-dialog-status-error { color: var(--danger); }
+    .settings-dialog-status-info { color: var(--muted); }
+    .settings-dialog-status-success { color: var(--accent); }
     .settings-dialog.settings-hub-dialog { position: fixed; top: 50%; left: 50%;
       transform: translate(-50%, -50%); margin: 0;
       max-width: min(40rem, calc(100vw - 2rem));

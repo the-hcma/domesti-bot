@@ -9,76 +9,15 @@ const SUCCESS_TOAST_MS = 5_000;
 let activeToast: HTMLDivElement | null = null;
 let activeToastTimer: number | null = null;
 
-function dismissToast(): void {
-  if (activeToastTimer !== null) {
-    window.clearTimeout(activeToastTimer);
-    activeToastTimer = null;
-  }
-  if (activeToast !== null) {
-    activeToast.remove();
-    activeToast = null;
-  }
-}
-
-export function showToast(
-  message: string,
-  variant: ToastVariant = ToastVariant.Info,
-  durationMs?: number,
-): void {
-  dismissToast();
-
-  const toast = document.createElement("div");
-  const variantClass =
-    variant === ToastVariant.Success
-      ? "action-toast-success"
-      : variant === ToastVariant.Info
-        ? "action-toast-info"
-        : "";
-  toast.className =
-    variantClass.length > 0 ? `action-toast ${variantClass}` : "action-toast";
+/** CSS class list for an action toast of the given variant (always includes an explicit tone class). */
+export function actionToastClassName(variant: ToastVariant): string {
   if (variant === ToastVariant.Error) {
-    toast.setAttribute("role", "alert");
-    toast.setAttribute("aria-live", "assertive");
-  } else {
-    toast.setAttribute("role", "status");
-    toast.setAttribute("aria-live", "polite");
+    return "action-toast action-toast-error";
   }
-
-  const text = document.createElement("span");
-  text.className = "action-toast-message";
-  text.textContent = message;
-
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.className = "action-toast-dismiss";
-  dismiss.setAttribute("aria-label", "Dismiss");
-  dismiss.textContent = "\u00d7";
-  dismiss.addEventListener("click", () => {
-    dismissToast();
-  });
-
-  toast.append(text, dismiss);
-  document.body.append(toast);
-  activeToast = toast;
-
-  const timeout =
-    durationMs
-    ?? (variant === ToastVariant.Success ? SUCCESS_TOAST_MS : DEFAULT_TOAST_MS);
-  activeToastTimer = window.setTimeout(() => {
-    dismissToast();
-  }, timeout);
-}
-
-export function showErrorToast(message: string): void {
-  showToast(message, ToastVariant.Error);
-}
-
-export function showSuccessToast(message: string): void {
-  showToast(message, ToastVariant.Success);
-}
-
-export function showInfoToast(message: string): void {
-  showToast(message, ToastVariant.Info);
+  if (variant === ToastVariant.Success) {
+    return "action-toast action-toast-success";
+  }
+  return "action-toast action-toast-info";
 }
 
 export function confirmAction(options: {
@@ -152,4 +91,69 @@ export function confirmAction(options: {
     dialog.showModal();
     confirmBtn.focus();
   });
+}
+
+export function showErrorToast(message: string): void {
+  showToast(message, ToastVariant.Error);
+}
+
+export function showInfoToast(message: string): void {
+  showToast(message, ToastVariant.Info);
+}
+
+export function showSuccessToast(message: string): void {
+  showToast(message, ToastVariant.Success);
+}
+
+export function showToast(
+  message: string,
+  variant: ToastVariant = ToastVariant.Info,
+  durationMs?: number,
+): void {
+  dismissToast();
+
+  const toast = document.createElement("div");
+  toast.className = actionToastClassName(variant);
+  if (variant === ToastVariant.Error) {
+    toast.setAttribute("role", "alert");
+    toast.setAttribute("aria-live", "assertive");
+  } else {
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+  }
+
+  const text = document.createElement("span");
+  text.className = "action-toast-message";
+  text.textContent = message;
+
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "action-toast-dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss");
+  dismiss.textContent = "\u00d7";
+  dismiss.addEventListener("click", () => {
+    dismissToast();
+  });
+
+  toast.append(text, dismiss);
+  document.body.append(toast);
+  activeToast = toast;
+
+  const timeout =
+    durationMs
+    ?? (variant === ToastVariant.Success ? SUCCESS_TOAST_MS : DEFAULT_TOAST_MS);
+  activeToastTimer = window.setTimeout(() => {
+    dismissToast();
+  }, timeout);
+}
+
+function dismissToast(): void {
+  if (activeToastTimer !== null) {
+    window.clearTimeout(activeToastTimer);
+    activeToastTimer = null;
+  }
+  if (activeToast !== null) {
+    activeToast.remove();
+    activeToast = null;
+  }
 }

@@ -6,9 +6,11 @@ import {
   SensorCollectionFrequencyChoice,
   SensorCollectionIntervalS,
   SensorCollectionKey,
+  ToastVariant,
 } from "./closed-sets.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
+import { setSettingsDialogStatus } from "./settings-status.js";
 import type {
   SensorCollectionRetentionOut,
   SensorCollectionSampleOut,
@@ -590,7 +592,11 @@ export async function mountSensorDataPanel(
     retention = retentionPayload;
   } catch (err) {
     status.hidden = false;
-    status.textContent = `Could not load sensor collection: ${formatError(err)}`;
+    setSettingsDialogStatus(
+      status,
+      `Could not load sensor collection: ${formatError(err)}`,
+      ToastVariant.Error,
+    );
     return;
   }
 
@@ -684,8 +690,11 @@ function mountRetentionForm(
       status.hidden = true;
       const maxAgeDays = Number(daysInput.value);
       if (!unlimitedCb.checked && (!Number.isFinite(maxAgeDays) || maxAgeDays <= 0)) {
-        status.hidden = false;
-        status.textContent = "Enter a retention of at least 1 day, or enable keep forever.";
+        setSettingsDialogStatus(
+          status,
+          "Enter a retention of at least 1 day, or enable keep forever.",
+          ToastVariant.Error,
+        );
         return;
       }
       const body = {
@@ -706,8 +715,11 @@ function mountRetentionForm(
               retentionPruneConfirmMessage(preview.samples_to_prune, body.max_age_days),
             );
             if (!confirmed) {
-              status.hidden = false;
-              status.textContent = RETENTION_PRUNE_CANCELLED_STATUS;
+              setSettingsDialogStatus(
+                status,
+                RETENTION_PRUNE_CANCELLED_STATUS,
+                ToastVariant.Info,
+              );
               return;
             }
           }
@@ -721,8 +733,11 @@ function mountRetentionForm(
             : `Sensor sample retention: ${current.max_age_days} days`,
         );
       } catch (err) {
-        status.hidden = false;
-        status.textContent = `Could not save retention: ${formatError(err)}`;
+        setSettingsDialogStatus(
+          status,
+          `Could not save retention: ${formatError(err)}`,
+          ToastVariant.Error,
+        );
       } finally {
         saveBtn.disabled = false;
         unlimitedCb.disabled = false;
@@ -895,7 +910,11 @@ function buildSensorCard(
         return;
       }
       status.hidden = false;
-      status.textContent = `Could not load samples: ${formatError(err)}`;
+      setSettingsDialogStatus(
+        status,
+        `Could not load samples: ${formatError(err)}`,
+        ToastVariant.Error,
+      );
     }
   };
 
@@ -934,7 +953,11 @@ function buildSensorCard(
       await refreshChart();
     } catch (err) {
       status.hidden = false;
-      status.textContent = `Could not save: ${formatError(err)}`;
+      setSettingsDialogStatus(
+        status,
+        `Could not save: ${formatError(err)}`,
+        ToastVariant.Error,
+      );
       syncIntervalSelect(intervalSelect, current.enabled, current.interval_s);
     } finally {
       intervalSelect.disabled = false;
