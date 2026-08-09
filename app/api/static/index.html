@@ -788,13 +788,20 @@
       max-width: min(20rem, calc(100vw - 4rem));
       box-sizing: border-box; white-space: normal; overflow-wrap: anywhere;
       word-break: break-word; }
-    .settings-hub-dialog .kasa-motion-knobs-row .settings-dialog-field:last-child
-      .rules-info-popover:not([hidden]),
-    .settings-hub-dialog .kasa-motion-checks-row .settings-dialog-field:last-child
-      .rules-info-popover:not([hidden]),
-    .settings-hub-dialog .kasa-motion-ambient-limit-row .settings-dialog-field:last-child
-      .rules-info-popover:not([hidden]) {
-      left: auto; right: 0; }
+    /* Right-anchor trailing-field popovers only when the dialog is wide enough
+       for the three knob fields (3 × 8.5rem + 2 × 10px gaps + 44px padding
+       ≈ 32rem viewport) to sit on a single row.  Below that breakpoint
+       `:last-child` may be visually on the left of a wrapped row, where
+       `right: 0` would push the popover off-screen to the left. */
+    @media (min-width: 32rem) {
+      .settings-hub-dialog .kasa-motion-knobs-row .settings-dialog-field:last-child
+        .rules-info-popover:not([hidden]),
+      .settings-hub-dialog .kasa-motion-checks-row .settings-dialog-field:last-child
+        .rules-info-popover:not([hidden]),
+      .settings-hub-dialog .kasa-motion-ambient-limit-row .settings-dialog-field:last-child
+        .rules-info-popover:not([hidden]) {
+        left: auto; right: 0; }
+    }
     .ep1-psk-section .settings-dialog-lead,
     .ep1-ble-section .settings-dialog-lead,
     .ep1-calibration-section .settings-dialog-lead { font-size: 13px; line-height: 1.35; }
