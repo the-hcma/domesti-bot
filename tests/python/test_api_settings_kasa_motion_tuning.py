@@ -13,6 +13,7 @@ from app.device_enums import KasaPirRange
 from app.kasa_motion_tuning import (
     KASA_MOTION_TUNING_DEVICE_NOT_FOUND,
     KASA_MOTION_TUNING_THRESHOLD_RANGE,
+    KasaAmbientBrightnessPreset,
     KasaMotionSettingsTarget,
     KasaMotionTuningNotFoundError,
     KasaMotionTuningSnapshot,
@@ -61,6 +62,16 @@ def test_get_kasa_motion_tuning_returns_snapshot() -> None:
     assert body["inactivity_timeout_ms"] == 60_000
     assert body["ambient_available"] is True
     assert body["ambient_light"] == 64
+    assert body["ambient_brightness_limit"] == 15
+    assert body["ambient_brightness_limit_presets"] == [
+        {"name": "cloudy", "value": 15},
+        {"name": "overcast", "value": 11},
+    ]
+    assert body["pir_value"] == -22
+    assert body["adc_min"] == 0
+    assert body["adc_mid"] == 2047
+    assert body["adc_max"] == 4095
+    assert body["adc_value"] == 2000
     assert body["knobs_confirmed"] is True
     read_mock.assert_awaited_once()
 
@@ -83,7 +94,13 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
     client = _client()
     base = _snapshot()
     result = KasaMotionTuningSnapshot(
+        adc_max=base.adc_max,
+        adc_mid=base.adc_mid,
+        adc_min=base.adc_min,
+        adc_value=base.adc_value,
         ambient_available=base.ambient_available,
+        ambient_brightness_limit=11,
+        ambient_brightness_limit_presets=base.ambient_brightness_limit_presets,
         ambient_light=base.ambient_light,
         ambient_light_enabled=False,
         device_id=base.device_id,
@@ -99,6 +116,7 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
         pir_range_choices=base.pir_range_choices,
         pir_threshold=40,
         pir_triggered=base.pir_triggered,
+        pir_value=base.pir_value,
     )
     with patch(
         "app.api.settings_routes.apply_kasa_motion_tuning",
@@ -113,6 +131,7 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
                 "pir_threshold": 40,
                 "inactivity_timeout_ms": 120_000,
                 "ambient_light_enabled": False,
+                "ambient_brightness_limit": 11,
             },
         )
     assert response.status_code == HTTPStatus.OK
@@ -122,6 +141,7 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
     assert body["pir_threshold"] == 40
     assert body["inactivity_timeout_ms"] == 120_000
     assert body["ambient_light_enabled"] is False
+    assert body["ambient_brightness_limit"] == 11
     apply_mock.assert_awaited_once()
     assert apply_mock.await_args is not None
     kwargs = apply_mock.await_args.kwargs
@@ -131,6 +151,7 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
     assert kwargs["pir_threshold"] == 40
     assert kwargs["inactivity_timeout_ms"] == 120_000
     assert kwargs["ambient_light_enabled"] is False
+    assert kwargs["ambient_brightness_limit"] == 11
 
 
 def test_put_kasa_motion_tuning_validation_422() -> None:
@@ -154,7 +175,13 @@ def test_put_kasa_motion_tuning_unconfirmed() -> None:
     client = _client()
     base = _snapshot()
     result = KasaMotionTuningSnapshot(
+        adc_max=base.adc_max,
+        adc_mid=base.adc_mid,
+        adc_min=base.adc_min,
+        adc_value=base.adc_value,
         ambient_available=base.ambient_available,
+        ambient_brightness_limit=base.ambient_brightness_limit,
+        ambient_brightness_limit_presets=base.ambient_brightness_limit_presets,
         ambient_light=base.ambient_light,
         ambient_light_enabled=base.ambient_light_enabled,
         device_id=base.device_id,
@@ -170,6 +197,7 @@ def test_put_kasa_motion_tuning_unconfirmed() -> None:
         pir_range_choices=base.pir_range_choices,
         pir_threshold=base.pir_threshold,
         pir_triggered=base.pir_triggered,
+        pir_value=base.pir_value,
     )
     with patch(
         "app.api.settings_routes.apply_kasa_motion_tuning",
@@ -196,7 +224,16 @@ def _client() -> TestClient:
 
 def _snapshot(*, device_id: str = "98:25:4a:64:ac:90") -> KasaMotionTuningSnapshot:
     return KasaMotionTuningSnapshot(
+        adc_max=4095,
+        adc_mid=2047,
+        adc_min=0,
+        adc_value=2000,
         ambient_available=True,
+        ambient_brightness_limit=15,
+        ambient_brightness_limit_presets=(
+            KasaAmbientBrightnessPreset(name="cloudy", value=15),
+            KasaAmbientBrightnessPreset(name="overcast", value=11),
+        ),
         ambient_light=64,
         ambient_light_enabled=True,
         device_id=device_id,
@@ -216,4 +253,5 @@ def _snapshot(*, device_id: str = "98:25:4a:64:ac:90") -> KasaMotionTuningSnapsh
         ),
         pir_threshold=50,
         pir_triggered=False,
+        pir_value=-22,
     )

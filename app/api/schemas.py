@@ -560,12 +560,46 @@ class KasaDevicesSettingsOut(BaseModel):
     )
 
 
+class KasaAmbientBrightnessPresetOut(BaseModel):
+    """One device-defined ambient brightness-limit preset (``level_array`` entry)."""
+
+    name: str = Field(..., description="Vendor preset label (for example cloudy, dawn, custom).")
+    value: int = Field(..., description="Brightness-limit value for this preset.")
+
+
 class KasaMotionTuningOut(BaseModel):
     """PIR / ambient config + live sensors for one Kasa Settings target."""
 
+    adc_max: int | None = Field(
+        default=None,
+        description="Motion ADC maximum (debug; from PIR config).",
+    )
+    adc_mid: int | None = Field(
+        default=None,
+        description="Motion ADC midpoint / zero point (debug).",
+    )
+    adc_min: int | None = Field(
+        default=None,
+        description="Motion ADC minimum (debug; from PIR config).",
+    )
+    adc_value: int | None = Field(
+        default=None,
+        description="Live Motion ADC reading (debug; polled snapshot).",
+    )
     ambient_available: bool = Field(
         ...,
         description="True when the device exposes the ambient (LAS) module.",
+    )
+    ambient_brightness_limit: int | None = Field(
+        default=None,
+        description=(
+            "Ambient brightness limit used when motion is inactive (day/night gate "
+            "threshold from ``dark_index`` / ``level_array``)."
+        ),
+    )
+    ambient_brightness_limit_presets: list[KasaAmbientBrightnessPresetOut] = Field(
+        default_factory=list,
+        description="Device-defined ambient brightness-limit presets (``level_array``).",
     )
     ambient_light: int | None = Field(
         default=None,
@@ -616,6 +650,10 @@ class KasaMotionTuningOut(BaseModel):
         ...,
         description="Live PIR triggered sensor (polled ADC snapshot; short motion can be missed).",
     )
+    pir_value: int | None = Field(
+        default=None,
+        description="Live signed PIR value derived from ADC (debug; polled snapshot).",
+    )
 
 
 class KasaMotionTuningSetIn(BaseModel):
@@ -624,6 +662,15 @@ class KasaMotionTuningSetIn(BaseModel):
     Omitted fields are left unchanged on the device.
     """
 
+    ambient_brightness_limit: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Ambient brightness limit when motion is inactive (day/night gate). "
+            "See ``ambient_brightness_limit_presets`` for device-defined values; "
+            "custom values are also accepted by the device."
+        ),
+    )
     ambient_light_enabled: bool | None = Field(
         default=None,
         description="Enable or disable ambient light gating (requires ambient module).",

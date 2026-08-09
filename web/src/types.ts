@@ -203,8 +203,19 @@ export interface KasaDevicesSettingsOut {
   devices: KasaDeviceSettingsOut[];
 }
 
+export interface KasaAmbientBrightnessPresetOut {
+  name: string;
+  value: number;
+}
+
 export interface KasaMotionTuningOut {
+  adc_max: number | null;
+  adc_mid: number | null;
+  adc_min: number | null;
+  adc_value: number | null;
   ambient_available: boolean;
+  ambient_brightness_limit: number | null;
+  ambient_brightness_limit_presets: KasaAmbientBrightnessPresetOut[];
   ambient_light: number | null;
   ambient_light_enabled: boolean | null;
   device_id: string;
@@ -220,9 +231,11 @@ export interface KasaMotionTuningOut {
   pir_range_choices: KasaPirRange[];
   pir_threshold: number;
   pir_triggered: boolean;
+  pir_value: number | null;
 }
 
 export interface KasaMotionTuningSetIn {
+  ambient_brightness_limit?: number | null;
   ambient_light_enabled?: boolean | null;
   inactivity_timeout_ms?: number | null;
   pir_enabled?: boolean | null;
