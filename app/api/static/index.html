@@ -756,14 +756,19 @@
     .kasa-credentials-section .settings-dialog-field { flex: 0 0 auto; }
     .kasa-motion-knobs-row { margin-bottom: 0; align-items: flex-end; gap: 10px; }
     .kasa-motion-knobs-row .settings-dialog-field { flex: 1 1 7rem; min-width: 0; }
+    .kasa-motion-checks-row { margin-bottom: 0; align-items: flex-start; gap: 16px; }
+    .kasa-motion-checks-row .settings-dialog-field { flex: 0 0 auto; }
     .kasa-settings-form .settings-dialog-field > input[type="checkbox"] {
       width: auto; align-self: flex-start; margin: 2px 0 0; padding: 0;
       border: none; background: transparent; accent-color: var(--accent); }
     .kasa-motion-sensors-heading { margin: 2px 0 0; }
-    .kasa-motion-sensors { display: grid; grid-template-columns: max-content 1fr;
-      column-gap: 12px; row-gap: 2px; margin: 0; }
-    .kasa-motion-sensors dt { margin: 0; font-weight: 600; color: var(--fg); }
-    .kasa-motion-sensors dd { margin: 0; }
+    .kasa-motion-sensors { display: flex; flex-wrap: wrap; align-items: baseline;
+      column-gap: 20px; row-gap: 4px; margin: 0; }
+    .kasa-motion-sensor { display: flex; align-items: baseline; gap: 0.35rem;
+      white-space: nowrap; }
+    .kasa-motion-sensor-label { margin: 0; font-weight: 600; color: var(--fg); }
+    .kasa-motion-sensor-label::after { content: ":"; }
+    .kasa-motion-sensor-value { margin: 0; }
     .ep1-psk-section .settings-dialog-lead,
     .ep1-ble-section .settings-dialog-lead,
     .ep1-calibration-section .settings-dialog-lead { font-size: 13px; line-height: 1.35; }

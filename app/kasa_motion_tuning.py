@@ -26,11 +26,13 @@ from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 _LOGGER = logging.getLogger(__name__)
 
 KASA_MOTION_TUNING_DEVICE_NOT_FOUND = "No Kasa motion device matched device_id={device_id!r}"
+KASA_MOTION_TUNING_INACTIVITY_TIMEOUT_RANGE = "Expected inactivity_timeout_ms >= 0, got {value}"
 KASA_MOTION_TUNING_MANAGER_UNAVAILABLE = (
     "Kasa device manager is not available; wait for discovery or check Kasa Settings"
 )
 KASA_MOTION_TUNING_MODULE_UNAVAILABLE = "Kasa device {display} has no motion (PIR) module after update"
 KASA_MOTION_TUNING_THRESHOLD_RANGE = "Expected pir_threshold in [0, 100], got {value}"
+_INACTIVITY_TIMEOUT_MS_MIN = 0
 _PIR_THRESHOLD_MAX = 100
 _PIR_THRESHOLD_MIN = 0
 
@@ -69,6 +71,7 @@ class KasaMotionTuningSnapshot:
     display_label: str
     display_name: str | None
     host: str
+    inactivity_timeout_ms: int
     model: str | None
     pir_enabled: bool
     pir_percent: float | None
@@ -83,6 +86,7 @@ async def apply_kasa_motion_tuning(
     *,
     device_id: str,
     ambient_light_enabled: bool | None = None,
+    inactivity_timeout_ms: int | None = None,
     kasa_mgr: KasaDeviceManager | None,
     pir_enabled: bool | None = None,
     pir_range: KasaPirRange | None = None,
@@ -98,10 +102,22 @@ async def apply_kasa_motion_tuning(
         raise KasaMotionTuningNotFoundError(KASA_MOTION_TUNING_DEVICE_NOT_FOUND.format(device_id=device_id))
 
     updates_requested = any(
-        value is not None for value in (ambient_light_enabled, pir_enabled, pir_range, pir_threshold)
+        value is not None
+        for value in (
+            ambient_light_enabled,
+            inactivity_timeout_ms,
+            pir_enabled,
+            pir_range,
+            pir_threshold,
+        )
     )
     if not updates_requested:
         return await read_kasa_motion_tuning(device_id=device_id, kasa_mgr=kasa_mgr)
+
+    if inactivity_timeout_ms is not None and inactivity_timeout_ms < _INACTIVITY_TIMEOUT_MS_MIN:
+        raise KasaMotionTuningValidationError(
+            KASA_MOTION_TUNING_INACTIVITY_TIMEOUT_RANGE.format(value=inactivity_timeout_ms)
+        )
 
     if pir_threshold is not None and not (_PIR_THRESHOLD_MIN <= pir_threshold <= _PIR_THRESHOLD_MAX):
         raise KasaMotionTuningValidationError(KASA_MOTION_TUNING_THRESHOLD_RANGE.format(value=pir_threshold))
@@ -137,6 +153,8 @@ async def apply_kasa_motion_tuning(
             await motion.set_threshold(pir_threshold)
         elif pir_range is not None:
             await motion._set_range_from_str(pir_range.value)
+        if inactivity_timeout_ms is not None:
+            await motion.set_inactivity_timeout(inactivity_timeout_ms)
         if ambient_light_enabled is not None and ambient is not None:
             await ambient.set_enabled(ambient_light_enabled)
         await kd._kDevice.update()
@@ -152,6 +170,7 @@ async def apply_kasa_motion_tuning(
     confirmed = _knobs_match_request(
         snapshot,
         ambient_light_enabled=ambient_light_enabled,
+        inactivity_timeout_ms=inactivity_timeout_ms,
         pir_enabled=pir_enabled,
         pir_range=effective_range,
         pir_threshold=pir_threshold,
@@ -166,6 +185,7 @@ async def apply_kasa_motion_tuning(
         display_label=snapshot.display_label,
         display_name=snapshot.display_name,
         host=snapshot.host,
+        inactivity_timeout_ms=snapshot.inactivity_timeout_ms,
         knobs_confirmed=False,
         model=snapshot.model,
         pir_enabled=snapshot.pir_enabled,
@@ -265,6 +285,7 @@ def _knobs_match_request(
     snapshot: KasaMotionTuningSnapshot,
     *,
     ambient_light_enabled: bool | None,
+    inactivity_timeout_ms: int | None,
     pir_enabled: bool | None,
     pir_range: KasaPirRange | None,
     pir_threshold: int | None,
@@ -274,6 +295,8 @@ def _knobs_match_request(
     if pir_threshold is not None and snapshot.pir_threshold != pir_threshold:
         return False
     if pir_range is not None and snapshot.pir_range is not pir_range:
+        return False
+    if inactivity_timeout_ms is not None and snapshot.inactivity_timeout_ms != inactivity_timeout_ms:
         return False
     if ambient_light_enabled is not None:
         if snapshot.ambient_light_enabled is not ambient_light_enabled:
@@ -367,6 +390,7 @@ def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
         pir_percent = float(motion.pir_percent)
         pir_threshold = int(motion.threshold)
         pir_triggered = bool(motion.pir_triggered)
+        inactivity_timeout_ms = int(motion.inactivity_timeout)
     except KasaMotionTuningError:
         raise
     except Exception as exc:
@@ -391,6 +415,7 @@ def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
         display_label=display,
         display_name=display_name,
         host=kd.host,
+        inactivity_timeout_ms=inactivity_timeout_ms,
         model=_device_model(kd._kDevice),
         pir_enabled=pir_enabled,
         pir_percent=pir_percent,

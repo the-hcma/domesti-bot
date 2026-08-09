@@ -270,6 +270,7 @@ async def put_kasa_device_motion_tuning(
         snapshot = await apply_kasa_motion_tuning(
             device_id=device_id,
             ambient_light_enabled=body.ambient_light_enabled,
+            inactivity_timeout_ms=body.inactivity_timeout_ms,
             kasa_mgr=_live_kasa_mgr(),
             pir_enabled=body.pir_enabled,
             pir_range=body.pir_range,
@@ -877,6 +878,7 @@ def _kasa_motion_tuning_out(snapshot: KasaMotionTuningSnapshot) -> KasaMotionTun
         display_label=snapshot.display_label,
         display_name=snapshot.display_name,
         host=snapshot.host,
+        inactivity_timeout_ms=snapshot.inactivity_timeout_ms,
         knobs_confirmed=snapshot.knobs_confirmed,
         model=snapshot.model,
         pir_enabled=snapshot.pir_enabled,

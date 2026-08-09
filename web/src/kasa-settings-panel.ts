@@ -21,6 +21,11 @@ export const KASA_MOTION_SETTINGS_APPLY_LABEL = "Apply motion tuning";
 export const KASA_MOTION_SETTINGS_APPLY_UNCONFIRMED =
   "Motion settings were sent, but the switch did not confirm all values. Refresh and retry.";
 export const KASA_MOTION_SETTINGS_LEGEND = "Motion (PIR) tuning";
+export const KASA_MOTION_SETTINGS_LINGER_INFO_DETAIL =
+  "How long the light stays on after the last motion detection (device inactivity timeout / cold time). The Kasa app’s default Smart Control rule can overwrite this back to about 60 seconds — delete or edit that rule if changes do not stick.";
+export const KASA_MOTION_SETTINGS_LINGER_INFO_EXAMPLE =
+  "Set 120 so a hallway light stays on for two minutes after you walk past.";
+export const KASA_MOTION_SETTINGS_LINGER_LABEL = "Linger after motion (seconds)";
 export const KASA_MOTION_SETTINGS_LIVE_SENSORS_HEADING = "Live sensors";
 export const KASA_MOTION_SETTINGS_LIVE_SENSORS_INFO_DETAIL =
   "Read-only polled snapshots from the switch. They are not editable here — use Refresh sensors to update. Short motion can be missed between polls.";
@@ -58,7 +63,7 @@ function appendMotionIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
   intro.className = "settings-dialog-lead";
   intro.textContent =
-    "Edit PIR enable / range / threshold and ambient-light enable on motion-capable wall switches (for example KS200M). PIR triggered, PIR percent, and ambient light below are live read-only sensors — refresh to update; short motion can be missed between polls.";
+    "Edit PIR range / threshold, linger after motion, enable switches, and ambient-light enable on motion-capable wall switches (for example KS200M). PIR triggered, PIR percent, and ambient light below are live read-only sensors — refresh to update; short motion can be missed between polls.";
   parent.append(intro);
 }
 
@@ -240,9 +245,23 @@ export async function mountKasaSettingsPanel(
     pirThresholdInput,
   );
 
+  const lingerInput = document.createElement("input");
+  lingerInput.type = "number";
+  lingerInput.name = "linger_seconds";
+  lingerInput.min = "0";
+  lingerInput.step = "1";
+  const lingerField = createMotionField(
+    KASA_MOTION_SETTINGS_LINGER_LABEL,
+    {
+      detail: KASA_MOTION_SETTINGS_LINGER_INFO_DETAIL,
+      example: KASA_MOTION_SETTINGS_LINGER_INFO_EXAMPLE,
+    },
+    lingerInput,
+  );
+
   const knobsRow = document.createElement("div");
   knobsRow.className = "settings-dialog-field-row kasa-motion-knobs-row";
-  knobsRow.append(pirEnabledField, pirRangeField, pirThresholdField);
+  knobsRow.append(pirRangeField, pirThresholdField, lingerField);
 
   const ambientEnabledInput = document.createElement("input");
   ambientEnabledInput.type = "checkbox";
@@ -256,6 +275,10 @@ export async function mountKasaSettingsPanel(
     ambientEnabledInput,
   );
 
+  const checksRow = document.createElement("div");
+  checksRow.className = "settings-dialog-field-row kasa-motion-checks-row";
+  checksRow.append(pirEnabledField, ambientEnabledField);
+
   const liveSensorsHeading = document.createElement("h3");
   liveSensorsHeading.className =
     "settings-dialog-subheading kasa-motion-sensors-heading";
@@ -266,28 +289,36 @@ export async function mountKasaSettingsPanel(
     }),
   );
 
-  const sensors = document.createElement("dl");
+  const sensors = document.createElement("div");
   sensors.className = "settings-dialog-lead kasa-motion-sensors";
-  const triggeredDt = document.createElement("dt");
-  triggeredDt.textContent = "PIR triggered";
-  const triggeredDd = document.createElement("dd");
+  const triggeredItem = document.createElement("div");
+  triggeredItem.className = "kasa-motion-sensor";
+  const triggeredLabel = document.createElement("span");
+  triggeredLabel.className = "kasa-motion-sensor-label";
+  triggeredLabel.textContent = "PIR triggered";
+  const triggeredDd = document.createElement("span");
+  triggeredDd.className = "kasa-motion-sensor-value";
   triggeredDd.textContent = "—";
-  const percentDt = document.createElement("dt");
-  percentDt.textContent = "PIR percent";
-  const percentDd = document.createElement("dd");
+  triggeredItem.append(triggeredLabel, triggeredDd);
+  const percentItem = document.createElement("div");
+  percentItem.className = "kasa-motion-sensor";
+  const percentLabel = document.createElement("span");
+  percentLabel.className = "kasa-motion-sensor-label";
+  percentLabel.textContent = "PIR percent";
+  const percentDd = document.createElement("span");
+  percentDd.className = "kasa-motion-sensor-value";
   percentDd.textContent = "—";
-  const ambientDt = document.createElement("dt");
-  ambientDt.textContent = "Ambient light";
-  const ambientDd = document.createElement("dd");
+  percentItem.append(percentLabel, percentDd);
+  const ambientItem = document.createElement("div");
+  ambientItem.className = "kasa-motion-sensor";
+  const ambientLabel = document.createElement("span");
+  ambientLabel.className = "kasa-motion-sensor-label";
+  ambientLabel.textContent = "Ambient light";
+  const ambientDd = document.createElement("span");
+  ambientDd.className = "kasa-motion-sensor-value";
   ambientDd.textContent = "—";
-  sensors.append(
-    triggeredDt,
-    triggeredDd,
-    percentDt,
-    percentDd,
-    ambientDt,
-    ambientDd,
-  );
+  ambientItem.append(ambientLabel, ambientDd);
+  sensors.append(triggeredItem, percentItem, ambientItem);
 
   const motionActions = document.createElement("div");
   motionActions.className = "settings-dialog-actions";
@@ -304,7 +335,7 @@ export async function mountKasaSettingsPanel(
   motionSection.append(
     motionStatus,
     knobsRow,
-    ambientEnabledField,
+    checksRow,
     liveSensorsHeading,
     sensors,
     motionActions,
@@ -365,6 +396,7 @@ export async function mountKasaSettingsPanel(
       pirEnabledInput.checked = false;
       pirRangeSelect.replaceChildren();
       pirThresholdInput.value = "";
+      lingerInput.value = "";
       ambientEnabledInput.checked = false;
       triggeredDd.textContent = "—";
       percentDd.textContent = "—";
@@ -384,6 +416,7 @@ export async function mountKasaSettingsPanel(
       pirRangeSelect.append(option);
     }
     pirThresholdInput.value = String(snap.pir_threshold);
+    lingerInput.value = String(Math.round(snap.inactivity_timeout_ms / 1000));
     ambientEnabledInput.checked = snap.ambient_light_enabled === true;
     triggeredDd.textContent = snap.pir_triggered ? "yes" : "no";
     percentDd.textContent =
@@ -699,6 +732,21 @@ export async function mountKasaSettingsPanel(
           body.pir_range = nextRange;
         }
       }
+      const lingerRaw = lingerInput.value.trim();
+      const nextLingerSeconds = Number(lingerRaw);
+      if (
+        lingerRaw !== "" &&
+        Number.isFinite(nextLingerSeconds)
+      ) {
+        if (nextLingerSeconds < 0) {
+          showMotionStatus("Linger after motion must be 0 or greater.");
+          return;
+        }
+        const nextLingerMs = Math.trunc(nextLingerSeconds) * 1000;
+        if (nextLingerMs !== baseline.inactivity_timeout_ms) {
+          body.inactivity_timeout_ms = nextLingerMs;
+        }
+      }
       if (baseline.ambient_available) {
         const nextAmbient = ambientEnabledInput.checked;
         if (nextAmbient !== (baseline.ambient_light_enabled === true)) {
@@ -709,6 +757,7 @@ export async function mountKasaSettingsPanel(
         body.pir_enabled == null &&
         body.pir_range == null &&
         body.pir_threshold == null &&
+        body.inactivity_timeout_ms == null &&
         body.ambient_light_enabled == null
       ) {
         showMotionStatus("No motion settings changed.");

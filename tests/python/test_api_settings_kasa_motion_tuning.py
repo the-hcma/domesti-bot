@@ -58,6 +58,7 @@ def test_get_kasa_motion_tuning_returns_snapshot() -> None:
     assert body["pir_enabled"] is True
     assert body["pir_range"] == "Mid"
     assert body["pir_threshold"] == 50
+    assert body["inactivity_timeout_ms"] == 60_000
     assert body["ambient_available"] is True
     assert body["ambient_light"] == 64
     assert body["knobs_confirmed"] is True
@@ -89,6 +90,7 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
         display_label=base.display_label,
         display_name=base.display_name,
         host=base.host,
+        inactivity_timeout_ms=120_000,
         knobs_confirmed=True,
         model=base.model,
         pir_enabled=False,
@@ -109,6 +111,7 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
                 "pir_enabled": False,
                 "pir_range": "Near",
                 "pir_threshold": 40,
+                "inactivity_timeout_ms": 120_000,
                 "ambient_light_enabled": False,
             },
         )
@@ -117,6 +120,7 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
     assert body["pir_enabled"] is False
     assert body["pir_range"] == "Near"
     assert body["pir_threshold"] == 40
+    assert body["inactivity_timeout_ms"] == 120_000
     assert body["ambient_light_enabled"] is False
     apply_mock.assert_awaited_once()
     assert apply_mock.await_args is not None
@@ -125,6 +129,7 @@ def test_put_kasa_motion_tuning_writes_knobs() -> None:
     assert kwargs["pir_enabled"] is False
     assert kwargs["pir_range"] is KasaPirRange.NEAR
     assert kwargs["pir_threshold"] == 40
+    assert kwargs["inactivity_timeout_ms"] == 120_000
     assert kwargs["ambient_light_enabled"] is False
 
 
@@ -156,6 +161,7 @@ def test_put_kasa_motion_tuning_unconfirmed() -> None:
         display_label=base.display_label,
         display_name=base.display_name,
         host=base.host,
+        inactivity_timeout_ms=base.inactivity_timeout_ms,
         knobs_confirmed=False,
         model=base.model,
         pir_enabled=base.pir_enabled,
@@ -197,6 +203,7 @@ def _snapshot(*, device_id: str = "98:25:4a:64:ac:90") -> KasaMotionTuningSnapsh
         display_label=f"Garage light ({device_id})",
         display_name="Garage light",
         host="192.168.86.186",
+        inactivity_timeout_ms=60_000,
         model="KS200M(US)",
         pir_enabled=True,
         pir_percent=-1.07,

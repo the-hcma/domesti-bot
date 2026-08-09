@@ -211,6 +211,7 @@ export interface KasaMotionTuningOut {
   display_label: string;
   display_name: string | null;
   host: string;
+  inactivity_timeout_ms: number;
   knobs_confirmed: boolean;
   model: string | null;
   pir_enabled: boolean;
@@ -223,6 +224,7 @@ export interface KasaMotionTuningOut {
 
 export interface KasaMotionTuningSetIn {
   ambient_light_enabled?: boolean | null;
+  inactivity_timeout_ms?: number | null;
   pir_enabled?: boolean | null;
   pir_range?: KasaPirRange | null;
   pir_threshold?: number | null;
