@@ -762,8 +762,7 @@
     .kasa-motion-knobs-row { margin-bottom: 0; align-items: flex-end; gap: 10px;
       flex-wrap: wrap; }
     .kasa-motion-knobs-row .settings-dialog-field { flex: 1 1 8.5rem; min-width: 0; }
-    .kasa-motion-knobs-row .rules-field-label-row,
-    .kasa-motion-knobs-row .rules-field-label-row label { white-space: nowrap; }
+    .kasa-motion-knobs-row .rules-field-label-row > label { white-space: nowrap; }
     .kasa-motion-checks-row { margin-bottom: 0; align-items: center; gap: 16px;
       flex-wrap: wrap; }
     .kasa-motion-checks-row .settings-dialog-field { flex: 0 0 auto; }
@@ -787,7 +786,8 @@
        would otherwise overflow past the dialog with left:0 anchoring). */
     .settings-hub-dialog .rules-info-popover:not([hidden]) {
       max-width: min(20rem, calc(100vw - 4rem));
-      box-sizing: border-box; overflow-wrap: anywhere; word-break: break-word; }
+      box-sizing: border-box; white-space: normal; overflow-wrap: anywhere;
+      word-break: break-word; }
     .settings-hub-dialog .kasa-motion-knobs-row .settings-dialog-field:last-child
       .rules-info-popover:not([hidden]),
     .settings-hub-dialog .kasa-motion-checks-row .settings-dialog-field:last-child
