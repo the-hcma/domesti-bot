@@ -175,6 +175,48 @@ def rule_references_user_id(
     return any(user_id.strip().lower() == needle for user_id in condition_user_ids)
 
 
+def stale_device_display_name_issue(
+    ctx: RuleValidationContext,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+    display_name: str | None,
+) -> RuleReferenceIssueOut | None:
+    """Return a Warning when ``display_name`` no longer matches the live preferred label."""
+    stored = (display_name or "").strip()
+    if stored == "":
+        return None
+    if ctx.device_state is None:
+        return None
+    reference = device_id.strip()
+    if reference == "" or not is_canonical_rule_device_id(family_id, reference):
+        return None
+    try:
+        if not _device_reference_resolves(ctx, family_id=family_id, device_id=reference):
+            return None
+        live = lookup_preferred_label(
+            ctx.device_state,
+            family_id=family_id,
+            device_id=reference,
+        )
+    except RuleActionDispatchError:
+        return None
+    if live is None:
+        return None
+    live_trimmed = live.strip()
+    if live_trimmed == "" or stored.casefold() == live_trimmed.casefold():
+        return None
+    return RuleReferenceIssueOut(
+        detail=stale_device_display_name_detail(
+            device_id=reference,
+            live=live_trimmed,
+            stored=stored,
+        ),
+        kind=RuleReferenceIssueKind.STALE_DEVICE_DISPLAY_NAME,
+        reference=reference,
+    )
+
+
 def validate_rule(
     rule: RuleOut,
     ctx: RuleValidationContext,
@@ -278,7 +320,7 @@ def _device_reference_issues(
     )
     if primary is not None:
         issues.append(primary)
-    stale = _stale_device_display_name_issue(
+    stale = stale_device_display_name_issue(
         ctx,
         family_id=family_id,
         device_id=device_id,
@@ -386,47 +428,6 @@ def _resolve_device_ref_to_identifier(
             return resolve_vizio_identifier_by_label(state.vizio_mgr, device_ref)
         case _:
             return None
-
-
-def _stale_device_display_name_issue(
-    ctx: RuleValidationContext,
-    *,
-    family_id: DeviceFamilyId,
-    device_id: str,
-    display_name: str | None,
-) -> RuleReferenceIssueOut | None:
-    stored = (display_name or "").strip()
-    if stored == "":
-        return None
-    if ctx.device_state is None:
-        return None
-    reference = device_id.strip()
-    if reference == "" or not is_canonical_rule_device_id(family_id, reference):
-        return None
-    try:
-        if not _device_reference_resolves(ctx, family_id=family_id, device_id=reference):
-            return None
-        live = lookup_preferred_label(
-            ctx.device_state,
-            family_id=family_id,
-            device_id=reference,
-        )
-    except RuleActionDispatchError:
-        return None
-    if live is None:
-        return None
-    live_trimmed = live.strip()
-    if live_trimmed == "" or stored.casefold() == live_trimmed.casefold():
-        return None
-    return RuleReferenceIssueOut(
-        detail=stale_device_display_name_detail(
-            device_id=reference,
-            live=live_trimmed,
-            stored=stored,
-        ),
-        kind=RuleReferenceIssueKind.STALE_DEVICE_DISPLAY_NAME,
-        reference=reference,
-    )
 
 
 def _unknown_user_issue(

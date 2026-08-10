@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.api.schemas import (
+    DevicesAnyInStateCondition,
+    RuleConditionDeviceRefOut,
     RuleConditionsOut,
     RuleDeviceActionOut,
     RuleOut,
@@ -18,6 +20,7 @@ from app.api.schemas import (
 from app.db.schema import bootstrap_schema
 from app.device_display import format_device_display
 from app.device_enums import (
+    DeviceConditionState,
     DeviceFamilyId,
     OperatorDigestId,
     RuleDeviceActionType,
@@ -126,6 +129,68 @@ def test_collect_stale_display_name_findings_filters_kind() -> None:
     assert findings[0].stored_display_name == "Old HDHomeRun name"
 
 
+def test_collect_uses_stale_condition_snapshot_when_action_is_current() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DevicesAnyInStateCondition(
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id="dc:62:79:6c:86:77",
+                            display_name="Old HDHomeRun name",
+                            family_id=DeviceFamilyId.KASA,
+                        ),
+                    ],
+                    state=DeviceConditionState.ON,
+                    type="devices_any_in_state",
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[
+            RuleDeviceActionOut(
+                action=RuleDeviceActionType.TURN_OFF,
+                device_id="dc:62:79:6c:86:77",
+                display_name="HDHomeRun tuner",
+                family_id=DeviceFamilyId.KASA,
+            ),
+        ],
+        enabled=True,
+        id="mixed-label",
+        label="Mixed label",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.SCHEDULED],
+        schedule_cron="0 4 * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with (
+        patch(
+            "app.rule_validation.resolve_kasa_host_by_label",
+            return_value="dc:62:79:6c:86:77",
+        ),
+        patch(
+            "app.rule_validation.lookup_preferred_label",
+            return_value="HDHomeRun tuner",
+        ),
+        patch(
+            "app.stale_device_display_name_email.lookup_preferred_label",
+            return_value="HDHomeRun tuner",
+        ),
+    ):
+        findings = collect_stale_display_name_findings([rule], ctx)
+    assert len(findings) == 1
+    assert findings[0].stored_display_name == "Old HDHomeRun name"
+    assert findings[0].live_display_name == "HDHomeRun tuner"
+
+
 def test_maybe_send_delivers_when_findings_and_recipients(
     tmp_path: Path,
 ) -> None:
@@ -184,6 +249,10 @@ def test_maybe_send_delivers_when_findings_and_recipients(
             "app.stale_device_display_name_email.domesti_public_base_url",
             return_value=None,
         ),
+        patch(
+            "app.stale_device_display_name_email.time.time",
+            return_value=_NOW + 5.0,
+        ),
     ):
         sent = maybe_send_stale_display_name_digest(
             cache_path=cache,
@@ -198,7 +267,7 @@ def test_maybe_send_delivers_when_findings_and_recipients(
             cache,
             OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
         )
-        == _NOW
+        == _NOW + 5.0
     )
 
 

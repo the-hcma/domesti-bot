@@ -19,7 +19,6 @@ from app.api.schemas import (
     Ep1ReadingCompareCondition,
     RuleConditionOut,
     RuleOut,
-    RuleReferenceIssueOut,
     normalized_vacation_notification_emails,
 )
 from app.automation_rules_loader import (
@@ -33,7 +32,6 @@ from app.device_display import format_device_display
 from app.device_enums import (
     DeviceFamilyId,
     OperatorDigestId,
-    RuleReferenceIssueKind,
     StaleDeviceDisplayNameEmailSource,
 )
 from app.domesti_bot_cli import DeviceManagersState
@@ -53,14 +51,14 @@ from app.outbound_email import (
     provenance_footer,
     record_outbound_smtp_failure,
 )
-from app.rule_actions import RuleActionDispatchError, lookup_preferred_label
+from app.rule_actions import lookup_preferred_label
 from app.rule_notification import rule_automation_status_url
 from app.rule_validation import (
     RosterUserRow,
     RuleValidationContext,
     build_roster_name_hint_lookup,
     build_roster_user_id_lookup,
-    validate_rule,
+    stale_device_display_name_issue,
 )
 from app.rules_store import list_geofences, list_users
 from app.smtp_store import load_smtp_config, smtp_send_ready
@@ -157,13 +155,41 @@ def collect_stale_display_name_findings(
     rules: list[RuleOut],
     ctx: RuleValidationContext,
 ) -> tuple[StaleDisplayNameFinding, ...]:
-    """Return stale ``display_name`` issues across ``rules`` (stable order)."""
+    """Return stale ``display_name`` snapshots across ``rules`` (stable, deduped)."""
     findings: list[StaleDisplayNameFinding] = []
+    seen: set[tuple[str, str, str]] = set()
+    if ctx.device_state is None:
+        return ()
     for rule in sorted(rules, key=lambda row: row.id):
-        for issue in validate_rule(rule, ctx):
-            finding = _finding_from_issue(rule, issue, ctx)
-            if finding is not None:
-                findings.append(finding)
+        for family_id, device_id, stored in _iter_rule_display_snapshots(rule):
+            key = (rule.id, device_id, stored.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            issue = stale_device_display_name_issue(
+                ctx,
+                family_id=family_id,
+                device_id=device_id,
+                display_name=stored,
+            )
+            if issue is None:
+                continue
+            live = lookup_preferred_label(
+                ctx.device_state,
+                family_id=family_id,
+                device_id=device_id,
+            )
+            if live is None or live.strip() == "":
+                continue
+            findings.append(
+                StaleDisplayNameFinding(
+                    device_id=device_id,
+                    live_display_name=live.strip(),
+                    rule_id=rule.id,
+                    rule_label=rule.label,
+                    stored_display_name=stored,
+                )
+            )
     return tuple(findings)
 
 
@@ -232,7 +258,6 @@ def maybe_send_stale_display_name_digest(
         timezone=timezone,
     ):
         return False
-    local_date = datetime.fromtimestamp(clock, tz=timezone).date().isoformat()
     try:
         sent = send_stale_display_name_digest(
             findings,
@@ -251,11 +276,12 @@ def maybe_send_stale_display_name_digest(
             digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
         )
         return False
+    completed_at = time.time()
     complete_operator_digest_send(
         cache_path,
         digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
-        last_sent_at=clock,
-        local_date=local_date,
+        last_sent_at=completed_at,
+        local_date=datetime.fromtimestamp(completed_at, tz=timezone).date().isoformat(),
     )
     return True
 
@@ -331,58 +357,6 @@ def _build_validation_context(
     )
 
 
-def _device_display_snapshot(
-    rule: RuleOut,
-    device_id: str,
-) -> tuple[DeviceFamilyId, str] | None:
-    needle = device_id.strip()
-    for action in rule.device_actions:
-        if action.device_id.strip() != needle:
-            continue
-        stored = (action.display_name or "").strip()
-        if stored:
-            return action.family_id, stored
-    for ref_family, ref_id, stored in _iter_condition_display_snapshots(rule.conditions.all):
-        if ref_id == needle and stored:
-            return ref_family, stored
-    return None
-
-
-def _finding_from_issue(
-    rule: RuleOut,
-    issue: RuleReferenceIssueOut,
-    ctx: RuleValidationContext,
-) -> StaleDisplayNameFinding | None:
-    if issue.kind != RuleReferenceIssueKind.STALE_DEVICE_DISPLAY_NAME:
-        return None
-    if ctx.device_state is None:
-        return None
-    snapshot = _device_display_snapshot(rule, issue.reference)
-    if snapshot is None:
-        return None
-    family_id, stored = snapshot
-    try:
-        live = lookup_preferred_label(
-            ctx.device_state,
-            family_id=family_id,
-            device_id=issue.reference,
-        )
-    except RuleActionDispatchError:
-        return None
-    if live is None:
-        return None
-    live_trimmed = live.strip()
-    if live_trimmed == "":
-        return None
-    return StaleDisplayNameFinding(
-        device_id=issue.reference,
-        live_display_name=live_trimmed,
-        rule_id=rule.id,
-        rule_label=rule.label,
-        stored_display_name=stored,
-    )
-
-
 def _iter_condition_display_snapshots(
     conditions: list[RuleConditionOut],
 ) -> list[tuple[DeviceFamilyId, str, str]]:
@@ -414,4 +388,16 @@ def _iter_condition_display_snapshots(
             found.extend(_iter_condition_display_snapshots(condition.conditions))
         elif isinstance(condition, AnyConditionsCondition):
             found.extend(_iter_condition_display_snapshots(condition.conditions))
+    return found
+
+
+def _iter_rule_display_snapshots(
+    rule: RuleOut,
+) -> list[tuple[DeviceFamilyId, str, str]]:
+    found: list[tuple[DeviceFamilyId, str, str]] = []
+    for action in rule.device_actions:
+        stored = (action.display_name or "").strip()
+        if stored:
+            found.append((action.family_id, action.device_id.strip(), stored))
+    found.extend(_iter_condition_display_snapshots(rule.conditions.all))
     return found
