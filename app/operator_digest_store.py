@@ -114,7 +114,6 @@ def try_claim_operator_digest_for_local_day(
             return False
         if _row_has_active_claim(
             row,
-            local_date=local_date,
             now_epoch=now_epoch,
             claim_ttl_s=claim_ttl_s,
         ):
@@ -175,10 +174,9 @@ def _row_already_sent_on_local_date(
 def _row_has_active_claim(
     row: OperatorDigestState,
     *,
-    local_date: str,
     now_epoch: float,
     claim_ttl_s: float,
 ) -> bool:
-    if row.claim_local_date != local_date or row.claimed_at is None:
+    if row.claimed_at is None:
         return False
     return (now_epoch - row.claimed_at) < claim_ttl_s
