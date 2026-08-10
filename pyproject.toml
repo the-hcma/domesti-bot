@@ -63,7 +63,7 @@ dependencies = [
     "idna>=3.18",
     "lxml==6.1.1",
     "mashumaro==3.22",
-    "playwright>=1.61.0",
+    "playwright>=1.62.0",
     "prompt_toolkit>=3.0.43",
     "protobuf>=7.35.1",
     "pychromecast>=14.0.10",
@@ -83,7 +83,7 @@ dependencies = [
     "uvicorn[standard]>=0.52.0",
     "watchfiles==1.2.0",
     "wcwidth>=0.8.2",
-    "websockets>=17.0",
+    "websockets>=17.0.1",
     "yarl>=1.24.5",
     "zeroconf>=0.150.0",
 ]
@@ -145,7 +145,7 @@ known-first-party = ["app", "config"]
 dev = [
     "httpx2>=2.9.1",
     "icecream>=2.2.0",
-    "playwright>=1.61.0",
+    "playwright>=1.62.0",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
