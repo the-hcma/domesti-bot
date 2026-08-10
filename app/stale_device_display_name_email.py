@@ -68,6 +68,7 @@ _LOGGER = logging.getLogger(__name__)
 STALE_DISPLAY_NAME_DIGEST_FINDING_TEMPLATE = (
     '{device_label}: stored display_name "{stored}" no longer matches the live label'
 )
+STALE_DISPLAY_NAME_DIGEST_INSTANCE_PREFIX = "Instance:"
 STALE_DISPLAY_NAME_DIGEST_INTRO = (
     "One or more automation rules still store a friendly device name that no longer "
     "matches the live label on the device. The MAC (device id) is still correct — "
@@ -128,9 +129,10 @@ def build_stale_display_name_digest_bodies(
     html_parts.append("</ul>")
     instance_url = domesti_public_base_url(cache_path)
     if instance_url is not None:
-        plain_parts.extend(["", f"Instance: {instance_url}"])
+        plain_parts.extend(["", f"{STALE_DISPLAY_NAME_DIGEST_INSTANCE_PREFIX} {instance_url}"])
         html_parts.append(
-            f'<p>Instance: <a href="{escape(instance_url, quote=True)}">{escape(instance_url, quote=False)}</a></p>'
+            f"<p>{escape(STALE_DISPLAY_NAME_DIGEST_INSTANCE_PREFIX, quote=False)} "
+            f'<a href="{escape(instance_url, quote=True)}">{escape(instance_url, quote=False)}</a></p>'
         )
     else:
         plain_parts.extend(
@@ -327,7 +329,7 @@ def send_stale_display_name_digest(
         "[rules] stale display-name digest sent finding_count=%d recipient_count=%d %s",
         len(findings),
         len(recipients),
-        result.format_for_log(),
+        result.format_for_log(redact_recipients=True),
     )
     return True
 

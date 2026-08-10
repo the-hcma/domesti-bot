@@ -33,10 +33,12 @@ from app.operator_digest_store import (
     try_claim_operator_digest_for_local_day,
     upsert_operator_digest_last_sent_at,
 )
+from app.outbound_email import provenance_footer
 from app.rule_validation import RuleValidationContext
 from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult
 from app.stale_device_display_name_email import (
     STALE_DISPLAY_NAME_DIGEST_FINDING_TEMPLATE,
+    STALE_DISPLAY_NAME_DIGEST_INSTANCE_PREFIX,
     STALE_DISPLAY_NAME_DIGEST_INTRO,
     STALE_DISPLAY_NAME_DIGEST_STATUS_LINK_TEXT,
     STALE_DISPLAY_NAME_DIGEST_SUBJECT,
@@ -47,9 +49,6 @@ from app.stale_device_display_name_email import (
     maybe_send_stale_display_name_digest,
     send_stale_display_name_digest,
 )
-
-_NOW = 1_700_000_000.0  # 2023-11-14 ~15:33 UTC
-_TZ = ZoneInfo("America/New_York")
 
 
 def test_build_stale_display_name_digest_bodies_include_provenance_and_facts(
@@ -67,16 +66,20 @@ def test_build_stale_display_name_digest_bodies_include_provenance_and_facts(
         device_label=device_label,
         stored=finding.stored_display_name,
     )
+    expected_provenance = provenance_footer(
+        subsystem=STALE_DISPLAY_NAME_DIGEST_SUBSYSTEM,
+        trigger=StaleDeviceDisplayNameEmailSource.AUTOMATIC.value,
+    )
     assert STALE_DISPLAY_NAME_DIGEST_INTRO in plain
     assert "Stale label (stale-label)" in plain
     assert expected_detail in plain
     assert device_label == "HDHomeRun tuner (dc:62:79:6c:86:77)"
-    assert "Instance: https://home.example.com" in plain
-    assert f"Sent by: domesti-bot · {STALE_DISPLAY_NAME_DIGEST_SUBSYSTEM} (automatic)" in plain
+    assert f"{STALE_DISPLAY_NAME_DIGEST_INSTANCE_PREFIX} https://home.example.com" in plain
+    assert expected_provenance in plain
     assert STALE_DISPLAY_NAME_DIGEST_INTRO in html
     assert STALE_DISPLAY_NAME_DIGEST_STATUS_LINK_TEXT in html
     assert "#/automations/status/stale-label" in html
-    assert f"Sent by: domesti-bot · {STALE_DISPLAY_NAME_DIGEST_SUBSYSTEM} (automatic)" in html
+    assert expected_provenance in html
 
 
 def test_collect_stale_display_name_findings_filters_kind() -> None:
@@ -399,6 +402,10 @@ def test_try_claim_operator_digest_is_atomic_across_threads(tmp_path: Path) -> N
         )
         is False
     )
+
+
+_NOW = 1_700_000_000.0  # 2023-11-14 ~15:33 UTC
+_TZ = ZoneInfo("America/New_York")
 
 
 def _finding() -> StaleDisplayNameFinding:

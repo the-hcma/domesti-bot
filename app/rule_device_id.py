@@ -8,13 +8,14 @@ warning when a rule still uses one.
 
 from __future__ import annotations
 
+from app.device_display import format_device_display
 from app.device_enums import DeviceFamilyId
 from app.device_mac import is_normalized_mac, try_normalize_mac
 
 # Public message constants (asserted by tests — do not hard-code prose there).
 RULE_DEVICE_DISPLAY_NAME_STALE_WARNING = (
-    'Stored display_name "{stored}" for device {device_id} no longer matches '
-    'live label "{live}" — update the rule snapshot (device_id stays authoritative).'
+    'Stored display_name "{stored}" for {device_label} no longer matches '
+    "the live preferred label — update the rule snapshot (device_id stays authoritative)."
 )
 RULE_DEVICE_ID_DISPLAY_NAME_WARNING = (
     'Device id "{device_id}" looks like a display name; store the MAC address '
@@ -60,9 +61,9 @@ def stale_device_display_name_detail(
     stored: str,
 ) -> str:
     """Operator-facing warning when a rule's display_name snapshot is out of date."""
+    device_label = format_device_display(device_id, live)
     return RULE_DEVICE_DISPLAY_NAME_STALE_WARNING.format(
-        device_id=device_id.strip(),
-        live=live.strip(),
+        device_label=device_label,
         stored=stored.strip(),
     )
 
