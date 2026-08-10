@@ -130,6 +130,7 @@ from app.rule_validation import (
     rule_watches_backend_device,
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
+from app.stale_device_display_name_email import maybe_send_stale_display_name_digest
 from app.vacation_mode import tick_vacation_mode
 from app.wifi_home_presence import (
     history_row_geofence_inside,
@@ -1500,6 +1501,7 @@ class RuleEvaluator:
                     await self._maybe_process_device_dwell_satisfied()
                     await self._maybe_request_locations_for_deferred_edges()
                     await self._tick_vacation_mode(ctx, now=self._now_fn())
+                    await self._maybe_send_stale_display_name_digest()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1534,6 +1536,21 @@ class RuleEvaluator:
         }
         for rule_id in stale_rule_ids:
             self._cancel_deferred_device_actions_for_rule(rule_id)
+
+    async def _maybe_send_stale_display_name_digest(self) -> None:
+        """Email operators when rule display_name snapshots drift (at most once/day)."""
+        cache_path = self._cache_path
+        if cache_path is None:
+            return
+        try:
+            await asyncio.to_thread(
+                maybe_send_stale_display_name_digest,
+                cache_path=cache_path,
+                device_state=self._device_state_getter(),
+                now_epoch=self._now_fn(),
+            )
+        except Exception:
+            _LOGGER.exception("[rules] stale display-name digest tick failed")
 
     async def _tick_vacation_mode(
         self,

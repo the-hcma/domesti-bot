@@ -169,6 +169,12 @@ class KasaPirRange(StrEnum):
     NEAR = "Near"
 
 
+class OperatorDigestId(StrEnum):
+    """Persisted once-per-day operator digest kinds (SQLite ``operator_digest_state``)."""
+
+    STALE_DEVICE_DISPLAY_NAME = "stale_device_display_name"
+
+
 class RuleDeviceActionType(StrEnum):
     """Per-device command dispatched when an automation rule fires."""
 
@@ -279,6 +285,12 @@ class SettingsCredentialsTestSource(StrEnum):
     DATABASE = "database"
     ENV = "env"
     FORM = "form"
+
+
+class StaleDeviceDisplayNameEmailSource(StrEnum):
+    """What triggered a stale rule ``display_name`` digest email."""
+
+    AUTOMATIC = "automatic"
 
 
 class UiActionType(StrEnum):

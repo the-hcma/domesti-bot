@@ -1,0 +1,296 @@
+"""Hermetic tests for stale device display_name digest emails."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.api.schemas import (
+    RuleConditionsOut,
+    RuleDeviceActionOut,
+    RuleOut,
+    VacationModeSettingsOut,
+)
+from app.db.schema import bootstrap_schema
+from app.device_enums import (
+    DeviceFamilyId,
+    OperatorDigestId,
+    RuleDeviceActionType,
+    RuleTrigger,
+    StaleDeviceDisplayNameEmailSource,
+)
+from app.operator_digest_store import (
+    load_operator_digest_last_sent_at,
+    upsert_operator_digest_last_sent_at,
+)
+from app.rule_device_id import RULE_DEVICE_DISPLAY_NAME_STALE_WARNING
+from app.rule_validation import RuleValidationContext
+from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult
+from app.stale_device_display_name_email import (
+    STALE_DISPLAY_NAME_DIGEST_INTRO,
+    STALE_DISPLAY_NAME_DIGEST_SUBJECT,
+    STALE_DISPLAY_NAME_DIGEST_SUBSYSTEM,
+    StaleDisplayNameFinding,
+    build_stale_display_name_digest_bodies,
+    collect_stale_display_name_findings,
+    maybe_send_stale_display_name_digest,
+    send_stale_display_name_digest,
+)
+
+_NOW = 1_700_000_000.0  # 2023-11-14 ~15:33 UTC
+
+
+def _finding() -> StaleDisplayNameFinding:
+    return StaleDisplayNameFinding(
+        detail=RULE_DEVICE_DISPLAY_NAME_STALE_WARNING.format(
+            device_id="dc:62:79:6c:86:77",
+            live="HDHomeRun tuner",
+            stored="Old HDHomeRun name",
+        ),
+        device_id="dc:62:79:6c:86:77",
+        rule_id="stale-label",
+        rule_label="Stale label",
+    )
+
+
+def _smtp_params() -> SmtpConnectionParams:
+    return SmtpConnectionParams(
+        from_address="noreply@example.com",
+        host="smtp.example.com",
+        mail_domain="example.com",
+        password="secret",
+        port=587,
+        username="noreply@example.com",
+    )
+
+
+def test_build_stale_display_name_digest_bodies_include_provenance_and_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_PUBLIC_BASE_URL", "https://home.example.com")
+    plain, html = build_stale_display_name_digest_bodies(
+        (_finding(),),
+        cache_path=None,
+        source=StaleDeviceDisplayNameEmailSource.AUTOMATIC,
+    )
+    assert STALE_DISPLAY_NAME_DIGEST_INTRO in plain
+    assert "Stale label (stale-label)" in plain
+    assert "Old HDHomeRun name" in plain
+    assert "HDHomeRun tuner" in plain
+    assert "Instance: https://home.example.com" in plain
+    assert f"Sent by: domesti-bot · {STALE_DISPLAY_NAME_DIGEST_SUBSYSTEM} (automatic)" in plain
+    assert STALE_DISPLAY_NAME_DIGEST_INTRO in html
+    assert "view rule status" in html
+    assert "#/automations/status/stale-label" in html
+    assert f"Sent by: domesti-bot · {STALE_DISPLAY_NAME_DIGEST_SUBSYSTEM} (automatic)" in html
+
+
+def test_collect_stale_display_name_findings_filters_kind() -> None:
+    rule = RuleOut(
+        conditions=RuleConditionsOut(all=[]),
+        cooldown_s=60,
+        device_actions=[
+            RuleDeviceActionOut(
+                action=RuleDeviceActionType.TURN_OFF,
+                device_id="dc:62:79:6c:86:77",
+                display_name="Old HDHomeRun name",
+                family_id=DeviceFamilyId.KASA,
+            ),
+        ],
+        enabled=True,
+        id="stale-label",
+        label="Stale label",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.SCHEDULED],
+        schedule_cron="0 4 * * *",
+    )
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with (
+        patch(
+            "app.rule_validation.resolve_kasa_host_by_label",
+            return_value="dc:62:79:6c:86:77",
+        ),
+        patch(
+            "app.rule_validation.lookup_preferred_label",
+            return_value="HDHomeRun tuner",
+        ),
+    ):
+        findings = collect_stale_display_name_findings([rule], ctx)
+    assert len(findings) == 1
+    assert findings[0].rule_id == "stale-label"
+    assert findings[0].device_id == "dc:62:79:6c:86:77"
+
+
+def test_maybe_send_skips_when_already_sent_today(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    bootstrap_schema(cache)
+    upsert_operator_digest_last_sent_at(
+        cache,
+        digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+        last_sent_at=_NOW - 60.0,
+    )
+    with (
+        patch(
+            "app.stale_device_display_name_email.load_settings_location",
+            return_value=MagicMock(timezone="America/New_York"),
+        ),
+        patch(
+            "app.stale_device_display_name_email.send_stale_display_name_digest",
+        ) as send_mock,
+    ):
+        sent = maybe_send_stale_display_name_digest(
+            cache_path=cache,
+            device_state=MagicMock(),
+            now_epoch=_NOW,
+        )
+    assert sent is False
+    send_mock.assert_not_called()
+
+
+def test_maybe_send_skips_when_smtp_not_ready(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    bootstrap_schema(cache)
+    with (
+        patch(
+            "app.stale_device_display_name_email.load_settings_location",
+            return_value=MagicMock(timezone="America/New_York"),
+        ),
+        patch(
+            "app.stale_device_display_name_email.load_smtp_config",
+            return_value=None,
+        ),
+        patch(
+            "app.stale_device_display_name_email.send_stale_display_name_digest",
+        ) as send_mock,
+    ):
+        sent = maybe_send_stale_display_name_digest(
+            cache_path=cache,
+            device_state=MagicMock(),
+            now_epoch=_NOW,
+        )
+    assert sent is False
+    send_mock.assert_not_called()
+
+
+def test_send_stale_display_name_digest_persists_last_sent(
+    tmp_path: Path,
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    bootstrap_schema(cache)
+    with (
+        patch(
+            "app.stale_device_display_name_email.load_outbound_smtp_params",
+            return_value=_smtp_params(),
+        ),
+        patch(
+            "app.stale_device_display_name_email.deliver_outbound_email",
+            return_value=SmtpDeliveryResult(
+                host="smtp.example.com",
+                port=587,
+                recipients=("ops@example.com",),
+                smtp_code=250,
+                smtp_response="ok",
+            ),
+        ) as deliver_mock,
+        patch(
+            "app.stale_device_display_name_email.domesti_public_base_url",
+            return_value="https://home.example.com",
+        ),
+    ):
+        sent = send_stale_display_name_digest(
+            (_finding(),),
+            cache_path=cache,
+            now_epoch=_NOW,
+            recipients=["ops@example.com"],
+        )
+    assert sent is True
+    deliver_mock.assert_called_once()
+    message = deliver_mock.call_args.args[1]
+    assert message["Subject"] == STALE_DISPLAY_NAME_DIGEST_SUBJECT
+    assert message["To"] == "ops@example.com"
+    assert (
+        load_operator_digest_last_sent_at(
+            cache,
+            OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+        )
+        == _NOW
+    )
+
+
+def test_maybe_send_delivers_when_findings_and_recipients(
+    tmp_path: Path,
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    bootstrap_schema(cache)
+    vacation = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=1800.0,
+        min_distance_m=80_000.0,
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com"],
+        notify_on_transition=True,
+        user_ids=["hcma"],
+    )
+    finding = _finding()
+    with (
+        patch(
+            "app.stale_device_display_name_email.load_settings_location",
+            return_value=MagicMock(timezone="America/New_York"),
+        ),
+        patch(
+            "app.stale_device_display_name_email.load_smtp_config",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.stale_device_display_name_email.smtp_send_ready",
+            return_value=True,
+        ),
+        patch(
+            "app.stale_device_display_name_email.load_vacation_mode_settings",
+            return_value=vacation,
+        ),
+        patch(
+            "app.stale_device_display_name_email.list_automation_rules",
+            return_value=[],
+        ),
+        patch(
+            "app.stale_device_display_name_email.collect_stale_display_name_findings",
+            return_value=(finding,),
+        ),
+        patch(
+            "app.stale_device_display_name_email.load_outbound_smtp_params",
+            return_value=_smtp_params(),
+        ),
+        patch(
+            "app.stale_device_display_name_email.deliver_outbound_email",
+            return_value=SmtpDeliveryResult(
+                host="smtp.example.com",
+                port=587,
+                recipients=("ops@example.com",),
+                smtp_code=250,
+                smtp_response="ok",
+            ),
+        ) as deliver_mock,
+        patch(
+            "app.stale_device_display_name_email.domesti_public_base_url",
+            return_value=None,
+        ),
+    ):
+        sent = maybe_send_stale_display_name_digest(
+            cache_path=cache,
+            device_state=MagicMock(),
+            now_epoch=_NOW,
+            validation_ctx=MagicMock(),
+        )
+    assert sent is True
+    deliver_mock.assert_called_once()

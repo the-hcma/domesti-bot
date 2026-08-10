@@ -109,6 +109,16 @@ class MyTracksSettings(Base):
     username: Mapped[str] = mapped_column(String, nullable=False, default="")
 
 
+class OperatorDigestState(Base):
+    """Once-per-local-day gate for operator digest emails."""
+
+    __tablename__ = "operator_digest_state"
+
+    digest_id: Mapped[str] = mapped_column(String, primary_key=True)
+    last_sent_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class RuleDeferredDeviceAction(Base):
     """One pending delayed rule device action awaiting its ``due_at``.
 
