@@ -115,7 +115,10 @@ class OperatorDigestState(Base):
     __tablename__ = "operator_digest_state"
 
     digest_id: Mapped[str] = mapped_column(String, primary_key=True)
+    claim_local_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    claimed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_sent_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_sent_local_date: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 

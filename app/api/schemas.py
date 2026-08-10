@@ -23,6 +23,7 @@ from app.device_enums import (
     Ep1ReadingMetric,
     KasaPirRange,
     RuleDeviceActionType,
+    RuleReferenceIssueKind,
     RuleTrigger,
     SensorChartWindow,
     SensorCollectionKey,
@@ -1913,18 +1914,7 @@ class RuleReferenceIssueOut(BaseModel):
     """Broken reference from a rule definition to roster / geofence data."""
 
     detail: str
-    kind: Literal[
-        "discovery_pending",
-        "geofence_edge_grace_disabled",
-        "missing_notification_email",
-        "missing_smtp",
-        "non_canonical_device_id",
-        "stale_device_display_name",
-        "unknown_device",
-        "unknown_geofence",
-        "unknown_user",
-        "unsupported_device_action",
-    ]
+    kind: RuleReferenceIssueKind
     reference: str
 
 

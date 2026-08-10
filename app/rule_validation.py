@@ -23,7 +23,12 @@ from app.api.schemas import (
     UsersOutsideGeofenceForSCondition,
     normalized_rule_notification_emails,
 )
-from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
+from app.device_enums import (
+    DeviceConditionState,
+    DeviceFamilyId,
+    RuleReferenceIssueKind,
+    RuleTrigger,
+)
 from app.domesti_bot_cli import DeviceManagersState
 from app.rule_actions import (
     RuleActionDispatchError,
@@ -201,7 +206,7 @@ def _device_action_issues(
         return [
             RuleReferenceIssueOut(
                 detail=EP1_DEVICE_ACTIONS_UNSUPPORTED_DETAIL,
-                kind="unsupported_device_action",
+                kind=RuleReferenceIssueKind.UNSUPPORTED_DEVICE_ACTION,
                 reference=action.device_id.strip(),
             ),
         ]
@@ -225,32 +230,32 @@ def _device_reference_issue(
     if reference == "":
         return RuleReferenceIssueOut(
             detail=(f"Expected non-empty {family_id.value} device_id in {context_label}"),
-            kind="unknown_device",
+            kind=RuleReferenceIssueKind.UNKNOWN_DEVICE,
             reference=reference,
         )
     if ctx.device_state is None:
         return RuleReferenceIssueOut(
             detail=(f'Cannot verify {family_id.value} device "{reference}" — device discovery is not ready yet'),
-            kind="discovery_pending",
+            kind=RuleReferenceIssueKind.DISCOVERY_PENDING,
             reference=reference,
         )
     try:
         if not _device_reference_resolves(ctx, family_id=family_id, device_id=reference):
             return RuleReferenceIssueOut(
                 detail=(f'Unknown {family_id.value} device "{reference}" (not found in the current device list).'),
-                kind="unknown_device",
+                kind=RuleReferenceIssueKind.UNKNOWN_DEVICE,
                 reference=reference,
             )
     except RuleActionDispatchError as exc:
         return RuleReferenceIssueOut(
             detail=str(exc),
-            kind="unknown_device",
+            kind=RuleReferenceIssueKind.UNKNOWN_DEVICE,
             reference=reference,
         )
     if not is_canonical_rule_device_id(family_id, reference):
         return RuleReferenceIssueOut(
             detail=non_canonical_device_id_detail(reference),
-            kind="non_canonical_device_id",
+            kind=RuleReferenceIssueKind.NON_CANONICAL_DEVICE_ID,
             reference=reference,
         )
     return None
@@ -419,7 +424,7 @@ def _stale_device_display_name_issue(
             live=live_trimmed,
             stored=stored,
         ),
-        kind="stale_device_display_name",
+        kind=RuleReferenceIssueKind.STALE_DEVICE_DISPLAY_NAME,
         reference=reference,
     )
 
@@ -432,12 +437,12 @@ def _unknown_user_issue(
     if suggestion is not None and suggestion.lower() != reference.strip().lower():
         return RuleReferenceIssueOut(
             detail=(f'User "{reference}" is not in the automation user roster. Did you mean user_id "{suggestion}"?'),
-            kind="unknown_user",
+            kind=RuleReferenceIssueKind.UNKNOWN_USER,
             reference=reference,
         )
     return RuleReferenceIssueOut(
         detail=(f'User "{reference}" is not in the automation user roster (sync users from My Tracks).'),
-        kind="unknown_user",
+        kind=RuleReferenceIssueKind.UNKNOWN_USER,
         reference=reference,
     )
 
@@ -466,7 +471,7 @@ def _validate_geofence_edge_grace(rule: RuleOut) -> list[RuleReferenceIssueOut]:
                 "accuracy_edge_grace_s is 0 — poor GPS accuracy can block "
                 "enter/leave edges silently. Use the default 120 s or higher."
             ),
-            kind="geofence_edge_grace_disabled",
+            kind=RuleReferenceIssueKind.GEOFENCE_EDGE_GRACE_DISABLED,
             reference=rule.id,
         ),
     ]
@@ -482,7 +487,7 @@ def _validate_geofences(
             issues.append(
                 RuleReferenceIssueOut(
                     detail=(f'Geofence "{geofence_id}" is not defined (add it under Automations → Geofences).'),
-                    kind="unknown_geofence",
+                    kind=RuleReferenceIssueKind.UNKNOWN_GEOFENCE,
                     reference=geofence_id,
                 ),
             )
@@ -501,7 +506,7 @@ def _validate_notification(
         issues.append(
             RuleReferenceIssueOut(
                 detail=(f'Rule "{rule.id}" has notify_on_fire enabled but no notification_emails'),
-                kind="missing_notification_email",
+                kind=RuleReferenceIssueKind.MISSING_NOTIFICATION_EMAIL,
                 reference=rule.id,
             ),
         )
@@ -512,7 +517,7 @@ def _validate_notification(
                 detail=(
                     "SMTP is not configured; notification emails cannot be sent (configure under Automations → Mail)."
                 ),
-                kind="missing_smtp",
+                kind=RuleReferenceIssueKind.MISSING_SMTP,
                 reference=recipients[0],
             ),
         )
@@ -577,7 +582,7 @@ def _validate_device_condition_states(rule: RuleOut) -> list[RuleReferenceIssueO
             issues.append(
                 RuleReferenceIssueOut(
                     detail=(f'Device "{ref.device_id}" family {ref.family_id.value} cannot report state {state.value}'),
-                    kind="unknown_device",
+                    kind=RuleReferenceIssueKind.UNKNOWN_DEVICE,
                     reference=ref.device_id,
                 ),
             )
