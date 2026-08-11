@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import os
+import signal
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -92,10 +93,15 @@ _LEVER_ORDER: tuple[Ep1OccupancyTuningKind, ...] = (
 )
 _NUMBER_VALUE_ABS_TOL = 1e-6
 _OCCUPANCY_ALIASES: tuple[str, ...] = ("occupancy",)
+_installed_stop_signals: list[signal.Signals] = []
 
 
 class Ep1OvernightCalibrationError(ValueError):
     """Operator-facing overnight calibrator failure."""
+
+
+class Ep1OvernightCalibrationInterruptedError(Ep1OvernightCalibrationError):
+    """Stop requested via ``stop_event`` / SIGTERM / SIGINT."""
 
 
 class Ep1OvernightCalibrationNotFoundError(Ep1OvernightCalibrationError):
@@ -161,6 +167,7 @@ class OvernightCalibrationRunResult:
     false_positives: int
     success: bool
     window_ended: bool
+    interrupted: bool = False
 
 
 def default_calibration_log_path(*, device_id: str, now: datetime | None = None) -> Path:
@@ -214,6 +221,7 @@ async def observe_ep1_occupancy(
     port: int,
     duration_s: float,
     noise_psk: str | None = None,
+    stop_event: asyncio.Event | None = None,
 ) -> OccupancyObservation:
     """Subscribe to the occupancy binary for ``duration_s`` and count occupied samples."""
 
@@ -233,11 +241,36 @@ async def observe_ep1_occupancy(
                     aliases=", ".join(_OCCUPANCY_ALIASES),
                 )
             )
-        return await _watch_occupancy(client, key=int(occupancy.key), duration_s=duration_s)
+        return await _watch_occupancy(
+            client,
+            key=int(occupancy.key),
+            duration_s=duration_s,
+            stop_event=stop_event,
+        )
     except APIConnectionError as exc:
         raise Ep1OvernightCalibrationError(f"EP1 occupancy observe failed at {host}:{port}: {exc}") from exc
     finally:
         await _disconnect_client(client)
+
+
+def install_overnight_calibration_stop_signals(stop_event: asyncio.Event) -> None:
+    """Wire SIGTERM/SIGINT to ``stop_event`` on the running asyncio loop."""
+
+    loop = asyncio.get_running_loop()
+
+    def _on_stop() -> None:
+        if stop_event.is_set():
+            return
+        _LOGGER.info("Stop signal received; exiting overnight calibration cleanly")
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _on_stop)
+        except (NotImplementedError, RuntimeError):
+            # Fallback for environments without loop signal handlers.
+            signal.signal(sig, lambda *_args: _on_stop())
+        _installed_stop_signals.append(sig)
 
 
 def propose_next_false_positive_adjustment(
@@ -265,6 +298,18 @@ def propose_next_false_positive_adjustment(
     return None
 
 
+def remove_overnight_calibration_stop_signals() -> None:
+    """Remove handlers installed by :func:`install_overnight_calibration_stop_signals`."""
+
+    loop = asyncio.get_running_loop()
+    while _installed_stop_signals:
+        sig = _installed_stop_signals.pop()
+        try:
+            loop.remove_signal_handler(sig)
+        except (NotImplementedError, RuntimeError):
+            pass
+
+
 async def run_overnight_ep1_calibration(
     *,
     device_id: str,
@@ -278,6 +323,7 @@ async def run_overnight_ep1_calibration(
     max_cycles: int | None = None,
     observe_s: float = DEFAULT_OBSERVE_S,
     settle_s: float = DEFAULT_SETTLE_S,
+    stop_event: asyncio.Event | None = None,
     timezone_name: str | None = None,
     wait_for_window: bool = False,
     window_end_hour: int = DEFAULT_WINDOW_END_HOUR,
@@ -325,7 +371,18 @@ async def run_overnight_ep1_calibration(
             window_start_hour,
         )
         if sleep_s > 0:
-            await asyncio.sleep(sleep_s)
+            if await _await_or_stop(stop_event, sleep_s):
+                return OvernightCalibrationRunResult(
+                    clear_streak=0,
+                    cycles=0,
+                    device_id=target.device_id,
+                    display_label=target.display_label,
+                    exhausted=False,
+                    false_positives=0,
+                    interrupted=True,
+                    success=False,
+                    window_ended=False,
+                )
         local_now = datetime.now(tz=tz)
 
     resolved_log = log_path if log_path is not None else default_calibration_log_path(device_id=target.device_id)
@@ -362,10 +419,15 @@ async def run_overnight_ep1_calibration(
     cycles = 0
     exhausted = False
     false_positives = 0
+    interrupted = False
     window_ended = False
 
     try:
         while True:
+            if stop_event is not None and stop_event.is_set():
+                interrupted = True
+                _LOGGER.info("Stop requested; ending overnight calibration")
+                break
             local_now = datetime.now(tz=tz)
             if not force_window and not in_empty_room_window(
                 local_now,
@@ -398,21 +460,27 @@ async def run_overnight_ep1_calibration(
                     break
                 cycle_observe_s = min(observe_s, remaining_s)
 
-            cycle = await _run_one_cycle(
-                target=target,
-                attempt_index=attempt_index,
-                cache_path=cache_path,
-                clear_streak=clear_streak,
-                dry_run=dry_run,
-                ep1_mgr=ep1_mgr,
-                force_window=force_window,
-                log_path=resolved_log,
-                noise_psk=psk,
-                observe_s=cycle_observe_s,
-                timezone=tz,
-                window_end_hour=window_end_hour,
-                window_start_hour=window_start_hour,
-            )
+            try:
+                cycle = await _run_one_cycle(
+                    target=target,
+                    attempt_index=attempt_index,
+                    cache_path=cache_path,
+                    clear_streak=clear_streak,
+                    dry_run=dry_run,
+                    ep1_mgr=ep1_mgr,
+                    force_window=force_window,
+                    log_path=resolved_log,
+                    noise_psk=psk,
+                    observe_s=cycle_observe_s,
+                    stop_event=stop_event,
+                    timezone=tz,
+                    window_end_hour=window_end_hour,
+                    window_start_hour=window_start_hour,
+                )
+            except Ep1OvernightCalibrationInterruptedError:
+                interrupted = True
+                _LOGGER.info("Stop requested during observe; ending overnight calibration")
+                break
             if cycle.outside_window:
                 window_ended = True
                 _LOGGER.info("Empty-room window ended mid-cycle; discarding observation")
@@ -446,11 +514,15 @@ async def run_overnight_ep1_calibration(
                     attempt_index += 1
                 if not cycle.dry_run and cycle.applied and settle_s > 0:
                     _LOGGER.info("Settling %.1fs after knob change", settle_s)
-                    await asyncio.sleep(settle_s)
+                    if await _await_or_stop(stop_event, settle_s):
+                        interrupted = True
+                        break
             else:
                 clear_streak = cycle.clear_streak
                 if clear_streak >= clear_streak_required:
                     break
+    except Ep1OvernightCalibrationInterruptedError:
+        interrupted = True
     except Exception as exc:
         _append_jsonl(
             resolved_log,
@@ -466,7 +538,7 @@ async def run_overnight_ep1_calibration(
         )
         raise
 
-    success = clear_streak >= clear_streak_required and not exhausted
+    success = clear_streak >= clear_streak_required and not exhausted and not interrupted
     result = OvernightCalibrationRunResult(
         clear_streak=clear_streak,
         cycles=cycles,
@@ -474,6 +546,7 @@ async def run_overnight_ep1_calibration(
         display_label=target.display_label,
         exhausted=exhausted,
         false_positives=false_positives,
+        interrupted=interrupted,
         success=success,
         window_ended=window_ended,
     )
@@ -487,13 +560,14 @@ async def run_overnight_ep1_calibration(
     )
     _LOGGER.info(
         "EP1 overnight calibration finished success=%s cycles=%s false_positives=%s "
-        "clear_streak=%s exhausted=%s window_ended=%s",
+        "clear_streak=%s exhausted=%s window_ended=%s interrupted=%s",
         result.success,
         result.cycles,
         result.false_positives,
         result.clear_streak,
         result.exhausted,
         result.window_ended,
+        result.interrupted,
     )
     return result
 
@@ -576,6 +650,21 @@ def _append_jsonl(path: Path, payload: Mapping[str, object]) -> None:
     line = json.dumps(dict(payload), sort_keys=True, default=str)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
+
+
+async def _await_or_stop(stop_event: asyncio.Event | None, delay_s: float) -> bool:
+    """Sleep up to ``delay_s``. Return True if ``stop_event`` fired first."""
+
+    if delay_s <= 0:
+        return bool(stop_event is not None and stop_event.is_set())
+    if stop_event is None:
+        await asyncio.sleep(delay_s)
+        return False
+    try:
+        await asyncio.wait_for(stop_event.wait(), timeout=delay_s)
+        return True
+    except TimeoutError:
+        return False
 
 
 async def _disconnect_client(client: APIClient) -> None:
@@ -738,18 +827,24 @@ async def _run_one_cycle(
     timezone: ZoneInfo,
     window_end_hour: int,
     window_start_hour: int,
+    stop_event: asyncio.Event | None = None,
 ) -> OvernightCalibrationCycleResult:
     observation: OccupancyObservation | None = None
     observe_error: str | None = None
     for attempt in range(1, DEFAULT_OBSERVE_RETRY_COUNT + 1):
+        if stop_event is not None and stop_event.is_set():
+            raise Ep1OvernightCalibrationInterruptedError("Stop requested before occupancy observe")
         try:
             observation = await observe_ep1_occupancy(
                 host=target.host,
                 port=target.port,
                 duration_s=observe_s,
                 noise_psk=noise_psk,
+                stop_event=stop_event,
             )
             break
+        except Ep1OvernightCalibrationInterruptedError:
+            raise
         except Ep1OvernightCalibrationError as exc:
             observe_error = str(exc)
             _LOGGER.warning(
@@ -759,7 +854,11 @@ async def _run_one_cycle(
                 exc,
             )
             if attempt < DEFAULT_OBSERVE_RETRY_COUNT:
-                await asyncio.sleep(DEFAULT_OBSERVE_RETRY_SLEEP_S)
+                if await _await_or_stop(stop_event, DEFAULT_OBSERVE_RETRY_SLEEP_S):
+                    raise Ep1OvernightCalibrationInterruptedError(
+                        "Stop requested during observe retry backoff"
+                    ) from exc
+
     if observation is None:
         now = datetime.now(tz=timezone)
         placeholder = _empty_occupancy_observation(observe_s)
@@ -979,6 +1078,7 @@ async def _watch_occupancy(
     *,
     key: int,
     duration_s: float,
+    stop_event: asyncio.Event | None = None,
 ) -> OccupancyObservation:
     samples: list[bool] = []
     latest: bool | None = None
@@ -996,7 +1096,8 @@ async def _watch_occupancy(
         samples.append(occupied)
 
     client.subscribe_states(_on_state)
-    await asyncio.sleep(duration_s)
+    if await _await_or_stop(stop_event, duration_s):
+        raise Ep1OvernightCalibrationInterruptedError("Occupancy observe interrupted by stop signal")
     occupied_count = sum(1 for sample in samples if sample)
     if not samples:
         raise Ep1OvernightCalibrationError(

@@ -50,7 +50,10 @@ from app.ep1_overnight_calibration import (  # noqa: E402
     DEFAULT_WINDOW_START_HOUR,
     Ep1OvernightCalibrationError,
     Ep1OvernightCalibrationOutsideWindowError,
+    OvernightCalibrationRunResult,
     default_calibration_log_path,
+    install_overnight_calibration_stop_signals,
+    remove_overnight_calibration_stop_signals,
     run_overnight_ep1_calibration,
     select_ep1_calibration_target,
 )
@@ -102,20 +105,12 @@ def main() -> int:
 
     try:
         result = asyncio.run(
-            run_overnight_ep1_calibration(
-                device_id=target.device_id,
+            _run_calibration(
+                args=args,
                 cache_path=cache_path,
-                clear_streak_required=args.clear_streak,
-                dry_run=args.dry_run,
-                force_window=args.force_window,
+                device_id=target.device_id,
                 log_path=log_path,
                 max_cycles=max_cycles,
-                observe_s=args.observe_s,
-                settle_s=args.settle_s,
-                timezone_name=args.timezone,
-                wait_for_window=args.wait_for_window,
-                window_end_hour=args.window_end,
-                window_start_hour=args.window_start,
             )
         )
     except Ep1OvernightCalibrationOutsideWindowError as exc:
@@ -129,9 +124,12 @@ def main() -> int:
     print(
         f"Done: success={result.success} cycles={result.cycles} "
         f"false_positives={result.false_positives} clear_streak={result.clear_streak} "
-        f"exhausted={result.exhausted} window_ended={result.window_ended}",
+        f"exhausted={result.exhausted} window_ended={result.window_ended} "
+        f"interrupted={result.interrupted}",
         flush=True,
     )
+    if result.interrupted:
+        return 143
     if result.success:
         return 0
     if result.exhausted:
@@ -139,6 +137,37 @@ def main() -> int:
     if result.window_ended:
         return 5
     return 1
+
+
+async def _run_calibration(
+    *,
+    args: argparse.Namespace,
+    cache_path: Path,
+    device_id: str,
+    log_path: Path,
+    max_cycles: int | None,
+) -> OvernightCalibrationRunResult:
+    stop_event = asyncio.Event()
+    install_overnight_calibration_stop_signals(stop_event)
+    try:
+        return await run_overnight_ep1_calibration(
+            device_id=device_id,
+            cache_path=cache_path,
+            clear_streak_required=args.clear_streak,
+            dry_run=args.dry_run,
+            force_window=args.force_window,
+            log_path=log_path,
+            max_cycles=max_cycles,
+            observe_s=args.observe_s,
+            settle_s=args.settle_s,
+            stop_event=stop_event,
+            timezone_name=args.timezone,
+            wait_for_window=args.wait_for_window,
+            window_end_hour=args.window_end,
+            window_start_hour=args.window_start,
+        )
+    finally:
+        remove_overnight_calibration_stop_signals()
 
 
 def _parse_args() -> argparse.Namespace:
