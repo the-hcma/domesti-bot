@@ -135,7 +135,6 @@ def test_stale_device_display_name_detail_uses_public_constant() -> None:
         stored="Old kitchen",
     )
     assert detail == RULE_DEVICE_DISPLAY_NAME_STALE_WARNING.format(
-        device_id="aa:bb:cc:dd:ee:ff",
-        live="Kitchen lights",
+        device_label="Kitchen lights (aa:bb:cc:dd:ee:ff)",
         stored="Old kitchen",
     )

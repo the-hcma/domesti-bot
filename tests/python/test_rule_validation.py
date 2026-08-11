@@ -686,8 +686,7 @@ def test_validate_rule_warns_when_display_name_is_stale() -> None:
     assert len(issues) == 1
     assert issues[0].kind == "stale_device_display_name"
     assert issues[0].detail == RULE_DEVICE_DISPLAY_NAME_STALE_WARNING.format(
-        device_id="dc:62:79:6c:86:77",
-        live="HDHomeRun tuner",
+        device_label="HDHomeRun tuner (dc:62:79:6c:86:77)",
         stored="Old HDHomeRun name",
     )
 

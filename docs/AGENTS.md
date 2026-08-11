@@ -428,6 +428,7 @@ Domain modules own subject + body facts. MIME assembly, SMTP param loading (for 
 | Vacation transition / Automations test | `app/vacation_mode.py` |
 | Vacation anomaly (live + test) | `app/vacation_mode.py` |
 | Rule fire notification | `app/rule_actions.py` → `app/rule_notification.py` |
+| Stale rule device display_name digest (once/day) | `app/stale_device_display_name_email.py` |
 
 New senders must comply from day one and ship hermetic tests for provenance (and test markers when applicable).
 

@@ -169,6 +169,12 @@ class KasaPirRange(StrEnum):
     NEAR = "Near"
 
 
+class OperatorDigestId(StrEnum):
+    """Persisted once-per-day operator digest kinds (SQLite ``operator_digest_state``)."""
+
+    STALE_DEVICE_DISPLAY_NAME = "stale_device_display_name"
+
+
 class RuleDeviceActionType(StrEnum):
     """Per-device command dispatched when an automation rule fires."""
 
@@ -204,6 +210,21 @@ class RuleEvaluationCause(StrEnum):
     EDGE = "edge"
     ELIGIBILITY = "eligibility"
     SCHEDULED = "scheduled"
+
+
+class RuleReferenceIssueKind(StrEnum):
+    """Broken / warning reference kinds from rule validation (API ``kind``)."""
+
+    DISCOVERY_PENDING = "discovery_pending"
+    GEOFENCE_EDGE_GRACE_DISABLED = "geofence_edge_grace_disabled"
+    MISSING_NOTIFICATION_EMAIL = "missing_notification_email"
+    MISSING_SMTP = "missing_smtp"
+    NON_CANONICAL_DEVICE_ID = "non_canonical_device_id"
+    STALE_DEVICE_DISPLAY_NAME = "stale_device_display_name"
+    UNKNOWN_DEVICE = "unknown_device"
+    UNKNOWN_GEOFENCE = "unknown_geofence"
+    UNKNOWN_USER = "unknown_user"
+    UNSUPPORTED_DEVICE_ACTION = "unsupported_device_action"
 
 
 class RuleTrigger(StrEnum):
@@ -279,6 +300,12 @@ class SettingsCredentialsTestSource(StrEnum):
     DATABASE = "database"
     ENV = "env"
     FORM = "form"
+
+
+class StaleDeviceDisplayNameEmailSource(StrEnum):
+    """What triggered a stale rule ``display_name`` digest email."""
+
+    AUTOMATIC = "automatic"
 
 
 class UiActionType(StrEnum):
