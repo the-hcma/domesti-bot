@@ -60,6 +60,14 @@ def generate_fernet_key() -> str:
     return Fernet.generate_key().decode("ascii")
 
 
+def git_repository_root() -> Path:
+    """Return the git checkout root shared across worktrees.
+
+    Independent of ``DOMESTI_BOT_CONFIG_FILE`` (unlike :func:`secrets_json_path`).
+    """
+    return _git_repository_root()
+
+
 def load_secrets_key_material() -> tuple[str | None, SecretsKeySource]:
     """Return ``(key material, source)`` without validating Fernet encoding."""
     env = (os.environ.get("DOMESTI_BOT_SECRETS_KEY") or "").strip()

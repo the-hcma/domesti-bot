@@ -45,17 +45,21 @@ def main() -> int:
         "--rules-file",
         type=Path,
         default=None,
-        help="automation-rules.json path (default: XDG ~/.config/domesti-bot/automation-rules.json)",
+        help="automation-rules.json path (default: XDG operator file; must already exist)",
     )
     args = parser.parse_args()
     cache = args.cache
     if cache is None:
         cache = Path.home() / ".cache" / "rule-engine" / "device_discovery.sqlite"
-    report = migrate_automation_rules_file(
-        rules_path=args.rules_file,
-        cache_path=cache,
-        dry_run=args.dry_run,
-    )
+    try:
+        report = migrate_automation_rules_file(
+            rules_path=args.rules_file,
+            cache_path=cache,
+            dry_run=args.dry_run,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     print(f"rewritten={len(report.rewritten)} unresolved={len(report.unresolved)}")
     for rule_id, family, old, new in report.rewritten:
         print(f"  {rule_id} {family}: {old!r} → {new!r}")
