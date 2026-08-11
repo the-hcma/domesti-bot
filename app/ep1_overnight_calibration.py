@@ -137,6 +137,7 @@ class OvernightCalibrationCycleResult:
     dry_run: bool
     observation: OccupancyObservation
     knobs: Mapping[str, float | None]
+    outside_window: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +371,18 @@ async def run_overnight_ep1_calibration(
             if max_cycles is not None and cycles >= max_cycles:
                 break
 
+            cycle_observe_s = observe_s
+            if not force_window:
+                remaining_s = seconds_until_empty_room_window_end(
+                    local_now,
+                    start_hour=window_start_hour,
+                    end_hour=window_end_hour,
+                )
+                if remaining_s <= 0:
+                    window_ended = True
+                    break
+                cycle_observe_s = min(observe_s, remaining_s)
+
             cycle = await _run_one_cycle(
                 target=target,
                 attempt_index=attempt_index,
@@ -377,10 +390,18 @@ async def run_overnight_ep1_calibration(
                 clear_streak=clear_streak,
                 dry_run=dry_run,
                 ep1_mgr=ep1_mgr,
+                force_window=force_window,
                 log_path=resolved_log,
                 noise_psk=psk,
-                observe_s=observe_s,
+                observe_s=cycle_observe_s,
+                timezone=tz,
+                window_end_hour=window_end_hour,
+                window_start_hour=window_start_hour,
             )
+            if cycle.outside_window:
+                window_ended = True
+                _LOGGER.info("Empty-room window ended mid-cycle; discarding observation")
+                break
             cycles += 1
             if cycle.observation.false_positive:
                 false_positives += 1
@@ -463,6 +484,30 @@ def seconds_until_empty_room_window(
     if start_today <= local_now:
         start_today = start_today + timedelta(days=1)
     return max(0.0, (start_today - local_now).total_seconds())
+
+
+def seconds_until_empty_room_window_end(
+    local_now: datetime,
+    *,
+    start_hour: int = DEFAULT_WINDOW_START_HOUR,
+    end_hour: int = DEFAULT_WINDOW_END_HOUR,
+) -> float:
+    """Seconds remaining in the open empty-room window, or ``0.0`` if closed.
+
+    ``start_hour == end_hour`` (always open) returns a large sentinel so callers
+    that cap observation duration do not truncate.
+    """
+
+    _validate_hour(start_hour, name="start_hour")
+    _validate_hour(end_hour, name="end_hour")
+    if start_hour == end_hour:
+        return 24 * 3600.0
+    if not in_empty_room_window(local_now, start_hour=start_hour, end_hour=end_hour):
+        return 0.0
+    end_at = local_now.replace(hour=end_hour, minute=0, second=0, microsecond=0)
+    if end_at <= local_now:
+        end_at = end_at + timedelta(days=1)
+    return max(0.0, (end_at - local_now).total_seconds())
 
 
 def select_ep1_calibration_target(
@@ -620,9 +665,13 @@ async def _run_one_cycle(
     clear_streak: int,
     dry_run: bool,
     ep1_mgr: Ep1DeviceManager | None,
+    force_window: bool,
     log_path: Path,
     noise_psk: str | None,
     observe_s: float,
+    timezone: ZoneInfo,
+    window_end_hour: int,
+    window_start_hour: int,
 ) -> OvernightCalibrationCycleResult:
     observation = await observe_ep1_occupancy(
         host=target.host,
@@ -630,6 +679,30 @@ async def _run_one_cycle(
         duration_s=observe_s,
         noise_psk=noise_psk,
     )
+    now = datetime.now(tz=timezone)
+    if not force_window and not in_empty_room_window(
+        now,
+        start_hour=window_start_hour,
+        end_hour=window_end_hour,
+    ):
+        _append_jsonl(
+            log_path,
+            {
+                "event": "window_ended_mid_cycle",
+                "device_id": target.device_id,
+                "observation": asdict(observation),
+                "local_time": now.isoformat(timespec="seconds"),
+            },
+        )
+        return OvernightCalibrationCycleResult(
+            adjustment=None,
+            applied=False,
+            clear_streak=clear_streak,
+            dry_run=dry_run,
+            observation=observation,
+            knobs={},
+            outside_window=True,
+        )
     try:
         snapshot = await read_ep1_occupancy_tuning(
             device_id=target.device_id,

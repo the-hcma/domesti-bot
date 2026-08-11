@@ -15,6 +15,7 @@ from app.ep1_overnight_calibration import (
     in_empty_room_window,
     propose_next_false_positive_adjustment,
     seconds_until_empty_room_window,
+    seconds_until_empty_room_window_end,
 )
 
 
@@ -113,6 +114,17 @@ def test_seconds_until_empty_room_window_counts_to_midnight() -> None:
     tz = ZoneInfo("UTC")
     wait_s = seconds_until_empty_room_window(datetime(2026, 8, 11, 12, 0, tzinfo=tz))
     assert wait_s == pytest.approx(12 * 3600.0)
+
+
+def test_seconds_until_empty_room_window_end_inside() -> None:
+    tz = ZoneInfo("UTC")
+    remaining = seconds_until_empty_room_window_end(datetime(2026, 8, 11, 5, 0, tzinfo=tz))
+    assert remaining == pytest.approx(3600.0)
+
+
+def test_seconds_until_empty_room_window_end_outside_is_zero() -> None:
+    tz = ZoneInfo("UTC")
+    assert seconds_until_empty_room_window_end(datetime(2026, 8, 11, 12, 0, tzinfo=tz)) == 0.0
 
 
 def test_propose_prefers_lowering_max_distance_first() -> None:
