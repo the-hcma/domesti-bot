@@ -6,7 +6,9 @@ This document describes how to evolve domesti-bot from its **partially implement
 >
 > When **Kristen arrives at** or **leaves** the **west-point** geofence, email **github@hcma.info** (no device actions).
 
-See **`automation-rules.json.example`** at the repo root (copy to gitignored **`automation-rules.json`** on the server).
+See **`automation-rules.json.example`** at the repo root (copy to
+**`$XDG_CONFIG_HOME/domesti-bot/automation-rules.json`**, usually
+`~/.config/domesti-bot/automation-rules.json`).
 
 The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport wider than the compact/mobile breakpoint). Mobile/PWA users keep the tile dashboard; they do not get rule editing in v1.
 
@@ -26,7 +28,7 @@ The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport
 
 | Item | Choice |
 | --- | --- |
-| **Path** | `automation-rules.json` at the **repo/server root** (beside `domesti-bot.config.json`). Committed template: `automation-rules.json.example`. |
+| **Path** | Operator file: `$XDG_CONFIG_HOME/domesti-bot/automation-rules.json` (usually `~/.config/domesti-bot/…`; override with `DOMESTI_AUTOMATION_RULES_FILE`). Committed template: `automation-rules.json.example` at the repo root. |
 | **Schema** | Same JSON shape as `RuleOut` / `RuleConditionOut` in `web/src/types.ts` (mirrors future Pydantic models). |
 | **Device targets** | Top-level `"device_id_resolution": "mac"` — `device_id` is the normalized MAC (or Tailwind `{hub_mac}:{door_id}`). Display names are UI-only; Automations warns on leftover labels. |
 | **Geofences** | Loaded from existing SQLite (`rule_geofences`) by `geofence_id` (`house`, `west-point`, …). Operators define fences in Automations → Geofences; the bundle only references ids. |
@@ -111,8 +113,8 @@ Until Phase 2b, operators change rules by editing `automation-rules.json` and re
 ### Module layout (next implementation PRs)
 
 ```
-automation-rules.json          # operator copy (gitignored)
-automation-rules.json.example
+~/.config/domesti-bot/automation-rules.json   # operator copy (XDG; or DOMESTI_AUTOMATION_RULES_FILE)
+automation-rules.json.example                 # committed template at repo root
 app/automation_rules_loader.py # parse + validate bundle; serves GET /v1/rules
 app/rule_conditions.py         # astral + geofence conditions; feeds GET /v1/rules/status
 app/rule_actions.py            # Kasa/Tailwind dispatch + SMTP notify (shipped)

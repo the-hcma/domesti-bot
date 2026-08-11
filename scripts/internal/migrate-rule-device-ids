@@ -45,7 +45,7 @@ def main() -> int:
         "--rules-file",
         type=Path,
         default=None,
-        help="automation-rules.json path (default: operator file beside config)",
+        help="automation-rules.json path (default: XDG ~/.config/domesti-bot/automation-rules.json)",
     )
     args = parser.parse_args()
     cache = args.cache

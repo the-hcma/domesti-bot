@@ -43,23 +43,32 @@ class AutomationRulesLoadError(ValueError):
 
 
 def automation_rules_json_path() -> Path:
-    """Resolve the bundle path (operator file, else committed example)."""
+    """Resolve the bundle path (operator file, else committed example).
+
+    Precedence when ``DOMESTI_AUTOMATION_RULES_FILE`` is unset:
+
+    1. ``$XDG_CONFIG_HOME/domesti-bot/automation-rules.json`` if present
+    2. Committed ``automation-rules.json.example`` in the repository checkout
+    """
     override = (os.environ.get("DOMESTI_AUTOMATION_RULES_FILE") or "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    root = secrets_json_path().parent
-    operator = root / _AUTOMATION_RULES_FILENAME
-    if operator.is_file():
-        return operator
-    return root / _AUTOMATION_RULES_EXAMPLE_FILENAME
+    xdg = automation_rules_xdg_json_path()
+    if xdg.is_file():
+        return xdg.resolve()
+    return _automation_rules_example_json_path().resolve()
 
 
 def automation_rules_operator_json_path() -> Path:
-    """Path for mutable operator rules (never the committed ``*.example`` template)."""
+    """Path for mutable operator rules (never the committed ``*.example`` template).
+
+    Defaults to ``$XDG_CONFIG_HOME/domesti-bot/automation-rules.json`` unless
+    ``DOMESTI_AUTOMATION_RULES_FILE`` overrides.
+    """
     override = (os.environ.get("DOMESTI_AUTOMATION_RULES_FILE") or "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return secrets_json_path().parent / _AUTOMATION_RULES_FILENAME
+    return automation_rules_xdg_json_path().resolve()
 
 
 def automation_rules_source() -> AutomationRulesSource:
@@ -67,10 +76,14 @@ def automation_rules_source() -> AutomationRulesSource:
     override = (os.environ.get("DOMESTI_AUTOMATION_RULES_FILE") or "").strip()
     if override:
         return "operator"
-    root = secrets_json_path().parent
-    if (root / _AUTOMATION_RULES_FILENAME).is_file():
+    if automation_rules_xdg_json_path().is_file():
         return "operator"
     return "example"
+
+
+def automation_rules_xdg_json_path() -> Path:
+    """Operator path under ``$XDG_CONFIG_HOME/domesti-bot/`` (usually ``~/.config/domesti-bot/``)."""
+    return _xdg_config_home() / "domesti-bot" / _AUTOMATION_RULES_FILENAME
 
 
 def list_automation_rules(*, path: Path | None = None) -> list[RuleOut]:
@@ -191,3 +204,16 @@ def save_vacation_mode_settings(
         encoding="utf-8",
     )
     return validated
+
+
+def _automation_rules_example_json_path() -> Path:
+    """Committed example template beside the repository checkout root."""
+    return secrets_json_path().parent / _AUTOMATION_RULES_EXAMPLE_FILENAME
+
+
+def _xdg_config_home() -> Path:
+    """Return ``$XDG_CONFIG_HOME`` or ``~/.config`` when unset."""
+    override = (os.environ.get("XDG_CONFIG_HOME") or "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".config"

@@ -16,6 +16,7 @@ Operator and contributor guides for this repository. For day-to-day device contr
 
 - **Tiles / bulk off** — start `./scripts/domesti-bot-server`, open the landing page.
 - **EP1 sensors** — USB flash Homey firmware, same LAN as the server; see [EP1.md](EP1.md).
-- **Automations** — desktop ☰ → **Automations**; rules live in `automation-rules.json` (see `automation-rules.json.example`).
+- **Automations** — desktop ☰ → **Automations**; operator rules live in
+  `~/.config/domesti-bot/automation-rules.json` (see `automation-rules.json.example`).
 - **My Tracks** — desktop ☰ → **Settings** → My Tracks (pair, sync users/geofences).
 - **Secrets** — `domesti-bot.config.json`, Tailwind token, optional EP1 Noise PSK, SMTP under Automations → Mail.

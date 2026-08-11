@@ -21,7 +21,7 @@ logs/
 # Fernet master key for encrypted SQLite secrets (see domesti-bot.config.json.example).
 domesti-bot.config.json
 
-# Operator automation rules (see automation-rules.json.example).
+# Stray operator automation-rules.json at the repo root (rules live under XDG).
 automation-rules.json
 
 # Web bundle: source lives under web/, built output under app/api/static/dist/.
