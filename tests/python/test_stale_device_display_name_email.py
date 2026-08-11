@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import smtplib
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -272,6 +273,85 @@ def test_maybe_send_delivers_when_findings_and_recipients(
             OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
         )
         == _NOW + 5.0
+    )
+
+
+def test_maybe_send_keeps_day_gate_on_recipients_refused(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    bootstrap_schema(cache)
+    vacation = VacationModeSettingsOut(
+        enabled=True,
+        hysteresis_s=1800.0,
+        min_distance_m=80_000.0,
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com", "typo@example.com"],
+        notify_on_transition=True,
+        user_ids=["hcma"],
+    )
+    finding = _finding()
+    refused = smtplib.SMTPRecipientsRefused(
+        {"typo@example.com": (550, b"user unknown")},
+    )
+    with (
+        patch(
+            "app.stale_device_display_name_email.load_settings_location",
+            return_value=MagicMock(timezone="America/New_York"),
+        ),
+        patch(
+            "app.stale_device_display_name_email.load_smtp_config",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.stale_device_display_name_email.smtp_send_ready",
+            return_value=True,
+        ),
+        patch(
+            "app.stale_device_display_name_email.load_vacation_mode_settings",
+            return_value=vacation,
+        ),
+        patch(
+            "app.stale_device_display_name_email.list_automation_rules",
+            return_value=[],
+        ),
+        patch(
+            "app.stale_device_display_name_email.collect_stale_display_name_findings",
+            return_value=(finding,),
+        ),
+        patch(
+            "app.stale_device_display_name_email.load_outbound_smtp_params",
+            return_value=_smtp_params(),
+        ),
+        patch(
+            "app.stale_device_display_name_email.deliver_outbound_email",
+            side_effect=refused,
+        ),
+        patch(
+            "app.stale_device_display_name_email.time.time",
+            return_value=_NOW + 5.0,
+        ),
+    ):
+        sent = maybe_send_stale_display_name_digest(
+            cache_path=cache,
+            device_state=MagicMock(),
+            now_epoch=_NOW,
+            validation_ctx=MagicMock(),
+        )
+    assert sent is True
+    assert (
+        load_operator_digest_last_sent_at(
+            cache,
+            OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+        )
+        == _NOW + 5.0
+    )
+    assert (
+        try_claim_operator_digest_for_local_day(
+            cache,
+            digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+            now_epoch=_NOW + 10.0,
+            timezone=_TZ,
+        )
+        is None
     )
 
 

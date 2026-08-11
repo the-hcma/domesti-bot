@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import smtplib
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -204,9 +205,11 @@ def maybe_send_stale_display_name_digest(
 ) -> bool:
     """Send at most one stale-label digest per local day when SMTP is ready.
 
-    Returns True when an email was sent. Skips when there are no findings, SMTP
-    is not configured, recipients are empty, discovery is not ready, or a digest
-    was already sent today (home timezone). The once-per-day gate is claimed
+    Returns True when the once-per-day gate was consumed (SMTP accepted the
+    message, or recipients were refused after DATA may already have delivered
+    to some addresses). Skips when there are no findings, SMTP is not
+    configured, recipients are empty, discovery is not ready, or a digest was
+    already sent today (home timezone). The once-per-day gate is claimed
     atomically before SMTP so concurrent evaluators cannot double-send.
     """
     if cache_path is None:
@@ -318,6 +321,19 @@ def send_stale_display_name_digest(
     )
     try:
         result = deliver_outbound_email(params, message)
+    except smtplib.SMTPRecipientsRefused as exc:
+        # DATA may already have been accepted for some recipients; keep the day
+        # gate so the periodic tick cannot flood the accepted inboxes.
+        friendly = record_outbound_smtp_failure(exc, host=params.host)
+        _LOGGER.error(
+            "[rules] stale display-name digest partial refusal recipient_count=%d refused_count=%d host=%s:%s: %s",
+            len(recipients),
+            len(exc.recipients),
+            params.host,
+            params.port,
+            friendly,
+        )
+        return True
     except Exception as exc:
         friendly = record_outbound_smtp_failure(exc, host=params.host)
         _LOGGER.error(
