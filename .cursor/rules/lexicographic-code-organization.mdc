@@ -1,0 +1,95 @@
+---
+description: Lexicographic code organization — public then private; sorted closed sets
+alwaysApply: true
+---
+
+# Lexicographic code organization
+
+**Default:** sort **ASCII lexicographically by name** whenever possible. **Insert** new
+definitions and closed-set members in sorted position — do not append at the bottom of a
+block.
+
+Keep language-standard import / `from … import` blocks at the top of the module (e.g. PEP 8
+for Python); they are not part of the public/private sorts below.
+
+## Module level
+
+Two blocks, in order:
+
+1. **Public** — module-level names **without** a leading `_`: constants (`ALL_CAPS`),
+   classes, module-level functions (`def` / `async def`), and other public bindings. Sort
+   **within this block** by name (ASCII).
+2. **Private** — module-level names **with** a leading `_` (helpers, module-private
+   constants, etc.). Sort **within this block** by name (ASCII).
+
+Public names are **not** interleaved with private names by strict global ASCII
+(`build_foo` stays in the public block even though `_` sorts before `b`).
+
+```python
+# public block (sorted)
+DEFAULT_TIMEOUT_S = 30
+class Widget: ...
+def build_status() -> None: ...
+
+# private block (sorted)
+def _epoch_to_iso_z(epoch: float) -> str: ...
+def _format_label(dt: datetime) -> str: ...
+```
+
+When adding a new `_helper`, insert it among the other `_` names — not after the public
+APIs and not at the end of the file unless it sorts last in the private block.
+
+## Inside a `class`
+
+Two blocks, in order:
+
+1. **Public** — class-level members whose names do **not** start with `_`, including
+   methods, `@property` getters, constants, nested classes, and other bindings. Treat
+   `async def` like `def`. Dunder methods (`__init__`, `__str__`, …) live in this block and
+   participate in the same lexicographic sort.
+2. **Private** — class-level members whose names start with `_` (single leading underscore),
+   including methods, properties, constants, nested classes, and other bindings. Sort
+   lexicographically within this block.
+
+```python
+class Example:
+  def __init__(self) -> None: ...
+  def __str__(self) -> str: ...
+  def close(self) -> None: ...
+  def fetch(self) -> None: ...
+
+  def _validate(self) -> None: ...
+```
+
+## Closed-set literals
+
+For **unordered** closed name sets, keep members in **ASCII lexicographic order** and insert
+new members in sorted position (do not append):
+
+- `frozenset({...})` / `set` literals of names
+
+For **order-sensitive** declarations, preserve declaration order when it is part of the
+contract (enum auto-values, iteration/serialization order, or user-visible sequencing). Sort
+lexicographically only when order is not significant:
+
+- Enum members — sort when values/iteration order are not contractual; otherwise keep
+  declaration order
+- Tuple / list constants of identifier-like strings — sort when order is not observable
+  externally; otherwise keep declaration order
+
+```python
+# good — unordered name set
+ALLOWED = frozenset({"alpha", "beta", "gamma"})
+
+# bad — unsorted / append-only unordered set
+ALLOWED = frozenset({"gamma", "alpha", "beta"})
+```
+
+## Other languages
+
+Apply the same **public-then-private, lexicographic within each block** idea elsewhere when
+organizing code (e.g. grouped `const` / `enum` members in TypeScript, export blocks in TS
+modules) unless a file already documents a different stable layout.
+
+Whole-file reorders of legacy modules are optional drive-by refactors; **new and moved APIs
+must follow this rule in the block they belong to.**
