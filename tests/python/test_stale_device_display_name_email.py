@@ -30,6 +30,7 @@ from app.device_enums import (
 from app.operator_digest_store import (
     complete_operator_digest_send,
     load_operator_digest_last_sent_at,
+    release_operator_digest_claim,
     try_claim_operator_digest_for_local_day,
     upsert_operator_digest_last_sent_at,
 )
@@ -360,6 +361,57 @@ def test_send_stale_display_name_digest_delivers_message(
     message = deliver_mock.call_args.args[1]
     assert message["Subject"] == STALE_DISPLAY_NAME_DIGEST_SUBJECT
     assert message["To"] == "ops@example.com"
+
+
+def test_complete_after_midnight_blocks_new_day_even_without_claim_ownership(
+    tmp_path: Path,
+) -> None:
+    """SMTP accept on the next local day must pin that day even if claim ownership is lost."""
+    cache = tmp_path / "cache.sqlite"
+    bootstrap_schema(cache)
+    # 2023-11-14 23:59:50 America/New_York
+    claim_epoch = 1_700_024_390.0
+    token = try_claim_operator_digest_for_local_day(
+        cache,
+        digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+        now_epoch=claim_epoch,
+        timezone=_TZ,
+    )
+    assert token == claim_epoch
+    # Simulate another writer taking the claim after TTL while SMTP is in flight.
+    assert release_operator_digest_claim(
+        cache,
+        claim_token=token,
+        digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+    )
+    # Delivery accepted just after local midnight.
+    delivery_epoch = 1_700_024_410.0  # 2023-11-15 00:00:10 America/New_York
+    assert (
+        complete_operator_digest_send(
+            cache,
+            claim_token=token,
+            digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+            last_sent_at=delivery_epoch,
+            local_date="2023-11-15",
+        )
+        is False
+    )
+    assert (
+        load_operator_digest_last_sent_at(
+            cache,
+            OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+        )
+        == delivery_epoch
+    )
+    assert (
+        try_claim_operator_digest_for_local_day(
+            cache,
+            digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
+            now_epoch=delivery_epoch + 60.0,
+            timezone=_TZ,
+        )
+        is None
+    )
 
 
 def test_try_claim_operator_digest_is_atomic_across_threads(tmp_path: Path) -> None:

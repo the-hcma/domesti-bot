@@ -24,19 +24,36 @@ def complete_operator_digest_send(
     last_sent_at: float,
     local_date: str,
 ) -> bool:
-    """Finalize a successful send for ``claim_token``; no-op when ownership was lost."""
+    """Record delivery for ``local_date`` after SMTP accept.
+
+    Always persists ``last_sent_*`` for ``local_date`` so a post-midnight accept
+    cannot be retried even when ``claim_token`` no longer owns the row. Clears
+    the in-flight claim only when ``claim_token`` still matches.
+    """
 
     def _write(session: Session) -> bool:
-        row = session.get(OperatorDigestState, digest_id.value)
-        if row is None or row.claimed_at != claim_token:
-            return False
         now = time.time()
-        row.claim_local_date = None
-        row.claimed_at = None
+        row = session.get(OperatorDigestState, digest_id.value)
+        if row is None:
+            session.add(
+                OperatorDigestState(
+                    claim_local_date=None,
+                    claimed_at=None,
+                    digest_id=digest_id.value,
+                    last_sent_at=last_sent_at,
+                    last_sent_local_date=local_date,
+                    updated_at=now,
+                )
+            )
+            return True
+        owned = row.claimed_at == claim_token
         row.last_sent_at = last_sent_at
         row.last_sent_local_date = local_date
+        if owned:
+            row.claim_local_date = None
+            row.claimed_at = None
         row.updated_at = now
-        return True
+        return owned
 
     return discovery_write(path, _write)
 
