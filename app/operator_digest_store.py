@@ -151,10 +151,16 @@ def upsert_operator_digest_last_sent_at(
     *,
     digest_id: OperatorDigestId,
     last_sent_at: float,
-) -> None:
-    """Record a successful digest send time for the once-per-local-day gate."""
+    local_date: str,
+) -> bool:
+    """Record a successful digest send for the once-per-local-day gate.
 
-    def _write(session: Session) -> None:
+    Writes ``last_sent_at`` and ``last_sent_local_date`` together. Returns False
+    when an in-flight claim owns the row — production completion must use
+    :func:`complete_operator_digest_send` instead.
+    """
+
+    def _write(session: Session) -> bool:
         now = time.time()
         row = session.get(OperatorDigestState, digest_id.value)
         if row is None:
@@ -164,15 +170,19 @@ def upsert_operator_digest_last_sent_at(
                     claimed_at=None,
                     digest_id=digest_id.value,
                     last_sent_at=last_sent_at,
-                    last_sent_local_date=None,
+                    last_sent_local_date=local_date,
                     updated_at=now,
                 )
             )
-            return
+            return True
+        if row.claimed_at is not None:
+            return False
         row.last_sent_at = last_sent_at
+        row.last_sent_local_date = local_date
         row.updated_at = now
+        return True
 
-    discovery_write(path, _write)
+    return discovery_write(path, _write)
 
 
 def _row_already_sent_on_local_date(
