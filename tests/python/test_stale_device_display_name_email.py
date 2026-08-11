@@ -366,7 +366,7 @@ def test_try_claim_operator_digest_is_atomic_across_threads(tmp_path: Path) -> N
     cache = tmp_path / "cache.sqlite"
     bootstrap_schema(cache)
     barrier = threading.Barrier(2)
-    results: list[bool] = []
+    results: list[float | None] = []
     lock = threading.Lock()
 
     def _worker() -> None:
@@ -385,10 +385,12 @@ def test_try_claim_operator_digest_is_atomic_across_threads(tmp_path: Path) -> N
         thread.start()
     for thread in threads:
         thread.join()
-    assert results.count(True) == 1
-    assert results.count(False) == 1
-    complete_operator_digest_send(
+    tokens = [token for token in results if token is not None]
+    assert len(tokens) == 1
+    assert results.count(None) == 1
+    assert complete_operator_digest_send(
         cache,
+        claim_token=tokens[0],
         digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
         last_sent_at=_NOW,
         local_date="2023-11-14",
@@ -400,7 +402,7 @@ def test_try_claim_operator_digest_is_atomic_across_threads(tmp_path: Path) -> N
             now_epoch=_NOW + 10.0,
             timezone=_TZ,
         )
-        is False
+        is None
     )
 
 

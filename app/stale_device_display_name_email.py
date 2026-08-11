@@ -253,12 +253,13 @@ def maybe_send_stale_display_name_digest(
     findings = collect_stale_display_name_findings(rules, ctx)
     if not findings:
         return False
-    if not try_claim_operator_digest_for_local_day(
+    claim_token = try_claim_operator_digest_for_local_day(
         cache_path,
         digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
         now_epoch=clock,
         timezone=timezone,
-    ):
+    )
+    if claim_token is None:
         return False
     try:
         sent = send_stale_display_name_digest(
@@ -269,18 +270,21 @@ def maybe_send_stale_display_name_digest(
     except Exception:
         release_operator_digest_claim(
             cache_path,
+            claim_token=claim_token,
             digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
         )
         raise
     if not sent:
         release_operator_digest_claim(
             cache_path,
+            claim_token=claim_token,
             digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
         )
         return False
     completed_at = time.time()
     complete_operator_digest_send(
         cache_path,
+        claim_token=claim_token,
         digest_id=OperatorDigestId.STALE_DEVICE_DISPLAY_NAME,
         last_sent_at=completed_at,
         local_date=datetime.fromtimestamp(completed_at, tz=timezone).date().isoformat(),

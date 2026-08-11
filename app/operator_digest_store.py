@@ -19,34 +19,26 @@ OPERATOR_DIGEST_CLAIM_TTL_S = 15 * 60.0
 def complete_operator_digest_send(
     path: Path,
     *,
+    claim_token: float,
     digest_id: OperatorDigestId,
     last_sent_at: float,
     local_date: str,
-) -> None:
-    """Record a successful digest send and clear any in-flight claim."""
+) -> bool:
+    """Finalize a successful send for ``claim_token``; no-op when ownership was lost."""
 
-    def _write(session: Session) -> None:
-        now = time.time()
+    def _write(session: Session) -> bool:
         row = session.get(OperatorDigestState, digest_id.value)
-        if row is None:
-            session.add(
-                OperatorDigestState(
-                    claim_local_date=None,
-                    claimed_at=None,
-                    digest_id=digest_id.value,
-                    last_sent_at=last_sent_at,
-                    last_sent_local_date=local_date,
-                    updated_at=now,
-                )
-            )
-            return
+        if row is None or row.claimed_at != claim_token:
+            return False
+        now = time.time()
         row.claim_local_date = None
         row.claimed_at = None
         row.last_sent_at = last_sent_at
         row.last_sent_local_date = local_date
         row.updated_at = now
+        return True
 
-    discovery_write(path, _write)
+    return discovery_write(path, _write)
 
 
 def load_operator_digest_last_sent_at(
@@ -64,19 +56,25 @@ def load_operator_digest_last_sent_at(
 def release_operator_digest_claim(
     path: Path,
     *,
+    claim_token: float,
     digest_id: OperatorDigestId,
-) -> None:
-    """Clear an in-flight claim so a failed delivery can retry the same local day."""
+) -> bool:
+    """Release ``claim_token`` after a failed delivery so the same local day can retry."""
 
-    def _write(session: Session) -> None:
+    def _write(session: Session) -> bool:
         row = session.get(OperatorDigestState, digest_id.value)
-        if row is None:
-            return
+        if row is None or row.claimed_at != claim_token:
+            return False
+        now = time.time()
         row.claim_local_date = None
         row.claimed_at = None
-        row.updated_at = time.time()
+        # Claim reserves the day optimistically; only the owning claim may unreserve.
+        row.last_sent_at = None
+        row.last_sent_local_date = None
+        row.updated_at = now
+        return True
 
-    discovery_write(path, _write)
+    return discovery_write(path, _write)
 
 
 def try_claim_operator_digest_for_local_day(
@@ -86,16 +84,19 @@ def try_claim_operator_digest_for_local_day(
     now_epoch: float,
     timezone: ZoneInfo,
     claim_ttl_s: float = OPERATOR_DIGEST_CLAIM_TTL_S,
-) -> bool:
+) -> float | None:
     """Atomically reserve one digest send for the home local calendar day.
 
-    Returns True when this caller owns the reservation. Concurrent callers and
-    same-day successful sends get False. Stale claims older than ``claim_ttl_s``
-    may be taken over so a crashed sender does not block the day forever.
+    Returns a claim token (``claimed_at``) when this caller owns the reservation,
+    else None. The claim optimistically records ``last_sent_*`` for today so a
+    crash after SMTP acceptance cannot be retried the same day. Failed delivery
+    must :func:`release_operator_digest_claim` with the same token. Active claims
+    block takeover until ``claim_ttl_s`` elapses; a same-day reservation without
+    release is not taken over (missed day over double-send).
     """
     local_date = datetime.fromtimestamp(now_epoch, tz=timezone).date().isoformat()
 
-    def _write(session: Session) -> bool:
+    def _write(session: Session) -> float | None:
         now = time.time()
         row = session.get(OperatorDigestState, digest_id.value)
         if row is None:
@@ -104,24 +105,26 @@ def try_claim_operator_digest_for_local_day(
                     claim_local_date=local_date,
                     claimed_at=now_epoch,
                     digest_id=digest_id.value,
-                    last_sent_at=None,
-                    last_sent_local_date=None,
+                    last_sent_at=now_epoch,
+                    last_sent_local_date=local_date,
                     updated_at=now,
                 )
             )
-            return True
-        if _row_already_sent_on_local_date(row, local_date=local_date, timezone=timezone):
-            return False
+            return now_epoch
         if _row_has_active_claim(
             row,
             now_epoch=now_epoch,
             claim_ttl_s=claim_ttl_s,
         ):
-            return False
+            return None
+        if _row_already_sent_on_local_date(row, local_date=local_date, timezone=timezone):
+            return None
         row.claim_local_date = local_date
         row.claimed_at = now_epoch
+        row.last_sent_at = now_epoch
+        row.last_sent_local_date = local_date
         row.updated_at = now
-        return True
+        return now_epoch
 
     return discovery_write(path, _write)
 
