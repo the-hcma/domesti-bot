@@ -409,7 +409,10 @@ async def run_overnight_ep1_calibration(
                 if cycle.adjustment is None:
                     exhausted = True
                     break
-                attempt_index += 1
+                # Only rotate levers after a confirmed write (or dry-run proposal).
+                # Unconfirmed applies leave attempt_index alone so the same lever retries.
+                if cycle.dry_run or cycle.applied:
+                    attempt_index += 1
                 if not cycle.dry_run and cycle.applied and settle_s > 0:
                     _LOGGER.info("Settling %.1fs after knob change", settle_s)
                     await asyncio.sleep(settle_s)

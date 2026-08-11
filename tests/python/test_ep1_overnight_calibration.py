@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.device_enums import Ep1OccupancyTuningKind
+from app.ep1_calibration import Ep1SettingsTarget
 from app.ep1_occupancy_tuning import Ep1OccupancyTuningField, Ep1OccupancyTuningSnapshot
 from app.ep1_overnight_calibration import (
     Ep1OvernightCalibrationError,
     KnobAdjustDirection,
+    KnobAdjustment,
+    OccupancyObservation,
+    OvernightCalibrationCycleResult,
     in_empty_room_window,
     propose_next_false_positive_adjustment,
+    run_overnight_ep1_calibration,
     seconds_until_empty_room_window,
     seconds_until_empty_room_window_end,
 )
@@ -309,3 +316,97 @@ def test_propose_decreases_misaligned_max_distance() -> None:
     assert adj is not None
     assert adj.kind == Ep1OccupancyTuningKind.MAX_DISTANCE
     assert adj.new_value == pytest.approx(3.9)
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_advance_attempt_index_when_write_unconfirmed(
+    tmp_path: Path,
+) -> None:
+    """Unconfirmed knob writes must retry the same lever, not rotate past it."""
+
+    target = Ep1SettingsTarget(
+        device_id="aa:bb:cc:dd:ee:ff",
+        display_label="EP1 (aa:bb:cc:dd:ee:ff)",
+        display_name="EP1",
+        host="192.0.2.10",
+        port=6053,
+    )
+    adjustment = KnobAdjustment(
+        direction=KnobAdjustDirection.DECREASE,
+        kind=Ep1OccupancyTuningKind.MAX_DISTANCE,
+        new_value=4.9,
+        old_value=5.0,
+        step=0.1,
+    )
+    fp_obs = OccupancyObservation(
+        duration_s=1.0,
+        false_positive=True,
+        final_occupied=True,
+        occupied_sample_count=1,
+        sample_count=2,
+    )
+    clear_obs = OccupancyObservation(
+        duration_s=1.0,
+        false_positive=False,
+        final_occupied=False,
+        occupied_sample_count=0,
+        sample_count=1,
+    )
+    attempt_indices: list[int] = []
+
+    async def _fake_cycle(**kwargs: object) -> OvernightCalibrationCycleResult:
+        attempt_index = kwargs["attempt_index"]
+        assert isinstance(attempt_index, int)
+        attempt_indices.append(attempt_index)
+        call_n = len(attempt_indices)
+        if call_n <= 2:
+            return OvernightCalibrationCycleResult(
+                adjustment=adjustment,
+                applied=False,
+                clear_streak=0,
+                dry_run=False,
+                observation=fp_obs,
+                knobs={},
+            )
+        if call_n == 3:
+            return OvernightCalibrationCycleResult(
+                adjustment=adjustment,
+                applied=True,
+                clear_streak=0,
+                dry_run=False,
+                observation=fp_obs,
+                knobs={},
+            )
+        return OvernightCalibrationCycleResult(
+            adjustment=None,
+            applied=False,
+            clear_streak=1,
+            dry_run=False,
+            observation=clear_obs,
+            knobs={},
+        )
+
+    with (
+        patch(
+            "app.ep1_overnight_calibration.resolve_ep1_settings_target",
+            return_value=target,
+        ),
+        patch(
+            "app.ep1_overnight_calibration._run_one_cycle",
+            new=AsyncMock(side_effect=_fake_cycle),
+        ),
+        patch("app.ep1_overnight_calibration.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await run_overnight_ep1_calibration(
+            device_id=target.device_id,
+            clear_streak_required=1,
+            force_window=True,
+            log_path=tmp_path / "calibrate.jsonl",
+            observe_s=1.0,
+            settle_s=0.0,
+            timezone_name="UTC",
+        )
+
+    assert attempt_indices[:4] == [0, 0, 0, 1]
+    assert result.false_positives == 3
+    assert result.success is True
