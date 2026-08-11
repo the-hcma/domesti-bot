@@ -596,7 +596,10 @@ def _propose_for_field(field: Ep1OccupancyTuningField) -> KnobAdjustment | None:
     if field.kind in _DECREASE_KINDS:
         if value <= lo + _NUMBER_VALUE_ABS_TOL:
             return None
-        new_value = max(lo, _quantize_from_min(value - step, lo=lo, step=step, hi=hi))
+        new_value = max(
+            lo,
+            _quantize_toward(value - step, lo=lo, step=step, hi=hi, toward=KnobAdjustDirection.DECREASE),
+        )
         if abs(new_value - value) <= _NUMBER_VALUE_ABS_TOL:
             return None
         return KnobAdjustment(
@@ -610,7 +613,10 @@ def _propose_for_field(field: Ep1OccupancyTuningField) -> KnobAdjustment | None:
     if field.kind in _INCREASE_KINDS:
         if value >= hi - _NUMBER_VALUE_ABS_TOL:
             return None
-        new_value = min(hi, _quantize_from_min(value + step, lo=lo, step=step, hi=hi))
+        new_value = min(
+            hi,
+            _quantize_toward(value + step, lo=lo, step=step, hi=hi, toward=KnobAdjustDirection.INCREASE),
+        )
         if abs(new_value - value) <= _NUMBER_VALUE_ABS_TOL:
             return None
         return KnobAdjustment(
@@ -623,8 +629,22 @@ def _propose_for_field(field: Ep1OccupancyTuningField) -> KnobAdjustment | None:
     return None
 
 
-def _quantize_from_min(value: float, *, lo: float, step: float, hi: float) -> float:
-    steps = round((value - lo) / step)
+def _quantize_toward(
+    value: float,
+    *,
+    lo: float,
+    step: float,
+    hi: float,
+    toward: KnobAdjustDirection,
+) -> float:
+    """Snap ``value`` onto the step grid, monotonic in ``toward`` for misaligned knobs."""
+
+    raw = (value - lo) / step
+    tol = max(_NUMBER_VALUE_ABS_TOL / step, 1e-9)
+    if toward == KnobAdjustDirection.DECREASE:
+        steps = math.floor(raw + tol)
+    else:
+        steps = math.ceil(raw - tol)
     quantized = lo + (steps * step)
     return min(hi, max(lo, quantized))
 

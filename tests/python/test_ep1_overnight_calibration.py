@@ -291,3 +291,21 @@ def test_propose_rotates_start_lever_with_attempt_index() -> None:
     adj = propose_next_false_positive_adjustment(snap, attempt_index=1)
     assert adj is not None
     assert adj.kind == Ep1OccupancyTuningKind.TRIGGER_SENSITIVITY
+
+
+def test_propose_decreases_misaligned_max_distance() -> None:
+    snap = _snapshot(
+        {
+            Ep1OccupancyTuningKind.MAX_DISTANCE: _field(
+                Ep1OccupancyTuningKind.MAX_DISTANCE,
+                value=4.04,
+                min_value=0.0,
+                max_value=8.0,
+                step=0.1,
+            ),
+        }
+    )
+    adj = propose_next_false_positive_adjustment(snap, attempt_index=0)
+    assert adj is not None
+    assert adj.kind == Ep1OccupancyTuningKind.MAX_DISTANCE
+    assert adj.new_value == pytest.approx(3.9)
