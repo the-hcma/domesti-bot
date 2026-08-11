@@ -377,6 +377,7 @@ def test_complete_after_midnight_blocks_new_day_even_without_claim_ownership(
         now_epoch=claim_epoch,
         timezone=_TZ,
     )
+    assert token is not None
     assert token == claim_epoch
     # Simulate another writer taking the claim after TTL while SMTP is in flight.
     assert release_operator_digest_claim(
