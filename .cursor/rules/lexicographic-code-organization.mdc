@@ -43,11 +43,13 @@ APIs and not at the end of the file unless it sorts last in the private block.
 
 Two blocks, in order:
 
-1. **Public** — methods and `@property` getters whose names do **not** start with `_`.
-   Treat `async def` like `def`. Dunder methods (`__init__`, `__str__`, …) live in this
-   block and participate in the same lexicographic sort.
-2. **Private** — methods and `@property` getters whose names start with `_` (single leading
-   underscore). Sort lexicographically within this block.
+1. **Public** — class-level members whose names do **not** start with `_`, including
+   methods, `@property` getters, constants, nested classes, and other bindings. Treat
+   `async def` like `def`. Dunder methods (`__init__`, `__str__`, …) live in this block and
+   participate in the same lexicographic sort.
+2. **Private** — class-level members whose names start with `_` (single leading underscore),
+   including methods, properties, constants, nested classes, and other bindings. Sort
+   lexicographically within this block.
 
 ```python
 class Example:
@@ -61,18 +63,25 @@ class Example:
 
 ## Closed-set literals
 
-Keep members of closed name sets in **ASCII lexicographic order**, and insert new members
-in sorted position (do not append):
+For **unordered** closed name sets, keep members in **ASCII lexicographic order** and insert
+new members in sorted position (do not append):
 
 - `frozenset({...})` / `set` literals of names
-- Enum members
-- Tuple / list constants of identifier-like strings (param names, flag names, etc.)
+
+For **order-sensitive** declarations, preserve declaration order when it is part of the
+contract (enum auto-values, iteration/serialization order, or user-visible sequencing). Sort
+lexicographically only when order is not significant:
+
+- Enum members — sort when values/iteration order are not contractual; otherwise keep
+  declaration order
+- Tuple / list constants of identifier-like strings — sort when order is not observable
+  externally; otherwise keep declaration order
 
 ```python
-# good
+# good — unordered name set
 ALLOWED = frozenset({"alpha", "beta", "gamma"})
 
-# bad — unsorted / append-only
+# bad — unsorted / append-only unordered set
 ALLOWED = frozenset({"gamma", "alpha", "beta"})
 ```
 
