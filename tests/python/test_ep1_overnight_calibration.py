@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -628,3 +629,63 @@ async def test_run_aborts_after_consecutive_inconclusive_observes(tmp_path: Path
         device_id=target.device_id,
     ) in str(raised.value)
     assert DEFAULT_MAX_CONSECUTIVE_OBSERVE_FAILURES >= 2
+
+
+@pytest.mark.asyncio
+async def test_run_stops_cleanly_when_stop_event_set(tmp_path: Path) -> None:
+    target = Ep1SettingsTarget(
+        device_id="aa:bb:cc:dd:ee:ff",
+        display_label="EP1 (aa:bb:cc:dd:ee:ff)",
+        display_name="EP1",
+        host="192.0.2.10",
+        port=6053,
+    )
+    clear_obs = OccupancyObservation(
+        duration_s=1.0,
+        false_positive=False,
+        final_occupied=False,
+        occupied_sample_count=0,
+        sample_count=1,
+    )
+    stop_event = asyncio.Event()
+    calls = 0
+
+    async def _fake_cycle(**_kwargs: object) -> OvernightCalibrationCycleResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            stop_event.set()
+            return OvernightCalibrationCycleResult(
+                adjustment=None,
+                applied=False,
+                clear_streak=1,
+                dry_run=False,
+                observation=clear_obs,
+                knobs={},
+            )
+        raise AssertionError("should have stopped after stop_event was set")
+
+    with (
+        patch(
+            "app.ep1_overnight_calibration.resolve_ep1_settings_target",
+            return_value=target,
+        ),
+        patch(
+            "app.ep1_overnight_calibration._run_one_cycle",
+            new=AsyncMock(side_effect=_fake_cycle),
+        ),
+    ):
+        result = await run_overnight_ep1_calibration(
+            device_id=target.device_id,
+            clear_streak_required=100,
+            force_window=True,
+            log_path=tmp_path / "calibrate.jsonl",
+            observe_s=1.0,
+            settle_s=0.0,
+            stop_event=stop_event,
+            timezone_name="UTC",
+        )
+
+    assert result.interrupted is True
+    assert result.success is False
+    assert calls == 1
