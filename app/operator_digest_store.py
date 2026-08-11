@@ -166,6 +166,10 @@ def _row_already_sent_on_local_date(
 ) -> bool:
     if row.last_sent_local_date == local_date:
         return True
+    # Optimistic / in-flight claims always set last_sent_local_date; do not treat a
+    # bare last_sent_at as finalized while a claim is still open.
+    if row.claimed_at is not None:
+        return False
     if row.last_sent_at is None:
         return False
     if row.last_sent_local_date is not None:
