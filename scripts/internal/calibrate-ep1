@@ -28,14 +28,6 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _ensure_uv() -> None:
-    if os.environ.get("UV_ACTIVE") or "/.venv/" in (sys.executable or ""):
-        return
-    uv = shutil.which("uv")
-    if uv:
-        os.execv(uv, [uv, "run", sys.argv[0], *sys.argv[1:]])
-
-
 def main() -> int:
     """Parse CLI flags and run the overnight calibrator."""
     _ensure_uv()
@@ -45,7 +37,6 @@ def main() -> int:
     from app.ep1_calibration import list_ep1_settings_targets
     from app.ep1_overnight_calibration import (
         Ep1OvernightCalibrationError,
-        Ep1OvernightCalibrationExhaustedError,
         Ep1OvernightCalibrationOutsideWindowError,
         default_calibration_log_path,
         run_overnight_ep1_calibration,
@@ -82,8 +73,9 @@ def main() -> int:
         log_path = default_calibration_log_path(device_id=target.device_id)
     max_cycles = 1 if args.once else args.max_cycles
 
+    # ``display_label`` is already ``preferred_label (mac)`` from Settings targets.
     print(
-        f"Calibrating {target.display_label} ({target.device_id}) at {target.host}:{target.port}\n"
+        f"Calibrating {target.display_label} at {target.host}:{target.port}\n"
         f"  window={args.window_start:02d}:00–{args.window_end:02d}:00 local "
         f"force_window={args.force_window} wait_for_window={args.wait_for_window} "
         f"dry_run={args.dry_run}\n"
@@ -99,7 +91,6 @@ def main() -> int:
                 device_id=target.device_id,
                 cache_path=cache_path,
                 clear_streak_required=args.clear_streak,
-                cli_noise_psk=args.noise_psk,
                 dry_run=args.dry_run,
                 force_window=args.force_window,
                 log_path=log_path,
@@ -116,9 +107,6 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         print("Hint: re-run with --force-window for a daytime dry-run / one-shot.", file=sys.stderr)
         return 3
-    except Ep1OvernightCalibrationExhaustedError as exc:
-        print(str(exc), file=sys.stderr)
-        return 4
     except Ep1OvernightCalibrationError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -136,6 +124,14 @@ def main() -> int:
     if result.window_ended:
         return 5
     return 1
+
+
+def _ensure_uv() -> None:
+    if os.environ.get("UV_ACTIVE") or "/.venv/" in (sys.executable or ""):
+        return
+    uv = shutil.which("uv")
+    if uv:
+        os.execv(uv, [uv, "run", sys.argv[0], *sys.argv[1:]])
 
 
 def _parse_args() -> argparse.Namespace:
@@ -185,27 +181,23 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="JSONL log path (default: under $HOME/scratch/domesti-bot/ep1-overnight-calibration/)",
     )
-    parser.add_argument(
+    cycle_limit = parser.add_mutually_exclusive_group()
+    cycle_limit.add_argument(
         "--max-cycles",
         default=None,
         type=int,
         help="Stop after N observe/adjust cycles (default: run until success or window end)",
     )
-    parser.add_argument(
-        "--noise-psk",
-        default=None,
-        help="Optional ESPHome Noise PSK (else EP1_NOISE_PSK / encrypted DB)",
+    cycle_limit.add_argument(
+        "--once",
+        action="store_true",
+        help="Shorthand for --max-cycles 1",
     )
     parser.add_argument(
         "--observe-s",
         default=DEFAULT_OBSERVE_S,
         type=float,
         help=f"Seconds to watch occupancy per cycle (default: {DEFAULT_OBSERVE_S:g})",
-    )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="Shorthand for --max-cycles 1",
     )
     parser.add_argument(
         "--settle-s",
