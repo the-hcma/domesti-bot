@@ -2,7 +2,7 @@
   "version": 1,
   "device_id_resolution": "mac",
   "_notes": [
-    "Copy this file to automation-rules.json in the repo/server root (same directory as domesti-bot.config.json).",
+    "Copy this file to $XDG_CONFIG_HOME/domesti-bot/automation-rules.json (usually ~/.config/domesti-bot/automation-rules.json). Override with DOMESTI_AUTOMATION_RULES_FILE.",
     "settings_location.lat/lon are the configured home point (maps, astronomical schedules, and distance features such as vacation mode). Do not use a geofence center as a substitute. lat=0 and lon=0 together mean home is not configured.",
     "users_min_distance_from_home_m is true when every listed user_id has a usable GPS location at least min_distance_m from settings_location home (AND across users; missing/low-accuracy locations fail closed).",
     "device_id values are normalized MAC addresses (or Tailwind {hub_mac}:{door_id}) and are authoritative. Optional display_name is a non-authoritative snapshot for humans; Automations warns (Warning badge) if it no longer matches the live preferred_label, and warns if a rule still stores a label as device_id. Example MACs below are locally administered placeholders (02:00:\u2026).",

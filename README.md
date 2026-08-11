@@ -14,8 +14,9 @@ tile-based web UI for one-tap control from any phone or laptop on the same LAN.
 A **file-backed rules engine** drives **Automations**: presence from
 [my-tracks](https://github.com/the-hcma/my-tracks) (geofence enter/leave),
 scheduled cron rules (dwell, device-state, once-per-day caps), Kasa actions, and
-email notifications. Rule definitions live in `automation-rules.json` today;
-edit the file and restart the server to change automations.
+email notifications. Operator rule definitions live in
+`~/.config/domesti-bot/automation-rules.json` (XDG); edit the file and restart
+the server to change automations.
 
 The project is intentionally narrow in scope: no mandatory cloud round-trips, no
 vendor SaaS beyond what each device family already requires. Everything runs on
@@ -43,11 +44,11 @@ Linux server that already hosts other always-on services.
   automatically; optional `EP1_HOSTS` / `--ep1-host` when multicast is blocked.
   Live readings appear in the dashboard header. USB bring-up without Home
   Assistant: [`docs/EP1.md`](docs/EP1.md).
-- **Automations (rules engine)** — `automation-rules.json` at the server root
-  (template: `automation-rules.json.example`). Edge rules on geofence enter/leave;
-  scheduled cron rules (sunset, dwell, device on/off, once-per-day). Kasa actions
-  and optional email on fire. Desktop ☰ → **Automations** — see
-  [Automations](#automations).
+- **Automations (rules engine)** — operator `automation-rules.json` under
+  `~/.config/domesti-bot/` (template: `automation-rules.json.example`). Edge
+  rules on geofence enter/leave; scheduled cron rules (sunset, dwell, device
+  on/off, once-per-day). Kasa actions and optional email on fire. Desktop ☰ →
+  **Automations** — see [Automations](#automations).
 - **My Tracks presence** — pair with a my-tracks server for live location
   webhooks; sync user roster and geofence definitions into domesti-bot. See
   [`docs/MY_TRACKS_INTEGRATION_PLAN.md`](docs/MY_TRACKS_INTEGRATION_PLAN.md).
@@ -142,7 +143,7 @@ Optional environment variables:
 | Variable | Effect |
 |---|---|
 | `DOMESTI_API_KEY` | When set, every `/v1/…` endpoint requires the `X-Domesti-Api-Key` header. Unset = unauthenticated (intended for trusted LAN only). |
-| `DOMESTI_AUTOMATION_RULES_FILE` | Path to the automation rule bundle (default: `./automation-rules.json` beside the config file). |
+| `DOMESTI_AUTOMATION_RULES_FILE` | Path to the automation rule bundle (default: `$XDG_CONFIG_HOME/domesti-bot/automation-rules.json`, usually `~/.config/domesti-bot/automation-rules.json`). |
 | `DOMESTI_BOT_CONFIG_FILE` | Override path to the config JSON file (default: `./domesti-bot.config.json` at repo root). |
 | `DOMESTI_BOT_SECRETS_KEY` | Fernet master key for encrypted SQLite secrets. Overrides `domesti-bot.config.json` when set. |
 | `DOMESTI_LISTEN_HOST` | Default bind address for the HTTP server. Overridden by `--listen-host` / `--listen-all`. |
@@ -241,12 +242,13 @@ offered.
 
 Production automations are **file-backed** today:
 
-1. Copy `automation-rules.json.example` → `automation-rules.json` beside
-   `domesti-bot.config.json` (gitignored on your server).
+1. Copy `automation-rules.json.example` →
+   `~/.config/domesti-bot/automation-rules.json` (or `$XDG_CONFIG_HOME/domesti-bot/…`).
+   Override the path with `DOMESTI_AUTOMATION_RULES_FILE` if needed.
 2. Pair **My Tracks** (desktop ☰ → **Settings**) and sync **Users** / **Geofences**
    under ☰ → **Automations** so rule `user_id` and `geofence_id` values match.
 3. Configure **Mail** under Automations if rules use `notify_on_fire`.
-4. Edit `automation-rules.json`, then restart `domesti-bot-server` (or the
+4. Edit the operator `automation-rules.json`, then restart `domesti-bot-server` (or the
    systemd user unit).
 
 **Triggers:** `edge_true` (fire on geofence enter/leave for the arriving user)

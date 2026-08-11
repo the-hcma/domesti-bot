@@ -9,7 +9,10 @@ import pytest
 
 from app.automation_rules_loader import (
     AutomationRulesLoadError,
+    automation_rules_json_path,
+    automation_rules_operator_json_path,
     automation_rules_source,
+    automation_rules_xdg_json_path,
     list_automation_rules,
     load_automation_rules_bundle,
     load_settings_location,
@@ -120,3 +123,53 @@ def test_load_automation_rules_bundle_rejects_invalid_schema(tmp_path: Path) -> 
     )
     with pytest.raises(AutomationRulesLoadError, match="automation rules schema"):
         load_automation_rules_bundle(path=path)
+
+
+def test_automation_rules_paths_prefer_xdg_operator_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DOMESTI_AUTOMATION_RULES_FILE", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    example = Path(__file__).resolve().parents[2] / "automation-rules.json.example"
+    xdg_dir = tmp_path / "xdg-config" / "domesti-bot"
+    xdg_dir.mkdir(parents=True)
+    operator = xdg_dir / "automation-rules.json"
+    operator.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    assert automation_rules_xdg_json_path() == operator
+    assert automation_rules_json_path() == operator.resolve()
+    assert automation_rules_operator_json_path() == operator.resolve()
+    assert automation_rules_source() == "operator"
+    assert load_automation_rules_bundle().version == 1
+
+
+def test_automation_rules_paths_fall_back_to_example_without_xdg(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DOMESTI_AUTOMATION_RULES_FILE", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty-xdg"))
+
+    assert not automation_rules_xdg_json_path().is_file()
+    resolved = automation_rules_json_path()
+    assert resolved.name == "automation-rules.json.example"
+    assert resolved.is_file()
+    assert automation_rules_operator_json_path() == automation_rules_xdg_json_path().resolve()
+    assert automation_rules_source() == "example"
+
+
+def test_automation_rules_env_override_wins_over_xdg(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    xdg_dir = tmp_path / "xdg-config" / "domesti-bot"
+    xdg_dir.mkdir(parents=True)
+    (xdg_dir / "automation-rules.json").write_text("{}", encoding="utf-8")
+    example = Path(__file__).resolve().parents[2] / "automation-rules.json.example"
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
+
+    assert automation_rules_json_path() == example.resolve()
+    assert automation_rules_operator_json_path() == example.resolve()
+    assert automation_rules_source() == "operator"
