@@ -10,6 +10,7 @@ import pytest
 from app.device_enums import Ep1OccupancyTuningKind
 from app.ep1_occupancy_tuning import Ep1OccupancyTuningField, Ep1OccupancyTuningSnapshot
 from app.ep1_overnight_calibration import (
+    Ep1OvernightCalibrationError,
     KnobAdjustDirection,
     in_empty_room_window,
     propose_next_false_positive_adjustment,
@@ -60,12 +61,28 @@ def _snapshot(knobs: dict[Ep1OccupancyTuningKind, Ep1OccupancyTuningField]) -> E
     )
 
 
+def test_in_empty_room_window_equal_hours_is_always_open() -> None:
+    tz = ZoneInfo("UTC")
+    assert in_empty_room_window(
+        datetime(2026, 8, 11, 12, 0, tzinfo=tz),
+        start_hour=3,
+        end_hour=3,
+    )
+
+
 def test_in_empty_room_window_midnight_to_six() -> None:
     tz = ZoneInfo("America/New_York")
     assert in_empty_room_window(datetime(2026, 8, 11, 0, 0, tzinfo=tz))
     assert in_empty_room_window(datetime(2026, 8, 11, 5, 59, tzinfo=tz))
     assert not in_empty_room_window(datetime(2026, 8, 11, 6, 0, tzinfo=tz))
     assert not in_empty_room_window(datetime(2026, 8, 11, 12, 0, tzinfo=tz))
+
+
+@pytest.mark.parametrize("bad_hour", [-1, 24])
+def test_in_empty_room_window_rejects_out_of_range_hours(bad_hour: int) -> None:
+    tz = ZoneInfo("UTC")
+    with pytest.raises(Ep1OvernightCalibrationError):
+        in_empty_room_window(datetime(2026, 8, 11, 1, 0, tzinfo=tz), start_hour=bad_hour)
 
 
 def test_in_empty_room_window_wraps_midnight() -> None:

@@ -14,14 +14,14 @@ import asyncio
 import json
 import logging
 import math
-import time
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from datetime import time as dt_time
 from enum import StrEnum
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aioesphomeapi.client import APIClient
 from aioesphomeapi.core import APIConnectionError
@@ -50,7 +50,7 @@ DEFAULT_WINDOW_END_HOUR = 6
 DEFAULT_WINDOW_START_HOUR = 0
 EP1_OVERNIGHT_CALIBRATION_EXHAUSTED = "All false-positive levers are already at their floor/ceiling for {device_id}"
 EP1_OVERNIGHT_CALIBRATION_NO_OCCUPANCY = (
-    "EP1 at {host}:{port} has no occupancy binary sensor (expected object_id aliases {aliases})"
+    "EP1 at {host}:{port} has no occupancy binary sensor (expected object_id aliases: {aliases})"
 )
 EP1_OVERNIGHT_CALIBRATION_OUTSIDE_WINDOW = (
     "Local time {local_time} is outside the empty-room window "
@@ -88,10 +88,6 @@ _OCCUPANCY_ALIASES: tuple[str, ...] = ("occupancy",)
 
 class Ep1OvernightCalibrationError(ValueError):
     """Operator-facing overnight calibrator failure."""
-
-
-class Ep1OvernightCalibrationExhaustedError(Ep1OvernightCalibrationError):
-    """Every false-positive lever is already at its limit."""
 
 
 class Ep1OvernightCalibrationNotFoundError(Ep1OvernightCalibrationError):
@@ -224,7 +220,7 @@ async def observe_ep1_occupancy(
                 EP1_OVERNIGHT_CALIBRATION_NO_OCCUPANCY.format(
                     host=host,
                     port=port,
-                    aliases=_OCCUPANCY_ALIASES,
+                    aliases=", ".join(_OCCUPANCY_ALIASES),
                 )
             )
         return await _watch_occupancy(client, key=int(occupancy.key), duration_s=duration_s)
@@ -290,9 +286,9 @@ async def run_overnight_ep1_calibration(
             EP1_OVERNIGHT_CALIBRATION_TARGET_NOT_FOUND.format(device_id=device_id)
         )
 
-    tz = ZoneInfo(timezone_name) if timezone_name else datetime.now().astimezone().tzinfo
+    tz = _resolve_calibration_timezone(timezone_name)
     local_now = datetime.now(tz=tz)
-    if not force_window and not in_empty_room_window(
+    while not force_window and not in_empty_room_window(
         local_now,
         start_hour=window_start_hour,
         end_hour=window_end_hour,
@@ -310,12 +306,16 @@ async def run_overnight_ep1_calibration(
             start_hour=window_start_hour,
             end_hour=window_end_hour,
         )
+        # Chunk long waits so DST / clock changes are noticed before the window opens.
+        sleep_s = min(wait_s, 60.0) if wait_s > 0 else 0.0
         _LOGGER.info(
-            "Outside empty-room window; waiting %.0fs until %02d:00 local",
+            "Outside empty-room window; waiting %.0fs (next chunk %.0fs) until %02d:00 local",
             wait_s,
+            sleep_s,
             window_start_hour,
         )
-        await asyncio.sleep(wait_s)
+        if sleep_s > 0:
+            await asyncio.sleep(sleep_s)
         local_now = datetime.now(tz=tz)
 
     resolved_log = log_path if log_path is not None else default_calibration_log_path(device_id=target.device_id)
@@ -353,45 +353,63 @@ async def run_overnight_ep1_calibration(
     exhausted = False
     window_ended = False
 
-    while True:
-        local_now = datetime.now(tz=tz)
-        if not force_window and not in_empty_room_window(
-            local_now,
-            start_hour=window_start_hour,
-            end_hour=window_end_hour,
-        ):
-            window_ended = True
-            _LOGGER.info("Empty-room window ended at %s; stopping", local_now.strftime("%H:%M:%S"))
-            break
-        if max_cycles is not None and cycles >= max_cycles:
-            break
+    try:
+        while True:
+            local_now = datetime.now(tz=tz)
+            if not force_window and not in_empty_room_window(
+                local_now,
+                start_hour=window_start_hour,
+                end_hour=window_end_hour,
+            ):
+                window_ended = True
+                _LOGGER.info(
+                    "Empty-room window ended at %s; stopping",
+                    local_now.strftime("%H:%M:%S"),
+                )
+                break
+            if max_cycles is not None and cycles >= max_cycles:
+                break
 
-        cycle = await _run_one_cycle(
-            target=target,
-            attempt_index=attempt_index,
-            cache_path=cache_path,
-            clear_streak=clear_streak,
-            dry_run=dry_run,
-            ep1_mgr=ep1_mgr,
-            log_path=resolved_log,
-            noise_psk=psk,
-            observe_s=observe_s,
+            cycle = await _run_one_cycle(
+                target=target,
+                attempt_index=attempt_index,
+                cache_path=cache_path,
+                clear_streak=clear_streak,
+                dry_run=dry_run,
+                ep1_mgr=ep1_mgr,
+                log_path=resolved_log,
+                noise_psk=psk,
+                observe_s=observe_s,
+            )
+            cycles += 1
+            if cycle.observation.false_positive:
+                false_positives += 1
+                clear_streak = 0
+                if cycle.adjustment is None:
+                    exhausted = True
+                    break
+                attempt_index += 1
+                if not cycle.dry_run and cycle.applied and settle_s > 0:
+                    _LOGGER.info("Settling %.1fs after knob change", settle_s)
+                    await asyncio.sleep(settle_s)
+            else:
+                clear_streak = cycle.clear_streak
+                if clear_streak >= clear_streak_required:
+                    break
+    except Exception as exc:
+        _append_jsonl(
+            resolved_log,
+            {
+                "event": "run_abort",
+                "device_id": target.device_id,
+                "cycles": cycles,
+                "false_positives": false_positives,
+                "clear_streak": clear_streak,
+                "error": str(exc),
+                "local_time": datetime.now(tz=tz).isoformat(timespec="seconds"),
+            },
         )
-        cycles += 1
-        if cycle.observation.false_positive:
-            false_positives += 1
-            clear_streak = 0
-            if cycle.adjustment is None:
-                exhausted = True
-                break
-            attempt_index += 1
-            if not cycle.dry_run and cycle.applied and settle_s > 0:
-                _LOGGER.info("Settling %.1fs after knob change", settle_s)
-                await asyncio.sleep(settle_s)
-        else:
-            clear_streak = cycle.clear_streak
-            if clear_streak >= clear_streak_required:
-                break
+        raise
 
     success = clear_streak >= clear_streak_required and not exhausted
     result = OvernightCalibrationRunResult(
@@ -455,7 +473,6 @@ def select_ep1_calibration_target(
 ) -> Ep1SettingsTarget:
     """Resolve ``device_id`` or pick the sole discovered EP1."""
 
-    targets = list_ep1_settings_targets(cache_path=cache_path, ep1_mgr=ep1_mgr)
     if device_id:
         target = resolve_ep1_settings_target(device_id, cache_path=cache_path, ep1_mgr=ep1_mgr)
         if target is None:
@@ -463,10 +480,9 @@ def select_ep1_calibration_target(
                 EP1_OVERNIGHT_CALIBRATION_TARGET_NOT_FOUND.format(device_id=device_id)
             )
         return target
+    targets = list_ep1_settings_targets(cache_path=cache_path, ep1_mgr=ep1_mgr)
     if not targets:
-        raise Ep1OvernightCalibrationNotFoundError(
-            "No EP1 devices discovered yet; run discovery or pass --device-id / --host"
-        )
+        raise Ep1OvernightCalibrationNotFoundError("No EP1 devices discovered yet; run discovery or pass --device-id")
     if len(targets) > 1:
         listing = ", ".join(f"{row.display_label} ({row.device_id})" for row in targets)
         raise Ep1OvernightCalibrationError(f"Multiple EP1 devices found; pass --device-id. Known: {listing}")
@@ -568,6 +584,29 @@ def _quantize_from_min(value: float, *, lo: float, step: float, hi: float) -> fl
     return min(hi, max(lo, quantized))
 
 
+def _resolve_calibration_timezone(timezone_name: str | None) -> ZoneInfo:
+    """Resolve an IANA zone for the empty-room window (explicit, TZ, or /etc/localtime)."""
+
+    if timezone_name:
+        try:
+            return ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError as exc:
+            raise Ep1OvernightCalibrationError(f"Expected a valid IANA timezone, got {timezone_name!r}") from exc
+
+    env_tz = (os.environ.get("TZ") or "").strip()
+    if env_tz:
+        try:
+            return ZoneInfo(env_tz)
+        except ZoneInfoNotFoundError:
+            pass
+
+    system = _system_iana_timezone()
+    if system is not None:
+        return system
+
+    raise Ep1OvernightCalibrationError("Could not resolve a local IANA timezone; pass --timezone Explicit/Name")
+
+
 def _resolved_noise_psk(*, cli_noise_psk: str | None, cache_path: Path | None) -> str | None:
     psk, _source = resolve_ep1_noise_psk(cli_psk=cli_noise_psk, cache_path=cache_path)
     return (psk or "").strip() or None
@@ -591,12 +630,17 @@ async def _run_one_cycle(
         duration_s=observe_s,
         noise_psk=noise_psk,
     )
-    snapshot = await read_ep1_occupancy_tuning(
-        device_id=target.device_id,
-        cache_path=cache_path,
-        cli_noise_psk=noise_psk,
-        ep1_mgr=ep1_mgr,
-    )
+    try:
+        snapshot = await read_ep1_occupancy_tuning(
+            device_id=target.device_id,
+            cache_path=cache_path,
+            cli_noise_psk=noise_psk,
+            ep1_mgr=ep1_mgr,
+        )
+    except Ep1OccupancyTuningNotFoundError as exc:
+        raise Ep1OvernightCalibrationNotFoundError(str(exc)) from exc
+    except Ep1OccupancyTuningError as exc:
+        raise Ep1OvernightCalibrationError(str(exc)) from exc
     knobs = knob_values_for_log(snapshot)
     adjustment: KnobAdjustment | None = None
     applied = False
@@ -649,7 +693,13 @@ async def _run_one_cycle(
                     raise Ep1OvernightCalibrationNotFoundError(str(exc)) from exc
                 except Ep1OccupancyTuningError as exc:
                     raise Ep1OvernightCalibrationError(str(exc)) from exc
-                applied = True
+                applied = bool(updated.knobs_confirmed)
+                if not updated.knobs_confirmed:
+                    _LOGGER.warning(
+                        "Device did not confirm %s=%s; re-reading next cycle",
+                        adjustment.kind.value,
+                        adjustment.new_value,
+                    )
                 knobs = knob_values_for_log(updated)
                 _append_jsonl(
                     log_path,
@@ -708,6 +758,27 @@ async def _run_one_cycle(
     )
 
 
+def _system_iana_timezone() -> ZoneInfo | None:
+    """Best-effort IANA zone from ``/etc/localtime`` (common Linux layout)."""
+
+    path = Path("/etc/localtime")
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    parts = resolved.parts
+    if "zoneinfo" not in parts:
+        return None
+    idx = parts.index("zoneinfo")
+    name = "/".join(parts[idx + 1 :])
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return None
+
+
 def _validate_hour(hour: int, *, name: str) -> None:
     if hour < 0 or hour > 23:
         raise Ep1OvernightCalibrationError(f"Expected {name} in 0..23, got {hour}")
@@ -735,12 +806,7 @@ async def _watch_occupancy(
         samples.append(occupied)
 
     client.subscribe_states(_on_state)
-    deadline = time.monotonic() + duration_s
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        await asyncio.sleep(min(remaining, 0.25))
+    await asyncio.sleep(duration_s)
     occupied_count = sum(1 for sample in samples if sample)
     if not samples:
         raise Ep1OvernightCalibrationError(
