@@ -44,6 +44,9 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_CLEAR_STREAK_REQUIRED = 3
 DEFAULT_LOG_DIR = Path.home() / "scratch" / "domesti-bot" / "ep1-overnight-calibration"
+DEFAULT_MAX_CONSECUTIVE_OBSERVE_FAILURES = 10
+DEFAULT_OBSERVE_RETRY_COUNT = 3
+DEFAULT_OBSERVE_RETRY_SLEEP_S = 5.0
 DEFAULT_OBSERVE_S = 90.0
 DEFAULT_SETTLE_S = 45.0
 DEFAULT_WINDOW_END_HOUR = 6
@@ -52,11 +55,16 @@ EP1_OVERNIGHT_CALIBRATION_EXHAUSTED = "All false-positive levers are already at 
 EP1_OVERNIGHT_CALIBRATION_NO_OCCUPANCY = (
     "EP1 at {host}:{port} has no occupancy binary sensor (expected object_id aliases: {aliases})"
 )
+EP1_OVERNIGHT_CALIBRATION_OBSERVE_FAILURES_EXHAUSTED = (
+    "EP1 occupancy observe failed {count} consecutive cycles for {device_id}; aborting"
+)
 EP1_OVERNIGHT_CALIBRATION_OUTSIDE_WINDOW = (
     "Local time {local_time} is outside the empty-room window "
     "[{start_hour:02d}:00, {end_hour:02d}:00); pass --force-window to override"
 )
 EP1_OVERNIGHT_CALIBRATION_TARGET_NOT_FOUND = "No EP1 device matched device_id={device_id!r}"
+# Sub-second / tiny remaining windows often collect zero states; end cleanly instead.
+MIN_USEFUL_OBSERVE_S = 5.0
 
 _DECREASE_KINDS: frozenset[Ep1OccupancyTuningKind] = frozenset(
     {
@@ -137,6 +145,7 @@ class OvernightCalibrationCycleResult:
     dry_run: bool
     observation: OccupancyObservation
     knobs: Mapping[str, float | None]
+    inconclusive: bool = False
     outside_window: bool = False
 
 
@@ -347,11 +356,12 @@ async def run_overnight_ep1_calibration(
         dry_run,
     )
 
-    clear_streak = 0
-    cycles = 0
-    false_positives = 0
     attempt_index = 0
+    clear_streak = 0
+    consecutive_observe_failures = 0
+    cycles = 0
     exhausted = False
+    false_positives = 0
     window_ended = False
 
     try:
@@ -378,8 +388,13 @@ async def run_overnight_ep1_calibration(
                     start_hour=window_start_hour,
                     end_hour=window_end_hour,
                 )
-                if remaining_s <= 0:
+                if remaining_s < MIN_USEFUL_OBSERVE_S:
                     window_ended = True
+                    _LOGGER.info(
+                        "Empty-room window ending (%.1fs left < %.1fs useful observe); stopping",
+                        remaining_s,
+                        MIN_USEFUL_OBSERVE_S,
+                    )
                     break
                 cycle_observe_s = min(observe_s, remaining_s)
 
@@ -402,6 +417,22 @@ async def run_overnight_ep1_calibration(
                 window_ended = True
                 _LOGGER.info("Empty-room window ended mid-cycle; discarding observation")
                 break
+            if cycle.inconclusive:
+                consecutive_observe_failures += 1
+                _LOGGER.warning(
+                    "Inconclusive observe cycle (%s consecutive); clear_streak unchanged at %s",
+                    consecutive_observe_failures,
+                    clear_streak,
+                )
+                if consecutive_observe_failures >= DEFAULT_MAX_CONSECUTIVE_OBSERVE_FAILURES:
+                    raise Ep1OvernightCalibrationError(
+                        EP1_OVERNIGHT_CALIBRATION_OBSERVE_FAILURES_EXHAUSTED.format(
+                            count=consecutive_observe_failures,
+                            device_id=target.device_id,
+                        )
+                    )
+                continue
+            consecutive_observe_failures = 0
             cycles += 1
             if cycle.observation.false_positive:
                 false_positives += 1
@@ -554,6 +585,18 @@ async def _disconnect_client(client: APIClient) -> None:
         _LOGGER.debug("EP1 overnight calibration client disconnect failed", exc_info=True)
 
 
+def _empty_occupancy_observation(duration_s: float) -> OccupancyObservation:
+    """Placeholder when observe fails after retries (never treated as a clear)."""
+
+    return OccupancyObservation(
+        duration_s=duration_s,
+        false_positive=False,
+        final_occupied=None,
+        occupied_sample_count=0,
+        sample_count=0,
+    )
+
+
 def _ep1_api_client(*, host: str, port: int, noise_psk: str | None) -> APIClient:
     return APIClient(
         host,
@@ -696,12 +739,63 @@ async def _run_one_cycle(
     window_end_hour: int,
     window_start_hour: int,
 ) -> OvernightCalibrationCycleResult:
-    observation = await observe_ep1_occupancy(
-        host=target.host,
-        port=target.port,
-        duration_s=observe_s,
-        noise_psk=noise_psk,
-    )
+    observation: OccupancyObservation | None = None
+    observe_error: str | None = None
+    for attempt in range(1, DEFAULT_OBSERVE_RETRY_COUNT + 1):
+        try:
+            observation = await observe_ep1_occupancy(
+                host=target.host,
+                port=target.port,
+                duration_s=observe_s,
+                noise_psk=noise_psk,
+            )
+            break
+        except Ep1OvernightCalibrationError as exc:
+            observe_error = str(exc)
+            _LOGGER.warning(
+                "EP1 occupancy observe failed (attempt %s/%s): %s",
+                attempt,
+                DEFAULT_OBSERVE_RETRY_COUNT,
+                exc,
+            )
+            if attempt < DEFAULT_OBSERVE_RETRY_COUNT:
+                await asyncio.sleep(DEFAULT_OBSERVE_RETRY_SLEEP_S)
+    if observation is None:
+        now = datetime.now(tz=timezone)
+        placeholder = _empty_occupancy_observation(observe_s)
+        _append_jsonl(
+            log_path,
+            {
+                "event": "observe_inconclusive",
+                "device_id": target.device_id,
+                "error": observe_error,
+                "observe_s": observe_s,
+                "local_time": now.isoformat(timespec="seconds"),
+            },
+        )
+        if not force_window and not in_empty_room_window(
+            now,
+            start_hour=window_start_hour,
+            end_hour=window_end_hour,
+        ):
+            return OvernightCalibrationCycleResult(
+                adjustment=None,
+                applied=False,
+                clear_streak=clear_streak,
+                dry_run=dry_run,
+                observation=placeholder,
+                knobs={},
+                outside_window=True,
+            )
+        return OvernightCalibrationCycleResult(
+            adjustment=None,
+            applied=False,
+            clear_streak=clear_streak,
+            dry_run=dry_run,
+            observation=placeholder,
+            knobs={},
+            inconclusive=True,
+        )
     now = datetime.now(tz=timezone)
     if not force_window and not in_empty_room_window(
         now,

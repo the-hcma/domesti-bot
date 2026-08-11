@@ -13,11 +13,15 @@ from app.device_enums import Ep1OccupancyTuningKind
 from app.ep1_calibration import Ep1SettingsTarget
 from app.ep1_occupancy_tuning import Ep1OccupancyTuningField, Ep1OccupancyTuningSnapshot
 from app.ep1_overnight_calibration import (
+    DEFAULT_MAX_CONSECUTIVE_OBSERVE_FAILURES,
+    DEFAULT_OBSERVE_RETRY_COUNT,
+    EP1_OVERNIGHT_CALIBRATION_OBSERVE_FAILURES_EXHAUSTED,
     Ep1OvernightCalibrationError,
     KnobAdjustDirection,
     KnobAdjustment,
     OccupancyObservation,
     OvernightCalibrationCycleResult,
+    _run_one_cycle,
     in_empty_room_window,
     propose_next_false_positive_adjustment,
     run_overnight_ep1_calibration,
@@ -410,3 +414,217 @@ async def test_run_does_not_advance_attempt_index_when_write_unconfirmed(
     assert attempt_indices[:4] == [0, 0, 0, 1]
     assert result.false_positives == 3
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_run_continues_after_inconclusive_observe(tmp_path: Path) -> None:
+    """Transient observe failure must not abort the overnight run."""
+
+    target = Ep1SettingsTarget(
+        device_id="aa:bb:cc:dd:ee:ff",
+        display_label="EP1 (aa:bb:cc:dd:ee:ff)",
+        display_name="EP1",
+        host="192.0.2.10",
+        port=6053,
+    )
+    clear_obs = OccupancyObservation(
+        duration_s=1.0,
+        false_positive=False,
+        final_occupied=False,
+        occupied_sample_count=0,
+        sample_count=1,
+    )
+    placeholder = OccupancyObservation(
+        duration_s=1.0,
+        false_positive=False,
+        final_occupied=None,
+        occupied_sample_count=0,
+        sample_count=0,
+    )
+    calls = 0
+
+    async def _fake_cycle(**_kwargs: object) -> OvernightCalibrationCycleResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return OvernightCalibrationCycleResult(
+                adjustment=None,
+                applied=False,
+                clear_streak=0,
+                dry_run=False,
+                observation=placeholder,
+                knobs={},
+                inconclusive=True,
+            )
+        return OvernightCalibrationCycleResult(
+            adjustment=None,
+            applied=False,
+            clear_streak=1,
+            dry_run=False,
+            observation=clear_obs,
+            knobs={},
+        )
+
+    with (
+        patch(
+            "app.ep1_overnight_calibration.resolve_ep1_settings_target",
+            return_value=target,
+        ),
+        patch(
+            "app.ep1_overnight_calibration._run_one_cycle",
+            new=AsyncMock(side_effect=_fake_cycle),
+        ),
+    ):
+        result = await run_overnight_ep1_calibration(
+            device_id=target.device_id,
+            clear_streak_required=1,
+            force_window=True,
+            log_path=tmp_path / "calibrate.jsonl",
+            observe_s=1.0,
+            settle_s=0.0,
+            timezone_name="UTC",
+        )
+
+    assert calls == 2
+    assert result.cycles == 1
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_run_ends_cleanly_when_remaining_observe_too_short(tmp_path: Path) -> None:
+    """Tiny remaining window must exit as window_ended, not abort on empty samples."""
+
+    target = Ep1SettingsTarget(
+        device_id="aa:bb:cc:dd:ee:ff",
+        display_label="EP1 (aa:bb:cc:dd:ee:ff)",
+        display_name="EP1",
+        host="192.0.2.10",
+        port=6053,
+    )
+    mock_cycle = AsyncMock()
+    with (
+        patch(
+            "app.ep1_overnight_calibration.resolve_ep1_settings_target",
+            return_value=target,
+        ),
+        patch(
+            "app.ep1_overnight_calibration.seconds_until_empty_room_window_end",
+            return_value=1.0,
+        ),
+        patch(
+            "app.ep1_overnight_calibration._run_one_cycle",
+            new=mock_cycle,
+        ),
+    ):
+        result = await run_overnight_ep1_calibration(
+            device_id=target.device_id,
+            clear_streak_required=1,
+            force_window=False,
+            log_path=tmp_path / "calibrate.jsonl",
+            observe_s=90.0,
+            settle_s=0.0,
+            timezone_name="UTC",
+            window_end_hour=0,
+            window_start_hour=0,
+        )
+
+    assert result.window_ended is True
+    assert result.success is False
+    mock_cycle.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_one_cycle_retries_observe_then_marks_inconclusive(
+    tmp_path: Path,
+) -> None:
+    target = Ep1SettingsTarget(
+        device_id="aa:bb:cc:dd:ee:ff",
+        display_label="EP1 (aa:bb:cc:dd:ee:ff)",
+        display_name="EP1",
+        host="192.0.2.10",
+        port=6053,
+    )
+    observe = AsyncMock(side_effect=Ep1OvernightCalibrationError("WiFi blip"))
+    with (
+        patch("app.ep1_overnight_calibration.observe_ep1_occupancy", new=observe),
+        patch("app.ep1_overnight_calibration.asyncio.sleep", new_callable=AsyncMock),
+    ):
+        result = await _run_one_cycle(
+            target=target,
+            attempt_index=0,
+            cache_path=None,
+            clear_streak=2,
+            dry_run=False,
+            ep1_mgr=None,
+            force_window=True,
+            log_path=tmp_path / "calibrate.jsonl",
+            noise_psk=None,
+            observe_s=1.0,
+            timezone=ZoneInfo("UTC"),
+            window_end_hour=6,
+            window_start_hour=0,
+        )
+
+    assert result.inconclusive is True
+    assert result.clear_streak == 2
+    assert observe.await_count == DEFAULT_OBSERVE_RETRY_COUNT
+
+
+@pytest.mark.asyncio
+async def test_run_aborts_after_consecutive_inconclusive_observes(tmp_path: Path) -> None:
+    target = Ep1SettingsTarget(
+        device_id="aa:bb:cc:dd:ee:ff",
+        display_label="EP1 (aa:bb:cc:dd:ee:ff)",
+        display_name="EP1",
+        host="192.0.2.10",
+        port=6053,
+    )
+    placeholder = OccupancyObservation(
+        duration_s=1.0,
+        false_positive=False,
+        final_occupied=None,
+        occupied_sample_count=0,
+        sample_count=0,
+    )
+
+    async def _always_inconclusive(**_kwargs: object) -> OvernightCalibrationCycleResult:
+        return OvernightCalibrationCycleResult(
+            adjustment=None,
+            applied=False,
+            clear_streak=0,
+            dry_run=False,
+            observation=placeholder,
+            knobs={},
+            inconclusive=True,
+        )
+
+    with (
+        patch(
+            "app.ep1_overnight_calibration.resolve_ep1_settings_target",
+            return_value=target,
+        ),
+        patch(
+            "app.ep1_overnight_calibration._run_one_cycle",
+            new=AsyncMock(side_effect=_always_inconclusive),
+        ),
+        patch(
+            "app.ep1_overnight_calibration.DEFAULT_MAX_CONSECUTIVE_OBSERVE_FAILURES",
+            2,
+        ),
+    ):
+        with pytest.raises(Ep1OvernightCalibrationError) as raised:
+            await run_overnight_ep1_calibration(
+                device_id=target.device_id,
+                clear_streak_required=1,
+                force_window=True,
+                log_path=tmp_path / "calibrate.jsonl",
+                observe_s=1.0,
+                settle_s=0.0,
+                timezone_name="UTC",
+            )
+
+    assert EP1_OVERNIGHT_CALIBRATION_OBSERVE_FAILURES_EXHAUSTED.format(
+        count=2,
+        device_id=target.device_id,
+    ) in str(raised.value)
+    assert DEFAULT_MAX_CONSECUTIVE_OBSERVE_FAILURES >= 2
