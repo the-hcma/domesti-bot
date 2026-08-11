@@ -190,3 +190,19 @@ def test_automation_rules_paths_prefer_xdg_operator_file(
     assert automation_rules_operator_json_path() == operator.resolve()
     assert automation_rules_source() == "operator"
     assert load_automation_rules_bundle().version == 1
+
+
+def test_migrate_automation_rules_file_requires_existing_operator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.rule_device_id_migrate import migrate_automation_rules_file
+
+    monkeypatch.delenv("DOMESTI_AUTOMATION_RULES_FILE", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty-xdg"))
+    missing = tmp_path / "empty-xdg" / "domesti-bot" / "automation-rules.json"
+    cache = tmp_path / "cache.sqlite"
+    cache.touch()
+    with pytest.raises(FileNotFoundError, match="Operator automation rules file not found"):
+        migrate_automation_rules_file(cache_path=cache, dry_run=True)
+    assert not missing.is_file()

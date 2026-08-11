@@ -15,12 +15,12 @@ from app.api.schemas import (
     SettingsLocationOut,
     VacationModeSettingsOut,
 )
+from app.db.secrets_key import git_repository_root
 from app.device_enums import DeviceIdResolution
 from app.home_location import HomeLocationRef, resolve_home_location
 
 _AUTOMATION_RULES_EXAMPLE_FILENAME = "automation-rules.json.example"
 _AUTOMATION_RULES_FILENAME = "automation-rules.json"
-_REPO_ROOT = Path(__file__).resolve().parent.parent
 AutomationRulesSource = Literal["operator", "example"]
 
 
@@ -207,11 +207,13 @@ def save_vacation_mode_settings(
 
 
 def _automation_rules_example_json_path() -> Path:
-    """Committed example template beside this package's repository checkout root.
+    """Committed example template beside the git checkout root.
 
-    Independent of ``DOMESTI_BOT_CONFIG_FILE`` / ``secrets_json_path()``.
+    Uses :func:`app.db.secrets_key.git_repository_root` so worktrees share the
+    main checkout template, and so ``DOMESTI_BOT_CONFIG_FILE`` cannot redirect
+    the lookup (unlike :func:`app.db.secrets_key.secrets_json_path`).
     """
-    return _REPO_ROOT / _AUTOMATION_RULES_EXAMPLE_FILENAME
+    return git_repository_root() / _AUTOMATION_RULES_EXAMPLE_FILENAME
 
 
 def _xdg_config_home() -> Path:

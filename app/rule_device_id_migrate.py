@@ -87,6 +87,11 @@ def migrate_automation_rules_file(
 ) -> RuleDeviceIdMigrationReport:
     """Rewrite operator/example rules so device_ids are MAC-canonical when resolvable."""
     path = rules_path if rules_path is not None else automation_rules_operator_json_path()
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Operator automation rules file not found at {path}. "
+            "Copy automation-rules.json.example to that path, or pass --rules-file."
+        )
     bundle = load_automation_rules_bundle(path=path)
     lookup = build_label_to_canonical_lookup(cache_path)
     migrated, report = migrate_bundle_device_ids(bundle, label_to_canonical=lookup)
