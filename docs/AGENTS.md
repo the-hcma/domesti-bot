@@ -130,7 +130,7 @@ domesti-bot/
 
 ## Code Style
 
-- **Lexicographic code organization** — enforced by `.cursor/rules/python-sorted-methods.mdc`. **Public** module-level names and class members first (constants, classes, functions, properties) sorted ASCII lexicographically within that block; **private** (`_`-prefixed) module helpers and class members second, sorted within that block. Do not append new APIs at the bottom — insert in sorted position. Dunder methods sit in the public class block. Same public-then-private lexicographic principle applies broadly when organizing code.
+- **Lexicographic code organization** — enforced by `.cursor/rules/lexicographic-code-organization.mdc` (org canonical; supersedes the retired `python-sorted-methods.mdc`). **Public** module-level names and class members first (constants, classes, functions, properties) sorted ASCII lexicographically within that block; **private** (`_`-prefixed) module helpers and class members second, sorted within that block. Do not append new APIs at the bottom — insert in sorted position. Dunder methods sit in the public class block. Closed-set literals (`frozenset` / unordered name sets) stay sorted; preserve declaration order when order is contractual (enums, tuples/lists). Same public-then-private lexicographic principle applies broadly when organizing code.
 - **Imports must be at module level.** No lazy / local imports inside functions or methods. `TYPE_CHECKING` guards are acceptable (they are module-level by nature).
 - **Import order** follows PEP 8 (standard library, third-party, local) and matches what already exists in the repo.
 - **Empty lines must contain no whitespace** (no trailing spaces/tabs).
@@ -673,7 +673,7 @@ Before every commit (mirrors the CI gates above; `uv sync --group dev` when deps
 - [ ] If any `app/api/static/icons/compact/*.svg` changed: `./scripts/internal/generate-compact-icon-preview` and attach `$HOME/scratch/domesti-bot/tmp/build/review.html` (or a screenshot) to the PR
 - [ ] No trailing whitespace; empty lines have no whitespace
 - [ ] Imports sorted; all imports at module level
-- [ ] New methods / module-level functions inserted in **lexicographic** position (public block, then private block — see `python-sorted-methods.mdc`)
+- [ ] New methods / module-level functions inserted in **lexicographic** position (public block, then private block — see `lexicographic-code-organization.mdc`)
 - [ ] No `print()` in library code (use `logging`)
 - [ ] No hardcoded credentials or well-known ports in tests
 - [ ] Commit message follows Conventional Commits and is GPG-signed
