@@ -86,7 +86,7 @@ def migrate_automation_rules_file(
     dry_run: bool = False,
 ) -> RuleDeviceIdMigrationReport:
     """Rewrite operator/example rules so device_ids are MAC-canonical when resolvable."""
-    path = rules_path if rules_path is not None else automation_rules_operator_json_path()
+    path = (rules_path if rules_path is not None else automation_rules_operator_json_path()).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(
             f"Operator automation rules file not found at {path}. "
