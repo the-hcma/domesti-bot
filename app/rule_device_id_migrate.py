@@ -11,7 +11,7 @@ from typing import Any
 from app.api.schemas import RuleOut
 from app.automation_rules_loader import (
     AutomationRulesBundle,
-    automation_rules_json_path,
+    automation_rules_operator_json_path,
     load_automation_rules_bundle,
 )
 from app.device_discovery_store import (
@@ -86,7 +86,7 @@ def migrate_automation_rules_file(
     dry_run: bool = False,
 ) -> RuleDeviceIdMigrationReport:
     """Rewrite operator/example rules so device_ids are MAC-canonical when resolvable."""
-    path = rules_path if rules_path is not None else automation_rules_json_path()
+    path = rules_path if rules_path is not None else automation_rules_operator_json_path()
     bundle = load_automation_rules_bundle(path=path)
     lookup = build_label_to_canonical_lookup(cache_path)
     migrated, report = migrate_bundle_device_ids(bundle, label_to_canonical=lookup)

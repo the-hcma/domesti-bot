@@ -242,8 +242,14 @@ offered.
 
 Production automations are **file-backed** today:
 
-1. Copy `automation-rules.json.example` →
-   `~/.config/domesti-bot/automation-rules.json` (or `$XDG_CONFIG_HOME/domesti-bot/…`).
+1. Create the XDG directory and copy the template:
+
+   ```bash
+   mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/domesti-bot"
+   cp automation-rules.json.example \
+     "${XDG_CONFIG_HOME:-$HOME/.config}/domesti-bot/automation-rules.json"
+   ```
+
    Override the path with `DOMESTI_AUTOMATION_RULES_FILE` if needed.
 2. Pair **My Tracks** (desktop ☰ → **Settings**) and sync **Users** / **Geofences**
    under ☰ → **Automations** so rule `user_id` and `geofence_id` values match.
