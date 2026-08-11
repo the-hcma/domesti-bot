@@ -1,0 +1,756 @@
+"""Overnight empty-room EP1 occupancy false-positive calibrator.
+
+Assumes the target room is unoccupied during a local-time window (default
+00:00–06:00). Observes the combined ``occupancy`` binary; any occupied reading
+is treated as a false positive. On each false positive, lowers one mmWave knob
+(or raises on-latency) via :func:`app.ep1_occupancy_tuning.apply_ep1_occupancy_tuning`,
+logs the change, and continues until consecutive clear windows succeed or the
+calibration window ends.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import math
+import time
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
+from datetime import time as dt_time
+from enum import StrEnum
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from aioesphomeapi.client import APIClient
+from aioesphomeapi.core import APIConnectionError
+from aioesphomeapi.model import BinarySensorInfo, BinarySensorState, EntityInfo, EntityState
+
+from app.device_enums import Ep1OccupancyTuningKind
+from app.ep1_calibration import Ep1SettingsTarget, list_ep1_settings_targets, resolve_ep1_settings_target
+from app.ep1_credentials import resolve_ep1_noise_psk
+from app.ep1_device_manager import Ep1DeviceManager
+from app.ep1_occupancy_tuning import (
+    Ep1OccupancyTuningError,
+    Ep1OccupancyTuningField,
+    Ep1OccupancyTuningNotFoundError,
+    Ep1OccupancyTuningSnapshot,
+    apply_ep1_occupancy_tuning,
+    read_ep1_occupancy_tuning,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+DEFAULT_CLEAR_STREAK_REQUIRED = 3
+DEFAULT_LOG_DIR = Path.home() / "scratch" / "domesti-bot" / "ep1-overnight-calibration"
+DEFAULT_OBSERVE_S = 90.0
+DEFAULT_SETTLE_S = 45.0
+DEFAULT_WINDOW_END_HOUR = 6
+DEFAULT_WINDOW_START_HOUR = 0
+EP1_OVERNIGHT_CALIBRATION_EXHAUSTED = "All false-positive levers are already at their floor/ceiling for {device_id}"
+EP1_OVERNIGHT_CALIBRATION_NO_OCCUPANCY = (
+    "EP1 at {host}:{port} has no occupancy binary sensor (expected object_id aliases {aliases})"
+)
+EP1_OVERNIGHT_CALIBRATION_OUTSIDE_WINDOW = (
+    "Local time {local_time} is outside the empty-room window "
+    "[{start_hour:02d}:00, {end_hour:02d}:00); pass --force-window to override"
+)
+EP1_OVERNIGHT_CALIBRATION_TARGET_NOT_FOUND = "No EP1 device matched device_id={device_id!r}"
+
+_DECREASE_KINDS: frozenset[Ep1OccupancyTuningKind] = frozenset(
+    {
+        Ep1OccupancyTuningKind.MAX_DISTANCE,
+        Ep1OccupancyTuningKind.SUSTAIN_SENSITIVITY,
+        Ep1OccupancyTuningKind.TRIGGER_DISTANCE,
+        Ep1OccupancyTuningKind.TRIGGER_SENSITIVITY,
+    }
+)
+_INCREASE_KINDS: frozenset[Ep1OccupancyTuningKind] = frozenset(
+    {
+        Ep1OccupancyTuningKind.MIN_DISTANCE,
+        Ep1OccupancyTuningKind.ON_LATENCY,
+    }
+)
+# Vendor empty-room checklist order: shrink range → desensitize → lengthen on-latency →
+# raise min distance last (near-field clutter).
+_LEVER_ORDER: tuple[Ep1OccupancyTuningKind, ...] = (
+    Ep1OccupancyTuningKind.MAX_DISTANCE,
+    Ep1OccupancyTuningKind.TRIGGER_SENSITIVITY,
+    Ep1OccupancyTuningKind.SUSTAIN_SENSITIVITY,
+    Ep1OccupancyTuningKind.ON_LATENCY,
+    Ep1OccupancyTuningKind.TRIGGER_DISTANCE,
+    Ep1OccupancyTuningKind.MIN_DISTANCE,
+)
+_NUMBER_VALUE_ABS_TOL = 1e-6
+_OCCUPANCY_ALIASES: tuple[str, ...] = ("occupancy",)
+
+
+class Ep1OvernightCalibrationError(ValueError):
+    """Operator-facing overnight calibrator failure."""
+
+
+class Ep1OvernightCalibrationExhaustedError(Ep1OvernightCalibrationError):
+    """Every false-positive lever is already at its limit."""
+
+
+class Ep1OvernightCalibrationNotFoundError(Ep1OvernightCalibrationError):
+    """``device_id`` does not match a known EP1 target."""
+
+
+class Ep1OvernightCalibrationOutsideWindowError(Ep1OvernightCalibrationError):
+    """Local clock is outside the configured empty-room window."""
+
+
+class KnobAdjustDirection(StrEnum):
+    """Whether a lever move tightens (decrease) or loosens occupancy (increase)."""
+
+    DECREASE = "decrease"
+    INCREASE = "increase"
+
+
+@dataclass(frozen=True, slots=True)
+class KnobAdjustment:
+    """One proposed or applied mmWave knob change."""
+
+    direction: KnobAdjustDirection
+    kind: Ep1OccupancyTuningKind
+    new_value: float
+    old_value: float
+    step: float
+
+
+@dataclass(frozen=True, slots=True)
+class OccupancyObservation:
+    """Result of watching the occupancy binary for a fixed duration."""
+
+    duration_s: float
+    false_positive: bool
+    final_occupied: bool | None
+    occupied_sample_count: int
+    sample_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class OvernightCalibrationCycleResult:
+    """One observe → (optional) adjust cycle."""
+
+    adjustment: KnobAdjustment | None
+    applied: bool
+    clear_streak: int
+    dry_run: bool
+    observation: OccupancyObservation
+    knobs: Mapping[str, float | None]
+
+
+@dataclass(frozen=True, slots=True)
+class OvernightCalibrationRunResult:
+    """Summary after the overnight loop exits."""
+
+    clear_streak: int
+    cycles: int
+    device_id: str
+    display_label: str
+    exhausted: bool
+    false_positives: int
+    success: bool
+    window_ended: bool
+
+
+def default_calibration_log_path(*, device_id: str, now: datetime | None = None) -> Path:
+    """JSONL path under ``$HOME/scratch/domesti-bot/ep1-overnight-calibration/``."""
+
+    stamp = (now or datetime.now().astimezone()).strftime("%Y%m%d-%H%M%S")
+    safe_id = device_id.replace(":", "").replace("/", "_")
+    return DEFAULT_LOG_DIR / f"calibrate-ep1-{safe_id}-{stamp}.jsonl"
+
+
+def in_empty_room_window(
+    local_now: datetime,
+    *,
+    start_hour: int = DEFAULT_WINDOW_START_HOUR,
+    end_hour: int = DEFAULT_WINDOW_END_HOUR,
+) -> bool:
+    """Return True when ``local_now`` is in ``[start_hour:00, end_hour:00)`` local time.
+
+    Supports windows that wrap midnight (e.g. 22→6). ``start_hour == end_hour`` means
+    the full day (always True).
+    """
+
+    _validate_hour(start_hour, name="start_hour")
+    _validate_hour(end_hour, name="end_hour")
+    if start_hour == end_hour:
+        return True
+    clock = local_now.timetz().replace(tzinfo=None)
+    start = dt_time(hour=start_hour)
+    end = dt_time(hour=end_hour)
+    if start < end:
+        return start <= clock < end
+    return clock >= start or clock < end
+
+
+def knob_values_for_log(snapshot: Ep1OccupancyTuningSnapshot) -> dict[str, float | None]:
+    """Serialize available knob values for JSONL / CLI output."""
+
+    out: dict[str, float | None] = {}
+    for kind in Ep1OccupancyTuningKind:
+        field = snapshot.knobs.get(kind)
+        if field is None or not field.available:
+            out[kind.value] = None
+            continue
+        out[kind.value] = field.value
+    return out
+
+
+async def observe_ep1_occupancy(
+    *,
+    host: str,
+    port: int,
+    duration_s: float,
+    noise_psk: str | None = None,
+) -> OccupancyObservation:
+    """Subscribe to the occupancy binary for ``duration_s`` and count occupied samples."""
+
+    if not math.isfinite(duration_s) or duration_s <= 0:
+        raise Ep1OvernightCalibrationError(f"Expected a positive duration_s, got {duration_s!r}")
+
+    client = _ep1_api_client(host=host, port=port, noise_psk=noise_psk)
+    try:
+        await client.connect(login=True)
+        entities, _services = await client.list_entities_services()
+        occupancy = _occupancy_entity(entities)
+        if occupancy is None:
+            raise Ep1OvernightCalibrationError(
+                EP1_OVERNIGHT_CALIBRATION_NO_OCCUPANCY.format(
+                    host=host,
+                    port=port,
+                    aliases=_OCCUPANCY_ALIASES,
+                )
+            )
+        return await _watch_occupancy(client, key=int(occupancy.key), duration_s=duration_s)
+    except APIConnectionError as exc:
+        raise Ep1OvernightCalibrationError(f"EP1 occupancy observe failed at {host}:{port}: {exc}") from exc
+    finally:
+        await _disconnect_client(client)
+
+
+def propose_next_false_positive_adjustment(
+    snapshot: Ep1OccupancyTuningSnapshot,
+    *,
+    attempt_index: int = 0,
+) -> KnobAdjustment | None:
+    """Pick the next lever to tighten after a false positive.
+
+    Walks :data:`_LEVER_ORDER` starting at ``attempt_index % len(order)``, skipping
+    unavailable knobs and those already at the floor (decrease) or ceiling (increase).
+    """
+
+    if not _LEVER_ORDER:
+        return None
+    start = attempt_index % len(_LEVER_ORDER)
+    for offset in range(len(_LEVER_ORDER)):
+        kind = _LEVER_ORDER[(start + offset) % len(_LEVER_ORDER)]
+        field = snapshot.knobs.get(kind)
+        if field is None or not field.available or field.value is None:
+            continue
+        proposed = _propose_for_field(field)
+        if proposed is not None:
+            return proposed
+    return None
+
+
+async def run_overnight_ep1_calibration(
+    *,
+    device_id: str,
+    cache_path: Path | None = None,
+    clear_streak_required: int = DEFAULT_CLEAR_STREAK_REQUIRED,
+    cli_noise_psk: str | None = None,
+    dry_run: bool = False,
+    ep1_mgr: Ep1DeviceManager | None = None,
+    force_window: bool = False,
+    log_path: Path | None = None,
+    max_cycles: int | None = None,
+    observe_s: float = DEFAULT_OBSERVE_S,
+    settle_s: float = DEFAULT_SETTLE_S,
+    timezone_name: str | None = None,
+    wait_for_window: bool = False,
+    window_end_hour: int = DEFAULT_WINDOW_END_HOUR,
+    window_start_hour: int = DEFAULT_WINDOW_START_HOUR,
+) -> OvernightCalibrationRunResult:
+    """Loop: observe → on false positive adjust one knob → settle → repeat until clear."""
+
+    if clear_streak_required < 1:
+        raise Ep1OvernightCalibrationError(f"Expected clear_streak_required >= 1, got {clear_streak_required}")
+    if max_cycles is not None and max_cycles < 1:
+        raise Ep1OvernightCalibrationError(f"Expected max_cycles >= 1, got {max_cycles}")
+
+    target = resolve_ep1_settings_target(device_id, cache_path=cache_path, ep1_mgr=ep1_mgr)
+    if target is None:
+        raise Ep1OvernightCalibrationNotFoundError(
+            EP1_OVERNIGHT_CALIBRATION_TARGET_NOT_FOUND.format(device_id=device_id)
+        )
+
+    tz = ZoneInfo(timezone_name) if timezone_name else datetime.now().astimezone().tzinfo
+    local_now = datetime.now(tz=tz)
+    if not force_window and not in_empty_room_window(
+        local_now,
+        start_hour=window_start_hour,
+        end_hour=window_end_hour,
+    ):
+        if not wait_for_window:
+            raise Ep1OvernightCalibrationOutsideWindowError(
+                EP1_OVERNIGHT_CALIBRATION_OUTSIDE_WINDOW.format(
+                    local_time=local_now.strftime("%H:%M:%S"),
+                    start_hour=window_start_hour,
+                    end_hour=window_end_hour,
+                )
+            )
+        wait_s = seconds_until_empty_room_window(
+            local_now,
+            start_hour=window_start_hour,
+            end_hour=window_end_hour,
+        )
+        _LOGGER.info(
+            "Outside empty-room window; waiting %.0fs until %02d:00 local",
+            wait_s,
+            window_start_hour,
+        )
+        await asyncio.sleep(wait_s)
+        local_now = datetime.now(tz=tz)
+
+    resolved_log = log_path if log_path is not None else default_calibration_log_path(device_id=target.device_id)
+    resolved_log.parent.mkdir(parents=True, exist_ok=True)
+    psk = _resolved_noise_psk(cli_noise_psk=cli_noise_psk, cache_path=cache_path)
+
+    _append_jsonl(
+        resolved_log,
+        {
+            "event": "run_start",
+            "device_id": target.device_id,
+            "display_label": target.display_label,
+            "dry_run": dry_run,
+            "force_window": force_window,
+            "observe_s": observe_s,
+            "settle_s": settle_s,
+            "window_start_hour": window_start_hour,
+            "window_end_hour": window_end_hour,
+            "clear_streak_required": clear_streak_required,
+            "local_time": local_now.isoformat(timespec="seconds"),
+        },
+    )
+    _LOGGER.info(
+        "EP1 overnight calibration starting device_id=%s label=%s log=%s dry_run=%s",
+        target.device_id,
+        target.display_label,
+        resolved_log,
+        dry_run,
+    )
+
+    clear_streak = 0
+    cycles = 0
+    false_positives = 0
+    attempt_index = 0
+    exhausted = False
+    window_ended = False
+
+    while True:
+        local_now = datetime.now(tz=tz)
+        if not force_window and not in_empty_room_window(
+            local_now,
+            start_hour=window_start_hour,
+            end_hour=window_end_hour,
+        ):
+            window_ended = True
+            _LOGGER.info("Empty-room window ended at %s; stopping", local_now.strftime("%H:%M:%S"))
+            break
+        if max_cycles is not None and cycles >= max_cycles:
+            break
+
+        cycle = await _run_one_cycle(
+            target=target,
+            attempt_index=attempt_index,
+            cache_path=cache_path,
+            clear_streak=clear_streak,
+            dry_run=dry_run,
+            ep1_mgr=ep1_mgr,
+            log_path=resolved_log,
+            noise_psk=psk,
+            observe_s=observe_s,
+        )
+        cycles += 1
+        if cycle.observation.false_positive:
+            false_positives += 1
+            clear_streak = 0
+            if cycle.adjustment is None:
+                exhausted = True
+                break
+            attempt_index += 1
+            if not cycle.dry_run and cycle.applied and settle_s > 0:
+                _LOGGER.info("Settling %.1fs after knob change", settle_s)
+                await asyncio.sleep(settle_s)
+        else:
+            clear_streak = cycle.clear_streak
+            if clear_streak >= clear_streak_required:
+                break
+
+    success = clear_streak >= clear_streak_required and not exhausted
+    result = OvernightCalibrationRunResult(
+        clear_streak=clear_streak,
+        cycles=cycles,
+        device_id=target.device_id,
+        display_label=target.display_label,
+        exhausted=exhausted,
+        false_positives=false_positives,
+        success=success,
+        window_ended=window_ended,
+    )
+    _append_jsonl(
+        resolved_log,
+        {
+            "event": "run_end",
+            **asdict(result),
+            "local_time": datetime.now(tz=tz).isoformat(timespec="seconds"),
+        },
+    )
+    _LOGGER.info(
+        "EP1 overnight calibration finished success=%s cycles=%s false_positives=%s "
+        "clear_streak=%s exhausted=%s window_ended=%s",
+        result.success,
+        result.cycles,
+        result.false_positives,
+        result.clear_streak,
+        result.exhausted,
+        result.window_ended,
+    )
+    return result
+
+
+def seconds_until_empty_room_window(
+    local_now: datetime,
+    *,
+    start_hour: int = DEFAULT_WINDOW_START_HOUR,
+    end_hour: int = DEFAULT_WINDOW_END_HOUR,
+) -> float:
+    """Seconds until ``local_now`` enters ``[start_hour:00, end_hour:00)``.
+
+    Returns ``0.0`` when already inside the window. Supports windows that wrap
+    midnight. ``start_hour == end_hour`` means always open (returns ``0.0``).
+    """
+
+    _validate_hour(start_hour, name="start_hour")
+    _validate_hour(end_hour, name="end_hour")
+    if in_empty_room_window(local_now, start_hour=start_hour, end_hour=end_hour):
+        return 0.0
+    start_today = local_now.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+    if start_today <= local_now:
+        start_today = start_today + timedelta(days=1)
+    return max(0.0, (start_today - local_now).total_seconds())
+
+
+def select_ep1_calibration_target(
+    device_id: str | None,
+    *,
+    cache_path: Path | None = None,
+    ep1_mgr: Ep1DeviceManager | None = None,
+) -> Ep1SettingsTarget:
+    """Resolve ``device_id`` or pick the sole discovered EP1."""
+
+    targets = list_ep1_settings_targets(cache_path=cache_path, ep1_mgr=ep1_mgr)
+    if device_id:
+        target = resolve_ep1_settings_target(device_id, cache_path=cache_path, ep1_mgr=ep1_mgr)
+        if target is None:
+            raise Ep1OvernightCalibrationNotFoundError(
+                EP1_OVERNIGHT_CALIBRATION_TARGET_NOT_FOUND.format(device_id=device_id)
+            )
+        return target
+    if not targets:
+        raise Ep1OvernightCalibrationNotFoundError(
+            "No EP1 devices discovered yet; run discovery or pass --device-id / --host"
+        )
+    if len(targets) > 1:
+        listing = ", ".join(f"{row.display_label} ({row.device_id})" for row in targets)
+        raise Ep1OvernightCalibrationError(f"Multiple EP1 devices found; pass --device-id. Known: {listing}")
+    return targets[0]
+
+
+def _adjustment_kwargs(adjustment: KnobAdjustment) -> dict[str, float]:
+    return {adjustment.kind.value: adjustment.new_value}
+
+
+def _append_jsonl(path: Path, payload: Mapping[str, object]) -> None:
+    line = json.dumps(dict(payload), sort_keys=True, default=str)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+
+
+async def _disconnect_client(client: APIClient) -> None:
+    try:
+        await client.disconnect(force=True)
+    except Exception:
+        _LOGGER.debug("EP1 overnight calibration client disconnect failed", exc_info=True)
+
+
+def _ep1_api_client(*, host: str, port: int, noise_psk: str | None) -> APIClient:
+    return APIClient(
+        host,
+        port,
+        password=None,
+        noise_psk=noise_psk,
+        client_info="domesti-bot-ep1-overnight-calibration",
+    )
+
+
+def _entity_tokens(entity: EntityInfo) -> set[str]:
+    tokens = {
+        _normalize_entity_token(getattr(entity, "name", "") or ""),
+        _normalize_entity_token(getattr(entity, "object_id", "") or ""),
+    }
+    tokens.discard("")
+    return tokens
+
+
+def _normalize_entity_token(value: str) -> str:
+    return value.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _occupancy_entity(entities: Sequence[EntityInfo]) -> BinarySensorInfo | None:
+    for entity in entities:
+        if not isinstance(entity, BinarySensorInfo):
+            continue
+        if _entity_tokens(entity).intersection(_OCCUPANCY_ALIASES):
+            return entity
+    return None
+
+
+def _propose_for_field(field: Ep1OccupancyTuningField) -> KnobAdjustment | None:
+    if field.value is None or field.step is None or field.min_value is None or field.max_value is None:
+        return None
+    step = float(field.step)
+    if step <= 0 or not math.isfinite(step):
+        return None
+    value = float(field.value)
+    lo = float(field.min_value)
+    hi = float(field.max_value)
+
+    if field.kind in _DECREASE_KINDS:
+        if value <= lo + _NUMBER_VALUE_ABS_TOL:
+            return None
+        new_value = max(lo, _quantize_from_min(value - step, lo=lo, step=step, hi=hi))
+        if abs(new_value - value) <= _NUMBER_VALUE_ABS_TOL:
+            return None
+        return KnobAdjustment(
+            direction=KnobAdjustDirection.DECREASE,
+            kind=field.kind,
+            new_value=new_value,
+            old_value=value,
+            step=step,
+        )
+
+    if field.kind in _INCREASE_KINDS:
+        if value >= hi - _NUMBER_VALUE_ABS_TOL:
+            return None
+        new_value = min(hi, _quantize_from_min(value + step, lo=lo, step=step, hi=hi))
+        if abs(new_value - value) <= _NUMBER_VALUE_ABS_TOL:
+            return None
+        return KnobAdjustment(
+            direction=KnobAdjustDirection.INCREASE,
+            kind=field.kind,
+            new_value=new_value,
+            old_value=value,
+            step=step,
+        )
+    return None
+
+
+def _quantize_from_min(value: float, *, lo: float, step: float, hi: float) -> float:
+    steps = round((value - lo) / step)
+    quantized = lo + (steps * step)
+    return min(hi, max(lo, quantized))
+
+
+def _resolved_noise_psk(*, cli_noise_psk: str | None, cache_path: Path | None) -> str | None:
+    psk, _source = resolve_ep1_noise_psk(cli_psk=cli_noise_psk, cache_path=cache_path)
+    return (psk or "").strip() or None
+
+
+async def _run_one_cycle(
+    *,
+    target: Ep1SettingsTarget,
+    attempt_index: int,
+    cache_path: Path | None,
+    clear_streak: int,
+    dry_run: bool,
+    ep1_mgr: Ep1DeviceManager | None,
+    log_path: Path,
+    noise_psk: str | None,
+    observe_s: float,
+) -> OvernightCalibrationCycleResult:
+    observation = await observe_ep1_occupancy(
+        host=target.host,
+        port=target.port,
+        duration_s=observe_s,
+        noise_psk=noise_psk,
+    )
+    snapshot = await read_ep1_occupancy_tuning(
+        device_id=target.device_id,
+        cache_path=cache_path,
+        cli_noise_psk=noise_psk,
+        ep1_mgr=ep1_mgr,
+    )
+    knobs = knob_values_for_log(snapshot)
+    adjustment: KnobAdjustment | None = None
+    applied = False
+    next_clear_streak = clear_streak
+
+    if observation.false_positive:
+        adjustment = propose_next_false_positive_adjustment(snapshot, attempt_index=attempt_index)
+        if adjustment is None:
+            _append_jsonl(
+                log_path,
+                {
+                    "event": "false_positive_exhausted",
+                    "device_id": target.device_id,
+                    "observation": asdict(observation),
+                    "knobs": knobs,
+                },
+            )
+            _LOGGER.warning(EP1_OVERNIGHT_CALIBRATION_EXHAUSTED.format(device_id=target.device_id))
+        else:
+            _LOGGER.warning(
+                "False positive: occupied_samples=%s/%s; propose %s %s → %s (%s)",
+                observation.occupied_sample_count,
+                observation.sample_count,
+                adjustment.kind.value,
+                adjustment.old_value,
+                adjustment.new_value,
+                adjustment.direction.value,
+            )
+            _append_jsonl(
+                log_path,
+                {
+                    "event": "false_positive",
+                    "device_id": target.device_id,
+                    "observation": asdict(observation),
+                    "proposed": asdict(adjustment),
+                    "knobs_before": knobs,
+                    "dry_run": dry_run,
+                },
+            )
+            if not dry_run:
+                try:
+                    updated = await apply_ep1_occupancy_tuning(
+                        device_id=target.device_id,
+                        cache_path=cache_path,
+                        cli_noise_psk=noise_psk,
+                        ep1_mgr=ep1_mgr,
+                        **_adjustment_kwargs(adjustment),
+                    )
+                except Ep1OccupancyTuningNotFoundError as exc:
+                    raise Ep1OvernightCalibrationNotFoundError(str(exc)) from exc
+                except Ep1OccupancyTuningError as exc:
+                    raise Ep1OvernightCalibrationError(str(exc)) from exc
+                applied = True
+                knobs = knob_values_for_log(updated)
+                _append_jsonl(
+                    log_path,
+                    {
+                        "event": "adjustment_applied",
+                        "device_id": target.device_id,
+                        "adjustment": asdict(adjustment),
+                        "knobs_after": knobs,
+                        "distance_applied": updated.distance_applied,
+                        "sensitivity_applied": updated.sensitivity_applied,
+                        "knobs_confirmed": updated.knobs_confirmed,
+                    },
+                )
+                _LOGGER.info(
+                    "Applied %s=%s (was %s); distance_applied=%s sensitivity_applied=%s",
+                    adjustment.kind.value,
+                    adjustment.new_value,
+                    adjustment.old_value,
+                    updated.distance_applied,
+                    updated.sensitivity_applied,
+                )
+            else:
+                _LOGGER.info(
+                    "Dry-run: would set %s=%s (was %s)",
+                    adjustment.kind.value,
+                    adjustment.new_value,
+                    adjustment.old_value,
+                )
+        next_clear_streak = 0
+    else:
+        next_clear_streak = clear_streak + 1
+        _LOGGER.info(
+            "Clear observation (samples=%s occupied=%s); clear_streak=%s",
+            observation.sample_count,
+            observation.occupied_sample_count,
+            next_clear_streak,
+        )
+        _append_jsonl(
+            log_path,
+            {
+                "event": "clear",
+                "device_id": target.device_id,
+                "observation": asdict(observation),
+                "clear_streak": next_clear_streak,
+                "knobs": knobs,
+            },
+        )
+
+    return OvernightCalibrationCycleResult(
+        adjustment=adjustment,
+        applied=applied,
+        clear_streak=next_clear_streak,
+        dry_run=dry_run,
+        observation=observation,
+        knobs=knobs,
+    )
+
+
+def _validate_hour(hour: int, *, name: str) -> None:
+    if hour < 0 or hour > 23:
+        raise Ep1OvernightCalibrationError(f"Expected {name} in 0..23, got {hour}")
+
+
+async def _watch_occupancy(
+    client: APIClient,
+    *,
+    key: int,
+    duration_s: float,
+) -> OccupancyObservation:
+    samples: list[bool] = []
+    latest: bool | None = None
+
+    def _on_state(state: EntityState) -> None:
+        nonlocal latest
+        if int(state.key) != key:
+            return
+        if not isinstance(state, BinarySensorState):
+            return
+        if getattr(state, "missing_state", False):
+            return
+        occupied = bool(state.state)
+        latest = occupied
+        samples.append(occupied)
+
+    client.subscribe_states(_on_state)
+    deadline = time.monotonic() + duration_s
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(remaining, 0.25))
+    occupied_count = sum(1 for sample in samples if sample)
+    if not samples:
+        raise Ep1OvernightCalibrationError(
+            f"EP1 occupancy observe collected no states in {duration_s:g}s "
+            f"(key={key}); is the occupancy binary available?"
+        )
+    return OccupancyObservation(
+        duration_s=duration_s,
+        false_positive=occupied_count > 0 or latest is True,
+        final_occupied=latest,
+        occupied_sample_count=occupied_count,
+        sample_count=len(samples),
+    )
