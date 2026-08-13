@@ -1,0 +1,59 @@
+---
+description: Run github-repo-lint after repo config or workflow changes
+globs:
+  - .cursor/rules/**
+  - .github/**
+  - pnpm-workspace.yaml
+  - release-please-config.json
+  - .release-please-manifest.json
+  - scripts/lib/repo-practices-workflows/**
+  - web/pnpm-workspace.yaml
+alwaysApply: false
+---
+
+# Repo practices lint after config changes
+
+When you edit **repo-practices-sensitive** paths — workflows, dependabot, Release
+Please config, pnpm release age, org cursor rules, `.github/ci/*`, or canonical
+workflow templates under `scripts/lib/repo-practices-workflows/` — **before submit**:
+
+## 1. Audit (required)
+
+From a synced **repository-helpers** clone:
+
+```bash
+scripts/github-repo-lint --repo OWNER/NAME --suggest --strict-onboarding
+```
+
+Resolve `OWNER/NAME` from `git remote get-url origin`. Use
+`${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/github-repo-lint`
+when not in repository-helpers.
+
+Fix every `FAIL` before merge. Treat `SUGGEST` lines as follow-ups unless they block
+your change (e.g. missing `--apply-fix` merge settings when adding Release Please).
+
+## 2. GitHub-side fixes
+
+When adding **Release Please**, changing **merge/release settings**, or adopting org
+workflow templates, also run (mutates GitHub repo settings; run from the target clone
+when queuing workflow PRs):
+
+```bash
+scripts/github-repo-lint --repo OWNER/NAME --apply-fix
+```
+
+## 3. uv + Release Please jsonpath
+
+Copy `scripts/lib/repo-practices-workflows/release-please-uv-lock-extra-files.snippet.json`
+into `release-please-config.json` `extra-files`. The jsonpath **must** use
+`@.name.value`, not plain `@.name` — otherwise Release Please silently skips `uv.lock`
+([release-please#2561](https://github.com/googleapis/release-please/issues/2561)).
+
+## 4. PR test plan
+
+Note that repo-practices lint passed (or list `--apply-fix` steps taken) in the PR
+**Test plan**.
+
+`scripts/dev/pre-pr-checks` runs this audit automatically when the branch diff touches
+workflow/config paths (detect-first `repo-practices-lint` job). Cursor rule edits alone
+do not trigger pre-pr (the audit reads GitHub, not your local tree).
