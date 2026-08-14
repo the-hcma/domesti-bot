@@ -340,10 +340,18 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         style,
         '.ep1-header-occupancy-glyph[data-occupancy="clear"]',
     )
-    fill = _css_rule_block(style, ".ep1-header-occupancy-fill")
+    clear_fill = _css_rule_block(
+        style,
+        '.ep1-header-occupancy-glyph[data-occupancy="clear"] .ep1-header-occupancy-fill',
+    )
+    occupied_fill = _css_rule_block(
+        style,
+        '.ep1-header-occupancy-glyph[data-occupancy="occupied"] .ep1-header-occupancy-fill',
+    )
     assert "var(--accent)" in occupied
     assert "#646a72" in clear
-    assert "color-mix" in fill
+    assert "currentColor" in clear_fill
+    assert "currentColor" in occupied_fill
     end_icons = _css_rule_block(style, ".tile-header-end-icons")
     assert "grid-template-columns: auto auto" in end_icons
     header = _css_rule_block(
