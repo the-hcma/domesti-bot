@@ -131,10 +131,13 @@
        silver that stays visible on the always-dark canvas in both themes —
        ``var(--fg)`` in light appearance is near-black and disappears. */
     .ep1-header-occupancy-glyph[data-occupancy="occupied"] { color: var(--accent); }
-    .ep1-header-occupancy-glyph[data-occupancy="clear"] { color: #cfd3db; }
+    .ep1-header-occupancy-glyph[data-occupancy="clear"] { color: #646a72; }
     .ep1-header-occupancy-svg { display: block; width: 22px; height: 22px; }
-    .ep1-header-occupancy-fill {
-      fill: color-mix(in srgb, currentColor 28%, transparent);
+    .ep1-header-occupancy-glyph[data-occupancy="clear"] .ep1-header-occupancy-fill {
+      fill: currentColor;
+    }
+    .ep1-header-occupancy-glyph[data-occupancy="occupied"] .ep1-header-occupancy-fill {
+      fill: currentColor;
     }
     .btn.btn-theme-toggle { display: inline-flex; align-items: center;
       justify-content: center; box-sizing: border-box; padding: 4px;

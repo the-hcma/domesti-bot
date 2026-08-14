@@ -16,12 +16,14 @@ export interface DeviceIdentityTooltipSource {
   mac_address: string;
 }
 
+export interface DeviceIdentityTooltipOptions {
+  includeLabel?: boolean;
+  includePropertiesHint?: boolean;
+}
+
 export function formatDeviceIdentityTooltip(
   device: DeviceIdentityTooltipSource,
-  options?: {
-    includeLabel?: boolean;
-    includePropertiesHint?: boolean;
-  },
+  options?: DeviceIdentityTooltipOptions,
 ): string {
   const lines: string[] = [];
   if (options?.includePropertiesHint === true) {
@@ -45,4 +47,15 @@ export function formatDeviceIdentityTooltip(
     }
   }
   return lines.join("\n");
+}
+
+export function formatDeviceIdentityTooltipLabel(
+  device: DeviceIdentityTooltipSource,
+  stateSuffix: string | null = null,
+): string {
+  const base = (device.label ?? "").trim() || device.mac_address;
+  if (stateSuffix == null || stateSuffix.trim() === "") {
+    return base;
+  }
+  return `${base} (${stateSuffix})`;
 }

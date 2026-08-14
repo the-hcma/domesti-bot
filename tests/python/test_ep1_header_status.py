@@ -199,8 +199,30 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
 <head><meta charset="utf-8"><style>{style_css}</style></head>
 <body>
 <div id="app">
-  <span class="ep1-header-occupancy-glyph" data-occupancy="clear"></span>
-  <span class="ep1-header-occupancy-glyph" data-occupancy="occupied"></span>
+  <span class="ep1-header-occupancy-glyph" data-occupancy="clear">
+    <svg class="ep1-header-occupancy-svg" width="22" height="22"
+         viewBox="0 0 24 24" aria-hidden="true">
+      <path class="ep1-header-occupancy-fill" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M12 2a7 7 0 0 0-7 7v11l2.5-1.5L10 20l2-1.5L14 20l2.5-1.5L19 20V9a7 7 0 0 0-7-7z"></path>
+    </svg>
+  </span>
+  <span class="ep1-header-occupancy-glyph" data-occupancy="occupied">
+    <svg class="ep1-header-occupancy-svg" width="22" height="22"
+         viewBox="0 0 24 24" aria-hidden="true">
+      <circle class="ep1-header-occupancy-fill" cx="12" cy="7" r="3"
+              fill="none" stroke="currentColor" stroke-width="2"></circle>
+      <path
+        class="ep1-header-occupancy-fill"
+        d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="2"
+      ></path>
+    </svg>
+  </span>
 </div>
 </body></html>"""
     page = chromium_browser.new_page(viewport={"width": 1280, "height": 800})
@@ -221,18 +243,28 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
                   const occupied = getComputedStyle(
                     document.querySelector('[data-occupancy="occupied"]')
                   ).color;
-                  return { canvas, clear, occupied };
+                  const clearFill = getComputedStyle(
+                    document.querySelector('[data-occupancy="clear"] .ep1-header-occupancy-fill')
+                  ).fill;
+                  const occupiedFill = getComputedStyle(
+                    document.querySelector('[data-occupancy="occupied"] .ep1-header-occupancy-fill')
+                  ).fill;
+                  return { canvas, clear, clearFill, occupied, occupiedFill };
                 }""",
             )
             canvas = _parse_css_color(str(colors["canvas"]))
             clear = _parse_css_color(str(colors["clear"]))
             occupied = _parse_css_color(str(colors["occupied"]))
-            assert _contrast_ratio(clear, canvas) >= 3.0, (
-                f"clear glyph vs canvas in {theme}: {colors['clear']} on {colors['canvas']}"
+            fill = _parse_css_color(str(colors["clearFill"]))
+            occupied_fill_color = _parse_css_color(str(colors["occupiedFill"]))
+            assert _contrast_ratio(fill, canvas) >= 3.0, (
+                f"clear glyph fill vs canvas in {theme}: {fill} on {colors['canvas']}"
             )
-            assert _contrast_ratio(occupied, canvas) >= 3.0, (
-                f"occupied glyph vs canvas in {theme}: {colors['occupied']} on {colors['canvas']}"
+            assert _contrast_ratio(occupied_fill_color, canvas) >= 3.0, (
+                f"occupied glyph fill vs canvas in {theme}: {occupied_fill_color} on {colors['canvas']}"
             )
+            assert fill == clear
+            assert occupied_fill_color == occupied
     finally:
         page.close()
 
@@ -249,6 +281,7 @@ def test_ep1_header_status_module_readings_only_contract() -> None:
     assert "export function createEp1HeaderOccupancyGlyph" in src
     assert "export function formatEp1HeaderOccupancyTooltip" in src
     assert "formatDeviceIdentityTooltip" in src
+    assert "formatDeviceIdentityTooltipLabel" in src
     assert "mac_address" in src
     assert "ep1-header-status-label" not in src
     assert "compactC" in src
@@ -263,6 +296,20 @@ def test_ep1_header_status_module_readings_only_contract() -> None:
     assert "illuminance_lx" in src
     assert 'dataset["responding"]' in src
     assert "EP1_HEADER_STALE_AFTER_S" in src
+
+
+def test_device_identity_tooltip_module_contract() -> None:
+    src = (_REPO_ROOT / "web" / "src" / "device-identity-tooltip.ts").read_text(
+        encoding="utf-8",
+    )
+    assert "export const DEVICE_PROPERTIES_MENU_HINT" in src
+    assert "export interface DeviceIdentityTooltipOptions" in src
+    assert "export function formatDeviceIdentityTooltip" in src
+    assert "Right-click to edit device properties" in src
+    assert "MAC address:" in src
+    assert "IP:" in src
+    assert "includeLabel" in src
+    assert "includePropertiesHint" in src
 
 
 def test_index_html_ep1_header_status_css_contract() -> None:
@@ -293,10 +340,18 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         style,
         '.ep1-header-occupancy-glyph[data-occupancy="clear"]',
     )
-    fill = _css_rule_block(style, ".ep1-header-occupancy-fill")
+    clear_fill = _css_rule_block(
+        style,
+        '.ep1-header-occupancy-glyph[data-occupancy="clear"] .ep1-header-occupancy-fill',
+    )
+    occupied_fill = _css_rule_block(
+        style,
+        '.ep1-header-occupancy-glyph[data-occupancy="occupied"] .ep1-header-occupancy-fill',
+    )
     assert "var(--accent)" in occupied
-    assert "#cfd3db" in clear
-    assert "color-mix" in fill
+    assert "#646a72" in clear
+    assert "currentColor" in clear_fill
+    assert "currentColor" in occupied_fill
     end_icons = _css_rule_block(style, ".tile-header-end-icons")
     assert "grid-template-columns: auto auto" in end_icons
     header = _css_rule_block(
@@ -356,19 +411,6 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert "max-height: 560px" in src
     assert "pointer: coarse" in src
     assert "°C · " in src
-
-
-def test_device_identity_tooltip_module_contract() -> None:
-    src = (_REPO_ROOT / "web" / "src" / "device-identity-tooltip.ts").read_text(
-        encoding="utf-8",
-    )
-    assert "export const DEVICE_PROPERTIES_MENU_HINT" in src
-    assert "Right-click to edit device properties" in src
-    assert "export function formatDeviceIdentityTooltip" in src
-    assert "MAC address:" in src
-    assert "IP:" in src
-    assert "includeLabel" in src
-    assert "includePropertiesHint" in src
 
 
 def test_compact_layout_mq_css_matches_main() -> None:
@@ -441,6 +483,15 @@ def _parse_css_color(raw: str) -> tuple[int, int, int]:
     if hex_match is not None:
         digits = hex_match.group(1)
         return (int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16))
+    srgb_match = re.fullmatch(
+        r"color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*/\s*[\d.]+)?\)",
+        text,
+    )
+    if srgb_match is not None:
+        red = round(float(srgb_match.group(1)) * 255)
+        green = round(float(srgb_match.group(2)) * 255)
+        blue = round(float(srgb_match.group(3)) * 255)
+        return (red, green, blue)
     rgb_match = re.fullmatch(
         r"rgba?\(\s*(\d+)(?:\s*,\s*|\s+)(\d+)(?:\s*,\s*|\s+)(\d+)(?:\s*[,/]\s*[\d.]+)?\s*\)",
         text,

@@ -5,7 +5,10 @@
  * right of the global bulk-off control (#574). Read-only.
  */
 
-import { formatDeviceIdentityTooltip } from "./device-identity-tooltip.js";
+import {
+  formatDeviceIdentityTooltip,
+  formatDeviceIdentityTooltipLabel,
+} from "./device-identity-tooltip.js";
 import {
   DeviceConditionState,
   DeviceFamilyId,
@@ -167,7 +170,10 @@ export function formatEp1HeaderOccupancyTooltip(
   const includeStateSuffix = sources.length > 1;
   const blocks: string[] = [heading];
   for (const snapshot of sources) {
-    const label = occupancyTooltipDeviceLabel(snapshot, includeStateSuffix);
+    const label = formatDeviceIdentityTooltipLabel(
+      snapshot,
+      includeStateSuffix ? snapshot.occupancy_state : null,
+    );
     blocks.push("");
     blocks.push(
       formatDeviceIdentityTooltip(
@@ -355,17 +361,6 @@ function ep1HeaderStatusFromDevice(device: UIDeviceOut): Ep1HeaderStatusSnapshot
     temperature_c: readings?.temperature_c ?? null,
     temperature_f: readings?.temperature_f ?? null,
   };
-}
-
-function occupancyTooltipDeviceLabel(
-  snapshot: Ep1HeaderStatusSnapshot,
-  includeStateSuffix: boolean,
-): string {
-  const base = snapshot.label.trim() || snapshot.mac_address;
-  if (!includeStateSuffix) {
-    return base;
-  }
-  return `${base} (${snapshot.occupancy_state})`;
 }
 
 function occupancyTooltipSources(
