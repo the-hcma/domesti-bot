@@ -314,6 +314,8 @@ def test_device_identity_tooltip_module_contract() -> None:
 
 def test_index_html_ep1_header_status_css_contract() -> None:
     style = _extract_index_html_style_block()
+    light_shell = _css_rule_block(style, 'html[data-theme="light"] body')
+    assert "background: #ffffff" in light_shell
     base = _css_rule_block(style, ".ep1-header-status")
     assert "display: flex" in base
     assert "flex: 0 1 auto" in base
@@ -328,7 +330,7 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         '.ep1-header-status-metric[data-responding="false"]',
     )
     assert "var(--accent)" in responding
-    assert "var(--pending)" in stale
+    assert "color: #a16207" in stale
     glyph = _css_rule_block(style, ".ep1-header-occupancy-glyph")
     assert "inline-flex" in glyph
     assert "min-width: 44px" not in glyph
@@ -349,9 +351,19 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         '.ep1-header-occupancy-glyph[data-occupancy="occupied"] .ep1-header-occupancy-fill',
     )
     assert "var(--accent)" in occupied
-    assert "#646a72" in clear
+    assert "#4b5563" in clear
     assert "currentColor" in clear_fill
     assert "currentColor" in occupied_fill
+    header = _css_rule_block(style, ".tile-header")
+    assert "color: #1d1f21" in header
+    global_off = _css_rule_block(style, ".tile-header-global-off")
+    assert "background: #f3f4f6" in global_off
+    assert "border-color: #c7cdd6" in global_off
+    assert "color: #1d1f21" in global_off
+    end_icons = _css_rule_block(style, ".tile-header-end-icons")
+    assert "color: #1d1f21" in end_icons
+    brand = _css_rule_block(style, ".brand-mark")
+    assert "color: #4b5563" in brand
     end_icons = _css_rule_block(style, ".tile-header-end-icons")
     assert "grid-template-columns: auto auto" in end_icons
     header = _css_rule_block(
