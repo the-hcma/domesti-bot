@@ -155,7 +155,6 @@
     .btn.btn-theme-toggle svg { display: block; width: 22px; height: 22px; }
     .brand-mark { position: relative; display: inline-flex;
       flex: 0 0 auto; flex-shrink: 0; align-items: center; color: var(--muted); }
-    html[data-theme="light"] .brand-mark { color: #4b5563; }
     .brand-mark-icon-btn { display: inline-flex; flex-shrink: 0;
       align-items: center; padding: 0; border: none; background: transparent;
       color: inherit; font: inherit; border-radius: 6px; cursor: pointer;
@@ -187,6 +186,14 @@
       html:not([data-theme]) .brand-mark-bm-mouth { stroke: #c5cae9; stroke-width: 0.55; }
       html:not([data-theme]) .brand-mark-bm-waist { stroke: #e1bee7; }
     }
+    @media (prefers-color-scheme: light) {
+      /* Mascot head/antenna paint stroke/fill directly (not currentColor),
+         so the wrapper's .brand-mark color has no effect here — override
+         the shapes themselves to keep >=3:1 contrast on the white canvas. */
+      html:not([data-theme]) .brand-mark-bm-head { stroke: #4b5563; }
+      html:not([data-theme]) .brand-mark-bm-antenna-rod { stroke: #4b5563; }
+      html:not([data-theme]) .brand-mark-bm-antenna-ball { fill: #4b5563; }
+    }
     html[data-theme="dark"] .brand-mark-bm-body { fill: #b39ddb; stroke: #4a148c; }
     html[data-theme="dark"] .brand-mark-bm-neck { fill: #7e57c2; stroke: #4a148c; }
     html[data-theme="dark"] .brand-mark-bm-apron { fill: #ffe082; stroke: #ff6f00; }
@@ -196,6 +203,9 @@
     html[data-theme="dark"] .brand-mark-bm-eye { fill: #eceff1; stroke: #1a237e; stroke-width: 0.42; }
     html[data-theme="dark"] .brand-mark-bm-mouth { stroke: #c5cae9; stroke-width: 0.55; }
     html[data-theme="dark"] .brand-mark-bm-waist { stroke: #e1bee7; }
+    html[data-theme="light"] .brand-mark-bm-head { stroke: #4b5563; }
+    html[data-theme="light"] .brand-mark-bm-antenna-rod { stroke: #4b5563; }
+    html[data-theme="light"] .brand-mark-bm-antenna-ball { fill: #4b5563; }
     .tile-loading, .tile-empty { color: var(--muted); padding: 12px; }
     .tile-empty-discovery { max-width: 42rem; padding: 4px 4px 12px; }
     .tile-empty-discovery h2 { margin: 0 0 8px; font-size: 16px;

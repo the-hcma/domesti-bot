@@ -224,6 +224,13 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
       ></path>
     </svg>
   </span>
+  <span class="brand-mark">
+    <svg class="brand-mark-svg" viewBox="0 0 24 24">
+      <circle class="brand-mark-bm-head" cx="12" cy="8" r="4"></circle>
+      <line class="brand-mark-bm-antenna-rod" x1="12" y1="4" x2="12" y2="1"></line>
+      <circle class="brand-mark-bm-antenna-ball" cx="12" cy="1" r="1"></circle>
+    </svg>
+  </span>
 </div>
 </main>
 </body></html>"""
@@ -269,7 +276,16 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
                   const occupiedFill = getComputedStyle(
                     document.querySelector('[data-occupancy="occupied"] .ep1-header-occupancy-fill')
                   ).fill;
-                  return { canvas, clear, clearFill, occupied, occupiedFill };
+                  const brandHeadStroke = getComputedStyle(
+                    document.querySelector('.brand-mark-bm-head')
+                  ).stroke;
+                  const brandBallFill = getComputedStyle(
+                    document.querySelector('.brand-mark-bm-antenna-ball')
+                  ).fill;
+                  return {
+                    canvas, clear, clearFill, occupied, occupiedFill,
+                    brandHeadStroke, brandBallFill,
+                  };
                 }""",
             )
             canvas = _parse_css_color(str(colors["canvas"]))
@@ -281,11 +297,19 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
             occupied = _parse_css_color(str(colors["occupied"]))
             fill = _parse_css_color(str(colors["clearFill"]))
             occupied_fill_color = _parse_css_color(str(colors["occupiedFill"]))
+            brand_head_stroke = _parse_css_color(str(colors["brandHeadStroke"]))
+            brand_ball_fill = _parse_css_color(str(colors["brandBallFill"]))
             assert _contrast_ratio(fill, canvas) >= 3.0, (
                 f"clear glyph fill vs canvas in {label}: {fill} on {colors['canvas']}"
             )
             assert _contrast_ratio(occupied_fill_color, canvas) >= 3.0, (
                 f"occupied glyph fill vs canvas in {label}: {occupied_fill_color} on {colors['canvas']}"
+            )
+            assert _contrast_ratio(brand_head_stroke, canvas) >= 3.0, (
+                f"brand-mark head stroke vs canvas in {label}: {brand_head_stroke} on {colors['canvas']}"
+            )
+            assert _contrast_ratio(brand_ball_fill, canvas) >= 3.0, (
+                f"brand-mark antenna-ball fill vs canvas in {label}: {brand_ball_fill} on {colors['canvas']}"
             )
             assert fill == clear
             assert occupied_fill_color == occupied
@@ -383,8 +407,16 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "#646a72" in clear
     assert "currentColor" in clear_fill
     assert "currentColor" in occupied_fill
-    brand = _css_rule_block(style, 'html[data-theme="light"] .brand-mark')
-    assert "color: #4b5563" in brand
+    brand_head = _css_rule_block(style, 'html[data-theme="light"] .brand-mark-bm-head')
+    brand_rod = _css_rule_block(style, 'html[data-theme="light"] .brand-mark-bm-antenna-rod')
+    brand_ball = _css_rule_block(style, 'html[data-theme="light"] .brand-mark-bm-antenna-ball')
+    assert "stroke: #4b5563" in brand_head
+    assert "stroke: #4b5563" in brand_rod
+    assert "fill: #4b5563" in brand_ball
+    assert (
+        "html:not([data-theme]) .brand-mark-bm-head { stroke: #4b5563; }"
+        in style.split("@media (prefers-color-scheme: light) {", 1)[1]
+    )
     end_icons = _css_rule_block(style, ".tile-header-end-icons")
     assert "grid-template-columns: auto auto" in end_icons
     header = _css_rule_block(
