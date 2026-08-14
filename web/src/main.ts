@@ -5,6 +5,7 @@
 // device, plus per-family and global bulk actions.
 
 import { api, HttpError, isBackendTransportFailure } from "./api.js";
+import { formatDeviceIdentityTooltip } from "./device-identity-tooltip.js";
 import {
   createEp1HeaderOccupancyGlyph,
   createEp1HeaderStatusStrip,
@@ -65,7 +66,6 @@ const DEVICE_PROPERTIES_HIDE_HELP =
   "Hide this tile on the compact (phone / tablet) layout. It remains visible and controllable on the desktop web UI.";
 const DEVICE_PROPERTIES_HIDE_LABEL = "Hide on phone / tablet";
 const DEVICE_PROPERTIES_LONG_PRESS_MS = 500;
-const DEVICE_PROPERTIES_MENU_HINT = "Right-click to edit device properties";
 
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
@@ -1756,7 +1756,12 @@ function createTileHeaderEndIcons(state: UIStateOut | null): HTMLElement {
   if (state !== null) {
     const occupancyGlyph = ep1HeaderOccupancyGlyphFromUiState(state);
     if (occupancyGlyph !== null) {
-      end.append(createEp1HeaderOccupancyGlyph(occupancyGlyph));
+      end.append(
+        createEp1HeaderOccupancyGlyph(
+          occupancyGlyph,
+          ep1HeaderStatusFromUiState(state),
+        ),
+      );
     }
   }
   end.append(createThemeToggleButton());
@@ -2291,22 +2296,6 @@ function createTilePrefsBadge(device: UIDeviceOut): HTMLSpanElement | null {
   return badge;
 }
 
-function deviceIdentityTooltip(device: UIDeviceOut): string {
-  const lines = [DEVICE_PROPERTIES_MENU_HINT, ""];
-  lines.push(`MAC address: ${device.mac_address}`);
-  const host = (device.host ?? "").trim();
-  if (host) {
-    lines.push(`IP: ${host}`);
-  }
-  for (const detail of device.identity_details ?? []) {
-    const text = detail.trim();
-    if (text) {
-      lines.push(text);
-    }
-  }
-  return lines.join("\n");
-}
-
 function createTileSaturatedHit(
   device: UIDeviceOut,
   controller: DomestiBotController,
@@ -2324,7 +2313,9 @@ function createTileSaturatedHit(
     device.state === UIDeviceState.Occupied;
   hit.setAttribute("aria-pressed", isActive ? "true" : "false");
   hit.setAttribute("aria-label", compactTileAriaLabel(device));
-  hit.title = deviceIdentityTooltip(device);
+  hit.title = formatDeviceIdentityTooltip(device, {
+    includePropertiesHint: true,
+  });
   hit.disabled = !connected;
   appendSaturatedTileVisuals(hit, device, hitClassName === "tile-compact-hit");
   attachTileHitListeners(hit, device, controller);

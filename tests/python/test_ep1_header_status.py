@@ -188,6 +188,55 @@ def test_ep1_header_status_comfortable_splits_c_and_f_with_dot(
         page.close()
 
 
+@pytest.mark.browser
+def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
+    chromium_browser: Any,
+) -> None:
+    """Clear ghost stays visible on the dark canvas in both appearances."""
+    style_css = _extract_index_html_style_block()
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>{style_css}</style></head>
+<body>
+<div id="app">
+  <span class="ep1-header-occupancy-glyph" data-occupancy="clear"></span>
+  <span class="ep1-header-occupancy-glyph" data-occupancy="occupied"></span>
+</div>
+</body></html>"""
+    page = chromium_browser.new_page(viewport={"width": 1280, "height": 800})
+    try:
+        page.set_content(html)
+        for theme in ("light", "dark"):
+            page.evaluate(
+                "(theme) => document.documentElement.setAttribute('data-theme', theme)",
+                theme,
+            )
+            colors = page.evaluate(
+                """() => {
+                  const canvas = getComputedStyle(document.documentElement)
+                    .getPropertyValue('--canvas-bg').trim();
+                  const clear = getComputedStyle(
+                    document.querySelector('[data-occupancy="clear"]')
+                  ).color;
+                  const occupied = getComputedStyle(
+                    document.querySelector('[data-occupancy="occupied"]')
+                  ).color;
+                  return { canvas, clear, occupied };
+                }""",
+            )
+            canvas = _parse_css_color(str(colors["canvas"]))
+            clear = _parse_css_color(str(colors["clear"]))
+            occupied = _parse_css_color(str(colors["occupied"]))
+            assert _contrast_ratio(clear, canvas) >= 3.0, (
+                f"clear glyph vs canvas in {theme}: {colors['clear']} on {colors['canvas']}"
+            )
+            assert _contrast_ratio(occupied, canvas) >= 3.0, (
+                f"occupied glyph vs canvas in {theme}: {colors['occupied']} on {colors['canvas']}"
+            )
+    finally:
+        page.close()
+
+
 def test_ep1_header_status_module_readings_only_contract() -> None:
     src = _EP1_HEADER_TS.read_text(encoding="utf-8")
     assert "export interface Ep1HeaderStatusSnapshot" in src
@@ -198,6 +247,9 @@ def test_ep1_header_status_module_readings_only_contract() -> None:
     assert "export function ep1HeaderStatusFromUiState" in src
     assert "export function ep1HeaderOccupancyGlyphFromUiState" in src
     assert "export function createEp1HeaderOccupancyGlyph" in src
+    assert "export function formatEp1HeaderOccupancyTooltip" in src
+    assert "formatDeviceIdentityTooltip" in src
+    assert "mac_address" in src
     assert "ep1-header-status-label" not in src
     assert "compactC" in src
     assert "compactF" in src
@@ -233,6 +285,18 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     glyph = _css_rule_block(style, ".ep1-header-occupancy-glyph")
     assert "inline-flex" in glyph
     assert "min-width: 44px" not in glyph
+    occupied = _css_rule_block(
+        style,
+        '.ep1-header-occupancy-glyph[data-occupancy="occupied"]',
+    )
+    clear = _css_rule_block(
+        style,
+        '.ep1-header-occupancy-glyph[data-occupancy="clear"]',
+    )
+    fill = _css_rule_block(style, ".ep1-header-occupancy-fill")
+    assert "var(--accent)" in occupied
+    assert "#cfd3db" in clear
+    assert "color-mix" in fill
     end_icons = _css_rule_block(style, ".tile-header-end-icons")
     assert "grid-template-columns: auto auto" in end_icons
     header = _css_rule_block(
@@ -277,7 +341,10 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert "createTileHeaderEndIcons(state)" in src
     assert "createTileHeaderEndIcons(null)" in src
     assert "ep1HeaderOccupancyGlyphFromUiState(state)" in src
-    assert "createEp1HeaderOccupancyGlyph(occupancyGlyph)" in src
+    assert "createEp1HeaderOccupancyGlyph(" in src
+    assert "ep1HeaderStatusFromUiState(state)" in src
+    assert "formatDeviceIdentityTooltip" in src
+    assert "function deviceIdentityTooltip" not in src
     assert 'className = "tile-header-end-icons"' in src
     assert "MOCK_EP1_HEADER_STATUS" not in src
     assert "TODO(ep1-header-live)" not in src
@@ -289,6 +356,19 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert "max-height: 560px" in src
     assert "pointer: coarse" in src
     assert "°C · " in src
+
+
+def test_device_identity_tooltip_module_contract() -> None:
+    src = (_REPO_ROOT / "web" / "src" / "device-identity-tooltip.ts").read_text(
+        encoding="utf-8",
+    )
+    assert "export const DEVICE_PROPERTIES_MENU_HINT" in src
+    assert "Right-click to edit device properties" in src
+    assert "export function formatDeviceIdentityTooltip" in src
+    assert "MAC address:" in src
+    assert "IP:" in src
+    assert "includeLabel" in src
+    assert "includePropertiesHint" in src
 
 
 def test_compact_layout_mq_css_matches_main() -> None:
@@ -322,6 +402,12 @@ def _compact_layout_mq_from_main(src: str) -> str:
     return _normalize_media_query_clause(match.group(1))
 
 
+def _contrast_ratio(fg: tuple[int, int, int], bg: tuple[int, int, int]) -> float:
+    lighter = max(_relative_luminance(fg), _relative_luminance(bg))
+    darker = min(_relative_luminance(fg), _relative_luminance(bg))
+    return (lighter + 0.05) / (darker + 0.05)
+
+
 def _css_rule_block(style_css: str, selector_needle: str) -> str:
     idx = style_css.find(selector_needle)
     assert idx >= 0, f"Expected rule {selector_needle!r} in index.html <style>"
@@ -347,3 +433,29 @@ def _extract_index_html_style_block() -> str:
 
 def _normalize_media_query_clause(raw: str) -> str:
     return re.sub(r"\s+", " ", raw.strip())
+
+
+def _parse_css_color(raw: str) -> tuple[int, int, int]:
+    text = raw.strip()
+    hex_match = re.fullmatch(r"#([0-9a-fA-F]{6})", text)
+    if hex_match is not None:
+        digits = hex_match.group(1)
+        return (int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16))
+    rgb_match = re.fullmatch(
+        r"rgba?\(\s*(\d+)(?:\s*,\s*|\s+)(\d+)(?:\s*,\s*|\s+)(\d+)(?:\s*[,/]\s*[\d.]+)?\s*\)",
+        text,
+    )
+    if rgb_match is not None:
+        return (int(rgb_match.group(1)), int(rgb_match.group(2)), int(rgb_match.group(3)))
+    raise AssertionError(f"Expected hex or rgb() color, got {raw!r}")
+
+
+def _relative_luminance(rgb: tuple[int, int, int]) -> float:
+    def channel(value: int) -> float:
+        scaled = value / 255.0
+        if scaled <= 0.03928:
+            return scaled / 12.92
+        return ((scaled + 0.055) / 1.055) ** 2.4
+
+    red, green, blue = rgb
+    return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)

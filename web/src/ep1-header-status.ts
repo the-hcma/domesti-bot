@@ -5,10 +5,12 @@
  * right of the global bulk-off control (#574). Read-only.
  */
 
+import { formatDeviceIdentityTooltip } from "./device-identity-tooltip.js";
 import {
   DeviceConditionState,
   DeviceFamilyId,
   type UIDeviceOut,
+  type UIDeviceState,
   type UIOccupancyReadingsOut,
   type UIStateOut,
 } from "./types.js";
@@ -35,9 +37,13 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** One EP1 sensor summarized in the header strip. */
 export interface Ep1HeaderStatusSnapshot {
+  host: string | null;
   humidity_pct: number | null;
+  identity_details: readonly string[];
   illuminance_lx: number | null;
   label: string;
+  mac_address: string;
+  occupancy_state: UIDeviceState;
   responding: boolean;
   temperature_c: number | null;
   temperature_f: number | null;
@@ -110,6 +116,7 @@ export function createEp1HeaderStatusStrip(
 /** Person (occupied) or ghost (clear) control for the header actions row. */
 export function createEp1HeaderOccupancyGlyph(
   kind: Ep1HeaderOccupancyGlyph,
+  snapshots: readonly Ep1HeaderStatusSnapshot[] = [],
 ): HTMLElement {
   const span = document.createElement("span");
   span.className = "ep1-header-occupancy-glyph";
@@ -121,10 +128,7 @@ export function createEp1HeaderOccupancyGlyph(
       : EP1_HEADER_OCCUPANCY_ARIA_CLEAR,
   );
   span.setAttribute("role", "img");
-  span.title =
-    kind === Ep1HeaderOccupancyGlyph.Occupied
-      ? EP1_HEADER_OCCUPANCY_ARIA_OCCUPIED
-      : EP1_HEADER_OCCUPANCY_ARIA_CLEAR;
+  span.title = formatEp1HeaderOccupancyTooltip(kind, snapshots);
   span.append(
     kind === Ep1HeaderOccupancyGlyph.Occupied
       ? createPersonSvg()
@@ -145,6 +149,39 @@ export function formatEp1HeaderIlluminance(lx: number | null): string | null {
     return null;
   }
   return Number.isInteger(lx) ? `${String(lx)} lx` : `${lx.toFixed(1)} lx`;
+}
+
+/** Desktop hover copy: occupancy heading plus the EP1(s) backing the glyph. */
+export function formatEp1HeaderOccupancyTooltip(
+  kind: Ep1HeaderOccupancyGlyph,
+  snapshots: readonly Ep1HeaderStatusSnapshot[],
+): string {
+  const heading =
+    kind === Ep1HeaderOccupancyGlyph.Occupied
+      ? EP1_HEADER_OCCUPANCY_ARIA_OCCUPIED
+      : EP1_HEADER_OCCUPANCY_ARIA_CLEAR;
+  const sources = occupancyTooltipSources(snapshots);
+  if (sources.length === 0) {
+    return heading;
+  }
+  const includeStateSuffix = sources.length > 1;
+  const blocks: string[] = [heading];
+  for (const snapshot of sources) {
+    const label = occupancyTooltipDeviceLabel(snapshot, includeStateSuffix);
+    blocks.push("");
+    blocks.push(
+      formatDeviceIdentityTooltip(
+        {
+          host: snapshot.host,
+          identity_details: snapshot.identity_details,
+          label,
+          mac_address: snapshot.mac_address,
+        },
+        { includeLabel: true },
+      ),
+    );
+  }
+  return blocks.join("\n");
 }
 
 export function formatEp1HeaderTemperature(
@@ -188,10 +225,7 @@ function createEp1HeaderStatusDevice(
   const row = document.createElement("div");
   row.className = "ep1-header-status-device";
   row.dataset["responding"] = snapshot.responding ? "true" : "false";
-  // Readings only in the strip; keep the device name as a tooltip for context.
-  if (snapshot.label !== "") {
-    row.title = snapshot.label;
-  }
+  row.title = formatDeviceIdentityTooltip(snapshot, { includeLabel: true });
 
   const temp = formatEp1HeaderTemperature(snapshot);
   if (temp != null) {
@@ -242,6 +276,7 @@ function createGhostSvg(): SVGElement {
   body.setAttribute("stroke-width", "2");
   body.setAttribute("stroke-linecap", "round");
   body.setAttribute("stroke-linejoin", "round");
+  body.classList.add("ep1-header-occupancy-fill");
   const eyeL = document.createElementNS(SVG_NS, "circle");
   eyeL.setAttribute("cx", "9");
   eyeL.setAttribute("cy", "10");
@@ -290,12 +325,14 @@ function createPersonSvg(): SVGElement {
   head.setAttribute("fill", "none");
   head.setAttribute("stroke", "currentColor");
   head.setAttribute("stroke-width", "2");
+  head.classList.add("ep1-header-occupancy-fill");
   const body = document.createElementNS(SVG_NS, "path");
   body.setAttribute("d", "M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6");
   body.setAttribute("fill", "none");
   body.setAttribute("stroke", "currentColor");
   body.setAttribute("stroke-width", "2");
   body.setAttribute("stroke-linecap", "round");
+  body.classList.add("ep1-header-occupancy-fill");
   svg.append(head, body);
   return svg;
 }
@@ -307,11 +344,33 @@ function ep1HeaderStatusFromDevice(device: UIDeviceOut): Ep1HeaderStatusSnapshot
     readings?.responding ??
     isEp1HeaderResponding(readings?.last_heard_at ?? null);
   return {
+    host: (device.host ?? "").trim() || null,
     humidity_pct: readings?.humidity_pct ?? null,
+    identity_details: device.identity_details ?? [],
     illuminance_lx: readings?.illuminance_lx ?? null,
     label: device.label,
+    mac_address: device.mac_address,
+    occupancy_state: device.state,
     responding,
     temperature_c: readings?.temperature_c ?? null,
     temperature_f: readings?.temperature_f ?? null,
   };
+}
+
+function occupancyTooltipDeviceLabel(
+  snapshot: Ep1HeaderStatusSnapshot,
+  includeStateSuffix: boolean,
+): string {
+  const base = snapshot.label.trim() || snapshot.mac_address;
+  if (!includeStateSuffix) {
+    return base;
+  }
+  return `${base} (${snapshot.occupancy_state})`;
+}
+
+function occupancyTooltipSources(
+  snapshots: readonly Ep1HeaderStatusSnapshot[],
+): Ep1HeaderStatusSnapshot[] {
+  const responding = snapshots.filter((snapshot) => snapshot.responding);
+  return responding.length > 0 ? responding : [...snapshots];
 }
