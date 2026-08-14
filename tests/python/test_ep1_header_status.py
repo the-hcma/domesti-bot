@@ -192,12 +192,13 @@ def test_ep1_header_status_comfortable_splits_c_and_f_with_dot(
 def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
     chromium_browser: Any,
 ) -> None:
-    """Clear ghost stays visible on the dark canvas in both appearances."""
+    """Clear ghost stays visible on the actual canvas in both appearances."""
     style_css = _extract_index_html_style_block()
     html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><style>{style_css}</style></head>
 <body>
+<main>
 <div id="app">
   <span class="ep1-header-occupancy-glyph" data-occupancy="clear">
     <svg class="ep1-header-occupancy-svg" width="22" height="22"
@@ -224,6 +225,7 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
     </svg>
   </span>
 </div>
+</main>
 </body></html>"""
     page = chromium_browser.new_page(viewport={"width": 1280, "height": 800})
     try:
@@ -314,8 +316,8 @@ def test_device_identity_tooltip_module_contract() -> None:
 
 def test_index_html_ep1_header_status_css_contract() -> None:
     style = _extract_index_html_style_block()
-    light_shell = _css_rule_block(style, 'html[data-theme="light"] body')
-    assert "background: #ffffff" in light_shell
+    light_root = _css_rule_block(style, 'html[data-theme="light"] {')
+    assert "--canvas-bg: #ffffff" in light_root
     base = _css_rule_block(style, ".ep1-header-status")
     assert "display: flex" in base
     assert "flex: 0 1 auto" in base
@@ -327,10 +329,10 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     )
     stale = _css_rule_block(
         style,
-        '.ep1-header-status-metric[data-responding="false"]',
+        'html[data-theme="light"] .ep1-header-status-metric[data-responding="false"]',
     )
     assert "var(--accent)" in responding
-    assert "var(--pending)" in stale
+    assert "color: #a16207" in stale
     glyph = _css_rule_block(style, ".ep1-header-occupancy-glyph")
     assert "inline-flex" in glyph
     assert "min-width: 44px" not in glyph
@@ -354,14 +356,6 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "#646a72" in clear
     assert "currentColor" in clear_fill
     assert "currentColor" in occupied_fill
-    header = _css_rule_block(style, 'html[data-theme="light"] .tile-header')
-    assert "color: #1d1f21" in header
-    global_off = _css_rule_block(style, 'html[data-theme="light"] .tile-header-global-off')
-    assert "background: #f3f4f6" in global_off
-    assert "border-color: #c7cdd6" in global_off
-    assert "color: #1d1f21" in global_off
-    end_icons = _css_rule_block(style, 'html[data-theme="light"] .tile-header-end-icons')
-    assert "color: #1d1f21" in end_icons
     brand = _css_rule_block(style, 'html[data-theme="light"] .brand-mark')
     assert "color: #4b5563" in brand
     end_icons = _css_rule_block(style, ".tile-header-end-icons")

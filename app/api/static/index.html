@@ -62,11 +62,7 @@
       --bg: #f6f7f9;
       --input-fill: #ffffff;
       --border: #e1e4e8;
-      --canvas-bg: #0a0a0a;
-    }
-    html[data-theme="light"] body {
-      background: #ffffff;
-      color: #1d1f21;
+      --canvas-bg: #ffffff;
     }
     html[data-theme="dark"] {
       color-scheme: dark;
@@ -87,7 +83,7 @@
     html, body { margin: 0; padding: 0; background: var(--canvas-bg); color: var(--fg);
       font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       -webkit-text-size-adjust: 100%; }
-    main { max-width: 960px; margin: 4vh auto; padding: 24px; background: var(--canvas-bg); }
+    main { max-width: 960px; margin: 4vh auto; padding: 24px; }
     h1, h2, h3, h4 { margin: 0; }
     h3 { font-size: 15px; }
     p { margin: 8px 0; color: var(--muted); }
@@ -96,34 +92,22 @@
     #app { display: flex; flex-direction: column; gap: 18px; }
     .tile-header { display: flex; flex-wrap: wrap; align-items: center;
       justify-content: space-between; gap: 8px 12px; padding: 0 4px; }
-    html[data-theme="light"] .tile-header,
-    html:not([data-theme]) .tile-header { color: #1d1f21; }
     .tile-header-sparse { justify-content: space-between; width: 100%; }
     .tile-header-actions { display: flex; flex: 1 1 auto; align-items: stretch;
       justify-content: flex-end; gap: 8px; min-width: 0; }
     .tile-header-global-off { flex: 1 1 auto; min-width: 0; white-space: normal; }
-    html[data-theme="light"] .tile-header-global-off,
-    html:not([data-theme]) .tile-header-global-off {
-      background: #f3f4f6;
-      border-color: #c7cdd6;
-      color: #1d1f21;
-    }
     /* Occupancy + theme: tight 2-col group flush right; bulk-off takes the middle. */
     .tile-header-end-icons {
       display: grid; grid-template-columns: auto auto; align-items: center;
       justify-content: end; justify-items: center; gap: 2px 4px;
       flex: 0 0 auto; margin-left: 0;
     }
-    html[data-theme="light"] .tile-header-end-icons,
-    html:not([data-theme]) .tile-header-end-icons { color: #1d1f21; }
     /* EP1 header status strip (#524) — readings only (no device name); same row as bulk-off. */
     .ep1-header-status {
       display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center;
       gap: 6px 14px; min-width: 0; color: var(--fg); font-size: 0.92rem;
       line-height: 1.25;
     }
-    html[data-theme="light"] .ep1-header-status,
-    html:not([data-theme]) .ep1-header-status { color: #1d1f21; }
     .ep1-header-status-device {
       display: inline-flex; flex-wrap: nowrap; align-items: baseline;
       gap: 0.35em 0.55em; min-width: 0;
@@ -131,8 +115,7 @@
     .ep1-header-status-metric { white-space: nowrap; }
     .ep1-header-status-metric[data-responding="true"] { color: var(--accent); }
     .ep1-header-status-metric[data-responding="false"] { color: var(--pending); }
-    html[data-theme="light"] .ep1-header-status-metric[data-responding="false"],
-    html:not([data-theme]) .ep1-header-status-metric[data-responding="false"] {
+    html[data-theme="light"] .ep1-header-status-metric[data-responding="false"] {
       color: #a16207;
     }
     .ep1-header-status-metric ~ .ep1-header-status-metric::before {
@@ -153,10 +136,6 @@
        ``var(--fg)`` in light appearance is near-black and disappears. */
     .ep1-header-occupancy-glyph[data-occupancy="occupied"] { color: var(--accent); }
     .ep1-header-occupancy-glyph[data-occupancy="clear"] { color: #646a72; }
-    html[data-theme="light"] .ep1-header-occupancy-glyph[data-occupancy="clear"],
-    html:not([data-theme]) .ep1-header-occupancy-glyph[data-occupancy="clear"] {
-      color: #4b5563;
-    }
     .ep1-header-occupancy-svg { display: block; width: 22px; height: 22px; }
     .ep1-header-occupancy-glyph[data-occupancy="clear"] .ep1-header-occupancy-fill {
       fill: currentColor;
@@ -171,15 +150,12 @@
     .btn.btn-theme-toggle svg { display: block; width: 22px; height: 22px; }
     .brand-mark { position: relative; display: inline-flex;
       flex: 0 0 auto; flex-shrink: 0; align-items: center; color: var(--muted); }
-    html[data-theme="light"] .brand-mark,
-    html:not([data-theme]) .brand-mark { color: #4b5563; }
+    html[data-theme="light"] .brand-mark { color: #4b5563; }
     .brand-mark-icon-btn { display: inline-flex; flex-shrink: 0;
       align-items: center; padding: 0; border: none; background: transparent;
       color: inherit; font: inherit; border-radius: 6px; cursor: pointer;
       touch-action: manipulation; }
     .brand-mark-icon-btn:hover { color: var(--fg); }
-    html[data-theme="light"] .brand-mark-icon-btn:hover,
-    html:not([data-theme]) .brand-mark-icon-btn:hover { color: #111827; }
     .brand-mark-icon-btn:focus-visible { outline: 2px solid var(--accent);
       outline-offset: 2px; }
     .brand-mark-mascot { display: inline-flex; flex-shrink: 0; align-items: center; }
