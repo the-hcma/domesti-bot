@@ -192,12 +192,13 @@ def test_ep1_header_status_comfortable_splits_c_and_f_with_dot(
 def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
     chromium_browser: Any,
 ) -> None:
-    """Clear ghost stays visible on the dark canvas in both appearances."""
+    """Clear ghost stays visible on the actual canvas in both appearances."""
     style_css = _extract_index_html_style_block()
     html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><style>{style_css}</style></head>
 <body>
+<main>
 <div id="app">
   <span class="ep1-header-occupancy-glyph" data-occupancy="clear">
     <svg class="ep1-header-occupancy-svg" width="22" height="22"
@@ -223,20 +224,46 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
       ></path>
     </svg>
   </span>
+  <span class="brand-mark">
+    <svg class="brand-mark-svg" viewBox="0 0 24 24">
+      <circle class="brand-mark-bm-head" cx="12" cy="8" r="4"></circle>
+      <line class="brand-mark-bm-antenna-rod" x1="12" y1="4" x2="12" y2="1"></line>
+      <circle class="brand-mark-bm-antenna-ball" cx="12" cy="1" r="1"></circle>
+    </svg>
+  </span>
 </div>
+</main>
 </body></html>"""
     page = chromium_browser.new_page(viewport={"width": 1280, "height": 800})
     try:
         page.set_content(html)
-        for theme in ("light", "dark"):
+        scenarios: list[tuple[str | None, str | None, tuple[int, int, int] | None]] = [
+            ("light", None, (255, 255, 255)),
+            ("dark", None, None),
+            # No explicit theme choice + OS set to light — the common desktop
+            # default for a user who never touches the theme toggle. This is
+            # the exact case #636 regressed: the canvas must actually be
+            # white here too, not just contrast-legal against a dark base.
+            (None, "light", (255, 255, 255)),
+        ]
+        for data_theme, color_scheme, expected_canvas in scenarios:
+            label = data_theme or f"no-theme/os-{color_scheme}"
+            if color_scheme is not None:
+                page.emulate_media(color_scheme=color_scheme)
             page.evaluate(
-                "(theme) => document.documentElement.setAttribute('data-theme', theme)",
-                theme,
+                "(theme) => {"
+                "  if (theme) {"
+                "    document.documentElement.setAttribute('data-theme', theme);"
+                "  } else {"
+                "    document.documentElement.removeAttribute('data-theme');"
+                "  }"
+                "}",
+                data_theme,
             )
             colors = page.evaluate(
                 """() => {
-                  const canvas = getComputedStyle(document.documentElement)
-                    .getPropertyValue('--canvas-bg').trim();
+                  const canvas = getComputedStyle(document.body)
+                    .backgroundColor;
                   const clear = getComputedStyle(
                     document.querySelector('[data-occupancy="clear"]')
                   ).color;
@@ -249,19 +276,40 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
                   const occupiedFill = getComputedStyle(
                     document.querySelector('[data-occupancy="occupied"] .ep1-header-occupancy-fill')
                   ).fill;
-                  return { canvas, clear, clearFill, occupied, occupiedFill };
+                  const brandHeadStroke = getComputedStyle(
+                    document.querySelector('.brand-mark-bm-head')
+                  ).stroke;
+                  const brandBallFill = getComputedStyle(
+                    document.querySelector('.brand-mark-bm-antenna-ball')
+                  ).fill;
+                  return {
+                    canvas, clear, clearFill, occupied, occupiedFill,
+                    brandHeadStroke, brandBallFill,
+                  };
                 }""",
             )
             canvas = _parse_css_color(str(colors["canvas"]))
+            if expected_canvas is not None:
+                assert canvas == expected_canvas, (
+                    f"canvas in {label} should be white for the clear-mode panel, got {colors['canvas']}"
+                )
             clear = _parse_css_color(str(colors["clear"]))
             occupied = _parse_css_color(str(colors["occupied"]))
             fill = _parse_css_color(str(colors["clearFill"]))
             occupied_fill_color = _parse_css_color(str(colors["occupiedFill"]))
+            brand_head_stroke = _parse_css_color(str(colors["brandHeadStroke"]))
+            brand_ball_fill = _parse_css_color(str(colors["brandBallFill"]))
             assert _contrast_ratio(fill, canvas) >= 3.0, (
-                f"clear glyph fill vs canvas in {theme}: {fill} on {colors['canvas']}"
+                f"clear glyph fill vs canvas in {label}: {fill} on {colors['canvas']}"
             )
             assert _contrast_ratio(occupied_fill_color, canvas) >= 3.0, (
-                f"occupied glyph fill vs canvas in {theme}: {occupied_fill_color} on {colors['canvas']}"
+                f"occupied glyph fill vs canvas in {label}: {occupied_fill_color} on {colors['canvas']}"
+            )
+            assert _contrast_ratio(brand_head_stroke, canvas) >= 3.0, (
+                f"brand-mark head stroke vs canvas in {label}: {brand_head_stroke} on {colors['canvas']}"
+            )
+            assert _contrast_ratio(brand_ball_fill, canvas) >= 3.0, (
+                f"brand-mark antenna-ball fill vs canvas in {label}: {brand_ball_fill} on {colors['canvas']}"
             )
             assert fill == clear
             assert occupied_fill_color == occupied
@@ -314,6 +362,15 @@ def test_device_identity_tooltip_module_contract() -> None:
 
 def test_index_html_ep1_header_status_css_contract() -> None:
     style = _extract_index_html_style_block()
+    light_root = _css_rule_block(style, 'html[data-theme="light"] {')
+    assert "--canvas-bg: #ffffff" in light_root
+    assert "--muted: #4b5563" in light_root
+    light_default = _css_rule_block(
+        style,
+        "@media (prefers-color-scheme: light) {",
+    )
+    assert "--canvas-bg: #ffffff" in light_default
+    assert "--muted: #4b5563" in light_default
     base = _css_rule_block(style, ".ep1-header-status")
     assert "display: flex" in base
     assert "flex: 0 1 auto" in base
@@ -325,10 +382,10 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     )
     stale = _css_rule_block(
         style,
-        '.ep1-header-status-metric[data-responding="false"]',
+        'html[data-theme="light"] .ep1-header-status-metric[data-responding="false"]',
     )
     assert "var(--accent)" in responding
-    assert "var(--pending)" in stale
+    assert "color: #a16207" in stale
     glyph = _css_rule_block(style, ".ep1-header-occupancy-glyph")
     assert "inline-flex" in glyph
     assert "min-width: 44px" not in glyph
@@ -352,6 +409,10 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "#646a72" in clear
     assert "currentColor" in clear_fill
     assert "currentColor" in occupied_fill
+    brand_head = _css_rule_block(style, ".brand-mark-bm-head")
+    brand_ball = _css_rule_block(style, ".brand-mark-bm-antenna-ball")
+    assert "var(--muted)" in brand_head
+    assert "var(--muted)" in brand_ball
     end_icons = _css_rule_block(style, ".tile-header-end-icons")
     assert "grid-template-columns: auto auto" in end_icons
     header = _css_rule_block(
