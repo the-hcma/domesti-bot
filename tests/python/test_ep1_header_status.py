@@ -235,8 +235,8 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
             )
             colors = page.evaluate(
                 """() => {
-                  const canvas = getComputedStyle(document.documentElement)
-                    .getPropertyValue('--canvas-bg').trim();
+                  const canvas = getComputedStyle(document.body)
+                    .backgroundColor;
                   const clear = getComputedStyle(
                     document.querySelector('[data-occupancy="clear"]')
                   ).color;
@@ -330,7 +330,7 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         '.ep1-header-status-metric[data-responding="false"]',
     )
     assert "var(--accent)" in responding
-    assert "color: #a16207" in stale
+    assert "var(--pending)" in stale
     glyph = _css_rule_block(style, ".ep1-header-occupancy-glyph")
     assert "inline-flex" in glyph
     assert "min-width: 44px" not in glyph
@@ -351,18 +351,18 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         '.ep1-header-occupancy-glyph[data-occupancy="occupied"] .ep1-header-occupancy-fill',
     )
     assert "var(--accent)" in occupied
-    assert "#4b5563" in clear
+    assert "#646a72" in clear
     assert "currentColor" in clear_fill
     assert "currentColor" in occupied_fill
-    header = _css_rule_block(style, ".tile-header")
+    header = _css_rule_block(style, 'html[data-theme="light"] .tile-header')
     assert "color: #1d1f21" in header
-    global_off = _css_rule_block(style, ".tile-header-global-off")
+    global_off = _css_rule_block(style, 'html[data-theme="light"] .tile-header-global-off')
     assert "background: #f3f4f6" in global_off
     assert "border-color: #c7cdd6" in global_off
     assert "color: #1d1f21" in global_off
-    end_icons = _css_rule_block(style, ".tile-header-end-icons")
+    end_icons = _css_rule_block(style, 'html[data-theme="light"] .tile-header-end-icons')
     assert "color: #1d1f21" in end_icons
-    brand = _css_rule_block(style, ".brand-mark")
+    brand = _css_rule_block(style, 'html[data-theme="light"] .brand-mark')
     assert "color: #4b5563" in brand
     end_icons = _css_rule_block(style, ".tile-header-end-icons")
     assert "grid-template-columns: auto auto" in end_icons
