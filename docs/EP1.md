@@ -17,9 +17,13 @@ For the tracking issue and field notes from the first Homey bring-up, see
   default 15s). Liveness follows subscription activity (`last_heard_at`), not
   “climate values changed”
 - **Person / ghost** glyph immediately right of the orange bulk-off button
-  (occupied / clear). Multiple EP1s: occupied if any *responding* sensor is
-  occupied, else clear if any responding sensor is clear, else hidden
-  (including when all EP1s are stale)
+  (occupied / clear). Occupied paints with `--accent` (green); clear uses a
+  light silver so the ghost stays visible on the dark canvas in both light
+  and dark appearance. Desktop hover on the climate/light readings or the
+  occupancy glyph shows the same device identity as tiles (label, MAC, IP).
+  Multiple EP1s: occupied if any *responding* sensor is occupied, else clear
+  if any responding sensor is clear, else hidden (including when all EP1s
+  are stale)
 - Rule conditions: occupancy device-state and `ep1_reading_compare` (JSON-authored;
   see `automation-rules.json.example`)
 
