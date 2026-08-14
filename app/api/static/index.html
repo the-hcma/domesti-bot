@@ -29,6 +29,11 @@
       --border: #e1e4e8;
       --canvas-bg: #0a0a0a;
     }
+    @media (prefers-color-scheme: light) {
+      html:not([data-theme]) {
+        --canvas-bg: #ffffff;
+      }
+    }
     @media (prefers-color-scheme: dark) {
       html:not([data-theme]) {
         color-scheme: dark;

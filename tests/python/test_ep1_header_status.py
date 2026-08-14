@@ -230,10 +230,28 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
     page = chromium_browser.new_page(viewport={"width": 1280, "height": 800})
     try:
         page.set_content(html)
-        for theme in ("light", "dark"):
+        scenarios: list[tuple[str | None, str | None, tuple[int, int, int] | None]] = [
+            ("light", None, (255, 255, 255)),
+            ("dark", None, None),
+            # No explicit theme choice + OS set to light — the common desktop
+            # default for a user who never touches the theme toggle. This is
+            # the exact case #636 regressed: the canvas must actually be
+            # white here too, not just contrast-legal against a dark base.
+            (None, "light", (255, 255, 255)),
+        ]
+        for data_theme, color_scheme, expected_canvas in scenarios:
+            label = data_theme or f"no-theme/os-{color_scheme}"
+            if color_scheme is not None:
+                page.emulate_media(color_scheme=color_scheme)
             page.evaluate(
-                "(theme) => document.documentElement.setAttribute('data-theme', theme)",
-                theme,
+                "(theme) => {"
+                "  if (theme) {"
+                "    document.documentElement.setAttribute('data-theme', theme);"
+                "  } else {"
+                "    document.documentElement.removeAttribute('data-theme');"
+                "  }"
+                "}",
+                data_theme,
             )
             colors = page.evaluate(
                 """() => {
@@ -255,15 +273,19 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
                 }""",
             )
             canvas = _parse_css_color(str(colors["canvas"]))
+            if expected_canvas is not None:
+                assert canvas == expected_canvas, (
+                    f"canvas in {label} should be white for the clear-mode panel, got {colors['canvas']}"
+                )
             clear = _parse_css_color(str(colors["clear"]))
             occupied = _parse_css_color(str(colors["occupied"]))
             fill = _parse_css_color(str(colors["clearFill"]))
             occupied_fill_color = _parse_css_color(str(colors["occupiedFill"]))
             assert _contrast_ratio(fill, canvas) >= 3.0, (
-                f"clear glyph fill vs canvas in {theme}: {fill} on {colors['canvas']}"
+                f"clear glyph fill vs canvas in {label}: {fill} on {colors['canvas']}"
             )
             assert _contrast_ratio(occupied_fill_color, canvas) >= 3.0, (
-                f"occupied glyph fill vs canvas in {theme}: {occupied_fill_color} on {colors['canvas']}"
+                f"occupied glyph fill vs canvas in {label}: {occupied_fill_color} on {colors['canvas']}"
             )
             assert fill == clear
             assert occupied_fill_color == occupied
@@ -318,6 +340,11 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     style = _extract_index_html_style_block()
     light_root = _css_rule_block(style, 'html[data-theme="light"] {')
     assert "--canvas-bg: #ffffff" in light_root
+    light_default = _css_rule_block(
+        style,
+        "@media (prefers-color-scheme: light) {",
+    )
+    assert "--canvas-bg: #ffffff" in light_default
     base = _css_rule_block(style, ".ep1-header-status")
     assert "display: flex" in base
     assert "flex: 0 1 auto" in base
