@@ -364,11 +364,13 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     style = _extract_index_html_style_block()
     light_root = _css_rule_block(style, 'html[data-theme="light"] {')
     assert "--canvas-bg: #ffffff" in light_root
+    assert "--muted: #4b5563" in light_root
     light_default = _css_rule_block(
         style,
         "@media (prefers-color-scheme: light) {",
     )
     assert "--canvas-bg: #ffffff" in light_default
+    assert "--muted: #4b5563" in light_default
     base = _css_rule_block(style, ".ep1-header-status")
     assert "display: flex" in base
     assert "flex: 0 1 auto" in base
@@ -407,16 +409,10 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "#646a72" in clear
     assert "currentColor" in clear_fill
     assert "currentColor" in occupied_fill
-    brand_head = _css_rule_block(style, 'html[data-theme="light"] .brand-mark-bm-head')
-    brand_rod = _css_rule_block(style, 'html[data-theme="light"] .brand-mark-bm-antenna-rod')
-    brand_ball = _css_rule_block(style, 'html[data-theme="light"] .brand-mark-bm-antenna-ball')
-    assert "stroke: #4b5563" in brand_head
-    assert "stroke: #4b5563" in brand_rod
-    assert "fill: #4b5563" in brand_ball
-    assert (
-        "html:not([data-theme]) .brand-mark-bm-head { stroke: #4b5563; }"
-        in style.split("@media (prefers-color-scheme: light) {", 1)[1]
-    )
+    brand_head = _css_rule_block(style, ".brand-mark-bm-head")
+    brand_ball = _css_rule_block(style, ".brand-mark-bm-antenna-ball")
+    assert "var(--muted)" in brand_head
+    assert "var(--muted)" in brand_ball
     end_icons = _css_rule_block(style, ".tile-header-end-icons")
     assert "grid-template-columns: auto auto" in end_icons
     header = _css_rule_block(
