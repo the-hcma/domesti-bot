@@ -463,14 +463,8 @@ def test_index_html_ep1_header_status_css_contract() -> None:
 
 def test_index_html_theme_color_adapts_before_js() -> None:
     html = _INDEX_HTML_PATH.read_text(encoding="utf-8")
-    assert (
-        'name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff"'
-        in html
-    )
-    assert (
-        'name="theme-color" media="(prefers-color-scheme: dark)" content="#15171a"'
-        in html
-    )
+    assert 'name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff"' in html
+    assert 'name="theme-color" media="(prefers-color-scheme: dark)" content="#15171a"' in html
     assert 'name="theme-color" content="#0a0a0a"' not in html
 
 
