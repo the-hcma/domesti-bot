@@ -333,9 +333,7 @@ async def test_coordinator_skips_when_wifi_home_ssid_matches(
             ),
         )
     request_mock.assert_not_awaited()
-    assert any(
-        "reason=wifi_home_ssid" in record.getMessage() for record in caplog.records
-    )
+    assert any("reason=wifi_home_ssid" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.asyncio
