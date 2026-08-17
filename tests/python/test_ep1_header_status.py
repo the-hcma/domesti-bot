@@ -251,6 +251,7 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
       ></path>
     </svg>
   </span>
+  <span class="ep1-header-status-metric" data-responding="true">22.5 °C</span>
   <span class="brand-mark">
     <svg class="brand-mark-svg" viewBox="0 0 24 24">
       <circle class="brand-mark-bm-head" cx="12" cy="8" r="4"></circle>
@@ -309,9 +310,14 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
                   const brandBallFill = getComputedStyle(
                     document.querySelector('.brand-mark-bm-antenna-ball')
                   ).fill;
+                  const liveMetric = getComputedStyle(
+                    document.querySelector(
+                      '.ep1-header-status-metric[data-responding="true"]'
+                    )
+                  ).color;
                   return {
                     canvas, clear, occupied, clearStroke, occupiedStroke,
-                    brandHeadStroke, brandBallFill,
+                    brandHeadStroke, brandBallFill, liveMetric,
                   };
                 }""",
             )
@@ -319,6 +325,10 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
             if expected_canvas is not None:
                 assert canvas == expected_canvas, (
                     f"canvas in {label} should be white for the clear-mode panel, got {colors['canvas']}"
+                )
+                live_metric = _parse_css_color(str(colors["liveMetric"]))
+                assert live_metric == (20, 83, 45), (
+                    f"live metric in {label} should be #14532d, got {colors['liveMetric']}"
                 )
             clear = _parse_css_color(str(colors["clear"]))
             occupied = _parse_css_color(str(colors["occupied"]))
@@ -411,6 +421,11 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "font-weight: 700" in metric
     assert "var(--accent)" in responding
     assert "color: #14532d" in light_live
+    os_light_live = _css_rule_block(
+        style,
+        'html:not([data-theme]) .ep1-header-status-metric[data-responding="true"]',
+    )
+    assert "color: #14532d" in os_light_live
     assert "color: #a16207" in stale
     glyph = _css_rule_block(style, ".ep1-header-occupancy-glyph")
     assert "inline-flex" in glyph
