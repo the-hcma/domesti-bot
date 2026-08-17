@@ -38,10 +38,9 @@ def _write_bundle(path: Path) -> None:
                 "conditions": {
                     "all": [
                         {
-                            "type": "users_inside_geofence_for_s",
+                            "type": "users_inside_geofence",
                             "geofence_id": "house",
                             "user_ids": ["kristen"],
-                            "min_inside_s": 600,
                         },
                     ],
                 },
@@ -70,6 +69,7 @@ def test_build_rules_status_user_inside_geofence_ids_include_wifi_home(
                 display_name="Kristen",
                 tracking_device_label="Phone",
                 enabled=True,
+                home_wifi_ssid="familia",
             ),
         ],
     )
@@ -91,13 +91,14 @@ def test_build_rules_status_user_inside_geofence_ids_include_wifi_home(
         db,
         UserLocationRecord(
             user_id="kristen",
-            lat=41.1941344,
-            lon=-73.8882358,
-            accuracy_m=97,
+            lat=41.2000,
+            lon=-73.9000,
+            accuracy_m=48,
             connection_type="w",
             fix_at=1_700_000_000.0,
             reported_at=1_700_000_000.0,
             source="test",
+            wifi_ssid="familia",
         ),
         retention=default_location_history_retention(),
     )
@@ -105,3 +106,5 @@ def test_build_rules_status_user_inside_geofence_ids_include_wifi_home(
     status = build_rules_status(cache_path=db)
     kristen = next(user for user in status.users if user.user_id == "kristen")
     assert kristen.inside_geofence_ids == ["house"]
+    rule = next(row for row in status.rules if row.id == "evening-lights-off-both-home")
+    assert all(cond.met for cond in rule.conditions)

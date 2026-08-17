@@ -174,10 +174,11 @@ def test_put_user_home_wifi_and_list_observed_wifi(tmp_path: Path) -> None:
 
     put = client.put(
         "/v1/rules/users/henrique/home-wifi",
-        json={"wifi_ssid": "HomeNet", "wifi_bssid": "aa:bb:cc:dd:ee:ff"},
+        json={"wifi_ssid": "HomeNet"},
     )
     assert put.status_code == HTTPStatus.OK
-    assert put.json()["home_wifi_bssid"] == "aa:bb:cc:dd:ee:ff"
+    assert put.json()["home_wifi_ssid"] == "HomeNet"
+    assert put.json()["home_wifi_bssid"] is None
 
 
 def test_put_user_household(tmp_path: Path) -> None:
@@ -207,7 +208,7 @@ def test_put_user_household(tmp_path: Path) -> None:
     assert listed.json()[0]["is_household"] is True
 
 
-def test_put_user_home_wifi_rejects_partial_ssid_without_bssid(tmp_path: Path) -> None:
+def test_put_user_home_wifi_allows_ssid_without_bssid(tmp_path: Path) -> None:
     db = tmp_path / "ui.sqlite"
     replace_users(
         db,
@@ -225,9 +226,45 @@ def test_put_user_home_wifi_rejects_partial_ssid_without_bssid(tmp_path: Path) -
     client = _client(db)
     response = client.put(
         "/v1/rules/users/henrique/home-wifi",
-        json={"wifi_ssid": "HomeNet", "wifi_bssid": "   "},
+        json={"wifi_ssid": "HomeNet"},
     )
-    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["home_wifi_ssid"] == "HomeNet"
+    assert body["home_wifi_bssid"] is None
+
+
+def test_put_user_home_wifi_ignores_bssid_and_clears_on_null_ssid(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    replace_users(
+        db,
+        [
+            UserRecord(
+                user_id="henrique",
+                first_name="Test",
+                last_name="",
+                display_name="Henrique",
+                tracking_device_label="Pixel",
+                enabled=True,
+            ),
+        ],
+    )
+    client = _client(db)
+    seeded = client.put(
+        "/v1/rules/users/henrique/home-wifi",
+        json={"wifi_ssid": "HomeNet"},
+    )
+    assert seeded.status_code == HTTPStatus.OK
+    response = client.put(
+        "/v1/rules/users/henrique/home-wifi",
+        json={"wifi_ssid": None, "wifi_bssid": "aa:bb:cc:dd:ee:ff"},
+    )
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["home_wifi_ssid"] is None
+    assert body["home_wifi_bssid"] is None
 
 
 def test_put_and_delete_geofence(tmp_path: Path) -> None:

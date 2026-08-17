@@ -112,6 +112,8 @@ def build_rules_status(
     )
     inside_since = evaluator.geofence_inside_since_snapshot() if evaluator is not None else {}
     outside_since = evaluator.geofence_outside_since_snapshot() if evaluator is not None else {}
+    user_home_wifi_bssid = {row.user_id: row.home_wifi_bssid for row in users}
+    user_home_wifi_ssid = {row.user_id: row.home_wifi_ssid for row in users}
     eval_ctx = RuleEvaluationContext(
         device_bool_since=(evaluator.device_bool_since_snapshot() if evaluator is not None else {}),
         device_bool_value=(evaluator.device_bool_value_snapshot() if evaluator is not None else {}),
@@ -124,6 +126,8 @@ def build_rules_status(
         sun=sun,
         timezone=tz,
         user_display_names=user_display_names,
+        user_home_wifi_bssid=user_home_wifi_bssid,
+        user_home_wifi_ssid=user_home_wifi_ssid,
         user_locations=user_locations,
     )
     validation_ctx = _build_validation_context(
@@ -365,6 +369,7 @@ def _load_users_status(cache_path: Path | None) -> list[UserStatusOut]:
                 settings=settings,
                 min_accuracy_m=min_accuracy_m,
                 home_wifi_bssid=user.home_wifi_bssid,
+                home_wifi_ssid=user.home_wifi_ssid,
             )
         rows.append(
             UserStatusOut(

@@ -103,6 +103,7 @@ class RuleEvaluationContext:
         default_factory=dict,
     )
     user_home_wifi_bssid: dict[str, str | None] = field(default_factory=dict)
+    user_home_wifi_ssid: dict[str, str | None] = field(default_factory=dict)
     user_location_history: dict[str, tuple[UserLocationOut, ...]] = field(
         default_factory=dict,
     )
@@ -2259,7 +2260,9 @@ def _wifi_home_presence_applies_for_location(
         lon=location.lon,
         min_accuracy_m=min_accuracy_m,
         home_wifi_bssid=ctx.user_home_wifi_bssid.get(roster_user_id),
+        home_wifi_ssid=ctx.user_home_wifi_ssid.get(roster_user_id),
         observed_wifi_bssid=location.wifi_bssid,
+        observed_wifi_ssid=location.wifi_ssid,
     )
 
 

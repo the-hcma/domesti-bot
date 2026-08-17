@@ -99,7 +99,8 @@ def test_wifi_home_geofence_ids_honors_explicit_geofence() -> None:
     assert ids == frozenset({"house"})
 
 
-def test_wifi_home_presence_applies_for_configured_home_bssid() -> None:
+def test_wifi_home_presence_applies_for_configured_home_ssid() -> None:
+    """SSID match treats any AP/band on home WiFi as inside (mesh / 2026-08-17)."""
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
     kwargs = {
@@ -107,36 +108,26 @@ def test_wifi_home_presence_applies_for_configured_home_bssid() -> None:
         "lat": 41.2000,
         "lon": -73.9000,
         "min_accuracy_m": _MIN_ACCURACY_M,
-        "home_wifi_bssid": "aa:bb:cc:dd:ee:ff",
-        "observed_wifi_bssid": "AA:BB:CC:DD:EE:FF",
+        "home_wifi_ssid": "familia",
+        "home_wifi_bssid": "90:ca:fa:76:2a:d4",
+        "observed_wifi_ssid": "familia",
+        "observed_wifi_bssid": "90:ca:fa:76:2a:d0",
     }
-    assert wifi_home_presence_applies(settings, "house", "w", accuracy_m=500, **kwargs)
+    assert wifi_home_presence_applies(settings, "house", "w", accuracy_m=48, **kwargs)
     assert not wifi_home_presence_applies(
         settings,
         "house",
         "w",
-        accuracy_m=500,
+        accuracy_m=48,
         geofences=geofences,
-        lat=41.194085,
-        lon=-73.888365,
+        lat=41.2000,
+        lon=-73.9000,
         min_accuracy_m=_MIN_ACCURACY_M,
-        home_wifi_bssid="aa:bb:cc:dd:ee:ff",
-        observed_wifi_bssid="11:22:33:44:55:66",
+        home_wifi_ssid="familia",
+        home_wifi_bssid="90:ca:fa:76:2a:d4",
+        observed_wifi_ssid="guest",
+        observed_wifi_bssid="90:ca:fa:76:2a:d4",
     )
-
-
-def test_wifi_home_presence_configured_home_bssid_skips_geo_fallback() -> None:
-    settings = _settings(wifi_home_geofence_id="house")
-    geofences = [_house_geofence()]
-    kwargs = {
-        "geofences": geofences,
-        "lat": _SLACK_ZONE_LAT,
-        "lon": _SLACK_ZONE_LON,
-        "min_accuracy_m": _MIN_ACCURACY_M,
-        "home_wifi_bssid": "aa:bb:cc:dd:ee:ff",
-        "observed_wifi_bssid": None,
-    }
-    assert not wifi_home_presence_applies(settings, "house", "w", accuracy_m=300, **kwargs)
 
 
 def test_wifi_home_presence_applies_for_low_accuracy_wifi_near_home() -> None:
@@ -151,6 +142,21 @@ def test_wifi_home_presence_applies_for_low_accuracy_wifi_near_home() -> None:
     }
     assert wifi_home_presence_applies(settings, "house", "w", **kwargs)
     assert not wifi_home_presence_applies(settings, "house", "m", **kwargs)
+
+
+def test_wifi_home_presence_applies_in_radius_slack_zone() -> None:
+    settings = _settings(wifi_home_geofence_id="house")
+    geofences = [_house_geofence()]
+    assert wifi_home_presence_applies(
+        settings,
+        "house",
+        "w",
+        geofences=geofences,
+        lat=_SLACK_ZONE_LAT,
+        lon=_SLACK_ZONE_LON,
+        accuracy_m=300,
+        min_accuracy_m=_MIN_ACCURACY_M,
+    )
 
 
 def test_wifi_home_presence_does_not_apply_for_good_accuracy_wifi() -> None:
@@ -168,18 +174,35 @@ def test_wifi_home_presence_does_not_apply_for_good_accuracy_wifi() -> None:
     )
 
 
-def test_wifi_home_presence_applies_in_radius_slack_zone() -> None:
+def test_wifi_home_presence_ignores_bssid_for_membership() -> None:
+    """BSSID is diagnostics only: matching AP without home SSID is not inside."""
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
-    assert wifi_home_presence_applies(
+    assert not wifi_home_presence_applies(
         settings,
         "house",
         "w",
+        accuracy_m=48,
         geofences=geofences,
-        lat=_SLACK_ZONE_LAT,
-        lon=_SLACK_ZONE_LON,
-        accuracy_m=300,
+        lat=41.2000,
+        lon=-73.9000,
         min_accuracy_m=_MIN_ACCURACY_M,
+        home_wifi_bssid="aa:bb:cc:dd:ee:ff",
+        observed_wifi_bssid="AA:BB:CC:DD:EE:FF",
+    )
+    assert not wifi_home_presence_applies(
+        settings,
+        "house",
+        "w",
+        accuracy_m=48,
+        geofences=geofences,
+        lat=41.2000,
+        lon=-73.9000,
+        min_accuracy_m=_MIN_ACCURACY_M,
+        home_wifi_ssid="familia",
+        home_wifi_bssid="90:ca:fa:76:2a:d4",
+        observed_wifi_ssid=None,
+        observed_wifi_bssid="90:ca:fa:76:2a:d4",
     )
 
 

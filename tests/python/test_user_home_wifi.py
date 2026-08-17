@@ -29,7 +29,6 @@ def test_replace_users_preserves_home_wifi(tmp_path: Path) -> None:
         db,
         "henrique",
         wifi_ssid="HomeNet",
-        wifi_bssid="aa:bb:cc:dd:ee:ff",
     )
     replace_users(
         db,
@@ -48,7 +47,7 @@ def test_replace_users_preserves_home_wifi(tmp_path: Path) -> None:
     )
     saved = list_users(db)[0]
     assert saved.home_wifi_ssid == "HomeNet"
-    assert saved.home_wifi_bssid == "aa:bb:cc:dd:ee:ff"
+    assert saved.home_wifi_bssid is None
 
 
 def test_list_observed_wifi_networks_keeps_latest_ssid_rename_as_separate(
@@ -130,3 +129,15 @@ def test_list_observed_wifi_networks_dedupes_by_ssid(tmp_path: Path) -> None:
     assert len(networks) == 1
     assert networks[0].wifi_ssid == "HomeNet"
     assert networks[0].wifi_bssid == "aa:bb:cc:dd:ee:02"
+
+
+def test_set_user_home_wifi_allows_ssid_only(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    replace_users(db, [_henrique()])
+    saved = set_user_home_wifi(
+        db,
+        "henrique",
+        wifi_ssid="familia",
+    )
+    assert saved.home_wifi_ssid == "familia"
+    assert saved.home_wifi_bssid is None

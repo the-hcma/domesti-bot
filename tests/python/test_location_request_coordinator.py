@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -45,7 +46,7 @@ def _fernet_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
 
 
-def _seed_db(db: Path) -> None:
+def _seed_db(db: Path, *, home_wifi_ssid: str | None = None) -> None:
     replace_users(
         db,
         [
@@ -57,6 +58,7 @@ def _seed_db(db: Path) -> None:
                 tracking_device_label="Pixel",
                 enabled=True,
                 home_wifi_bssid="aa:bb:cc:dd:ee:ff",
+                home_wifi_ssid=home_wifi_ssid,
             ),
         ],
     )
@@ -271,43 +273,67 @@ async def test_coordinator_skips_when_remote_requests_disabled(
 
 
 @pytest.mark.asyncio
-async def test_coordinator_skips_when_wifi_home_bssid_matches(
+async def test_coordinator_skips_when_wifi_home_ssid_matches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
     _write_edge_rule(bundle)
-    _seed_db(db)
+    _seed_db(db, home_wifi_ssid="HomeNet")
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    monkeypatch.setattr(
+        "app.location_request_coordinator.ACCURACY_STREAK_COUNT",
+        2,
+    )
 
     now = 1_700_000_000.0
+    for offset, accuracy_m in [(0.0, 120), (10.0, 130)]:
+        upsert_user_location(
+            db,
+            UserLocationRecord(
+                user_id="henrique",
+                lat=41.194085,
+                lon=-73.888365,
+                accuracy_m=accuracy_m,
+                fix_at=now + offset,
+                reported_at=now + offset,
+                source="test",
+            ),
+            retention=default_location_history_retention(),
+        )
     location = UserLocationRecord(
         user_id="henrique",
         lat=41.194085,
         lon=-73.888365,
-        accuracy_m=120,
-        fix_at=now,
-        reported_at=now,
+        accuracy_m=130,
+        fix_at=now + 10.0,
+        reported_at=now + 10.0,
         source="test",
         connection_type="w",
-        wifi_bssid="aa:bb:cc:dd:ee:ff",
+        wifi_ssid="HomeNet",
+        wifi_bssid="11:22:33:44:55:66",
     )
-    coordinator = LocationRequestCoordinator(cache_path=db, now_fn=lambda: now)
+    coordinator = LocationRequestCoordinator(cache_path=db, now_fn=lambda: now + 10.0)
     request_mock = AsyncMock(return_value=RequestLocationResult(status="accepted"))
-    with patch(
-        "app.location_request_coordinator.request_user_location",
-        request_mock,
+    with (
+        caplog.at_level(logging.DEBUG, logger="mytracks"),
+        patch(
+            "app.location_request_coordinator.request_user_location",
+            request_mock,
+        ),
     ):
         await coordinator._maybe_request_async(
             "henrique",
             context=LocationRequestContext(
                 deferred_edges=(),
                 location=location,
-                now=now,
+                now=now + 10.0,
             ),
         )
     request_mock.assert_not_awaited()
+    assert any("reason=wifi_home_ssid" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.asyncio
