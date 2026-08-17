@@ -146,13 +146,16 @@ COMPLETION_DISCOVERING_HINT = "discovering…"
 
 DEFAULT_DISCOVERY_DB = Path.home() / ".cache" / "rule-engine" / "device_discovery.sqlite"
 
+DISCOVERY_FAILED_PREFIX = "Device discovery failed: "
 DISCOVERY_IN_PROGRESS_MSG = "Device discovery still in progress; wait for the family ready line and retry."
 
 EP1_NOT_INITIALIZED_MSG = "EP1 manager is not initialized — try refresh-discovery or discover-ep1."
 EP1_NOT_LOADED_MSG = "EP1 not loaded — set --ep1-host / EP1_HOSTS, allow mDNS discovery, or run discover-ep1 first."
 EP1_READ_FAILED_PREFIX = "EP1 read failed for "
+FAMILY_SKIPPED_NOT_LOADED = "not loaded"
 NO_BACKENDS_DEVICE_COMMANDS_UNAVAILABLE_MSG = "No backends initialized; device commands stay unavailable."
 NO_BACKENDS_EXITING_MSG = "No backends initialized; exiting."
+REFRESH_DONE_PREFIX = "Refreshed"
 
 _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("clear-display-name", "Drop the saved friendly label for a device (SQLite cache required)."),
@@ -2000,7 +2003,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2031,7 +2034,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2087,7 +2090,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2118,7 +2121,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2151,7 +2154,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2199,7 +2202,7 @@ async def dispatch_repl_action(
             f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
             f"{nd} Tailwind door(s), {nv} Vizio TV(s))."
         )
-        print(f"{theme.ok('Refreshed')} {theme.dim(tail)}")
+        print(f"{theme.ok(REFRESH_DONE_PREFIX)} {theme.dim(tail)}")
         return
 
     if cmd == "kasa-creds":
@@ -2236,7 +2239,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2289,7 +2292,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2320,7 +2323,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2354,7 +2357,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2387,7 +2390,7 @@ async def dispatch_repl_action(
                 return {
                     "slug": slug,
                     "skipped": True,
-                    "detail": "not loaded",
+                    "detail": FAMILY_SKIPPED_NOT_LOADED,
                     "exc": None,
                     "ok": False,
                     "mgr": None,
@@ -2924,6 +2927,11 @@ class _CliDiscoverySession:
         if attr is not None:
             setattr(self, attr, result.get("mgr"))
 
+    def fail_pending_families(self) -> None:
+        for slug, status in self.family_status.items():
+            if status is FamilyDiscoveryStatus.PENDING:
+                self.family_status[slug] = FamilyDiscoveryStatus.FAILED
+
     def families_pending(self, *slugs: str) -> bool:
         return any(self.family_status[slug] is FamilyDiscoveryStatus.PENDING for slug in slugs)
 
@@ -3441,15 +3449,26 @@ async def shutdown_device_managers(state: DeviceManagersState) -> None:
 async def _async_main(args: argparse.Namespace) -> None:
     theme = _Theme(enabled=_stdout_color_enabled(args.color))
     discovery = _CliDiscoverySession.from_args(args)
+
+    async def _run_discovery() -> None:
+        try:
+            await bootstrap_device_managers(
+                args,
+                theme=theme,
+                log_progress=True,
+                session=discovery,
+                exit_if_empty=False,
+                sync_kasa_vendor_aliases=True,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as ex:
+            discovery.fail_pending_families()
+            _LOGGER.exception("Device discovery failed")
+            print(theme.err(f"{DISCOVERY_FAILED_PREFIX}{ex}"), file=sys.stderr, flush=True)
+
     discovery_task = asyncio.create_task(
-        bootstrap_device_managers(
-            args,
-            theme=theme,
-            log_progress=True,
-            session=discovery,
-            exit_if_empty=False,
-            sync_kasa_vendor_aliases=True,
-        ),
+        _run_discovery(),
         name="cli-device-discovery",
     )
     try:

@@ -17,9 +17,13 @@ from app.device_completion import CompletionAlias
 from app.device_display import format_device_display
 from app.domesti_bot_cli import (
     _COMMAND_HELP_LINES,
+    _FAMILY_BOOT_LABEL,
     COMMANDS,
     COMPLETION_DISCOVERING_HINT,
+    DISCOVERY_FAILED_PREFIX,
     DISCOVERY_IN_PROGRESS_MSG,
+    FAMILY_SKIPPED_NOT_LOADED,
+    REFRESH_DONE_PREFIX,
     FamilyDiscoveryStatus,
     _ArgCtx,
     _async_main,
@@ -520,8 +524,38 @@ async def test_refresh_prints_ep1_skipped_when_not_loaded() -> None:
             arg="",
         )
     text = out.getvalue()
-    assert "Everything Presence One: skipped — not loaded" in text
-    assert "Refreshed" in text
+    assert f"{_FAMILY_BOOT_LABEL['ep1']}: skipped — {FAMILY_SKIPPED_NOT_LOADED}" in text
+    assert REFRESH_DONE_PREFIX in text
+
+
+@pytest.mark.asyncio
+async def test_async_main_marks_families_failed_when_discovery_raises(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    boom_started = asyncio.Event()
+
+    async def _boom(*_args: object, **_kwargs: object) -> None:
+        boom_started.set()
+        raise ValueError("Expected a host:port, got 192.168.1.50:")
+
+    async def _fake_cmd_loop(discovery: _CliDiscoverySession, *_args: object, **_kwargs: object) -> None:
+        await boom_started.wait()
+        assert all(status is FamilyDiscoveryStatus.FAILED for status in discovery.family_status.values())
+
+    async def _noop_shutdown(_state: object) -> None:
+        return None
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    with (
+        patch("app.domesti_bot_cli.bootstrap_device_managers", _boom),
+        patch("app.domesti_bot_cli._cmd_loop", _fake_cmd_loop),
+        patch("app.domesti_bot_cli.shutdown_device_managers", _noop_shutdown),
+    ):
+        await _async_main(args)
+    captured = capsys.readouterr()
+    assert DISCOVERY_FAILED_PREFIX in captured.out + captured.err
+    assert "Expected a host:port, got 192.168.1.50:" in captured.out + captured.err
 
 
 @pytest.mark.asyncio
