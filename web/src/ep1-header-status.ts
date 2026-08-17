@@ -285,7 +285,6 @@ function createGhostSvg(): SVGElement {
   body.setAttribute("stroke-width", "2");
   body.setAttribute("stroke-linecap", "round");
   body.setAttribute("stroke-linejoin", "round");
-  body.classList.add("ep1-header-occupancy-fill");
   const eyeL = document.createElementNS(SVG_NS, "circle");
   eyeL.setAttribute("cx", "9");
   eyeL.setAttribute("cy", "10");
@@ -334,14 +333,12 @@ function createPersonSvg(): SVGElement {
   head.setAttribute("fill", "none");
   head.setAttribute("stroke", "currentColor");
   head.setAttribute("stroke-width", "2");
-  head.classList.add("ep1-header-occupancy-fill");
   const body = document.createElementNS(SVG_NS, "path");
   body.setAttribute("d", "M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6");
   body.setAttribute("fill", "none");
   body.setAttribute("stroke", "currentColor");
   body.setAttribute("stroke-width", "2");
   body.setAttribute("stroke-linecap", "round");
-  body.classList.add("ep1-header-occupancy-fill");
   svg.append(head, body);
   return svg;
 }
