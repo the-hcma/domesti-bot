@@ -538,8 +538,12 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             return False
         cached = device_discovery_store.load_sonos_zones(self._discovery_cache_path)
         if not cached:
-            _LOGGER.info("Sonos reload_from_cache: empty cache; keeping prior device map")
-            return False
+            if self._alias_to_device is None:
+                return False
+            self._alias_to_device = {}
+            self._last_discovery_source = "cache"
+            _LOGGER.info("Sonos reload_from_cache: empty cache; cleared device map")
+            return True
         devices = await self._reconnect_from_cache()
         if devices is None:
             _LOGGER.warning("Sonos reload_from_cache: reconnect failed; keeping prior device map")

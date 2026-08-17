@@ -721,8 +721,15 @@ class AndroidTvDeviceManager(SwitchDeviceManager[AndroidTvSwitchDevice]):
             _LOGGER.debug("AndroidTV reload_from_cache: manager not initialized")
             return False
         known = device_discovery_store.load_androidtv_known_devices(self._discovery_store_path)
-        if not known or not all(uid for _h, _p, _fn, uid, _model, _mac in known):
-            _LOGGER.info("AndroidTV reload_from_cache: empty or incomplete cache; keeping prior device map")
+        if not known:
+            previous = self._alias_to_device
+            await self.disconnect()
+            self._alias_to_device = {}
+            self._last_discovery_source = "cache"
+            _LOGGER.info("AndroidTV reload_from_cache: empty cache; cleared device map")
+            return True
+        if not all(uid for _h, _p, _fn, uid, _model, _mac in known):
+            _LOGGER.info("AndroidTV reload_from_cache: incomplete cache; keeping prior device map")
             return False
         previous = self._alias_to_device
         uniq = await self._connect_devices_from_cache(known)

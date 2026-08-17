@@ -130,8 +130,8 @@ async def test_maybe_sync_continues_after_family_exception(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_maybe_sync_keeps_kasa_when_cache_emptied(tmp_path: Path) -> None:
-    """Empty SQLite is a no-op — keep a healthy UI map on a transient empty read."""
+async def test_maybe_sync_clears_kasa_when_cache_emptied_after_refresh(tmp_path: Path) -> None:
+    """Authoritative refresh can write an empty Kasa table — sync must clear ghosts."""
 
     db = tmp_path / "cached.sqlite"
     cfg = _xor_cfg("192.168.1.10")
@@ -152,16 +152,12 @@ async def test_maybe_sync_keeps_kasa_when_cache_emptied(tmp_path: Path) -> None:
 
     device_discovery_store.save_configs(db, [])
     runtime.reset()
-    with (
-        patch.object(runtime, "restart_device_state_watchers", AsyncMock()) as restart,
-        patch.object(mgr, "reload_from_cache", AsyncMock()) as reload,
-    ):
+    with patch.object(runtime, "restart_device_state_watchers", AsyncMock()) as restart:
         changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
 
-    assert changed is False
-    assert {kd._kDevice.host for kd in mgr.switches} == {"192.168.1.10"}
-    reload.assert_not_awaited()
-    restart.assert_not_awaited()
+    assert changed is True
+    assert mgr.switches == ()
+    restart.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -195,6 +191,87 @@ async def test_maybe_sync_kasa_noop_when_same_mac_moves_ip(tmp_path: Path) -> No
         changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
     assert changed is False
     reload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rediscover_adds_new_mac_to_cache_and_ui_state_syncs(tmp_path: Path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg_a = _xor_cfg("192.168.1.10")
+    cfg_b = _xor_cfg("192.168.1.20")
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.10", "Desk", cfg_a, False, _MAC_10)],
+    )
+
+    async def _connect(cfg: Any, *, credentials: Any, timeout: Any) -> MagicMock:
+        del credentials, timeout
+        alias = "Desk" if cfg.host == "192.168.1.10" else "Lamp"
+        return _mock_device(cfg.host, alias, _xor_cfg(cfg.host))
+
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(side_effect=_connect),
+        ),
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+    ):
+        await mgr.fetch()
+        device_discovery_store.save_configs(
+            db,
+            [
+                ("192.168.1.10", "Desk", cfg_a, False, _MAC_10),
+                ("192.168.1.20", "Lamp", cfg_b, False, _MAC_14),
+            ],
+        )
+        runtime.reset()
+        with patch.object(runtime, "restart_device_state_watchers", AsyncMock()):
+            changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
+
+    assert changed is True
+    assert {kd.mac_address for kd in mgr.switches} == {_MAC_10, _MAC_14}
+
+
+@pytest.mark.asyncio
+async def test_rediscover_removes_mac_from_cache_and_ui_state_syncs(tmp_path: Path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg_a = _xor_cfg("192.168.1.10")
+    cfg_b = _xor_cfg("192.168.1.20")
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.10", "Desk", cfg_a, False, _MAC_10),
+            ("192.168.1.20", "Lamp", cfg_b, False, _MAC_14),
+        ],
+    )
+
+    async def _connect(cfg: Any, *, credentials: Any, timeout: Any) -> MagicMock:
+        del credentials, timeout
+        return _mock_device(cfg.host, "Desk", cfg_a)
+
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(side_effect=_connect),
+        ),
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+    ):
+        await mgr.fetch()
+        device_discovery_store.save_configs(db, [("192.168.1.10", "Desk", cfg_a, False, _MAC_10)])
+        runtime.reset()
+        with patch.object(runtime, "restart_device_state_watchers", AsyncMock()):
+            changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
+
+    assert changed is True
+    assert {kd.mac_address for kd in mgr.switches} == {_MAC_10}
+    assert _cached_kasa_macs(db) == frozenset({_MAC_10})
+
+
+def _cached_kasa_macs(db: Path) -> frozenset[str]:
+    from app.discovery_cache_sync import _cached_kasa_macs as cached_macs
+
+    return cached_macs(db)
 
 
 @pytest.mark.asyncio

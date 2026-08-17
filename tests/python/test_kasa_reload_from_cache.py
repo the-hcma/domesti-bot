@@ -255,7 +255,7 @@ async def test_reload_from_cache_does_not_persist_discovery_table(tmp_path) -> N
 
 
 @pytest.mark.asyncio
-async def test_reload_from_cache_keeps_prior_map_when_sqlite_empty(tmp_path) -> None:
+async def test_reload_from_cache_clears_map_when_sqlite_empty(tmp_path) -> None:
     db = tmp_path / "cached.sqlite"
     cfg = _xor_cfg("192.168.1.10")
     device_discovery_store.save_configs(
@@ -276,5 +276,5 @@ async def test_reload_from_cache_keeps_prior_map_when_sqlite_empty(tmp_path) -> 
         device_discovery_store.save_configs(db, [])
         ok = await mgr.reload_from_cache()
 
-    assert ok is False
-    assert {kd._kDevice.host for kd in mgr.switches} == {"192.168.1.10"}
+    assert ok is True
+    assert mgr.switches == ()

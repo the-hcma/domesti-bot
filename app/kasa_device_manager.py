@@ -546,6 +546,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         alias_map: dict[str, KasaDevice],
         *,
         alias_overrides: dict[str, str] | None = None,
+        merge_prior_klap_hosts: bool = True,
         record_renames: bool = True,
     ) -> None:
         if self._discovery_cache_path is None:
@@ -610,11 +611,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         for host in sorted(self._hosts_requiring_klap_auth):
             if host in seen_hosts:
                 continue
-            prior = prior_by_host.get(host)
-            if prior is not None:
-                alias, cfg_dict, _requires, prior_mac = prior
-                rows.append((host, alias, cfg_dict, True, prior_mac))
-                continue
+            if merge_prior_klap_hosts:
+                prior = prior_by_host.get(host)
+                if prior is not None:
+                    alias, cfg_dict, _requires, prior_mac = prior
+                    rows.append((host, alias, cfg_dict, True, prior_mac))
+                    continue
             skipped = self._skipped_klap_auth_configs.get(host)
             if skipped is None:
                 continue
@@ -1007,7 +1009,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             _LOGGER.info("Kasa: discovered %d device(s)", discovered_count)
 
         self._finalize_kasa_lookup(devices_by_host)
-        self._persist_discovery_cache(self._device_name_to_device or {})
+        self._persist_discovery_cache(
+            self._device_name_to_device or {},
+            merge_prior_klap_hosts=not force_discovery,
+        )
         self._last_discovery_source = "discovery"
 
     def _finalize_kasa_lookup(self, alias_map: dict[str, KasaDevice]) -> None:
@@ -1120,8 +1125,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         rewritten (the CLI owns those writes).
 
         Returns ``False`` (keeping the prior map) when there is no cache path,
-        the manager is uninitialized, the cache is empty, or reconnect fails
-        in a way that would have fallen through to ``Discover.discover``.
+        the manager is uninitialized, or reconnect fails in a way that would
+        have fallen through to ``Discover.discover``. An empty cache clears the
+        in-memory map and returns ``True``.
         """
 
         if self._discovery_cache_path is None:
@@ -1132,8 +1138,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             return False
         cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
         if not cached:
-            _LOGGER.info("Kasa reload_from_cache: empty cache; keeping prior device map")
-            return False
+            previous_map = self._device_name_to_device
+            self._finalize_kasa_lookup({})
+            self._last_discovery_source = "cache"
+            await self._disconnect_device_map(previous_map)
+            _LOGGER.info("Kasa reload_from_cache: empty cache; cleared device map")
+            return True
 
         previous_map = self._device_name_to_device
         previous_klap = set(self._hosts_requiring_klap_auth)
