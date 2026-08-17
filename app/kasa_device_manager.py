@@ -75,6 +75,7 @@ from kasa.exceptions import (
 )
 
 from app import device_discovery_store
+from app.device_display import format_device_display
 from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
 from app.device_mac import lookup_mac_via_arp, try_normalize_mac
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
@@ -752,6 +753,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             alias = (getattr(kd._kDevice, "alias", None) or "").strip()
             if alias:
                 candidate_keys.append(alias)
+            display = format_device_display(kd.identifier, kd.preferred_label)
+            if display:
+                candidate_keys.append(display)
             for key in candidate_keys:
                 if not key or key == host or key == kd.mac_address:
                     continue
@@ -1203,3 +1207,61 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         devices = list({id(kd): kd for kd in self._device_name_to_device.values()}.values())
         devices.sort(key=lambda d: d.preferred_label.lower())
         return tuple(devices)
+
+    async def sync_preferred_labels_to_vendor_aliases(self) -> int:
+        """One-shot: push unique preferred labels onto Kasa vendor aliases.
+
+        Skips when the preferred label is missing, equals the MAC, already
+        matches the vendor alias, or would collide with another device's
+        preferred label or existing alias (those stay as
+        :mod:`app.device_label_conflicts` warnings). Persists the discovery
+        cache so the next cache-first start sees the matched alias.
+
+        Returns the number of devices whose alias was updated.
+        """
+
+        if self._device_name_to_device is None:
+            raise NotInitializedError
+        devices = list({id(kd): kd for kd in self._device_name_to_device.values()}.values())
+        preferred_counts: dict[str, int] = {}
+        alias_owner_mac: dict[str, str] = {}
+        for kd in devices:
+            preferred = kd.preferred_label.strip()
+            if preferred and preferred.lower() != kd.mac_address.lower():
+                key = preferred.lower()
+                preferred_counts[key] = preferred_counts.get(key, 0) + 1
+            alias = (getattr(kd._kDevice, "alias", None) or "").strip()
+            if alias:
+                alias_owner_mac.setdefault(alias.lower(), kd.mac_address)
+
+        updated = 0
+        for kd in devices:
+            preferred = kd.preferred_label.strip()
+            if not preferred or preferred.lower() == kd.mac_address.lower():
+                continue
+            preferred_key = preferred.lower()
+            if preferred_counts.get(preferred_key, 0) > 1:
+                continue
+            owner = alias_owner_mac.get(preferred_key)
+            if owner is not None and owner != kd.mac_address:
+                continue
+            current = (getattr(kd._kDevice, "alias", None) or "").strip()
+            if current.lower() == preferred_key:
+                continue
+            try:
+                await kd._kDevice.set_alias(preferred)
+            except Exception:
+                _LOGGER.warning(
+                    "Kasa: failed to set vendor alias on %s to %r",
+                    format_device_display(kd.identifier, kd.preferred_label),
+                    preferred,
+                    exc_info=True,
+                )
+                continue
+            alias_owner_mac[preferred_key] = kd.mac_address
+            updated += 1
+
+        if updated:
+            self._persist_discovery_cache(self._device_name_to_device)
+            self.rebuild_lookup_after_display_change()
+        return updated

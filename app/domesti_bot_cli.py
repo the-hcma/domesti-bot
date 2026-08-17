@@ -32,6 +32,13 @@ Discovery is written to a SQLite file by default (Kasa device configs and the la
 controller host). Optional **display names** are stored in ``device_display_names`` and are
 the preferred CLI labels when set. Use ``--no-discovery-cache`` to disable persistence.
 
+The REPL prompt appears as soon as process wiring is up. LAN discovery runs in the
+background (same cache-first / ``--force-discovery`` rules as the HTTP server). Per-family
+ready lines print as they land; device commands issued before a family is ready print a
+discovery-in-progress error instead of a traceback. After a family succeeds, Kasa preferred
+labels are pushed onto vendor aliases once (not a continuous sync). Tab completion shows
+``preferred_label (mac)`` and still accepts a typed MAC, label, or combined display string.
+
 Use ``refresh-discovery`` in the REPL to rerun Kasa UDP discovery and reload the Tailwind
 door list; ``refresh`` reconnects faster using cached Kasa configs when possible.
 
@@ -58,8 +65,9 @@ import logging
 import os
 import sys
 import time
-from collections.abc import Awaitable, Callable
-from contextlib import redirect_stderr, redirect_stdout
+from collections.abc import Awaitable, Callable, Iterator, Sequence
+from contextlib import redirect_stderr, redirect_stdout, suppress
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -67,6 +75,7 @@ import httpx
 from prompt_toolkit import HTML, PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.enums import EditingMode
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from app import device_discovery_store
 from app.androidtv_device_manager import (
@@ -79,6 +88,12 @@ from app.androidtv_device_manager import (
 from app.build_info import format_cli_version_line
 from app.db.secrets import SecretsConfigurationError, save_kasa_credentials_to_db
 from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
+from app.device_completion import (
+    CompletionAlias,
+    completion_alias_matches,
+    device_completion_alias,
+)
+from app.device_display import format_device_display
 from app.device_label_conflicts import clear_device_label_conflicts, drain_device_label_conflicts
 from app.device_manager import NotInitializedError
 from app.ep1_credentials import resolve_ep1_noise_psk
@@ -127,7 +142,11 @@ COMMANDS = (
     "turn-on",
 )
 
+COMPLETION_DISCOVERING_HINT = "discovering…"
+
 DEFAULT_DISCOVERY_DB = Path.home() / ".cache" / "rule-engine" / "device_discovery.sqlite"
+
+DISCOVERY_IN_PROGRESS_MSG = "Device discovery still in progress; wait for the family ready line and retry."
 
 EP1_NOT_INITIALIZED_MSG = "EP1 manager is not initialized — try refresh-discovery or discover-ep1."
 EP1_NOT_LOADED_MSG = "EP1 not loaded — set --ep1-host / EP1_HOSTS, allow mDNS discovery, or run discover-ep1 first."
@@ -259,6 +278,44 @@ _FAMILY_SOURCE_LABEL: dict[str, str] = {
     "discovery": "LAN discovery",
 }
 
+# Commands that need a family to be past PENDING. ``show-devices`` is omitted —
+# it renders a per-family discovering hint instead of blocking the whole listing.
+_DEVICE_COMMAND_FAMILIES: dict[str, tuple[str, ...]] = {
+    "clear-display-name": ("androidtv", "gotailwind", "kasa"),
+    "close-door": ("gotailwind",),
+    "discover-androidtv": ("androidtv",),
+    "discover-ep1": ("ep1",),
+    "is-on": ("androidtv", "kasa"),
+    "is-open": ("gotailwind",),
+    "kasa-creds": ("kasa",),
+    "open-door": ("gotailwind",),
+    "pause": ("sonos",),
+    "read-ep1": ("ep1",),
+    "refresh": ("androidtv", "ep1", "gotailwind", "kasa", "sonos", "vizio"),
+    "refresh-discovery": ("androidtv", "ep1", "gotailwind", "kasa", "sonos", "vizio"),
+    "resume": ("sonos",),
+    "set-display-name": ("androidtv", "gotailwind", "kasa"),
+    "turn-off": ("androidtv", "kasa"),
+    "turn-on": ("androidtv", "kasa"),
+}
+
+_SLUG_TO_MGR_ATTR: dict[str, str] = {
+    "androidtv": "androidtv_mgr",
+    "ep1": "ep1_mgr",
+    "gotailwind": "tailwind_mgr",
+    "sonos": "sonos_mgr",
+    "vizio": "vizio_mgr",
+}
+
+
+class FamilyDiscoveryStatus(StrEnum):
+    """Per-family bootstrap state for the local CLI (not an HTTP wire enum)."""
+
+    FAILED = "failed"
+    PENDING = "pending"
+    READY = "ready"
+    SKIPPED = "skipped"
+
 
 def _parse_ep1_host_specs(cli_hosts: list[str]) -> list[tuple[str, int]]:
     """Merge ``--ep1-host`` with ``EP1_HOSTS`` into ``(host, port)`` pairs."""
@@ -362,6 +419,8 @@ async def _timed_family_boot(
     boot_coro: Awaitable[dict[str, Any]],
     *,
     log_progress: bool,
+    theme: _Theme | None = None,
+    session: _CliDiscoverySession | None = None,
 ) -> dict[str, Any]:
     """Run one backend ``fetch`` and log start/finish with wall-clock timing."""
     if log_progress:
@@ -371,12 +430,18 @@ async def _timed_family_boot(
         )
     started = time.monotonic()
     result = await boot_coro
+    if session is not None:
+        session.apply_family_result(slug, result)
     if log_progress:
         _LOGGER.info(
             "%s in %.1fs",
             _bootstrap_family_summary(slug, result, ok_verb="ready"),
             time.monotonic() - started,
         )
+        if theme is not None:
+            _print_family_parallel_line(theme, slug, result, ok_verb="ready")
+            if slug == "kasa" and result.get("ok") and session is not None:
+                _maybe_print_kasa_auth_notice(session.kasa_mgr, theme=theme)
     return result
 
 
@@ -468,14 +533,22 @@ def split_invocation(line: str) -> tuple[str, str] | None:
 
 
 def _kasa_switch_aliases(mgr: KasaDeviceManager) -> list[str]:
+    return [item.display for item in _kasa_switch_completion_items(mgr)]
+
+
+def _kasa_switch_completion_items(mgr: KasaDeviceManager) -> list[CompletionAlias]:
     try:
-        labels: set[str] = set()
-        for s in mgr.switches:
-            labels.add(s.identifier)
-            labels.add(s.preferred_label)
-        return sorted(labels)
+        items = [device_completion_alias(s.identifier, s.preferred_label) for s in mgr.switches]
+        return sorted(items, key=lambda item: item.display.lower())
     except NotInitializedError:
         return []
+
+
+def _kasa_switch_count(mgr: KasaDeviceManager) -> int:
+    try:
+        return len(mgr.switches)
+    except NotInitializedError:
+        return 0
 
 
 def _maybe_print_kasa_auth_notice(kasa_mgr: KasaDeviceManager, *, theme: _Theme) -> None:
@@ -589,7 +662,7 @@ async def _repl_cmd_kasa_creds(
     except Exception as ex:
         print(theme.err(f"kasa-creds: rediscover failed: {ex}"), file=sys.stderr)
         return
-    n_switches = len(_kasa_switch_aliases(kasa_mgr))
+    n_switches = _kasa_switch_count(kasa_mgr)
     skipped = kasa_mgr.skipped_auth_hosts
     if skipped:
         print(theme.warn(f"kasa-creds: {len(skipped)} device(s) still failed auth: {', '.join(skipped)}"))
@@ -648,17 +721,48 @@ async def _repl_cmd_setup_secrets(
     )
 
 
+def _all_cli_device_completion_items(
+    kasa_mgr: KasaDeviceManager,
+    tailwind_mgr: GotailwindDeviceManager | None,
+    androidtv_mgr: AndroidTvDeviceManager | None = None,
+) -> list[CompletionAlias]:
+    items = list(_androidtv_switch_completion_items(androidtv_mgr))
+    items.extend(_kasa_switch_completion_items(kasa_mgr))
+    if tailwind_mgr is not None:
+        items.extend(_tailwind_door_completion_items(tailwind_mgr))
+    return sorted(items, key=lambda item: item.display.lower())
+
+
 def _all_cli_device_labels(
     kasa_mgr: KasaDeviceManager,
     tailwind_mgr: GotailwindDeviceManager | None,
     androidtv_mgr: AndroidTvDeviceManager | None = None,
 ) -> list[str]:
-    labels: set[str] = set()
-    labels.update(_androidtv_switch_aliases(androidtv_mgr))
-    labels.update(_kasa_switch_aliases(kasa_mgr))
-    if tailwind_mgr is not None:
-        labels.update(_tailwind_door_aliases(tailwind_mgr))
-    return sorted(labels)
+    return [item.display for item in _all_cli_device_completion_items(kasa_mgr, tailwind_mgr, androidtv_mgr)]
+
+
+def _append_device_label_triples(
+    triples: list[tuple[str, str, str]],
+    *,
+    backend: str,
+    api_id: str,
+    identifier: str,
+    preferred_label: str,
+    extra: tuple[str, ...] = (),
+) -> None:
+    """Register MAC, preferred label, extras, and ``Name (mac)`` as resolve keys."""
+
+    display = format_device_display(identifier, preferred_label)
+    seen: set[str] = set()
+    for raw in (identifier, preferred_label, *extra, display):
+        label = (raw or "").strip()
+        if not label:
+            continue
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        triples.append((label, backend, api_id))
 
 
 def _collect_label_triples(
@@ -672,25 +776,37 @@ def _collect_label_triples(
     if androidtv_mgr is not None:
         try:
             for d in androidtv_mgr.switches:
-                triples.append((d.identifier, "androidtv", d.identifier))
-                if d.preferred_label != d.identifier:
-                    triples.append((d.preferred_label, "androidtv", d.identifier))
+                _append_device_label_triples(
+                    triples,
+                    backend="androidtv",
+                    api_id=d.identifier,
+                    identifier=d.identifier,
+                    preferred_label=d.preferred_label,
+                )
         except NotInitializedError:
             pass
     try:
         for kd in kasa_mgr.switches:
-            triples.append((kd.identifier, "kasa", kd.identifier))
-            if kd.preferred_label != kd.identifier:
-                triples.append((kd.preferred_label, "kasa", kd.identifier))
+            _append_device_label_triples(
+                triples,
+                backend="kasa",
+                api_id=kd.identifier,
+                identifier=kd.identifier,
+                preferred_label=kd.preferred_label,
+            )
     except NotInitializedError:
         pass
     if tailwind_mgr is not None:
         try:
             for gd in tailwind_mgr.doors:
-                triples.append((gd.identifier, "tailwind", gd.identifier))
-                triples.append((str(gd.door_index), "tailwind", gd.identifier))
-                if gd.preferred_label not in (gd.identifier, str(gd.door_index)):
-                    triples.append((gd.preferred_label, "tailwind", gd.identifier))
+                _append_device_label_triples(
+                    triples,
+                    backend="tailwind",
+                    api_id=gd.identifier,
+                    identifier=gd.identifier,
+                    preferred_label=gd.preferred_label,
+                    extra=(str(gd.door_index),),
+                )
         except NotInitializedError:
             pass
     return triples
@@ -718,19 +834,58 @@ def _ep1_sensor_count(mgr: Ep1DeviceManager | None) -> int:
         return 0
 
 
+def _preferred_surface_label(labels: Sequence[str]) -> str:
+    """Pick the human ``Name (mac)`` surface when several labels map to one device."""
+
+    for lab in labels:
+        if " (" in lab and lab.endswith(")"):
+            return lab
+    return sorted(labels, key=len, reverse=True)[0]
+
+
 def _resolve_cli_target(
     raw: str,
     triples: list[tuple[str, str, str]],
 ) -> tuple[str | None, list[str], tuple[str, str] | None]:
-    """Return ``(api_lookup_id, ambiguous_labels, (backend, api_id))``."""
+    """Return ``(api_lookup_id, ambiguous_labels, (backend, api_id))``.
 
-    labels = [t[0] for t in triples]
-    hit, amb = _resolve_device_name(raw, labels)
-    if hit is None:
-        return None, amb, None
-    for lab, backend, api in triples:
-        if lab.lower() == hit.lower():
-            return api, [], (backend, api)
+    Multiple surface labels for the same device (MAC, preferred label,
+    ``Name (mac)``) count as one match so prefix resolution is not falsely
+    ambiguous.
+    """
+
+    q = raw.strip()
+    if not q:
+        return None, [], None
+    lower_q = q.lower()
+
+    def unique_targets(selected: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+        by_key: dict[tuple[str, str], list[str]] = {}
+        order: list[tuple[str, str]] = []
+        for lab, backend, api in selected:
+            key = (backend, api)
+            if key not in by_key:
+                by_key[key] = []
+                order.append(key)
+            by_key[key].append(lab)
+        out: list[tuple[str, str, str]] = []
+        for backend, api in order:
+            out.append((_preferred_surface_label(by_key[(backend, api)]), backend, api))
+        return out
+
+    exact = unique_targets([t for t in triples if t[0].lower() == lower_q])
+    if len(exact) == 1:
+        _lab, backend, api = exact[0]
+        return api, [], (backend, api)
+    if len(exact) > 1:
+        return None, sorted({t[0] for t in exact}), None
+
+    prefix_hits = unique_targets([t for t in triples if t[0].lower().startswith(lower_q)])
+    if len(prefix_hits) == 1:
+        _lab, backend, api = prefix_hits[0]
+        return api, [], (backend, api)
+    if len(prefix_hits) > 1:
+        return None, sorted({t[0] for t in prefix_hits}), None
     return None, [], None
 
 
@@ -770,14 +925,15 @@ def _sqlite_canonical_key(
 
 
 def _sonos_zone_aliases(mgr: SonosDeviceManager | None) -> list[str]:
+    return [item.display for item in _sonos_zone_completion_items(mgr)]
+
+
+def _sonos_zone_completion_items(mgr: SonosDeviceManager | None) -> list[CompletionAlias]:
     if mgr is None:
         return []
     try:
-        labels: set[str] = set()
-        for p in mgr.players:
-            labels.add(p.identifier)
-            labels.add(p.preferred_label)
-        return sorted(labels)
+        items = [device_completion_alias(p.identifier, p.preferred_label) for p in mgr.players]
+        return sorted(items, key=lambda item: item.display.lower())
     except NotInitializedError:
         return []
 
@@ -839,14 +995,15 @@ def _vizio_tv_count(mgr: VizioDeviceManager | None) -> int:
 
 
 def _androidtv_switch_aliases(mgr: AndroidTvDeviceManager | None) -> list[str]:
+    return [item.display for item in _androidtv_switch_completion_items(mgr)]
+
+
+def _androidtv_switch_completion_items(mgr: AndroidTvDeviceManager | None) -> list[CompletionAlias]:
     if mgr is None:
         return []
     try:
-        labels: set[str] = set()
-        for d in mgr.switches:
-            labels.add(d.identifier)
-            labels.add(d.preferred_label)
-        return sorted(labels)
+        items = [device_completion_alias(d.identifier, d.preferred_label) for d in mgr.switches]
+        return sorted(items, key=lambda item: item.display.lower())
     except NotInitializedError:
         return []
 
@@ -866,11 +1023,17 @@ def _collect_ep1_triples(ep1_mgr: Ep1DeviceManager | None) -> list[tuple[str, st
         return triples
     try:
         for device in ep1_mgr.devices:
-            triples.append((device.identifier, "ep1", device.identifier))
+            extra: tuple[str, ...] = ()
             if device.mac_address and device.mac_address != device.identifier:
-                triples.append((device.mac_address, "ep1", device.identifier))
-            if device.preferred_label not in (device.identifier, device.mac_address):
-                triples.append((device.preferred_label, "ep1", device.identifier))
+                extra = (device.mac_address,)
+            _append_device_label_triples(
+                triples,
+                backend="ep1",
+                api_id=device.identifier,
+                identifier=device.identifier,
+                preferred_label=device.preferred_label,
+                extra=extra,
+            )
     except NotInitializedError:
         pass
     return triples
@@ -881,9 +1044,13 @@ def _collect_media_triples(sonos_mgr: SonosDeviceManager | None) -> list[tuple[s
     if sonos_mgr is not None:
         try:
             for p in sonos_mgr.players:
-                triples.append((p.identifier, "sonos", p.identifier))
-                if p.preferred_label != p.identifier:
-                    triples.append((p.preferred_label, "sonos", p.identifier))
+                _append_device_label_triples(
+                    triples,
+                    backend="sonos",
+                    api_id=p.identifier,
+                    identifier=p.identifier,
+                    preferred_label=p.preferred_label,
+                )
         except NotInitializedError:
             pass
     return triples
@@ -897,33 +1064,51 @@ def _collect_switch_triples(
     if androidtv_mgr is not None:
         try:
             for d in androidtv_mgr.switches:
-                triples.append((d.identifier, "androidtv", d.identifier))
-                if d.preferred_label != d.identifier:
-                    triples.append((d.preferred_label, "androidtv", d.identifier))
+                _append_device_label_triples(
+                    triples,
+                    backend="androidtv",
+                    api_id=d.identifier,
+                    identifier=d.identifier,
+                    preferred_label=d.preferred_label,
+                )
         except NotInitializedError:
             pass
     try:
         for kd in kasa_mgr.switches:
-            triples.append((kd.identifier, "kasa", kd.identifier))
-            if kd.preferred_label != kd.identifier:
-                triples.append((kd.preferred_label, "kasa", kd.identifier))
+            _append_device_label_triples(
+                triples,
+                backend="kasa",
+                api_id=kd.identifier,
+                identifier=kd.identifier,
+                preferred_label=kd.preferred_label,
+            )
     except NotInitializedError:
         pass
     return triples
 
 
 def _media_playback_aliases(sonos_mgr: SonosDeviceManager | None) -> list[str]:
-    return list(_sonos_zone_aliases(sonos_mgr))
+    return [item.display for item in _sonos_zone_completion_items(sonos_mgr)]
+
+
+def _media_playback_completion_items(sonos_mgr: SonosDeviceManager | None) -> list[CompletionAlias]:
+    return list(_sonos_zone_completion_items(sonos_mgr))
 
 
 def _switch_aliases(
     kasa_mgr: KasaDeviceManager,
     androidtv_mgr: AndroidTvDeviceManager | None,
 ) -> list[str]:
-    labels: set[str] = set()
-    labels.update(_androidtv_switch_aliases(androidtv_mgr))
-    labels.update(_kasa_switch_aliases(kasa_mgr))
-    return sorted(labels)
+    return [item.display for item in _switch_completion_items(kasa_mgr, androidtv_mgr)]
+
+
+def _switch_completion_items(
+    kasa_mgr: KasaDeviceManager,
+    androidtv_mgr: AndroidTvDeviceManager | None,
+) -> list[CompletionAlias]:
+    items = list(_androidtv_switch_completion_items(androidtv_mgr))
+    items.extend(_kasa_switch_completion_items(kasa_mgr))
+    return sorted(items, key=lambda item: item.display.lower())
 
 
 def _resolve_device_name(raw: str, candidates: list[str]) -> tuple[str | None, list[str]]:
@@ -978,15 +1163,15 @@ def _stdout_color_enabled(mode: str) -> bool:
 
 
 def _tailwind_door_aliases(mgr: GotailwindDeviceManager | None) -> list[str]:
+    return [item.display for item in _tailwind_door_completion_items(mgr)]
+
+
+def _tailwind_door_completion_items(mgr: GotailwindDeviceManager | None) -> list[CompletionAlias]:
     if mgr is None:
         return []
     try:
-        ids: set[str] = set()
-        for d in mgr.doors:
-            ids.add(d.identifier)
-            ids.add(str(d.door_index))
-            ids.add(d.preferred_label)
-        return sorted(ids)
+        items = [device_completion_alias(d.identifier, d.preferred_label, str(d.door_index)) for d in mgr.doors]
+        return sorted(items, key=lambda item: item.display.lower())
     except NotInitializedError:
         return []
 
@@ -1001,10 +1186,37 @@ def _tailwind_door_count(mgr: GotailwindDeviceManager | None) -> int:
 
 
 class _RemoteAliasBundles(NamedTuple):
-    switch: list[str]
-    sonos: list[str]
-    tailwind: list[str]
-    all_device_labels: list[str]
+    switch: list[CompletionAlias]
+    sonos: list[CompletionAlias]
+    tailwind: list[CompletionAlias]
+    all_device_labels: list[CompletionAlias]
+
+
+def _completion_aliases_pending(
+    discovery: _CliDiscoverySession | None,
+    *slugs: str,
+) -> bool:
+    return discovery is not None and discovery.families_pending(*slugs)
+
+
+def _yield_alias_completions(
+    *,
+    items: list[CompletionAlias],
+    prefix: str,
+    style: str,
+    pending: bool,
+) -> Iterator[Completion]:
+    if pending:
+        yield Completion(
+            prefix,
+            start_position=-len(prefix),
+            display=COMPLETION_DISCOVERING_HINT,
+        )
+        return
+    prefix_lower = prefix.lower()
+    for item in items:
+        if completion_alias_matches(item, prefix_lower):
+            yield Completion(item.display, start_position=-len(prefix), style=style)
 
 
 class _ReplCompleterRemote(Completer):
@@ -1039,7 +1251,9 @@ class _ReplCompleterRemote(Completer):
         ):
             return
 
-        aliases: list[str]
+        prefix = ctx.arg_prefix
+        st = self._theme.completion_parameter_style()
+        pending = False
         if ctx.command in ("turn-on", "turn-off", "is-on"):
             aliases = self._bundles.switch
         elif ctx.command in ("pause", "resume"):
@@ -1049,16 +1263,16 @@ class _ReplCompleterRemote(Completer):
         elif ctx.command in ("set-display-name", "clear-display-name"):
             aliases = self._bundles.all_device_labels
         elif ctx.command == "edit-mode":
-            aliases = list(_EDIT_MODE_SUBARGS)
+            aliases = [CompletionAlias(display=name, matches=()) for name in _EDIT_MODE_SUBARGS]
         else:
             return
 
-        prefix = ctx.arg_prefix
-        prefix_lower = prefix.lower()
-        st = self._theme.completion_parameter_style()
-        for name in aliases:
-            if name.lower().startswith(prefix_lower):
-                yield Completion(name, start_position=-len(prefix), style=st)
+        yield from _yield_alias_completions(
+            items=aliases,
+            prefix=prefix,
+            style=st,
+            pending=pending,
+        )
 
 
 class _ReplCompleter(Completer):
@@ -1070,12 +1284,14 @@ class _ReplCompleter(Completer):
         sonos: SonosDeviceManager | None,
         tailwind: GotailwindDeviceManager | None,
         theme: _Theme,
+        discovery: _CliDiscoverySession | None = None,
     ) -> None:
         self._androidtv = androidtv
         self._kasa = kasa
         self._sonos = sonos
         self._tailwind = tailwind
         self._theme = theme
+        self._discovery = discovery
 
     def get_completions(self, document, complete_event):  # noqa: ANN001
         buf = document.text_before_cursor
@@ -1104,26 +1320,46 @@ class _ReplCompleter(Completer):
         ):
             return
 
-        aliases: list[str]
+        prefix = ctx.arg_prefix
+        st = self._theme.completion_parameter_style()
+        androidtv, kasa, sonos, tailwind = self._live_managers()
         if ctx.command in ("turn-on", "turn-off", "is-on"):
-            aliases = _switch_aliases(self._kasa, self._androidtv)
+            items = _switch_completion_items(kasa, androidtv)
+            pending = not items and _completion_aliases_pending(self._discovery, "androidtv", "kasa")
         elif ctx.command in ("pause", "resume"):
-            aliases = _media_playback_aliases(self._sonos)
+            items = _media_playback_completion_items(sonos)
+            pending = not items and _completion_aliases_pending(self._discovery, "sonos")
         elif ctx.command in ("open-door", "close-door", "is-open"):
-            aliases = _tailwind_door_aliases(self._tailwind)
+            items = _tailwind_door_completion_items(tailwind)
+            pending = not items and _completion_aliases_pending(self._discovery, "gotailwind")
         elif ctx.command in ("set-display-name", "clear-display-name"):
-            aliases = _all_cli_device_labels(self._kasa, self._tailwind, self._androidtv)
+            items = _all_cli_device_completion_items(kasa, tailwind, androidtv)
+            pending = not items and _completion_aliases_pending(self._discovery, "androidtv", "gotailwind", "kasa")
         elif ctx.command == "edit-mode":
-            aliases = list(_EDIT_MODE_SUBARGS)
+            items = [CompletionAlias(display=name, matches=()) for name in _EDIT_MODE_SUBARGS]
+            pending = False
         else:
             return
 
-        prefix = ctx.arg_prefix
-        prefix_lower = prefix.lower()
-        st = self._theme.completion_parameter_style()
-        for name in aliases:
-            if name.lower().startswith(prefix_lower):
-                yield Completion(name, start_position=-len(prefix), style=st)
+        yield from _yield_alias_completions(
+            items=items,
+            prefix=prefix,
+            style=st,
+            pending=pending,
+        )
+
+    def _live_managers(
+        self,
+    ) -> tuple[
+        AndroidTvDeviceManager | None,
+        KasaDeviceManager,
+        SonosDeviceManager | None,
+        GotailwindDeviceManager | None,
+    ]:
+        if self._discovery is not None:
+            d = self._discovery
+            return d.androidtv_mgr, d.kasa_mgr, d.sonos_mgr, d.tailwind_mgr
+        return self._androidtv, self._kasa, self._sonos, self._tailwind
 
 
 async def _repl_cmd_discover_androidtv(
@@ -1410,9 +1646,12 @@ async def _repl_cmd_show_devices(
     ep1_mgr: Ep1DeviceManager | None,
     vizio_mgr: VizioDeviceManager | None,
     theme: _Theme,
+    discovery: _CliDiscoverySession | None = None,
 ) -> None:
     print(theme.header("Google Cast (playback proxy: on = playing):"))
-    if androidtv_mgr is None:
+    if discovery is not None and discovery.families_pending("androidtv"):
+        print(theme.dim(f"  ({COMPLETION_DISCOVERING_HINT})"))
+    elif androidtv_mgr is None:
         print(
             theme.dim(
                 "  (skipped — use --no-androidtv; otherwise ensure LAN Cast discovery or set ANDROIDTV_HOSTS / cache.)"
@@ -1438,28 +1677,33 @@ async def _repl_cmd_show_devices(
         except NotInitializedError:
             print(theme.dim("  (not available)"))
     print(theme.header("Kasa switches:"))
-    try:
-        rows = sorted(
-            kasa_mgr.switches,
-            key=lambda s: _lex_show_devices_key(s.preferred_label, s.identifier),
-        )
-        if not rows:
-            print(theme.dim("  (none)"))
-        for sw in rows:
-            print(f"  {theme.device(repr(sw.preferred_label))}  {theme.state('(' + sw.power_state + ')')}")
-            kasa_details: list[str] = []
-            if sw.preferred_label != sw.mac_address:
-                kasa_details.append(f"alias: {sw.preferred_label}")
-            _print_device_identity(
-                theme,
-                mac_address=sw.mac_address,
-                host=sw.host,
-                details=kasa_details,
+    if discovery is not None and discovery.families_pending("kasa"):
+        print(theme.dim(f"  ({COMPLETION_DISCOVERING_HINT})"))
+    else:
+        try:
+            rows = sorted(
+                kasa_mgr.switches,
+                key=lambda s: _lex_show_devices_key(s.preferred_label, s.identifier),
             )
-    except NotInitializedError:
-        print(theme.dim("  (not available)"))
+            if not rows:
+                print(theme.dim("  (none)"))
+            for sw in rows:
+                print(f"  {theme.device(repr(sw.preferred_label))}  {theme.state('(' + sw.power_state + ')')}")
+                kasa_details: list[str] = []
+                if sw.preferred_label != sw.mac_address:
+                    kasa_details.append(f"alias: {sw.preferred_label}")
+                _print_device_identity(
+                    theme,
+                    mac_address=sw.mac_address,
+                    host=sw.host,
+                    details=kasa_details,
+                )
+        except NotInitializedError:
+            print(theme.dim("  (not available)"))
     print(theme.header("Sonos zones:"))
-    if sonos_mgr is None:
+    if discovery is not None and discovery.families_pending("sonos"):
+        print(theme.dim(f"  ({COMPLETION_DISCOVERING_HINT})"))
+    elif sonos_mgr is None:
         print(theme.dim("  (not loaded — omit --no-sonos or check LAN discovery.)"))
     else:
         try:
@@ -1483,7 +1727,9 @@ async def _repl_cmd_show_devices(
         except NotInitializedError:
             print(theme.dim("  (not available)"))
     print(theme.header("Tailwind doors:"))
-    if tailwind_mgr is None:
+    if discovery is not None and discovery.families_pending("gotailwind"):
+        print(theme.dim(f"  ({COMPLETION_DISCOVERING_HINT})"))
+    elif tailwind_mgr is None:
         print(theme.dim("  (skipped — set TAILWIND_TOKEN or --tailwind-token)"))
     else:
         try:
@@ -1509,7 +1755,9 @@ async def _repl_cmd_show_devices(
         except NotInitializedError:
             print(theme.dim("  (not available)"))
     print(theme.header("Everything Presence One:"))
-    if ep1_mgr is None:
+    if discovery is not None and discovery.families_pending("ep1"):
+        print(theme.dim(f"  ({COMPLETION_DISCOVERING_HINT})"))
+    elif ep1_mgr is None:
         print(theme.dim("  (not loaded — set --ep1-host / EP1_HOSTS, or allow EP1 mDNS discovery.)"))
     else:
         try:
@@ -1530,7 +1778,9 @@ async def _repl_cmd_show_devices(
         except NotInitializedError:
             print(theme.dim("  (not available)"))
     print(theme.header("Vizio TVs:"))
-    if vizio_mgr is None:
+    if discovery is not None and discovery.families_pending("vizio"):
+        print(theme.dim(f"  ({COMPLETION_DISCOVERING_HINT})"))
+    elif vizio_mgr is None:
         print(
             theme.dim("  (skipped — pair via settings, set VIZIO_HOSTS / --vizio-host, or configure VIZIO_AUTH_TOKEN.)")
         )
@@ -1607,7 +1857,12 @@ async def dispatch_repl_action(
     theme: _Theme,
     cmd: str,
     arg: str,
+    discovery: _CliDiscoverySession | None = None,
 ) -> None:
+    families = _DEVICE_COMMAND_FAMILIES.get(cmd)
+    if families and discovery is not None and discovery.families_pending(*families):
+        print(theme.err(DISCOVERY_IN_PROGRESS_MSG), file=sys.stderr)
+        return
     if cmd == "set-display-name":
         if cache_path is None:
             print(
@@ -1717,6 +1972,7 @@ async def dispatch_repl_action(
             ep1_mgr=ep1_mgr,
             vizio_mgr=vizio_mgr,
             theme=theme,
+            discovery=discovery,
         )
         return
 
@@ -2183,34 +2439,43 @@ async def dispatch_repl_action(
             if tailwind_mgr is None:
                 print(theme.err("Tailwind not configured."), file=sys.stderr)
                 return
-            key, amb = _resolve_device_name(arg, _tailwind_door_aliases(tailwind_mgr))
-            if key is None:
+            api_id, amb, meta = _resolve_cli_target(
+                arg,
+                [t for t in _collect_label_triples(kasa_mgr, tailwind_mgr, androidtv_mgr) if t[1] == "tailwind"],
+            )
+            if api_id is None or meta is None:
                 _report_resolve_failure(theme, "Tailwind door", arg, amb)
                 return
-            await tailwind_mgr.open(key)
-            print(f"{theme.device(repr(key))} {theme.dim('->')} {theme.ok('open')} {theme.dim('(command sent)')}")
+            await tailwind_mgr.open(api_id)
+            print(f"{theme.device(repr(api_id))} {theme.dim('->')} {theme.ok('open')} {theme.dim('(command sent)')}")
         elif cmd == "close-door":
             if tailwind_mgr is None:
                 print(theme.err("Tailwind not configured."), file=sys.stderr)
                 return
-            key, amb = _resolve_device_name(arg, _tailwind_door_aliases(tailwind_mgr))
-            if key is None:
+            api_id, amb, meta = _resolve_cli_target(
+                arg,
+                [t for t in _collect_label_triples(kasa_mgr, tailwind_mgr, androidtv_mgr) if t[1] == "tailwind"],
+            )
+            if api_id is None or meta is None:
                 _report_resolve_failure(theme, "Tailwind door", arg, amb)
                 return
-            await tailwind_mgr.close(key)
-            print(f"{theme.device(repr(key))} {theme.dim('->')} {theme.meta('close')} {theme.dim('(command sent)')}")
+            await tailwind_mgr.close(api_id)
+            print(f"{theme.device(repr(api_id))} {theme.dim('->')} {theme.meta('close')} {theme.dim('(command sent)')}")
         elif cmd == "is-open":
             if tailwind_mgr is None:
                 print(theme.err("Tailwind not configured."), file=sys.stderr)
                 return
-            key, amb = _resolve_device_name(arg, _tailwind_door_aliases(tailwind_mgr))
-            if key is None:
+            api_id, amb, meta = _resolve_cli_target(
+                arg,
+                [t for t in _collect_label_triples(kasa_mgr, tailwind_mgr, androidtv_mgr) if t[1] == "tailwind"],
+            )
+            if api_id is None or meta is None:
                 _report_resolve_failure(theme, "Tailwind door", arg, amb)
                 return
-            open_ = await tailwind_mgr.is_open(key)
+            open_ = await tailwind_mgr.is_open(api_id)
             label = "open" if open_ else "closed"
             st_fn = theme.ok if open_ else theme.meta
-            print(f"{theme.device(repr(key))} {theme.dim('->')} {st_fn(label)}")
+            print(f"{theme.device(repr(api_id))} {theme.dim('->')} {st_fn(label)}")
         elif cmd == "pause":
             await _repl_cmd_sonos_pause_resume(
                 cmd,
@@ -2290,26 +2555,19 @@ async def execute_line_for_api(
 
 
 async def _cmd_loop(
-    kasa_mgr: KasaDeviceManager,
-    sonos_mgr: SonosDeviceManager | None,
-    tailwind_mgr: GotailwindDeviceManager | None,
-    androidtv_mgr: AndroidTvDeviceManager | None,
-    ep1_mgr: Ep1DeviceManager | None,
-    vizio_mgr: VizioDeviceManager | None,
+    discovery: _CliDiscoverySession,
     *,
-    cache_path: Path | None,
-    androidtv_zeroconf_timeout: float,
-    ep1_zeroconf_timeout: float,
     editing_mode: EditingMode,
     theme: _Theme,
 ) -> None:
-    session = PromptSession(
+    prompt = PromptSession(
         completer=_ReplCompleter(
-            androidtv=androidtv_mgr,
-            kasa=kasa_mgr,
-            sonos=sonos_mgr,
-            tailwind=tailwind_mgr,
+            androidtv=discovery.androidtv_mgr,
+            kasa=discovery.kasa_mgr,
+            sonos=discovery.sonos_mgr,
+            tailwind=discovery.tailwind_mgr,
             theme=theme,
+            discovery=discovery,
         ),
         complete_while_typing=False,
         editing_mode=editing_mode,
@@ -2317,7 +2575,7 @@ async def _cmd_loop(
 
     while True:
         try:
-            line = await session.prompt_async(_repl_prompt_message(theme))
+            line = await prompt.prompt_async(_repl_prompt_message(theme))
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -2340,10 +2598,10 @@ async def _cmd_loop(
         if cmd == "edit-mode":
             sub = arg.strip().lower()
             if sub in ("emacs", "e"):
-                session.editing_mode = EditingMode.EMACS
+                prompt.editing_mode = EditingMode.EMACS
                 print(theme.ok("Line editing: Emacs"))
             elif sub in ("vim", "vi", "v"):
-                session.editing_mode = EditingMode.VI
+                prompt.editing_mode = EditingMode.VI
                 print(theme.ok("Line editing: Vim"))
             else:
                 print(
@@ -2353,18 +2611,19 @@ async def _cmd_loop(
             continue
 
         await dispatch_repl_action(
-            kasa_mgr,
-            sonos_mgr,
-            tailwind_mgr,
-            androidtv_mgr,
-            ep1_mgr,
-            vizio_mgr,
-            cache_path=cache_path,
-            androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
-            ep1_zeroconf_timeout=ep1_zeroconf_timeout,
+            discovery.kasa_mgr,
+            discovery.sonos_mgr,
+            discovery.tailwind_mgr,
+            discovery.androidtv_mgr,
+            discovery.ep1_mgr,
+            discovery.vizio_mgr,
+            cache_path=discovery.cache_path,
+            androidtv_zeroconf_timeout=float(discovery.args.androidtv_zeroconf_timeout),
+            ep1_zeroconf_timeout=float(getattr(discovery.args, "ep1_zeroconf_timeout", DEFAULT_EP1_ZEROCONF_TIMEOUT_S)),
             theme=theme,
             cmd=cmd,
             arg=arg,
+            discovery=discovery,
         )
 
 
@@ -2485,15 +2744,36 @@ async def _cmd_loop_remote(
                     print(theme.err(f"completion-aliases refresh failed: {ex}"), file=sys.stderr)
 
 
+def _parse_completion_alias_list(raw: object) -> list[CompletionAlias]:
+    if not isinstance(raw, list):
+        return []
+    items: list[CompletionAlias] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            text = entry.strip()
+            if text:
+                items.append(CompletionAlias(display=text, matches=()))
+            continue
+        if not isinstance(entry, dict):
+            continue
+        display = str(entry.get("display") or "").strip()
+        if not display:
+            continue
+        matches_raw = entry.get("matches") or []
+        matches = tuple(str(m) for m in matches_raw if str(m).strip())
+        items.append(CompletionAlias(display=display, matches=matches))
+    return items
+
+
 async def _fetch_remote_completion_aliases(client: httpx.AsyncClient) -> _RemoteAliasBundles:
     r = await client.get("/v1/completion-aliases")
     r.raise_for_status()
     data = r.json()
     return _RemoteAliasBundles(
-        switch=list(data.get("switch") or []),
-        sonos=list(data.get("sonos") or []),
-        tailwind=list(data.get("tailwind") or []),
-        all_device_labels=list(data.get("all_device_labels") or []),
+        switch=_parse_completion_alias_list(data.get("switch")),
+        sonos=_parse_completion_alias_list(data.get("sonos")),
+        tailwind=_parse_completion_alias_list(data.get("tailwind")),
+        all_device_labels=_parse_completion_alias_list(data.get("all_device_labels")),
     )
 
 
@@ -2553,6 +2833,73 @@ async def _bootstrap_tailwind(
     return None, last_exc
 
 
+class _CliDiscoverySession:
+    """Mutable managers + per-family status while CLI discovery runs in the background."""
+
+    def __init__(
+        self,
+        *,
+        args: argparse.Namespace,
+        cache_path: Path | None,
+        kasa_mgr: KasaDeviceManager,
+    ) -> None:
+        self.args = args
+        self.cache_path = cache_path
+        self.kasa_mgr = kasa_mgr
+        self.androidtv_mgr: AndroidTvDeviceManager | None = None
+        self.ep1_mgr: Ep1DeviceManager | None = None
+        self.sonos_mgr: SonosDeviceManager | None = None
+        self.tailwind_mgr: GotailwindDeviceManager | None = None
+        self.vizio_mgr: VizioDeviceManager | None = None
+        self.family_status: dict[str, FamilyDiscoveryStatus] = {
+            slug: FamilyDiscoveryStatus.PENDING for slug in _FAMILY_BOOT_SLUGS
+        }
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> _CliDiscoverySession:
+        clear_device_label_conflicts()
+        cache_path = Path(args.discovery_cache).expanduser().resolve() if args.discovery_cache else None
+        creds, _kasa_creds_source = resolve_kasa_credentials(cache_path=cache_path)
+        kasa_mgr = KasaDeviceManager(
+            discovery_target=args.discovery_target,
+            discovery_timeout=args.discovery_timeout,
+            credentials=creds,
+            query_timeout=args.query_timeout,
+            discovery_cache_path=cache_path,
+            force_discovery=args.force_discovery,
+        )
+        return cls(args=args, cache_path=cache_path, kasa_mgr=kasa_mgr)
+
+    def apply_family_result(self, slug: str, result: dict[str, Any]) -> None:
+        if result.get("skipped"):
+            status = FamilyDiscoveryStatus.SKIPPED
+        elif result.get("exc") is not None:
+            status = FamilyDiscoveryStatus.FAILED
+        elif result.get("ok"):
+            status = FamilyDiscoveryStatus.READY
+        else:
+            status = FamilyDiscoveryStatus.FAILED
+        self.family_status[slug] = status
+        attr = _SLUG_TO_MGR_ATTR.get(slug)
+        if attr is not None:
+            setattr(self, attr, result.get("mgr"))
+
+    def families_pending(self, *slugs: str) -> bool:
+        return any(self.family_status[slug] is FamilyDiscoveryStatus.PENDING for slug in slugs)
+
+    def to_state(self) -> DeviceManagersState:
+        return DeviceManagersState(
+            kasa_mgr=self.kasa_mgr,
+            sonos_mgr=self.sonos_mgr,
+            tailwind_mgr=self.tailwind_mgr,
+            androidtv_mgr=self.androidtv_mgr,
+            ep1_mgr=self.ep1_mgr,
+            vizio_mgr=self.vizio_mgr,
+            cache_path=self.cache_path,
+            args=self.args,
+        )
+
+
 class DeviceManagersState(NamedTuple):
     """Live device managers plus paths after a successful :func:`bootstrap_device_managers`."""
 
@@ -2571,21 +2918,16 @@ async def bootstrap_device_managers(
     *,
     theme: _Theme,
     log_progress: bool = True,
+    session: _CliDiscoverySession | None = None,
+    exit_if_empty: bool = True,
 ) -> DeviceManagersState:
     """Create managers, run parallel discovery, and return state (or exit if nothing works)."""
 
-    clear_device_label_conflicts()
-    cache_path = Path(args.discovery_cache).expanduser().resolve() if args.discovery_cache else None
-    creds, _kasa_creds_source = resolve_kasa_credentials(cache_path=cache_path)
-
-    kasa_mgr = KasaDeviceManager(
-        discovery_target=args.discovery_target,
-        discovery_timeout=args.discovery_timeout,
-        credentials=creds,
-        query_timeout=args.query_timeout,
-        discovery_cache_path=cache_path,
-        force_discovery=args.force_discovery,
-    )
+    if session is None:
+        session = _CliDiscoverySession.from_args(args)
+    cache_path = session.cache_path
+    kasa_mgr = session.kasa_mgr
+    args = session.args
 
     token, _tailwind_token_source = resolve_tailwind_token(
         cli_token=args.tailwind_token,
@@ -2676,6 +3018,10 @@ async def bootstrap_device_managers(
         slug = "kasa"
         try:
             await kasa_mgr.fetch()
+            try:
+                await kasa_mgr.sync_preferred_labels_to_vendor_aliases()
+            except Exception:
+                _LOGGER.warning("Kasa preferred-label alias sync failed", exc_info=True)
             try:
                 kasa_count = len(kasa_mgr.switches)
             except Exception:
@@ -2912,23 +3258,56 @@ async def bootstrap_device_managers(
         print(theme.warn("Discovering devices (parallel)…"), flush=True)
         _LOGGER.info("[startup] discovering devices (parallel)")
     bundles = await asyncio.gather(
-        _timed_family_boot("androidtv", boot_androidtv(), log_progress=log_progress),
-        _timed_family_boot("ep1", boot_ep1(), log_progress=log_progress),
-        _timed_family_boot("gotailwind", boot_tailwind(), log_progress=log_progress),
-        _timed_family_boot("kasa", boot_kasa(), log_progress=log_progress),
-        _timed_family_boot("sonos", boot_sonos(), log_progress=log_progress),
-        _timed_family_boot("vizio", boot_vizio(), log_progress=log_progress),
+        _timed_family_boot(
+            "androidtv",
+            boot_androidtv(),
+            log_progress=log_progress,
+            theme=theme,
+            session=session,
+        ),
+        _timed_family_boot(
+            "ep1",
+            boot_ep1(),
+            log_progress=log_progress,
+            theme=theme,
+            session=session,
+        ),
+        _timed_family_boot(
+            "gotailwind",
+            boot_tailwind(),
+            log_progress=log_progress,
+            theme=theme,
+            session=session,
+        ),
+        _timed_family_boot(
+            "kasa",
+            boot_kasa(),
+            log_progress=log_progress,
+            theme=theme,
+            session=session,
+        ),
+        _timed_family_boot(
+            "sonos",
+            boot_sonos(),
+            log_progress=log_progress,
+            theme=theme,
+            session=session,
+        ),
+        _timed_family_boot(
+            "vizio",
+            boot_vizio(),
+            log_progress=log_progress,
+            theme=theme,
+            session=session,
+        ),
     )
     by_slug = {b["slug"]: b for b in bundles}
-    if log_progress:
-        for slug in _FAMILY_BOOT_SLUGS:
-            _print_family_parallel_line(theme, slug, by_slug[slug], ok_verb="ready")
 
-    androidtv_mgr = by_slug["androidtv"].get("mgr")
-    ep1_mgr = by_slug["ep1"].get("mgr")
-    sonos_mgr = by_slug["sonos"].get("mgr")
-    tailwind_mgr = by_slug["gotailwind"].get("mgr")
-    vizio_mgr = by_slug["vizio"].get("mgr")
+    androidtv_mgr = session.androidtv_mgr
+    ep1_mgr = session.ep1_mgr
+    sonos_mgr = session.sonos_mgr
+    tailwind_mgr = session.tailwind_mgr
+    vizio_mgr = session.vizio_mgr
     kasa_ok = bool(by_slug["kasa"].get("ok"))
     tw_ok = tailwind_mgr is not None
 
@@ -2938,10 +3317,11 @@ async def bootstrap_device_managers(
     vizio_ready = vizio_mgr is not None
     if not kasa_ok and not tw_ok and not sonos_ready and not androidtv_ready and not ep1_ready and not vizio_ready:
         print(theme.err("No backends initialized; exiting."), file=sys.stderr)
-        raise SystemExit(1)
+        if exit_if_empty:
+            raise SystemExit(1)
 
     if log_progress:
-        ns = len(_kasa_switch_aliases(kasa_mgr))
+        ns = _kasa_switch_count(kasa_mgr)
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
         ne = _ep1_sensor_count(ep1_mgr)
@@ -2952,19 +3332,9 @@ async def bootstrap_device_managers(
             f"{nd} Tailwind door(s), {nv} Vizio TV(s)). Tab-complete commands and names."
         )
         print(f"{theme.ok('Ready')} {theme.dim(tail)}", flush=True)
-        _maybe_print_kasa_auth_notice(kasa_mgr, theme=theme)
         _print_label_conflicts(theme)
 
-    return DeviceManagersState(
-        kasa_mgr=kasa_mgr,
-        sonos_mgr=sonos_mgr,
-        tailwind_mgr=tailwind_mgr,
-        androidtv_mgr=androidtv_mgr,
-        ep1_mgr=ep1_mgr,
-        vizio_mgr=vizio_mgr,
-        cache_path=cache_path,
-        args=args,
-    )
+    return session.to_state()
 
 
 _SHUTDOWN_DISCONNECT_TIMEOUT_S = 15.0
@@ -3023,23 +3393,30 @@ async def shutdown_device_managers(state: DeviceManagersState) -> None:
 
 async def _async_main(args: argparse.Namespace) -> None:
     theme = _Theme(enabled=_stdout_color_enabled(args.color))
-    state = await bootstrap_device_managers(args, theme=theme, log_progress=True)
-    try:
-        await _cmd_loop(
-            state.kasa_mgr,
-            state.sonos_mgr,
-            state.tailwind_mgr,
-            state.androidtv_mgr,
-            state.ep1_mgr,
-            state.vizio_mgr,
-            cache_path=state.cache_path,
-            androidtv_zeroconf_timeout=float(state.args.androidtv_zeroconf_timeout),
-            ep1_zeroconf_timeout=float(getattr(state.args, "ep1_zeroconf_timeout", DEFAULT_EP1_ZEROCONF_TIMEOUT_S)),
-            editing_mode=_editing_mode_enum(args.edit_mode),
+    discovery = _CliDiscoverySession.from_args(args)
+    discovery_task = asyncio.create_task(
+        bootstrap_device_managers(
+            args,
             theme=theme,
-        )
+            log_progress=True,
+            session=discovery,
+            exit_if_empty=False,
+        ),
+        name="cli-device-discovery",
+    )
+    try:
+        with patch_stdout():
+            await _cmd_loop(
+                discovery,
+                editing_mode=_editing_mode_enum(args.edit_mode),
+                theme=theme,
+            )
     finally:
-        await shutdown_device_managers(state)
+        if not discovery_task.done():
+            discovery_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await discovery_task
+        await shutdown_device_managers(discovery.to_state())
 
 
 async def _async_main_remote(args: argparse.Namespace) -> None:

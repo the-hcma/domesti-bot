@@ -24,6 +24,7 @@ from app.api.mytracks_routes import settings_router as mytracks_settings_router
 from app.api.rules_routes import router as rules_router
 from app.api.schemas import (
     CompletionAliasesOut,
+    CompletionAliasItem,
     ExecuteLineIn,
     ExecuteLineOut,
     MetaOut,
@@ -60,6 +61,7 @@ from app.api.ui_state import (
 from app.api.vizio_settings_routes import router as vizio_settings_router
 from app.api.webhooks_routes import router as webhooks_router
 from app.build_info import get_build_info
+from app.device_completion import CompletionAlias
 from app.device_enums import DeviceFamilyId, UiActionType
 from app.device_state_watcher import (
     build_default_watchers,
@@ -69,10 +71,10 @@ from app.device_state_watcher import (
 from app.discovery_cache_sync import maybe_sync_discovery_cache
 from app.domesti_bot_cli import (
     DeviceManagersState,
-    _all_cli_device_labels,
-    _media_playback_aliases,
-    _switch_aliases,
-    _tailwind_door_aliases,
+    _all_cli_device_completion_items,
+    _media_playback_completion_items,
+    _switch_completion_items,
+    _tailwind_door_completion_items,
     _Theme,
     bootstrap_device_managers,
     execute_line_for_api,
@@ -131,6 +133,10 @@ def _access_log_level(path: str, status_code: int) -> int:
     if status_code >= 400:
         return logging.INFO
     return logging.DEBUG
+
+
+def _completion_alias_items(items: list[CompletionAlias]) -> list[CompletionAliasItem]:
+    return [CompletionAliasItem(display=item.display, matches=list(item.matches)) for item in items]
 
 
 class _AccessLogMiddleware(BaseHTTPMiddleware):
@@ -445,10 +451,12 @@ def create_app(args: Any) -> FastAPI:
     @app.get("/v1/completion-aliases", dependencies=[Depends(_verify_api_key)])
     async def completion_aliases(state: DeviceState) -> CompletionAliasesOut:
         return CompletionAliasesOut(
-            switch=_switch_aliases(state.kasa_mgr, state.androidtv_mgr),
-            sonos=_media_playback_aliases(state.sonos_mgr),
-            tailwind=_tailwind_door_aliases(state.tailwind_mgr),
-            all_device_labels=_all_cli_device_labels(state.kasa_mgr, state.tailwind_mgr, state.androidtv_mgr),
+            switch=_completion_alias_items(_switch_completion_items(state.kasa_mgr, state.androidtv_mgr)),
+            sonos=_completion_alias_items(_media_playback_completion_items(state.sonos_mgr)),
+            tailwind=_completion_alias_items(_tailwind_door_completion_items(state.tailwind_mgr)),
+            all_device_labels=_completion_alias_items(
+                _all_cli_device_completion_items(state.kasa_mgr, state.tailwind_mgr, state.androidtv_mgr)
+            ),
         )
 
     @app.post("/v1/execute-line", dependencies=[Depends(_verify_api_key)])

@@ -41,13 +41,25 @@ TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
 VizioAuthSourceOut = Literal["cli", "env", "database", "none"]
 
 
+class CompletionAliasItem(BaseModel):
+    """One tab-completion candidate for the remote CLI.
+
+    ``display`` is the inserted text (``preferred_label (mac)``). ``matches`` are
+    extra prefixes (raw MAC, preferred label, door index) that should complete
+    to the same display so tab completion is never MAC-only when a name exists.
+    """
+
+    display: str
+    matches: list[str] = Field(default_factory=list)
+
+
 class CompletionAliasesOut(BaseModel):
     """Device name fragments for Tab completion in remote CLI mode."""
 
-    switch: list[str] = Field(default_factory=list)
-    sonos: list[str] = Field(default_factory=list)
-    tailwind: list[str] = Field(default_factory=list)
-    all_device_labels: list[str] = Field(default_factory=list)
+    switch: list[CompletionAliasItem] = Field(default_factory=list)
+    sonos: list[CompletionAliasItem] = Field(default_factory=list)
+    tailwind: list[CompletionAliasItem] = Field(default_factory=list)
+    all_device_labels: list[CompletionAliasItem] = Field(default_factory=list)
 
 
 class ExecuteLineIn(BaseModel):
