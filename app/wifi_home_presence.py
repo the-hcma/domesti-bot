@@ -209,9 +209,10 @@ def wifi_home_presence_applies(
 
     Resolution order:
 
-    1. Configured home **SSID** — WiFi connection + SSID match (mesh/repeaters OK;
-       BSSID is ignored for membership).
-    2. Legacy configured home **BSSID** only (no SSID) — exact BSSID match.
+    1. Configured home **SSID** — WiFi connection + observed SSID match
+       (mesh/repeaters OK; BSSID is ignored for membership when SSID is present).
+    2. Configured home **BSSID** — exact BSSID match when home SSID is unset, or
+       when home SSID is set but the observation omits SSID (hidden / blank).
     3. Otherwise low-accuracy ``conn=w`` plus proximity slack from the geofence
        center.
     """
@@ -220,11 +221,15 @@ def wifi_home_presence_applies(
     if not connection_type_is_wifi(connection_type):
         return False
     normalized_home_ssid = normalize_wifi_ssid(home_wifi_ssid)
-    if normalized_home_ssid is not None:
+    observed_ssid = normalize_wifi_ssid(observed_wifi_ssid)
+    if normalized_home_ssid is not None and observed_ssid is not None:
         return wifi_ssids_match(observed_wifi_ssid, normalized_home_ssid)
     normalized_home_bssid = normalize_wifi_bssid(home_wifi_bssid)
     if normalized_home_bssid is not None:
         return wifi_bssids_match(observed_wifi_bssid, normalized_home_bssid)
+    if normalized_home_ssid is not None:
+        # Home SSID configured, observation lacks SSID, and no home BSSID — not home.
+        return False
     if not location_accuracy_is_low(accuracy_m, min_accuracy_m):
         return False
     for geofence in geofences:

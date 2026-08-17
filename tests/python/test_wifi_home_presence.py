@@ -185,6 +185,40 @@ def test_wifi_home_presence_applies_in_radius_slack_zone() -> None:
     )
 
 
+def test_wifi_home_presence_applies_when_observed_ssid_missing_uses_bssid() -> None:
+    """Home SSID configured but observation omits SSID → fall back to BSSID."""
+    settings = _settings(wifi_home_geofence_id="house")
+    geofences = [_house_geofence()]
+    assert wifi_home_presence_applies(
+        settings,
+        "house",
+        "w",
+        accuracy_m=48,
+        geofences=geofences,
+        lat=41.2000,
+        lon=-73.9000,
+        min_accuracy_m=_MIN_ACCURACY_M,
+        home_wifi_ssid="familia",
+        home_wifi_bssid="90:ca:fa:76:2a:d4",
+        observed_wifi_ssid=None,
+        observed_wifi_bssid="90:ca:fa:76:2a:d4",
+    )
+    assert not wifi_home_presence_applies(
+        settings,
+        "house",
+        "w",
+        accuracy_m=48,
+        geofences=geofences,
+        lat=41.2000,
+        lon=-73.9000,
+        min_accuracy_m=_MIN_ACCURACY_M,
+        home_wifi_ssid="familia",
+        home_wifi_bssid="90:ca:fa:76:2a:d4",
+        observed_wifi_ssid=None,
+        observed_wifi_bssid="11:22:33:44:55:66",
+    )
+
+
 def test_wifi_home_presence_does_not_apply_for_good_accuracy_wifi() -> None:
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]

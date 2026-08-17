@@ -28,7 +28,12 @@ from app.presence_store import (
     _haversine_m,
     list_user_location_history_for_user,
 )
-from app.presence_wifi import normalize_wifi_bssid, wifi_bssids_match, wifi_ssids_match
+from app.presence_wifi import (
+    normalize_wifi_bssid,
+    normalize_wifi_ssid,
+    wifi_bssids_match,
+    wifi_ssids_match,
+)
 from app.rule_validation import collect_rule_geofence_ids, collect_rule_user_ids
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.wifi_home_presence import wifi_home_geofence_ids
@@ -564,7 +569,7 @@ def _user_confidently_inside_via_home_wifi(
     home_row = next((row for row in users if row.user_id == user_id), None)
     if home_row is None:
         return False
-    if home_row.home_wifi_ssid is not None:
+    if home_row.home_wifi_ssid is not None and normalize_wifi_ssid(location.wifi_ssid) is not None:
         if not wifi_ssids_match(location.wifi_ssid, home_row.home_wifi_ssid):
             return False
     else:
