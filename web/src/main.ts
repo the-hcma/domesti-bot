@@ -70,6 +70,8 @@ const DEVICE_PROPERTIES_LONG_PRESS_MS = 500;
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
 
+const THEME_COLOR_DARK = "#15171a";
+const THEME_COLOR_LIGHT = "#ffffff";
 const THEME_STORAGE_KEY = "domesti-color-theme";
 
 /** Moon icon — shown when UI is light (control switches to dark). */
@@ -1050,7 +1052,7 @@ function applyStoredColorTheme(): void {
   if (meta !== null) {
     const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const dark = t === ThemePreference.Dark || (t === null && systemDark);
-    meta.setAttribute("content", dark ? "#15171a" : "#0a0a0a");
+    meta.setAttribute("content", dark ? THEME_COLOR_DARK : THEME_COLOR_LIGHT);
   }
   if (themeToggleSingleton !== null) {
     const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;

@@ -32,7 +32,9 @@ export function formatDeviceIdentityTooltip(
   if (options?.includeLabel === true) {
     const label = (device.label ?? "").trim();
     if (label !== "") {
-      lines.push(label);
+      // Same blank line tiles put after the properties hint, so header
+      // hover (label + MAC + IP) reads like tile hover (hint + MAC + IP).
+      lines.push(label, "");
     }
   }
   lines.push(`MAC address: ${device.mac_address}`);
