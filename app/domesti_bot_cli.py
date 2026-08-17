@@ -1982,6 +1982,8 @@ async def dispatch_repl_action(
         discos: list[Any] = []
         if androidtv_mgr is not None:
             discos.append(androidtv_mgr.disconnect())
+        if ep1_mgr is not None:
+            discos.append(ep1_mgr.disconnect())
         discos.append(kasa_mgr.disconnect())
         if sonos_mgr is not None:
             discos.append(sonos_mgr.disconnect())
@@ -2012,6 +2014,40 @@ async def dispatch_repl_action(
                     "exc": None,
                     "ok": True,
                     "mgr": None,
+                }
+            except Exception as ex:
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "",
+                    "exc": ex,
+                    "ok": False,
+                    "mgr": None,
+                }
+
+        async def ref_ep1() -> dict[str, Any]:
+            slug = "ep1"
+            if ep1_mgr is None:
+                return {
+                    "slug": slug,
+                    "skipped": True,
+                    "detail": "not loaded",
+                    "exc": None,
+                    "ok": False,
+                    "mgr": None,
+                }
+            try:
+                await ep1_mgr.rediscover()
+                await _maybe_restart_device_state_watchers_after_ep1()
+                return {
+                    "slug": slug,
+                    "skipped": False,
+                    "detail": "",
+                    "exc": None,
+                    "ok": True,
+                    "mgr": None,
+                    "source": ep1_mgr.last_discovery_source,
+                    "count": _ep1_sensor_count(ep1_mgr),
                 }
             except Exception as ex:
                 return {
@@ -2144,6 +2180,7 @@ async def dispatch_repl_action(
 
         ref_bundles = await asyncio.gather(
             ref_androidtv(),
+            ref_ep1(),
             ref_tailwind(),
             ref_kasa(),
             ref_sonos(),
@@ -2155,10 +2192,11 @@ async def dispatch_repl_action(
         nk = len(_kasa_switch_aliases(kasa_mgr))
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
+        ne = _ep1_sensor_count(ep1_mgr)
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (
-            f"({na} Google Cast device(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
+            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
             f"{nd} Tailwind door(s), {nv} Vizio TV(s))."
         )
         print(f"{theme.ok('Refreshed')} {theme.dim(tail)}")

@@ -463,6 +463,37 @@ async def test_dispatch_prints_discovery_in_progress_while_family_pending() -> N
 
 
 @pytest.mark.asyncio
+async def test_refresh_prints_ep1_skipped_when_not_loaded() -> None:
+    from contextlib import redirect_stdout
+    from io import StringIO
+    from unittest.mock import AsyncMock, MagicMock
+
+    kasa = MagicMock()
+    kasa.disconnect = AsyncMock()
+    kasa.fetch = AsyncMock()
+    kasa.switches = ()
+    out = StringIO()
+    with redirect_stdout(out):
+        await dispatch_repl_action(
+            cast(KasaDeviceManager, kasa),
+            None,
+            None,
+            None,
+            None,
+            None,
+            cache_path=None,
+            androidtv_zeroconf_timeout=1.0,
+            ep1_zeroconf_timeout=1.0,
+            theme=_Theme(enabled=False),
+            cmd="refresh",
+            arg="",
+        )
+    text = out.getvalue()
+    assert "Everything Presence One: skipped — not loaded" in text
+    assert "Refreshed" in text
+
+
+@pytest.mark.asyncio
 async def test_async_main_starts_prompt_before_discovery_finishes() -> None:
     prompt_started = asyncio.Event()
 
