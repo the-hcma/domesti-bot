@@ -3472,7 +3472,7 @@ async def _async_main(args: argparse.Namespace) -> None:
         name="cli-device-discovery",
     )
     try:
-        with patch_stdout():
+        with patch_stdout(raw=True):
             await _cmd_loop(
                 discovery,
                 editing_mode=_editing_mode_enum(args.edit_mode),

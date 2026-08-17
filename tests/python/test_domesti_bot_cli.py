@@ -7,7 +7,7 @@ import json
 from contextlib import suppress
 from pathlib import Path
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from prompt_toolkit.formatted_text import to_plain_text
@@ -586,6 +586,33 @@ async def test_async_main_starts_prompt_before_discovery_finishes() -> None:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+
+
+@pytest.mark.asyncio
+async def test_async_main_enables_patch_stdout_raw_for_ansi_colors() -> None:
+    prompt_started = asyncio.Event()
+
+    async def _noop_bootstrap(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    async def _fake_cmd_loop(*_args: object, **_kwargs: object) -> None:
+        prompt_started.set()
+
+    async def _noop_shutdown(_state: object) -> None:
+        return None
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    with (
+        patch("app.domesti_bot_cli.bootstrap_device_managers", _noop_bootstrap),
+        patch("app.domesti_bot_cli._cmd_loop", _fake_cmd_loop),
+        patch("app.domesti_bot_cli.shutdown_device_managers", _noop_shutdown),
+        patch("app.domesti_bot_cli.patch_stdout") as patch_stdout_mock,
+    ):
+        patch_stdout_mock.return_value.__enter__ = MagicMock(return_value=None)
+        patch_stdout_mock.return_value.__exit__ = MagicMock(return_value=None)
+        await _async_main(args)
+    patch_stdout_mock.assert_called_once_with(raw=True)
 
 
 @pytest.mark.asyncio
