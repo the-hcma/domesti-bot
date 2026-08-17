@@ -199,12 +199,15 @@ def test_device_identity_tooltip_module_contract() -> None:
     assert "IP:" in src
     assert "includeLabel" in src
     assert "includePropertiesHint" in src
+    assert "blankLineAfterLabel" in src
     assert 'lines.push(label, "")' in src
 
 
 def test_ep1_header_identity_hover_wiring_contract() -> None:
     src = _EP1_HEADER_TS.read_text(encoding="utf-8")
-    assert "row.title = formatDeviceIdentityTooltip(snapshot, { includeLabel: true })" in src
+    assert "row.title = formatDeviceIdentityTooltip(snapshot, {" in src
+    assert "blankLineAfterLabel: true" in src
+    assert "{ includeLabel: true }" in src
     assert "includeStateSuffix = sources.length > 1" in src
     assert "formatEp1HeaderOccupancyTooltip" in src
     assert "formatDeviceIdentityTooltipLabel" in src
