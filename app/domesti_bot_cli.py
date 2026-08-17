@@ -1327,16 +1327,16 @@ class _ReplCompleter(Completer):
         androidtv, kasa, sonos, tailwind = self._live_managers()
         if ctx.command in ("turn-on", "turn-off", "is-on"):
             items = _switch_completion_items(kasa, androidtv)
-            pending = not items and _completion_aliases_pending(self._discovery, "androidtv", "kasa")
+            pending = _completion_aliases_pending(self._discovery, "androidtv", "kasa")
         elif ctx.command in ("pause", "resume"):
             items = _media_playback_completion_items(sonos)
-            pending = not items and _completion_aliases_pending(self._discovery, "sonos")
+            pending = _completion_aliases_pending(self._discovery, "sonos")
         elif ctx.command in ("open-door", "close-door", "is-open"):
             items = _tailwind_door_completion_items(tailwind)
-            pending = not items and _completion_aliases_pending(self._discovery, "gotailwind")
+            pending = _completion_aliases_pending(self._discovery, "gotailwind")
         elif ctx.command in ("set-display-name", "clear-display-name"):
             items = _all_cli_device_completion_items(kasa, tailwind, androidtv)
-            pending = not items and _completion_aliases_pending(self._discovery, "androidtv", "gotailwind", "kasa")
+            pending = _completion_aliases_pending(self._discovery, "androidtv", "gotailwind", "kasa")
         elif ctx.command == "edit-mode":
             items = [CompletionAlias(display=name, matches=()) for name in _EDIT_MODE_SUBARGS]
             pending = False

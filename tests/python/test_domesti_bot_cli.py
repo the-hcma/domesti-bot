@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 from prompt_toolkit.formatted_text import to_plain_text
 
+from app.androidtv_device_manager import AndroidTvDeviceManager
 from app.device_completion import CompletionAlias
 from app.device_display import format_device_display
 from app.domesti_bot_cli import (
@@ -385,6 +386,36 @@ def test_resolve_cli_target_shared_prefix_across_devices_is_ambiguous() -> None:
     assert api is None
     assert meta is None
     assert amb == sorted({display1, display2})
+
+
+def test_repl_completer_hints_when_any_gated_family_pending() -> None:
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    discovery = _CliDiscoverySession.from_args(args)
+    discovery.family_status["androidtv"] = FamilyDiscoveryStatus.READY
+
+    class _Switch:
+        identifier = "aa:bb:cc:dd:ee:10"
+        preferred_label = "Porch lights"
+
+    class _Android:
+        switches = (_Switch(),)
+
+    discovery.androidtv_mgr = cast(AndroidTvDeviceManager, _Android())
+    completer = _ReplCompleter(
+        androidtv=discovery.androidtv_mgr,
+        kasa=discovery.kasa_mgr,
+        sonos=None,
+        tailwind=None,
+        theme=_Theme(enabled=False),
+        discovery=discovery,
+    )
+    completions = list(completer.get_completions(Document("turn-off ", 9), CompleteEvent()))
+    assert len(completions) == 1
+    assert to_plain_text(completions[0].display) == COMPLETION_DISCOVERING_HINT
 
 
 def test_repl_completer_inserts_name_and_mac_for_mac_prefix() -> None:
