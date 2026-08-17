@@ -115,17 +115,18 @@ def _cached_ep1_macs(cache_path: Path) -> frozenset[str]:
 
 
 def _cached_kasa_macs(cache_path: Path) -> frozenset[str]:
-    """Stable Kasa roster fingerprint: MACs plus KLAP-auth hosts from cache rows."""
+    """Stable Kasa roster fingerprint: MACs for connected rows, host keys for KLAP."""
 
     items: set[str] = set()
     for host, _alias, _cfg, requires_klap, mac in device_discovery_store.load_cached_configs(cache_path):
+        host_s = host.strip()
+        if requires_klap:
+            if host_s:
+                items.add(f"{_KASA_KLAP_HOST_PREFIX}{host_s}")
+            continue
         normalized = try_normalize_mac(mac or "")
         if normalized:
             items.add(normalized)
-        if requires_klap:
-            host_s = host.strip()
-            if host_s:
-                items.add(f"{_KASA_KLAP_HOST_PREFIX}{host_s}")
     return frozenset(items)
 
 
