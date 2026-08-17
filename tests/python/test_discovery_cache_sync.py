@@ -543,6 +543,52 @@ async def test_maybe_sync_suppresses_retry_after_shrink_reload_fails(
 
 
 @pytest.mark.asyncio
+async def test_maybe_sync_detects_removed_klap_skipped_host(tmp_path: Path) -> None:
+    """Removing a KLAP-skipped host from cache must trigger roster sync."""
+
+    db = tmp_path / "cached.sqlite"
+    cfg_a = _xor_cfg("192.168.1.10")
+    klap_cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.10", "Desk", cfg_a, False, _MAC_10),
+            ("192.168.1.20", "Tapo", klap_cfg, True, None),
+        ],
+    )
+
+    mock_a = _mock_device("192.168.1.10", "Desk", cfg_a)
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(return_value=mock_a),
+        ),
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+    ):
+        await mgr.fetch()
+
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.10", "Desk", cfg_a, False, _MAC_10)],
+    )
+    runtime.reset()
+    with patch.object(mgr, "reload_from_cache", AsyncMock(return_value=True)) as reload:
+        changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
+
+    assert changed is True
+    reload.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_maybe_sync_sonos_noop_when_rincon_case_differs(tmp_path: Path) -> None:
     """Upper/lower RINCON spelling must not look like roster drift."""
 

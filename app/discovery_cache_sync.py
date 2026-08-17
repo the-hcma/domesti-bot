@@ -32,6 +32,8 @@ from app.vizio_device_manager import VizioDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
 
+_KASA_KLAP_HOST_PREFIX = "klap-host:"
+
 
 async def maybe_sync_discovery_cache(state: DeviceManagersState) -> bool:
     """Reload every ready family from SQLite when its cached roster drifts.
@@ -113,14 +115,18 @@ def _cached_ep1_macs(cache_path: Path) -> frozenset[str]:
 
 
 def _cached_kasa_macs(cache_path: Path) -> frozenset[str]:
-    """Normalized MACs from cache rows; MAC-less rows are excluded from the fingerprint."""
+    """Stable Kasa roster fingerprint: MACs plus KLAP-auth hosts from cache rows."""
 
-    macs: set[str] = set()
-    for _host, _alias, _cfg, _requires_klap, mac in device_discovery_store.load_cached_configs(cache_path):
+    items: set[str] = set()
+    for host, _alias, _cfg, requires_klap, mac in device_discovery_store.load_cached_configs(cache_path):
         normalized = try_normalize_mac(mac or "")
         if normalized:
-            macs.add(normalized)
-    return frozenset(macs)
+            items.add(normalized)
+        if requires_klap:
+            host_s = host.strip()
+            if host_s:
+                items.add(f"{_KASA_KLAP_HOST_PREFIX}{host_s}")
+    return frozenset(items)
 
 
 def _cached_sonos_uids(cache_path: Path) -> frozenset[str]:
@@ -197,25 +203,20 @@ def _live_ep1_macs(mgr: Ep1DeviceManager) -> frozenset[str]:
 
 
 def _live_kasa_macs(mgr: KasaDeviceManager, cache_path: Path) -> frozenset[str]:
-    """Normalized MACs the manager accounts for (connected or KLAP-skipped).
+    """Stable Kasa roster fingerprint: connected MACs plus in-memory KLAP-auth hosts.
 
-    Skipped KLAP-auth hosts have no live device object, so their MACs come
-    from the matching cache rows. Endpoints without a known MAC are excluded
-    on both sides — a DHCP address change alone must never register as drift.
+    KLAP-skipped hosts are keyed by host so authoritative cache removals
+    register as drift even when the skipped row had no MAC. ``cache_path`` is
+    unused but kept for call-site symmetry with the cache reader.
     """
 
-    macs = {kd.mac_address for kd in mgr.switches}
-    macs.discard("")
-    skipped = {(host or "").strip() for host in mgr.skipped_auth_hosts}
-    skipped.discard("")
-    if skipped:
-        for host, _alias, _cfg, _requires_klap, mac in device_discovery_store.load_cached_configs(cache_path):
-            if host.strip() not in skipped:
-                continue
-            normalized = try_normalize_mac(mac or "")
-            if normalized:
-                macs.add(normalized)
-    return frozenset(macs)
+    del cache_path
+    items = {kd.mac_address for kd in mgr.switches if kd.mac_address}
+    for host in (*mgr.skipped_auth_hosts, *mgr.hosts_requiring_klap_auth):
+        host_s = (host or "").strip()
+        if host_s:
+            items.add(f"{_KASA_KLAP_HOST_PREFIX}{host_s}")
+    return frozenset(items)
 
 
 def _live_sonos_uids(mgr: SonosDeviceManager) -> frozenset[str]:
