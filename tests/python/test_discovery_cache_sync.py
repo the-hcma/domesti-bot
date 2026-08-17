@@ -486,9 +486,7 @@ async def test_maybe_sync_retries_when_cache_shrinks_after_failed_reload(
     ):
         await mgr.fetch()
 
-    runtime.discovery_cache_sync_failed[DeviceFamilyId.KASA.value] = frozenset(
-        {_MAC_10, _MAC_14}
-    )
+    runtime.discovery_cache_sync_failed[DeviceFamilyId.KASA.value] = frozenset({_MAC_10, _MAC_14})
     device_discovery_store.save_configs(
         db,
         [("192.168.1.10", "Desk", cfg_a, False, _MAC_10)],
