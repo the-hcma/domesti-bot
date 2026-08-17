@@ -130,3 +130,16 @@ def test_list_observed_wifi_networks_dedupes_by_ssid(tmp_path: Path) -> None:
     assert len(networks) == 1
     assert networks[0].wifi_ssid == "HomeNet"
     assert networks[0].wifi_bssid == "aa:bb:cc:dd:ee:02"
+
+
+def test_set_user_home_wifi_allows_ssid_only(tmp_path: Path) -> None:
+    db = tmp_path / "ui.sqlite"
+    replace_users(db, [_henrique()])
+    saved = set_user_home_wifi(
+        db,
+        "henrique",
+        wifi_ssid="familia",
+        wifi_bssid=None,
+    )
+    assert saved.home_wifi_ssid == "familia"
+    assert saved.home_wifi_bssid is None

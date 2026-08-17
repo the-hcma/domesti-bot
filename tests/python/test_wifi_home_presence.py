@@ -99,7 +99,38 @@ def test_wifi_home_geofence_ids_honors_explicit_geofence() -> None:
     assert ids == frozenset({"house"})
 
 
-def test_wifi_home_presence_applies_for_configured_home_bssid() -> None:
+def test_wifi_home_presence_applies_for_configured_home_ssid() -> None:
+    """SSID match treats any AP/band on home WiFi as inside (mesh / 2026-08-17)."""
+    settings = _settings(wifi_home_geofence_id="house")
+    geofences = [_house_geofence()]
+    kwargs = {
+        "geofences": geofences,
+        "lat": 41.2000,
+        "lon": -73.9000,
+        "min_accuracy_m": _MIN_ACCURACY_M,
+        "home_wifi_ssid": "familia",
+        "home_wifi_bssid": "90:ca:fa:76:2a:d4",
+        "observed_wifi_ssid": "familia",
+        "observed_wifi_bssid": "90:ca:fa:76:2a:d0",
+    }
+    assert wifi_home_presence_applies(settings, "house", "w", accuracy_m=48, **kwargs)
+    assert not wifi_home_presence_applies(
+        settings,
+        "house",
+        "w",
+        accuracy_m=48,
+        geofences=geofences,
+        lat=41.2000,
+        lon=-73.9000,
+        min_accuracy_m=_MIN_ACCURACY_M,
+        home_wifi_ssid="familia",
+        home_wifi_bssid="90:ca:fa:76:2a:d4",
+        observed_wifi_ssid="guest",
+        observed_wifi_bssid="90:ca:fa:76:2a:d4",
+    )
+
+
+def test_wifi_home_presence_applies_for_legacy_home_bssid_without_ssid() -> None:
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
     kwargs = {
@@ -125,7 +156,7 @@ def test_wifi_home_presence_applies_for_configured_home_bssid() -> None:
     )
 
 
-def test_wifi_home_presence_configured_home_bssid_skips_geo_fallback() -> None:
+def test_wifi_home_presence_legacy_home_bssid_skips_geo_fallback() -> None:
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
     kwargs = {

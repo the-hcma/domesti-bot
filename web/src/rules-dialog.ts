@@ -1818,7 +1818,8 @@ class RulesHubController {
     wifiHeading.textContent = "Home WiFi";
     const wifiLead = document.createElement("p");
     wifiLead.className = "rules-card-meta";
-    wifiLead.textContent = "One SSID for all household members (matched by BSSID).";
+    wifiLead.textContent =
+      "One SSID for all household members (presence matches by network name; mesh/repeaters OK).";
 
     const householdCheckByUserId = new Map<string, HTMLInputElement>();
     for (const user of rosterUsers) {
@@ -1874,17 +1875,20 @@ class RulesHubController {
     let sharedBssid: string | null = null;
     let sharedSsid: string | null = null;
     for (const user of householdMembers) {
-      if (user.home_wifi_bssid !== null) {
+      if (user.home_wifi_ssid !== null || user.home_wifi_bssid !== null) {
         sharedBssid = user.home_wifi_bssid;
         sharedSsid = user.home_wifi_ssid;
         break;
       }
     }
-    if (sharedBssid !== null && sharedSsid !== null && !networkByBssid.has(sharedBssid)) {
-      networkByBssid.set(sharedBssid, {
-        wifi_bssid: sharedBssid,
-        wifi_ssid: sharedSsid,
-      });
+    if (sharedSsid !== null) {
+      const syntheticBssid = sharedBssid ?? `ssid:${sharedSsid}`;
+      if (![...networkByBssid.values()].some((row) => row.wifi_ssid === sharedSsid)) {
+        networkByBssid.set(syntheticBssid, {
+          wifi_bssid: syntheticBssid,
+          wifi_ssid: sharedSsid,
+        });
+      }
     }
     for (const network of uniqueWifiNetworksBySsid(
       networkByBssid.values(),
@@ -1896,7 +1900,7 @@ class RulesHubController {
       option.dataset.ssid = network.wifi_ssid;
       sharedWifiSelect.append(option);
     }
-    if (sharedBssid !== null) {
+    if (sharedSsid !== null || sharedBssid !== null) {
       // Prefer matching the configured SSID even when BSSID was collapsed.
       const preferredSsid =
         sharedSsid
@@ -1909,10 +1913,10 @@ class RulesHubController {
         );
         if (match !== undefined) {
           sharedWifiSelect.value = match.value;
-        } else {
+        } else if (sharedBssid !== null) {
           sharedWifiSelect.value = sharedBssid;
         }
-      } else {
+      } else if (sharedBssid !== null) {
         sharedWifiSelect.value = sharedBssid;
       }
     }
@@ -2011,16 +2015,21 @@ class RulesHubController {
     );
 
     const selected = home.sharedWifiSelect.options[home.sharedWifiSelect.selectedIndex];
-    const wifiBssid =
+    const selectedValue =
       home.sharedWifiSelect.value === "" ? null : home.sharedWifiSelect.value;
+    let wifiBssid: string | null = selectedValue;
     let wifiSsid: string | null = null;
-    if (wifiBssid !== null) {
+    if (selectedValue !== null) {
       const ssid = selected?.dataset.ssid;
       if (ssid === undefined || ssid === "") {
         showErrorToast("Selected WiFi option is missing SSID metadata.");
         return;
       }
       wifiSsid = ssid;
+      // Synthetic option for SSID-only config (no real AP MAC).
+      if (selectedValue.startsWith("ssid:")) {
+        wifiBssid = null;
+      }
     }
 
     const failedLabels: string[] = [];

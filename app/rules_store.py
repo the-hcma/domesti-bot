@@ -139,14 +139,18 @@ def set_user_home_wifi(
     wifi_ssid: str | None,
     wifi_bssid: str | None,
 ) -> UserRecord:
-    """Persist the operator-selected home WiFi network for ``user_id``."""
+    """Persist the operator-selected home WiFi network for ``user_id``.
+
+    Home identity is the SSID. BSSID is optional (diagnostics / preferred AP).
+    Clearing SSID clears BSSID as well.
+    """
     trimmed_user_id = user_id.strip()
     normalized_bssid = normalize_wifi_bssid(wifi_bssid)
     trimmed_ssid = (wifi_ssid or "").strip() or None
-    if normalized_bssid is None:
-        trimmed_ssid = None
-    elif trimmed_ssid is None:
+    if normalized_bssid is not None and trimmed_ssid is None:
         raise ValueError("Expected wifi_ssid when wifi_bssid is set, got None")
+    if trimmed_ssid is None:
+        normalized_bssid = None
     now = time.time()
 
     def _write(session: Session) -> UserRecord:

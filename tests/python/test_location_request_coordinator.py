@@ -57,6 +57,7 @@ def _seed_db(db: Path) -> None:
                 tracking_device_label="Pixel",
                 enabled=True,
                 home_wifi_bssid="aa:bb:cc:dd:ee:ff",
+                home_wifi_ssid="HomeNet",
             ),
         ],
     )
@@ -271,7 +272,7 @@ async def test_coordinator_skips_when_remote_requests_disabled(
 
 
 @pytest.mark.asyncio
-async def test_coordinator_skips_when_wifi_home_bssid_matches(
+async def test_coordinator_skips_when_wifi_home_ssid_matches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -291,7 +292,8 @@ async def test_coordinator_skips_when_wifi_home_bssid_matches(
         reported_at=now,
         source="test",
         connection_type="w",
-        wifi_bssid="aa:bb:cc:dd:ee:ff",
+        wifi_ssid="HomeNet",
+        wifi_bssid="11:22:33:44:55:66",
     )
     coordinator = LocationRequestCoordinator(cache_path=db, now_fn=lambda: now)
     request_mock = AsyncMock(return_value=RequestLocationResult(status="accepted"))

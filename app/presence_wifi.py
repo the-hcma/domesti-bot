@@ -13,6 +13,16 @@ def normalize_wifi_bssid(value: str | None) -> str | None:
     return trimmed
 
 
+def normalize_wifi_ssid(value: str | None) -> str | None:
+    """Return a trimmed SSID, or ``None`` when absent."""
+    if value is None:
+        return None
+    trimmed = value.strip()
+    if trimmed == "":
+        return None
+    return trimmed
+
+
 def wifi_bssids_match(
     observed_bssid: str | None,
     home_bssid: str | None,
@@ -20,6 +30,18 @@ def wifi_bssids_match(
     """Return whether both BSSIDs are present and equal after normalization."""
     normalized_observed = normalize_wifi_bssid(observed_bssid)
     normalized_home = normalize_wifi_bssid(home_bssid)
+    if normalized_observed is None or normalized_home is None:
+        return False
+    return normalized_observed == normalized_home
+
+
+def wifi_ssids_match(
+    observed_ssid: str | None,
+    home_ssid: str | None,
+) -> bool:
+    """Return whether both SSIDs are present and equal after trim."""
+    normalized_observed = normalize_wifi_ssid(observed_ssid)
+    normalized_home = normalize_wifi_ssid(home_ssid)
     if normalized_observed is None or normalized_home is None:
         return False
     return normalized_observed == normalized_home

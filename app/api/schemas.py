@@ -1394,9 +1394,9 @@ class UserHomeWifiIn(BaseModel):
     def _validate_home_wifi_pair(self) -> Self:
         has_bssid = self.wifi_bssid is not None
         has_ssid = self.wifi_ssid is not None
-        if has_bssid != has_ssid:
+        if has_bssid and not has_ssid:
             raise ValueError(
-                "Expected wifi_bssid and wifi_ssid together or both cleared, "
+                "Expected wifi_ssid when wifi_bssid is set, "
                 f"got wifi_bssid={self.wifi_bssid!r}, wifi_ssid={self.wifi_ssid!r}",
             )
         return self

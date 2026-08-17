@@ -427,6 +427,7 @@ def _users_status(cache_path: Path) -> list[UserStatusOut]:
                 settings=settings,
                 min_accuracy_m=min_accuracy_m,
                 home_wifi_bssid=user.home_wifi_bssid,
+                home_wifi_ssid=user.home_wifi_ssid,
             )
         rows.append(
             UserStatusOut(
