@@ -754,7 +754,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                     _LOGGER.info("%s", exc)
             cached = self._cache_targets()
             if cached:
-                return cached, True
+                return cached, False
             return [], False
 
         base = self._initial_targets()

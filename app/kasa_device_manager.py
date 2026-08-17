@@ -621,7 +621,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             if skipped is None:
                 continue
             alias, cfg_dict = skipped
-            rows.append((host, alias, cfg_dict, True, None))
+            prior_mac = prior_by_host.get(host, (None, None, None, None))[3]
+            rows.append((host, alias, cfg_dict, True, prior_mac))
         rows.sort(key=lambda r: r[0])
         device_discovery_store.save_configs(self._discovery_cache_path, rows)
 
@@ -1139,6 +1140,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
         if not cached:
             previous_map = self._device_name_to_device
+            self._hosts_requiring_klap_auth = set()
+            self._last_skipped_auth_hosts = []
+            self._skipped_klap_auth_configs = {}
             self._finalize_kasa_lookup({})
             self._last_discovery_source = "cache"
             await self._disconnect_device_map(previous_map)

@@ -446,6 +446,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             self._alias_to_device = {}
             self._tailwind = None
             self._host = None
+            self._hub_mac = None
             _LOGGER.info("Tailwind reload_from_cache: empty cache; cleared device map")
             return True
 

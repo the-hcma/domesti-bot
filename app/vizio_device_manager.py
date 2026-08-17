@@ -355,11 +355,12 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             return False
         rows = device_discovery_store.load_vizio_tvs(self._discovery_cache_path)
         if not rows:
-            previous_tvs = self._tvs
-            previous_ids = self._id_to_tv
-            for tv in previous_tvs:
+            for tv in self._tvs:
                 with contextlib.suppress(Exception):
                     await tv._client.aclose()
+            if self._session is not None and not self._session.closed:
+                await self._session.close()
+            self._session = None
             self._tvs = ()
             self._id_to_tv = {}
             self._last_discovery_source = "cache"
@@ -545,7 +546,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         out: list[VizioTvEndpoint] = []
         seen_ids: set[str] = set()
         seen_hosts: set[tuple[str, int]] = set()
-        if not self._force_discovery and self._discovery_cache_path is not None:
+        if self._discovery_cache_path is not None:
             for host, port, display, model, mac, diid in device_discovery_store.load_vizio_tvs(
                 self._discovery_cache_path
             ):

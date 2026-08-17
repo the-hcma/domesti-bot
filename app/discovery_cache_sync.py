@@ -248,9 +248,15 @@ def _roster_drift(
     family: DeviceFamilyId,
 ) -> bool:
     if cached == live:
+        _clear_failed(family)
         return False
     failed = _failed_fp(family)
     if failed is not None and cached == failed:
+        # Authoritative cache shrink (ghost still in live) must retry even when the
+        # failed fingerprint matches the new cache.
+        if cached < live:
+            _clear_failed(family)
+            return True
         return False
     return True
 

@@ -574,3 +574,17 @@ async def test_turn_on_play_when_paused() -> None:
     dev = AndroidTvSwitchDevice("u2", cast, mac_address="aa:bb:cc:dd:ee:ff")
     await dev.turn_on()
     cast.media_controller.play.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reload_from_cache_empty_cache_clears_map(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    mgr = AndroidTvDeviceManager(explicit_host_specs=[], discovery_store_path=db)
+    mgr._alias_to_device = {"aa:bb:cc:dd:ee:ff": MagicMock()}
+    mgr._last_discovery_source = "cache"
+
+    ok = await mgr.reload_from_cache()
+
+    assert ok is True
+    assert mgr.switches == ()
+    assert mgr._alias_to_device == {}
