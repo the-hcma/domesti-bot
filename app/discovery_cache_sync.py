@@ -206,17 +206,27 @@ def _live_ep1_macs(mgr: Ep1DeviceManager) -> frozenset[str]:
 def _live_kasa_macs(mgr: KasaDeviceManager, cache_path: Path) -> frozenset[str]:
     """Stable Kasa roster fingerprint: connected MACs plus in-memory KLAP-auth hosts.
 
-    KLAP-skipped hosts are keyed by host so authoritative cache removals
-    register as drift even when the skipped row had no MAC. ``cache_path`` is
-    unused but kept for call-site symmetry with the cache reader.
+    KLAP rows fingerprint by host on both sides so skipped and connected
+    KLAP devices match the cache. Connected KLAP switches must not also
+    contribute their MAC or every poll sees drift.
     """
 
     del cache_path
-    items = {kd.mac_address for kd in mgr.switches if kd.mac_address}
-    for host in (*mgr.skipped_auth_hosts, *mgr.hosts_requiring_klap_auth):
-        host_s = (host or "").strip()
-        if host_s:
+    klap_hosts = {
+        (host or "").strip()
+        for host in (*mgr.skipped_auth_hosts, *mgr.hosts_requiring_klap_auth)
+        if (host or "").strip()
+    }
+    items: set[str] = set()
+    for kd in mgr.switches:
+        host_s = (kd.host or "").strip()
+        if host_s in klap_hosts:
             items.add(f"{_KASA_KLAP_HOST_PREFIX}{host_s}")
+            continue
+        if kd.mac_address:
+            items.add(kd.mac_address)
+    for host in klap_hosts:
+        items.add(f"{_KASA_KLAP_HOST_PREFIX}{host}")
     return frozenset(items)
 
 

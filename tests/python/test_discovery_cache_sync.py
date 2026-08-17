@@ -632,6 +632,54 @@ async def test_maybe_sync_noop_when_klap_row_has_cached_mac(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_maybe_sync_noop_when_klap_device_connected_with_credentials(tmp_path: Path) -> None:
+    """Connected KLAP hosts fingerprint by host only — not host plus MAC."""
+
+    db = tmp_path / "cached.sqlite"
+    klap_cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    klap_mac = "aa:bb:cc:dd:ee:02"
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.20", "Tapo", klap_cfg, True, klap_mac)],
+    )
+
+    mock_klap = MagicMock()
+    mock_klap.mac_address = klap_mac
+    mock_klap.host = "192.168.1.20"
+
+    kasa = MagicMock(spec=KasaDeviceManager)
+    kasa.switches = (mock_klap,)
+    kasa.skipped_auth_hosts = ()
+    kasa.hosts_requiring_klap_auth = {"192.168.1.20"}
+    kasa.reload_from_cache = AsyncMock()
+
+    runtime.reset()
+    changed = await maybe_sync_discovery_cache(
+        DeviceManagersState(
+            kasa_mgr=kasa,
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            ep1_mgr=None,
+            vizio_mgr=None,
+            cache_path=db,
+            args=argparse.Namespace(),
+        )
+    )
+
+    assert changed is False
+    kasa.reload_from_cache.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_maybe_sync_sonos_noop_when_rincon_case_differs(tmp_path: Path) -> None:
     """Upper/lower RINCON spelling must not look like roster drift."""
 
