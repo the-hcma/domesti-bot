@@ -368,6 +368,25 @@ def test_resolve_cli_target_same_device_prefix_is_not_ambiguous() -> None:
     assert meta == ("kasa", mac)
 
 
+def test_resolve_cli_target_shared_prefix_across_devices_is_ambiguous() -> None:
+    mac1 = "aa:bb:cc:dd:ee:10"
+    mac2 = "aa:bb:cc:dd:ee:11"
+    display1 = format_device_display(mac1, "Porch lights")
+    display2 = format_device_display(mac2, "Porch heater")
+    triples = [
+        (mac1, "kasa", mac1),
+        ("Porch lights", "kasa", mac1),
+        (display1, "kasa", mac1),
+        (mac2, "kasa", mac2),
+        ("Porch heater", "kasa", mac2),
+        (display2, "kasa", mac2),
+    ]
+    api, amb, meta = _resolve_cli_target("Porch", triples)
+    assert api is None
+    assert meta is None
+    assert amb == sorted({display1, display2})
+
+
 def test_repl_completer_inserts_name_and_mac_for_mac_prefix() -> None:
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
@@ -471,3 +490,30 @@ async def test_async_main_starts_prompt_before_discovery_finishes() -> None:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+
+
+@pytest.mark.asyncio
+async def test_async_main_requests_kasa_vendor_alias_sync() -> None:
+    seen: dict[str, object] = {}
+    bootstrap_started = asyncio.Event()
+
+    async def _capture_bootstrap(*_args: object, **kwargs: object) -> None:
+        seen.update(kwargs)
+        bootstrap_started.set()
+
+    async def _fake_cmd_loop(*_args: object, **_kwargs: object) -> None:
+        await bootstrap_started.wait()
+
+    async def _noop_shutdown(_state: object) -> None:
+        return None
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    with (
+        patch("app.domesti_bot_cli.bootstrap_device_managers", _capture_bootstrap),
+        patch("app.domesti_bot_cli._cmd_loop", _fake_cmd_loop),
+        patch("app.domesti_bot_cli.shutdown_device_managers", _noop_shutdown),
+    ):
+        await _async_main(args)
+    assert seen.get("sync_kasa_vendor_aliases") is True
+    assert seen.get("exit_if_empty") is False

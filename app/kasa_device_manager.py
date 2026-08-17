@@ -541,7 +541,13 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 )
         return None
 
-    def _persist_discovery_cache(self, alias_map: dict[str, KasaDevice]) -> None:
+    def _persist_discovery_cache(
+        self,
+        alias_map: dict[str, KasaDevice],
+        *,
+        alias_overrides: dict[str, str] | None = None,
+        record_renames: bool = True,
+    ) -> None:
         if self._discovery_cache_path is None:
             return
         # Preserve KLAP-auth hosts that were skipped (e.g. no credentials) so a
@@ -572,13 +578,17 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 continue
             cfg_dict = dev.config.to_dict_control_credentials(exclude_credentials=True)
             mac = kd.mac_address
-            alias = getattr(dev, "alias", None)
-            note_display_name_rename(
-                backend="kasa",
-                mac_address=mac,
-                previous_label=prior_label_by_mac.get(mac.lower()),
-                current_label=(alias or "").strip() or None,
-            )
+            override = None
+            if alias_overrides is not None and mac:
+                override = alias_overrides.get(mac.lower())
+            alias = override if override is not None else getattr(dev, "alias", None)
+            if record_renames:
+                note_display_name_rename(
+                    backend="kasa",
+                    mac_address=mac,
+                    previous_label=prior_label_by_mac.get(mac.lower()),
+                    current_label=(alias or "").strip() or None,
+                )
             rows.append(
                 (
                     host,
@@ -589,7 +599,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 )
             )
             seen_hosts.add(host)
-            for old_key in (host, (getattr(dev, "alias", None) or "").strip()):
+            for old_key in (host, (alias or "").strip()):
                 if old_key and old_key != mac:
                     device_discovery_store.migrate_canonical_key_to_mac(
                         self._discovery_cache_path,
@@ -1235,33 +1245,52 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 alias_owner_mac.setdefault(alias.lower(), kd.mac_address)
 
         updated = 0
-        for kd in devices:
-            preferred = kd.preferred_label.strip()
-            if not preferred or preferred.lower() == kd.mac_address.lower():
-                continue
-            preferred_key = preferred.lower()
-            if preferred_counts.get(preferred_key, 0) > 1:
-                continue
-            owner = alias_owner_mac.get(preferred_key)
-            if owner is not None and owner != kd.mac_address:
-                continue
-            current = (getattr(kd._kDevice, "alias", None) or "").strip()
-            if current.lower() == preferred_key:
-                continue
-            try:
-                await kd._kDevice.set_alias(preferred)
-            except Exception:
-                _LOGGER.warning(
-                    "Kasa: failed to set vendor alias on %s to %r",
-                    format_device_display(kd.identifier, kd.preferred_label),
-                    preferred,
-                    exc_info=True,
-                )
-                continue
-            alias_owner_mac[preferred_key] = kd.mac_address
-            updated += 1
+        alias_overrides: dict[str, str] = {}
+        failed_macs: set[str] = set()
+        progressed = True
+        while progressed:
+            progressed = False
+            for kd in devices:
+                mac_key = kd.mac_address.lower()
+                if mac_key in alias_overrides or mac_key in failed_macs:
+                    continue
+                preferred = kd.preferred_label.strip()
+                if not preferred or preferred.lower() == kd.mac_address.lower():
+                    continue
+                preferred_key = preferred.lower()
+                if preferred_counts.get(preferred_key, 0) > 1:
+                    continue
+                owner = alias_owner_mac.get(preferred_key)
+                if owner is not None and owner != kd.mac_address:
+                    continue
+                current = (getattr(kd._kDevice, "alias", None) or "").strip()
+                if current.lower() == preferred_key:
+                    continue
+                try:
+                    await kd._kDevice.set_alias(preferred)
+                except Exception:
+                    _LOGGER.warning(
+                        "Kasa: failed to set vendor alias on %s to %r",
+                        format_device_display(kd.identifier, kd.preferred_label),
+                        preferred,
+                        exc_info=True,
+                    )
+                    failed_macs.add(mac_key)
+                    continue
+                if current:
+                    old_key = current.lower()
+                    if alias_owner_mac.get(old_key) == kd.mac_address:
+                        del alias_owner_mac[old_key]
+                alias_owner_mac[preferred_key] = kd.mac_address
+                alias_overrides[mac_key] = preferred
+                updated += 1
+                progressed = True
 
         if updated:
-            self._persist_discovery_cache(self._device_name_to_device)
+            self._persist_discovery_cache(
+                self._device_name_to_device,
+                alias_overrides=alias_overrides,
+                record_renames=False,
+            )
             self.rebuild_lookup_after_display_change()
         return updated

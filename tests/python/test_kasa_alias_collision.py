@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.device_display import format_device_display
 from app.kasa_device_manager import KasaDeviceManager
 
 
@@ -106,9 +107,12 @@ async def test_fetch_does_not_warn_when_all_aliases_unique(
             await mgr.fetch()
 
     assert len(mgr.switches) == 3
-    assert mgr.get_device_by_alias("Living Room Lamp") is not None
+    lamp = mgr.get_device_by_alias("Living Room Lamp")
+    assert lamp is not None
     assert mgr.get_device_by_alias("Kitchen Counter") is not None
     assert mgr.get_device_by_alias("Office Plug") is not None
+    display = format_device_display(lamp.identifier, lamp.preferred_label)
+    assert mgr.get_device_by_alias(display) is lamp
 
 
 @pytest.mark.asyncio

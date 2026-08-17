@@ -54,7 +54,12 @@ class CompletionAliasItem(BaseModel):
 
 
 class CompletionAliasesOut(BaseModel):
-    """Device name fragments for Tab completion in remote CLI mode."""
+    """Device name fragments for Tab completion in remote CLI mode.
+
+    Breaking vs earlier ``list[str]`` lists: each field is now
+    ``list[CompletionAliasItem]`` (``{display, matches}``). The in-repo
+    remote CLI still accepts both shapes when talking to mixed servers.
+    """
 
     switch: list[CompletionAliasItem] = Field(default_factory=list)
     sonos: list[CompletionAliasItem] = Field(default_factory=list)

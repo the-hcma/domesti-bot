@@ -151,6 +151,8 @@ DISCOVERY_IN_PROGRESS_MSG = "Device discovery still in progress; wait for the fa
 EP1_NOT_INITIALIZED_MSG = "EP1 manager is not initialized — try refresh-discovery or discover-ep1."
 EP1_NOT_LOADED_MSG = "EP1 not loaded — set --ep1-host / EP1_HOSTS, allow mDNS discovery, or run discover-ep1 first."
 EP1_READ_FAILED_PREFIX = "EP1 read failed for "
+NO_BACKENDS_DEVICE_COMMANDS_UNAVAILABLE_MSG = "No backends initialized; device commands stay unavailable."
+NO_BACKENDS_EXITING_MSG = "No backends initialized; exiting."
 
 _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("clear-display-name", "Drop the saved friendly label for a device (SQLite cache required)."),
@@ -2920,8 +2922,13 @@ async def bootstrap_device_managers(
     log_progress: bool = True,
     session: _CliDiscoverySession | None = None,
     exit_if_empty: bool = True,
+    sync_kasa_vendor_aliases: bool = False,
 ) -> DeviceManagersState:
-    """Create managers, run parallel discovery, and return state (or exit if nothing works)."""
+    """Create managers, run parallel discovery, and return state (or exit if nothing works).
+
+    ``sync_kasa_vendor_aliases`` is CLI-only. HTTP discovery leaves Kasa
+    hardware aliases unchanged.
+    """
 
     if session is None:
         session = _CliDiscoverySession.from_args(args)
@@ -3018,10 +3025,11 @@ async def bootstrap_device_managers(
         slug = "kasa"
         try:
             await kasa_mgr.fetch()
-            try:
-                await kasa_mgr.sync_preferred_labels_to_vendor_aliases()
-            except Exception:
-                _LOGGER.warning("Kasa preferred-label alias sync failed", exc_info=True)
+            if sync_kasa_vendor_aliases:
+                try:
+                    await kasa_mgr.sync_preferred_labels_to_vendor_aliases()
+                except Exception:
+                    _LOGGER.warning("Kasa preferred-label alias sync failed", exc_info=True)
             try:
                 kasa_count = len(kasa_mgr.switches)
             except Exception:
@@ -3316,9 +3324,10 @@ async def bootstrap_device_managers(
     ep1_ready = ep1_mgr is not None
     vizio_ready = vizio_mgr is not None
     if not kasa_ok and not tw_ok and not sonos_ready and not androidtv_ready and not ep1_ready and not vizio_ready:
-        print(theme.err("No backends initialized; exiting."), file=sys.stderr)
         if exit_if_empty:
+            print(theme.err(NO_BACKENDS_EXITING_MSG), file=sys.stderr)
             raise SystemExit(1)
+        print(theme.err(NO_BACKENDS_DEVICE_COMMANDS_UNAVAILABLE_MSG), file=sys.stderr)
 
     if log_progress:
         ns = _kasa_switch_count(kasa_mgr)
@@ -3401,6 +3410,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             log_progress=True,
             session=discovery,
             exit_if_empty=False,
+            sync_kasa_vendor_aliases=True,
         ),
         name="cli-device-discovery",
     )
