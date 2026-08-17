@@ -40,6 +40,7 @@ class DomestiServerRuntime:
     cli_args: Any | None
     device_state: DeviceManagersState | None
     discovery_cache_sync_failed: dict[str, frozenset[str]]
+    discovery_cache_sync_failed_live: dict[str, frozenset[str]]
     discovery_cache_sync_lock: asyncio.Lock
     discovery_completed_at: float | None
     discovery_error: str | None
@@ -68,6 +69,7 @@ class DomestiServerRuntime:
         self.discovery_started_at = time.monotonic()
         self.discovery_completed_at = None
         self.discovery_cache_sync_failed = {}
+        self.discovery_cache_sync_failed_live = {}
         self.shutdown_requested = asyncio.Event()
         self.watcher_stop = asyncio.Event()
         self.watcher_task = None
@@ -104,6 +106,7 @@ class DomestiServerRuntime:
         self.cli_args = None
         self.device_state = None
         self.discovery_cache_sync_failed = {}
+        self.discovery_cache_sync_failed_live = {}
         self.discovery_cache_sync_lock = asyncio.Lock()
         self.discovery_completed_at = None
         self.discovery_error = None

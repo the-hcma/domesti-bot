@@ -159,6 +159,7 @@ def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[st
 
 def _clear_failed(family: DeviceFamilyId) -> None:
     runtime.discovery_cache_sync_failed.pop(family.value, None)
+    runtime.discovery_cache_sync_failed_live.pop(family.value, None)
 
 
 def _ep1_needs_sync(state: DeviceManagersState, cache_path: Path) -> bool:
@@ -238,8 +239,17 @@ def _live_vizio_ids(mgr: VizioDeviceManager) -> frozenset[str]:
     return frozenset(tv.identifier for tv in mgr.tvs)
 
 
-def _mark_failed(family: DeviceFamilyId, fingerprint: frozenset[str]) -> None:
-    runtime.discovery_cache_sync_failed[family.value] = fingerprint
+def _failed_live_fp(family: DeviceFamilyId) -> frozenset[str] | None:
+    return runtime.discovery_cache_sync_failed_live.get(family.value)
+
+
+def _mark_failed(
+    family: DeviceFamilyId,
+    cached: frozenset[str],
+    live: frozenset[str],
+) -> None:
+    runtime.discovery_cache_sync_failed[family.value] = cached
+    runtime.discovery_cache_sync_failed_live[family.value] = live
 
 
 def _roster_drift(
@@ -252,12 +262,9 @@ def _roster_drift(
         return False
     failed = _failed_fp(family)
     if failed is not None and cached == failed:
-        # Authoritative cache shrink (ghost still in live) must retry even when the
-        # failed fingerprint matches the new cache.
-        if cached < live:
-            _clear_failed(family)
-            return True
-        return False
+        failed_live = _failed_live_fp(family)
+        if failed_live is not None and live == failed_live:
+            return False
     return True
 
 
@@ -279,14 +286,15 @@ async def _sync_androidtv(state: DeviceManagersState, cache_path: Path) -> bool:
         return False
     known = device_discovery_store.load_androidtv_known_devices(cache_path)
     cached = frozenset(uid for _h, _p, _fn, uid, _model, _mac in known if uid)
+    live = _live_androidtv_uuids(mgr)
     _LOGGER.info(
         "AndroidTV discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_androidtv_uuids(mgr)),
+        sorted(live),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache()
     if not ok:
-        _mark_failed(DeviceFamilyId.ANDROIDTV, cached)
+        _mark_failed(DeviceFamilyId.ANDROIDTV, cached, live)
         return False
     _clear_failed(DeviceFamilyId.ANDROIDTV)
     return True
@@ -297,14 +305,15 @@ async def _sync_ep1(state: DeviceManagersState, cache_path: Path) -> bool:
     if mgr is None or not _ep1_needs_sync(state, cache_path):
         return False
     cached = _cached_ep1_macs(cache_path)
+    live = _live_ep1_macs(mgr)
     _LOGGER.info(
         "EP1 discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_ep1_macs(mgr)),
+        sorted(live),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache()
     if not ok:
-        _mark_failed(DeviceFamilyId.EP1, cached)
+        _mark_failed(DeviceFamilyId.EP1, cached, live)
         return False
     _clear_failed(DeviceFamilyId.EP1)
     return True
@@ -315,14 +324,15 @@ async def _sync_kasa(state: DeviceManagersState, cache_path: Path) -> bool:
         return False
     mgr = state.kasa_mgr
     cached = _cached_kasa_macs(cache_path)
+    live = _live_kasa_macs(mgr, cache_path)
     _LOGGER.info(
         "Kasa discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_kasa_macs(mgr, cache_path)),
+        sorted(live),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache()
     if not ok:
-        _mark_failed(DeviceFamilyId.KASA, cached)
+        _mark_failed(DeviceFamilyId.KASA, cached, live)
         return False
     _clear_failed(DeviceFamilyId.KASA)
     return True
@@ -333,14 +343,15 @@ async def _sync_sonos(state: DeviceManagersState, cache_path: Path) -> bool:
     if mgr is None or not _sonos_needs_sync(state, cache_path):
         return False
     cached = _cached_sonos_uids(cache_path)
+    live = _live_sonos_uids(mgr)
     _LOGGER.info(
         "Sonos discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_sonos_uids(mgr)),
+        sorted(live),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache()
     if not ok:
-        _mark_failed(DeviceFamilyId.SONOS, cached)
+        _mark_failed(DeviceFamilyId.SONOS, cached, live)
         return False
     _clear_failed(DeviceFamilyId.SONOS)
     return True
@@ -351,14 +362,15 @@ async def _sync_tailwind(state: DeviceManagersState, cache_path: Path) -> bool:
     if mgr is None or not _tailwind_needs_sync(state, cache_path):
         return False
     cached = _cached_tailwind_hub_macs(cache_path)
+    live = _live_tailwind_hub_macs(mgr)
     _LOGGER.info(
         "Tailwind discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_tailwind_hub_macs(mgr)),
+        sorted(live),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache(cache_path=cache_path)
     if not ok:
-        _mark_failed(DeviceFamilyId.TAILWIND, cached)
+        _mark_failed(DeviceFamilyId.TAILWIND, cached, live)
         return False
     _clear_failed(DeviceFamilyId.TAILWIND)
     return True
@@ -369,14 +381,15 @@ async def _sync_vizio(state: DeviceManagersState, cache_path: Path) -> bool:
     if mgr is None or not _vizio_needs_sync(state, cache_path):
         return False
     cached = _cached_vizio_ids(cache_path, mgr)
+    live = _live_vizio_ids(mgr)
     _LOGGER.info(
         "Vizio discovery cache drift: live=%s cache=%s; reloading from SQLite",
-        sorted(_live_vizio_ids(mgr)),
+        sorted(live),
         sorted(cached),
     )
     ok = await mgr.reload_from_cache()
     if not ok:
-        _mark_failed(DeviceFamilyId.VIZIO, cached)
+        _mark_failed(DeviceFamilyId.VIZIO, cached, live)
         return False
     _clear_failed(DeviceFamilyId.VIZIO)
     return True

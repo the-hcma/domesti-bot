@@ -500,6 +500,49 @@ async def test_maybe_sync_retries_when_cache_shrinks_after_failed_reload(
 
 
 @pytest.mark.asyncio
+async def test_maybe_sync_suppresses_retry_after_shrink_reload_fails(
+    tmp_path: Path,
+) -> None:
+    """Failed reload on an authoritative cache shrink must not retry every poll."""
+
+    db = tmp_path / "cached.sqlite"
+    cfg_a = _xor_cfg("192.168.1.10")
+    cfg_b = _xor_cfg("192.168.1.20")
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.10", "Desk", cfg_a, False, _MAC_10),
+            ("192.168.1.20", "Lamp", cfg_b, False, _MAC_14),
+        ],
+    )
+
+    async def _connect(cfg: Any, *, credentials: Any, timeout: Any) -> MagicMock | None:
+        del credentials, timeout
+        return _mock_device(cfg.host, cfg.host, _xor_cfg(cfg.host))
+
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with patch(
+        "app.kasa_device_manager._connect_from_saved_config",
+        AsyncMock(side_effect=_connect),
+    ):
+        await mgr.fetch()
+
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.10", "Desk", cfg_a, False, _MAC_10)],
+    )
+    runtime.reset()
+    runtime.discovery_cache_sync_failed[DeviceFamilyId.KASA.value] = frozenset({_MAC_10})
+    runtime.discovery_cache_sync_failed_live[DeviceFamilyId.KASA.value] = frozenset({_MAC_10, _MAC_14})
+
+    with patch.object(mgr, "reload_from_cache", AsyncMock()) as reload:
+        changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
+
+    assert changed is False
+    reload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_maybe_sync_sonos_noop_when_rincon_case_differs(tmp_path: Path) -> None:
     """Upper/lower RINCON spelling must not look like roster drift."""
 
