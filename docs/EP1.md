@@ -18,9 +18,10 @@ For the tracking issue and field notes from the first Homey bring-up, see
   “climate values changed”
 - **Person / ghost** glyph immediately right of the orange bulk-off button
   (occupied / clear). Occupied paints with `--accent` (green); clear uses a
-  light silver so the ghost stays visible on the dark canvas in both light
-  and dark appearance. Desktop hover on the climate/light readings or the
-  occupancy glyph shows the same device identity as tiles (label, MAC, IP).
+  light silver on the dark canvas and a darker gray in light/clear mode so
+  the ghost stays visible on the white main panel. Desktop hover on the
+  climate/light readings or the occupancy glyph uses the same identity
+  block as tiles (label, then MAC and IP).
   Multiple EP1s: occupied if any *responding* sensor is occupied, else clear
   if any responding sensor is clear, else hidden (including when all EP1s
   are stale)

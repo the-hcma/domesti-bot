@@ -231,7 +231,10 @@ function createEp1HeaderStatusDevice(
   const row = document.createElement("div");
   row.className = "ep1-header-status-device";
   row.dataset["responding"] = snapshot.responding ? "true" : "false";
-  row.title = formatDeviceIdentityTooltip(snapshot, { includeLabel: true });
+  row.title = formatDeviceIdentityTooltip(snapshot, {
+    blankLineAfterLabel: true,
+    includeLabel: true,
+  });
 
   const temp = formatEp1HeaderTemperature(snapshot);
   if (temp != null) {

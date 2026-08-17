@@ -188,6 +188,32 @@ def test_ep1_header_status_comfortable_splits_c_and_f_with_dot(
         page.close()
 
 
+def test_device_identity_tooltip_module_contract() -> None:
+    src = (_REPO_ROOT / "web" / "src" / "device-identity-tooltip.ts").read_text(
+        encoding="utf-8",
+    )
+    assert "export const DEVICE_PROPERTIES_MENU_HINT" in src
+    assert "export interface DeviceIdentityTooltipOptions" in src
+    assert "export function formatDeviceIdentityTooltip" in src
+    assert "MAC address:" in src
+    assert "IP:" in src
+    assert "includeLabel" in src
+    assert "includePropertiesHint" in src
+    assert "blankLineAfterLabel" in src
+    assert 'lines.push(label, "")' in src
+
+
+def test_ep1_header_identity_hover_wiring_contract() -> None:
+    src = _EP1_HEADER_TS.read_text(encoding="utf-8")
+    assert "row.title = formatDeviceIdentityTooltip(snapshot, {" in src
+    assert "blankLineAfterLabel: true" in src
+    assert "{ includeLabel: true }" in src
+    assert "includeStateSuffix = sources.length > 1" in src
+    assert "formatEp1HeaderOccupancyTooltip" in src
+    assert "formatDeviceIdentityTooltipLabel" in src
+    assert "snapshot.occupancy_state" in src
+
+
 @pytest.mark.browser
 def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
     chromium_browser: Any,
@@ -346,20 +372,6 @@ def test_ep1_header_status_module_readings_only_contract() -> None:
     assert "EP1_HEADER_STALE_AFTER_S" in src
 
 
-def test_device_identity_tooltip_module_contract() -> None:
-    src = (_REPO_ROOT / "web" / "src" / "device-identity-tooltip.ts").read_text(
-        encoding="utf-8",
-    )
-    assert "export const DEVICE_PROPERTIES_MENU_HINT" in src
-    assert "export interface DeviceIdentityTooltipOptions" in src
-    assert "export function formatDeviceIdentityTooltip" in src
-    assert "Right-click to edit device properties" in src
-    assert "MAC address:" in src
-    assert "IP:" in src
-    assert "includeLabel" in src
-    assert "includePropertiesHint" in src
-
-
 def test_index_html_ep1_header_status_css_contract() -> None:
     style = _extract_index_html_style_block()
     light_root = _css_rule_block(style, 'html[data-theme="light"] {')
@@ -371,6 +383,10 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     )
     assert "--canvas-bg: #ffffff" in light_default
     assert "--muted: #4b5563" in light_default
+    main_panel = _css_rule_block(style, "main {")
+    assert "background: var(--canvas-bg)" in main_panel
+    app_panel = _css_rule_block(style, "#app {")
+    assert "background: var(--canvas-bg)" in app_panel
     base = _css_rule_block(style, ".ep1-header-status")
     assert "display: flex" in base
     assert "flex: 0 1 auto" in base
@@ -407,6 +423,11 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     )
     assert "var(--accent)" in occupied
     assert "#646a72" in clear
+    light_clear = _css_rule_block(
+        style,
+        'html[data-theme="light"] .ep1-header-occupancy-glyph[data-occupancy="clear"]',
+    )
+    assert "#4b5563" in light_clear
     assert "currentColor" in clear_fill
     assert "currentColor" in occupied_fill
     brand_head = _css_rule_block(style, ".brand-mark-bm-head")
@@ -443,6 +464,13 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "·" in metric_sep
 
 
+def test_index_html_theme_color_adapts_before_js() -> None:
+    html = _INDEX_HTML_PATH.read_text(encoding="utf-8")
+    assert 'name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff"' in html
+    assert 'name="theme-color" media="(prefers-color-scheme: dark)" content="#15171a"' in html
+    assert 'name="theme-color" content="#0a0a0a"' not in html
+
+
 def test_main_uses_icon_bulk_off_on_compact() -> None:
     src = _MAIN_TS.read_text(encoding="utf-8")
     assert "createGlobalBulkOffButton()" in src
@@ -461,6 +489,12 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert "ep1HeaderStatusFromUiState(state)" in src
     assert "formatDeviceIdentityTooltip" in src
     assert "function deviceIdentityTooltip" not in src
+    assert 'THEME_COLOR_LIGHT = "#ffffff"' in src
+    assert 'THEME_COLOR_DARK = "#15171a"' in src
+    assert "dark ? THEME_COLOR_DARK : THEME_COLOR_LIGHT" in src
+    assert "querySelectorAll('meta[name=\"theme-color\"]')" in src
+    assert 'removeAttribute("media")' in src
+    assert 'content", dark ? "#15171a" : "#0a0a0a"' not in src
     assert 'className = "tile-header-end-icons"' in src
     assert "MOCK_EP1_HEADER_STATUS" not in src
     assert "TODO(ep1-header-live)" not in src

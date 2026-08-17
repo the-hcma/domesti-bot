@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <title>domesti-bot</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0a0a0a">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#15171a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="manifest" href="/static/manifest.webmanifest">
@@ -89,13 +90,15 @@
     html, body { margin: 0; padding: 0; background: var(--canvas-bg); color: var(--fg);
       font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       -webkit-text-size-adjust: 100%; }
-    main { max-width: 960px; margin: 4vh auto; padding: 24px; }
+    main { max-width: 960px; margin: 4vh auto; padding: 24px;
+      background: var(--canvas-bg); }
     h1, h2, h3, h4 { margin: 0; }
     h3 { font-size: 15px; }
     p { margin: 8px 0; color: var(--muted); }
 
     /* Devices panel — populated by /static/dist/main.js */
-    #app { display: flex; flex-direction: column; gap: 18px; }
+    #app { display: flex; flex-direction: column; gap: 18px;
+      background: var(--canvas-bg); }
     .tile-header { display: flex; flex-wrap: wrap; align-items: center;
       justify-content: space-between; gap: 8px 12px; padding: 0 4px; }
     .tile-header-sparse { justify-content: space-between; width: 100%; }
@@ -137,11 +140,14 @@
       box-sizing: border-box; padding: 4px; color: var(--fg);
       min-width: 0; min-height: 0; line-height: 0;
     }
-    /* Occupied: accent green (same family as live climate). Clear: a light
-       silver that stays visible on the always-dark canvas in both themes —
-       ``var(--fg)`` in light appearance is near-black and disappears. */
+    /* Occupied: accent green (same family as live climate). Clear: silver on
+       the dark canvas; a darker gray in light/clear mode so the ghost stays
+       readable on the white panel (``var(--fg)`` is near-black and too heavy). */
     .ep1-header-occupancy-glyph[data-occupancy="occupied"] { color: var(--accent); }
     .ep1-header-occupancy-glyph[data-occupancy="clear"] { color: #646a72; }
+    html[data-theme="light"] .ep1-header-occupancy-glyph[data-occupancy="clear"] {
+      color: #4b5563;
+    }
     .ep1-header-occupancy-svg { display: block; width: 22px; height: 22px; }
     .ep1-header-occupancy-glyph[data-occupancy="clear"] .ep1-header-occupancy-fill {
       fill: currentColor;

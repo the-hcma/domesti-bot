@@ -70,6 +70,8 @@ const DEVICE_PROPERTIES_LONG_PRESS_MS = 500;
 const PWA_INSTALL_DISMISS_PERMANENT_KEY = "domesti-pwa-install-dismiss-permanent";
 const PWA_INSTALL_DISMISS_SESSION_KEY = "domesti-pwa-install-dismiss-session";
 
+const THEME_COLOR_DARK = "#15171a";
+const THEME_COLOR_LIGHT = "#ffffff";
 const THEME_STORAGE_KEY = "domesti-color-theme";
 
 /** Moon icon — shown when UI is light (control switches to dark). */
@@ -1046,17 +1048,16 @@ function applyStoredColorTheme(): void {
   } else {
     document.documentElement.setAttribute("data-theme", t);
   }
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta !== null) {
-    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const dark = t === ThemePreference.Dark || (t === null && systemDark);
-    meta.setAttribute("content", dark ? "#15171a" : "#0a0a0a");
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = t === ThemePreference.Dark || (t === null && systemDark);
+  const themeColor = dark ? THEME_COLOR_DARK : THEME_COLOR_LIGHT;
+  for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+    meta.removeAttribute("media");
+    meta.setAttribute("content", themeColor);
   }
   if (themeToggleSingleton !== null) {
-    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const darkNow = t === ThemePreference.Dark || (t === null && systemDark);
-    themeToggleSingleton.innerHTML = darkNow ? THEME_GLYPH_SUN_SVG : THEME_GLYPH_MOON_SVG;
-    const title = darkNow
+    themeToggleSingleton.innerHTML = dark ? THEME_GLYPH_SUN_SVG : THEME_GLYPH_MOON_SVG;
+    const title = dark
       ? "Switch to light appearance"
       : "Switch to dark appearance";
     themeToggleSingleton.title = title;

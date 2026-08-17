@@ -17,6 +17,7 @@ export interface DeviceIdentityTooltipSource {
 }
 
 export interface DeviceIdentityTooltipOptions {
+  blankLineAfterLabel?: boolean;
   includeLabel?: boolean;
   includePropertiesHint?: boolean;
 }
@@ -32,7 +33,15 @@ export function formatDeviceIdentityTooltip(
   if (options?.includeLabel === true) {
     const label = (device.label ?? "").trim();
     if (label !== "") {
-      lines.push(label);
+      // Tile hover puts a blank line after the properties hint. Header
+      // device-row hover opts into the same spacer; occupancy hover does
+      // not — that tooltip already inserts a blank before each identity
+      // block and would otherwise get a second blank after the label.
+      if (options.blankLineAfterLabel === true) {
+        lines.push(label, "");
+      } else {
+        lines.push(label);
+      }
     }
   }
   lines.push(`MAC address: ${device.mac_address}`);
