@@ -269,20 +269,13 @@ function templateToCondition(
   };
 }
 
-/** One option per SSID; prefer ``preferredBssid`` when several BSSIDs share a name. */
+/** One option per SSID (BSSID is telemetry only). */
 function uniqueWifiNetworksBySsid(
   networks: Iterable<{ wifi_bssid: string; wifi_ssid: string }>,
-  preferredBssid: string | null,
 ): { wifi_bssid: string; wifi_ssid: string }[] {
   const bySsid = new Map<string, { wifi_bssid: string; wifi_ssid: string }>();
   for (const network of networks) {
-    const existing = bySsid.get(network.wifi_ssid);
-    if (existing === undefined) {
-      bySsid.set(network.wifi_ssid, network);
-    } else if (
-      preferredBssid !== null
-      && network.wifi_bssid === preferredBssid
-    ) {
+    if (!bySsid.has(network.wifi_ssid)) {
       bySsid.set(network.wifi_ssid, network);
     }
   }
@@ -1858,55 +1851,44 @@ class RulesHubController {
     sharedWifiSelect.append(noneOption);
 
     const householdMembers = rosterUsers.filter((user) => user.is_household);
-    const networkByBssid = new Map<string, { wifi_bssid: string; wifi_ssid: string }>();
+    const networkBySsid = new Map<string, { wifi_bssid: string; wifi_ssid: string }>();
     for (const user of householdMembers) {
       try {
         const networks = await this.dataSource.listUserObservedWifi(user.user_id);
         for (const network of networks) {
-          networkByBssid.set(network.wifi_bssid, {
-            wifi_bssid: network.wifi_bssid,
-            wifi_ssid: network.wifi_ssid,
-          });
+          if (!networkBySsid.has(network.wifi_ssid)) {
+            networkBySsid.set(network.wifi_ssid, {
+              wifi_bssid: network.wifi_bssid,
+              wifi_ssid: network.wifi_ssid,
+            });
+          }
         }
       } catch (err) {
         console.warn("Failed to load observed WiFi networks", err);
       }
     }
-    let sharedBssid: string | null = null;
     let sharedSsid: string | null = null;
     for (const user of householdMembers) {
-      if (user.home_wifi_ssid !== null || user.home_wifi_bssid !== null) {
-        sharedBssid = user.home_wifi_bssid;
+      if (user.home_wifi_ssid !== null) {
         sharedSsid = user.home_wifi_ssid;
         break;
       }
     }
-    if (sharedSsid !== null) {
-      const syntheticBssid = sharedBssid ?? `ssid:${sharedSsid}`;
-      if (![...networkByBssid.values()].some((row) => row.wifi_ssid === sharedSsid)) {
-        networkByBssid.set(syntheticBssid, {
-          wifi_bssid: syntheticBssid,
-          wifi_ssid: sharedSsid,
-        });
-      }
+    if (sharedSsid !== null && !networkBySsid.has(sharedSsid)) {
+      networkBySsid.set(sharedSsid, {
+        wifi_bssid: "",
+        wifi_ssid: sharedSsid,
+      });
     }
-    for (const network of uniqueWifiNetworksBySsid(
-      networkByBssid.values(),
-      sharedBssid,
-    )) {
+    for (const network of uniqueWifiNetworksBySsid(networkBySsid.values())) {
       const option = document.createElement("option");
-      option.value = network.wifi_bssid;
+      option.value = network.wifi_ssid;
       option.textContent = network.wifi_ssid;
       option.dataset.ssid = network.wifi_ssid;
       sharedWifiSelect.append(option);
     }
     if (sharedSsid !== null) {
-      const match = [...sharedWifiSelect.options].find(
-        (option) => option.dataset.ssid === sharedSsid,
-      );
-      if (match !== undefined) {
-        sharedWifiSelect.value = match.value;
-      }
+      sharedWifiSelect.value = sharedSsid;
     }
 
     const saveRow = document.createElement("div");
@@ -1955,14 +1937,13 @@ class RulesHubController {
       }
       existingSsids.add(option.dataset.ssid ?? option.textContent ?? "");
     }
-    const preferredBssid = select.value === "" ? null : select.value;
-    for (const network of uniqueWifiNetworksBySsid(networks, preferredBssid)) {
+    for (const network of uniqueWifiNetworksBySsid(networks)) {
       if (existingSsids.has(network.wifi_ssid)) {
         continue;
       }
       existingSsids.add(network.wifi_ssid);
       const option = document.createElement("option");
-      option.value = network.wifi_bssid;
+      option.value = network.wifi_ssid;
       option.textContent = network.wifi_ssid;
       option.dataset.ssid = network.wifi_ssid;
       select.append(option);
@@ -2002,23 +1983,9 @@ class RulesHubController {
       savedLocation.home_label,
     );
 
-    const selected = home.sharedWifiSelect.options[home.sharedWifiSelect.selectedIndex];
     const selectedValue =
       home.sharedWifiSelect.value === "" ? null : home.sharedWifiSelect.value;
-    let wifiBssid: string | null = selectedValue;
-    let wifiSsid: string | null = null;
-    if (selectedValue !== null) {
-      const ssid = selected?.dataset.ssid;
-      if (ssid === undefined || ssid === "") {
-        showErrorToast("Selected WiFi option is missing SSID metadata.");
-        return;
-      }
-      wifiSsid = ssid;
-      // Synthetic option for SSID-only config (no real AP MAC).
-      if (selectedValue.startsWith("ssid:")) {
-        wifiBssid = null;
-      }
-    }
+    const wifiSsid = selectedValue;
 
     const failedLabels: string[] = [];
     for (const user of rosterUsers) {
@@ -2033,17 +2000,12 @@ class RulesHubController {
         }
         if (wantHousehold) {
           await this.dataSource.setUserHomeWifi(user.user_id, {
-            wifi_bssid: wifiBssid,
             wifi_ssid: wifiSsid,
           });
-          user.home_wifi_bssid = wifiBssid;
           user.home_wifi_ssid = wifiSsid;
-        } else if (
-          user.home_wifi_bssid !== null
-          || user.home_wifi_ssid !== null
-        ) {
+          user.home_wifi_bssid = null;
+        } else if (user.home_wifi_ssid !== null || user.home_wifi_bssid !== null) {
           const cleared = await this.dataSource.setUserHomeWifi(user.user_id, {
-            wifi_bssid: null,
             wifi_ssid: null,
           });
           user.home_wifi_bssid = cleared.home_wifi_bssid;

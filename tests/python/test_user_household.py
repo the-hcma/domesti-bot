@@ -53,10 +53,9 @@ def test_replace_users_preserves_home_wifi_and_household(tmp_path: Path) -> None
         db,
         "henrique",
         wifi_ssid="HomeNet",
-        wifi_bssid="aa:bb:cc:dd:ee:ff",
     )
     replace_users(db, [_henrique()])
     saved = list_users(db)[0]
     assert saved.is_household is True
     assert saved.home_wifi_ssid == "HomeNet"
-    assert saved.home_wifi_bssid == "aa:bb:cc:dd:ee:ff"
+    assert saved.home_wifi_bssid is None

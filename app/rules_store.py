@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models import RuleGeofence, RuleUser
 from app.db.session import discovery_session, discovery_write
-from app.presence_wifi import normalize_wifi_bssid
 from app.user_names import default_display_name, format_person_display_name, parse_person_name
 
 
@@ -99,19 +98,13 @@ def replace_users(path: Path, users: list[UserRecord]) -> int:
 
     def _write(session: Session) -> None:
         existing_rows = session.scalars(select(RuleUser)).all()
-        preserved_home_wifi: dict[str, tuple[str | None, str | None]] = {
-            row.user_id: (row.home_wifi_ssid, row.home_wifi_bssid) for row in existing_rows
-        }
+        preserved_home_ssid: dict[str, str | None] = {row.user_id: row.home_wifi_ssid for row in existing_rows}
         preserved_household: dict[str, bool] = {row.user_id: bool(row.is_household) for row in existing_rows}
         session.execute(delete(RuleUser))
         for user in users:
             home_wifi_ssid = user.home_wifi_ssid
-            home_wifi_bssid = user.home_wifi_bssid
-            if home_wifi_ssid is None and home_wifi_bssid is None:
-                home_wifi_ssid, home_wifi_bssid = preserved_home_wifi.get(
-                    user.user_id,
-                    (None, None),
-                )
+            if home_wifi_ssid is None:
+                home_wifi_ssid = preserved_home_ssid.get(user.user_id)
             is_household = preserved_household.get(user.user_id, user.is_household)
             session.add(
                 RuleUser(
@@ -122,7 +115,7 @@ def replace_users(path: Path, users: list[UserRecord]) -> int:
                     tracking_device_label=user.tracking_device_label,
                     enabled=1 if user.enabled else 0,
                     home_wifi_ssid=home_wifi_ssid,
-                    home_wifi_bssid=normalize_wifi_bssid(home_wifi_bssid),
+                    home_wifi_bssid=None,
                     is_household=1 if is_household else 0,
                     updated_at=now,
                 )
@@ -137,20 +130,13 @@ def set_user_home_wifi(
     user_id: str,
     *,
     wifi_ssid: str | None,
-    wifi_bssid: str | None,
 ) -> UserRecord:
-    """Persist the operator-selected home WiFi network for ``user_id``.
+    """Persist the operator-selected home WiFi SSID for ``user_id``.
 
-    Home identity is the SSID. BSSID is optional (diagnostics / preferred AP).
-    Clearing SSID clears BSSID as well.
+    Home identity is the SSID only. Any previously stored BSSID is cleared.
     """
     trimmed_user_id = user_id.strip()
-    normalized_bssid = normalize_wifi_bssid(wifi_bssid)
     trimmed_ssid = (wifi_ssid or "").strip() or None
-    if normalized_bssid is not None and trimmed_ssid is None:
-        raise ValueError("Expected wifi_ssid when wifi_bssid is set, got None")
-    if trimmed_ssid is None:
-        normalized_bssid = None
     now = time.time()
 
     def _write(session: Session) -> UserRecord:
@@ -158,7 +144,7 @@ def set_user_home_wifi(
         if row is None:
             raise KeyError(trimmed_user_id)
         row.home_wifi_ssid = trimmed_ssid
-        row.home_wifi_bssid = normalized_bssid
+        row.home_wifi_bssid = None
         row.updated_at = now
         return _user_to_record(row)
 

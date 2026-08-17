@@ -311,7 +311,7 @@ export class MockRulesDataSource implements RulesDataSource {
     }
     const updated: UserOut = {
       ...user,
-      home_wifi_bssid: homeWifi.wifi_bssid,
+      home_wifi_bssid: null,
       home_wifi_ssid: homeWifi.wifi_ssid,
     };
     return this.saveUser(updated);

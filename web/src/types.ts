@@ -802,7 +802,6 @@ export interface ObservedWifiNetworkOut {
 }
 
 export interface UserHomeWifiIn {
-  wifi_bssid: string | null;
   wifi_ssid: string | null;
 }
 

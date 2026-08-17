@@ -138,7 +138,6 @@ async def put_user_home_wifi(
             cache_path,
             trimmed_user_id,
             wifi_ssid=body.wifi_ssid,
-            wifi_bssid=body.wifi_bssid,
         )
     except KeyError as exc:
         raise HTTPException(

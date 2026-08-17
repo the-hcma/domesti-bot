@@ -1360,21 +1360,9 @@ class ObservedWifiNetworkOut(BaseModel):
 
 
 class UserHomeWifiIn(BaseModel):
-    """Operator-selected home WiFi for one user."""
+    """Operator-selected home WiFi SSID for one user."""
 
-    wifi_bssid: str | None = None
     wifi_ssid: str | None = None
-
-    @field_validator("wifi_bssid", mode="before")
-    @classmethod
-    def _normalize_home_wifi_bssid(cls, value: object) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise ValueError(
-                f"Expected str or None for wifi_bssid, got {type(value).__name__}",
-            )
-        return normalize_wifi_bssid(value)
 
     @field_validator("wifi_ssid", mode="before")
     @classmethod
@@ -1389,17 +1377,6 @@ class UserHomeWifiIn(BaseModel):
         if trimmed == "":
             return None
         return trimmed
-
-    @model_validator(mode="after")
-    def _validate_home_wifi_pair(self) -> Self:
-        has_bssid = self.wifi_bssid is not None
-        has_ssid = self.wifi_ssid is not None
-        if has_bssid and not has_ssid:
-            raise ValueError(
-                "Expected wifi_ssid when wifi_bssid is set, "
-                f"got wifi_bssid={self.wifi_bssid!r}, wifi_ssid={self.wifi_ssid!r}",
-            )
-        return self
 
 
 class UserHouseholdIn(BaseModel):
