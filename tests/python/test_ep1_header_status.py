@@ -461,6 +461,19 @@ def test_index_html_ep1_header_status_css_contract() -> None:
     assert "·" in metric_sep
 
 
+def test_index_html_theme_color_adapts_before_js() -> None:
+    html = _INDEX_HTML_PATH.read_text(encoding="utf-8")
+    assert (
+        'name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff"'
+        in html
+    )
+    assert (
+        'name="theme-color" media="(prefers-color-scheme: dark)" content="#15171a"'
+        in html
+    )
+    assert 'name="theme-color" content="#0a0a0a"' not in html
+
+
 def test_main_uses_icon_bulk_off_on_compact() -> None:
     src = _MAIN_TS.read_text(encoding="utf-8")
     assert "createGlobalBulkOffButton()" in src
@@ -482,6 +495,8 @@ def test_main_uses_icon_bulk_off_on_compact() -> None:
     assert 'THEME_COLOR_LIGHT = "#ffffff"' in src
     assert 'THEME_COLOR_DARK = "#15171a"' in src
     assert "dark ? THEME_COLOR_DARK : THEME_COLOR_LIGHT" in src
+    assert "querySelectorAll('meta[name=\"theme-color\"]')" in src
+    assert 'removeAttribute("media")' in src
     assert 'content", dark ? "#15171a" : "#0a0a0a"' not in src
     assert 'className = "tile-header-end-icons"' in src
     assert "MOCK_EP1_HEADER_STATUS" not in src
