@@ -19,12 +19,14 @@ For the tracking issue and field notes from the first Homey bring-up, see
 - **Person / ghost** glyph immediately right of the orange bulk-off button
   (occupied / clear). Occupied paints with `--accent` (green); clear uses a
   light silver on the dark canvas and a darker gray in light/clear mode so
-  the ghost stays visible on the white main panel. Desktop hover on the
-  climate/light readings or the occupancy glyph uses the same identity
-  block as tiles (label, then MAC and IP).
-  Multiple EP1s: occupied if any *responding* sensor is occupied, else clear
-  if any responding sensor is clear, else hidden (including when all EP1s
-  are stale)
+  the ghost stays visible on the white main panel. Glyphs are stroke
+  outlines (ghost keeps eye dots); live header metrics are bold. In light
+  appearance, live readings use a darker green than `--accent` so they
+  contrast on the white panel. Desktop hover on the climate/light readings
+  or the occupancy glyph uses the same identity block as tiles (label, then
+  MAC and IP). Multiple EP1s: occupied if any *responding* sensor is
+  occupied, else clear if any responding sensor is clear, else hidden
+  (including when all EP1s are stale)
 - Rule conditions: occupancy device-state and `ep1_reading_compare` (JSON-authored;
   see `automation-rules.json.example`)
 
