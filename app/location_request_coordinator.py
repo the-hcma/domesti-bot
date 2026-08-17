@@ -569,7 +569,7 @@ def _user_confidently_inside_via_home_wifi(
     home_row = next((row for row in users if row.user_id == user_id), None)
     if home_row is None:
         return False
-    if home_row.home_wifi_ssid is not None and normalize_wifi_ssid(location.wifi_ssid) is not None:
+    if normalize_wifi_ssid(home_row.home_wifi_ssid) is not None and normalize_wifi_ssid(location.wifi_ssid) is not None:
         if not wifi_ssids_match(location.wifi_ssid, home_row.home_wifi_ssid):
             return False
     else:
