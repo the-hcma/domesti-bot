@@ -130,32 +130,6 @@ def test_wifi_home_presence_applies_for_configured_home_ssid() -> None:
     )
 
 
-def test_wifi_home_presence_applies_for_legacy_home_bssid_without_ssid() -> None:
-    settings = _settings(wifi_home_geofence_id="house")
-    geofences = [_house_geofence()]
-    kwargs = {
-        "geofences": geofences,
-        "lat": 41.2000,
-        "lon": -73.9000,
-        "min_accuracy_m": _MIN_ACCURACY_M,
-        "home_wifi_bssid": "aa:bb:cc:dd:ee:ff",
-        "observed_wifi_bssid": "AA:BB:CC:DD:EE:FF",
-    }
-    assert wifi_home_presence_applies(settings, "house", "w", accuracy_m=500, **kwargs)
-    assert not wifi_home_presence_applies(
-        settings,
-        "house",
-        "w",
-        accuracy_m=500,
-        geofences=geofences,
-        lat=41.194085,
-        lon=-73.888365,
-        min_accuracy_m=_MIN_ACCURACY_M,
-        home_wifi_bssid="aa:bb:cc:dd:ee:ff",
-        observed_wifi_bssid="11:22:33:44:55:66",
-    )
-
-
 def test_wifi_home_presence_applies_for_low_accuracy_wifi_near_home() -> None:
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
@@ -185,40 +159,6 @@ def test_wifi_home_presence_applies_in_radius_slack_zone() -> None:
     )
 
 
-def test_wifi_home_presence_applies_when_observed_ssid_missing_uses_bssid() -> None:
-    """Home SSID configured but observation omits SSID → fall back to BSSID."""
-    settings = _settings(wifi_home_geofence_id="house")
-    geofences = [_house_geofence()]
-    assert wifi_home_presence_applies(
-        settings,
-        "house",
-        "w",
-        accuracy_m=48,
-        geofences=geofences,
-        lat=41.2000,
-        lon=-73.9000,
-        min_accuracy_m=_MIN_ACCURACY_M,
-        home_wifi_ssid="familia",
-        home_wifi_bssid="90:ca:fa:76:2a:d4",
-        observed_wifi_ssid=None,
-        observed_wifi_bssid="90:ca:fa:76:2a:d4",
-    )
-    assert not wifi_home_presence_applies(
-        settings,
-        "house",
-        "w",
-        accuracy_m=48,
-        geofences=geofences,
-        lat=41.2000,
-        lon=-73.9000,
-        min_accuracy_m=_MIN_ACCURACY_M,
-        home_wifi_ssid="familia",
-        home_wifi_bssid="90:ca:fa:76:2a:d4",
-        observed_wifi_ssid=None,
-        observed_wifi_bssid="11:22:33:44:55:66",
-    )
-
-
 def test_wifi_home_presence_does_not_apply_for_good_accuracy_wifi() -> None:
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
@@ -234,18 +174,36 @@ def test_wifi_home_presence_does_not_apply_for_good_accuracy_wifi() -> None:
     )
 
 
-def test_wifi_home_presence_legacy_home_bssid_skips_geo_fallback() -> None:
+def test_wifi_home_presence_ignores_bssid_for_membership() -> None:
+    """BSSID is diagnostics only: matching AP without home SSID is not inside."""
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
-    kwargs = {
-        "geofences": geofences,
-        "lat": _SLACK_ZONE_LAT,
-        "lon": _SLACK_ZONE_LON,
-        "min_accuracy_m": _MIN_ACCURACY_M,
-        "home_wifi_bssid": "aa:bb:cc:dd:ee:ff",
-        "observed_wifi_bssid": None,
-    }
-    assert not wifi_home_presence_applies(settings, "house", "w", accuracy_m=300, **kwargs)
+    assert not wifi_home_presence_applies(
+        settings,
+        "house",
+        "w",
+        accuracy_m=48,
+        geofences=geofences,
+        lat=41.2000,
+        lon=-73.9000,
+        min_accuracy_m=_MIN_ACCURACY_M,
+        home_wifi_bssid="aa:bb:cc:dd:ee:ff",
+        observed_wifi_bssid="AA:BB:CC:DD:EE:FF",
+    )
+    assert not wifi_home_presence_applies(
+        settings,
+        "house",
+        "w",
+        accuracy_m=48,
+        geofences=geofences,
+        lat=41.2000,
+        lon=-73.9000,
+        min_accuracy_m=_MIN_ACCURACY_M,
+        home_wifi_ssid="familia",
+        home_wifi_bssid="90:ca:fa:76:2a:d4",
+        observed_wifi_ssid=None,
+        observed_wifi_bssid="90:ca:fa:76:2a:d4",
+    )
 
 
 def test_wifi_home_presence_requires_coordinates_within_slack_radius() -> None:

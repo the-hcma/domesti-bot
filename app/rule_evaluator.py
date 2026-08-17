@@ -2872,7 +2872,7 @@ class RuleEvaluator:
             else:
                 self._geofence_geo_inside_streak_since.pop(key, None)
                 if wifi_dwell_inside:
-                    # Home WiFi SSID/BSSID match keeps the user inside despite GPS.
+                    # Home WiFi SSID match keeps the user inside despite GPS.
                     # Do not emit left or accumulate GPS-outside reconcile while matched.
                     self._geofence_geo_outside_streak_since.pop(key, None)
                 else:

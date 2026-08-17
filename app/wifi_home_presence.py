@@ -7,12 +7,7 @@ from collections.abc import Sequence
 from app.api.schemas import GeofenceOut, RuleOut, SettingsLocationOut
 from app.presence_connection_type import connection_type_is_wifi
 from app.presence_store import UserLocationRecord, _haversine_m, geofence_ids_containing_location
-from app.presence_wifi import (
-    normalize_wifi_bssid,
-    normalize_wifi_ssid,
-    wifi_bssids_match,
-    wifi_ssids_match,
-)
+from app.presence_wifi import normalize_wifi_ssid, wifi_ssids_match
 from app.rules_store import GeofenceRecord
 
 GeofencePresenceTarget = GeofenceRecord | GeofenceOut
@@ -210,26 +205,19 @@ def wifi_home_presence_applies(
     Resolution order:
 
     1. Configured home **SSID** — WiFi connection + observed SSID match
-       (mesh/repeaters OK; BSSID is ignored for membership when SSID is present).
-    2. Configured home **BSSID** — exact BSSID match when home SSID is unset, or
-       when home SSID is set but the observation omits SSID (hidden / blank).
-    3. Otherwise low-accuracy ``conn=w`` plus proximity slack from the geofence
+       (mesh/repeaters OK). BSSID is diagnostics only and is not used for
+       membership.
+    2. Otherwise low-accuracy ``conn=w`` plus proximity slack from the geofence
        center.
     """
+    del home_wifi_bssid, observed_wifi_bssid
     if geofence_id not in wifi_home_geofence_ids(settings, geofences):
         return False
     if not connection_type_is_wifi(connection_type):
         return False
     normalized_home_ssid = normalize_wifi_ssid(home_wifi_ssid)
-    observed_ssid = normalize_wifi_ssid(observed_wifi_ssid)
-    if normalized_home_ssid is not None and observed_ssid is not None:
-        return wifi_ssids_match(observed_wifi_ssid, normalized_home_ssid)
-    normalized_home_bssid = normalize_wifi_bssid(home_wifi_bssid)
-    if normalized_home_bssid is not None:
-        return wifi_bssids_match(observed_wifi_bssid, normalized_home_bssid)
     if normalized_home_ssid is not None:
-        # Home SSID configured, observation lacks SSID, and no home BSSID — not home.
-        return False
+        return wifi_ssids_match(observed_wifi_ssid, normalized_home_ssid)
     if not location_accuracy_is_low(accuracy_m, min_accuracy_m):
         return False
     for geofence in geofences:

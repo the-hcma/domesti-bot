@@ -1900,24 +1900,12 @@ class RulesHubController {
       option.dataset.ssid = network.wifi_ssid;
       sharedWifiSelect.append(option);
     }
-    if (sharedSsid !== null || sharedBssid !== null) {
-      // Prefer matching the configured SSID even when BSSID was collapsed.
-      const preferredSsid =
-        sharedSsid
-        ?? [...networkByBssid.values()].find((row) => row.wifi_bssid === sharedBssid)
-          ?.wifi_ssid
-        ?? null;
-      if (preferredSsid !== null) {
-        const match = [...sharedWifiSelect.options].find(
-          (option) => option.dataset.ssid === preferredSsid,
-        );
-        if (match !== undefined) {
-          sharedWifiSelect.value = match.value;
-        } else if (sharedBssid !== null) {
-          sharedWifiSelect.value = sharedBssid;
-        }
-      } else if (sharedBssid !== null) {
-        sharedWifiSelect.value = sharedBssid;
+    if (sharedSsid !== null) {
+      const match = [...sharedWifiSelect.options].find(
+        (option) => option.dataset.ssid === sharedSsid,
+      );
+      if (match !== undefined) {
+        sharedWifiSelect.value = match.value;
       }
     }
 
