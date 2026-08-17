@@ -2,30 +2,62 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import suppress
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 import pytest
+from prompt_toolkit.formatted_text import to_plain_text
 
+from app.androidtv_device_manager import AndroidTvDeviceManager
+from app.device_completion import CompletionAlias
+from app.device_display import format_device_display
 from app.domesti_bot_cli import (
     _COMMAND_HELP_LINES,
+    _FAMILY_BOOT_LABEL,
     COMMANDS,
+    COMPLETION_DISCOVERING_HINT,
+    DISCOVERY_FAILED_PREFIX,
+    DISCOVERY_IN_PROGRESS_MSG,
+    FAMILY_SKIPPED_NOT_LOADED,
+    REFRESH_DONE_PREFIX,
+    FamilyDiscoveryStatus,
     _ArgCtx,
+    _async_main,
+    _CliDiscoverySession,
     _CmdCtx,
     _collect_label_triples,
     _greedy_resolve_set_display_tokens,
+    _kasa_switch_aliases,
     _normalize_edit_mode_choice,
+    _parse_completion_alias_list,
     _parse_completion_buffer,
     _print_family_parallel_line,
     _repl_cmd_setup_secrets,
+    _ReplCompleter,
     _resolve_cli_target,
     _resolve_device_name,
     _Theme,
     build_arg_parser,
+    dispatch_repl_action,
     split_invocation,
 )
 from app.kasa_device_manager import KasaDeviceManager
+
+
+def test_parse_completion_alias_list_accepts_legacy_strings() -> None:
+    items = _parse_completion_alias_list(["Porch lights", "  ", 3])
+    assert items == [CompletionAlias(display="Porch lights", matches=())]
+
+
+def test_parse_completion_alias_list_reads_structured_items() -> None:
+    mac = "aa:bb:cc:dd:ee:10"
+    display = format_device_display(mac, "Porch lights")
+    items = _parse_completion_alias_list([{"display": display, "matches": [mac, "Porch lights"]}])
+    assert items == [CompletionAlias(display=display, matches=(mac, "Porch lights"))]
 
 
 @pytest.mark.parametrize(
@@ -292,3 +324,292 @@ async def test_show_devices_lists_vizio_tvs() -> None:
     assert "MAC address:" in text
     assert "00:bd:3e:d5:f0:11" in text
     assert "(on)" in text
+
+
+def test_kasa_switch_aliases_are_name_and_mac() -> None:
+    mac = "aa:bb:cc:dd:ee:10"
+
+    class _Switch:
+        identifier = mac
+        preferred_label = "Porch lights"
+
+    class _Kasa:
+        switches = (_Switch(),)
+
+    aliases = _kasa_switch_aliases(cast(KasaDeviceManager, _Kasa()))
+    assert aliases == [format_device_display(mac, "Porch lights")]
+    assert mac not in aliases
+
+
+def test_resolve_cli_target_accepts_formatted_display_and_mac() -> None:
+    mac = "aa:bb:cc:dd:ee:10"
+    display = format_device_display(mac, "Porch lights")
+    triples = [
+        (mac, "kasa", mac),
+        ("Porch lights", "kasa", mac),
+        (display, "kasa", mac),
+    ]
+    api, amb, meta = _resolve_cli_target(display, triples)
+    assert amb == []
+    assert api == mac
+    assert meta == ("kasa", mac)
+    api2, amb2, meta2 = _resolve_cli_target(mac, triples)
+    assert amb2 == []
+    assert api2 == mac
+    assert meta2 == ("kasa", mac)
+
+
+def test_resolve_cli_target_same_device_prefix_is_not_ambiguous() -> None:
+    mac = "aa:bb:cc:dd:ee:10"
+    display = format_device_display(mac, "Porch lights")
+    triples = [
+        (mac, "kasa", mac),
+        ("Porch lights", "kasa", mac),
+        (display, "kasa", mac),
+    ]
+    api, amb, meta = _resolve_cli_target("Porch", triples)
+    assert amb == []
+    assert api == mac
+    assert meta == ("kasa", mac)
+
+
+def test_resolve_cli_target_shared_prefix_across_devices_is_ambiguous() -> None:
+    mac1 = "aa:bb:cc:dd:ee:10"
+    mac2 = "aa:bb:cc:dd:ee:11"
+    display1 = format_device_display(mac1, "Porch lights")
+    display2 = format_device_display(mac2, "Porch heater")
+    triples = [
+        (mac1, "kasa", mac1),
+        ("Porch lights", "kasa", mac1),
+        (display1, "kasa", mac1),
+        (mac2, "kasa", mac2),
+        ("Porch heater", "kasa", mac2),
+        (display2, "kasa", mac2),
+    ]
+    api, amb, meta = _resolve_cli_target("Porch", triples)
+    assert api is None
+    assert meta is None
+    assert amb == sorted({display1, display2})
+
+
+def test_repl_completer_hints_when_any_gated_family_pending() -> None:
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    discovery = _CliDiscoverySession.from_args(args)
+    discovery.family_status["androidtv"] = FamilyDiscoveryStatus.READY
+
+    class _Switch:
+        identifier = "aa:bb:cc:dd:ee:10"
+        preferred_label = "Porch lights"
+
+    class _Android:
+        switches = (_Switch(),)
+
+    discovery.androidtv_mgr = cast(AndroidTvDeviceManager, _Android())
+    completer = _ReplCompleter(
+        androidtv=discovery.androidtv_mgr,
+        kasa=discovery.kasa_mgr,
+        sonos=None,
+        tailwind=None,
+        theme=_Theme(enabled=False),
+        discovery=discovery,
+    )
+    completions = list(completer.get_completions(Document("turn-off ", 9), CompleteEvent()))
+    assert len(completions) == 1
+    assert to_plain_text(completions[0].display) == COMPLETION_DISCOVERING_HINT
+
+
+def test_repl_completer_inserts_name_and_mac_for_mac_prefix() -> None:
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
+    mac = "aa:bb:cc:dd:ee:10"
+    display = format_device_display(mac, "Porch lights")
+
+    class _Switch:
+        identifier = mac
+        preferred_label = "Porch lights"
+
+    class _Kasa:
+        switches = (_Switch(),)
+
+    completer = _ReplCompleter(
+        androidtv=None,
+        kasa=cast(KasaDeviceManager, _Kasa()),
+        sonos=None,
+        tailwind=None,
+        theme=_Theme(enabled=False),
+    )
+    completions = list(completer.get_completions(Document("turn-off aa:bb", 14), CompleteEvent()))
+    assert [c.text for c in completions] == [display]
+
+
+def test_repl_completer_shows_discovering_hint_when_family_pending() -> None:
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    discovery = _CliDiscoverySession.from_args(args)
+    assert discovery.family_status["kasa"] is FamilyDiscoveryStatus.PENDING
+
+    completer = _ReplCompleter(
+        androidtv=None,
+        kasa=discovery.kasa_mgr,
+        sonos=None,
+        tailwind=None,
+        theme=_Theme(enabled=False),
+        discovery=discovery,
+    )
+    completions = list(completer.get_completions(Document("turn-off ", 9), CompleteEvent()))
+    assert len(completions) == 1
+    assert to_plain_text(completions[0].display) == COMPLETION_DISCOVERING_HINT
+
+
+@pytest.mark.asyncio
+async def test_dispatch_prints_discovery_in_progress_while_family_pending() -> None:
+    from contextlib import redirect_stderr
+    from io import StringIO
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    discovery = _CliDiscoverySession.from_args(args)
+    err = StringIO()
+    with redirect_stderr(err):
+        await dispatch_repl_action(
+            discovery.kasa_mgr,
+            None,
+            None,
+            None,
+            None,
+            None,
+            cache_path=None,
+            androidtv_zeroconf_timeout=1.0,
+            ep1_zeroconf_timeout=1.0,
+            theme=_Theme(enabled=False),
+            cmd="turn-off",
+            arg="Porch",
+            discovery=discovery,
+        )
+    assert DISCOVERY_IN_PROGRESS_MSG in err.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_refresh_prints_ep1_skipped_when_not_loaded() -> None:
+    from contextlib import redirect_stdout
+    from io import StringIO
+    from unittest.mock import AsyncMock, MagicMock
+
+    kasa = MagicMock()
+    kasa.disconnect = AsyncMock()
+    kasa.fetch = AsyncMock()
+    kasa.switches = ()
+    out = StringIO()
+    with redirect_stdout(out):
+        await dispatch_repl_action(
+            cast(KasaDeviceManager, kasa),
+            None,
+            None,
+            None,
+            None,
+            None,
+            cache_path=None,
+            androidtv_zeroconf_timeout=1.0,
+            ep1_zeroconf_timeout=1.0,
+            theme=_Theme(enabled=False),
+            cmd="refresh",
+            arg="",
+        )
+    text = out.getvalue()
+    assert f"{_FAMILY_BOOT_LABEL['ep1']}: skipped — {FAMILY_SKIPPED_NOT_LOADED}" in text
+    assert REFRESH_DONE_PREFIX in text
+
+
+@pytest.mark.asyncio
+async def test_async_main_marks_families_failed_when_discovery_raises(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    boom_started = asyncio.Event()
+
+    async def _boom(*_args: object, **_kwargs: object) -> None:
+        boom_started.set()
+        raise ValueError("Expected a host:port, got 192.168.1.50:")
+
+    async def _fake_cmd_loop(discovery: _CliDiscoverySession, *_args: object, **_kwargs: object) -> None:
+        await boom_started.wait()
+        assert all(status is FamilyDiscoveryStatus.FAILED for status in discovery.family_status.values())
+
+    async def _noop_shutdown(_state: object) -> None:
+        return None
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    with (
+        patch("app.domesti_bot_cli.bootstrap_device_managers", _boom),
+        patch("app.domesti_bot_cli._cmd_loop", _fake_cmd_loop),
+        patch("app.domesti_bot_cli.shutdown_device_managers", _noop_shutdown),
+    ):
+        await _async_main(args)
+    captured = capsys.readouterr()
+    assert DISCOVERY_FAILED_PREFIX in captured.out + captured.err
+    assert "Expected a host:port, got 192.168.1.50:" in captured.out + captured.err
+
+
+@pytest.mark.asyncio
+async def test_async_main_starts_prompt_before_discovery_finishes() -> None:
+    prompt_started = asyncio.Event()
+
+    async def _hanging_bootstrap(*_args: object, **_kwargs: object) -> None:
+        await asyncio.Event().wait()
+
+    async def _fake_cmd_loop(*_args: object, **_kwargs: object) -> None:
+        prompt_started.set()
+        await asyncio.Event().wait()
+
+    async def _noop_shutdown(_state: object) -> None:
+        return None
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    with (
+        patch("app.domesti_bot_cli.bootstrap_device_managers", _hanging_bootstrap),
+        patch("app.domesti_bot_cli._cmd_loop", _fake_cmd_loop),
+        patch("app.domesti_bot_cli.shutdown_device_managers", _noop_shutdown),
+    ):
+        task = asyncio.create_task(_async_main(args))
+        try:
+            await asyncio.wait_for(prompt_started.wait(), timeout=2.0)
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
+@pytest.mark.asyncio
+async def test_async_main_requests_kasa_vendor_alias_sync() -> None:
+    seen: dict[str, object] = {}
+    bootstrap_started = asyncio.Event()
+
+    async def _capture_bootstrap(*_args: object, **kwargs: object) -> None:
+        seen.update(kwargs)
+        bootstrap_started.set()
+
+    async def _fake_cmd_loop(*_args: object, **_kwargs: object) -> None:
+        await bootstrap_started.wait()
+
+    async def _noop_shutdown(_state: object) -> None:
+        return None
+
+    args = build_arg_parser().parse_args(["--no-discovery-cache"])
+    args.discovery_cache = None
+    with (
+        patch("app.domesti_bot_cli.bootstrap_device_managers", _capture_bootstrap),
+        patch("app.domesti_bot_cli._cmd_loop", _fake_cmd_loop),
+        patch("app.domesti_bot_cli.shutdown_device_managers", _noop_shutdown),
+    ):
+        await _async_main(args)
+    assert seen.get("sync_kasa_vendor_aliases") is True
+    assert seen.get("exit_if_empty") is False

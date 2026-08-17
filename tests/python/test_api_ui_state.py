@@ -28,6 +28,7 @@ from app import device_discovery_store
 from app.api.app import create_app
 from app.api.schemas import UIDeviceOut, UIFamilyOut, UIStateOut
 from app.api.ui_state import build_ui_state, find_kasa_by_host
+from app.device_display import format_device_display
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -491,6 +492,23 @@ def test_build_ui_state_exclusions_dont_cross_families(tmp_path: Path) -> None:
     families = {f.id: f for f in out.families}
     assert families["kasa"].devices[0].exclude_from_global is False
     assert families["tailwind"].devices[0].exclude_from_global is True
+
+
+def test_get_v1_completion_aliases_exposes_name_and_mac() -> None:
+    mac = "aa:bb:cc:dd:ee:10"
+    label = "Porch lights"
+    client, _app = _client()
+    runtime.device_state = _state(kasa_mgr=_fake_kasa_mgr([(mac, label, True)]))
+    runtime.discovery_error = None
+
+    response = client.get("/v1/completion-aliases")
+    assert response.status_code == HTTPStatus.OK
+    payload = response.json()
+    display = format_device_display(mac, label)
+    assert payload["switch"] == [
+        {"display": display, "matches": [mac, label]},
+    ]
+    assert mac not in [item["display"] for item in payload["switch"]]
 
 
 def test_get_v1_ui_state_returns_payload_when_state_is_set(tmp_path: Path) -> None:
