@@ -252,11 +252,13 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             used_discovery = True
             discovered = await discover_vizio_hosts_ssdp(timeout=self._discovery_timeout)
             for item in discovered:
+                cached_mac = self._cached_mac_for_host(item.host, item.port)
                 endpoint = VizioTvEndpoint(
                     host=item.host,
                     port=item.port,
                     display_name=item.name,
                     model=item.model or None,
+                    mac=cached_mac,
                 )
                 if self._matches_known_tv(endpoint, connected):
                     continue
@@ -542,11 +544,23 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             diid=endpoint.diid,
         )
 
+    def _cached_mac_for_host(self, host: str, port: int) -> str | None:
+        """Return a cached MAC for ``host:port`` so mac-keyed tokens resolve during SSDP."""
+
+        if self._discovery_cache_path is None:
+            return None
+        for cached_host, cached_port, _display, _model, mac, _diid in device_discovery_store.load_vizio_tvs(
+            self._discovery_cache_path
+        ):
+            if cached_host == host and cached_port == port:
+                return mac
+        return None
+
     def _initial_targets(self) -> list[VizioTvEndpoint]:
         out: list[VizioTvEndpoint] = []
         seen_ids: set[str] = set()
         seen_hosts: set[tuple[str, int]] = set()
-        if self._discovery_cache_path is not None:
+        if not self._force_discovery and self._discovery_cache_path is not None:
             for host, port, display, model, mac, diid in device_discovery_store.load_vizio_tvs(
                 self._discovery_cache_path
             ):
