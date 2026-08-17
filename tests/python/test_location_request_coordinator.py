@@ -45,7 +45,7 @@ def _fernet_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
 
 
-def _seed_db(db: Path) -> None:
+def _seed_db(db: Path, *, home_wifi_ssid: str | None = None) -> None:
     replace_users(
         db,
         [
@@ -57,7 +57,7 @@ def _seed_db(db: Path) -> None:
                 tracking_device_label="Pixel",
                 enabled=True,
                 home_wifi_bssid="aa:bb:cc:dd:ee:ff",
-                home_wifi_ssid="HomeNet",
+                home_wifi_ssid=home_wifi_ssid,
             ),
         ],
     )
@@ -279,7 +279,7 @@ async def test_coordinator_skips_when_wifi_home_ssid_matches(
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
     _write_edge_rule(bundle)
-    _seed_db(db)
+    _seed_db(db, home_wifi_ssid="HomeNet")
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
 
     now = 1_700_000_000.0

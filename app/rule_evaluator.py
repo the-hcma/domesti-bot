@@ -2871,33 +2871,38 @@ class RuleEvaluator:
                             )
             else:
                 self._geofence_geo_inside_streak_since.pop(key, None)
-                outside_streak_since = self._geofence_geo_outside_streak_since.get(key)
-                if outside_streak_since is None:
-                    outside_streak_since = observed_at
-                    self._geofence_geo_outside_streak_since[key] = outside_streak_since
-                if (
-                    was_inside or prior_was_inside
-                ) and observed_at - outside_streak_since >= _GEO_OUTSIDE_STATE_RECONCILE_S:
-                    if mutate_state:
-                        if was_inside or prior_was_inside:
-                            self._bump_geofence_presence_episode(user_id, geofence_id)
-                            episode_bumped = True
-                        self._geofence_was_inside[key] = False
-                        was_inside = False
-                        if track_dwell:
-                            self._drop_geofence_inside_since(key)
-                        self._set_geofence_outside_since(key, outside_streak_since)
-                        self._clear_deferred_accuracy_edges_for_geofence(
-                            user_id,
-                            geofence_id,
-                            event="left",
-                        )
-                        _log_geofence_outside_reconciled(
-                            geofence_id=geofence_id,
-                            streak_s=observed_at - outside_streak_since,
-                            user_id=user_id,
-                        )
-                        transition = GeofenceTransition(left=True)
+                if wifi_dwell_inside:
+                    # Home WiFi SSID/BSSID match keeps the user inside despite GPS.
+                    # Do not emit left or accumulate GPS-outside reconcile while matched.
+                    self._geofence_geo_outside_streak_since.pop(key, None)
+                else:
+                    outside_streak_since = self._geofence_geo_outside_streak_since.get(key)
+                    if outside_streak_since is None:
+                        outside_streak_since = observed_at
+                        self._geofence_geo_outside_streak_since[key] = outside_streak_since
+                    if (
+                        was_inside or prior_was_inside
+                    ) and observed_at - outside_streak_since >= _GEO_OUTSIDE_STATE_RECONCILE_S:
+                        if mutate_state:
+                            if was_inside or prior_was_inside:
+                                self._bump_geofence_presence_episode(user_id, geofence_id)
+                                episode_bumped = True
+                            self._geofence_was_inside[key] = False
+                            was_inside = False
+                            if track_dwell:
+                                self._drop_geofence_inside_since(key)
+                            self._set_geofence_outside_since(key, outside_streak_since)
+                            self._clear_deferred_accuracy_edges_for_geofence(
+                                user_id,
+                                geofence_id,
+                                event="left",
+                            )
+                            _log_geofence_outside_reconciled(
+                                geofence_id=geofence_id,
+                                streak_s=observed_at - outside_streak_since,
+                                user_id=user_id,
+                            )
+                            transition = GeofenceTransition(left=True)
             if gps_inside and not was_inside:
                 outside_since = self._geofence_outside_since.get(key)
                 dwell_elapsed = outside_since is None or (observed_at - outside_since >= _MIN_GEOFENCE_OUTSIDE_DWELL_S)

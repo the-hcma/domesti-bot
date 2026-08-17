@@ -16,6 +16,7 @@ from app.api.schemas import (
     RuleOut,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
+    UsersOutsideGeofenceForSCondition,
 )
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
@@ -87,6 +88,10 @@ def _seed_db(
     accuracy_m: int | None,
     connection_type: str | None = None,
     fix_at: float | None = None,
+    home_wifi_bssid: str | None = None,
+    home_wifi_ssid: str | None = None,
+    wifi_bssid: str | None = None,
+    wifi_ssid: str | None = None,
 ) -> None:
     fix_epoch = reported_at if fix_at is None else fix_at
     replace_users(
@@ -99,6 +104,8 @@ def _seed_db(
                 display_name="Test",
                 tracking_device_label="Phone",
                 enabled=True,
+                home_wifi_bssid=home_wifi_bssid,
+                home_wifi_ssid=home_wifi_ssid,
             ),
         ],
     )
@@ -127,6 +134,8 @@ def _seed_db(
             fix_at=fix_epoch,
             reported_at=reported_at,
             source="test",
+            wifi_bssid=wifi_bssid,
+            wifi_ssid=wifi_ssid,
         ),
         retention=default_location_history_retention(),
     )
@@ -425,6 +434,130 @@ async def test_wifi_home_seeds_dwell_inside_since_for_low_accuracy_wifi(
         if call.args and "wifi home presence overrode low-accuracy location" in str(call.args[0])
     ]
     assert override_logs
+
+
+@pytest.mark.asyncio
+async def test_wifi_home_ssid_suppresses_gps_outside_leave(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GPS jump while home SSID matches must not emit leave (2026-08-17 / mesh)."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    away_rule = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                UsersOutsideGeofenceForSCondition(
+                    type="users_outside_geofence_for_s",
+                    geofence_id="house",
+                    min_outside_s=300,
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="away-dwell",
+        label="Away dwell",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.EDGE_TRUE],
+    )
+    _write_bundle(bundle, away_rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        fix_at=clock["now"] - 400.0,
+        reported_at=clock["now"] - 400.0,
+        accuracy_m=20,
+        home_wifi_ssid="familia",
+        home_wifi_bssid="90:ca:fa:76:2a:d4",
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: clock["now"],
+    )
+    await evaluator.on_location_update("henrique")
+    assert evaluator._geofence_was_inside.get(("henrique", "house")) is True
+
+    # GPS jump ~555 m outside while still on home SSID (different mesh BSSID).
+    clock["now"] += 60.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.1990,
+            lon=-73.888325,
+            accuracy_m=48,
+            connection_type="w",
+            fix_at=clock["now"],
+            reported_at=clock["now"],
+            source="test",
+            wifi_ssid="familia",
+            wifi_bssid="90:ca:fa:76:2a:d0",
+        ),
+        retention=default_location_history_retention(),
+    )
+    with patch("app.rule_evaluator._LOGGER.debug") as debug_mock:
+        await evaluator.on_location_update("henrique")
+
+    left_logs = [
+        call
+        for call in debug_mock.call_args_list
+        if call.args
+        and call.args[0] == "[rules] geofence transition user_id=%s geofence_id=%s event=%s"
+        and call.args[3] == "left"
+    ]
+    assert left_logs == []
+    assert evaluator._geofence_was_inside.get(("henrique", "house")) is True
+    assert ("henrique", "house") not in evaluator.geofence_outside_since_snapshot()
+
+    # Past GPS-outside reconcile window; SSID must still suppress leave.
+    clock["now"] += 700.0
+    upsert_user_location(
+        db,
+        UserLocationRecord(
+            user_id="henrique",
+            lat=41.1990,
+            lon=-73.888325,
+            accuracy_m=48,
+            connection_type="w",
+            fix_at=clock["now"],
+            reported_at=clock["now"],
+            source="test",
+            wifi_ssid="familia",
+            wifi_bssid="90:ca:fa:76:2a:d0",
+        ),
+        retention=default_location_history_retention(),
+    )
+    with (
+        patch("app.rule_evaluator._LOGGER.info") as info_mock,
+        patch("app.rule_evaluator._LOGGER.debug") as debug_mock,
+    ):
+        await evaluator.on_location_update("henrique")
+
+    outside_reconciled = [
+        call for call in info_mock.call_args_list if call.args and "geofence outside reconciled" in str(call.args[0])
+    ]
+    left_logs = [
+        call
+        for call in debug_mock.call_args_list
+        if call.args
+        and call.args[0] == "[rules] geofence transition user_id=%s geofence_id=%s event=%s"
+        and call.args[3] == "left"
+    ]
+    assert outside_reconciled == []
+    assert left_logs == []
+    assert evaluator._geofence_was_inside.get(("henrique", "house")) is True
+    assert ("henrique", "house") not in evaluator.geofence_outside_since_snapshot()
 
 
 @pytest.mark.asyncio

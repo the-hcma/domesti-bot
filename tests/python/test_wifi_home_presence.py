@@ -156,20 +156,6 @@ def test_wifi_home_presence_applies_for_legacy_home_bssid_without_ssid() -> None
     )
 
 
-def test_wifi_home_presence_legacy_home_bssid_skips_geo_fallback() -> None:
-    settings = _settings(wifi_home_geofence_id="house")
-    geofences = [_house_geofence()]
-    kwargs = {
-        "geofences": geofences,
-        "lat": _SLACK_ZONE_LAT,
-        "lon": _SLACK_ZONE_LON,
-        "min_accuracy_m": _MIN_ACCURACY_M,
-        "home_wifi_bssid": "aa:bb:cc:dd:ee:ff",
-        "observed_wifi_bssid": None,
-    }
-    assert not wifi_home_presence_applies(settings, "house", "w", accuracy_m=300, **kwargs)
-
-
 def test_wifi_home_presence_applies_for_low_accuracy_wifi_near_home() -> None:
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
@@ -182,6 +168,21 @@ def test_wifi_home_presence_applies_for_low_accuracy_wifi_near_home() -> None:
     }
     assert wifi_home_presence_applies(settings, "house", "w", **kwargs)
     assert not wifi_home_presence_applies(settings, "house", "m", **kwargs)
+
+
+def test_wifi_home_presence_applies_in_radius_slack_zone() -> None:
+    settings = _settings(wifi_home_geofence_id="house")
+    geofences = [_house_geofence()]
+    assert wifi_home_presence_applies(
+        settings,
+        "house",
+        "w",
+        geofences=geofences,
+        lat=_SLACK_ZONE_LAT,
+        lon=_SLACK_ZONE_LON,
+        accuracy_m=300,
+        min_accuracy_m=_MIN_ACCURACY_M,
+    )
 
 
 def test_wifi_home_presence_does_not_apply_for_good_accuracy_wifi() -> None:
@@ -199,19 +200,18 @@ def test_wifi_home_presence_does_not_apply_for_good_accuracy_wifi() -> None:
     )
 
 
-def test_wifi_home_presence_applies_in_radius_slack_zone() -> None:
+def test_wifi_home_presence_legacy_home_bssid_skips_geo_fallback() -> None:
     settings = _settings(wifi_home_geofence_id="house")
     geofences = [_house_geofence()]
-    assert wifi_home_presence_applies(
-        settings,
-        "house",
-        "w",
-        geofences=geofences,
-        lat=_SLACK_ZONE_LAT,
-        lon=_SLACK_ZONE_LON,
-        accuracy_m=300,
-        min_accuracy_m=_MIN_ACCURACY_M,
-    )
+    kwargs = {
+        "geofences": geofences,
+        "lat": _SLACK_ZONE_LAT,
+        "lon": _SLACK_ZONE_LON,
+        "min_accuracy_m": _MIN_ACCURACY_M,
+        "home_wifi_bssid": "aa:bb:cc:dd:ee:ff",
+        "observed_wifi_bssid": None,
+    }
+    assert not wifi_home_presence_applies(settings, "house", "w", accuracy_m=300, **kwargs)
 
 
 def test_wifi_home_presence_requires_coordinates_within_slack_radius() -> None:
