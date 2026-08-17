@@ -325,7 +325,7 @@ class LocationRequestCoordinator:
         if _user_confidently_inside_via_home_wifi(cache_path, trimmed, location):
             if log_skips:
                 _LOGGER.debug(
-                    "location request skipped user=%s reason=wifi_home_bssid",
+                    "location request skipped user=%s reason=wifi_home_ssid",
                     trimmed,
                 )
             return None
