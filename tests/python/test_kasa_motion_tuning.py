@@ -251,7 +251,9 @@ async def test_read_kasa_motion_tuning_returns_snapshot() -> None:
         KasaAmbientBrightnessPreset(name="custom", value=94),
     )
     assert KasaPirRange.MID in snap.pir_range_choices
-    update = kd._kDevice.update
+    backend = kd.kasa_protocol_device()
+    assert backend is not None
+    update = backend.update
     assert isinstance(update, AsyncMock)
     update.assert_awaited()
     del motion, ambient

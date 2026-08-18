@@ -45,7 +45,11 @@ def _client() -> tuple[TestClient, FastAPI]:
     return TestClient(app), app
 
 
-def _fake_kasa_mgr(devices: list[tuple[str, str, bool]]) -> KasaDeviceManager:
+def _fake_kasa_mgr(
+    devices: list[tuple[str, str, bool]],
+    *,
+    unresponsive_ids: frozenset[str] = frozenset(),
+) -> KasaDeviceManager:
     """Return a Mock manager whose ``.switches`` is the supplied tuples.
 
     Each input tuple is ``(identifier, preferred_label, is_on)``. ``identifier``
@@ -64,6 +68,7 @@ def _fake_kasa_mgr(devices: list[tuple[str, str, bool]]) -> KasaDeviceManager:
         kd.mac_address = ident
         kd.preferred_label = label
         kd.is_on = is_on
+        kd.unresponsive = ident in unresponsive_ids
         fakes.append(kd)
     mgr = MagicMock(spec=KasaDeviceManager)
     mgr.switches = tuple(fakes)
@@ -231,8 +236,10 @@ def test_build_ui_state_emits_only_kasa_family_when_tailwind_manager_absent() ->
 
 
 def test_build_ui_state_marks_unresponsive_kasa_unknown() -> None:
-    mgr = _fake_kasa_mgr([("aa:bb:cc:dd:ee:01", "Desk", True)])
-    mgr.switches[0].unresponsive = True
+    mgr = _fake_kasa_mgr(
+        [("aa:bb:cc:dd:ee:01", "Desk", True)],
+        unresponsive_ids=frozenset({"aa:bb:cc:dd:ee:01"}),
+    )
     out = build_ui_state(_state(kasa_mgr=mgr), cache_path=None)
     device = out.families[0].devices[0]
     assert device.unresponsive is True

@@ -307,27 +307,36 @@ class KasaDevice(SwitchDevice):
             return (self._kDevice.host or "").strip()
         return self._host
 
+    def kasa_protocol_device(self) -> KDevice | None:
+        """Return the python-kasa session, or ``None`` when the tile is ARP-only."""
+
+        return self._kDevice
+
     @property
     def mac_address(self) -> str:
         return self._mac_address
 
-    async def turn_off(self) -> None:
-        if self._kDevice is None:
+    def require_kasa_protocol_device(self) -> KDevice:
+        """Return the python-kasa session, or raise when the tile is ARP-only."""
+
+        backend = self._kDevice
+        if backend is None:
             raise ConnectionError(
                 f"Expected a reachable Kasa device for {self.identifier}, got unresponsive LAN neighbor"
             )
-        await self._kDevice.turn_off()
+        return backend
+
+    async def turn_off(self) -> None:
+        backend = self.require_kasa_protocol_device()
+        await backend.turn_off()
         # Trust the commanded state. python-kasa often leaves ``is_on`` stale
         # until the next ``update()``; Vizio/Sonos/Tailwind pin cache the same way.
         self.set_power(False)
         self.set_unresponsive(False)
 
     async def turn_on(self) -> None:
-        if self._kDevice is None:
-            raise ConnectionError(
-                f"Expected a reachable Kasa device for {self.identifier}, got unresponsive LAN neighbor"
-            )
-        await self._kDevice.turn_on()
+        backend = self.require_kasa_protocol_device()
+        await backend.turn_on()
         self.set_power(True)
         self.set_unresponsive(False)
 

@@ -342,7 +342,7 @@ async def test_maybe_sync_reloads_and_restarts_watchers_on_drift(
             changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
 
     assert changed is True
-    assert {kd._kDevice.host for kd in mgr.switches} == {
+    assert {kd.host for kd in mgr.switches} == {
         "192.168.1.10",
         "192.168.1.20",
     }

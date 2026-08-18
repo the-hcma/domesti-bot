@@ -67,7 +67,7 @@ async def test_fetch_keeps_all_devices_even_when_aliases_collide(
     # All three devices must be reachable (the bug dropped the second
     # ``"Plug"`` because its identifier collided with the first).
     assert len(mgr.switches) == 3
-    hosts = {kd._kDevice.host for kd in mgr.switches}
+    hosts = {kd.host for kd in mgr.switches}
     assert hosts == {"192.168.1.10", "192.168.1.11", "192.168.1.12"}
 
     # Each host must be a usable lookup key.
