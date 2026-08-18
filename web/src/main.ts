@@ -95,7 +95,7 @@ const ABOUT_LICENSE = "Open-source software under the MIT License.";
 const ABOUT_REPO_LABEL = "github.com/the-hcma/domesti-bot";
 /** Public About-dialog lead; tests import this instead of duplicating the copy. */
 export const ABOUT_TAGLINE =
-  "Self-hosted home LAN dashboard for TP-Link Kasa, Sonos, GoTailwind garage doors, Everything Presence One, Vizio TVs, and Google Cast (temporarily disabled).";
+  "Self-hosted home LAN dashboard for TP-Link Kasa, Sonos, GoTailwind garage doors, Everything Presence One, Vizio TVs, and Google Cast (Chromecast and Google TV; temporarily disabled).";
 const DOMESTI_BOT_REPO_HREF = "https://github.com/the-hcma/domesti-bot";
 
 let domestiUiController: DomestiBotController | null = null;
