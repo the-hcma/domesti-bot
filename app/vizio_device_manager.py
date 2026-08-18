@@ -13,6 +13,7 @@ import aiohttp
 
 from app import device_discovery_store
 from app.db.secrets import (
+    SecretsConfigurationError,
     SecretsDecryptError,
     load_vizio_auth_hosts_from_db,
     load_vizio_auth_token_from_db,
@@ -517,6 +518,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 endpoint.device_id,
             )
             return None
+        leftover_by_mac = {mac: leftover_token for mac, leftover_token in leftovers}
         probe = VizioTvEndpoint(
             host=endpoint.host,
             port=endpoint.port,
@@ -525,18 +527,21 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             mac=None,
             diid=endpoint.diid,
         )
-        for expected_mac, leftover_token in leftovers:
-            tv, _unreachable = await self._connect_target(probe, leftover_token)
-            if tv is None:
-                continue
-            if tv.mac_address == expected_mac:
-                return tv
-            with contextlib.suppress(Exception):
-                await tv._client.aclose()
-        _LOGGER.info(
-            "Skipping Vizio TV %s — leftover SmartCast tokens did not match",
-            endpoint.device_id,
-        )
+        mac = await self._unauthenticated_tv_mac(probe)
+        leftover_token = leftover_by_mac.get(mac) if mac else None
+        if leftover_token is None:
+            _LOGGER.info(
+                "Skipping Vizio TV %s — leftover SmartCast tokens did not match",
+                endpoint.device_id,
+            )
+            return None
+        tv, _unreachable = await self._connect_target(probe, leftover_token)
+        if tv is None:
+            return None
+        if tv.mac_address == mac:
+            return tv
+        with contextlib.suppress(Exception):
+            await tv._client.aclose()
         return None
 
     async def _connect_target(
@@ -697,7 +702,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     mac=mac,
                     host=None,
                 )
-            except SecretsDecryptError:
+            except (SecretsConfigurationError, SecretsDecryptError):
                 continue
             if not token:
                 continue
@@ -824,6 +829,32 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             return True
         except (TimeoutError, OSError):
             return False
+
+    async def _unauthenticated_tv_mac(self, endpoint: VizioTvEndpoint) -> str | None:
+        """Read the TV MAC from SmartCast deviceinfo without a pairing token."""
+
+        if not await self._smartcast_port_open(endpoint):
+            return None
+        client = VizioSmartCastClient(
+            endpoint.host,
+            port=endpoint.port,
+            auth_token="",
+            session=self._session,
+        )
+        try:
+            info = await client.fetch_deviceinfo()
+        except (
+            TimeoutError,
+            OSError,
+            aiohttp.ClientError,
+            VizioSmartCastAuthError,
+            VizioSmartCastConnectionError,
+        ):
+            return None
+        mac = info.mac
+        if mac is None:
+            mac = await resolve_vizio_tv_mac(client, host=endpoint.host)
+        return try_normalize_mac(mac) if mac else None
 
     async def _unreachable_tv(
         self,

@@ -9,7 +9,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from app import device_discovery_store
-from app.db.secrets import save_vizio_auth_token_to_db
+from app.db.secrets import SecretsConfigurationError, save_vizio_auth_token_to_db
 from app.vizio_credentials import migrate_vizio_auth_token_host_to_mac
 from app.vizio_device_manager import (
     VizioDeviceManager,
@@ -18,7 +18,9 @@ from app.vizio_device_manager import (
 )
 from app.vizio_discovery import VizioDiscoveredHost
 from app.vizio_smartcast_client import (
+    VizioDeviceInfoSnapshot,
     VizioSmartCastAuthError,
+    VizioSmartCastClient,
     VizioSmartCastConnectionError,
 )
 
@@ -385,6 +387,12 @@ async def test_rediscover_recovers_ssdp_host_using_leftover_mac_token(
         host=None,
         token="kitchen-token",
     )
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:22",
+        host=None,
+        token="den-token",
+    )
     mgr = VizioDeviceManager(
         configured_hosts=[],
         discovery_cache_path=db,
@@ -415,6 +423,15 @@ async def test_rediscover_recovers_ssdp_host_using_leftover_mac_token(
             model="V505M-K09",
         )
     ]
+    connect = AsyncMock(return_value=fake_tv)
+    deviceinfo = AsyncMock(
+        return_value=VizioDeviceInfoSnapshot(
+            model_name="V505M-K09",
+            cast_name="Kitchen TV",
+            diid="",
+            mac="00:bd:3e:d5:f0:11",
+        )
+    )
     with (
         patch(
             "app.vizio_device_manager.lookup_mac_via_arp",
@@ -429,8 +446,12 @@ async def test_rediscover_recovers_ssdp_host_using_leftover_mac_token(
         patch.object(
             VizioDeviceManager,
             "_connect_endpoint",
-            new_callable=AsyncMock,
-            return_value=fake_tv,
+            connect,
+        ),
+        patch.object(
+            VizioSmartCastClient,
+            "fetch_deviceinfo",
+            deviceinfo,
         ),
         patch(
             "app.vizio_device_manager.discover_vizio_hosts_ssdp",
@@ -439,6 +460,8 @@ async def test_rediscover_recovers_ssdp_host_using_leftover_mac_token(
         ),
     ):
         await mgr.rediscover()
+    connect.assert_awaited_once()
+    deviceinfo.assert_awaited_once()
     assert len(mgr.tvs) == 1
     assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
     assert device_discovery_store.load_vizio_tvs(db)[0][4] == "00:bd:3e:d5:f0:11"
@@ -623,6 +646,49 @@ async def test_rediscover_runs_fetch_again(tmp_path: Path) -> None:
         assert ssdp.await_count == 1
     assert len(mgr.tvs) == 1
     assert mgr.last_discovery_source == "discovery"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_rediscover_skips_leftover_tokens_when_secrets_key_is_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cache.sqlite"
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token=None,
+        env_auth_token=None,
+    )
+    discovered = [
+        VizioDiscoveredHost(
+            host="192.168.86.201",
+            port=7345,
+            name="Kitchen TV",
+            model="V505M-K09",
+        )
+    ]
+    with (
+        patch(
+            "app.vizio_device_manager.load_vizio_auth_token_from_db",
+            side_effect=SecretsConfigurationError("malformed Fernet key"),
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            new_callable=AsyncMock,
+            return_value=discovered,
+        ),
+    ):
+        await mgr.rediscover()
+    assert mgr.tvs == ()
     await mgr.disconnect()
 
 
