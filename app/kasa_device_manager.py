@@ -633,6 +633,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         rows: list[tuple[str, str | None, dict[str, Any], bool, str | None]] = []
         seen_hosts: set[str] = set()
         seen_ids: set[int] = set()
+        seen_macs: set[str] = set()
         for kd in alias_map.values():
             did = id(kd)
             if did in seen_ids:
@@ -664,6 +665,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     )
                 )
                 seen_hosts.add(host)
+                kept_mac = (kd.mac_address or prior_mac or "").strip().lower()
+                if kept_mac:
+                    seen_macs.add(kept_mac)
                 continue
             host = (dev.host or "").strip()
             if not host:
@@ -691,6 +695,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 )
             )
             seen_hosts.add(host)
+            if mac:
+                seen_macs.add(mac.lower())
             for old_key in (host, (alias or "").strip()):
                 if old_key and old_key != mac:
                     device_discovery_store.migrate_canonical_key_to_mac(
@@ -706,6 +712,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 prior = prior_by_host.get(host)
                 if prior is not None:
                     alias, cfg_dict, _requires, prior_mac = prior
+                    if (prior_mac or "").strip().lower() in seen_macs:
+                        continue
                     rows.append((host, alias, cfg_dict, True, prior_mac))
                     continue
             skipped = self._skipped_klap_auth_configs.get(host)
@@ -713,6 +721,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 continue
             alias, cfg_dict = skipped
             prior_mac = prior_by_host.get(host, (None, None, None, None))[3]
+            if (prior_mac or "").strip().lower() in seen_macs:
+                continue
             rows.append((host, alias, cfg_dict, True, prior_mac))
         rows.sort(key=lambda r: r[0])
         device_discovery_store.save_configs(self._discovery_cache_path, rows)
