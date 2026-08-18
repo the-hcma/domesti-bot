@@ -27,9 +27,10 @@ marked ``requires_klap_auth`` (learned on first ``AuthenticationError`` and stor
 in the discovery cache) receive account credentials on reconnect/update. Legacy
 XOR / anonymous-KLAP devices never get credentials attached. When account
 credentials are **not** configured, KLAP-auth hosts are skipped quietly (DEBUG)
-and omitted from the device list — same as before credentials support — while
-anonymous devices continue to work. They remain listed on
-:attr:`hosts_requiring_klap_auth` / :attr:`skipped_auth_hosts` for Settings.
+and omitted from the device list unless their cached MAC still answers ARP —
+those stay as unresponsive tiles. Anonymous devices continue to work. Skipped
+hosts remain listed on :attr:`hosts_requiring_klap_auth` /
+:attr:`skipped_auth_hosts` for Settings.
 When credentials **are** configured but handshake fails, a WARNING is logged
 (see :func:`_klap_auth_recovery_hint`).
 
@@ -571,6 +572,40 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 )
         return None
 
+    async def _keep_arp_visible_cached_switch(
+        self,
+        devices_by_host: dict[str, KasaDevice],
+        *,
+        alias: str | None,
+        cached_mac: str | None,
+        host: str,
+    ) -> bool:
+        """Keep a protocol-silent cached MAC as an unresponsive tile when ARP still sees it.
+
+        Returns True when the host was retained (or already present under the ARP IP).
+        """
+
+        mac = try_normalize_mac(cached_mac or "")
+        if mac is None:
+            return False
+        if not await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host):
+            return False
+        arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) or host
+        if arp_ip in devices_by_host:
+            return True
+        devices_by_host[arp_ip] = KasaDevice(
+            mac,
+            None,
+            display_name=alias,
+            host=arp_ip,
+            mac_address=mac,
+        )
+        _LOGGER.info(
+            "Kasa: %s is on the LAN (ARP) but not answering the protocol; keeping as unresponsive",
+            format_device_display(mac, alias),
+        )
+        return True
+
     def _persist_discovery_cache(
         self,
         alias_map: dict[str, KasaDevice],
@@ -930,6 +965,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     "Kasa: ignoring KLAP-auth host %s (no account credentials configured)",
                     host,
                 )
+                await self._keep_arp_visible_cached_switch(
+                    devices_by_host,
+                    alias=_alias,
+                    cached_mac=cached_mac,
+                    host=host,
+                )
                 continue
             cfg = DeviceConfig.from_dict(cfg_dict)
             # Only attach account credentials for hosts that need KLAP auth.
@@ -959,22 +1000,19 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                         "Kasa: skipped KLAP-auth host %s (credentials configured but handshake failed)",
                         host,
                     )
+                    await self._keep_arp_visible_cached_switch(
+                        devices_by_host,
+                        alias=_alias,
+                        cached_mac=cached_mac,
+                        host=host,
+                    )
                     continue
-                mac = try_normalize_mac(cached_mac or "")
-                if mac is not None and await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host):
-                    arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) or host
-                    if arp_ip not in devices_by_host:
-                        devices_by_host[arp_ip] = KasaDevice(
-                            mac,
-                            None,
-                            display_name=_alias,
-                            host=arp_ip,
-                            mac_address=mac,
-                        )
-                        _LOGGER.info(
-                            "Kasa: %s is on the LAN (ARP) but not answering the protocol; keeping as unresponsive",
-                            format_device_display(mac, _alias),
-                        )
+                if await self._keep_arp_visible_cached_switch(
+                    devices_by_host,
+                    alias=_alias,
+                    cached_mac=cached_mac,
+                    host=host,
+                ):
                     continue
                 for kd in devices_by_host.values():
                     backend = kd._kDevice
@@ -1050,6 +1088,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     )
                 with contextlib.suppress(Exception):
                     await dev.disconnect()
+                await self._keep_arp_visible_cached_switch(
+                    devices_by_host,
+                    alias=_alias,
+                    cached_mac=cached_mac,
+                    host=host,
+                )
                 continue
             with contextlib.suppress(Exception):
                 await dev.disconnect()

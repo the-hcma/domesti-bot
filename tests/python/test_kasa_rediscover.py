@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from kasa.credentials import Credentials
 from kasa.deviceconfig import DeviceConfig
 from kasa.exceptions import _ConnectionError
 
@@ -200,6 +201,86 @@ async def test_fetch_cache_keeps_arp_visible_protocol_miss_as_unresponsive(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_fetch_cache_keeps_arp_visible_klap_handshake_miss_as_unresponsive(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.20", "Tapo plug", cfg, True, "aa:bb:cc:dd:ee:20")],
+    )
+    mgr = KasaDeviceManager(
+        discovery_cache_path=db,
+        credentials=Credentials(username="a@example.com", password="x"),
+    )
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.20"),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:20"
+    assert switch.preferred_label == "Tapo plug"
+    assert switch.unresponsive is True
+    assert mgr.last_discovery_source == "cache"
+    assert mgr.skipped_auth_hosts == ("192.168.1.20",)
+
+
+@pytest.mark.asyncio
+async def test_fetch_cache_keeps_arp_visible_klap_host_without_credentials_as_unresponsive(
+    tmp_path,
+) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.20", "Tapo plug", cfg, True, "aa:bb:cc:dd:ee:20")],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(side_effect=AssertionError("KLAP hosts without credentials must not connect")),
+        ),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.20"),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:20"
+    assert switch.preferred_label == "Tapo plug"
+    assert switch.unresponsive is True
+    assert mgr.last_discovery_source == "cache"
+    assert mgr.skipped_auth_hosts == ("192.168.1.20",)
+
+
+@pytest.mark.asyncio
 async def test_fetch_udp_fallback_keeps_arp_visible_cached_switch(tmp_path) -> None:
     db = tmp_path / "cached.sqlite"
     cfg = {
@@ -292,8 +373,6 @@ async def test_cache_reconnect_attaches_credentials_only_for_klap_hosts(
     tmp_path,
 ) -> None:
     """Anonymous hosts must not receive account credentials on cache reconnect."""
-
-    from kasa.credentials import Credentials
 
     db = tmp_path / "cached.sqlite"
     anon_cfg = {
@@ -417,7 +496,10 @@ async def test_cache_update_uses_ingest_recovery_instead_of_invalidating(
 
 @pytest.mark.asyncio
 async def test_cache_skips_klap_hosts_quietly_without_credentials(tmp_path) -> None:
-    """Known KLAP-auth hosts are ignored when no credentials are configured."""
+    """Known KLAP-auth hosts are ignored when no credentials are configured.
+
+    MAC-less KLAP cache rows stay omitted; ARP keep requires a cached MAC.
+    """
 
     db = tmp_path / "cached.sqlite"
     anon_cfg = {
@@ -442,6 +524,7 @@ async def test_cache_skips_klap_hosts_quietly_without_credentials(tmp_path) -> N
         db,
         [
             ("192.168.1.10", "Legacy", anon_cfg, False),
+            # No cached MAC: ARP keep cannot retain a tile (host-only never qualifies).
             ("192.168.1.20", "Tapo", klap_cfg, True),
         ],
     )
