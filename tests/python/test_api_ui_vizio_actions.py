@@ -126,10 +126,24 @@ async def test_bulk_off_global_apply_includes_vizio() -> None:
     assert tv.calls == ["off"]
 
 
+def test_vizio_toggle_endpoint_returns_409_for_unresponsive_tv(tmp_path: Path) -> None:
+    tv = _FakeVizioTv("192.168.1.10", "Kitchen TV", is_on=True, unresponsive=True)
+    state = _state(vizio_tvs=[tv], cache_path=tmp_path / "cache.sqlite")
+    client, _app = _client()
+    runtime.device_state = state
+    response = client.post(
+        "/v1/ui/vizio/tvs/192.168.1.10/toggle",
+        json={"on": False},
+    )
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert DEVICE_UNRESPONSIVE_ON_LAN in response.json()["detail"]
+    assert tv.calls == []
+
+
 def test_vizio_toggle_endpoint_turns_on(tmp_path: Path) -> None:
     tv = _FakeVizioTv("192.168.1.10", "Kitchen TV", is_on=False)
     state = _state(vizio_tvs=[tv], cache_path=tmp_path / "cache.sqlite")
-    client, app = _client()
+    client, _app = _client()
     runtime.device_state = state
     response = client.post(
         "/v1/ui/vizio/tvs/192.168.1.10/toggle",
@@ -139,20 +153,6 @@ def test_vizio_toggle_endpoint_turns_on(tmp_path: Path) -> None:
     body = response.json()
     assert body["device"]["state"] == "on"
     assert tv.calls == ["on"]
-
-
-def test_vizio_toggle_endpoint_returns_409_for_unresponsive_tv(tmp_path: Path) -> None:
-    tv = _FakeVizioTv("192.168.1.10", "Kitchen TV", is_on=True, unresponsive=True)
-    state = _state(vizio_tvs=[tv], cache_path=tmp_path / "cache.sqlite")
-    client, app = _client()
-    runtime.device_state = state
-    response = client.post(
-        "/v1/ui/vizio/tvs/192.168.1.10/toggle",
-        json={"on": False},
-    )
-    assert response.status_code == HTTPStatus.CONFLICT
-    assert DEVICE_UNRESPONSIVE_ON_LAN in response.json()["detail"]
-    assert tv.calls == []
 
 
 def test_vizio_preference_route_accepts_vizio_family(tmp_path: Path) -> None:

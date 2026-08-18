@@ -157,6 +157,7 @@ async def test_rediscover_keeps_cached_mac_when_udp_finds_other_mac_at_old_host(
     macs = {switch.mac_address for switch in mgr.switches}
     assert macs == {"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"}
     stub = next(switch for switch in mgr.switches if switch.mac_address == "aa:bb:cc:dd:ee:01")
+    assert stub.preferred_label == "Desk lamp"
     assert stub.unresponsive is True
     assert stub.host == "192.168.1.77"
     cached_host_by_mac = {row[4]: row[0] for row in device_discovery_store.load_cached_configs(db)}
