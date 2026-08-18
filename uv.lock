@@ -693,7 +693,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.34.2" },
     { name = "soco", specifier = ">=0.31.2" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
-    { name = "starlette", specifier = ">=1.4.1" },
+    { name = "starlette", specifier = ">=1.6.0" },
     { name = "typer", specifier = ">=0.27.1" },
     { name = "typing-extensions", specifier = "==4.16.0" },
     { name = "tzdata", specifier = "==2026.3" },
