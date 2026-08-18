@@ -12,7 +12,11 @@ from pathlib import Path
 import aiohttp
 
 from app import device_discovery_store
-from app.db.secrets import load_vizio_auth_hosts_from_db
+from app.db.secrets import (
+    SecretsDecryptError,
+    load_vizio_auth_hosts_from_db,
+    load_vizio_auth_token_from_db,
+)
 from app.device_display import format_device_display
 from app.device_enums import DeviceConditionState
 from app.device_mac import mac_alive_on_lan
@@ -275,10 +279,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 )
                 if self._matches_known_tv(endpoint, connected):
                     continue
-                token, _source = self._resolve_token(endpoint)
-                if not token:
-                    continue
-                tv, _unreachable = await self._connect_target(endpoint, token)
+                tv = await self._connect_ssdp_target(endpoint, connected)
                 if tv is not None:
                     connected.append(tv)
 
@@ -493,6 +494,51 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         await tv.refresh_power_state()
         return tv
 
+    async def _connect_ssdp_target(
+        self,
+        endpoint: VizioTvEndpoint,
+        connected: list[VizioTvDevice],
+    ) -> VizioTvDevice | None:
+        """Connect an SSDP host, including leftover MAC-keyed SmartCast tokens.
+
+        DIAL XML has no MAC. Tokens live under ``vizio_auth:<mac>``, so a cache
+        miss plus an ARP miss would otherwise skip a TV the CLI just found.
+        """
+
+        token, _source = self._resolve_token(endpoint)
+        if token:
+            tv, _unreachable = await self._connect_target(endpoint, token)
+            return tv
+        used_macs = {tv.mac_address for tv in connected if tv.mac_address}
+        leftovers = self._leftover_mac_auth_tokens(exclude_macs=used_macs)
+        if not leftovers:
+            _LOGGER.info(
+                "Skipping Vizio TV %s — no auth token configured",
+                endpoint.device_id,
+            )
+            return None
+        probe = VizioTvEndpoint(
+            host=endpoint.host,
+            port=endpoint.port,
+            display_name=endpoint.display_name,
+            model=endpoint.model,
+            mac=None,
+            diid=endpoint.diid,
+        )
+        for expected_mac, leftover_token in leftovers:
+            tv, _unreachable = await self._connect_target(probe, leftover_token)
+            if tv is None:
+                continue
+            if tv.mac_address == expected_mac:
+                return tv
+            with contextlib.suppress(Exception):
+                await tv._client.aclose()
+        _LOGGER.info(
+            "Skipping Vizio TV %s — leftover SmartCast tokens did not match",
+            endpoint.device_id,
+        )
+        return None
+
     async def _connect_target(
         self,
         endpoint: VizioTvEndpoint,
@@ -632,6 +678,31 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             seen_ids.add(device_id)
             seen_hosts.add(host_key)
             out.append(endpoint)
+        return out
+
+    def _leftover_mac_auth_tokens(self, *, exclude_macs: set[str]) -> list[tuple[str, str]]:
+        """Return ``(mac, token)`` for leftover SmartCast secrets not already connected."""
+
+        if self._discovery_cache_path is None:
+            return []
+        out: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for key in load_vizio_auth_hosts_from_db(self._discovery_cache_path):
+            mac = try_normalize_mac(key)
+            if mac is None or mac in exclude_macs or mac in seen:
+                continue
+            try:
+                token = load_vizio_auth_token_from_db(
+                    self._discovery_cache_path,
+                    mac=mac,
+                    host=None,
+                )
+            except SecretsDecryptError:
+                continue
+            if not token:
+                continue
+            seen.add(mac)
+            out.append((mac, token))
         return out
 
     async def _mac_alive_on_lan(self, endpoint: VizioTvEndpoint) -> bool:

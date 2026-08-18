@@ -6,14 +6,17 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from cryptography.fernet import Fernet
 
 from app import device_discovery_store
+from app.db.secrets import save_vizio_auth_token_to_db
 from app.vizio_credentials import migrate_vizio_auth_token_host_to_mac
 from app.vizio_device_manager import (
     VizioDeviceManager,
     VizioTvDevice,
     VizioTvEndpoint,
 )
+from app.vizio_discovery import VizioDiscoveredHost
 from app.vizio_smartcast_client import (
     VizioSmartCastAuthError,
     VizioSmartCastConnectionError,
@@ -365,6 +368,79 @@ async def test_rediscover_keeps_arp_visible_tv_as_unresponsive(tmp_path: Path) -
     assert len(mgr.tvs) == 1
     assert mgr.tvs[0].unresponsive is True
     assert mgr.tvs[0].ui_power_state() == "unknown"
+    assert device_discovery_store.load_vizio_tvs(db)[0][4] == "00:bd:3e:d5:f0:11"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_rediscover_recovers_ssdp_host_using_leftover_mac_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cache.sqlite"
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token=None,
+        env_auth_token=None,
+    )
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        model="V505M-K09",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    fake_client = MagicMock()
+    fake_client.aclose = AsyncMock()
+    fake_tv = VizioTvDevice(
+        endpoint,
+        fake_client,
+        display_name="Kitchen TV",
+        mac_address="00:bd:3e:d5:f0:11",
+    )
+    fake_tv.set_power(False)
+    discovered = [
+        VizioDiscoveredHost(
+            host="192.168.86.201",
+            port=7345,
+            name="Kitchen TV",
+            model="V505M-K09",
+        )
+    ]
+    with (
+        patch(
+            "app.vizio_device_manager.lookup_mac_via_arp",
+            return_value=None,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            new_callable=AsyncMock,
+            return_value=fake_tv,
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            new_callable=AsyncMock,
+            return_value=discovered,
+        ),
+    ):
+        await mgr.rediscover()
+    assert len(mgr.tvs) == 1
+    assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
     assert device_discovery_store.load_vizio_tvs(db)[0][4] == "00:bd:3e:d5:f0:11"
     await mgr.disconnect()
 
