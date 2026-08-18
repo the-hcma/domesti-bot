@@ -644,12 +644,15 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 host = kd.host
                 if not host:
                     continue
-                prior = prior_by_host.get(host)
-                if prior is None and kd.mac_address:
+                prior = None
+                stub_mac = try_normalize_mac(kd.mac_address or "")
+                if stub_mac is not None:
                     for _old_host, row in prior_by_host.items():
-                        if row[3] == kd.mac_address:
+                        if try_normalize_mac(row[3] or "") == stub_mac:
                             prior = row
                             break
+                if prior is None:
+                    prior = prior_by_host.get(host)
                 if prior is None:
                     continue
                 alias, cfg_dict, requires_klap_auth, prior_mac = prior

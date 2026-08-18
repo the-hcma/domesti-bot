@@ -63,7 +63,10 @@ def test_lookup_ip_via_arp_for_mac_parses_macos_table(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("app.device_mac.subprocess.run", _run)
     assert lookup_ip_via_arp_for_mac("00:bd:3e:d5:f0:11") == "192.168.86.201"
-    assert seen == [["arp", "-an"]]
+    assert len(seen) == 1
+    assert seen[0][0].startswith("/")
+    assert seen[0][0].endswith("/arp")
+    assert seen[0][1:] == ["-an"]
 
 
 def test_lookup_mac_via_arp_parses_macos_output(monkeypatch: pytest.MonkeyPatch) -> None:

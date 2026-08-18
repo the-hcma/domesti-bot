@@ -245,6 +245,71 @@ async def test_rediscover_persists_klap_stub_at_arp_ip_when_mac_moved(tmp_path) 
 
 
 @pytest.mark.asyncio
+async def test_fetch_cache_persists_stub_config_by_mac_when_hosts_swap(tmp_path) -> None:
+    """A stub must keep its own KLAP/XOR config when two MACs exchange IPs."""
+
+    db = tmp_path / "cached.sqlite"
+    xor_cfg = {
+        "host": "192.168.1.77",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    klap_cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.50", "Tapo plug", klap_cfg, True, "aa:bb:cc:dd:ee:20"),
+            ("192.168.1.77", "Desk lamp", xor_cfg, False, "aa:bb:cc:dd:ee:01"),
+        ],
+    )
+    mgr = KasaDeviceManager(
+        discovery_cache_path=db,
+        credentials=Credentials(username="a@example.com", password="x"),
+    )
+
+    def _arp_ip(mac: str) -> str:
+        return {
+            "aa:bb:cc:dd:ee:01": "192.168.1.50",
+            "aa:bb:cc:dd:ee:20": "192.168.1.77",
+        }[mac]
+
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", side_effect=_arp_ip),
+    ):
+        await mgr.fetch()
+    cached = device_discovery_store.load_cached_configs(db)
+    row_by_mac = {row[4]: row for row in cached}
+    tapo = row_by_mac["aa:bb:cc:dd:ee:20"]
+    lamp = row_by_mac["aa:bb:cc:dd:ee:01"]
+    assert tapo[0] == "192.168.1.77"
+    assert tapo[1] == "Tapo plug"
+    assert tapo[3] is True
+    assert tapo[2]["connection_type"]["encryption_type"] == "KLAP"
+    assert lamp[0] == "192.168.1.50"
+    assert lamp[1] == "Desk lamp"
+    assert lamp[3] is False
+    assert lamp[2]["connection_type"]["encryption_type"] == "XOR"
+
+
+@pytest.mark.asyncio
 async def test_fetch_cache_keeps_arp_visible_protocol_miss_as_unresponsive(tmp_path) -> None:
     db = tmp_path / "cached.sqlite"
     cfg = {

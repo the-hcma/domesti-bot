@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 
 _LOGGER = logging.getLogger(__name__)
+
+_ARP_EXECUTABLE_CANDIDATES = ("/sbin/arp", "/usr/bin/arp", "/usr/sbin/arp")
 
 _ARP_LINUX_LINE_RE = re.compile(
     r"(\d+\.\d+\.\d+\.\d+)\s+.*?\s+((?:[0-9a-fA-F]{1,2}:){5}[0-9a-fA-F]{1,2})",
@@ -40,7 +43,7 @@ def lookup_ip_via_arp_for_mac(mac: str) -> str | None:
         return None
     try:
         completed = subprocess.run(
-            ["arp", "-an"],
+            [_arp_executable(), "-an"],
             capture_output=True,
             text=True,
             check=False,
@@ -71,7 +74,7 @@ def lookup_mac_via_arp(host: str) -> str | None:
         return None
     try:
         completed = subprocess.run(
-            ["arp", "-n", host],
+            [_arp_executable(), "-n", host],
             capture_output=True,
             text=True,
             check=False,
@@ -151,3 +154,12 @@ def try_normalize_mac(mac: str) -> str | None:
         return normalize_mac(mac)
     except ValueError:
         return None
+
+
+def _arp_executable() -> str:
+    """Return a trusted absolute ``arp`` path without consulting ``PATH``."""
+
+    for path in _ARP_EXECUTABLE_CANDIDATES:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return "/usr/sbin/arp"
