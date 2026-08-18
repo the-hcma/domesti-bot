@@ -88,6 +88,25 @@ def lookup_mac_via_arp(host: str) -> str | None:
     return try_normalize_mac(match.group(0))
 
 
+def mac_alive_on_lan(*, mac: str | None, host: str | None = None) -> bool:
+    """True when ``mac`` still appears in the local ARP/neighbor table.
+
+    ``host`` is a fallback: if the MAC is missing from the reverse ARP map,
+    a neighbor entry for that IP whose hardware address matches ``mac`` still
+    counts. Host-only rows with no MAC never qualify — identity is MAC-primary.
+    """
+
+    if not mac:
+        return False
+    if lookup_ip_via_arp_for_mac(mac):
+        return True
+    host_s = (host or "").strip()
+    if not host_s:
+        return False
+    seen = lookup_mac_via_arp(host_s)
+    return seen is not None and seen == try_normalize_mac(mac)
+
+
 def mac_from_sonos_rincon(uid: str) -> str | None:
     """Extract a normalized MAC from a Sonos ``RINCON_<12hex>…`` UID when present."""
     text = uid.strip()

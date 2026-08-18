@@ -220,6 +220,10 @@ def _compact_icon_for_device(
     )
 
 
+def _device_unresponsive(device: object) -> bool:
+    return getattr(device, "unresponsive", False) is True
+
+
 def _door_state(is_open: bool, is_closed: bool) -> str:
     if is_open:
         return DeviceConditionState.OPEN.value
@@ -334,7 +338,8 @@ def _ep1_devices(
                 family_id=DeviceFamilyId.EP1.value,
                 label=device.preferred_label,
                 kind="occupancy",
-                state=device.occupancy_state,
+                state=_ui_state(device.occupancy_state, device),
+                unresponsive=_device_unresponsive(device),
                 compact_icon=_compact_icon_for_device(
                     family_id=DeviceFamilyId.EP1.value,
                     label=device.preferred_label,
@@ -389,7 +394,8 @@ def _kasa_devices(
                 family_id="kasa",
                 label=kd.preferred_label,
                 kind="switch",
-                state=_switch_state(kd.is_on),
+                state=_ui_state(_switch_state(kd.is_on), kd),
+                unresponsive=_device_unresponsive(kd),
                 compact_icon=_compact_icon_for_device(
                     family_id="kasa",
                     label=kd.preferred_label,
@@ -429,7 +435,8 @@ def _sonos_devices(
                 family_id="sonos",
                 label=sp.preferred_label,
                 kind="speaker",
-                state=_sonos_state(sp.is_playing),
+                state=_ui_state(_sonos_state(sp.is_playing), sp),
+                unresponsive=_device_unresponsive(sp),
                 compact_icon=_compact_icon_for_device(
                     family_id="sonos",
                     label=sp.preferred_label,
@@ -466,6 +473,14 @@ def _switch_state(is_on: bool) -> str:
     return DeviceConditionState.ON.value if is_on else DeviceConditionState.OFF.value
 
 
+def _ui_state(state: str, device: object) -> str:
+    """Force ``unknown`` when the device is on the LAN but not answering."""
+
+    if _device_unresponsive(device):
+        return "unknown"
+    return state
+
+
 def _vizio_switch_state(tv: VizioTvDevice) -> str:
     return tv.ui_power_state()
 
@@ -493,7 +508,8 @@ def _tailwind_devices(
                 family_id="tailwind",
                 label=gd.preferred_label,
                 kind="door",
-                state=_door_state(gd.is_open, gd.is_closed),
+                state=_ui_state(_door_state(gd.is_open, gd.is_closed), gd),
+                unresponsive=_device_unresponsive(gd),
                 compact_icon=_compact_icon_for_device(
                     family_id="tailwind",
                     label=gd.preferred_label,
@@ -526,7 +542,8 @@ def _vizio_devices(
                 family_id="vizio",
                 label=tv.preferred_label,
                 kind="switch",
-                state=_vizio_switch_state(tv),
+                state=_ui_state(_vizio_switch_state(tv), tv),
+                unresponsive=_device_unresponsive(tv),
                 compact_icon=_compact_icon_for_device(
                     family_id="vizio",
                     label=tv.preferred_label,
@@ -569,7 +586,8 @@ def build_kasa_device_view(
         family_id="kasa",
         label=kd.preferred_label,
         kind="switch",
-        state=_switch_state(kd.is_on),
+        state=_ui_state(_switch_state(kd.is_on), kd),
+        unresponsive=_device_unresponsive(kd),
         compact_icon=_compact_icon_for_device(
             family_id="kasa",
             label=kd.preferred_label,
@@ -611,7 +629,8 @@ def build_sonos_device_view(
         family_id="sonos",
         label=sp.preferred_label,
         kind="speaker",
-        state=_sonos_state(sp.is_playing),
+        state=_ui_state(_sonos_state(sp.is_playing), sp),
+        unresponsive=_device_unresponsive(sp),
         compact_icon=_compact_icon_for_device(
             family_id="sonos",
             label=sp.preferred_label,
@@ -650,7 +669,8 @@ def build_tailwind_device_view(
         family_id="tailwind",
         label=gd.preferred_label,
         kind="door",
-        state=_door_state(gd.is_open, gd.is_closed),
+        state=_ui_state(_door_state(gd.is_open, gd.is_closed), gd),
+        unresponsive=_device_unresponsive(gd),
         compact_icon=_compact_icon_for_device(
             family_id="tailwind",
             label=gd.preferred_label,
@@ -683,7 +703,8 @@ def build_vizio_device_view(
         family_id="vizio",
         label=tv.preferred_label,
         kind="switch",
-        state=_vizio_switch_state(tv),
+        state=_ui_state(_vizio_switch_state(tv), tv),
+        unresponsive=_device_unresponsive(tv),
         compact_icon=_compact_icon_for_device(
             family_id="vizio",
             label=tv.preferred_label,

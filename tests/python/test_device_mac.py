@@ -8,6 +8,7 @@ from app.device_mac import (
     is_normalized_mac,
     lookup_ip_via_arp_for_mac,
     lookup_mac_via_arp,
+    mac_alive_on_lan,
     mac_from_sonos_rincon,
     normalize_mac,
     try_normalize_mac,
@@ -71,3 +72,24 @@ def test_lookup_mac_via_arp_parses_macos_output(monkeypatch: pytest.MonkeyPatch)
         lambda *args, **kwargs: _Result(),
     )
     assert lookup_mac_via_arp("192.168.86.201") == "00:bd:3e:d5:f0:11"
+
+
+def test_mac_alive_on_lan_true_when_reverse_arp_finds_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.device_mac.lookup_ip_via_arp_for_mac",
+        lambda mac: "192.168.86.201" if mac == "00:bd:3e:d5:f0:11" else None,
+    )
+    assert mac_alive_on_lan(mac="00:bd:3e:d5:f0:11") is True
+
+
+def test_mac_alive_on_lan_true_when_host_neighbor_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.device_mac.lookup_ip_via_arp_for_mac", lambda mac: None)
+    monkeypatch.setattr(
+        "app.device_mac.lookup_mac_via_arp",
+        lambda host: "00:bd:3e:d5:f0:11" if host == "192.168.86.201" else None,
+    )
+    assert mac_alive_on_lan(mac="00:bd:3e:d5:f0:11", host="192.168.86.201") is True
+
+
+def test_mac_alive_on_lan_false_without_mac() -> None:
+    assert mac_alive_on_lan(mac=None, host="192.168.86.201") is False

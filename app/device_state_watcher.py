@@ -210,6 +210,8 @@ class KasaPollingWatcher(DeviceStateWatcher):
             task_name = f"state-watcher-{DeviceFamilyId.KASA.value}-{kd.identifier}"
 
             async def _refresh_switch(device: Any = kd) -> None:
+                if device._kDevice is None:
+                    return
                 host = (device._kDevice.host or "").strip() or "?"
                 try:
                     if not await _await_with_stop(

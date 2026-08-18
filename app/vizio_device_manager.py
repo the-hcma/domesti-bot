@@ -12,7 +12,9 @@ from pathlib import Path
 import aiohttp
 
 from app import device_discovery_store
+from app.db.secrets import load_vizio_auth_hosts_from_db
 from app.device_enums import DeviceConditionState
+from app.device_mac import mac_alive_on_lan
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
 from app.vizio_credentials import (
@@ -21,8 +23,14 @@ from app.vizio_credentials import (
     vizio_device_id_from_parts,
 )
 from app.vizio_discovery import discover_vizio_hosts_ssdp
-from app.vizio_mac import lookup_mac_via_arp, resolve_vizio_tv_ip
+from app.vizio_mac import (
+    lookup_ip_via_arp_for_mac,
+    lookup_mac_via_arp,
+    resolve_vizio_tv_ip,
+    try_normalize_mac,
+)
 from app.vizio_smartcast_client import (
+    DEFAULT_VIZIO_PORT,
     VizioSmartCastAuthError,
     VizioSmartCastClient,
     VizioSmartCastConnectionError,
@@ -169,7 +177,7 @@ class VizioTvDevice(SwitchDevice):
 
     def ui_power_state(self) -> str:
         """Cached on/off/unknown for the web UI and REPL listings."""
-        if self._power_unknown:
+        if self.unresponsive or self._power_unknown:
             return "unknown"
         return "on" if self._on else "off"
 
@@ -253,6 +261,8 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             discovered = await discover_vizio_hosts_ssdp(timeout=self._discovery_timeout)
             for item in discovered:
                 cached_mac = self._cached_mac_for_host(item.host, item.port)
+                if cached_mac is None:
+                    cached_mac = await asyncio.to_thread(lookup_mac_via_arp, item.host)
                 endpoint = VizioTvEndpoint(
                     host=item.host,
                     port=item.port,
@@ -500,7 +510,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                     endpoint.host,
                     endpoint.port,
                 )
-                return await self._offline_tv(endpoint, token), endpoint
+                return await self._unreachable_tv(endpoint, token), endpoint
         try:
             return await self._connect_endpoint(endpoint, token), None
         except VizioSmartCastConnectionError as exc:
@@ -515,7 +525,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 endpoint.device_id,
                 exc,
             )
-            return await self._offline_tv(endpoint, token), endpoint
+            return await self._unreachable_tv(endpoint, token), endpoint
         except VizioSmartCastAuthError as exc:
             _LOGGER.warning(
                 "Vizio TV %s auth rejected: %s",
@@ -544,6 +554,22 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             diid=endpoint.diid,
         )
 
+    def _arp_visible_auth_targets(self) -> list[VizioTvEndpoint]:
+        """Cached-auth TVs whose MAC still appears in the local ARP table."""
+
+        if self._discovery_cache_path is None:
+            return []
+        out: list[VizioTvEndpoint] = []
+        for key in load_vizio_auth_hosts_from_db(self._discovery_cache_path):
+            mac = try_normalize_mac(key)
+            if mac is None:
+                continue
+            ip = lookup_ip_via_arp_for_mac(mac)
+            if ip is None:
+                continue
+            out.append(VizioTvEndpoint(host=ip, port=DEFAULT_VIZIO_PORT, mac=mac))
+        return out
+
     def _cached_mac_for_host(self, host: str, port: int) -> str | None:
         """Return a cached MAC for ``host:port`` so mac-keyed tokens resolve during SSDP."""
 
@@ -560,7 +586,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         out: list[VizioTvEndpoint] = []
         seen_ids: set[str] = set()
         seen_hosts: set[tuple[str, int]] = set()
-        if not self._force_discovery and self._discovery_cache_path is not None:
+        if self._discovery_cache_path is not None:
             for host, port, display, model, mac, diid in device_discovery_store.load_vizio_tvs(
                 self._discovery_cache_path
             ):
@@ -592,7 +618,23 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             seen_ids.add(device_id)
             seen_hosts.add(host_key)
             out.append(VizioTvEndpoint(host=host, port=port))
+        if self._force_discovery:
+            for endpoint in self._arp_visible_auth_targets():
+                host_key = (endpoint.host, endpoint.port)
+                if host_key in seen_hosts:
+                    continue
+                device_id = endpoint.device_id
+                if device_id in seen_ids:
+                    continue
+                seen_ids.add(device_id)
+                seen_hosts.add(host_key)
+                out.append(endpoint)
         return out
+
+    async def _mac_alive_on_lan(self, endpoint: VizioTvEndpoint) -> bool:
+        """True when the TV's MAC (or host ARP neighbor) is still on the LAN."""
+
+        return await asyncio.to_thread(mac_alive_on_lan, mac=endpoint.mac, host=endpoint.host)
 
     async def _offline_tv(self, endpoint: VizioTvEndpoint, token: str) -> VizioTvDevice | None:
         """Return a cached off tile when SmartCast is unreachable at bootstrap."""
@@ -708,3 +750,28 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             return True
         except (TimeoutError, OSError):
             return False
+
+    async def _unreachable_tv(
+        self,
+        endpoint: VizioTvEndpoint,
+        token: str,
+    ) -> VizioTvDevice | None:
+        """Keep an ARP-visible TV as unresponsive; drop it on rediscover if ARP misses."""
+
+        alive = await self._mac_alive_on_lan(endpoint)
+        if self._force_discovery and not alive:
+            _LOGGER.info(
+                "Dropping Vizio TV %s — SmartCast unreachable and MAC not on the LAN",
+                endpoint.device_id,
+            )
+            return None
+        tv = await self._offline_tv(endpoint, token)
+        if tv is None:
+            return None
+        if alive:
+            tv.set_unresponsive(True)
+            _LOGGER.info(
+                "Vizio TV %s is on the LAN (ARP) but SmartCast is silent; keeping as unresponsive",
+                tv.identifier,
+            )
+        return tv

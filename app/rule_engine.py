@@ -36,12 +36,13 @@ def expected_state_for_action_type(action: RuleDeviceActionType) -> DeviceCondit
 class Device:
     """Location-aware user (phones, tags, etc.). Has no switch or door commands."""
 
-    __slots__ = ("_identifier", "_display_name", "_lat", "_lon", "_x", "_y")
+    __slots__ = ("_identifier", "_display_name", "_lat", "_lon", "_unresponsive", "_x", "_y")
 
     def __init__(self, identifier: str, *, display_name: str | None = None) -> None:
         self._identifier = identifier
         self._display_name = display_name.strip() if display_name and display_name.strip() else None
         self._lat, self._lon = None, None
+        self._unresponsive = False
         self._x, self._y = None, None
 
     def __str__(self) -> str:
@@ -68,6 +69,17 @@ class Device:
         """Set or clear the optional display name (whitespace-only clears)."""
 
         self._display_name = value.strip() if value and value.strip() else None
+
+    def set_unresponsive(self, value: bool) -> None:
+        """Mark whether the device is on the LAN but not answering its protocol."""
+
+        self._unresponsive = bool(value)
+
+    @property
+    def unresponsive(self) -> bool:
+        """True when ARP still sees the MAC but the device protocol is silent."""
+
+        return self._unresponsive
 
     @property
     def lat(self):

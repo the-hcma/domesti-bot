@@ -34,7 +34,7 @@ from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZerocon
 
 from app import device_discovery_store
 from app.device_enums import DeviceConditionState
-from app.device_mac import try_normalize_mac
+from app.device_mac import lookup_ip_via_arp_for_mac, mac_alive_on_lan, try_normalize_mac
 from app.device_manager import AlreadyInitializedError, DeviceManager, NotInitializedError
 from app.ep1_credentials import resolve_ep1_noise_psk
 from app.ep1_header_freshness import EP1_HEADER_EXPECTED_REFRESH_PERIOD_S
@@ -383,9 +383,17 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         targets, used_cache_only = await self._resolve_targets()
         if not targets:
             self._fetched = True
-            self._last_discovery_source = None
-            if self._discovery_cache_path is not None and self._force_discovery:
-                device_discovery_store.save_ep1_devices(self._discovery_cache_path, [])
+            if self._force_discovery:
+                self._retain_arp_visible_cached_devices()
+                if self._discovery_cache_path is not None:
+                    device_discovery_store.save_ep1_devices(
+                        self._discovery_cache_path,
+                        [
+                            (device.host, device.port, device.mac_address, device.display_name)
+                            for device in self.devices
+                        ],
+                    )
+            self._last_discovery_source = "discovery" if self._devices else None
             return
         if psk is None:
             _LOGGER.info("EP1 connecting without Noise PSK (plaintext Homey / pre-adoption firmware)")
@@ -409,6 +417,9 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                     mac=device.mac_address,
                     friendly_name=device.display_name,
                 )
+
+        if self._force_discovery:
+            self._retain_arp_visible_cached_devices()
 
         self._fetched = True
         if self._discovery_cache_path is not None and self._force_discovery:
@@ -622,6 +633,34 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             return []
         rows = device_discovery_store.load_ep1_devices(self._discovery_cache_path)
         return [(host, port) for host, port, _mac, _name in rows]
+
+    def _retain_arp_visible_cached_devices(self) -> None:
+        """Keep cached EP1 MACs that still answer ARP when the native API is silent."""
+
+        if self._discovery_cache_path is None:
+            return
+        seen = {device.mac_address for device in self._devices.values() if device.mac_address}
+        for host, port, mac, name in device_discovery_store.load_ep1_devices(self._discovery_cache_path):
+            mac_n = try_normalize_mac(mac or "")
+            if mac_n is None or mac_n in seen:
+                continue
+            if not mac_alive_on_lan(mac=mac_n, host=host):
+                continue
+            arp_ip = lookup_ip_via_arp_for_mac(mac_n) or host
+            device = Ep1Device(
+                mac_n,
+                display_name=name,
+                host=arp_ip,
+                port=port,
+                mac_address=mac_n,
+            )
+            device.set_unresponsive(True)
+            self._devices[device.identifier] = device
+            seen.add(mac_n)
+            _LOGGER.info(
+                "EP1: %s is on the LAN (ARP) but the native API is silent; keeping as unresponsive",
+                device.preferred_label,
+            )
 
     async def _collect_states(
         self,

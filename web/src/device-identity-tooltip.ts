@@ -8,12 +8,17 @@
 export const DEVICE_PROPERTIES_MENU_HINT =
   "Right-click to edit device properties";
 
+/** Keep in sync with ``app.device_display.DEVICE_UNRESPONSIVE_ON_LAN``. */
+export const DEVICE_UNRESPONSIVE_ON_LAN =
+  "On the network, but might be unresponsive";
+
 /** Fields needed to format a device-identity hover tooltip. */
 export interface DeviceIdentityTooltipSource {
   host?: string | null;
   identity_details?: readonly string[];
   label?: string;
   mac_address: string;
+  unresponsive?: boolean;
 }
 
 export interface DeviceIdentityTooltipOptions {
@@ -43,6 +48,9 @@ export function formatDeviceIdentityTooltip(
         lines.push(label);
       }
     }
+  }
+  if (device.unresponsive === true) {
+    lines.push(DEVICE_UNRESPONSIVE_ON_LAN);
   }
   lines.push(`MAC address: ${device.mac_address}`);
   const host = (device.host ?? "").trim();

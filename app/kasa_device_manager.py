@@ -77,7 +77,7 @@ from kasa.exceptions import (
 from app import device_discovery_store
 from app.device_display import format_device_display
 from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
-from app.device_mac import lookup_mac_via_arp, try_normalize_mac
+from app.device_mac import lookup_ip_via_arp_for_mac, lookup_mac_via_arp, mac_alive_on_lan, try_normalize_mac
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
 from app.rule_engine import SwitchDevice
 
@@ -280,38 +280,56 @@ async def _connect_from_saved_config(
 
 
 class KasaDevice(SwitchDevice):
-    __slots__ = ("_kDevice", "_mac_address")
+    __slots__ = ("_host", "_kDevice", "_mac_address")
 
     def __init__(
         self,
         identifier: str,
-        kDevice: KDevice,
+        kDevice: KDevice | None,
         *,
         display_name: str | None = None,
+        host: str | None = None,
         mac_address: str,
     ) -> None:
         super().__init__(identifier, display_name=display_name)
         self._kDevice = kDevice
         self._mac_address = mac_address
-        self.set_power(kDevice.is_on)
+        if kDevice is not None:
+            self.set_power(kDevice.is_on)
+            self._host = (kDevice.host or "").strip()
+        else:
+            self._host = (host or "").strip()
+            self.set_unresponsive(True)
 
     @property
     def host(self) -> str:
-        return (self._kDevice.host or "").strip()
+        if self._kDevice is not None:
+            return (self._kDevice.host or "").strip()
+        return self._host
 
     @property
     def mac_address(self) -> str:
         return self._mac_address
 
     async def turn_off(self) -> None:
+        if self._kDevice is None:
+            raise ConnectionError(
+                f"Expected a reachable Kasa device for {self.identifier}, got unresponsive LAN neighbor"
+            )
         await self._kDevice.turn_off()
         # Trust the commanded state. python-kasa often leaves ``is_on`` stale
         # until the next ``update()``; Vizio/Sonos/Tailwind pin cache the same way.
         self.set_power(False)
+        self.set_unresponsive(False)
 
     async def turn_on(self) -> None:
+        if self._kDevice is None:
+            raise ConnectionError(
+                f"Expected a reachable Kasa device for {self.identifier}, got unresponsive LAN neighbor"
+            )
         await self._kDevice.turn_on()
         self.set_power(True)
+        self.set_unresponsive(False)
 
 
 def _kasa_mac_from_device(dev: KDevice) -> str | None:
@@ -466,6 +484,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         seen: set[int] = set()
         for kd in cached.values():
             dev = kd._kDevice
+            if dev is None:
+                continue
             did = id(dev)
             if did in seen:
                 continue
@@ -574,6 +594,31 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 continue
             seen_ids.add(did)
             dev = kd._kDevice
+            if dev is None:
+                host = kd.host
+                if not host:
+                    continue
+                prior = prior_by_host.get(host)
+                if prior is None and kd.mac_address:
+                    for old_host, row in prior_by_host.items():
+                        if row[3] == kd.mac_address:
+                            prior = row
+                            host = old_host
+                            break
+                if prior is None:
+                    continue
+                alias, cfg_dict, requires_klap_auth, prior_mac = prior
+                rows.append(
+                    (
+                        host,
+                        alias or kd.preferred_label,
+                        cfg_dict,
+                        requires_klap_auth,
+                        kd.mac_address or prior_mac,
+                    )
+                )
+                seen_hosts.add(host)
+                continue
             host = (dev.host or "").strip()
             if not host:
                 continue
@@ -625,6 +670,58 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             rows.append((host, alias, cfg_dict, True, prior_mac))
         rows.sort(key=lambda r: r[0])
         device_discovery_store.save_configs(self._discovery_cache_path, rows)
+
+    async def _retain_arp_visible_cached_switches(
+        self,
+        devices_by_host: dict[str, KasaDevice],
+    ) -> None:
+        """Keep cached MACs that still answer ARP even when UDP discovery missed them."""
+
+        if self._discovery_cache_path is None:
+            return
+        qtimeout = self._query_timeout if self._query_timeout is not None else DeviceConfig.DEFAULT_TIMEOUT
+        seen_macs = {kd.mac_address for kd in devices_by_host.values() if kd.mac_address}
+        seen_hosts = set(devices_by_host)
+        cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
+        for host, alias, cfg_dict, requires_klap_auth, cached_mac in cached:
+            mac = try_normalize_mac(cached_mac or "")
+            if mac is None or mac in seen_macs or host in seen_hosts:
+                continue
+            if not mac_alive_on_lan(mac=mac, host=host):
+                continue
+            arp_ip = lookup_ip_via_arp_for_mac(mac) or host
+            creds = self._discovery_credentials if requires_klap_auth else None
+            cfg = DeviceConfig.from_dict(cfg_dict)
+            if arp_ip != host:
+                cfg = replace(cfg, host=arp_ip)
+            dev = await _connect_from_saved_config(
+                cfg,
+                credentials=creds,
+                timeout=qtimeout,
+            )
+            if dev is not None:
+                kd = _make_kasa_device(dev, cached_mac=mac)
+                if kd is not None:
+                    devices_by_host[dev.host] = kd
+                    seen_macs.add(mac)
+                    seen_hosts.add(dev.host)
+                    continue
+                with contextlib.suppress(Exception):
+                    await dev.disconnect()
+            stub = KasaDevice(
+                mac,
+                None,
+                display_name=alias,
+                host=arp_ip,
+                mac_address=mac,
+            )
+            devices_by_host[arp_ip] = stub
+            seen_macs.add(mac)
+            seen_hosts.add(arp_ip)
+            _LOGGER.info(
+                "Kasa: %s is on the LAN (ARP) but not answering discovery; keeping as unresponsive",
+                format_device_display(mac, alias),
+            )
 
     async def _try_ingest_with_credentials(
         self,
@@ -781,7 +878,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                         "duplicate is reachable by host (%s) only. Rename "
                         "one of them in the Kasa/Tapo app to disambiguate.",
                         key,
-                        existing._kDevice.host,
+                        existing.host,
                         host,
                         host,
                     )
@@ -851,8 +948,11 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     )
                     continue
                 for kd in devices_by_host.values():
+                    backend = kd._kDevice
+                    if backend is None:
+                        continue
                     with contextlib.suppress(Exception):
-                        await kd._kDevice.disconnect()
+                        await backend.disconnect()
                 return None
             # Device is already connected with the right credentials (or
             # anonymously). Run update + SMART plain-HTTP / XOR recovery
@@ -925,8 +1025,11 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             with contextlib.suppress(Exception):
                 await dev.disconnect()
             for kd in devices_by_host.values():
+                backend = kd._kDevice
+                if backend is None:
+                    continue
                 with contextlib.suppress(Exception):
-                    await kd._kDevice.disconnect()
+                    await backend.disconnect()
             return None
         return devices_by_host
 
@@ -941,6 +1044,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         seen: set[int] = set()
         for kd in alias_map.values():
             dev = kd._kDevice
+            if dev is None:
+                continue
             did = id(dev)
             if did in seen:
                 continue
@@ -993,8 +1098,11 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 devices_by_host[finalized.host] = kd
         except BaseException:
             for kd in devices_by_host.values():
+                backend = kd._kDevice
+                if backend is None:
+                    continue
                 with contextlib.suppress(Exception):
-                    await kd._kDevice.disconnect()
+                    await backend.disconnect()
             raise
 
         ingested_count = len(devices_by_host)
@@ -1008,6 +1116,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             )
         else:
             _LOGGER.info("Kasa: discovered %d device(s)", discovered_count)
+
+        if force_discovery:
+            await self._retain_arp_visible_cached_switches(devices_by_host)
 
         self._finalize_kasa_lookup(devices_by_host)
         self._persist_discovery_cache(
@@ -1081,9 +1192,13 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
     async def is_on(self, identifier: str) -> bool:
         kd = self._device_for(identifier)
-        await kd._kDevice.update()
-        kd.set_power(kd._kDevice.is_on)
-        return kd._kDevice.is_on
+        backend = kd._kDevice
+        if backend is None:
+            return kd.is_on
+        await backend.update()
+        kd.set_unresponsive(False)
+        kd.set_power(backend.is_on)
+        return backend.is_on
 
     @property
     def last_discovery_source(self) -> str | None:
@@ -1277,11 +1392,14 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 owner = alias_owner_mac.get(preferred_key)
                 if owner is not None and owner != kd.mac_address:
                     continue
-                current = (getattr(kd._kDevice, "alias", None) or "").strip()
+                backend = kd._kDevice
+                if backend is None:
+                    continue
+                current = (getattr(backend, "alias", None) or "").strip()
                 if current.lower() == preferred_key:
                     continue
                 try:
-                    await kd._kDevice.set_alias(preferred)
+                    await backend.set_alias(preferred)
                 except Exception:
                     _LOGGER.warning(
                         "Kasa: failed to set vendor alias on %s to %r",

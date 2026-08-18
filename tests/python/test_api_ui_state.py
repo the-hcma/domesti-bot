@@ -230,6 +230,15 @@ def test_build_ui_state_emits_only_kasa_family_when_tailwind_manager_absent() ->
     ]
 
 
+def test_build_ui_state_marks_unresponsive_kasa_unknown() -> None:
+    mgr = _fake_kasa_mgr([("aa:bb:cc:dd:ee:01", "Desk", True)])
+    mgr.switches[0].unresponsive = True
+    out = build_ui_state(_state(kasa_mgr=mgr), cache_path=None)
+    device = out.families[0].devices[0]
+    assert device.unresponsive is True
+    assert device.state == "unknown"
+
+
 def test_build_ui_state_emits_both_families_in_kasa_then_tailwind_order() -> None:
     state = _state(
         kasa_mgr=_fake_kasa_mgr([("192.168.1.10", "Desk", False)]),
@@ -605,4 +614,5 @@ def test_ui_state_out_is_a_pydantic_model_with_expected_fields() -> None:
         "mac_address",
         "occupancy_readings",
         "stream_favorites",
+        "unresponsive",
     }
