@@ -960,6 +960,22 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                         host,
                     )
                     continue
+                mac = try_normalize_mac(cached_mac or "")
+                if mac is not None and await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host):
+                    arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) or host
+                    if arp_ip not in devices_by_host:
+                        devices_by_host[arp_ip] = KasaDevice(
+                            mac,
+                            None,
+                            display_name=_alias,
+                            host=arp_ip,
+                            mac_address=mac,
+                        )
+                        _LOGGER.info(
+                            "Kasa: %s is on the LAN (ARP) but not answering the protocol; keeping as unresponsive",
+                            format_device_display(mac, _alias),
+                        )
+                    continue
                 for kd in devices_by_host.values():
                     backend = kd._kDevice
                     if backend is None:
@@ -1130,8 +1146,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         else:
             _LOGGER.info("Kasa: discovered %d device(s)", discovered_count)
 
-        if force_discovery:
-            await self._retain_arp_visible_cached_switches(devices_by_host)
+        await self._retain_arp_visible_cached_switches(devices_by_host)
 
         self._finalize_kasa_lookup(devices_by_host)
         self._persist_discovery_cache(

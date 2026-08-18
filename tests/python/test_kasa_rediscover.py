@@ -165,6 +165,83 @@ async def test_rediscover_keeps_cached_mac_when_udp_finds_other_mac_at_old_host(
 
 
 @pytest.mark.asyncio
+async def test_fetch_cache_keeps_arp_visible_protocol_miss_as_unresponsive(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Desk lamp", cfg, False, "aa:bb:cc:dd:ee:01")],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.50"),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:01"
+    assert switch.unresponsive is True
+    assert mgr.last_discovery_source == "cache"
+
+
+@pytest.mark.asyncio
+async def test_fetch_udp_fallback_keeps_arp_visible_cached_switch(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    nameless = {
+        "host": "192.168.1.51",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.51", "Nameless", nameless, False),
+            ("192.168.1.50", "Desk lamp", cfg, False, "aa:bb:cc:dd:ee:01"),
+        ],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.50"),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:01"
+    assert switch.unresponsive is True
+    assert mgr.last_discovery_source == "discovery"
+
+
+@pytest.mark.asyncio
 async def test_fetch_cache_hit_refreshes_alias_from_device_update(tmp_path) -> None:
     """Cache reconnect must call ``update()`` so renamed Kasa aliases reach the UI."""
 
