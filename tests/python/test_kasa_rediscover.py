@@ -119,6 +119,52 @@ async def test_rediscover_keeps_arp_visible_cached_switch_as_unresponsive(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_rediscover_keeps_cached_mac_when_udp_finds_other_mac_at_old_host(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Desk lamp", cfg, False, "aa:bb:cc:dd:ee:01")],
+    )
+    occupant = MagicMock()
+    occupant.host = "192.168.1.50"
+    occupant.alias = "Other plug"
+    occupant.mac = "aa:bb:cc:dd:ee:02"
+    occupant.sys_info = {}
+    occupant.is_on = False
+    occupant.config = DeviceConfig.from_dict(cfg)
+    occupant.update = AsyncMock()
+    occupant.disconnect = AsyncMock()
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={occupant.host: occupant}),
+        ),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.77"),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.rediscover()
+    macs = {switch.mac_address for switch in mgr.switches}
+    assert macs == {"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"}
+    stub = next(switch for switch in mgr.switches if switch.mac_address == "aa:bb:cc:dd:ee:01")
+    assert stub.unresponsive is True
+    assert stub.host == "192.168.1.77"
+    cached_host_by_mac = {row[4]: row[0] for row in device_discovery_store.load_cached_configs(db)}
+    assert cached_host_by_mac["aa:bb:cc:dd:ee:01"] == "192.168.1.77"
+    assert cached_host_by_mac["aa:bb:cc:dd:ee:02"] == "192.168.1.50"
+
+
+@pytest.mark.asyncio
 async def test_fetch_cache_hit_refreshes_alias_from_device_update(tmp_path) -> None:
     """Cache reconnect must call ``update()`` so renamed Kasa aliases reach the UI."""
 

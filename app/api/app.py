@@ -869,10 +869,16 @@ def create_app(args: Any) -> FastAPI:
             detail=f"on={body.on}",
         )
         mark_expected_device_change(DeviceFamilyId.VIZIO, device_id)
-        if body.on:
-            await tv.turn_on()
-        else:
-            await tv.turn_off()
+        try:
+            if body.on:
+                await tv.turn_on()
+            else:
+                await tv.turn_off()
+        except DeviceUnresponsiveError as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail=str(exc),
+            ) from exc
         return UIDeviceActionOut(
             device=build_vizio_device_view(
                 state.vizio_mgr,

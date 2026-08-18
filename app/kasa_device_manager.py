@@ -610,14 +610,15 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     continue
                 prior = prior_by_host.get(host)
                 if prior is None and kd.mac_address:
-                    for old_host, row in prior_by_host.items():
+                    for _old_host, row in prior_by_host.items():
                         if row[3] == kd.mac_address:
                             prior = row
-                            host = old_host
                             break
                 if prior is None:
                     continue
                 alias, cfg_dict, requires_klap_auth, prior_mac = prior
+                if cfg_dict.get("host") != host:
+                    cfg_dict = {**cfg_dict, "host": host}
                 rows.append(
                     (
                         host,
@@ -695,11 +696,13 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
         for host, alias, cfg_dict, requires_klap_auth, cached_mac in cached:
             mac = try_normalize_mac(cached_mac or "")
-            if mac is None or mac in seen_macs or host in seen_hosts:
+            if mac is None or mac in seen_macs:
                 continue
             if not await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host):
                 continue
             arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) or host
+            if arp_ip in seen_hosts:
+                continue
             creds = self._discovery_credentials if requires_klap_auth else None
             cfg = DeviceConfig.from_dict(cfg_dict)
             if arp_ip != host:

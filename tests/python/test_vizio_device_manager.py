@@ -327,7 +327,7 @@ async def test_rediscover_resolves_macless_cache_row_before_arp_keep(tmp_path: P
         ),
         patch(
             "app.vizio_device_manager.mac_alive_on_lan",
-            return_value=True,
+            side_effect=lambda *, mac, host: mac == "00:bd:3e:d5:f0:11" and host == "192.168.86.201",
         ),
         patch(
             "app.vizio_device_manager.discover_vizio_hosts_ssdp",

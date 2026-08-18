@@ -472,6 +472,17 @@ def _parse_pir_range_choices(raw_choices: Sequence[str] | None) -> tuple[KasaPir
     return tuple(parsed)
 
 
+def _require_kasa_protocol_device(kd: KasaDevice) -> KDevice:
+    backend = kd.kasa_protocol_device()
+    if backend is None:
+        raise KasaMotionTuningError(
+            KASA_MOTION_TUNING_MODULE_UNAVAILABLE.format(
+                display=format_device_display(kd.identifier, kd.preferred_label)
+            )
+        )
+    return backend
+
+
 def _resolve_motion_device(
     device_id: str,
     *,
@@ -488,17 +499,6 @@ def _resolve_motion_device(
             return None
         return kd
     return None
-
-
-def _require_kasa_protocol_device(kd: KasaDevice) -> KDevice:
-    backend = kd.kasa_protocol_device()
-    if backend is None:
-        raise KasaMotionTuningError(
-            KASA_MOTION_TUNING_MODULE_UNAVAILABLE.format(
-                display=format_device_display(kd.identifier, kd.preferred_label)
-            )
-        )
-    return backend
 
 
 def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
