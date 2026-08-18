@@ -148,11 +148,13 @@ def _cached_tailwind_hub_macs(cache_path: Path) -> frozenset[str]:
 
 
 def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[str]:
-    """Token-backed TV ids: discovery rows plus leftover SmartCast auth MACs.
+    """Token-backed discovery-row ids, or live∩auth when ``vizio_known_tvs`` is empty.
 
-    ``vizio_known_tvs`` can be emptied (CLI rediscover ARP miss) while
-    ``app_secrets`` still holds ``vizio_auth:<mac>``. Counting those MACs
-    prevents HTTP cache-sync from wiping a live TV that fetch can recover.
+    An emptied discovery table (CLI rediscover ARP miss) must not look like
+    “delete every TV” while ``vizio_auth:<mac>`` still backs a live roster
+    entry. Extra auth MACs that are not currently live (TV off / stale
+    pairing) stay out of the fingerprint so ``GET /v1/ui/state`` does not
+    drift every poll.
     """
 
     ids: set[str] = set()
@@ -167,12 +169,19 @@ def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[st
         if not token:
             continue
         ids.add(vizio_device_id_from_parts(mac=mac, host=host, port=port))
+    if ids:
+        return frozenset(ids)
+    auth_macs: set[str] = set()
     for key in load_vizio_auth_hosts_from_db(cache_path):
         mac = try_normalize_mac(key)
         if mac is None:
             continue
-        ids.add(mac)
-    return frozenset(ids)
+        auth_macs.add(mac)
+    try:
+        live = _live_vizio_ids(mgr)
+    except NotInitializedError:
+        return frozenset()
+    return frozenset(live & auth_macs)
 
 
 def _clear_failed(family: DeviceFamilyId) -> None:
