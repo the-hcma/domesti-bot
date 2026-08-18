@@ -73,6 +73,62 @@ async def test_fetch_continues_when_arp_auth_mac_secrets_key_is_invalid(
 
 
 @pytest.mark.asyncio
+async def test_fetch_keeps_env_token_tv_when_migrate_secrets_key_is_invalid(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "cache.sqlite"
+    mgr = VizioDeviceManager(
+        configured_hosts=[("192.168.86.201", 7345)],
+        discovery_cache_path=db,
+        cli_auth_token=None,
+        env_auth_token="env-token",
+    )
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        model="V505M-K09",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    fake_client = MagicMock()
+    fake_client.aclose = AsyncMock()
+    fake_tv = VizioTvDevice(
+        endpoint,
+        fake_client,
+        display_name="Kitchen TV",
+        mac_address="00:bd:3e:d5:f0:11",
+    )
+    fake_tv.set_power(False)
+    with (
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            new_callable=AsyncMock,
+            return_value=fake_tv,
+        ),
+        patch(
+            "app.vizio_credentials.load_vizio_auth_token_from_db",
+            side_effect=SecretsConfigurationError("malformed Fernet key"),
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        await mgr.fetch()
+    assert len(mgr.tvs) == 1
+    assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_fetch_recovers_auth_mac_when_discovery_table_empty(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -797,6 +853,22 @@ def test_migrate_vizio_auth_token_host_to_mac_skips_on_decrypt_error(
     monkeypatch.setattr(
         "app.vizio_credentials.load_vizio_auth_token_from_db",
         MagicMock(side_effect=SecretsDecryptError("bad key")),
+    )
+    migrate_vizio_auth_token_host_to_mac(
+        db,
+        host="192.168.86.201",
+        mac="00:bd:3e:d5:f0:11",
+    )
+
+
+def test_migrate_vizio_auth_token_host_to_mac_skips_on_secrets_configuration_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = tmp_path / "cache.sqlite"
+    monkeypatch.setattr(
+        "app.vizio_credentials.load_vizio_auth_token_from_db",
+        MagicMock(side_effect=SecretsConfigurationError("malformed Fernet key")),
     )
     migrate_vizio_auth_token_host_to_mac(
         db,
