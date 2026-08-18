@@ -40,6 +40,7 @@ from app.vizio_smartcast_client import (
     VizioSmartCastAuthError,
     VizioSmartCastClient,
     VizioSmartCastConnectionError,
+    VizioSmartCastError,
     device_id_for,
     parse_host_spec,
     resolve_vizio_tv_mac,
@@ -843,17 +844,11 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         )
         try:
             info = await client.fetch_deviceinfo()
-        except (
-            TimeoutError,
-            OSError,
-            aiohttp.ClientError,
-            VizioSmartCastAuthError,
-            VizioSmartCastConnectionError,
-        ):
+            mac = info.mac
+            if mac is None:
+                mac = await resolve_vizio_tv_mac(client, host=endpoint.host)
+        except (TimeoutError, OSError, aiohttp.ClientError, VizioSmartCastError):
             return None
-        mac = info.mac
-        if mac is None:
-            mac = await resolve_vizio_tv_mac(client, host=endpoint.host)
         return try_normalize_mac(mac) if mac else None
 
     async def _unreachable_tv(

@@ -22,6 +22,7 @@ from app.vizio_smartcast_client import (
     VizioSmartCastAuthError,
     VizioSmartCastClient,
     VizioSmartCastConnectionError,
+    VizioSmartCastError,
 )
 
 
@@ -680,6 +681,61 @@ async def test_rediscover_skips_leftover_tokens_when_secrets_key_is_invalid(
         patch(
             "app.vizio_device_manager.load_vizio_auth_token_from_db",
             side_effect=SecretsConfigurationError("malformed Fernet key"),
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            new_callable=AsyncMock,
+            return_value=discovered,
+        ),
+    ):
+        await mgr.rediscover()
+    assert mgr.tvs == ()
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_rediscover_skips_ssdp_host_when_deviceinfo_raises_smartcast_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cache.sqlite"
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token=None,
+        env_auth_token=None,
+    )
+    discovered = [
+        VizioDiscoveredHost(
+            host="192.168.86.201",
+            port=7345,
+            name="Kitchen TV",
+            model="V505M-K09",
+        )
+    ]
+    with (
+        patch(
+            "app.vizio_device_manager.lookup_mac_via_arp",
+            return_value=None,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch.object(
+            VizioSmartCastClient,
+            "fetch_deviceinfo",
+            new_callable=AsyncMock,
+            side_effect=VizioSmartCastError("non-JSON deviceinfo"),
         ),
         patch(
             "app.vizio_device_manager.discover_vizio_hosts_ssdp",
