@@ -10,11 +10,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import anyio
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from kasa.deviceconfig import DeviceConfig
 
 from app import device_discovery_store
 from app.api.app import create_app
+from app.db.secrets import save_vizio_auth_token_to_db
 from app.device_enums import DeviceFamilyId
 from app.discovery_cache_sync import maybe_sync_discovery_cache
 from app.domesti_bot_cli import DeviceManagersState
@@ -22,6 +24,7 @@ from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.server_runtime import runtime
 from app.sonos_device_manager import SonosDeviceManager
+from app.vizio_device_manager import VizioDeviceManager
 
 # Hermetic ARP stub maps these hosts to stable MACs (see tests/python/conftest.py).
 _MAC_10 = "aa:bb:c0:a8:01:0a"  # 192.168.1.10
@@ -801,6 +804,45 @@ async def test_maybe_sync_tailwind_noop_when_same_hub_mac_moves_ip(tmp_path: Pat
             androidtv_mgr=None,
             ep1_mgr=None,
             vizio_mgr=None,
+            cache_path=db,
+            args=argparse.Namespace(),
+        )
+    )
+
+    assert changed is False
+    mgr.reload_from_cache.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_maybe_sync_vizio_noop_when_auth_mac_outlives_empty_table(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cached.sqlite"
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    tv = MagicMock()
+    tv.identifier = "00:bd:3e:d5:f0:11"
+    mgr = MagicMock(spec=VizioDeviceManager)
+    mgr.tvs = (tv,)
+    mgr._cli_auth_token = None
+    mgr._env_auth_token = None
+    mgr.reload_from_cache = AsyncMock()
+
+    runtime.reset()
+    changed = await maybe_sync_discovery_cache(
+        DeviceManagersState(
+            kasa_mgr=MagicMock(spec=KasaDeviceManager),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            ep1_mgr=None,
+            vizio_mgr=mgr,
             cache_path=db,
             args=argparse.Namespace(),
         )

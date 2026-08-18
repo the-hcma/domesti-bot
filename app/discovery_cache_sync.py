@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 
 from app import device_discovery_store
+from app.db.secrets import load_vizio_auth_hosts_from_db
 from app.device_enums import DeviceFamilyId
 from app.device_mac import try_normalize_mac
 from app.device_manager import NotInitializedError
@@ -147,7 +148,12 @@ def _cached_tailwind_hub_macs(cache_path: Path) -> frozenset[str]:
 
 
 def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[str]:
-    """IDs that ``reload_from_cache`` would attempt (token-backed endpoints only)."""
+    """Token-backed TV ids: discovery rows plus leftover SmartCast auth MACs.
+
+    ``vizio_known_tvs`` can be emptied (CLI rediscover ARP miss) while
+    ``app_secrets`` still holds ``vizio_auth:<mac>``. Counting those MACs
+    prevents HTTP cache-sync from wiping a live TV that fetch can recover.
+    """
 
     ids: set[str] = set()
     for host, port, _display, _model, mac, _diid in device_discovery_store.load_vizio_tvs(cache_path):
@@ -161,6 +167,11 @@ def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[st
         if not token:
             continue
         ids.add(vizio_device_id_from_parts(mac=mac, host=host, port=port))
+    for key in load_vizio_auth_hosts_from_db(cache_path):
+        mac = try_normalize_mac(key)
+        if mac is None:
+            continue
+        ids.add(mac)
     return frozenset(ids)
 
 

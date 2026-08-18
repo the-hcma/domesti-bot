@@ -28,6 +28,78 @@ def _tv(*, is_on: bool = False) -> VizioTvDevice:
 
 
 @pytest.mark.asyncio
+async def test_fetch_recovers_auth_mac_when_discovery_table_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cryptography.fernet import Fernet
+
+    from app.db.secrets import save_vizio_auth_token_to_db
+
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cache.sqlite"
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token=None,
+        env_auth_token=None,
+    )
+    ssdp = AsyncMock(return_value=[])
+    with (
+        patch(
+            "app.vizio_device_manager.lookup_ip_via_arp_for_mac",
+            return_value="192.168.86.201",
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.vizio_device_manager.mac_alive_on_lan",
+            return_value=True,
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            ssdp,
+        ),
+    ):
+        await mgr.fetch()
+    assert len(mgr.tvs) == 1
+    assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
+    assert mgr.tvs[0].unresponsive is True
+    assert device_discovery_store.load_vizio_tvs(db)[0][4] == "00:bd:3e:d5:f0:11"
+    ssdp.assert_not_called()
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_fetch_reports_discovery_source_when_ssdp_finds_nothing(tmp_path: Path) -> None:
+    db = tmp_path / "cache.sqlite"
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token="test-token",
+    )
+    with patch(
+        "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        await mgr.fetch()
+    assert mgr.tvs == ()
+    assert mgr.last_discovery_source == "discovery"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_fetch_relocates_cached_tv_when_dhcp_ip_changes(tmp_path: Path) -> None:
     db = tmp_path / "cache.sqlite"
     device_discovery_store.upsert_vizio_tv(

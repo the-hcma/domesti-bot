@@ -287,7 +287,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         self._id_to_tv = {tv.identifier: tv for tv in connected}
         self._initialized = True
         if not connected:
-            self._last_discovery_source = None
+            self._last_discovery_source = "discovery" if used_discovery else None
         elif used_discovery and (self._force_discovery or not targets or failed):
             self._last_discovery_source = "discovery"
         else:
@@ -621,17 +621,17 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             seen_ids.add(device_id)
             seen_hosts.add(host_key)
             out.append(VizioTvEndpoint(host=host, port=port))
-        if self._force_discovery:
-            for endpoint in await self._arp_visible_auth_targets():
-                host_key = (endpoint.host, endpoint.port)
-                if host_key in seen_hosts:
-                    continue
-                device_id = endpoint.device_id
-                if device_id in seen_ids:
-                    continue
-                seen_ids.add(device_id)
-                seen_hosts.add(host_key)
-                out.append(endpoint)
+        # Auth MACs remain after vizio_known_tvs is emptied (rediscover ARP miss).
+        for endpoint in await self._arp_visible_auth_targets():
+            host_key = (endpoint.host, endpoint.port)
+            if host_key in seen_hosts:
+                continue
+            device_id = endpoint.device_id
+            if device_id in seen_ids:
+                continue
+            seen_ids.add(device_id)
+            seen_hosts.add(host_key)
+            out.append(endpoint)
         return out
 
     async def _mac_alive_on_lan(self, endpoint: VizioTvEndpoint) -> bool:
