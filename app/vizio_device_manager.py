@@ -516,7 +516,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         if not leftovers:
             _LOGGER.info(
                 "Skipping Vizio TV %s — no auth token configured",
-                endpoint.device_id,
+                format_device_display(endpoint.device_id, endpoint.display_name),
             )
             return None
         leftover_by_mac = {mac: leftover_token for mac, leftover_token in leftovers}
@@ -533,7 +533,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         if leftover_token is None:
             _LOGGER.info(
                 "Skipping Vizio TV %s — leftover SmartCast tokens did not match",
-                endpoint.device_id,
+                format_device_display(endpoint.device_id, endpoint.display_name),
             )
             return None
         tv, _unreachable = await self._connect_target(probe, leftover_token)

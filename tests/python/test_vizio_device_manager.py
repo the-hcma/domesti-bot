@@ -774,6 +774,10 @@ async def test_rediscover_skips_leftover_tokens_when_secrets_key_is_invalid(
     ]
     with (
         patch(
+            "app.vizio_device_manager.lookup_mac_via_arp",
+            return_value=None,
+        ),
+        patch(
             "app.vizio_device_manager.load_vizio_auth_token_from_db",
             side_effect=SecretsConfigurationError("malformed Fernet key"),
         ),
