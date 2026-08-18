@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 
 _LOGGER = logging.getLogger(__name__)
+
+_ARP_EXECUTABLE_CANDIDATES = ("/sbin/arp", "/usr/bin/arp", "/usr/sbin/arp")
 
 _ARP_LINUX_LINE_RE = re.compile(
     r"(\d+\.\d+\.\d+\.\d+)\s+.*?\s+((?:[0-9a-fA-F]{1,2}:){5}[0-9a-fA-F]{1,2})",
@@ -40,7 +43,7 @@ def lookup_ip_via_arp_for_mac(mac: str) -> str | None:
         return None
     try:
         completed = subprocess.run(
-            ["arp", "-a"],
+            [_arp_executable(), "-an"],
             capture_output=True,
             text=True,
             check=False,
@@ -71,7 +74,7 @@ def lookup_mac_via_arp(host: str) -> str | None:
         return None
     try:
         completed = subprocess.run(
-            ["arp", "-n", host],
+            [_arp_executable(), "-n", host],
             capture_output=True,
             text=True,
             check=False,
@@ -86,6 +89,25 @@ def lookup_mac_via_arp(host: str) -> str | None:
     if match is None:
         return None
     return try_normalize_mac(match.group(0))
+
+
+def mac_alive_on_lan(*, mac: str | None, host: str | None = None) -> bool:
+    """True when ``mac`` still appears in the local ARP/neighbor table.
+
+    ``host`` is a fallback: if the MAC is missing from the reverse ARP map,
+    a neighbor entry for that IP whose hardware address matches ``mac`` still
+    counts. Host-only rows with no MAC never qualify — identity is MAC-primary.
+    """
+
+    if not mac:
+        return False
+    if lookup_ip_via_arp_for_mac(mac):
+        return True
+    host_s = (host or "").strip()
+    if not host_s:
+        return False
+    seen = lookup_mac_via_arp(host_s)
+    return seen is not None and seen == try_normalize_mac(mac)
 
 
 def mac_from_sonos_rincon(uid: str) -> str | None:
@@ -132,3 +154,12 @@ def try_normalize_mac(mac: str) -> str | None:
         return normalize_mac(mac)
     except ValueError:
         return None
+
+
+def _arp_executable() -> str:
+    """Return a trusted absolute ``arp`` path without consulting ``PATH``."""
+
+    for path in _ARP_EXECUTABLE_CANDIDATES:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return "/usr/sbin/arp"

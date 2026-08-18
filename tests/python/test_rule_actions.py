@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from app.api.schemas import RuleConditionsOut, RuleDeviceActionOut, RuleOut
+from app.device_display import DEVICE_UNRESPONSIVE_ON_LAN
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
@@ -23,6 +24,7 @@ from app.rule_actions import (
     resolve_kasa_host_by_label,
     send_rule_notification_email,
 )
+from app.rule_engine import DeviceUnresponsiveError
 from app.rule_notification import format_completed_at_local
 from app.smtp_service import SmtpConnectionParams, SmtpDeliveryResult
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
@@ -30,7 +32,14 @@ from app.vizio_device_manager import VizioDeviceManager
 
 
 class _FakeKasa:
-    def __init__(self, host: str, label: str, *, is_on: bool = False) -> None:
+    def __init__(
+        self,
+        host: str,
+        label: str,
+        *,
+        is_on: bool = False,
+        unresponsive: bool = False,
+    ) -> None:
         self._kDevice = MagicMock()
         self._kDevice.host = host
         self.host = host
@@ -39,12 +48,15 @@ class _FakeKasa:
         self.preferred_label = label
         self.calls: list[str] = []
         self._is_on = is_on
+        self.unresponsive = unresponsive
 
     @property
     def is_on(self) -> bool:
         return self._is_on
 
     async def turn_off(self) -> None:
+        if self.unresponsive:
+            raise DeviceUnresponsiveError(DEVICE_UNRESPONSIVE_ON_LAN)
         self.calls.append("off")
         self._is_on = False
 
@@ -338,6 +350,38 @@ async def test_dispatch_rule_device_actions_programmer_error_on_turn_off_is_hard
     assert len(result.action_outcomes) == 1
     assert result.action_outcomes[0].succeeded is False
     assert result.action_outcomes[0].probable is False
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rule_device_actions_unresponsive_turn_off_is_hard_failure() -> None:
+    kasa = _FakeKasa("192.168.1.20", "Kitchen lamp", is_on=True, unresponsive=True)
+    state = DeviceManagersState(
+        kasa_mgr=_kasa_mgr([kasa]),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        ep1_mgr=None,
+        vizio_mgr=None,
+        cache_path=None,
+        args=argparse.Namespace(),
+    )
+    result = await dispatch_rule_device_actions(
+        state,
+        [
+            RuleDeviceActionOut(
+                family_id=DeviceFamilyId.KASA,
+                device_id="Kitchen lamp",
+                action=RuleDeviceActionType.TURN_OFF,
+            ),
+        ],
+    )
+    assert kasa.calls == []
+    assert result.probable_successes == ()
+    assert len(result.errors) == 1
+    assert DEVICE_UNRESPONSIVE_ON_LAN in result.errors[0]
+    outcome = result.action_outcomes[0]
+    assert outcome.succeeded is False
+    assert outcome.probable is False
 
 
 def test_resolve_kasa_host_by_label_raises_on_ambiguous_label() -> None:

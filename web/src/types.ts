@@ -117,6 +117,8 @@ export interface UIDeviceOut {
   identity_details?: string[];
   exclude_from_global: boolean;
   hide_on_mobile: boolean;
+  /** True when the MAC is on the LAN but the device protocol is silent. */
+  unresponsive?: boolean;
   /** Temperature / humidity / illuminance for occupancy tiles; null otherwise. */
   occupancy_readings?: UIOccupancyReadingsOut | null;
   /** Configured radio streams for Sonos zones (empty for other families). */

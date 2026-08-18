@@ -147,13 +147,16 @@ async def apply_kasa_motion_tuning(
         raise KasaMotionTuningValidationError(KASA_MOTION_TUNING_THRESHOLD_RANGE.format(value=pir_threshold))
 
     try:
-        await kd._kDevice.update()
+        backend = _require_kasa_protocol_device(kd)
+        await backend.update()
+    except KasaMotionTuningError:
+        raise
     except Exception as exc:
         raise KasaMotionTuningError(
             f"Failed to update Kasa device {format_device_display(kd.identifier, kd.preferred_label)}: {exc!r}"
         ) from exc
 
-    motion = _motion_module(kd._kDevice)
+    motion = _motion_module(backend)
     if motion is None:
         raise KasaMotionTuningError(
             KASA_MOTION_TUNING_MODULE_UNAVAILABLE.format(
@@ -161,7 +164,7 @@ async def apply_kasa_motion_tuning(
             )
         )
 
-    ambient = _ambient_module(kd._kDevice)
+    ambient = _ambient_module(backend)
     if (ambient_light_enabled is not None or ambient_brightness_limit is not None) and ambient is None:
         raise KasaMotionTuningValidationError(
             f"Kasa device {format_device_display(kd.identifier, kd.preferred_label)} "
@@ -184,7 +187,7 @@ async def apply_kasa_motion_tuning(
                 await ambient.set_enabled(ambient_light_enabled)
             if ambient_brightness_limit is not None:
                 await ambient.set_brightness_limit(ambient_brightness_limit)
-        await kd._kDevice.update()
+        await backend.update()
     except KasaMotionTuningError:
         raise
     except Exception as exc:
@@ -248,7 +251,8 @@ def list_kasa_motion_settings_targets(
         return []
     rows: list[KasaMotionSettingsTarget] = []
     for kd in _live_switches(kasa_mgr):
-        if not device_has_kasa_motion(kd._kDevice):
+        backend = kd.kasa_protocol_device()
+        if backend is None or not device_has_kasa_motion(backend):
             continue
         display_name = kd.preferred_label
         rows.append(
@@ -257,7 +261,7 @@ def list_kasa_motion_settings_targets(
                 display_label=format_device_display(kd.identifier, display_name),
                 display_name=display_name,
                 host=kd.host,
-                model=_device_model(kd._kDevice),
+                model=_device_model(backend),
             )
         )
     rows.sort(key=lambda row: (row.display_label.casefold(), row.device_id))
@@ -278,14 +282,15 @@ async def read_kasa_motion_tuning(
     if kd is None:
         raise KasaMotionTuningNotFoundError(KASA_MOTION_TUNING_DEVICE_NOT_FOUND.format(device_id=device_id))
 
+    backend = _require_kasa_protocol_device(kd)
     try:
-        await kd._kDevice.update()
+        await backend.update()
     except Exception as exc:
         raise KasaMotionTuningError(
             f"Failed to update Kasa device {format_device_display(kd.identifier, kd.preferred_label)}: {exc!r}"
         ) from exc
 
-    if _motion_module(kd._kDevice) is None:
+    if _motion_module(backend) is None:
         raise KasaMotionTuningError(
             KASA_MOTION_TUNING_MODULE_UNAVAILABLE.format(
                 display=format_device_display(kd.identifier, kd.preferred_label)
@@ -467,6 +472,17 @@ def _parse_pir_range_choices(raw_choices: Sequence[str] | None) -> tuple[KasaPir
     return tuple(parsed)
 
 
+def _require_kasa_protocol_device(kd: KasaDevice) -> KDevice:
+    backend = kd.kasa_protocol_device()
+    if backend is None:
+        raise KasaMotionTuningError(
+            KASA_MOTION_TUNING_MODULE_UNAVAILABLE.format(
+                display=format_device_display(kd.identifier, kd.preferred_label)
+            )
+        )
+    return backend
+
+
 def _resolve_motion_device(
     device_id: str,
     *,
@@ -478,21 +494,23 @@ def _resolve_motion_device(
     for kd in _live_switches(kasa_mgr):
         if kd.identifier != mac:
             continue
-        if not device_has_kasa_motion(kd._kDevice):
+        backend = kd.kasa_protocol_device()
+        if backend is None or not device_has_kasa_motion(backend):
             return None
         return kd
     return None
 
 
 def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
-    motion = _motion_module(kd._kDevice)
+    backend = _require_kasa_protocol_device(kd)
+    motion = _motion_module(backend)
     if motion is None:
         raise KasaMotionTuningError(
             KASA_MOTION_TUNING_MODULE_UNAVAILABLE.format(
                 display=format_device_display(kd.identifier, kd.preferred_label)
             )
         )
-    ambient = _ambient_module(kd._kDevice)
+    ambient = _ambient_module(backend)
     display_name = kd.preferred_label
     display = format_device_display(kd.identifier, display_name)
     try:
@@ -554,7 +572,7 @@ def _snapshot_from_device(kd: KasaDevice) -> KasaMotionTuningSnapshot:
         display_name=display_name,
         host=kd.host,
         inactivity_timeout_ms=inactivity_timeout_ms,
-        model=_device_model(kd._kDevice),
+        model=_device_model(backend),
         pir_enabled=pir_enabled,
         pir_percent=pir_percent,
         pir_range=pir_range,

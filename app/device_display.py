@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+DEVICE_UNRESPONSIVE_ON_LAN = "On the network, but might be unresponsive"
+
 
 def format_device_display(device_id: str, display_name: str | None) -> str:
     """Return ``Name (mac)`` when ``display_name`` differs from ``device_id``, else the id alone."""

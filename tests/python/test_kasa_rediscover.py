@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from kasa.credentials import Credentials
 from kasa.deviceconfig import DeviceConfig
 from kasa.exceptions import _ConnectionError
 
@@ -88,6 +89,384 @@ async def test_rediscover_uses_udp_not_sqlite_cache(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rediscover_keeps_arp_visible_cached_switch_as_unresponsive(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Desk lamp", cfg, False, "aa:bb:cc:dd:ee:01")],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.50"),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.rediscover()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:01"
+    assert switch.unresponsive is True
+    assert switch.preferred_label == "Desk lamp"
+
+
+@pytest.mark.asyncio
+async def test_rediscover_keeps_cached_mac_when_udp_finds_other_mac_at_old_host(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Desk lamp", cfg, False, "aa:bb:cc:dd:ee:01")],
+    )
+    occupant = MagicMock()
+    occupant.host = "192.168.1.50"
+    occupant.alias = "Other plug"
+    occupant.mac = "aa:bb:cc:dd:ee:02"
+    occupant.sys_info = {}
+    occupant.is_on = False
+    occupant.config = DeviceConfig.from_dict(cfg)
+    occupant.update = AsyncMock()
+    occupant.disconnect = AsyncMock()
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={occupant.host: occupant}),
+        ),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.77"),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.rediscover()
+    macs = {switch.mac_address for switch in mgr.switches}
+    assert macs == {"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"}
+    stub = next(switch for switch in mgr.switches if switch.mac_address == "aa:bb:cc:dd:ee:01")
+    assert stub.preferred_label == "Desk lamp"
+    assert stub.unresponsive is True
+    assert stub.host == "192.168.1.77"
+    cached_host_by_mac = {row[4]: row[0] for row in device_discovery_store.load_cached_configs(db)}
+    assert cached_host_by_mac["aa:bb:cc:dd:ee:01"] == "192.168.1.77"
+    assert cached_host_by_mac["aa:bb:cc:dd:ee:02"] == "192.168.1.50"
+
+
+@pytest.mark.asyncio
+async def test_fetch_cache_persists_klap_stub_at_arp_ip_when_mac_moved(tmp_path) -> None:
+    """KLAP merge must not restore the old host after ARP rewrites a stub IP."""
+
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.77",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.77", "Tapo plug", cfg, True, "aa:bb:cc:dd:ee:20")],
+    )
+    mgr = KasaDeviceManager(
+        discovery_cache_path=db,
+        credentials=Credentials(username="a@example.com", password="x"),
+    )
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.50"),
+    ):
+        await mgr.fetch()
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:20"
+    assert switch.host == "192.168.1.50"
+    assert switch.unresponsive is True
+    cached = device_discovery_store.load_cached_configs(db)
+    cached_host_by_mac = {row[4]: row[0] for row in cached}
+    assert cached_host_by_mac["aa:bb:cc:dd:ee:20"] == "192.168.1.50"
+    assert {row[0] for row in cached} == {"192.168.1.50"}
+
+
+@pytest.mark.asyncio
+async def test_rediscover_persists_klap_stub_at_arp_ip_when_mac_moved(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.77",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.77", "Tapo plug", cfg, True, "aa:bb:cc:dd:ee:20")],
+    )
+    mgr = KasaDeviceManager(
+        discovery_cache_path=db,
+        credentials=Credentials(username="a@example.com", password="x"),
+    )
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.50"),
+    ):
+        await mgr.rediscover()
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:20"
+    assert switch.host == "192.168.1.50"
+    cached = device_discovery_store.load_cached_configs(db)
+    cached_host_by_mac = {row[4]: row[0] for row in cached}
+    assert cached_host_by_mac["aa:bb:cc:dd:ee:20"] == "192.168.1.50"
+    assert {row[0] for row in cached} == {"192.168.1.50"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_cache_persists_stub_config_by_mac_when_hosts_swap(tmp_path) -> None:
+    """A stub must keep its own KLAP/XOR config when two MACs exchange IPs."""
+
+    db = tmp_path / "cached.sqlite"
+    xor_cfg = {
+        "host": "192.168.1.77",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    klap_cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.50", "Tapo plug", klap_cfg, True, "aa:bb:cc:dd:ee:20"),
+            ("192.168.1.77", "Desk lamp", xor_cfg, False, "aa:bb:cc:dd:ee:01"),
+        ],
+    )
+    mgr = KasaDeviceManager(
+        discovery_cache_path=db,
+        credentials=Credentials(username="a@example.com", password="x"),
+    )
+
+    def _arp_ip(mac: str) -> str:
+        return {
+            "aa:bb:cc:dd:ee:01": "192.168.1.50",
+            "aa:bb:cc:dd:ee:20": "192.168.1.77",
+        }[mac]
+
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", side_effect=_arp_ip),
+    ):
+        await mgr.fetch()
+    cached = device_discovery_store.load_cached_configs(db)
+    row_by_mac = {row[4]: row for row in cached}
+    tapo = row_by_mac["aa:bb:cc:dd:ee:20"]
+    lamp = row_by_mac["aa:bb:cc:dd:ee:01"]
+    assert tapo[0] == "192.168.1.77"
+    assert tapo[1] == "Tapo plug"
+    assert tapo[3] is True
+    assert tapo[2]["connection_type"]["encryption_type"] == "KLAP"
+    assert lamp[0] == "192.168.1.50"
+    assert lamp[1] == "Desk lamp"
+    assert lamp[3] is False
+    assert lamp[2]["connection_type"]["encryption_type"] == "XOR"
+
+
+@pytest.mark.asyncio
+async def test_fetch_cache_keeps_arp_visible_protocol_miss_as_unresponsive(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Desk lamp", cfg, False, "aa:bb:cc:dd:ee:01")],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.50"),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:01"
+    assert switch.unresponsive is True
+    assert mgr.last_discovery_source == "cache"
+
+
+@pytest.mark.asyncio
+async def test_fetch_cache_keeps_arp_visible_klap_handshake_miss_as_unresponsive(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.20", "Tapo plug", cfg, True, "aa:bb:cc:dd:ee:20")],
+    )
+    mgr = KasaDeviceManager(
+        discovery_cache_path=db,
+        credentials=Credentials(username="a@example.com", password="x"),
+    )
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.20"),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:20"
+    assert switch.preferred_label == "Tapo plug"
+    assert switch.unresponsive is True
+    assert mgr.last_discovery_source == "cache"
+    assert mgr.skipped_auth_hosts == ("192.168.1.20",)
+
+
+@pytest.mark.asyncio
+async def test_fetch_cache_keeps_arp_visible_klap_host_without_credentials_as_unresponsive(
+    tmp_path,
+) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.20", "Tapo plug", cfg, True, "aa:bb:cc:dd:ee:20")],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=AssertionError("UDP should not run on cache hit")),
+        ),
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(side_effect=AssertionError("KLAP hosts without credentials must not connect")),
+        ),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.20"),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:20"
+    assert switch.preferred_label == "Tapo plug"
+    assert switch.unresponsive is True
+    assert mgr.last_discovery_source == "cache"
+    assert mgr.skipped_auth_hosts == ("192.168.1.20",)
+
+
+@pytest.mark.asyncio
+async def test_fetch_udp_fallback_keeps_arp_visible_cached_switch(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    cfg = {
+        "host": "192.168.1.50",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    nameless = {
+        "host": "192.168.1.51",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "IOT.SMARTPLUGSWITCH",
+            "encryption_type": "XOR",
+            "https": False,
+        },
+    }
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.51", "Nameless", nameless, False),
+            ("192.168.1.50", "Desk lamp", cfg, False, "aa:bb:cc:dd:ee:01"),
+        ],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.50"),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 1
+    switch = mgr.switches[0]
+    assert switch.mac_address == "aa:bb:cc:dd:ee:01"
+    assert switch.unresponsive is True
+    assert mgr.last_discovery_source == "discovery"
+
+
+@pytest.mark.asyncio
 async def test_fetch_cache_hit_refreshes_alias_from_device_update(tmp_path) -> None:
     """Cache reconnect must call ``update()`` so renamed Kasa aliases reach the UI."""
 
@@ -137,8 +516,6 @@ async def test_cache_reconnect_attaches_credentials_only_for_klap_hosts(
     tmp_path,
 ) -> None:
     """Anonymous hosts must not receive account credentials on cache reconnect."""
-
-    from kasa.credentials import Credentials
 
     db = tmp_path / "cached.sqlite"
     anon_cfg = {
@@ -262,7 +639,10 @@ async def test_cache_update_uses_ingest_recovery_instead_of_invalidating(
 
 @pytest.mark.asyncio
 async def test_cache_skips_klap_hosts_quietly_without_credentials(tmp_path) -> None:
-    """Known KLAP-auth hosts are ignored when no credentials are configured."""
+    """Known KLAP-auth hosts are ignored when no credentials are configured.
+
+    MAC-less KLAP cache rows stay omitted; ARP keep requires a cached MAC.
+    """
 
     db = tmp_path / "cached.sqlite"
     anon_cfg = {
@@ -287,6 +667,7 @@ async def test_cache_skips_klap_hosts_quietly_without_credentials(tmp_path) -> N
         db,
         [
             ("192.168.1.10", "Legacy", anon_cfg, False),
+            # No cached MAC: ARP keep cannot retain a tile (host-only never qualifies).
             ("192.168.1.20", "Tapo", klap_cfg, True),
         ],
     )
@@ -370,9 +751,12 @@ async def test_rediscover_keeps_switches_visible_during_udp_sweep(tmp_path) -> N
         assert len(mgr.switches) == 1
         return {}
 
-    with patch(
-        "app.kasa_device_manager.Discover.discover",
-        AsyncMock(side_effect=_discover_and_assert_prior_devices),
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(side_effect=_discover_and_assert_prior_devices),
+        ),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
     ):
         await mgr.rediscover()
 

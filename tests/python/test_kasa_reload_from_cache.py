@@ -85,7 +85,7 @@ async def test_reload_from_cache_never_calls_discover(tmp_path) -> None:
             ok = await mgr.reload_from_cache()
 
     assert ok is True
-    assert {kd._kDevice.host for kd in mgr.switches} == {
+    assert {kd.host for kd in mgr.switches} == {
         "192.168.1.10",
         "192.168.1.20",
     }
@@ -128,7 +128,7 @@ async def test_reload_from_cache_removes_host_dropped_from_sqlite(tmp_path) -> N
         ok = await mgr.reload_from_cache()
 
     assert ok is True
-    assert [kd._kDevice.host for kd in mgr.switches] == ["192.168.1.10"]
+    assert [kd.host for kd in mgr.switches] == ["192.168.1.10"]
     mock_discover.assert_not_awaited()
 
 
@@ -170,7 +170,7 @@ async def test_reload_from_cache_clears_klap_auth_for_dropped_host(tmp_path) -> 
 
     assert ok is True
     assert "192.168.1.99" not in mgr.hosts_requiring_klap_auth
-    assert [kd._kDevice.host for kd in mgr.switches] == ["192.168.1.10"]
+    assert [kd.host for kd in mgr.switches] == ["192.168.1.10"]
 
 
 @pytest.mark.asyncio

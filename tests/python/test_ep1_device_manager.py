@@ -134,6 +134,41 @@ async def test_force_discovery_falls_back_to_cache_when_no_lan_targets(
 
 
 @pytest.mark.asyncio
+async def test_force_discovery_keeps_arp_visible_cached_ep1_as_unresponsive(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("EP1_NOISE_PSK", "test-psk")
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(
+        cache,
+        host="192.0.2.99",
+        port=6053,
+        mac="aa:bb:cc:dd:ee:01",
+        friendly_name="Cached",
+    )
+    client = MagicMock()
+    client.connect = AsyncMock(side_effect=RuntimeError("timeout"))
+    client.disconnect = AsyncMock()
+    monkeypatch.setattr("app.ep1_device_manager.mac_alive_on_lan", lambda **_k: True)
+    monkeypatch.setattr("app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda _mac: "192.0.2.99")
+    mgr = Ep1DeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=cache,
+        force_discovery=True,
+        zeroconf_discovery=False,
+        api_client_factory=lambda host, port, **_k: client,
+    )
+    await mgr.fetch()
+    assert len(mgr.devices) == 1
+    device = mgr.devices[0]
+    assert device.mac_address == "aa:bb:cc:dd:ee:01"
+    assert device.unresponsive is True
+    assert device.occupancy_state == "unknown"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_force_discovery_prefers_configured_hosts_over_cache(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

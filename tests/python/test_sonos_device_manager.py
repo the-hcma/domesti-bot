@@ -289,6 +289,31 @@ async def test_force_discovery_always_runs_udp(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_force_discovery_keeps_arp_visible_cached_zone_as_unresponsive(tmp_path: Path) -> None:
+    db = tmp_path / "sonos.sqlite"
+    device_discovery_store.save_sonos_zones(
+        db,
+        [("RINCON_AAAAAAAAAAAA01400", "192.168.1.10", "Living Room", "aa:aa:aa:aa:aa:aa")],
+    )
+    zone = MagicMock()
+    zone.uid = "RINCON_AAAAAAAAAAAA01400"
+    zone.player_name = "Living Room"
+    zone.ip_address = "192.168.1.10"
+    mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db, force_discovery=True)
+    with (
+        patch("app.sonos_device_manager.soco_discover", return_value=set()),
+        patch("app.sonos_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.10"),
+        patch("app.sonos_device_manager.SoCo", return_value=zone),
+    ):
+        await mgr.fetch()
+    assert len(mgr.players) == 1
+    player = mgr.players[0]
+    assert player.mac_address == "aa:aa:aa:aa:aa:aa"
+    assert player.unresponsive is True
+
+
+@pytest.mark.asyncio
 async def test_fetch_persists_cache_after_udp_discovery(tmp_path: Path) -> None:
     """A successful UDP sweep must write the cache so the next start can skip it."""
 

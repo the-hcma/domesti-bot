@@ -342,7 +342,7 @@ async def test_maybe_sync_reloads_and_restarts_watchers_on_drift(
             changed = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
 
     assert changed is True
-    assert {kd._kDevice.host for kd in mgr.switches} == {
+    assert {kd.host for kd in mgr.switches} == {
         "192.168.1.10",
         "192.168.1.20",
     }
@@ -444,9 +444,12 @@ async def test_maybe_sync_skips_retry_after_failed_fingerprint(
         return None
 
     runtime.reset()
-    with patch(
-        "app.kasa_device_manager._connect_from_saved_config",
-        AsyncMock(side_effect=_connect_fail),
+    with (
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(side_effect=_connect_fail),
+        ),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
     ):
         first = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
         with patch.object(mgr, "reload_from_cache", AsyncMock()) as reload:

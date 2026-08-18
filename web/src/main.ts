@@ -5,7 +5,7 @@
 // device, plus per-family and global bulk actions.
 
 import { api, HttpError, isBackendTransportFailure } from "./api.js";
-import { formatDeviceIdentityTooltip } from "./device-identity-tooltip.js";
+import { DEVICE_UNRESPONSIVE_ON_LAN, formatDeviceIdentityTooltip } from "./device-identity-tooltip.js";
 import {
   createEp1HeaderOccupancyGlyph,
   createEp1HeaderStatusStrip,
@@ -2015,7 +2015,14 @@ function attachTileHitListeners(
 
 function compactTileAriaLabel(device: UIDeviceOut): string {
   const statePhrase =
-    device.state === UIDeviceState.Unknown ? "state unknown" : `currently ${device.state}`;
+    device.unresponsive === true
+      ? DEVICE_UNRESPONSIVE_ON_LAN
+      : device.state === UIDeviceState.Unknown
+        ? "state unknown"
+        : `currently ${device.state}`;
+  if (device.unresponsive === true) {
+    return `${device.label}, ${statePhrase}`;
+  }
   switch (device.kind) {
     case UIDeviceKind.Switch: {
       const next = device.state === UIDeviceState.Off ? "turn on" : "turn off";
@@ -2306,7 +2313,7 @@ function createTileSaturatedHit(
   const hit = document.createElement("button");
   hit.type = "button";
   hit.className = hitClassName;
-  hit.dataset["tone"] = deviceStateTone(device.state);
+  hit.dataset["tone"] = deviceStateTone(device);
   const isActive =
     device.state === UIDeviceState.On ||
     device.state === UIDeviceState.Playing ||
@@ -2317,13 +2324,16 @@ function createTileSaturatedHit(
   hit.title = formatDeviceIdentityTooltip(device, {
     includePropertiesHint: true,
   });
-  hit.disabled = !connected;
+  hit.disabled = !connected || device.unresponsive === true;
   appendSaturatedTileVisuals(hit, device, hitClassName === "tile-compact-hit");
   attachTileHitListeners(hit, device, controller);
   return hit;
 }
 
 function deviceNeedsBulkOff(device: UIDeviceOut): boolean {
+  if (device.unresponsive === true) {
+    return false;
+  }
   switch (device.kind) {
     case UIDeviceKind.Switch:
       return device.state === UIDeviceState.On;
@@ -2337,15 +2347,15 @@ function deviceNeedsBulkOff(device: UIDeviceOut): boolean {
   }
 }
 
-function deviceStateTone(state: UIDeviceState): TileTone {
-  if (state === UIDeviceState.Unknown) {
+function deviceStateTone(device: UIDeviceOut): TileTone {
+  if (device.unresponsive === true || device.state === UIDeviceState.Unknown) {
     return TileTone.Unknown;
   }
   if (
-    state === UIDeviceState.On ||
-    state === UIDeviceState.Playing ||
-    state === UIDeviceState.Open ||
-    state === UIDeviceState.Occupied
+    device.state === UIDeviceState.On ||
+    device.state === UIDeviceState.Playing ||
+    device.state === UIDeviceState.Open ||
+    device.state === UIDeviceState.Occupied
   ) {
     return TileTone.Active;
   }
@@ -2569,6 +2579,9 @@ function renderFamily(
 }
 
 function tileStateCaption(device: UIDeviceOut): string | null {
+  if (device.unresponsive === true) {
+    return DEVICE_UNRESPONSIVE_ON_LAN;
+  }
   if (device.state === UIDeviceState.Unknown) {
     return "Unknown";
   }

@@ -21,28 +21,35 @@ from app.api.ui_state import (
     bulk_off_vizio_apply,
     find_vizio_by_id,
 )
+from app.device_display import DEVICE_UNRESPONSIVE_ON_LAN
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
+from app.rule_engine import DeviceUnresponsiveError
 from app.server_runtime import runtime
 from app.vizio_device_manager import VizioDeviceManager
 
 
 class _FakeVizioTv:
-    def __init__(self, device_id: str, label: str, *, is_on: bool) -> None:
+    def __init__(self, device_id: str, label: str, *, is_on: bool, unresponsive: bool = False) -> None:
         self.identifier = device_id
         self.mac_address = device_id if ":" in device_id else "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_on = is_on
         self.calls: list[str] = []
+        self.unresponsive = unresponsive
 
     def ui_power_state(self) -> str:
         return "on" if self.is_on else "off"
 
     async def turn_off(self) -> None:
+        if self.unresponsive:
+            raise DeviceUnresponsiveError(DEVICE_UNRESPONSIVE_ON_LAN)
         self.calls.append("off")
         self.is_on = False
 
     async def turn_on(self) -> None:
+        if self.unresponsive:
+            raise DeviceUnresponsiveError(DEVICE_UNRESPONSIVE_ON_LAN)
         self.calls.append("on")
         self.is_on = True
 
@@ -119,10 +126,24 @@ async def test_bulk_off_global_apply_includes_vizio() -> None:
     assert tv.calls == ["off"]
 
 
+def test_vizio_toggle_endpoint_returns_409_for_unresponsive_tv(tmp_path: Path) -> None:
+    tv = _FakeVizioTv("192.168.1.10", "Kitchen TV", is_on=True, unresponsive=True)
+    state = _state(vizio_tvs=[tv], cache_path=tmp_path / "cache.sqlite")
+    client, _app = _client()
+    runtime.device_state = state
+    response = client.post(
+        "/v1/ui/vizio/tvs/192.168.1.10/toggle",
+        json={"on": False},
+    )
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert DEVICE_UNRESPONSIVE_ON_LAN in response.json()["detail"]
+    assert tv.calls == []
+
+
 def test_vizio_toggle_endpoint_turns_on(tmp_path: Path) -> None:
     tv = _FakeVizioTv("192.168.1.10", "Kitchen TV", is_on=False)
     state = _state(vizio_tvs=[tv], cache_path=tmp_path / "cache.sqlite")
-    client, app = _client()
+    client, _app = _client()
     runtime.device_state = state
     response = client.post(
         "/v1/ui/vizio/tvs/192.168.1.10/toggle",

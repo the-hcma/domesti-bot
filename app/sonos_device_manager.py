@@ -26,8 +26,15 @@ from soco import discover as soco_discover
 from soco.exceptions import SoCoUPnPException
 
 from app import device_discovery_store
+from app.device_display import format_device_display
 from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
-from app.device_mac import lookup_mac_via_arp, mac_from_sonos_rincon
+from app.device_mac import (
+    lookup_ip_via_arp_for_mac,
+    lookup_mac_via_arp,
+    mac_alive_on_lan,
+    mac_from_sonos_rincon,
+    try_normalize_mac,
+)
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SpeakerDeviceManager
 from app.rule_engine import SpeakerDevice
 from app.sonos_stream_favorites import SonosStreamFavorite, load_sonos_stream_favorites
@@ -115,6 +122,7 @@ class SonosSpeakerDevice(SpeakerDevice):
         return self._rincon_uid
 
     async def pause(self) -> None:
+        self.require_responsive()
         try:
             await asyncio.to_thread(self._soco.pause)
         except SoCoUPnPException as exc:
@@ -137,6 +145,7 @@ class SonosSpeakerDevice(SpeakerDevice):
         self._is_playing = False
 
     async def resume(self, *, favorite_index: int = 0) -> None:
+        self.require_responsive()
         favorite: SonosStreamFavorite | None = None
         if self._stream_favorites:
             if favorite_index < 0 or favorite_index >= len(self._stream_favorites):
@@ -303,8 +312,11 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             uid = sd.rincon_uid.strip()
             if not host or not uid:
                 continue
-            display = getattr(zone, "player_name", None)
-            label = (str(display).strip() if display else "") or None
+            if sd.unresponsive:
+                label = sd.display_name or sd.preferred_label
+            else:
+                display = getattr(zone, "player_name", None)
+                label = (str(display).strip() if display else "") or None
             note_display_name_rename(
                 backend="sonos",
                 mac_address=sd.mac_address,
@@ -321,6 +333,39 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 )
         device_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
 
+    async def _retain_arp_visible_cached_zones(self, devices: list[SonosSpeakerDevice]) -> None:
+        """Keep cached zone MACs that still answer ARP when SSDP missed them."""
+
+        if self._discovery_cache_path is None:
+            return
+        seen = {device.mac_address for device in devices if device.mac_address}
+        for uid, host, zone_name, mac in device_discovery_store.load_sonos_zones(self._discovery_cache_path):
+            mac_n = try_normalize_mac(mac or "") or mac_from_sonos_rincon(uid)
+            if mac_n is None or mac_n in seen:
+                continue
+            if not await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host):
+                continue
+            arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) or host
+            label = (zone_name or "").strip() or mac_n
+            zone = SoCo(arp_ip)
+            sd = self._speaker_device(uid, zone, display_name=label)
+            if sd is None:
+                sd = SonosSpeakerDevice(
+                    mac_n,
+                    zone,
+                    display_name=label,
+                    mac_address=mac_n,
+                    rincon_uid=uid,
+                    stream_favorites=self._stream_favorites,
+                )
+            sd.set_unresponsive(True)
+            devices.append(sd)
+            seen.add(mac_n)
+            _LOGGER.info(
+                "Sonos: %s is on the LAN (ARP) but UPnP is silent; keeping as unresponsive",
+                format_device_display(sd.identifier, sd.preferred_label),
+            )
+
     async def _prime_playback_states(self, devices: list[SonosSpeakerDevice]) -> None:
         """One concurrent UPnP transport read per zone after discovery.
 
@@ -332,7 +377,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         if not devices:
             return
         await asyncio.gather(
-            *(d.update_playback_state() for d in devices),
+            *(d.update_playback_state() for d in devices if not d.unresponsive),
             return_exceptions=True,
         )
 
@@ -448,6 +493,8 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             if sd is None:
                 continue
             devices.append(sd)
+        if self._force_discovery:
+            await self._retain_arp_visible_cached_zones(devices)
         self._finalize(devices)
         self._persist_cache(devices)
         self._last_discovery_source = "discovery"

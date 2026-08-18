@@ -126,6 +126,7 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
                 name=f"state-watcher-{DeviceFamilyId.EP1.value}-{device.identifier}",
             )
             for device in devices
+            if getattr(device, "unresponsive", False) is not True
         ]
         try:
             await stop.wait()
@@ -210,6 +211,8 @@ class KasaPollingWatcher(DeviceStateWatcher):
             task_name = f"state-watcher-{DeviceFamilyId.KASA.value}-{kd.identifier}"
 
             async def _refresh_switch(device: Any = kd) -> None:
+                if device._kDevice is None:
+                    return
                 host = (device._kDevice.host or "").strip() or "?"
                 try:
                     if not await _await_with_stop(
@@ -274,6 +277,8 @@ class SonosPollingWatcher(DeviceStateWatcher):
             task_name = f"state-watcher-{DeviceFamilyId.SONOS.value}-{sp.identifier}"
 
             async def _refresh_player(device: Any = sp) -> None:
+                if getattr(device, "unresponsive", False) is True:
+                    return
                 try:
                     if not await _await_with_stop(
                         stop,

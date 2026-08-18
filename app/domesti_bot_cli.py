@@ -919,7 +919,7 @@ def _sqlite_canonical_key(
 ) -> str | None:
     if backend == "kasa":
         kd = kasa_mgr.get_device_by_alias(api_lookup_id)
-        return kd._kDevice.host if kd is not None else None
+        return kd.host if kd is not None else None
     if backend == "tailwind" and tailwind_mgr is not None:
         gd = tailwind_mgr.get_device_by_alias(api_lookup_id)
         return gd.identifier if gd is not None else None

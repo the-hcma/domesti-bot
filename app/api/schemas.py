@@ -200,7 +200,11 @@ class UIDeviceOut(BaseModel):
       ``"closed"`` for doors; ``"occupied"`` / ``"clear"`` for occupancy.
       ``"unknown"`` covers transient cases (a Tailwind door reporting
       ``OPENING`` / ``CLOSING``, a Sonos zone we haven't polled yet) so the
-      UI never has to crash on unexpected payloads.
+      UI never has to crash on unexpected payloads. ARP-visible devices whose
+      protocol is silent also report ``unknown`` with ``unresponsive=true``.
+    * ``unresponsive``: the MAC is still on the LAN (ARP) but SmartCast /
+      Kasa / Sonos / EP1 control is not answering. Tiles should say the
+      device is on the network but might be unresponsive.
     * ``occupancy_readings``: temperature / humidity / illuminance for
       ``kind=occupancy`` (null for other kinds). See
       :class:`UIOccupancyReadingsOut`.
@@ -233,6 +237,13 @@ class UIDeviceOut(BaseModel):
             "``on``/``off`` (switch), ``playing``/``paused`` (speaker), "
             "``open``/``closed`` (door), or ``occupied``/``clear`` (occupancy); "
             "``unknown`` for transient."
+        ),
+    )
+    unresponsive: bool = Field(
+        default=False,
+        description=(
+            "True when the MAC is still on the LAN but the device protocol "
+            "is not answering (tile: on the network, but might be unresponsive)."
         ),
     )
     compact_icon: str = Field(

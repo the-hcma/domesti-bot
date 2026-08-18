@@ -38,7 +38,7 @@ from app.outbound_email import (
     record_outbound_smtp_failure,
 )
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
-from app.rule_engine import expected_state_for_action_type
+from app.rule_engine import DeviceUnresponsiveError, expected_state_for_action_type
 from app.rule_notification import build_rule_notification_bodies
 from app.smtp_service import SmtpDeliveryResult
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
@@ -110,6 +110,8 @@ def _device_action_failure_is_probable(
     """Return whether a post-command failure on off/pause/close may still have succeeded."""
     match action.action:
         case RuleDeviceActionType.CLOSE | RuleDeviceActionType.PAUSE | RuleDeviceActionType.TURN_OFF:
+            if isinstance(exc, DeviceUnresponsiveError):
+                return False
             return isinstance(
                 exc,
                 (OSError, SonosTransitionUnavailableError, _ConnectionError),
