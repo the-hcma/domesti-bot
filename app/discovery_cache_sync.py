@@ -147,7 +147,14 @@ def _cached_tailwind_hub_macs(cache_path: Path) -> frozenset[str]:
 
 
 def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[str]:
-    """IDs that ``reload_from_cache`` would attempt (token-backed endpoints only)."""
+    """Token-backed discovery-row ids, or the live roster when the table is empty.
+
+    An emptied discovery table (CLI rediscover ARP miss) must not look like
+    “delete every TV”. Fingerprint the in-memory roster so leftover
+    ``vizio_auth:<mac>`` secrets for TVs that are off do not drift every
+    poll, and so env/CLI-token TVs that are live are not a subset miss
+    that wipes the map.
+    """
 
     ids: set[str] = set()
     for host, port, _display, _model, mac, _diid in device_discovery_store.load_vizio_tvs(cache_path):
@@ -161,7 +168,12 @@ def _cached_vizio_ids(cache_path: Path, mgr: VizioDeviceManager) -> frozenset[st
         if not token:
             continue
         ids.add(vizio_device_id_from_parts(mac=mac, host=host, port=port))
-    return frozenset(ids)
+    if ids:
+        return frozenset(ids)
+    try:
+        return _live_vizio_ids(mgr)
+    except NotInitializedError:
+        return frozenset()
 
 
 def _clear_failed(family: DeviceFamilyId) -> None:

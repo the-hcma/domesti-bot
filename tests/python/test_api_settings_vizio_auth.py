@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app import device_discovery_store
 from app.api.app import create_app
-from app.db.secrets import SecretsDecryptError
+from app.db.secrets import SecretsConfigurationError, SecretsDecryptError
 from app.domesti_bot_cli import DeviceManagersState
 from app.server_runtime import runtime as server_runtime
 from app.vizio_credentials import resolve_vizio_auth_token
@@ -203,6 +203,25 @@ def test_resolve_vizio_auth_falls_back_to_env_when_db_decrypt_fails(
     ):
         token, source = resolve_vizio_auth_token(
             mac=None,
+            host="192.168.86.201",
+            cli_token=None,
+            env_token="env-token",
+            cache_path=tmp_path / "ui.sqlite",
+        )
+    assert token == "env-token"
+    assert source == "env"
+
+
+def test_resolve_vizio_auth_falls_back_to_env_when_secrets_key_is_invalid(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("VIZIO_AUTH_TOKEN", "env-token")
+    with patch(
+        "app.vizio_credentials.load_vizio_auth_token_from_db",
+        side_effect=SecretsConfigurationError("malformed Fernet key"),
+    ):
+        token, source = resolve_vizio_auth_token(
+            mac="00:bd:3e:d5:f0:11",
             host="192.168.86.201",
             cli_token=None,
             env_token="env-token",

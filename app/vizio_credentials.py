@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.db.secrets import (
+    SecretsConfigurationError,
     SecretsDecryptError,
     delete_app_secret,
     load_vizio_auth_token_from_db,
@@ -42,7 +43,7 @@ def resolve_vizio_auth_token(
     if cache_path is not None:
         try:
             stored = load_vizio_auth_token_from_db(cache_path, mac=mac, host=host)
-        except SecretsDecryptError:
+        except (SecretsConfigurationError, SecretsDecryptError):
             stored = None
         if stored:
             return stored, "database"
@@ -61,7 +62,7 @@ def migrate_vizio_auth_token_host_to_mac(
     """Prefer an existing MAC-scoped token; else re-key legacy host storage."""
     try:
         mac_token = load_vizio_auth_token_from_db(cache_path, mac=mac, host=None)
-    except SecretsDecryptError:
+    except (SecretsConfigurationError, SecretsDecryptError):
         mac_token = None
     if mac_token:
         if vizio_auth_token_stored_in_db(cache_path, mac=None, host=host):
@@ -69,7 +70,7 @@ def migrate_vizio_auth_token_host_to_mac(
         return
     try:
         host_token = load_vizio_auth_token_from_db(cache_path, mac=None, host=host)
-    except SecretsDecryptError:
+    except (SecretsConfigurationError, SecretsDecryptError):
         host_token = None
     if host_token:
         save_vizio_auth_token_to_db(
