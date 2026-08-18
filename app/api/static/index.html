@@ -148,13 +148,19 @@
       box-sizing: border-box; padding: 4px; color: var(--fg);
       min-width: 0; min-height: 0; line-height: 0;
     }
-    /* Occupied: accent green (same family as live climate). Clear: silver on
-       the dark canvas; a darker gray in light/clear mode so the ghost stays
-       readable on the white panel (``var(--fg)`` is near-black and too heavy). */
+    /* Occupied / clear match live / stale EP1 header reading colors. */
     .ep1-header-occupancy-glyph[data-occupancy="occupied"] { color: var(--accent); }
-    .ep1-header-occupancy-glyph[data-occupancy="clear"] { color: #646a72; }
+    html[data-theme="light"] .ep1-header-occupancy-glyph[data-occupancy="occupied"] {
+      color: #14532d;
+    }
+    @media (prefers-color-scheme: light) {
+      html:not([data-theme]) .ep1-header-occupancy-glyph[data-occupancy="occupied"] {
+        color: #14532d;
+      }
+    }
+    .ep1-header-occupancy-glyph[data-occupancy="clear"] { color: var(--pending); }
     html[data-theme="light"] .ep1-header-occupancy-glyph[data-occupancy="clear"] {
-      color: #4b5563;
+      color: #a16207;
     }
     .ep1-header-occupancy-svg { display: block; width: 22px; height: 22px; }
     .btn.btn-theme-toggle { display: inline-flex; align-items: center;

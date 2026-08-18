@@ -230,7 +230,7 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
     <svg class="ep1-header-occupancy-svg" width="22" height="22"
          viewBox="0 0 24 24" aria-hidden="true">
       <path fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
             stroke-linejoin="round"
             d="M12 2a7 7 0 0 0-7 7v11l2.5-1.5L10 20l2-1.5L14 20l2.5-1.5L19 20V9a7 7 0 0 0-7-7z"></path>
       <circle cx="9" cy="10" r="1" fill="currentColor"></circle>
@@ -241,17 +241,18 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
     <svg class="ep1-header-occupancy-svg" width="22" height="22"
          viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="7" r="3"
-              fill="none" stroke="currentColor" stroke-width="2"></circle>
+              fill="none" stroke="currentColor" stroke-width="2.5"></circle>
       <path
         d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"
         fill="none"
         stroke="currentColor"
         stroke-linecap="round"
-        stroke-width="2"
+        stroke-width="2.5"
       ></path>
     </svg>
   </span>
   <span class="ep1-header-status-metric" data-responding="true">22.5 °C</span>
+  <span class="ep1-header-status-metric" data-responding="false">--</span>
   <span class="brand-mark">
     <svg class="brand-mark-svg" viewBox="0 0 24 24">
       <circle class="brand-mark-bm-head" cx="12" cy="8" r="4"></circle>
@@ -315,18 +316,24 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
                       '.ep1-header-status-metric[data-responding="true"]'
                     )
                   ).color;
+                  const staleMetric = getComputedStyle(
+                    document.querySelector(
+                      '.ep1-header-status-metric[data-responding="false"]'
+                    )
+                  ).color;
                   return {
                     canvas, clear, occupied, clearStroke, occupiedStroke,
-                    brandHeadStroke, brandBallFill, liveMetric,
+                    brandHeadStroke, brandBallFill, liveMetric, staleMetric,
                   };
                 }""",
             )
             canvas = _parse_css_color(str(colors["canvas"]))
+            live_metric = _parse_css_color(str(colors["liveMetric"]))
+            stale_metric = _parse_css_color(str(colors["staleMetric"]))
             if expected_canvas is not None:
                 assert canvas == expected_canvas, (
                     f"canvas in {label} should be white for the clear-mode panel, got {colors['canvas']}"
                 )
-                live_metric = _parse_css_color(str(colors["liveMetric"]))
                 assert live_metric == (20, 83, 45), (
                     f"live metric in {label} should be #14532d, got {colors['liveMetric']}"
                 )
@@ -336,6 +343,13 @@ def test_ep1_header_occupancy_glyph_contrasts_on_canvas_in_light_and_dark(
             occupied_stroke = _parse_css_color(str(colors["occupiedStroke"]))
             brand_head_stroke = _parse_css_color(str(colors["brandHeadStroke"]))
             brand_ball_fill = _parse_css_color(str(colors["brandBallFill"]))
+            assert occupied == live_metric, (
+                f"occupied glyph in {label} should match live readings, "
+                f"got {colors['occupied']} vs {colors['liveMetric']}"
+            )
+            assert clear == stale_metric, (
+                f"clear glyph in {label} should match stale readings, got {colors['clear']} vs {colors['staleMetric']}"
+            )
             assert _contrast_ratio(clear, canvas) >= 3.0, (
                 f"clear glyph vs canvas in {label}: {clear} on {colors['canvas']}"
             )
@@ -370,6 +384,9 @@ def test_ep1_header_status_module_readings_only_contract() -> None:
     assert "mac_address" in src
     assert 'classList.add("ep1-header-occupancy-fill")' not in src
     assert 'body.setAttribute("fill", "none")' in src
+    assert "EP1_HEADER_OCCUPANCY_STROKE_WIDTH" in src
+    assert 'setAttribute("stroke-width", EP1_HEADER_OCCUPANCY_STROKE_WIDTH)' in src
+    assert 'setAttribute("stroke-width", "2")' not in src
     assert "ep1-header-status-label" not in src
     assert "compactC" in src
     assert "compactF" in src
@@ -383,6 +400,22 @@ def test_ep1_header_status_module_readings_only_contract() -> None:
     assert "illuminance_lx" in src
     assert 'dataset["responding"]' in src
     assert "EP1_HEADER_STALE_AFTER_S" in src
+
+
+def test_about_tagline_lists_supported_families() -> None:
+    src = _MAIN_TS.read_text(encoding="utf-8")
+    assert "export const ABOUT_TAGLINE" in src
+    assert "tagline.textContent = ABOUT_TAGLINE" in src
+    for name in (
+        "Everything Presence One",
+        "GoTailwind",
+        "Google Cast",
+        "Sonos",
+        "TP-Link Kasa",
+        "Vizio TVs",
+        "temporarily disabled",
+    ):
+        assert name in src
 
 
 def test_index_html_ep1_header_status_css_contract() -> None:
@@ -439,12 +472,22 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         '.ep1-header-occupancy-glyph[data-occupancy="clear"]',
     )
     assert "var(--accent)" in occupied
-    assert "#646a72" in clear
+    assert "var(--pending)" in clear
+    light_occupied = _css_rule_block(
+        style,
+        'html[data-theme="light"] .ep1-header-occupancy-glyph[data-occupancy="occupied"]',
+    )
+    assert "color: #14532d" in light_occupied
     light_clear = _css_rule_block(
         style,
         'html[data-theme="light"] .ep1-header-occupancy-glyph[data-occupancy="clear"]',
     )
-    assert "#4b5563" in light_clear
+    assert "color: #a16207" in light_clear
+    os_light_occupied = _css_rule_block(
+        style,
+        'html:not([data-theme]) .ep1-header-occupancy-glyph[data-occupancy="occupied"]',
+    )
+    assert "color: #14532d" in os_light_occupied
     assert "ep1-header-occupancy-fill" not in style
     brand_head = _css_rule_block(style, ".brand-mark-bm-head")
     brand_ball = _css_rule_block(style, ".brand-mark-bm-antenna-ball")

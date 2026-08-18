@@ -27,6 +27,8 @@ export const EP1_HEADER_STALE_AFTER_S =
 
 export const EP1_HEADER_OCCUPANCY_ARIA_CLEAR = "Room clear";
 export const EP1_HEADER_OCCUPANCY_ARIA_OCCUPIED = "Room occupied";
+/** SVG stroke weight; matches the header metrics / theme-toggle visual mass. */
+export const EP1_HEADER_OCCUPANCY_STROKE_WIDTH = "2.5";
 
 /** Aggregate occupancy cue for the header glyph (multi-EP1 rule). */
 export const Ep1HeaderOccupancyGlyph = {
@@ -282,7 +284,7 @@ function createGhostSvg(): SVGElement {
   );
   body.setAttribute("fill", "none");
   body.setAttribute("stroke", "currentColor");
-  body.setAttribute("stroke-width", "2");
+  body.setAttribute("stroke-width", EP1_HEADER_OCCUPANCY_STROKE_WIDTH);
   body.setAttribute("stroke-linecap", "round");
   body.setAttribute("stroke-linejoin", "round");
   const eyeL = document.createElementNS(SVG_NS, "circle");
@@ -332,12 +334,12 @@ function createPersonSvg(): SVGElement {
   head.setAttribute("r", "3");
   head.setAttribute("fill", "none");
   head.setAttribute("stroke", "currentColor");
-  head.setAttribute("stroke-width", "2");
+  head.setAttribute("stroke-width", EP1_HEADER_OCCUPANCY_STROKE_WIDTH);
   const body = document.createElementNS(SVG_NS, "path");
   body.setAttribute("d", "M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6");
   body.setAttribute("fill", "none");
   body.setAttribute("stroke", "currentColor");
-  body.setAttribute("stroke-width", "2");
+  body.setAttribute("stroke-width", EP1_HEADER_OCCUPANCY_STROKE_WIDTH);
   body.setAttribute("stroke-linecap", "round");
   svg.append(head, body);
   return svg;

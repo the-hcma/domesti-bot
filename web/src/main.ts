@@ -90,13 +90,13 @@ interface PwaBeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
 }
 
-/** Public source repository (About dialog link target). */
-const DOMESTI_BOT_REPO_HREF = "https://github.com/the-hcma/domesti-bot";
-const ABOUT_TAGLINE =
-  "Self-hosted home LAN dashboard for TP-Link Kasa, Sonos, and GoTailwind garage doors.";
 const ABOUT_COPYRIGHT = "\u00a9 2026 Henrique Andrade";
 const ABOUT_LICENSE = "Open-source software under the MIT License.";
 const ABOUT_REPO_LABEL = "github.com/the-hcma/domesti-bot";
+/** Public About-dialog lead; tests import this instead of duplicating the copy. */
+export const ABOUT_TAGLINE =
+  "Self-hosted home LAN dashboard for TP-Link Kasa, Sonos, GoTailwind garage doors, Everything Presence One, Vizio TVs, and Google Cast (temporarily disabled).";
+const DOMESTI_BOT_REPO_HREF = "https://github.com/the-hcma/domesti-bot";
 
 let domestiUiController: DomestiBotController | null = null;
 
