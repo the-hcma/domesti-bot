@@ -13,6 +13,7 @@ import aiohttp
 
 from app import device_discovery_store
 from app.db.secrets import load_vizio_auth_hosts_from_db
+from app.device_display import format_device_display
 from app.device_enums import DeviceConditionState
 from app.device_mac import mac_alive_on_lan
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
@@ -765,7 +766,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
         if self._force_discovery and not alive:
             _LOGGER.info(
                 "Dropping Vizio TV %s — SmartCast unreachable and MAC not on the LAN",
-                endpoint.device_id,
+                format_device_display(endpoint.device_id, endpoint.display_name),
             )
             return None
         tv = await self._offline_tv(endpoint, token)
@@ -775,6 +776,6 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             tv.set_unresponsive(True)
             _LOGGER.info(
                 "Vizio TV %s is on the LAN (ARP) but SmartCast is silent; keeping as unresponsive",
-                tv.identifier,
+                format_device_display(tv.identifier, tv.preferred_label),
             )
         return tv

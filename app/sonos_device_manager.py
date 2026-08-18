@@ -26,6 +26,7 @@ from soco import discover as soco_discover
 from soco.exceptions import SoCoUPnPException
 
 from app import device_discovery_store
+from app.device_display import format_device_display
 from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
 from app.device_mac import (
     lookup_ip_via_arp_for_mac,
@@ -362,7 +363,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             seen.add(mac_n)
             _LOGGER.info(
                 "Sonos: %s is on the LAN (ARP) but UPnP is silent; keeping as unresponsive",
-                sd.preferred_label,
+                format_device_display(sd.identifier, sd.preferred_label),
             )
 
     async def _prime_playback_states(self, devices: list[SonosSpeakerDevice]) -> None:

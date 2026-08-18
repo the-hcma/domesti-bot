@@ -33,6 +33,7 @@ from zeroconf import ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
 from app import device_discovery_store
+from app.device_display import format_device_display
 from app.device_enums import DeviceConditionState
 from app.device_mac import lookup_ip_via_arp_for_mac, mac_alive_on_lan, try_normalize_mac
 from app.device_manager import AlreadyInitializedError, DeviceManager, NotInitializedError
@@ -429,6 +430,8 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             )
         if connected_any:
             self._last_discovery_source = "cache" if used_cache_only else "discovery"
+        elif self._devices:
+            self._last_discovery_source = "discovery"
         else:
             self._last_discovery_source = None
 
@@ -659,7 +662,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             seen.add(mac_n)
             _LOGGER.info(
                 "EP1: %s is on the LAN (ARP) but the native API is silent; keeping as unresponsive",
-                device.preferred_label,
+                format_device_display(device.identifier, device.preferred_label),
             )
 
     async def _collect_states(
