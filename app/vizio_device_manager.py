@@ -536,9 +536,27 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 format_device_display(endpoint.device_id, endpoint.display_name),
             )
             return None
-        tv, _unreachable = await self._connect_target(probe, leftover_token)
-        if tv is None:
+        probe = VizioTvEndpoint(
+            host=probe.host,
+            port=probe.port,
+            display_name=probe.display_name,
+            model=probe.model,
+            mac=mac,
+            diid=probe.diid,
+        )
+        try:
+            tv = await self._connect_endpoint(probe, leftover_token)
+        except VizioSmartCastAuthError as exc:
+            _LOGGER.warning(
+                "Vizio TV %s auth rejected: %s",
+                format_device_display(probe.device_id, probe.display_name),
+                exc,
+            )
             return None
+        except VizioSmartCastConnectionError:
+            return await self._offline_tv(probe, leftover_token)
+        if tv is None:
+            return await self._offline_tv(probe, leftover_token)
         if tv.mac_address == mac:
             return tv
         with contextlib.suppress(Exception):
