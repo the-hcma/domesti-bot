@@ -20,6 +20,7 @@ from app.vizio_discovery import VizioDiscoveredHost
 from app.vizio_smartcast_client import (
     VizioDeviceInfoSnapshot,
     VizioSmartCastAuthError,
+    VizioSmartCastBusyError,
     VizioSmartCastClient,
     VizioSmartCastConnectionError,
     VizioSmartCastError,
@@ -621,6 +622,80 @@ async def test_rediscover_keeps_leftover_tv_when_connect_flaps_after_mac_probe(
     assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
     assert mgr.tvs[0].ui_power_state() == "off"
     assert device_discovery_store.load_vizio_tvs(db)[0][4] == "00:bd:3e:d5:f0:11"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_rediscover_keeps_leftover_tv_when_connect_is_busy_after_mac_probe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cache.sqlite"
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token=None,
+        env_auth_token=None,
+    )
+    discovered = [
+        VizioDiscoveredHost(
+            host="192.168.86.201",
+            port=7345,
+            name="Kitchen TV",
+            model="V505M-K09",
+        )
+    ]
+    deviceinfo = AsyncMock(
+        return_value=VizioDeviceInfoSnapshot(
+            model_name="V505M-K09",
+            cast_name="Kitchen TV",
+            diid="",
+            mac="00:bd:3e:d5:f0:11",
+        )
+    )
+    with (
+        patch(
+            "app.vizio_device_manager.lookup_mac_via_arp",
+            return_value=None,
+        ),
+        patch(
+            "app.vizio_device_manager.mac_alive_on_lan",
+            return_value=False,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            new_callable=AsyncMock,
+            side_effect=VizioSmartCastBusyError("blocked"),
+        ),
+        patch.object(
+            VizioSmartCastClient,
+            "fetch_deviceinfo",
+            deviceinfo,
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            new_callable=AsyncMock,
+            return_value=discovered,
+        ),
+    ):
+        await mgr.rediscover()
+    assert len(mgr.tvs) == 1
+    assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
+    assert mgr.tvs[0].ui_power_state() == "off"
     await mgr.disconnect()
 
 

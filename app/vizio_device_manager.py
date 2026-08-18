@@ -553,7 +553,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 exc,
             )
             return None
-        except VizioSmartCastConnectionError:
+        except VizioSmartCastError:
             return await self._offline_tv(probe, leftover_token)
         if tv is None:
             return await self._offline_tv(probe, leftover_token)
