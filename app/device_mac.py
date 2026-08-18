@@ -40,7 +40,7 @@ def lookup_ip_via_arp_for_mac(mac: str) -> str | None:
         return None
     try:
         completed = subprocess.run(
-            ["arp", "-a"],
+            ["arp", "-an"],
             capture_output=True,
             text=True,
             check=False,

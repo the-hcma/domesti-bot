@@ -55,11 +55,15 @@ def test_lookup_ip_via_arp_for_mac_parses_macos_table(monkeypatch: pytest.Monkey
             "? (192.168.86.50) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]"
         )
 
-    monkeypatch.setattr(
-        "app.device_mac.subprocess.run",
-        lambda *args, **kwargs: _Result(),
-    )
+    seen: list[list[str]] = []
+
+    def _run(cmd: list[str], **_kwargs: object) -> _Result:
+        seen.append(list(cmd))
+        return _Result()
+
+    monkeypatch.setattr("app.device_mac.subprocess.run", _run)
     assert lookup_ip_via_arp_for_mac("00:bd:3e:d5:f0:11") == "192.168.86.201"
+    assert seen == [["arp", "-an"]]
 
 
 def test_lookup_mac_via_arp_parses_macos_output(monkeypatch: pytest.MonkeyPatch) -> None:

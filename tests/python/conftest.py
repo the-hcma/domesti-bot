@@ -28,7 +28,15 @@ def _stub_lookup_mac_via_arp(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Individual tests may still override ``lookup_mac_via_arp`` (e.g. to assert a
     miss). Patches every manager import site that calls the helper.
+
+    Reverse lookups (``lookup_ip_via_arp_for_mac``) stay empty unless a test
+    patches them. The real helper shells out to ``arp -an``; without a stub,
+    GitHub-hosted runners can stall on neighbor/DNS scans and look like a hung
+    pytest job.
     """
+
+    def _no_reverse_arp(_mac: str) -> None:
+        return None
 
     for target in (
         "app.device_mac.lookup_mac_via_arp",
@@ -40,3 +48,13 @@ def _stub_lookup_mac_via_arp(monkeypatch: pytest.MonkeyPatch) -> None:
         "app.vizio_mac.lookup_mac_via_arp",
     ):
         monkeypatch.setattr(target, _hermetic_arp_mac)
+    for target in (
+        "app.api.vizio_settings_routes.lookup_ip_via_arp_for_mac",
+        "app.device_mac.lookup_ip_via_arp_for_mac",
+        "app.ep1_device_manager.lookup_ip_via_arp_for_mac",
+        "app.kasa_device_manager.lookup_ip_via_arp_for_mac",
+        "app.sonos_device_manager.lookup_ip_via_arp_for_mac",
+        "app.vizio_device_manager.lookup_ip_via_arp_for_mac",
+        "app.vizio_mac.lookup_ip_via_arp_for_mac",
+    ):
+        monkeypatch.setattr(target, _no_reverse_arp)
