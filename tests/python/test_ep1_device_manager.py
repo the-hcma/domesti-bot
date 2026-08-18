@@ -535,7 +535,7 @@ async def test_rediscover_restores_devices_when_fetch_raises(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_rediscover_keeps_roster_when_all_connects_fail(tmp_path: Path) -> None:
+async def test_rediscover_clears_roster_when_all_connects_fail(tmp_path: Path) -> None:
     cache = tmp_path / "cache.sqlite"
     upsert_ep1_device(
         cache,
@@ -578,17 +578,16 @@ async def test_rediscover_keeps_roster_when_all_connects_fail(tmp_path: Path) ->
         api_client_factory=_factory,
     )
     await mgr.fetch()
-    before = mgr.devices[0]
-    assert before.host == "192.0.2.99"
+    assert mgr.devices[0].host == "192.0.2.99"
 
     await mgr.rediscover(hosts=[("192.0.2.55", 6053)])
-    assert mgr.devices[0] is before
-    assert [d.host for d in mgr.devices] == ["192.0.2.99"]
+    assert mgr.devices == []
+    assert load_ep1_devices(cache) == []
     await mgr.disconnect()
 
 
 @pytest.mark.asyncio
-async def test_rediscover_keeps_missing_sensor_when_subset_reconnects(tmp_path: Path) -> None:
+async def test_rediscover_drops_missing_sensor_when_subset_reconnects(tmp_path: Path) -> None:
     cache = tmp_path / "cache.sqlite"
     for host, mac, name in (
         ("192.0.2.10", "aa:bb:cc:dd:ee:01", "Office"),
@@ -633,12 +632,13 @@ async def test_rediscover_keeps_missing_sensor_when_subset_reconnects(tmp_path: 
     )
     await mgr.fetch()
     assert sorted(d.host for d in mgr.devices) == ["192.0.2.10", "192.0.2.20"]
-    hall = next(d for d in mgr.devices if d.host == "192.0.2.20")
 
     clients["192.0.2.20"].connect = AsyncMock(side_effect=RuntimeError("hall offline"))
     await mgr.rediscover()
-    assert sorted(d.host for d in mgr.devices) == ["192.0.2.10", "192.0.2.20"]
-    assert next(d for d in mgr.devices if d.host == "192.0.2.20") is hall
+    assert [d.host for d in mgr.devices] == ["192.0.2.10"]
+    rows = load_ep1_devices(cache)
+    assert len(rows) == 1
+    assert rows[0][0] == "192.0.2.10"
     await mgr.disconnect()
 
 

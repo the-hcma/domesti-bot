@@ -135,3 +135,47 @@ async def test_vizio_reload_from_cache_never_calls_ssdp(tmp_path) -> None:
     assert ok is True
     assert len(mgr.tvs) == 1
     ssdp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tailwind_reload_from_cache_empty_clears_hub_mac(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    mgr = GotailwindDeviceManager(token="123456", display_names_store_path=db)
+    mgr._alias_to_device = {"door-1": MagicMock()}
+    mgr._host = "192.168.1.40"
+    mgr._hub_mac = "aa:bb:c0:a8:01:28"
+    mgr._tailwind = MagicMock()
+    mgr._tailwind.close = AsyncMock()
+
+    ok = await mgr.reload_from_cache(cache_path=db)
+
+    assert ok is True
+    assert mgr.doors == ()
+    assert mgr.hub_mac is None
+
+
+@pytest.mark.asyncio
+async def test_vizio_reload_from_cache_empty_closes_session(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token="token",
+    )
+    mgr._initialized = True
+    fake_tv = MagicMock()
+    fake_tv._client.aclose = AsyncMock()
+    mgr._tvs = (fake_tv,)
+    mgr._id_to_tv = {"tv": fake_tv}
+    mgr._session = MagicMock()
+    mgr._session.closed = False
+    mgr._session.close = AsyncMock()
+
+    session = mgr._session
+    ok = await mgr.reload_from_cache()
+
+    assert ok is True
+    assert mgr.tvs == ()
+    fake_tv._client.aclose.assert_awaited_once()
+    session.close.assert_awaited_once()
+    assert mgr._session is None

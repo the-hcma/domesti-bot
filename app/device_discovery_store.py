@@ -258,6 +258,41 @@ def save_configs(
     discovery_write(path, _write)
 
 
+def save_ep1_devices(
+    path: Path,
+    rows: Iterable[tuple[str, int, str | None, str | None]],
+) -> None:
+    """Replace all rows; each entry is ``(host, port, mac, friendly_name)``."""
+
+    now = time.time()
+    records: list[tuple[str, int, str | None, str | None]] = []
+    for host, port, mac, friendly_name in rows:
+        h = str(host).strip()
+        if not h:
+            continue
+        mac_s = try_normalize_mac(str(mac)) if mac else None
+        label: str | None = None
+        if friendly_name is not None:
+            stripped = str(friendly_name).strip()
+            label = stripped if stripped else None
+        records.append((h, int(port), mac_s, label))
+
+    def _write(session: Session) -> None:
+        session.execute(delete(Ep1KnownDevice))
+        for h, p, mac_s, label in records:
+            session.add(
+                Ep1KnownDevice(
+                    host=h,
+                    port=p,
+                    mac=mac_s,
+                    friendly_name=label,
+                    updated_at=now,
+                )
+            )
+
+    discovery_write(path, _write)
+
+
 def save_sonos_zones(
     path: Path,
     rows: Iterable[tuple[str, str, str | None] | tuple[str, str, str | None, str | None]],
@@ -285,6 +320,51 @@ def save_sonos_zones(
         session.execute(delete(SonosKnownZone))
         for u, h, n, mac in records:
             session.add(SonosKnownZone(uuid=u, host=h, zone_name=n, mac=mac, updated_at=now))
+
+    discovery_write(path, _write)
+
+
+def save_vizio_tvs(
+    path: Path,
+    rows: Iterable[tuple[str, int, str | None, str | None, str | None, str | None]],
+) -> None:
+    """Replace all rows; each entry is ``(host, port, display_name, model, mac, diid)``."""
+
+    now = time.time()
+    records: list[tuple[str, int, str | None, str | None, str | None, str | None]] = []
+    for host, port, display_name, model, mac, diid in rows:
+        h = str(host).strip()
+        if not h:
+            continue
+        mac_s = try_normalize_mac(str(mac)) if mac else None
+        display: str | None = None
+        if display_name is not None:
+            stripped = str(display_name).strip()
+            display = stripped if stripped else None
+        model_s: str | None = None
+        if model is not None:
+            stripped = str(model).strip()
+            model_s = stripped if stripped else None
+        diid_s: str | None = None
+        if diid is not None:
+            stripped = str(diid).strip()
+            diid_s = stripped if stripped else None
+        records.append((h, int(port), display, model_s, mac_s, diid_s))
+
+    def _write(session: Session) -> None:
+        session.execute(delete(VizioKnownTv))
+        for h, p, display, model_s, mac_s, diid_s in records:
+            session.add(
+                VizioKnownTv(
+                    host=h,
+                    port=p,
+                    display_name=display,
+                    model=model_s,
+                    mac=mac_s,
+                    diid=diid_s,
+                    updated_at=now,
+                )
+            )
 
     discovery_write(path, _write)
 

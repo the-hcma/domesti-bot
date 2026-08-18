@@ -255,7 +255,7 @@ async def test_reload_from_cache_does_not_persist_discovery_table(tmp_path) -> N
 
 
 @pytest.mark.asyncio
-async def test_reload_from_cache_keeps_prior_map_when_sqlite_empty(tmp_path) -> None:
+async def test_reload_from_cache_clears_map_when_sqlite_empty(tmp_path) -> None:
     db = tmp_path / "cached.sqlite"
     cfg = _xor_cfg("192.168.1.10")
     device_discovery_store.save_configs(
@@ -276,5 +276,36 @@ async def test_reload_from_cache_keeps_prior_map_when_sqlite_empty(tmp_path) -> 
         device_discovery_store.save_configs(db, [])
         ok = await mgr.reload_from_cache()
 
-    assert ok is False
-    assert {kd._kDevice.host for kd in mgr.switches} == {"192.168.1.10"}
+    assert ok is True
+    assert mgr.switches == ()
+    assert mgr.hosts_requiring_klap_auth == ()
+    assert mgr.skipped_auth_hosts == ()
+
+
+@pytest.mark.asyncio
+async def test_force_discovery_persist_preserves_klap_skipped_mac(tmp_path) -> None:
+    """Force-discovery cache writes must keep a known MAC for skipped KLAP hosts."""
+
+    db = tmp_path / "cached.sqlite"
+    klap_cfg = {
+        "host": "192.168.1.20",
+        "timeout": 5,
+        "connection_type": {
+            "device_family": "SMART.TAPOPLUG",
+            "encryption_type": "KLAP",
+            "https": False,
+        },
+    }
+    klap_mac = "aa:bb:cc:dd:ee:01"
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.20", "Tapo", klap_cfg, True, klap_mac)],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    mgr._hosts_requiring_klap_auth = {"192.168.1.20"}
+    mgr._skipped_klap_auth_configs = {"192.168.1.20": ("Tapo", klap_cfg)}
+
+    mgr._persist_discovery_cache({}, merge_prior_klap_hosts=False)
+
+    cached = device_discovery_store.load_cached_configs(db)
+    assert cached == [("192.168.1.20", "Tapo", klap_cfg, True, klap_mac)]

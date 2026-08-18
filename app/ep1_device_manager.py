@@ -384,6 +384,8 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if not targets:
             self._fetched = True
             self._last_discovery_source = None
+            if self._discovery_cache_path is not None and self._force_discovery:
+                device_discovery_store.save_ep1_devices(self._discovery_cache_path, [])
             return
         if psk is None:
             _LOGGER.info("EP1 connecting without Noise PSK (plaintext Homey / pre-adoption firmware)")
@@ -399,7 +401,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 continue
             connected_any = True
             self._devices[device.identifier] = device
-            if self._discovery_cache_path is not None:
+            if self._discovery_cache_path is not None and not self._force_discovery:
                 device_discovery_store.upsert_ep1_device(
                     self._discovery_cache_path,
                     host=device.host,
@@ -409,6 +411,11 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 )
 
         self._fetched = True
+        if self._discovery_cache_path is not None and self._force_discovery:
+            device_discovery_store.save_ep1_devices(
+                self._discovery_cache_path,
+                [(device.host, device.port, device.mac_address, device.display_name) for device in self.devices],
+            )
         if connected_any:
             self._last_discovery_source = "cache" if used_cache_only else "discovery"
         else:
@@ -419,17 +426,11 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         *,
         hosts: Sequence[tuple[str, int]] | None = None,
     ) -> None:
-        """Force a fresh probe (optional ``hosts`` override); fall back to cache if LAN finds nothing.
+        """Force a fresh LAN probe (optional ``hosts`` override).
 
-        On ``fetch`` failure, or when some/all previous sensors fail to
-        reconnect, missing devices are kept from the prior map so a transient
-        outage cannot shrink (or wipe) a working roster.
-
-        ``Ep1Device`` instances do not own ESPHome clients — clients live only on
-        ``self._clients`` and are cleared by :meth:`disconnect`. Restored devices
-        therefore keep cached readings and identity for UI / rules / watchers;
-        :meth:`run_subscription_session` always opens a fresh client. An empty
-        ``_clients`` list after a failed rediscover is intentional.
+        The resulting roster replaces the prior map and SQLite rows. On
+        ``fetch`` failure the previous map is restored so a thrown error does
+        not wipe a working roster mid-outage.
         """
         previous_devices = dict(self._devices)
         previous_fetched = self._fetched
@@ -444,20 +445,6 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             self._configured_hosts = [(h.strip(), int(p)) for h, p in hosts if str(h).strip()]
         try:
             await self.fetch()
-            restored = 0
-            for identifier, device in previous_devices.items():
-                if identifier not in self._devices:
-                    self._devices[identifier] = device
-                    restored += 1
-            if restored:
-                _LOGGER.warning(
-                    "EP1 rediscover kept %d previous sensor(s) that did not reconnect",
-                    restored,
-                )
-                if not self._fetched:
-                    self._fetched = previous_fetched
-                if self._last_discovery_source is None and previous_source is not None:
-                    self._last_discovery_source = previous_source
         except Exception:
             self._devices = previous_devices
             self._fetched = previous_fetched
@@ -467,6 +454,43 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             self._force_discovery = previous
             if hosts is not None:
                 self._configured_hosts = previous_hosts
+
+    async def reload_from_cache(self) -> bool:
+        """Replace the in-memory sensor map from SQLite only (never mDNS)."""
+
+        if self._discovery_cache_path is None:
+            _LOGGER.debug("EP1 reload_from_cache: no discovery cache path")
+            return False
+        if not self._fetched:
+            _LOGGER.debug("EP1 reload_from_cache: manager not initialized")
+            return False
+        cached = device_discovery_store.load_ep1_devices(self._discovery_cache_path)
+        if not cached:
+            self._devices.clear()
+            self._last_discovery_source = "cache"
+            _LOGGER.info("EP1 reload_from_cache: empty cache; cleared device map")
+            return True
+
+        psk = self._resolved_noise_psk()
+        previous_devices = dict(self._devices)
+        self._devices.clear()
+        for host, port, _mac, _name in cached:
+            try:
+                device = await self._connect_and_read(host=host, port=port, noise_psk=psk)
+            except Exception as exc:
+                _LOGGER.warning("EP1 reload_from_cache connect failed for %s:%s: %s", host, port, exc)
+                self._devices = previous_devices
+                return False
+            if device is None:
+                self._devices = previous_devices
+                return False
+            self._devices[device.identifier] = device
+        self._last_discovery_source = "cache"
+        _LOGGER.info(
+            "EP1 reload_from_cache: replaced device map from cache (%d sensor(s))",
+            len(self.devices),
+        )
+        return True
 
     async def refresh_device_readings(self, identifier: str) -> None:
         """Re-read one device in place (Settings test / ``read-ep1`` / one-shot paths).
@@ -730,10 +754,6 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                     _LOGGER.info("%s", exc)
             cached = self._cache_targets()
             if cached:
-                _LOGGER.info(
-                    "EP1 force discovery found no LAN targets; falling back to discovery cache (%d host(s))",
-                    len(cached),
-                )
                 return cached, False
             return [], False
 

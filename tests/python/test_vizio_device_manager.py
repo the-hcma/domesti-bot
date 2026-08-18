@@ -206,7 +206,7 @@ async def test_fetch_resolves_mac_from_smartcast_and_migrates_host_token(
 
 
 @pytest.mark.asyncio
-async def test_rediscover_keeps_offline_cached_tv_when_ssdp_finds_nothing(
+async def test_rediscover_drops_offline_cached_tv_when_ssdp_finds_nothing(
     tmp_path: Path,
 ) -> None:
     db = tmp_path / "cache.sqlite"
@@ -239,12 +239,10 @@ async def test_rediscover_keeps_offline_cached_tv_when_ssdp_finds_nothing(
     ):
         await mgr.fetch()
         assert len(mgr.tvs) == 1
-        assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
-        assert mgr.tvs[0].ui_power_state() == "off"
         await mgr.rediscover()
         assert ssdp.await_count == 1
-    assert len(mgr.tvs) == 1
-    assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
+    assert mgr.tvs == ()
+    assert device_discovery_store.load_vizio_tvs(db) == []
     await mgr.disconnect()
 
 

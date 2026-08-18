@@ -439,8 +439,16 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             return False
         host = (device_discovery_store.load_tailwind_host(path) or "").strip()
         if not host:
-            _LOGGER.info("Tailwind reload_from_cache: empty cache; keeping prior device map")
-            return False
+            previous_tailwind = self._tailwind
+            if previous_tailwind is not None:
+                with contextlib.suppress(Exception):
+                    await previous_tailwind.close()
+            self._alias_to_device = {}
+            self._tailwind = None
+            self._host = None
+            self._hub_mac = None
+            _LOGGER.info("Tailwind reload_from_cache: empty cache; cleared device map")
+            return True
 
         previous_host_arg = self._host_arg
         previous_tailwind = self._tailwind
