@@ -129,6 +129,85 @@ async def test_fetch_keeps_env_token_tv_when_migrate_secrets_key_is_invalid(
 
 
 @pytest.mark.asyncio
+async def test_fetch_does_not_duplicate_cached_tv_when_arp_auth_ip_moved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cache.sqlite"
+    device_discovery_store.upsert_vizio_tv(
+        db,
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        model="V505M-K09",
+        mac="00:bd:3e:d5:f0:11",
+        diid=None,
+    )
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token=None,
+        env_auth_token=None,
+    )
+    endpoint = VizioTvEndpoint(
+        host="192.168.86.55",
+        port=7345,
+        display_name="Kitchen TV",
+        model="V505M-K09",
+        mac="00:bd:3e:d5:f0:11",
+    )
+    fake_client = MagicMock()
+    fake_client.aclose = AsyncMock()
+    fake_tv = VizioTvDevice(
+        endpoint,
+        fake_client,
+        display_name="Kitchen TV",
+        mac_address="00:bd:3e:d5:f0:11",
+    )
+    fake_tv.set_power(False)
+    connect = AsyncMock(return_value=fake_tv)
+    with (
+        patch(
+            "app.vizio_device_manager.lookup_ip_via_arp_for_mac",
+            return_value="192.168.86.55",
+        ),
+        patch(
+            "app.vizio_device_manager.resolve_vizio_tv_ip",
+            new_callable=AsyncMock,
+            return_value="192.168.86.55",
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_smartcast_port_open",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch.object(
+            VizioDeviceManager,
+            "_connect_endpoint",
+            connect,
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        await mgr.fetch()
+    assert connect.await_count == 1
+    assert len(mgr.tvs) == 1
+    assert mgr.tvs[0].identifier == "00:bd:3e:d5:f0:11"
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_fetch_recovers_auth_mac_when_discovery_table_empty(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
