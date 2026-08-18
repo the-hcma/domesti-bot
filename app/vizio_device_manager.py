@@ -135,6 +135,7 @@ class VizioTvDevice(SwitchDevice):
         self.set_power(active)
 
     async def turn_off(self) -> None:
+        self.require_responsive()
         # Quick Start standby keeps SmartCast reachable. Sending power_off
         # while already off can wake the display (seen on Kitchen TV when
         # away-shutdown dispatched turn_off for every listed device).
@@ -155,6 +156,7 @@ class VizioTvDevice(SwitchDevice):
         self.set_power(False)
 
     async def turn_on(self) -> None:
+        self.require_responsive()
         if not self._power_unknown and self._on:
             _LOGGER.debug(
                 "Skipping power_on for %s; already on",
@@ -237,7 +239,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             raise AlreadyInitializedError("VizioDeviceManager.fetch() already ran")
         connector = aiohttp.TCPConnector(ssl=False)
         self._session = aiohttp.ClientSession(connector=connector)
-        targets = self._initial_targets()
+        targets = await self._initial_targets()
         used_discovery = False
         connected: list[VizioTvDevice] = []
         failed: list[VizioTvEndpoint] = []
@@ -554,7 +556,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             diid=endpoint.diid,
         )
 
-    def _arp_visible_auth_targets(self) -> list[VizioTvEndpoint]:
+    async def _arp_visible_auth_targets(self) -> list[VizioTvEndpoint]:
         """Cached-auth TVs whose MAC still appears in the local ARP table."""
 
         if self._discovery_cache_path is None:
@@ -564,7 +566,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             mac = try_normalize_mac(key)
             if mac is None:
                 continue
-            ip = lookup_ip_via_arp_for_mac(mac)
+            ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac)
             if ip is None:
                 continue
             out.append(VizioTvEndpoint(host=ip, port=DEFAULT_VIZIO_PORT, mac=mac))
@@ -582,7 +584,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
                 return mac
         return None
 
-    def _initial_targets(self) -> list[VizioTvEndpoint]:
+    async def _initial_targets(self) -> list[VizioTvEndpoint]:
         out: list[VizioTvEndpoint] = []
         seen_ids: set[str] = set()
         seen_hosts: set[tuple[str, int]] = set()
@@ -619,7 +621,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
             seen_hosts.add(host_key)
             out.append(VizioTvEndpoint(host=host, port=port))
         if self._force_discovery:
-            for endpoint in self._arp_visible_auth_targets():
+            for endpoint in await self._arp_visible_auth_targets():
                 host_key = (endpoint.host, endpoint.port)
                 if host_key in seen_hosts:
                     continue
@@ -758,6 +760,7 @@ class VizioDeviceManager(SwitchDeviceManager[VizioTvDevice]):
     ) -> VizioTvDevice | None:
         """Keep an ARP-visible TV as unresponsive; drop it on rediscover if ARP misses."""
 
+        endpoint = await self._endpoint_with_resolved_mac(endpoint)
         alive = await self._mac_alive_on_lan(endpoint)
         if self._force_discovery and not alive:
             _LOGGER.info(

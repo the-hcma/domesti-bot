@@ -7,6 +7,7 @@ from typing import Any, Generic, TypeVar, assert_never
 
 from pyproj import Transformer
 
+from app.device_display import DEVICE_UNRESPONSIVE_ON_LAN
 from app.device_enums import DeviceConditionState, RuleDeviceActionType
 
 # Transform to UTM (a standard meters-based coordinate system)
@@ -65,6 +66,12 @@ class Device:
 
         return self._display_name if self._display_name else self._identifier
 
+    def require_responsive(self) -> None:
+        """Raise when the device is on the LAN but not answering its protocol."""
+
+        if self.unresponsive:
+            raise DeviceUnresponsiveError(DEVICE_UNRESPONSIVE_ON_LAN)
+
     def set_display_name(self, value: str | None) -> None:
         """Set or clear the optional display name (whitespace-only clears)."""
 
@@ -101,6 +108,10 @@ class Device:
     @property
     def y(self):
         return self._y
+
+
+class DeviceUnresponsiveError(ConnectionError):
+    """Raised when a device is on the LAN (ARP) but its protocol is silent."""
 
 
 class DoorDevice(Device, ABC):

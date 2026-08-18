@@ -51,6 +51,7 @@ rebuild the cache from a fresh UDP sweep.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -79,7 +80,7 @@ from app.device_display import format_device_display
 from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
 from app.device_mac import lookup_ip_via_arp_for_mac, lookup_mac_via_arp, mac_alive_on_lan, try_normalize_mac
 from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
-from app.rule_engine import SwitchDevice
+from app.rule_engine import DeviceUnresponsiveError, SwitchDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -321,7 +322,7 @@ class KasaDevice(SwitchDevice):
 
         backend = self._kDevice
         if backend is None:
-            raise ConnectionError(
+            raise DeviceUnresponsiveError(
                 f"Expected a reachable Kasa device for {self.identifier}, got unresponsive LAN neighbor"
             )
         return backend
@@ -696,9 +697,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             mac = try_normalize_mac(cached_mac or "")
             if mac is None or mac in seen_macs or host in seen_hosts:
                 continue
-            if not mac_alive_on_lan(mac=mac, host=host):
+            if not await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host):
                 continue
-            arp_ip = lookup_ip_via_arp_for_mac(mac) or host
+            arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) or host
             creds = self._discovery_credentials if requires_klap_auth else None
             cfg = DeviceConfig.from_dict(cfg_dict)
             if arp_ip != host:

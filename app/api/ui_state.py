@@ -127,6 +127,8 @@ async def _bulk_pause_sonos_apply_impl(
         if key in excluded:
             skipped.append(key)
             continue
+        if _device_unresponsive(sp):
+            continue
         if sp.is_playing is False:
             continue
         mark_expected_device_change(DeviceFamilyId.SONOS, key)
@@ -156,6 +158,8 @@ async def _bulk_off_vizio_apply_impl(
         device_id = tv.identifier
         if device_id in excluded:
             skipped.append(device_id)
+            continue
+        if _device_unresponsive(tv):
             continue
         if not tv.is_on:
             continue
@@ -194,6 +198,8 @@ async def _bulk_off_kasa_apply_impl(
             continue
         if key in excluded:
             skipped.append(key)
+            continue
+        if _device_unresponsive(kd):
             continue
         if not kd.is_on:
             continue

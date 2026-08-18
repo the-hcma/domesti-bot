@@ -19,6 +19,7 @@ from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDeviceManager
+from app.rule_engine import DeviceUnresponsiveError
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
 from app.vizio_device_manager import VizioDeviceManager
 
@@ -58,7 +59,7 @@ async def flip_ui_device(
             status_code=HTTPStatus.NOT_FOUND,
             detail=_manager_missing_detail(family),
         ) from exc
-    except SonosTransitionUnavailableError as exc:
+    except (DeviceUnresponsiveError, SonosTransitionUnavailableError) as exc:
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,
             detail=str(exc),

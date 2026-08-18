@@ -2020,6 +2020,9 @@ function compactTileAriaLabel(device: UIDeviceOut): string {
       : device.state === UIDeviceState.Unknown
         ? "state unknown"
         : `currently ${device.state}`;
+  if (device.unresponsive === true) {
+    return `${device.label}, ${statePhrase}`;
+  }
   switch (device.kind) {
     case UIDeviceKind.Switch: {
       const next = device.state === UIDeviceState.Off ? "turn on" : "turn off";
@@ -2321,13 +2324,16 @@ function createTileSaturatedHit(
   hit.title = formatDeviceIdentityTooltip(device, {
     includePropertiesHint: true,
   });
-  hit.disabled = !connected;
+  hit.disabled = !connected || device.unresponsive === true;
   appendSaturatedTileVisuals(hit, device, hitClassName === "tile-compact-hit");
   attachTileHitListeners(hit, device, controller);
   return hit;
 }
 
 function deviceNeedsBulkOff(device: UIDeviceOut): boolean {
+  if (device.unresponsive === true) {
+    return false;
+  }
   switch (device.kind) {
     case UIDeviceKind.Switch:
       return device.state === UIDeviceState.On;

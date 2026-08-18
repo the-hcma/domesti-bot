@@ -83,6 +83,7 @@ from app.domesti_bot_cli import (
 from app.ep1_device_manager import DEFAULT_EP1_ZEROCONF_TIMEOUT_S
 from app.expected_device_change import mark_expected_device_change
 from app.logging_config import TRACE_LEVEL
+from app.rule_engine import DeviceUnresponsiveError
 from app.server_runtime import runtime
 from app.sonos_device_manager import SonosTransitionUnavailableError
 from app.ui_device_actions import flip_ui_device
@@ -569,10 +570,16 @@ def create_app(args: Any) -> FastAPI:
             detail=f"on={body.on}",
         )
         mark_expected_device_change(DeviceFamilyId.KASA, device_id)
-        if body.on:
-            await kd.turn_on()
-        else:
-            await kd.turn_off()
+        try:
+            if body.on:
+                await kd.turn_on()
+            else:
+                await kd.turn_off()
+        except DeviceUnresponsiveError as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail=str(exc),
+            ) from exc
         return UIDeviceActionOut(
             device=build_kasa_device_view(state.kasa_mgr, host=device_id, cache_path=state.cache_path)
         )
@@ -703,7 +710,7 @@ def create_app(args: Any) -> FastAPI:
                 status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                 detail=str(exc),
             ) from exc
-        except SonosTransitionUnavailableError as exc:
+        except (DeviceUnresponsiveError, SonosTransitionUnavailableError) as exc:
             # UPnP 701 from Sonos: empty queue, mid-transition, or any
             # other state the zone can't transition out of right now.
             # The device has already refreshed its cached

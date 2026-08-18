@@ -121,6 +121,7 @@ class SonosSpeakerDevice(SpeakerDevice):
         return self._rincon_uid
 
     async def pause(self) -> None:
+        self.require_responsive()
         try:
             await asyncio.to_thread(self._soco.pause)
         except SoCoUPnPException as exc:
@@ -143,6 +144,7 @@ class SonosSpeakerDevice(SpeakerDevice):
         self._is_playing = False
 
     async def resume(self, *, favorite_index: int = 0) -> None:
+        self.require_responsive()
         favorite: SonosStreamFavorite | None = None
         if self._stream_favorites:
             if favorite_index < 0 or favorite_index >= len(self._stream_favorites):
@@ -330,7 +332,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 )
         device_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
 
-    def _retain_arp_visible_cached_zones(self, devices: list[SonosSpeakerDevice]) -> None:
+    async def _retain_arp_visible_cached_zones(self, devices: list[SonosSpeakerDevice]) -> None:
         """Keep cached zone MACs that still answer ARP when SSDP missed them."""
 
         if self._discovery_cache_path is None:
@@ -340,9 +342,9 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             mac_n = try_normalize_mac(mac or "") or mac_from_sonos_rincon(uid)
             if mac_n is None or mac_n in seen:
                 continue
-            if not mac_alive_on_lan(mac=mac_n, host=host):
+            if not await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host):
                 continue
-            arp_ip = lookup_ip_via_arp_for_mac(mac_n) or host
+            arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) or host
             label = (zone_name or "").strip() or mac_n
             zone = SoCo(arp_ip)
             sd = self._speaker_device(uid, zone, display_name=label)
@@ -491,7 +493,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 continue
             devices.append(sd)
         if self._force_discovery:
-            self._retain_arp_visible_cached_zones(devices)
+            await self._retain_arp_visible_cached_zones(devices)
         self._finalize(devices)
         self._persist_cache(devices)
         self._last_discovery_source = "discovery"

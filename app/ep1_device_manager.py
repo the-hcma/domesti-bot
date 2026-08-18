@@ -384,7 +384,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if not targets:
             self._fetched = True
             if self._force_discovery:
-                self._retain_arp_visible_cached_devices()
+                await self._retain_arp_visible_cached_devices()
                 if self._discovery_cache_path is not None:
                     device_discovery_store.save_ep1_devices(
                         self._discovery_cache_path,
@@ -419,7 +419,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 )
 
         if self._force_discovery:
-            self._retain_arp_visible_cached_devices()
+            await self._retain_arp_visible_cached_devices()
 
         self._fetched = True
         if self._discovery_cache_path is not None and self._force_discovery:
@@ -634,7 +634,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         rows = device_discovery_store.load_ep1_devices(self._discovery_cache_path)
         return [(host, port) for host, port, _mac, _name in rows]
 
-    def _retain_arp_visible_cached_devices(self) -> None:
+    async def _retain_arp_visible_cached_devices(self) -> None:
         """Keep cached EP1 MACs that still answer ARP when the native API is silent."""
 
         if self._discovery_cache_path is None:
@@ -644,9 +644,9 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             mac_n = try_normalize_mac(mac or "")
             if mac_n is None or mac_n in seen:
                 continue
-            if not mac_alive_on_lan(mac=mac_n, host=host):
+            if not await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host):
                 continue
-            arp_ip = lookup_ip_via_arp_for_mac(mac_n) or host
+            arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) or host
             device = Ep1Device(
                 mac_n,
                 display_name=name,

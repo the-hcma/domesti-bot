@@ -12,9 +12,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
+from app.device_display import DEVICE_UNRESPONSIVE_ON_LAN
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
+from app.rule_engine import DeviceUnresponsiveError
 from app.server_runtime import runtime
 from app.sonos_device_manager import (
     SonosDeviceManager,
@@ -60,17 +62,24 @@ class _FakeKasa:
         self.mac_address = "aa:bb:cc:dd:ee:ff"
         self.preferred_label = label
         self.is_on = is_on
+        self.unresponsive = False
         self.calls: list[str] = []
 
     async def turn_off(self) -> None:
+        if self.unresponsive:
+            raise DeviceUnresponsiveError(DEVICE_UNRESPONSIVE_ON_LAN)
         self.calls.append("off")
         self.is_on = False
 
     async def turn_on(self) -> None:
+        if self.unresponsive:
+            raise DeviceUnresponsiveError(DEVICE_UNRESPONSIVE_ON_LAN)
         self.calls.append("on")
         self.is_on = True
 
     async def flip(self) -> str:
+        if self.unresponsive:
+            raise DeviceUnresponsiveError(DEVICE_UNRESPONSIVE_ON_LAN)
         if self.is_on:
             await self.turn_off()
             return "on=False"
@@ -300,6 +309,20 @@ def test_post_ui_device_toggle_flips_kasa_switch_on() -> None:
     assert response.status_code == HTTPStatus.OK
     assert fake.calls == ["on"]
     assert response.json()["device"]["state"] == "on"
+
+
+def test_post_ui_device_toggle_returns_409_for_unresponsive_kasa() -> None:
+    fake = _FakeKasa("10.0.0.1", "Desk", is_on=False)
+    fake.unresponsive = True
+    client, _ = _client()
+    runtime.device_state = _state(kasa_devices=[fake])
+    runtime.discovery_error = None
+
+    response = client.post("/v1/ui/devices/kasa/10.0.0.1/toggle")
+
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert DEVICE_UNRESPONSIVE_ON_LAN in response.json()["detail"]
+    assert fake.calls == []
 
 
 def test_post_ui_device_toggle_returns_404_for_unknown_kasa_device() -> None:
