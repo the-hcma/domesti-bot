@@ -34,6 +34,45 @@ def _tv(*, is_on: bool = False) -> VizioTvDevice:
 
 
 @pytest.mark.asyncio
+async def test_fetch_continues_when_arp_auth_mac_secrets_key_is_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cache.sqlite"
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    mgr = VizioDeviceManager(
+        configured_hosts=[],
+        discovery_cache_path=db,
+        cli_auth_token=None,
+        env_auth_token=None,
+    )
+    with (
+        patch(
+            "app.vizio_device_manager.lookup_ip_via_arp_for_mac",
+            return_value="192.168.86.201",
+        ),
+        patch(
+            "app.vizio_credentials.load_vizio_auth_token_from_db",
+            side_effect=SecretsConfigurationError("malformed Fernet key"),
+        ),
+        patch(
+            "app.vizio_device_manager.discover_vizio_hosts_ssdp",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        await mgr.fetch()
+    assert mgr.tvs == ()
+    await mgr.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_fetch_recovers_auth_mac_when_discovery_table_empty(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

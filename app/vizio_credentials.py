@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.db.secrets import (
+    SecretsConfigurationError,
     SecretsDecryptError,
     delete_app_secret,
     load_vizio_auth_token_from_db,
@@ -42,7 +43,7 @@ def resolve_vizio_auth_token(
     if cache_path is not None:
         try:
             stored = load_vizio_auth_token_from_db(cache_path, mac=mac, host=host)
-        except SecretsDecryptError:
+        except (SecretsConfigurationError, SecretsDecryptError):
             stored = None
         if stored:
             return stored, "database"
