@@ -110,7 +110,7 @@ class Device:
         return self._y
 
 
-class DeviceUnresponsiveError(ConnectionError):
+class DeviceUnresponsiveError(Exception):
     """Raised when a device is on the LAN (ARP) but its protocol is silent."""
 
 
