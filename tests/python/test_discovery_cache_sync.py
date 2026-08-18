@@ -853,6 +853,47 @@ async def test_maybe_sync_vizio_noop_when_auth_mac_outlives_empty_table(
 
 
 @pytest.mark.asyncio
+async def test_maybe_sync_vizio_noop_when_live_has_env_token_tv_and_empty_table(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "cached.sqlite"
+    save_vizio_auth_token_to_db(
+        db,
+        mac="00:bd:3e:d5:f0:11",
+        host=None,
+        token="kitchen-token",
+    )
+    kitchen = MagicMock()
+    kitchen.identifier = "00:bd:3e:d5:f0:11"
+    den = MagicMock()
+    den.identifier = "00:bd:3e:d5:f0:22"
+    mgr = MagicMock(spec=VizioDeviceManager)
+    mgr.tvs = (kitchen, den)
+    mgr._cli_auth_token = None
+    mgr._env_auth_token = "shared-env-token"
+    mgr.reload_from_cache = AsyncMock()
+
+    runtime.reset()
+    changed = await maybe_sync_discovery_cache(
+        DeviceManagersState(
+            kasa_mgr=MagicMock(spec=KasaDeviceManager),
+            sonos_mgr=None,
+            tailwind_mgr=None,
+            androidtv_mgr=None,
+            ep1_mgr=None,
+            vizio_mgr=mgr,
+            cache_path=db,
+            args=argparse.Namespace(),
+        )
+    )
+
+    assert changed is False
+    mgr.reload_from_cache.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_maybe_sync_vizio_noop_when_live_is_subset_of_auth_macs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
