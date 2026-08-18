@@ -406,16 +406,19 @@ def test_about_tagline_lists_supported_families() -> None:
     src = _MAIN_TS.read_text(encoding="utf-8")
     assert "export const ABOUT_TAGLINE" in src
     assert "tagline.textContent = ABOUT_TAGLINE" in src
+    tagline = _about_tagline_from_main(src)
     for name in (
+        "Chromecast",
         "Everything Presence One",
         "GoTailwind",
         "Google Cast",
+        "Google TV",
         "Sonos",
         "TP-Link Kasa",
         "Vizio TVs",
         "temporarily disabled",
     ):
-        assert name in src
+        assert name in tagline
 
 
 def test_index_html_ep1_header_status_css_contract() -> None:
@@ -576,6 +579,12 @@ def test_compact_layout_mq_css_matches_main() -> None:
     assert "hover: none" in main_mq
     assert "pointer: coarse" in main_mq
     assert "max-width: 768px" in main_mq
+
+
+def _about_tagline_from_main(src: str) -> str:
+    match = re.search(r"export const ABOUT_TAGLINE\s*=\s*\"([^\"]+)\"", src)
+    assert match is not None, "Expected exported ABOUT_TAGLINE string in main.ts"
+    return match.group(1)
 
 
 def _compact_layout_mq_from_index_style(style: str) -> str:
