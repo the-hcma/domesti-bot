@@ -1176,9 +1176,9 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 
 ### Phase 2c — Scheduled rules and device-state conditions (shipped)
 
-**Motivating automation A (shipped):** after sunset, if **Front door lights** or **Garage outside lights** are still on and **Henrique (`hcma`) and Kristen** have both been inside the home geofence for more than **10 minutes**, turn those lights off. Re-check every **15 minutes** until conditions no longer apply or cooldown suppresses repeat fires. Example rule: `evening-lights-off-both-home` in `automation-rules.json.example`.
+**Motivating automation A (shipped):** after sunset, if **Front door lights** or **Garage outside lights** are still on and **Resident A and Resident B** have both been inside the home geofence for more than **10 minutes**, turn those lights off. Re-check every **15 minutes** until conditions no longer apply or cooldown suppresses repeat fires. Example rule: `evening-lights-off-both-home` in `automation-rules.json.example`.
 
-**Motivating automation B (shipped — Phase 2d):** after sunset, if **either** `hcma` **or** `kristen` is currently inside the home geofence, turn on **Kitchen lamp**, **Living room lamp**, and **Living room lamp2** — but **at most once per local calendar day** (0 or 1 fires per evening; no repeat until the next day even if the cron keeps ticking). See [fire_once_per_local_day](#design-fire_once_per_local_day-on-scheduled-rules-shipped).
+**Motivating automation B (shipped — Phase 2d):** after sunset, if **either** Resident A or Resident B is currently inside the home geofence, turn on **Kitchen lamp**, **Living room lamp**, and **Living room lamp2** — but **at most once per local calendar day** (0 or 1 fires per evening; no repeat until the next day even if the cron keeps ticking). See [fire_once_per_local_day](#design-fire_once_per_local_day-on-scheduled-rules-shipped).
 
 This class of automation is **not** representable with `edge_true` + location-ingest alone:
 

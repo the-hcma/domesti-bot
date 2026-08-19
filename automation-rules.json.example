@@ -74,14 +74,14 @@
                 "type": "users_inside_geofence",
                 "geofence_id": "house",
                 "user_ids": [
-                  "henrique"
+                  "user-a"
                 ]
               },
               {
                 "type": "users_inside_geofence",
                 "geofence_id": "house",
                 "user_ids": [
-                  "kristen"
+                  "user-b"
                 ]
               }
             ]
