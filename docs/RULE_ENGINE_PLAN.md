@@ -65,7 +65,7 @@ Rules fire on location ingest as follows:
 | `id` | Summary |
 | --- | --- |
 | `evening-arrival-home-lights` | Henrique **or** Kristen enters `house` after sunset → three Kasa `turn_on` + email |
-| `evening-lights-off-both-home` | Scheduled: both home 10+ min after sunset, either arrival light on → `turn_off` (example / operator) |
+| `evening-lights-off-both-home` | Dark + either arrives (edge): schedule `turn_off` 10 min later (example / operator) |
 | `evening-interior-lights-on-anyone-home` | Scheduled + **once per day**: anyone home after sunset → interior lamps `turn_on` (example) |
 | `away-pause-media` | Scheduled every 10 min: both outside `house`, any listed Sonos zone or Vizio TV on → `pause` / `turn_off` + email (example) |
 | `hdhomerun-nightly-power-cycle` | Scheduled 4am (example, **disabled**): Kasa `turn_off` then `turn_on` with `delay_s=60` |
@@ -1176,9 +1176,9 @@ Pydantic schemas in `app/api/schemas.py` **match** the TypeScript types from PR1
 
 ### Phase 2c — Scheduled rules and device-state conditions (shipped)
 
-**Motivating automation A (shipped):** after sunset, if **Front door lights** or **Garage outside lights** are still on and **Henrique (`hcma`) and Kristen** have both been inside the home geofence for more than **10 minutes**, turn those lights off. Re-check every **15 minutes** until conditions no longer apply or cooldown suppresses repeat fires. Example rule: `evening-lights-off-both-home` in `automation-rules.json.example`.
+**Motivating automation A (shipped, migrated to `edge_true`):** during dark hours (sunset→sunrise via `any[after_sunset, before_sunrise]`), when **either** Resident A or Resident B **arrives** home (`edge_true` + `users_inside_geofence` in an `any`), schedule `turn_off` of the arrival lights **10 minutes later** (`delay_s=600`). Complements `evening-arrival-home-lights` (which turns them on on arrival). Example rule: `evening-lights-off-both-home` in `automation-rules.json.example`.
 
-**Motivating automation B (shipped — Phase 2d):** after sunset, if **either** `hcma` **or** `kristen` is currently inside the home geofence, turn on **Kitchen lamp**, **Living room lamp**, and **Living room lamp2** — but **at most once per local calendar day** (0 or 1 fires per evening; no repeat until the next day even if the cron keeps ticking). See [fire_once_per_local_day](#design-fire_once_per_local_day-on-scheduled-rules-shipped).
+**Motivating automation B (shipped — Phase 2d):** after sunset, if **either** Resident A or Resident B is currently inside the home geofence, turn on **Kitchen lamp**, **Living room lamp**, and **Living room lamp2** — but **at most once per local calendar day** (0 or 1 fires per evening; no repeat until the next day even if the cron keeps ticking). See [fire_once_per_local_day](#design-fire_once_per_local_day-on-scheduled-rules-shipped).
 
 This class of automation is **not** representable with `edge_true` + location-ingest alone:
 
@@ -1301,7 +1301,7 @@ Default repeat semantics: **while conditions stay true**, a scheduled rule may f
 
 **Contrast with `evening-arrival-home-lights` (`edge_true`):** arrival rule fires on **enter** after sunset (good for garage approach lighting). This rule covers “someone is **already** home when evening starts” or “arrived earlier” without requiring a fresh geofence edge — but only **once** per night.
 
-**Contrast with `evening-lights-off-both-home`:** off rule uses **dwell** (both home 10+ min) + **devices_any_on** and **repeats** while lights stay on (cooldown-limited). On rule uses **anyone home** + **once per day** — complementary, not duplicate.
+**Contrast with `evening-lights-off-both-home`:** off rule fires on **arrival edge** during dark hours and schedules `turn_off` 10 min later (`delay_s=600`); on rule uses **anyone home** + **once per day** — complementary, not duplicate.
 
 **Not in scope for Phase 2d:** `fire_once_per_local_day` on `edge_true` (edge + daily cap is a different product); persisting “fired date” separately from `last_fired_at` (derive from timestamp unless we later need “fired today but rolled back”).
 
@@ -1369,10 +1369,9 @@ Reads **cached** state from `DeviceStateWatcher` / manager objects — Kasa `is_
 ```json
 {
   "id": "evening-lights-off-both-home",
-  "label": "Turn off arrival lights when both home 10+ min after sunset",
+  "label": "Turn off arrival lights when dark and either arrives (10 min later)",
   "enabled": true,
-  "trigger": "scheduled",
-  "schedule_cron": "*/15 * * * *",
+  "triggers": ["edge_true"],
   "cooldown_s": 300,
   "min_location_accuracy_m": 50,
   "accuracy_edge_grace_s": 120,
@@ -1380,33 +1379,29 @@ Reads **cached** state from `DeviceStateWatcher` / manager objects — Kasa `is_
   "conditions": {
     "all": [
       {
-        "type": "after_sunset",
-        "offset_minutes": 0,
-        "window_end": "midnight"
+        "type": "any",
+        "conditions": [
+          { "type": "after_sunset", "offset_minutes": 0, "window_end": "midnight" },
+          { "type": "before_sunrise", "offset_minutes": 0, "window_start": "midnight" }
+        ]
       },
       {
-        "type": "users_inside_geofence_for_s",
-        "geofence_id": "hcma-250m-around-home",
-        "user_ids": ["hcma", "kristen"],
-        "min_inside_s": 600
-      },
-      {
-        "type": "devices_any_on",
-        "devices": [
-          { "family_id": "kasa", "device_id": "Front door lights" },
-          { "family_id": "kasa", "device_id": "Garage outside lights" }
+        "type": "any",
+        "conditions": [
+          { "type": "users_inside_geofence", "geofence_id": "house", "user_ids": ["user-a"] },
+          { "type": "users_inside_geofence", "geofence_id": "house", "user_ids": ["user-b"] }
         ]
       }
     ]
   },
   "device_actions": [
-    { "family_id": "kasa", "device_id": "Front door lights", "action": "turn_off" },
-    { "family_id": "kasa", "device_id": "Garage outside lights", "action": "turn_off" }
+    { "family_id": "kasa", "device_id": "02:00:00:00:00:01", "action": "turn_off", "delay_s": 600 },
+    { "family_id": "kasa", "device_id": "02:00:00:00:00:03", "action": "turn_off", "delay_s": 600 }
   ]
 }
 ```
 
-**Expected behavior:** after sunset, every 15 minutes, if both have been home ≥10 minutes and either light is still on → turn both off; 5-minute cooldown avoids hammering if something else toggles them.
+**Expected behavior:** during dark hours, when either resident arrives home (`edge_true`), schedule `turn_off` of the arrival lights 10 minutes later (`delay_s=600`); 5-minute cooldown suppresses repeat fires if both arrive close together.
 
 #### Example: away media rule (`away-pause-media`)
 
