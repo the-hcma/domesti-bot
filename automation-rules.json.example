@@ -111,12 +111,11 @@
     },
     {
       "id": "evening-lights-off-both-home",
-      "label": "Turn off arrival lights when both home 10+ min after sunset",
+      "label": "Turn off arrival lights when dark and either arrives (10 min later)",
       "enabled": true,
       "triggers": [
-        "scheduled"
+        "edge_true"
       ],
-      "schedule_cron": "*/10 * * * *",
       "cooldown_s": 300,
       "min_location_accuracy_m": 50,
       "accuracy_edge_grace_s": 120,
@@ -129,27 +128,26 @@
             "window_end": "midnight"
           },
           {
-            "type": "users_inside_geofence_for_s",
-            "geofence_id": "house",
-            "user_ids": [
-              "henrique",
-              "kristen"
-            ],
-            "min_inside_s": 600
+            "type": "before_sunrise",
+            "offset_minutes": 0,
+            "window_start": "midnight"
           },
           {
-            "type": "devices_any_in_state",
-            "state": "on",
-            "devices": [
+            "type": "any",
+            "conditions": [
               {
-                "family_id": "kasa",
-                "device_id": "02:00:00:00:00:01",
-                "display_name": "Porch lights"
+                "type": "users_inside_geofence",
+                "geofence_id": "house",
+                "user_ids": [
+                  "henrique"
+                ]
               },
               {
-                "family_id": "kasa",
-                "device_id": "02:00:00:00:00:03",
-                "display_name": "Kitchen lights"
+                "type": "users_inside_geofence",
+                "geofence_id": "house",
+                "user_ids": [
+                  "kristen"
+                ]
               }
             ]
           }
@@ -160,13 +158,15 @@
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:01",
           "display_name": "Porch lights",
-          "action": "turn_off"
+          "action": "turn_off",
+          "delay_s": 600
         },
         {
           "family_id": "kasa",
           "device_id": "02:00:00:00:00:03",
           "display_name": "Kitchen lights",
-          "action": "turn_off"
+          "action": "turn_off",
+          "delay_s": 600
         }
       ]
     },

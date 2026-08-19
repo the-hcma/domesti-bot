@@ -65,7 +65,7 @@ Rules fire on location ingest as follows:
 | `id` | Summary |
 | --- | --- |
 | `evening-arrival-home-lights` | Henrique **or** Kristen enters `house` after sunset → three Kasa `turn_on` + email |
-| `evening-lights-off-both-home` | Scheduled: both home 10+ min after sunset, either arrival light on → `turn_off` (example / operator) |
+| `evening-lights-off-both-home` | Dark + either arrives (edge): schedule `turn_off` 10 min later (example / operator) |
 | `evening-interior-lights-on-anyone-home` | Scheduled + **once per day**: anyone home after sunset → interior lamps `turn_on` (example) |
 | `away-pause-media` | Scheduled every 10 min: both outside `house`, any listed Sonos zone or Vizio TV on → `pause` / `turn_off` + email (example) |
 | `hdhomerun-nightly-power-cycle` | Scheduled 4am (example, **disabled**): Kasa `turn_off` then `turn_on` with `delay_s=60` |
