@@ -10,8 +10,8 @@
     "Edge-triggered rules that use geofence conditions (users_inside_geofence / users_outside_geofence) rely on accuracy_edge_grace_s (default 120 s). Poor horizontal GPS accuracy can block enter/leave edges without grace; the evaluator also reconciles sustained GPS inside/outside streaks after 10 min.",
     "SMTP must be configured under Automations \u2192 Mail for notification emails to send.",
     "vacation_mode (optional top-level block; also editable under Automations \u2192 Vacation) is a sticky latch: when enabled, arms after all user_ids stay \u2265 min_distance_m from settings_location home for hysteresis_s (default 1800), and disarms when any of those users is inside the home geofence (wifi_home_geofence_id or geofences containing home lat/lon). Being closer than min_distance_m without entering the home geofence does not disarm. Without a resolvable home geofence the latch will not arm, and if already armed it fail-safe disarms. notify_on_transition (default true) emails notification_emails on arm/disarm edges; anomaly device emails while armed are separate (#464). Persists armed + far_since across restart. Leave enabled false in the example; operator wiring is local (#465).",
-    "Rule 1 fires when Henrique OR Kristen enters house after sunset (arrival edge, not merely present at sunset).",
-    "Rule 2 (evening-lights-off-both-home) runs every 10 min after sunset: when both have been home 10+ min and either arrival light is still on, turn both off.",
+    "Rule 1 fires when user-a OR user-b enters house after sunset (arrival edge, not merely present at sunset).",
+    "Rule 2 (evening-lights-off-both-home): dark (sunset\u2192sunrise, via any[after_sunset, before_sunrise]) + either user-a OR user-b arrives (edge_true); schedules turn_off of arrival lights 10 min later (delay_s=600).",
     "Rule 3 (evening-interior-lights-on-anyone-home) uses triggers [edge_true, scheduled] and arms from 25 min before sunset until midnight: at the window open it evaluates once \u2014 if Henrique OR Kristen is already home, interior lamps turn on; otherwise the next home geofence enter by either person fires the rule (once per local day). Not a periodic poll.",
     "Rule 4 (away-shutdown-everyone-outside-20m) runs every 10 min: when Henrique AND Kristen have been outside house 20+ min and any listed light/media device is still on, turn them off (garage doors are not closed).",
     "Rule 5 (away-garage-open-alert) uses dwell_satisfied: when both have been outside house 20+ min and a watched garage door has been open 20+ min, email operator@example.com and resident@example.com (once per away episode).",
@@ -123,14 +123,19 @@
       "conditions": {
         "all": [
           {
-            "type": "after_sunset",
-            "offset_minutes": 0,
-            "window_end": "midnight"
-          },
-          {
-            "type": "before_sunrise",
-            "offset_minutes": 0,
-            "window_start": "midnight"
+            "type": "any",
+            "conditions": [
+              {
+                "type": "after_sunset",
+                "offset_minutes": 0,
+                "window_end": "midnight"
+              },
+              {
+                "type": "before_sunrise",
+                "offset_minutes": 0,
+                "window_start": "midnight"
+              }
+            ]
           },
           {
             "type": "any",
@@ -139,14 +144,14 @@
                 "type": "users_inside_geofence",
                 "geofence_id": "house",
                 "user_ids": [
-                  "henrique"
+                  "user-a"
                 ]
               },
               {
                 "type": "users_inside_geofence",
                 "geofence_id": "house",
                 "user_ids": [
-                  "kristen"
+                  "user-b"
                 ]
               }
             ]
