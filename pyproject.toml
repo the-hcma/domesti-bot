@@ -143,7 +143,7 @@ known-first-party = ["app", "config"]
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.9.1",
+    "httpx2>=2.10.0",
     "icecream>=2.2.0",
     "playwright>=1.62.0",
     "pyright>=1.1.411",
