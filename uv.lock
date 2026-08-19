@@ -6,11 +6,6 @@ resolution-markers = [
     "platform_machine != 'x86_64' or sys_platform != 'darwin'",
 ]
 
-[options]
-
-[options.exclude-newer-package]
-httpx2 = "2026-08-10T07:04:30Z"
-
 [[package]]
 name = "aioesphomeapi"
 version = "45.6.2"
