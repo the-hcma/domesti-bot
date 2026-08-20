@@ -582,10 +582,7 @@ def test_presence_user_ids_for_condition_unknown_type_returns_empty(
     unknown = cast(RuleConditionOut, SimpleNamespace(type="future_condition"))
     with caplog.at_level(logging.WARNING, logger="app.rule_conditions"):
         assert _presence_user_ids_for_condition(unknown, rule, ctx) == set()
-    assert any(
-        "ignoring non-presence condition type SimpleNamespace" in r.getMessage()
-        for r in caplog.records
-    )
+    assert any("ignoring non-presence condition type SimpleNamespace" in r.getMessage() for r in caplog.records)
 
 
 def test_presence_user_ids_for_rule_with_daylight_and_users_inside() -> None:
