@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -21,6 +24,7 @@ from app.api.schemas import (
     Ep1ReadingCompareCondition,
     GeofenceOut,
     RuleConditionDeviceRefOut,
+    RuleConditionOut,
     RuleConditionsOut,
     RuleOut,
     SettingsLocationOut,
@@ -565,6 +569,22 @@ def test_presence_user_ids_for_condition_ignores_non_presence_types() -> None:
             ctx,
         )
         == set()
+    )
+
+
+def test_presence_user_ids_for_condition_unknown_type_returns_empty(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Future/unknown condition types must not raise (scheduled-tick logging)."""
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    ctx = _ctx(now=now, geofences=(), user_locations={})
+    rule = _evening_rule()
+    unknown = cast(RuleConditionOut, SimpleNamespace(type="future_condition"))
+    with caplog.at_level(logging.WARNING, logger="app.rule_conditions"):
+        assert _presence_user_ids_for_condition(unknown, rule, ctx) == set()
+    assert any(
+        "ignoring non-presence condition type SimpleNamespace" in r.getMessage()
+        for r in caplog.records
     )
 
 
