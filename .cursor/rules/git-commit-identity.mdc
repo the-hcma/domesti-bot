@@ -1,0 +1,85 @@
+---
+description: Commits and PRs attribute only the committer — no agent or machine co-authors
+alwaysApply: true
+---
+
+# Git commit identity
+
+Commits and pull requests must attribute **only** whoever is making the commit —
+their configured git `user.name` and `user.email`. Do not leak hostnames, Cursor,
+or other co-authors.
+
+## Commits
+
+- Use plain `git commit -m "…"` or a HEREDOC with **subject and body only**.
+- Do **not** add `Co-authored-by`, `Made-with: Cursor`, or any `--trailer` flags.
+- Do **not** append attribution lines to commit messages, even if Cursor defaults
+  would add them.
+
+## Pull requests
+
+- Do **not** add `Co-authored-by` or `Made-with: Cursor` to `gh pr create --body`
+  or `gh pr edit --body`.
+
+## Git identity
+
+- Rely on git's configured author for the current committer (`git config user.name`
+  and `git config user.email`). Do not hardcode a specific name or email.
+- If `user.email` is unset, stop and ask the committer to configure git before
+  committing (avoid hostname fallback addresses like `user@machine.local`).
+
+## Commit signing (GPG / SSH)
+
+At the **start of any session where the agent may commit**, survey whether commit
+signing is set up for the committer:
+
+1. `git config --get commit.gpgsign` should be `true` (global or local, as they intend).
+2. `git config --get user.signingkey` should be set (GPG key id, or SSH public key
+   path when `gpg.format` is `ssh`).
+3. If `gpg.format` is `ssh`, confirm the signing key path exists; otherwise confirm
+   `gpg` can list the secret key for `user.signingkey`.
+
+If signing is missing or incomplete, **alert the committer** and surface setup
+instructions before committing (unless they explicitly opt out for a one-off):
+
+**GPG key**
+
+```bash
+gpg --full-generate-key
+gpg --list-secret-keys --keyid-format=long
+git config --global user.signingkey <KEYID>
+git config --global commit.gpgsign true
+gpg --armor --export <KEYID>
+# Upload the armored public key: GitHub → Settings → SSH and GPG keys → New GPG key
+```
+
+**SSH signing (alternative)**
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+# Add the same public key on GitHub as a Signing Key (not only Authentication)
+```
+
+## Cursor CLI attribution (per machine)
+
+At the **start of any session where the agent may commit or open PRs**, read
+`~/.cursor/cli-config.json` (if present) and verify attribution is disabled:
+
+```json
+"attribution": {
+  "attributeCommitsToAgent": false,
+  "attributePRsToAgent": false
+}
+```
+
+If the file is missing, unreadable, or either flag is not `false`, **alert the
+committer** before committing and surface setup instructions — explain that Cursor
+will inject co-author trailers unless they fix their local config. Provide the
+exact keys to set (or create the file with the block above). Also remind them to
+disable **Settings → Git & PRs → Attribution** in the Cursor IDE (IDE and CLI
+settings are separate).
+
+Do not commit on their behalf until they acknowledge or fix the config (unless
+they explicitly opt out for a one-off commit).
