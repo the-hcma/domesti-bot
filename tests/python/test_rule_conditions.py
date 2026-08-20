@@ -12,11 +12,13 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.api.schemas import (
+    AfterLocalTimeCondition,
     AfterSunsetCondition,
     AnyConditionsCondition,
     DaylightCondition,
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
+    Ep1ReadingCompareCondition,
     GeofenceOut,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
@@ -28,7 +30,14 @@ from app.api.schemas import (
     UsersOutsideGeofenceForSCondition,
 )
 from app.automation_rules_loader import load_automation_rules_bundle
-from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleEvaluationCause, RuleTrigger
+from app.device_enums import (
+    DeviceConditionState,
+    DeviceFamilyId,
+    Ep1ReadingComparison,
+    Ep1ReadingMetric,
+    RuleEvaluationCause,
+    RuleTrigger,
+)
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
@@ -501,7 +510,23 @@ def test_presence_user_ids_for_condition_ignores_non_presence_types() -> None:
     rule = _evening_rule()
     assert (
         _presence_user_ids_for_condition(
+            AfterLocalTimeCondition(type="after_local_time", time_hhmm="18:00"),
+            rule,
+            ctx,
+        )
+        == set()
+    )
+    assert (
+        _presence_user_ids_for_condition(
             AfterSunsetCondition(type="after_sunset", offset_minutes=0),
+            rule,
+            ctx,
+        )
+        == set()
+    )
+    assert (
+        _presence_user_ids_for_condition(
+            DaylightCondition(type="daylight"),
             rule,
             ctx,
         )
@@ -524,6 +549,83 @@ def test_presence_user_ids_for_condition_ignores_non_presence_types() -> None:
         )
         == set()
     )
+    assert (
+        _presence_user_ids_for_condition(
+            Ep1ReadingCompareCondition(
+                type="ep1_reading_compare",
+                comparison=Ep1ReadingComparison.BELOW,
+                device=RuleConditionDeviceRefOut(
+                    device_id="02:00:00:00:00:21",
+                    family_id=DeviceFamilyId.EP1,
+                ),
+                metric=Ep1ReadingMetric.ILLUMINANCE_LX,
+                threshold=80.0,
+            ),
+            rule,
+            ctx,
+        )
+        == set()
+    )
+
+
+def test_presence_user_ids_for_rule_with_daylight_and_users_inside() -> None:
+    """Daylight alone yields no ids; nested with users_inside still returns presence."""
+    now = datetime(2026, 6, 9, 12, 0, tzinfo=_TZ)
+    geofence = GeofenceOut(
+        center_lat=41.194072,
+        center_lon=-73.888325,
+        enabled=True,
+        geofence_id="house",
+        label="House",
+        owntracks_rid=None,
+        radius_m=250,
+    )
+    location = UserLocationOut(
+        accuracy_m=20,
+        lat=41.1941,
+        lon=-73.8883,
+        fix_at="2026-06-09T16:00:00Z",
+        reported_at="2026-06-09T16:00:00Z",
+        source="owntracks",
+    )
+    ctx = _ctx(now=now, geofences=(geofence,), user_locations={"henrique": location})
+    daylight_only = RuleOut(
+        conditions=RuleConditionsOut(all=[DaylightCondition(type="daylight")]),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="daylight-only-presence",
+        label="Daylight only",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        schedule_cron="*/5 * * * *",
+        triggers=[RuleTrigger.SCHEDULED],
+    )
+    assert presence_user_ids_for_rule(daylight_only, ctx) == ()
+    nested = RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DaylightCondition(type="daylight"),
+                UsersInsideGeofenceCondition(
+                    type="users_inside_geofence",
+                    geofence_id="house",
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="daylight-and-home",
+        label="Daylight and home",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        schedule_cron="*/5 * * * *",
+        triggers=[RuleTrigger.SCHEDULED],
+    )
+    assert presence_user_ids_for_rule(nested, ctx) == ("henrique",)
 
 
 def test_users_inside_geofence_ignores_low_accuracy() -> None:

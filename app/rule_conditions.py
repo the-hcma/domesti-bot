@@ -1872,19 +1872,23 @@ def _presence_user_ids_for_condition(
             AfterSunsetCondition,
             BeforeLocalTimeCondition,
             BeforeSunriseCondition,
+            DaylightCondition,
             DaysOfWeekCondition,
             DevicesAllInStateCondition,
             DevicesAnyInStateCondition,
             DevicesAnyInStateForSCondition,
+            Ep1ReadingCompareCondition,
             LocalTimeWindowCondition,
         ),
     ):
         return set()
-    _LOGGER.error(
-        "[rules] unhandled condition type %s in presence_user_ids_for_condition",
+    # Non-presence leaves contribute no roster ids. Prefer empty over assert so a
+    # newly added RuleConditionOut variant cannot crash scheduled-tick logging.
+    _LOGGER.warning(
+        "[rules] ignoring non-presence condition type %s in presence_user_ids_for_condition",
         type(condition).__name__,
     )
-    raise AssertionError(f"Unhandled condition type {type(condition).__name__!r} in presence_user_ids_for_condition")
+    return set()
 
 
 def _resolved_location_for_geofence_rule(
