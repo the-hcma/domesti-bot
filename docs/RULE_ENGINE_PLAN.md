@@ -1370,7 +1370,7 @@ Occupancy entity pushes **never** emit a reading wake — they only go through t
 
 A rule may combine bool conditions and `ep1_reading_compare` (including on the same EP1 device): a reading wake matches via the reading branch and a bool wake via the bool branch; each wake still evaluates the **full** condition tree.
 
-**Out of scope (closes #670 “other families” AC):** only **EP1** currently streams numeric sensor readings into `DeviceRuleWakeNotifier.note_reading`. Families that expose on/off / playing / door state feed **bool transitions** into the notifier for live tiles and vacation anomaly — but **device-state rule predicates** today accept only Kasa, Sonos, Vizio, and EP1; Tailwind doors and Google Cast are rejected at validation (they are not bool rule sources). None of the non-EP1 families produce reading-kind wakes. When a future family streams numeric samples, the extension recipe is: push via `note_reading` (generalize the metric enum as needed), add a compare condition type plus a `rule_watches_*` filter parallel to `ep1_reading_compare`, and extend this table. Until then, non-EP1 reading sources are intentionally out of scope.
+**Out of scope (closes #670 “other families” AC):** only **EP1** currently streams numeric sensor readings into `DeviceRuleWakeNotifier.note_reading`. Families that expose on/off / playing / door state feed **bool transitions** into the notifier for live tiles and vacation anomaly. **Bool device-state rule predicates** today accept Kasa, Sonos, Vizio, EP1 occupancy, and Tailwind open/closed; Google Cast (`androidtv`) is rejected at validation (`supported_by_family` is false for every condition state). None of the non-EP1 families produce reading-kind wakes. When a future family streams numeric samples, the extension recipe is: push via `note_reading` (generalize the metric enum as needed), add a compare condition type plus a `rule_watches_*` filter parallel to `ep1_reading_compare`, and extend this table. Until then, non-EP1 reading sources are intentionally out of scope.
 
 **Motivating rule** (`daylight-dark-house-lights-on` in `automation-rules.json.example`): `triggers: ["device_state"]` + `daylight` + `ep1_reading_compare` — no `*/5` cron, no hand-rolled schedule. For evening clock windows, pair the same reading compare with a top-level `local_time_window` instead of `daylight` (prefer window eligibility over `schedule_cron`).
 
@@ -1391,7 +1391,7 @@ A rule may combine bool conditions and `ep1_reading_compare` (including on the s
 
 Reads **cached** state from `DeviceStateWatcher` / manager objects — Kasa `is_on`, Sonos `is_playing`, Vizio `ui_power_state()` — same source as the tile UI, not a live LAN round-trip on every tick. If `device_state` is `None` (discovery incomplete), condition is **unmet** with detail `discovery not ready`.
 
-**Shipped families:** Kasa, Sonos, Vizio. Tailwind doors and Google Cast are not device-state predicates yet (validation fails for those `family_id` values).
+**Shipped families (bool device-state predicates):** Kasa, Sonos, Vizio, EP1 occupancy, and Tailwind open/closed. Google Cast is not a device-state predicate (validation fails for `androidtv`).
 
 #### Example bundle rule (target shape)
 
