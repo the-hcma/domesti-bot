@@ -122,7 +122,10 @@ class DomestiServerRuntime:
         self.watcher_task = None
 
     def build_device_state_change_detector(self) -> DeviceStateChangeDetector:
-        return DeviceStateChangeDetector(self._on_device_bool_transition)
+        return DeviceStateChangeDetector(
+            self._on_device_bool_transition,
+            on_reading_update=self._on_device_reading_update,
+        )
 
     def schedule_rule_location_evaluation(self, user_id: str) -> None:
         evaluator = self.rule_evaluator
@@ -300,6 +303,13 @@ class DomestiServerRuntime:
             previous,
             current,
         )
+
+    def _on_device_reading_update(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+    ) -> None:
+        self.schedule_rule_device_state_evaluation(family_id, device_id)
 
 
 runtime = DomestiServerRuntime()

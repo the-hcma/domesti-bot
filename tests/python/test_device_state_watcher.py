@@ -27,7 +27,9 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from app.device_enums import DeviceConditionState, DeviceFamilyId
 from app.device_manager import NotInitializedError
+from app.device_state_change import DeviceStateChangeDetector
 from app.device_state_watcher import (
     DEFAULT_POLL_INTERVAL_S,
     DeviceStateWatcher,
@@ -402,26 +404,6 @@ async def test_vizio_watcher_polls_devices_concurrently() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ep1_watcher_runs_subscription_per_device() -> None:
-    mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"])
-    session = cast(AsyncMock, mgr.run_subscription_session)
-
-    async def _hold(_device: object, *, stop: asyncio.Event, on_reading_updated: object = None) -> None:
-        del on_reading_updated
-        await stop.wait()
-
-    session.side_effect = _hold
-    watcher = Ep1SubscriptionWatcher(mgr, reconnect_delay_s=0.01)
-    stop = asyncio.Event()
-    task = asyncio.create_task(watcher.run(stop=stop))
-    await _wait_for_await_count(session, 2)
-    stop.set()
-    await asyncio.wait_for(task, timeout=1.0)
-    seen = {c.args[0].identifier for c in session.await_args_list}
-    assert seen == {"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"}
-
-
-@pytest.mark.asyncio
 async def test_ep1_watcher_keeps_going_when_one_device_raises() -> None:
     mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"])
     session = cast(AsyncMock, mgr.run_subscription_session)
@@ -447,6 +429,58 @@ async def test_ep1_watcher_keeps_going_when_one_device_raises() -> None:
     await asyncio.wait_for(task, timeout=1.0)
     assert "aa:bb:cc:dd:ee:02" in calls
     assert calls.count("aa:bb:cc:dd:ee:01") >= 2
+
+
+def test_ep1_watcher_reading_update_notes_reading_every_sample() -> None:
+    """EP1 entity pushes wake reading callback even when occupancy is unchanged."""
+    on_change = MagicMock()
+    on_reading = MagicMock()
+    detector = DeviceStateChangeDetector(on_change, on_reading_update=on_reading)
+    device = MagicMock(spec=Ep1Device)
+    device.identifier = "aa:bb:cc:dd:ee:01"
+    device.occupancy_state = DeviceConditionState.CLEAR.value
+    watcher = Ep1SubscriptionWatcher(
+        MagicMock(spec=Ep1DeviceManager),
+        change_detector=detector,
+        reconnect_delay_s=0.01,
+    )
+
+    watcher._note_occupancy(device)
+    watcher._note_occupancy(device)
+    assert on_reading.call_count == 2
+    on_reading.assert_called_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    on_change.assert_not_called()
+
+    device.occupancy_state = DeviceConditionState.OCCUPIED.value
+    watcher._note_occupancy(device)
+    # Bool transition already schedules evaluation; reading wake is skipped.
+    assert on_reading.call_count == 2
+    on_change.assert_called_once_with(
+        DeviceFamilyId.EP1,
+        "aa:bb:cc:dd:ee:01",
+        False,
+        True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ep1_watcher_runs_subscription_per_device() -> None:
+    mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"])
+    session = cast(AsyncMock, mgr.run_subscription_session)
+
+    async def _hold(_device: object, *, stop: asyncio.Event, on_reading_updated: object = None) -> None:
+        del on_reading_updated
+        await stop.wait()
+
+    session.side_effect = _hold
+    watcher = Ep1SubscriptionWatcher(mgr, reconnect_delay_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await _wait_for_await_count(session, 2)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    seen = {c.args[0].identifier for c in session.await_args_list}
+    assert seen == {"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"}
 
 
 @pytest.mark.asyncio
