@@ -101,6 +101,26 @@ async def test_local_time_window_eligibility_materializes_next_evaluate_at_on_bo
 
 
 @pytest.mark.asyncio
+async def test_local_time_window_eligibility_prompt_when_boot_inside_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _window_fixture(tmp_path, monkeypatch, start_inside_window=True)
+    clock = fixture["clock"]
+    evaluator = fixture["evaluator"]
+
+    next_at = evaluator.next_evaluate_at_for_rule("evening-lux-window")
+    assert next_at == pytest.approx(clock["now"])
+
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await evaluator._evaluate_scheduled_rules()
+        assert send_mock.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_after_window_end_reading_wake_conditions_fail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
