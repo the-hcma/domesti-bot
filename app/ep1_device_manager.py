@@ -34,7 +34,7 @@ from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZerocon
 
 from app import device_discovery_store
 from app.device_display import format_device_display
-from app.device_enums import DeviceConditionState
+from app.device_enums import DeviceConditionState, Ep1EntityRole
 from app.device_mac import lookup_ip_via_arp_for_mac, mac_alive_on_lan, try_normalize_mac
 from app.device_manager import AlreadyInitializedError, DeviceManager, NotInitializedError
 from app.ep1_credentials import resolve_ep1_noise_psk
@@ -53,11 +53,11 @@ _EP1_NAME_MARKERS = (
     "everything-presence-one",
     "everything smart technology.everything presence one",
 )
-_ENTITY_NAME_ALIASES: dict[str, tuple[str, ...]] = {
-    "humidity": ("humidity", "humidity_sensor"),
-    "illuminance": ("illuminance", "illuminance_sensor"),
-    "occupancy": ("occupancy",),
-    "temperature": ("temperature", "temperature_sensor"),
+_ENTITY_NAME_ALIASES: dict[Ep1EntityRole, tuple[str, ...]] = {
+    Ep1EntityRole.HUMIDITY: ("humidity", "humidity_sensor"),
+    Ep1EntityRole.ILLUMINANCE: ("illuminance", "illuminance_sensor"),
+    Ep1EntityRole.OCCUPANCY: ("occupancy",),
+    Ep1EntityRole.TEMPERATURE: ("temperature", "temperature_sensor"),
 }
 _STATE_COLLECT_TIMEOUT_S = 8.0
 
@@ -537,7 +537,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         device: Ep1Device,
         *,
         stop: asyncio.Event,
-        on_reading_updated: Callable[[Ep1Device], None] | None = None,
+        on_reading_updated: Callable[[Ep1Device, Ep1EntityRole], None] | None = None,
     ) -> None:
         """Connect, ``subscribe_states``, and wait until ``stop`` or disconnect.
 
@@ -545,6 +545,9 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         backoff between sessions. Never blocks the event loop on LAN I/O
         beyond awaited aioesphomeapi coroutines. ``noise_psk`` may be empty for
         plaintext Homey firmware.
+
+        ``on_reading_updated`` receives ``(device, role)`` when an entity state
+        was applied (:class:`~app.device_enums.Ep1EntityRole`).
         """
 
         psk = self._resolved_noise_psk()
@@ -570,13 +573,13 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             def _on_state(state: EntityState) -> None:
                 # Always bump liveness — ESPHome may omit unchanged entities.
                 device.note_heard()
-                _apply_entity_state_to_device(
+                role = _apply_entity_state_to_device(
                     device,
                     state,
                     key_to_role=key_to_role,
                 )
-                if on_reading_updated is not None:
-                    on_reading_updated(device)
+                if on_reading_updated is not None and role is not None:
+                    on_reading_updated(device, role)
 
             client.subscribe_states(_on_state)
             # Arm liveness only once the subscription is registered — not on bare connect.
@@ -669,11 +672,11 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         self,
         client: APIClient,
         *,
-        key_to_role: dict[int, str],
-    ) -> dict[str, EntityState]:
+        key_to_role: dict[int, Ep1EntityRole],
+    ) -> dict[Ep1EntityRole, EntityState]:
         if not key_to_role:
             return {}
-        collected: dict[str, EntityState] = {}
+        collected: dict[Ep1EntityRole, EntityState] = {}
         done = asyncio.Event()
 
         def _on_state(state: EntityState) -> None:
@@ -733,12 +736,12 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 port=port,
                 mac_address=mac,
             )
-            occupancy = _occupancy_from_state(states.get("occupancy"))
+            occupancy = _occupancy_from_state(states.get(Ep1EntityRole.OCCUPANCY))
             device.apply_entity_state(
                 occupancy=occupancy,
-                temperature_c=_float_from_sensor_state(states.get("temperature")),
-                humidity_pct=_float_from_sensor_state(states.get("humidity")),
-                illuminance_lx=_float_from_sensor_state(states.get("illuminance")),
+                temperature_c=_float_from_sensor_state(states.get(Ep1EntityRole.TEMPERATURE)),
+                humidity_pct=_float_from_sensor_state(states.get(Ep1EntityRole.HUMIDITY)),
+                illuminance_lx=_float_from_sensor_state(states.get(Ep1EntityRole.ILLUMINANCE)),
             )
             return device
         finally:
@@ -819,29 +822,35 @@ def _apply_entity_state_to_device(
     device: Ep1Device,
     state: EntityState,
     *,
-    key_to_role: dict[int, str],
-) -> None:
+    key_to_role: dict[int, Ep1EntityRole],
+) -> Ep1EntityRole | None:
+    """Apply ``state`` to ``device``; return the role applied, or ``None``."""
     role = key_to_role.get(state.key)
     if role is None:
-        return
-    if role == "occupancy":
+        return None
+    if role == Ep1EntityRole.OCCUPANCY:
         occupancy = _occupancy_from_state(state)
-        if occupancy is not None:
-            device.apply_entity_state(occupancy=occupancy)
-        return
+        if occupancy is None:
+            return None
+        device.apply_entity_state(occupancy=occupancy)
+        return role
     value = _float_from_sensor_state(state)
     if value is None:
-        return
-    if role == "temperature":
+        return None
+    if role == Ep1EntityRole.TEMPERATURE:
         device.apply_entity_state(temperature_c=value)
-    elif role == "humidity":
+        return role
+    if role == Ep1EntityRole.HUMIDITY:
         device.apply_entity_state(humidity_pct=value)
-    elif role == "illuminance":
+        return role
+    if role == Ep1EntityRole.ILLUMINANCE:
         device.apply_entity_state(illuminance_lx=value)
+        return role
+    return None
 
 
-def _entity_key_to_role(entities: Sequence[EntityInfo]) -> dict[int, str]:
-    key_to_role: dict[int, str] = {}
+def _entity_key_to_role(entities: Sequence[EntityInfo]) -> dict[int, Ep1EntityRole]:
+    key_to_role: dict[int, Ep1EntityRole] = {}
     for entity in entities:
         role = _role_for_entity(entity)
         if role is None:
@@ -920,7 +929,7 @@ def _pick_ep1_host_address(info: AsyncServiceInfo) -> str | None:
     return raw_addrs[0]
 
 
-def _role_for_entity(entity: EntityInfo) -> str | None:
+def _role_for_entity(entity: EntityInfo) -> Ep1EntityRole | None:
     tokens = {
         _normalize_entity_token(getattr(entity, "name", "") or ""),
         _normalize_entity_token(getattr(entity, "object_id", "") or ""),
@@ -929,9 +938,9 @@ def _role_for_entity(entity: EntityInfo) -> str | None:
     for role, aliases in _ENTITY_NAME_ALIASES.items():
         if not tokens.intersection(aliases):
             continue
-        if role == "occupancy" and not isinstance(entity, BinarySensorInfo):
+        if role == Ep1EntityRole.OCCUPANCY and not isinstance(entity, BinarySensorInfo):
             continue
-        if role != "occupancy" and not isinstance(entity, SensorInfo):
+        if role != Ep1EntityRole.OCCUPANCY and not isinstance(entity, SensorInfo):
             continue
         return role
     return None

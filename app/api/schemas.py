@@ -1627,6 +1627,42 @@ class LocalTimeWindowCondition(BaseModel):
     end_hhmm: str
     start_hhmm: str
 
+    @model_validator(mode="after")
+    def _require_nonempty_window(self) -> Self:
+        # Half-open [start, end) — equal bounds are never open (dead rule).
+        if self.start_hhmm == self.end_hhmm:
+            raise ValueError(
+                "Expected local_time_window start_hhmm != end_hhmm "
+                f"(half-open window), got start={self.start_hhmm!r} end={self.end_hhmm!r}",
+            )
+        return self
+
+    @field_validator("end_hhmm", "start_hhmm", mode="before")
+    @classmethod
+    def _require_valid_hhmm(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Expected HH:MM string for local_time_window, got {type(value).__name__}",
+            )
+        trimmed = value.strip()
+        parts = trimmed.split(":")
+        if len(parts) != 2:
+            raise ValueError(
+                f"Expected HH:MM for local_time_window, got {value!r}",
+            )
+        try:
+            hour = int(parts[0])
+            minute = int(parts[1])
+        except ValueError as exc:
+            raise ValueError(
+                f"Expected HH:MM for local_time_window, got {value!r}",
+            ) from exc
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError(
+                f"Expected HH:MM in 00:00–23:59 for local_time_window, got {value!r}",
+            )
+        return f"{hour:02d}:{minute:02d}"
+
 
 class UsersInsideGeofenceCondition(BaseModel):
     type: Literal["users_inside_geofence"]
@@ -1865,10 +1901,24 @@ class RuleOut(BaseModel):
             raise ValueError("schedule_cron is only allowed when triggers includes scheduled")
         if not has_scheduled:
             self.schedule_cron = None
+            _reject_nested_local_time_windows(self.conditions.all)
+            _reject_multiple_top_level_local_time_windows_for_eligibility(self)
+            has_astronomical = any(
+                condition.type in ("after_sunset", "before_sunrise") for condition in self.conditions.all
+            )
+            has_local_time_window = any(
+                isinstance(condition, LocalTimeWindowCondition) for condition in self.conditions.all
+            )
+            if (has_device_state or has_dwell_satisfied) and has_astronomical and has_local_time_window:
+                raise ValueError(
+                    "Expected at most one eligibility window "
+                    "(after_sunset/before_sunrise or local_time_window), got both"
+                )
             if has_device_state:
                 return self
             return self
 
+        _reject_nested_local_time_windows(self.conditions.all)
         anchor = extract_astronomical_anchor(self)
         astronomical_count = sum(
             1 for condition in self.conditions.all if condition.type in ("after_sunset", "before_sunrise")
@@ -1900,6 +1950,40 @@ class RuleOut(BaseModel):
             self.schedule_cron = None
             return self
         raise ValueError("scheduled rules require schedule_cron or a top-level after_sunset / before_sunrise condition")
+
+
+def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut]) -> bool:
+    for condition in conditions:
+        if isinstance(condition, LocalTimeWindowCondition):
+            return True
+        if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            if _condition_tree_contains_local_time_window(condition.conditions):
+                return True
+    return False
+
+
+def _reject_multiple_top_level_local_time_windows_for_eligibility(rule: RuleOut) -> None:
+    """Reject 2+ top-level windows when device_state/dwell would use eligibility wakes."""
+    if RuleTrigger.SCHEDULED in rule.triggers:
+        return
+    if RuleTrigger.DEVICE_STATE not in rule.triggers and RuleTrigger.DWELL_SATISFIED not in rule.triggers:
+        return
+    if (rule.schedule_cron or "").strip() != "":
+        return
+    top_level = sum(1 for condition in rule.conditions.all if isinstance(condition, LocalTimeWindowCondition))
+    if top_level > 1:
+        raise ValueError(
+            "Expected at most one top-level local_time_window for device_state/dwell "
+            f"eligibility wakes, got {top_level}"
+        )
+
+
+def _reject_nested_local_time_windows(conditions: list[RuleConditionOut]) -> None:
+    """Reject ``local_time_window`` nested under ``all`` / ``any`` groups."""
+    for condition in conditions:
+        if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            if _condition_tree_contains_local_time_window(condition.conditions):
+                raise ValueError("Expected local_time_window at top-level conditions.all, got nested under all/any")
 
 
 def normalized_rule_notification_emails(rule: RuleOut) -> list[str]:

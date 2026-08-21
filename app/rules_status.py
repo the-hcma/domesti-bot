@@ -40,6 +40,11 @@ from app.automation_rules_loader import (
 from app.cron_schedule import fired_on_same_local_calendar_day
 from app.device_enums import RuleEvaluationCause, RuleTrigger
 from app.device_state_watcher import poll_interval_from_env
+from app.local_time_schedule import (
+    extract_top_level_local_time_window,
+    local_time_window_start_datetime,
+    uses_local_time_window_eligibility_wake,
+)
 from app.presence_store import (
     list_user_locations,
 )
@@ -151,7 +156,11 @@ def build_rules_status(
         next_evaluate_at: str | None = None
         scheduled_detail: str | None = None
         if (
-            (RuleTrigger.SCHEDULED in rule.triggers or uses_astronomical_eligibility_wake(rule))
+            (
+                RuleTrigger.SCHEDULED in rule.triggers
+                or uses_astronomical_eligibility_wake(rule)
+                or uses_local_time_window_eligibility_wake(rule)
+            )
             and rule.enabled
             and evaluator is not None
         ):
@@ -198,6 +207,26 @@ def build_rules_status(
                     f"{_format_astronomical_anchor_label(anchor_dt)}; "
                     "also on dwell threshold and watched device changes"
                 )
+        elif uses_local_time_window_eligibility_wake(rule) and evaluator is not None:
+            window = extract_top_level_local_time_window(rule)
+            if window is not None:
+                start_dt = local_time_window_start_datetime(
+                    window,
+                    local_date=effective_now.date(),
+                    timezone=tz,
+                )
+                if start_dt is not None:
+                    also_parts: list[str] = []
+                    if RuleTrigger.DWELL_SATISFIED in rule.triggers:
+                        also_parts.append("dwell threshold")
+                    if RuleTrigger.DEVICE_STATE in rule.triggers:
+                        also_parts.append("watched device/reading changes")
+                    also_clause = ""
+                    if also_parts:
+                        also_clause = f"; also on {' and '.join(also_parts)}"
+                    scheduled_detail = (
+                        f"Evaluates once when eligible at {_format_astronomical_anchor_label(start_dt)}{also_clause}"
+                    )
         elif RuleTrigger.SCHEDULED in rule.triggers and uses_astronomical_schedule(rule) and evaluator is not None:
             effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)
             if effective_cron is not None:

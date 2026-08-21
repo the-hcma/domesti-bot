@@ -26,6 +26,7 @@ from app.api.schemas import (
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
+    Ep1ReadingMetric,
     RuleReferenceIssueKind,
     RuleTrigger,
 )
@@ -133,6 +134,55 @@ def rule_watches_backend_device(
             family_id=family_id,
             backend_device_id=backend_device_id,
             rule_device_ref=ref_device,
+        ):
+            return True
+    return False
+
+
+def rule_watches_backend_device_bool_state(
+    rule: RuleOut,
+    state: DeviceManagersState,
+    *,
+    family_id: DeviceFamilyId,
+    backend_device_id: str,
+) -> bool:
+    """Return whether ``backend_device_id`` is watched via bool device-state conditions.
+
+    Matches ``devices_all_in_state`` / ``devices_any_in_state`` /
+    ``devices_any_in_state_for_s`` only — not ``ep1_reading_compare``.
+    """
+    for ref_family, ref_device in _collect_rule_bool_state_device_refs(rule):
+        if ref_family != family_id:
+            continue
+        if _backend_device_id_matches_rule_ref(
+            state,
+            family_id=family_id,
+            backend_device_id=backend_device_id,
+            rule_device_ref=ref_device,
+        ):
+            return True
+    return False
+
+
+def rule_watches_backend_device_ep1_reading(
+    rule: RuleOut,
+    state: DeviceManagersState,
+    *,
+    family_id: DeviceFamilyId,
+    backend_device_id: str,
+    metric: Ep1ReadingMetric,
+) -> bool:
+    """Return whether ``backend_device_id`` is watched via ``ep1_reading_compare`` for ``metric``."""
+    for condition in _iter_ep1_reading_compare_conditions(rule.conditions.all):
+        if condition.metric != metric:
+            continue
+        if condition.device.family_id != family_id:
+            continue
+        if _backend_device_id_matches_rule_ref(
+            state,
+            family_id=family_id,
+            backend_device_id=backend_device_id,
+            rule_device_ref=condition.device.device_id,
         ):
             return True
     return False
@@ -536,6 +586,16 @@ def _validate_users(
     return issues
 
 
+def _collect_rule_bool_state_device_refs(
+    rule: RuleOut,
+) -> set[tuple[DeviceFamilyId, str]]:
+    """Return device refs from bool device-state conditions only."""
+    refs: set[tuple[DeviceFamilyId, str]] = set()
+    for condition in rule.conditions.all:
+        _walk_bool_state_device_refs(condition, refs)
+    return refs
+
+
 def _iter_device_state_condition_checks(
     conditions: list[RuleConditionOut],
 ) -> list[tuple[list[RuleConditionDeviceRefOut], DeviceConditionState]]:
@@ -558,19 +618,26 @@ def _iter_device_state_condition_checks(
     return found
 
 
+def _iter_ep1_reading_compare_conditions(
+    conditions: list[RuleConditionOut],
+) -> list[Ep1ReadingCompareCondition]:
+    """Collect ``ep1_reading_compare`` conditions (including nested any/all)."""
+    found: list[Ep1ReadingCompareCondition] = []
+    for condition in conditions:
+        if isinstance(condition, Ep1ReadingCompareCondition):
+            found.append(condition)
+        elif isinstance(condition, AllConditionsCondition):
+            found.extend(_iter_ep1_reading_compare_conditions(condition.conditions))
+        elif isinstance(condition, AnyConditionsCondition):
+            found.extend(_iter_ep1_reading_compare_conditions(condition.conditions))
+    return found
+
+
 def _iter_ep1_reading_compare_device_refs(
     conditions: list[RuleConditionOut],
 ) -> list[RuleConditionDeviceRefOut]:
     """Collect device refs from ``ep1_reading_compare`` conditions."""
-    found: list[RuleConditionDeviceRefOut] = []
-    for condition in conditions:
-        if isinstance(condition, Ep1ReadingCompareCondition):
-            found.append(condition.device)
-        elif isinstance(condition, AllConditionsCondition):
-            found.extend(_iter_ep1_reading_compare_device_refs(condition.conditions))
-        elif isinstance(condition, AnyConditionsCondition):
-            found.extend(_iter_ep1_reading_compare_device_refs(condition.conditions))
-    return found
+    return [condition.device for condition in _iter_ep1_reading_compare_conditions(conditions)]
 
 
 def _validate_device_condition_states(rule: RuleOut) -> list[RuleReferenceIssueOut]:
@@ -629,6 +696,26 @@ def _validate_device_conditions(
         )
     issues.extend(_validate_device_condition_states(rule))
     return issues
+
+
+def _walk_bool_state_device_refs(
+    condition: RuleConditionOut,
+    refs: set[tuple[DeviceFamilyId, str]],
+) -> None:
+    if isinstance(
+        condition,
+        DevicesAllInStateCondition | DevicesAnyInStateCondition | DevicesAnyInStateForSCondition,
+    ):
+        for ref in condition.devices:
+            refs.add((ref.family_id, ref.device_id))
+        return
+    if isinstance(condition, AllConditionsCondition):
+        for child in condition.conditions:
+            _walk_bool_state_device_refs(child, refs)
+        return
+    if isinstance(condition, AnyConditionsCondition):
+        for child in condition.conditions:
+            _walk_bool_state_device_refs(child, refs)
 
 
 def _walk_device_refs(

@@ -27,9 +27,9 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
-from app.device_enums import DeviceConditionState, DeviceFamilyId
+from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1EntityRole, Ep1ReadingMetric
 from app.device_manager import NotInitializedError
-from app.device_state_change import DeviceStateChangeDetector
+from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.device_state_watcher import (
     DEFAULT_POLL_INTERVAL_S,
     DeviceStateWatcher,
@@ -431,30 +431,66 @@ async def test_ep1_watcher_keeps_going_when_one_device_raises() -> None:
     assert calls.count("aa:bb:cc:dd:ee:01") >= 2
 
 
-def test_ep1_watcher_reading_update_notes_reading_every_sample() -> None:
-    """EP1 entity pushes wake reading callback even when occupancy is unchanged."""
+def test_ep1_watcher_reading_update_notes_reading_by_role() -> None:
+    """EP1 climate/light pushes wake reading callback; occupancy uses bool only."""
     on_change = MagicMock()
     on_reading = MagicMock()
-    detector = DeviceStateChangeDetector(on_change, on_reading_update=on_reading)
+    on_seed = MagicMock()
+    detector = DeviceRuleWakeNotifier(on_change, on_bool_seed=on_seed, on_reading=on_reading)
     device = MagicMock(spec=Ep1Device)
     device.identifier = "aa:bb:cc:dd:ee:01"
     device.occupancy_state = DeviceConditionState.CLEAR.value
+    device.illuminance_lx = 10.0
     watcher = Ep1SubscriptionWatcher(
         MagicMock(spec=Ep1DeviceManager),
-        change_detector=detector,
+        wake_notifier=detector,
         reconnect_delay_s=0.01,
     )
 
-    watcher._note_occupancy(device)
-    watcher._note_occupancy(device)
-    assert on_reading.call_count == 2
-    on_reading.assert_called_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    watcher._on_entity_role(device, Ep1EntityRole.ILLUMINANCE)
+    watcher._on_entity_role(device, Ep1EntityRole.ILLUMINANCE)
+    assert on_reading.call_count == 0
+
+    device.illuminance_lx = 12.0
+    watcher._on_entity_role(device, Ep1EntityRole.ILLUMINANCE)
+    assert on_reading.call_count == 1
+    on_reading.assert_called_with(
+        DeviceFamilyId.EP1,
+        "aa:bb:cc:dd:ee:01",
+        Ep1ReadingMetric.ILLUMINANCE_LX,
+    )
     on_change.assert_not_called()
 
-    device.occupancy_state = DeviceConditionState.OCCUPIED.value
-    watcher._note_occupancy(device)
-    # Bool transition already schedules evaluation; reading wake is skipped.
+    device.temperature_c = 21.0
+    watcher._on_entity_role(device, Ep1EntityRole.TEMPERATURE)
+    device.temperature_c = 22.5
+    watcher._on_entity_role(device, Ep1EntityRole.TEMPERATURE)
     assert on_reading.call_count == 2
+    on_reading.assert_called_with(
+        DeviceFamilyId.EP1,
+        "aa:bb:cc:dd:ee:01",
+        Ep1ReadingMetric.TEMPERATURE_C,
+    )
+
+    device.humidity_pct = 40.0
+    watcher._on_entity_role(device, Ep1EntityRole.HUMIDITY)
+    device.humidity_pct = 41.0
+    watcher._on_entity_role(device, Ep1EntityRole.HUMIDITY)
+    assert on_reading.call_count == 3
+    on_reading.assert_called_with(
+        DeviceFamilyId.EP1,
+        "aa:bb:cc:dd:ee:01",
+        Ep1ReadingMetric.HUMIDITY_PCT,
+    )
+
+    watcher._on_entity_role(device, Ep1EntityRole.OCCUPANCY)
+    on_seed.assert_called_once_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    on_change.assert_not_called()
+    assert on_reading.call_count == 3
+
+    device.occupancy_state = DeviceConditionState.OCCUPIED.value
+    watcher._on_entity_role(device, Ep1EntityRole.OCCUPANCY)
+    assert on_reading.call_count == 3
     on_change.assert_called_once_with(
         DeviceFamilyId.EP1,
         "aa:bb:cc:dd:ee:01",

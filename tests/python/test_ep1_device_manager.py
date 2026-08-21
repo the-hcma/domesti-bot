@@ -17,7 +17,7 @@ from aioesphomeapi.model import (
 )
 
 from app.device_discovery_store import load_ep1_devices, upsert_ep1_device
-from app.device_enums import DeviceConditionState
+from app.device_enums import DeviceConditionState, Ep1EntityRole
 from app.ep1_device_manager import Ep1Device, Ep1DeviceManager, Ep1DiscoveryError
 
 
@@ -294,13 +294,13 @@ async def test_run_subscription_session_applies_states_until_stop(
     mgr._fetched = True
 
     stop = asyncio.Event()
-    updated: list[str] = []
+    updated: list[tuple[str, Ep1EntityRole]] = []
 
     async def _run() -> None:
         await mgr.run_subscription_session(
             device,
             stop=stop,
-            on_reading_updated=lambda d: updated.append(d.identifier),
+            on_reading_updated=lambda d, role: updated.append((d.identifier, role)),
         )
 
     task = asyncio.create_task(_run())
@@ -314,7 +314,10 @@ async def test_run_subscription_session_applies_states_until_stop(
     assert device.occupancy_state == DeviceConditionState.OCCUPIED.value
     assert device.temperature_c == 22.0
     assert device.last_heard_at is not None
-    assert updated == [device.identifier, device.identifier]
+    assert updated == [
+        (device.identifier, Ep1EntityRole.OCCUPANCY),
+        (device.identifier, Ep1EntityRole.TEMPERATURE),
+    ]
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
     client.disconnect.assert_awaited()
