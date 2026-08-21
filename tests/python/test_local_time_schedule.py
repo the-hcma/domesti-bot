@@ -127,6 +127,45 @@ def test_rule_rejects_astronomical_and_local_time_window_eligibility() -> None:
         )
 
 
+def test_rule_rejects_multiple_top_level_local_time_windows() -> None:
+    with pytest.raises(ValidationError, match="at most one top-level local_time_window"):
+        RuleOut(
+            conditions=RuleConditionsOut(
+                all=[
+                    LocalTimeWindowCondition(
+                        type="local_time_window",
+                        start_hhmm="18:00",
+                        end_hhmm="20:00",
+                    ),
+                    LocalTimeWindowCondition(
+                        type="local_time_window",
+                        start_hhmm="21:00",
+                        end_hhmm="00:00",
+                    ),
+                    Ep1ReadingCompareCondition(
+                        type="ep1_reading_compare",
+                        comparison=Ep1ReadingComparison.BELOW,
+                        metric=Ep1ReadingMetric.ILLUMINANCE_LX,
+                        threshold=34.0,
+                        device=RuleConditionDeviceRefOut(
+                            device_id="aa:bb:cc:dd:ee:01",
+                            family_id=DeviceFamilyId.EP1,
+                        ),
+                    ),
+                ],
+            ),
+            cooldown_s=0,
+            device_actions=[],
+            enabled=True,
+            id="multi-window",
+            label="Multi window",
+            min_location_accuracy_m=50,
+            notification_emails=["ops@example.com"],
+            notify_on_fire=True,
+            triggers=[RuleTrigger.DEVICE_STATE],
+        )
+
+
 def test_rule_rejects_nested_local_time_window() -> None:
     with pytest.raises(ValidationError, match="top-level conditions.all"):
         RuleOut(

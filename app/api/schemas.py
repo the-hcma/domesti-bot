@@ -1895,6 +1895,7 @@ class RuleOut(BaseModel):
             from app.local_time_schedule import uses_local_time_window_eligibility_wake
 
             _reject_nested_local_time_windows(self.conditions.all)
+            _reject_multiple_top_level_local_time_windows_for_eligibility(self)
             if uses_astronomical_eligibility_wake(self) and uses_local_time_window_eligibility_wake(self):
                 raise ValueError(
                     "Expected at most one eligibility window "
@@ -1946,6 +1947,22 @@ def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut
             if _condition_tree_contains_local_time_window(condition.conditions):
                 return True
     return False
+
+
+def _reject_multiple_top_level_local_time_windows_for_eligibility(rule: RuleOut) -> None:
+    """Reject 2+ top-level windows when device_state/dwell would use eligibility wakes."""
+    if RuleTrigger.SCHEDULED in rule.triggers:
+        return
+    if RuleTrigger.DEVICE_STATE not in rule.triggers and RuleTrigger.DWELL_SATISFIED not in rule.triggers:
+        return
+    if (rule.schedule_cron or "").strip() != "":
+        return
+    top_level = sum(1 for condition in rule.conditions.all if isinstance(condition, LocalTimeWindowCondition))
+    if top_level > 1:
+        raise ValueError(
+            "Expected at most one top-level local_time_window for device_state/dwell "
+            f"eligibility wakes, got {top_level}"
+        )
 
 
 def _reject_nested_local_time_windows(conditions: list[RuleConditionOut]) -> None:

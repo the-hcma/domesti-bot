@@ -18,17 +18,6 @@ def test_device_rule_wake_notifier_ignores_first_sample_without_seed() -> None:
     on_change.assert_not_called()
 
 
-def test_device_rule_wake_notifier_seeds_first_bool_sample() -> None:
-    on_change = MagicMock()
-    on_seed = MagicMock()
-    notifier = DeviceRuleWakeNotifier(on_change, on_bool_seed=on_seed)
-    assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", True) is True
-    on_seed.assert_called_once_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
-    on_change.assert_not_called()
-    assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", True) is False
-    on_seed.assert_called_once()
-
-
 def test_device_rule_wake_notifier_note_reading_diffs_values() -> None:
     on_change = MagicMock()
     on_reading = MagicMock()
@@ -103,6 +92,28 @@ def test_device_rule_wake_notifier_notifies_on_transition() -> None:
         False,
         True,
     )
+
+
+def test_device_rule_wake_notifier_seeds_first_bool_sample() -> None:
+    on_change = MagicMock()
+    on_seed = MagicMock()
+    notifier = DeviceRuleWakeNotifier(on_change, on_bool_seed=on_seed)
+    assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", True) is True
+    on_seed.assert_called_once_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    on_change.assert_not_called()
+    assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", True) is False
+    on_seed.assert_called_once()
+
+
+def test_device_rule_wake_notifier_seeds_when_prior_was_none() -> None:
+    on_change = MagicMock()
+    on_seed = MagicMock()
+    notifier = DeviceRuleWakeNotifier(on_change, on_bool_seed=on_seed)
+    assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", None) is False
+    on_seed.assert_not_called()
+    assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", True) is True
+    on_seed.assert_called_once_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    on_change.assert_not_called()
 
 
 def test_runtime_reading_update_schedules_rule_evaluation_not_vacation(

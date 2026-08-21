@@ -40,13 +40,12 @@ class DeviceRuleWakeNotifier:
         anomaly handling still requires a real prior→current transition.
         """
         key = (family_id, device_id)
-        prior_missing = key not in self._prior_bool
         prior = self._prior_bool.get(key)
         self._prior_bool[key] = state
         if prior is not None and prior != state:
             self._on_bool_transition(family_id, device_id, prior, state)
             return True
-        if prior_missing and state is not None and self._on_bool_seed is not None:
+        if prior is None and state is not None and self._on_bool_seed is not None:
             self._on_bool_seed(family_id, device_id)
             return True
         return False

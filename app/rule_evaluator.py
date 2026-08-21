@@ -2758,9 +2758,11 @@ class RuleEvaluator:
         runtime.schedule_materialized_for = local_date
         window = extract_top_level_local_time_window(rule)
         local_now = now.astimezone(timezone) if now.tzinfo is not None else now.replace(tzinfo=timezone)
-        if window is not None and is_local_time_window_open(window, now=local_now):
+        if window is not None and is_local_time_window_open(window, now=local_now) and not force:
             # Already inside today's open window (e.g. process restart after
             # start_hhmm): evaluate promptly rather than waiting until tomorrow.
+            # Skip on forced new-day refresh so overnight windows do not get a
+            # second eligibility fire after local midnight.
             runtime.next_evaluate_at = local_now.timestamp()
         else:
             runtime.next_evaluate_at = next_scheduled_evaluate_at(
