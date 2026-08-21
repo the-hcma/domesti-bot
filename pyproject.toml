@@ -75,7 +75,7 @@ dependencies = [
     "python-kasa @ git+https://github.com/python-kasa/python-kasa.git@refs/pull/1692/head",
     "requests>=2.34.2",
     "soco>=0.31.2",
-    "sqlalchemy>=2.0.51",
+    "sqlalchemy>=2.0.52",
     "starlette>=1.6.0",
     "typer>=0.27.1",
     "typing-extensions==4.16.0",
