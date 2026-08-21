@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+from pydantic import ValidationError
+
 from app.api.schemas import (
+    AfterSunsetCondition,
     Ep1ReadingCompareCondition,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
@@ -36,6 +40,21 @@ def test_extract_top_level_local_time_window_single() -> None:
     assert window.end_hhmm == "00:00"
 
 
+def test_local_time_window_rejects_invalid_hhmm() -> None:
+    with pytest.raises(ValidationError, match="HH:MM"):
+        LocalTimeWindowCondition(
+            type="local_time_window",
+            start_hhmm="25:00",
+            end_hhmm="00:00",
+        )
+    with pytest.raises(ValidationError, match="HH:MM"):
+        LocalTimeWindowCondition(
+            type="local_time_window",
+            start_hhmm="21:00",
+            end_hhmm="not-a-time",
+        )
+
+
 def test_local_time_window_start_datetime_builds_today() -> None:
     window = LocalTimeWindowCondition(
         type="local_time_window",
@@ -57,6 +76,41 @@ def test_materialize_local_time_window_cron() -> None:
     now = datetime(2023, 11, 14, 18, 0, tzinfo=tz)
     cron = materialize_local_time_window_cron(rule, timezone=tz, now=now)
     assert cron == "0 21 * * *"
+
+
+def test_rule_rejects_astronomical_and_local_time_window_eligibility() -> None:
+    with pytest.raises(ValidationError, match="at most one eligibility window"):
+        RuleOut(
+            conditions=RuleConditionsOut(
+                all=[
+                    AfterSunsetCondition(type="after_sunset", offset_minutes=0),
+                    LocalTimeWindowCondition(
+                        type="local_time_window",
+                        start_hhmm="21:00",
+                        end_hhmm="00:00",
+                    ),
+                    Ep1ReadingCompareCondition(
+                        type="ep1_reading_compare",
+                        comparison=Ep1ReadingComparison.BELOW,
+                        metric=Ep1ReadingMetric.ILLUMINANCE_LX,
+                        threshold=34.0,
+                        device=RuleConditionDeviceRefOut(
+                            device_id="aa:bb:cc:dd:ee:01",
+                            family_id=DeviceFamilyId.EP1,
+                        ),
+                    ),
+                ],
+            ),
+            cooldown_s=0,
+            device_actions=[],
+            enabled=True,
+            id="dual-eligibility",
+            label="Dual eligibility",
+            min_location_accuracy_m=50,
+            notification_emails=["ops@example.com"],
+            notify_on_fire=True,
+            triggers=[RuleTrigger.DEVICE_STATE],
+        )
 
 
 def test_uses_local_time_window_eligibility_wake_for_device_state() -> None:

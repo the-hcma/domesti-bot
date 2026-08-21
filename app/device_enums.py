@@ -106,6 +106,15 @@ class Ep1CalibrationOffsetKind(StrEnum):
     TEMPERATURE = "temperature"
 
 
+class Ep1EntityRole(StrEnum):
+    """ESPHome entity roles applied from EP1 ``subscribe_states`` dumps/pushes."""
+
+    HUMIDITY = "humidity"
+    ILLUMINANCE = "illuminance"
+    OCCUPANCY = "occupancy"
+    TEMPERATURE = "temperature"
+
+
 class Ep1OccupancyApplyButton(StrEnum):
     """ESPHome button roles pressed after mmWave occupancy number writes."""
 

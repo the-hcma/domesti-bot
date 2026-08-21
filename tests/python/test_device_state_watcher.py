@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
-from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1ReadingMetric
+from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1EntityRole, Ep1ReadingMetric
 from app.device_manager import NotInitializedError
 from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.device_state_watcher import (
@@ -445,8 +445,8 @@ def test_ep1_watcher_reading_update_notes_reading_by_role() -> None:
         reconnect_delay_s=0.01,
     )
 
-    watcher._on_entity_role(device, "illuminance")
-    watcher._on_entity_role(device, "illuminance")
+    watcher._on_entity_role(device, Ep1EntityRole.ILLUMINANCE)
+    watcher._on_entity_role(device, Ep1EntityRole.ILLUMINANCE)
     assert on_reading.call_count == 2
     on_reading.assert_called_with(
         DeviceFamilyId.EP1,
@@ -455,12 +455,12 @@ def test_ep1_watcher_reading_update_notes_reading_by_role() -> None:
     )
     on_change.assert_not_called()
 
-    watcher._on_entity_role(device, "occupancy")
+    watcher._on_entity_role(device, Ep1EntityRole.OCCUPANCY)
     on_change.assert_not_called()
     assert on_reading.call_count == 2
 
     device.occupancy_state = DeviceConditionState.OCCUPIED.value
-    watcher._on_entity_role(device, "occupancy")
+    watcher._on_entity_role(device, Ep1EntityRole.OCCUPANCY)
     assert on_reading.call_count == 2
     on_change.assert_called_once_with(
         DeviceFamilyId.EP1,

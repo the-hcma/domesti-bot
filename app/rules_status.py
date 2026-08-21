@@ -216,10 +216,16 @@ def build_rules_status(
                     timezone=tz,
                 )
                 if start_dt is not None:
+                    also_parts: list[str] = []
+                    if RuleTrigger.DWELL_SATISFIED in rule.triggers:
+                        also_parts.append("dwell threshold")
+                    if RuleTrigger.DEVICE_STATE in rule.triggers:
+                        also_parts.append("watched device/reading changes")
+                    also_clause = ""
+                    if also_parts:
+                        also_clause = f"; also on {' and '.join(also_parts)}"
                     scheduled_detail = (
-                        "Evaluates once when eligible at "
-                        f"{_format_astronomical_anchor_label(start_dt)}; "
-                        "also on dwell threshold and watched device/reading changes"
+                        f"Evaluates once when eligible at {_format_astronomical_anchor_label(start_dt)}{also_clause}"
                     )
         elif RuleTrigger.SCHEDULED in rule.triggers and uses_astronomical_schedule(rule) and evaluator is not None:
             effective_cron = evaluator.effective_schedule_cron_for_rule(rule.id)

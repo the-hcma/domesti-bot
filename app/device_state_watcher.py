@@ -46,7 +46,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
 from typing import Any, Final
 
-from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1ReadingMetric
+from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1EntityRole, Ep1ReadingMetric
 from app.device_manager import NotInitializedError
 from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.domesti_bot_cli import DeviceManagersState
@@ -59,10 +59,10 @@ from app.vizio_device_manager import VizioDeviceManager
 _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_EP1_RECONNECT_DELAY_S = 5.0
-_EP1_ROLE_TO_READING_METRIC: Final[dict[str, Ep1ReadingMetric]] = {
-    "humidity": Ep1ReadingMetric.HUMIDITY_PCT,
-    "illuminance": Ep1ReadingMetric.ILLUMINANCE_LX,
-    "temperature": Ep1ReadingMetric.TEMPERATURE_C,
+_EP1_ROLE_TO_READING_METRIC: Final[dict[Ep1EntityRole, Ep1ReadingMetric]] = {
+    Ep1EntityRole.HUMIDITY: Ep1ReadingMetric.HUMIDITY_PCT,
+    Ep1EntityRole.ILLUMINANCE: Ep1ReadingMetric.ILLUMINANCE_LX,
+    Ep1EntityRole.TEMPERATURE: Ep1ReadingMetric.TEMPERATURE_C,
 }
 _VIZIO_WATCHER_REFRESH_TIMEOUT_S = 5.0
 # Default cadence between two polls of the same backend. Generous on
@@ -165,10 +165,10 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
             except TimeoutError:
                 pass
 
-    def _on_entity_role(self, device: Ep1Device, role: str) -> None:
+    def _on_entity_role(self, device: Ep1Device, role: Ep1EntityRole) -> None:
         if self._wake_notifier is None:
             return
-        if role == "occupancy":
+        if role == Ep1EntityRole.OCCUPANCY:
             state = device.occupancy_state
             occupied: bool | None
             if state == DeviceConditionState.OCCUPIED.value:

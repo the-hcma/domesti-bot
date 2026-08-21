@@ -1627,6 +1627,32 @@ class LocalTimeWindowCondition(BaseModel):
     end_hhmm: str
     start_hhmm: str
 
+    @field_validator("end_hhmm", "start_hhmm", mode="before")
+    @classmethod
+    def _require_valid_hhmm(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Expected HH:MM string for local_time_window, got {type(value).__name__}",
+            )
+        trimmed = value.strip()
+        parts = trimmed.split(":")
+        if len(parts) != 2:
+            raise ValueError(
+                f"Expected HH:MM for local_time_window, got {value!r}",
+            )
+        try:
+            hour = int(parts[0])
+            minute = int(parts[1])
+        except ValueError as exc:
+            raise ValueError(
+                f"Expected HH:MM for local_time_window, got {value!r}",
+            ) from exc
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise ValueError(
+                f"Expected HH:MM in 00:00–23:59 for local_time_window, got {value!r}",
+            )
+        return f"{hour:02d}:{minute:02d}"
+
 
 class UsersInsideGeofenceCondition(BaseModel):
     type: Literal["users_inside_geofence"]
@@ -1865,6 +1891,14 @@ class RuleOut(BaseModel):
             raise ValueError("schedule_cron is only allowed when triggers includes scheduled")
         if not has_scheduled:
             self.schedule_cron = None
+            from app.astronomical_schedule import uses_astronomical_eligibility_wake
+            from app.local_time_schedule import uses_local_time_window_eligibility_wake
+
+            if uses_astronomical_eligibility_wake(self) and uses_local_time_window_eligibility_wake(self):
+                raise ValueError(
+                    "Expected at most one eligibility window "
+                    "(after_sunset/before_sunrise or local_time_window), got both"
+                )
             if has_device_state:
                 return self
             return self
