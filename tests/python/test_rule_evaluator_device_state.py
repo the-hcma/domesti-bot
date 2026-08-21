@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -162,6 +163,86 @@ async def test_device_dwell_fires_when_door_open_for_threshold_while_away(
 
     send_mock.assert_called_once()
     assert evaluator.fire_state_for_rule("away-garage-open-alert").last_fired_at == (clock["now"])
+
+
+@pytest.mark.asyncio
+async def test_schedule_device_state_change_coalesces_in_flight_wakes(
+    tmp_path: Path,
+) -> None:
+    """While one eval is in flight, further schedules dirty-requeue instead of stacking."""
+    db = tmp_path / "discovery.sqlite"
+    db.touch()
+    calls: list[tuple[DeviceFamilyId, str]] = []
+    release = asyncio.Event()
+    entered = asyncio.Event()
+
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: 1_700_000_000.0,
+    )
+
+    async def _gated(
+        family_id: DeviceFamilyId,
+        device_id: str,
+    ) -> None:
+        calls.append((family_id, device_id))
+        entered.set()
+        await release.wait()
+
+    evaluator.on_device_state_change = _gated  # type: ignore[method-assign]
+    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    evaluator.schedule_device_state_change(*key)
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+    evaluator.schedule_device_state_change(*key)
+    evaluator.schedule_device_state_change(*key)
+    assert len(calls) == 1
+    assert key in evaluator._pending_device_state_change_keys
+    release.set()
+    for _ in range(100):
+        if len(calls) >= 2 and key not in evaluator._in_flight_device_state_change_keys:
+            break
+        await asyncio.sleep(0.01)
+    assert calls == [key, key]
+    assert key not in evaluator._pending_device_state_change_keys
+    assert key not in evaluator._in_flight_device_state_change_keys
+
+
+@pytest.mark.asyncio
+async def test_schedule_device_state_change_releases_key_when_handler_raises(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "discovery.sqlite"
+    db.touch()
+    calls = 0
+
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: 1_700_000_000.0,
+    )
+
+    async def _boom(_family_id: DeviceFamilyId, _device_id: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("eval boom")
+
+    evaluator.on_device_state_change = _boom  # type: ignore[method-assign]
+    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:02")
+    evaluator.schedule_device_state_change(*key)
+    for _ in range(100):
+        if calls >= 1 and key not in evaluator._in_flight_device_state_change_keys:
+            break
+        await asyncio.sleep(0.01)
+    assert calls == 1
+    assert key not in evaluator._pending_device_state_change_keys
+    evaluator.schedule_device_state_change(*key)
+    for _ in range(100):
+        if calls >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert calls == 2
 
 
 @pytest.mark.asyncio
