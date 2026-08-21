@@ -10,8 +10,8 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from app.device_enums import DeviceFamilyId
-from app.device_state_change import DeviceStateChangeDetector
+from app.device_enums import DeviceFamilyId, Ep1ReadingMetric
+from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.device_state_watcher import (
     build_default_watchers,
     poll_interval_from_env,
@@ -121,10 +121,10 @@ class DomestiServerRuntime:
         self.watcher_stop = None
         self.watcher_task = None
 
-    def build_device_state_change_detector(self) -> DeviceStateChangeDetector:
-        return DeviceStateChangeDetector(
+    def build_device_rule_wake_notifier(self) -> DeviceRuleWakeNotifier:
+        return DeviceRuleWakeNotifier(
             self._on_device_bool_transition,
-            on_reading_update=self._on_device_reading_update,
+            on_reading=self._on_device_reading_update,
         )
 
     def schedule_rule_location_evaluation(self, user_id: str) -> None:
@@ -136,10 +136,16 @@ class DomestiServerRuntime:
         self,
         family_id: DeviceFamilyId,
         device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
     ) -> None:
         evaluator = self.rule_evaluator
         if evaluator is not None:
-            evaluator.schedule_device_state_change(family_id, device_id)
+            evaluator.schedule_device_state_change(
+                family_id,
+                device_id,
+                reading_metric=reading_metric,
+            )
 
     def schedule_vacation_anomaly_alert(
         self,
@@ -240,7 +246,7 @@ class DomestiServerRuntime:
         self.watcher_stop = asyncio.Event()
         watchers = build_default_watchers(
             state,
-            change_detector=self.build_device_state_change_detector(),
+            wake_notifier=self.build_device_rule_wake_notifier(),
             interval_s=poll_interval_s,
         )
         self.watcher_task = asyncio.create_task(
@@ -308,8 +314,13 @@ class DomestiServerRuntime:
         self,
         family_id: DeviceFamilyId,
         device_id: str,
+        metric: Ep1ReadingMetric,
     ) -> None:
-        self.schedule_rule_device_state_evaluation(family_id, device_id)
+        self.schedule_rule_device_state_evaluation(
+            family_id,
+            device_id,
+            reading_metric=metric,
+        )
 
 
 runtime = DomestiServerRuntime()

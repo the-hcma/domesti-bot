@@ -287,7 +287,7 @@ def create_app(args: Any) -> FastAPI:
                 return
             watchers = build_default_watchers(
                 state,
-                change_detector=runtime.build_device_state_change_detector(),
+                wake_notifier=runtime.build_device_rule_wake_notifier(),
                 interval_s=poll_interval_s,
             )
             runtime.watcher_task = asyncio.create_task(

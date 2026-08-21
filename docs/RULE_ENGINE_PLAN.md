@@ -1345,6 +1345,19 @@ Not addressed in code today. Optional future hardening: snapshot streak anchors 
 
 Status API: condition row detail like `hcma inside 12 min (need 10 min)` / `kristen outside`.
 
+#### Design: EP1 reading-kind subscribe contract (#672)
+
+When a rule uses `triggers: ["device_state"]` (no `scheduled` cron required):
+
+| Wake source | Matched rules |
+| --- | --- |
+| Bool transition (occupancy / switch / door / …) | Enabled `device_state` rules that watch the device via **bool** conditions only (`devices_all/any_in_state`, `devices_any_in_state_for_s`) |
+| EP1 reading push (`illuminance` / `temperature` / `humidity`) | Enabled `device_state` rules with `ep1_reading_compare` on that device **and** the same `metric` |
+
+Occupancy entity pushes never emit a reading wake — they only go through the bool path. Lux wakes therefore do not re-evaluate occupancy-only rules, and vice versa.
+
+**`local_time_window` eligibility:** a top-level `local_time_window` with `device_state` and/or `dwell_satisfied` (and **no** `scheduled` trigger / no `schedule_cron`) gets a one-shot eligibility evaluate at today's window `start_hhmm` — same idea as astronomical sunset eligibility. Prefer this over hand-rolled `0 21 * * *` crons for evening lux alerts.
+
 #### Design: device-state conditions
 
 ```json

@@ -27,9 +27,9 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
-from app.device_enums import DeviceConditionState, DeviceFamilyId
+from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1ReadingMetric
 from app.device_manager import NotInitializedError
-from app.device_state_change import DeviceStateChangeDetector
+from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.device_state_watcher import (
     DEFAULT_POLL_INTERVAL_S,
     DeviceStateWatcher,
@@ -431,29 +431,36 @@ async def test_ep1_watcher_keeps_going_when_one_device_raises() -> None:
     assert calls.count("aa:bb:cc:dd:ee:01") >= 2
 
 
-def test_ep1_watcher_reading_update_notes_reading_every_sample() -> None:
-    """EP1 entity pushes wake reading callback even when occupancy is unchanged."""
+def test_ep1_watcher_reading_update_notes_reading_by_role() -> None:
+    """EP1 climate/light pushes wake reading callback; occupancy uses bool only."""
     on_change = MagicMock()
     on_reading = MagicMock()
-    detector = DeviceStateChangeDetector(on_change, on_reading_update=on_reading)
+    detector = DeviceRuleWakeNotifier(on_change, on_reading=on_reading)
     device = MagicMock(spec=Ep1Device)
     device.identifier = "aa:bb:cc:dd:ee:01"
     device.occupancy_state = DeviceConditionState.CLEAR.value
     watcher = Ep1SubscriptionWatcher(
         MagicMock(spec=Ep1DeviceManager),
-        change_detector=detector,
+        wake_notifier=detector,
         reconnect_delay_s=0.01,
     )
 
-    watcher._note_occupancy(device)
-    watcher._note_occupancy(device)
+    watcher._on_entity_role(device, "illuminance")
+    watcher._on_entity_role(device, "illuminance")
     assert on_reading.call_count == 2
-    on_reading.assert_called_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    on_reading.assert_called_with(
+        DeviceFamilyId.EP1,
+        "aa:bb:cc:dd:ee:01",
+        Ep1ReadingMetric.ILLUMINANCE_LX,
+    )
     on_change.assert_not_called()
 
+    watcher._on_entity_role(device, "occupancy")
+    on_change.assert_not_called()
+    assert on_reading.call_count == 2
+
     device.occupancy_state = DeviceConditionState.OCCUPIED.value
-    watcher._note_occupancy(device)
-    # Bool transition already schedules evaluation; reading wake is skipped.
+    watcher._on_entity_role(device, "occupancy")
     assert on_reading.call_count == 2
     on_change.assert_called_once_with(
         DeviceFamilyId.EP1,

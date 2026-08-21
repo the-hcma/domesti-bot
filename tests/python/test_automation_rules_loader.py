@@ -49,8 +49,8 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     assert hot.threshold == 24.0
     dark_lights = next(rule for rule in bundle.rules if rule.id == "daylight-dark-house-lights-on")
     assert dark_lights.enabled is False
-    assert dark_lights.triggers == ["device_state", "scheduled"]
-    assert dark_lights.schedule_cron == "0 8 * * *"
+    assert dark_lights.triggers == ["device_state"]
+    assert dark_lights.schedule_cron is None
     assert dark_lights.conditions.all[0].type == "daylight"
     lux = dark_lights.conditions.all[1]
     assert lux.type == "ep1_reading_compare"

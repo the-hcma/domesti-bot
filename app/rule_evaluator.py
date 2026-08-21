@@ -61,6 +61,7 @@ from app.deferred_device_action_store import (
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
+    Ep1ReadingMetric,
     RuleEvaluationCause,
     RuleTrigger,
 )
@@ -75,6 +76,11 @@ from app.geofence_transition_state_store import (
     GeofenceTransitionStateRecord,
     list_geofence_transition_states,
     upsert_geofence_transition_state,
+)
+from app.local_time_schedule import (
+    materialize_local_time_window_cron,
+    uses_local_time_window_eligibility_wake,
+    uses_local_time_window_materialized_schedule,
 )
 from app.location_history_retention import LocationHistoryRetention
 from app.location_monitoring_policy import LocationMonitoringPolicy
@@ -128,7 +134,8 @@ from app.rule_validation import (
     collect_rule_user_ids,
     resolve_device_ref_to_backend_id,
     rule_references_user_id,
-    rule_watches_backend_device,
+    rule_watches_backend_device_bool_state,
+    rule_watches_backend_device_ep1_reading,
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.stale_device_display_name_email import maybe_send_stale_display_name_digest
@@ -257,9 +264,10 @@ class RuleEvaluator:
         self._geofence_was_inside: dict[tuple[str, str], bool] = {}
         self._last_run_at: float | None = None
         self._last_astronomical_materialization_date: date | None = None
+        self._last_local_time_window_materialization_date: date | None = None
         self._next_sun_check_at: float | None = None
-        self._in_flight_device_state_change_keys: set[tuple[DeviceFamilyId, str]] = set()
-        self._pending_device_state_change_keys: set[tuple[DeviceFamilyId, str]] = set()
+        self._in_flight_device_state_change_keys: set[tuple[DeviceFamilyId, str, Ep1ReadingMetric | None]] = set()
+        self._pending_device_state_change_keys: set[tuple[DeviceFamilyId, str, Ep1ReadingMetric | None]] = set()
         self._process_lock = asyncio.Lock()
         self._rule_state: dict[str, _RuleRuntimeState] = {}
         self._location_request_coordinator = LocationRequestCoordinator(
@@ -414,6 +422,8 @@ class RuleEvaluator:
         self,
         family_id: DeviceFamilyId,
         device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
     ) -> None:
         if self._cache_path is None:
             return
@@ -421,12 +431,18 @@ class RuleEvaluator:
         if trimmed == "":
             return
         async with self._process_lock:
-            await self._process_device_state_change(family_id, trimmed)
+            await self._process_device_state_change(
+                family_id,
+                trimmed,
+                reading_metric=reading_metric,
+            )
 
     def schedule_device_state_change(
         self,
         family_id: DeviceFamilyId,
         device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
     ) -> None:
         try:
             asyncio.get_running_loop()
@@ -444,6 +460,7 @@ class RuleEvaluator:
                     self._schedule_device_state_change_task,
                     family_id,
                     device_id,
+                    reading_metric,
                 )
             except RuntimeError:
                 _LOGGER.warning(
@@ -452,7 +469,7 @@ class RuleEvaluator:
                     device_id,
                 )
             return
-        self._schedule_device_state_change_task(family_id, device_id)
+        self._schedule_device_state_change_task(family_id, device_id, reading_metric)
 
     def start_periodic_tick(self) -> None:
         if self._tick_task is not None:
@@ -587,6 +604,8 @@ class RuleEvaluator:
             timezone,
         )
         if uses_astronomical_materialized_schedule(rule):
+            self._persist_rule_schedule_state(rule.id)
+        elif uses_local_time_window_materialized_schedule(rule):
             self._persist_rule_schedule_state(rule.id)
 
     def _apply_persisted_geofence_state(self) -> None:
@@ -920,7 +939,9 @@ class RuleEvaluator:
             )
             if runtime.next_evaluate_at is None or runtime.next_evaluate_at > now_epoch:
                 continue
-            eligibility_wake = uses_astronomical_eligibility_wake(rule)
+            eligibility_wake = uses_astronomical_eligibility_wake(
+                rule,
+            ) or uses_local_time_window_eligibility_wake(rule)
             fire_source: RuleFireSource = "eligibility" if eligibility_wake else "scheduled"
             log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
             evaluation_ctx = replace(
@@ -1520,6 +1541,7 @@ class RuleEvaluator:
                     self._prune_stale_deferred_device_actions()
                     await self._flush_ready_pending_fire_notifications()
                     self._refresh_astronomical_schedules_for_new_day()
+                    self._refresh_local_time_window_schedules_for_new_day()
                     await self._evaluate_scheduled_rules()
                     timezone = ZoneInfo(load_settings_location().timezone)
                     ctx = await self._build_evaluation_context(
@@ -1988,6 +2010,13 @@ class RuleEvaluator:
                     now=now,
                 )
                 continue
+            if uses_local_time_window_materialized_schedule(rule):
+                self._ensure_local_time_window_schedule_materialized(
+                    rule,
+                    timezone=timezone,
+                    now=now,
+                )
+                continue
             cron_expr = (rule.schedule_cron or "").strip()
             if cron_expr == "":
                 continue
@@ -2017,6 +2046,14 @@ class RuleEvaluator:
                 now=now,
             )
             return materialized or ""
+        if uses_local_time_window_materialized_schedule(rule):
+            now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+            materialized = self._ensure_local_time_window_schedule_materialized(
+                rule,
+                timezone=timezone,
+                now=now,
+            )
+            return materialized or ""
         return (rule.schedule_cron or "").strip()
 
     def _schedule_location_update_task(self, user_id: str) -> None:
@@ -2031,8 +2068,9 @@ class RuleEvaluator:
         self,
         family_id: DeviceFamilyId,
         device_id: str,
+        reading_metric: Ep1ReadingMetric | None = None,
     ) -> None:
-        key = (family_id, device_id)
+        key = (family_id, device_id, reading_metric)
         self._pending_device_state_change_keys.add(key)
         if key in self._in_flight_device_state_change_keys:
             return
@@ -2043,7 +2081,11 @@ class RuleEvaluator:
             try:
                 while not self._stop.is_set():
                     self._pending_device_state_change_keys.discard(key)
-                    await self.on_device_state_change(family_id, device_id)
+                    await self.on_device_state_change(
+                        family_id,
+                        device_id,
+                        reading_metric=reading_metric,
+                    )
                     if key not in self._pending_device_state_change_keys:
                         return
             finally:
@@ -2051,11 +2093,16 @@ class RuleEvaluator:
                 if self._stop.is_set():
                     self._pending_device_state_change_keys.discard(key)
                 elif key in self._pending_device_state_change_keys:
-                    self._schedule_device_state_change_task(family_id, device_id)
+                    self._schedule_device_state_change_task(
+                        family_id,
+                        device_id,
+                        reading_metric,
+                    )
 
+        metric_tag = reading_metric.value if reading_metric is not None else "bool"
         task = loop.create_task(
             _run_coalesced(),
-            name=f"rule-eval-device-{family_id.value}-{device_id}",
+            name=f"rule-eval-device-{family_id.value}-{device_id}-{metric_tag}",
         )
         task.add_done_callback(_log_device_state_evaluation_task)
 
@@ -2241,6 +2288,8 @@ class RuleEvaluator:
         self,
         family_id: DeviceFamilyId,
         device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
     ) -> None:
         cache_path = self._cache_path
         if cache_path is None:
@@ -2267,18 +2316,29 @@ class RuleEvaluator:
                 for rule in list_automation_rules()
                 if rule.enabled
                 and RuleTrigger.DEVICE_STATE in rule.triggers
-                and rule_watches_backend_device(
-                    rule,
-                    device_state,
-                    family_id=family_id,
-                    backend_device_id=device_id,
+                and (
+                    rule_watches_backend_device_ep1_reading(
+                        rule,
+                        device_state,
+                        family_id=family_id,
+                        backend_device_id=device_id,
+                        metric=reading_metric,
+                    )
+                    if reading_metric is not None
+                    else rule_watches_backend_device_bool_state(
+                        rule,
+                        device_state,
+                        family_id=family_id,
+                        backend_device_id=device_id,
+                    )
                 )
             ]
         if matched_rules:
             _LOGGER.info(
-                "[rules] evaluating device-state change family_id=%s device_id=%s rule_count=%d",
+                "[rules] evaluating device-state change family_id=%s device_id=%s reading_metric=%s rule_count=%d",
                 family_id.value,
                 device_id,
+                reading_metric.value if reading_metric is not None else "bool",
                 len(matched_rules),
             )
             transitions: dict[str, GeofenceTransition] = {}
@@ -2666,6 +2726,43 @@ class RuleEvaluator:
         self._persist_rule_schedule_state(rule.id)
         return cron_expr
 
+    def _ensure_local_time_window_schedule_materialized(
+        self,
+        rule: RuleOut,
+        *,
+        timezone: ZoneInfo,
+        now: datetime,
+        force: bool = False,
+    ) -> str | None:
+        if not uses_local_time_window_materialized_schedule(rule):
+            return None
+        runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+        local_date = local_calendar_date(now.timestamp(), timezone)
+        if (
+            not force
+            and runtime.schedule_materialized_for == local_date
+            and runtime.effective_schedule_cron is not None
+            and runtime.next_evaluate_at is not None
+        ):
+            return runtime.effective_schedule_cron
+        cron_expr = materialize_local_time_window_cron(
+            rule,
+            timezone=timezone,
+            now=now,
+        )
+        if cron_expr is None:
+            return None
+        runtime.effective_schedule_cron = cron_expr
+        runtime.schedule_materialized_for = local_date
+        runtime.next_evaluate_at = next_scheduled_evaluate_at(
+            cron_expr,
+            now,
+            timezone,
+            due_if_matching=True,
+        )
+        self._persist_rule_schedule_state(rule.id)
+        return cron_expr
+
     def _refresh_astronomical_schedules_for_new_day(self) -> None:
         settings = load_settings_location()
         timezone = ZoneInfo(settings.timezone)
@@ -2686,6 +2783,32 @@ class RuleEvaluator:
             ):
                 continue
             self._ensure_astronomical_schedule_materialized(
+                rule,
+                timezone=timezone,
+                now=now,
+                force=True,
+            )
+
+    def _refresh_local_time_window_schedules_for_new_day(self) -> None:
+        settings = load_settings_location()
+        timezone = ZoneInfo(settings.timezone)
+        now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+        local_date = local_calendar_date(now.timestamp(), timezone)
+        if self._last_local_time_window_materialization_date == local_date:
+            return
+        self._last_local_time_window_materialization_date = local_date
+        for rule in list_automation_rules():
+            if not rule.enabled or not uses_local_time_window_materialized_schedule(rule):
+                continue
+            runtime = self._rule_state.get(rule.id)
+            if (
+                runtime is not None
+                and runtime.schedule_materialized_for == local_date
+                and runtime.effective_schedule_cron is not None
+                and runtime.next_evaluate_at is not None
+            ):
+                continue
+            self._ensure_local_time_window_schedule_materialized(
                 rule,
                 timezone=timezone,
                 now=now,
@@ -3685,7 +3808,11 @@ def _rule_has_dwell_condition(rule: RuleOut) -> bool:
 
 
 def _rule_uses_scheduled_evaluation_tick(rule: RuleOut) -> bool:
-    return RuleTrigger.SCHEDULED in rule.triggers or uses_astronomical_eligibility_wake(rule)
+    return (
+        RuleTrigger.SCHEDULED in rule.triggers
+        or uses_astronomical_eligibility_wake(rule)
+        or uses_local_time_window_eligibility_wake(rule)
+    )
 
 
 def _scheduled_rule_user_ids_for_log(

@@ -537,7 +537,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         device: Ep1Device,
         *,
         stop: asyncio.Event,
-        on_reading_updated: Callable[[Ep1Device], None] | None = None,
+        on_reading_updated: Callable[[Ep1Device, str], None] | None = None,
     ) -> None:
         """Connect, ``subscribe_states``, and wait until ``stop`` or disconnect.
 
@@ -545,6 +545,10 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         backoff between sessions. Never blocks the event loop on LAN I/O
         beyond awaited aioesphomeapi coroutines. ``noise_psk`` may be empty for
         plaintext Homey firmware.
+
+        ``on_reading_updated`` receives ``(device, role)`` when an entity state
+        was applied (``occupancy`` / ``temperature`` / ``humidity`` /
+        ``illuminance``).
         """
 
         psk = self._resolved_noise_psk()
@@ -570,13 +574,13 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             def _on_state(state: EntityState) -> None:
                 # Always bump liveness — ESPHome may omit unchanged entities.
                 device.note_heard()
-                _apply_entity_state_to_device(
+                role = _apply_entity_state_to_device(
                     device,
                     state,
                     key_to_role=key_to_role,
                 )
-                if on_reading_updated is not None:
-                    on_reading_updated(device)
+                if on_reading_updated is not None and role is not None:
+                    on_reading_updated(device, role)
 
             client.subscribe_states(_on_state)
             # Arm liveness only once the subscription is registered — not on bare connect.
@@ -820,24 +824,30 @@ def _apply_entity_state_to_device(
     state: EntityState,
     *,
     key_to_role: dict[int, str],
-) -> None:
+) -> str | None:
+    """Apply ``state`` to ``device``; return the role string applied, or ``None``."""
     role = key_to_role.get(state.key)
     if role is None:
-        return
+        return None
     if role == "occupancy":
         occupancy = _occupancy_from_state(state)
-        if occupancy is not None:
-            device.apply_entity_state(occupancy=occupancy)
-        return
+        if occupancy is None:
+            return None
+        device.apply_entity_state(occupancy=occupancy)
+        return role
     value = _float_from_sensor_state(state)
     if value is None:
-        return
+        return None
     if role == "temperature":
         device.apply_entity_state(temperature_c=value)
-    elif role == "humidity":
+        return role
+    if role == "humidity":
         device.apply_entity_state(humidity_pct=value)
-    elif role == "illuminance":
+        return role
+    if role == "illuminance":
         device.apply_entity_state(illuminance_lx=value)
+        return role
+    return None
 
 
 def _entity_key_to_role(entities: Sequence[EntityInfo]) -> dict[int, str]:

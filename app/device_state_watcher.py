@@ -46,9 +46,9 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
 from typing import Any, Final
 
-from app.device_enums import DeviceConditionState, DeviceFamilyId
+from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1ReadingMetric
 from app.device_manager import NotInitializedError
-from app.device_state_change import DeviceStateChangeDetector
+from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -59,6 +59,11 @@ from app.vizio_device_manager import VizioDeviceManager
 _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_EP1_RECONNECT_DELAY_S = 5.0
+_EP1_ROLE_TO_READING_METRIC: Final[dict[str, Ep1ReadingMetric]] = {
+    "humidity": Ep1ReadingMetric.HUMIDITY_PCT,
+    "illuminance": Ep1ReadingMetric.ILLUMINANCE_LX,
+    "temperature": Ep1ReadingMetric.TEMPERATURE_C,
+}
 _VIZIO_WATCHER_REFRESH_TIMEOUT_S = 5.0
 # Default cadence between two polls of the same backend. Generous on
 # purpose: LAN devices don't change state often, and the action handlers
@@ -103,10 +108,10 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
         self,
         mgr: Ep1DeviceManager,
         *,
-        change_detector: DeviceStateChangeDetector | None = None,
+        wake_notifier: DeviceRuleWakeNotifier | None = None,
         reconnect_delay_s: float = _DEFAULT_EP1_RECONNECT_DELAY_S,
     ) -> None:
-        self._change_detector = change_detector
+        self._wake_notifier = wake_notifier
         self._mgr = mgr
         self._reconnect_delay_s = float(reconnect_delay_s)
 
@@ -143,7 +148,7 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
                 await self._mgr.run_subscription_session(
                     device,
                     stop=stop,
-                    on_reading_updated=self._note_occupancy if self._change_detector else None,
+                    on_reading_updated=self._on_entity_role if self._wake_notifier else None,
                 )
             except asyncio.CancelledError:
                 raise
@@ -160,27 +165,32 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
             except TimeoutError:
                 pass
 
-    def _note_occupancy(self, device: Ep1Device) -> None:
-        if self._change_detector is None:
+    def _on_entity_role(self, device: Ep1Device, role: str) -> None:
+        if self._wake_notifier is None:
             return
-        state = device.occupancy_state
-        occupied: bool | None
-        if state == DeviceConditionState.OCCUPIED.value:
-            occupied = True
-        elif state == DeviceConditionState.CLEAR.value:
-            occupied = False
-        else:
-            occupied = None
-        transitioned = self._change_detector.note_bool_state(
-            DeviceFamilyId.EP1,
-            device.identifier,
-            occupied,
-        )
-        if not transitioned:
-            self._change_detector.note_reading_update(
+        if role == "occupancy":
+            state = device.occupancy_state
+            occupied: bool | None
+            if state == DeviceConditionState.OCCUPIED.value:
+                occupied = True
+            elif state == DeviceConditionState.CLEAR.value:
+                occupied = False
+            else:
+                occupied = None
+            self._wake_notifier.note_bool_transition(
                 DeviceFamilyId.EP1,
                 device.identifier,
+                occupied,
             )
+            return
+        metric = _EP1_ROLE_TO_READING_METRIC.get(role)
+        if metric is None:
+            return
+        self._wake_notifier.note_reading(
+            DeviceFamilyId.EP1,
+            device.identifier,
+            metric,
+        )
 
 
 class KasaPollingWatcher(DeviceStateWatcher):
@@ -197,10 +207,10 @@ class KasaPollingWatcher(DeviceStateWatcher):
         self,
         mgr: KasaDeviceManager,
         *,
-        change_detector: DeviceStateChangeDetector | None = None,
+        wake_notifier: DeviceRuleWakeNotifier | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
-        self._change_detector = change_detector
+        self._wake_notifier = wake_notifier
         self._mgr = mgr
         self._interval_s = interval_s
 
@@ -232,8 +242,8 @@ class KasaPollingWatcher(DeviceStateWatcher):
                         exc=exc,
                     )
                     return
-                if self._change_detector is not None:
-                    self._change_detector.note_bool_state(
+                if self._wake_notifier is not None:
+                    self._wake_notifier.note_bool_transition(
                         DeviceFamilyId.KASA,
                         device.identifier,
                         device.is_on,
@@ -269,10 +279,10 @@ class SonosPollingWatcher(DeviceStateWatcher):
         self,
         mgr: SonosDeviceManager,
         *,
-        change_detector: DeviceStateChangeDetector | None = None,
+        wake_notifier: DeviceRuleWakeNotifier | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
-        self._change_detector = change_detector
+        self._wake_notifier = wake_notifier
         self._mgr = mgr
         self._interval_s = interval_s
 
@@ -297,8 +307,8 @@ class SonosPollingWatcher(DeviceStateWatcher):
                         exc=exc,
                     )
                     return
-                if self._change_detector is not None:
-                    self._change_detector.note_bool_state(
+                if self._wake_notifier is not None:
+                    self._wake_notifier.note_bool_transition(
                         DeviceFamilyId.SONOS,
                         device.identifier,
                         device.is_playing,
@@ -330,10 +340,10 @@ class TailwindPollingWatcher(DeviceStateWatcher):
         self,
         mgr: GotailwindDeviceManager,
         *,
-        change_detector: DeviceStateChangeDetector | None = None,
+        wake_notifier: DeviceRuleWakeNotifier | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
-        self._change_detector = change_detector
+        self._wake_notifier = wake_notifier
         self._mgr = mgr
         self._interval_s = interval_s
 
@@ -356,8 +366,8 @@ class TailwindPollingWatcher(DeviceStateWatcher):
                         exc=exc,
                     )
                     return
-                if self._change_detector is not None:
-                    self._change_detector.note_bool_state(
+                if self._wake_notifier is not None:
+                    self._wake_notifier.note_bool_transition(
                         DeviceFamilyId.TAILWIND,
                         device.identifier,
                         device.is_open,
@@ -387,10 +397,10 @@ class VizioPollingWatcher(DeviceStateWatcher):
         self,
         mgr: VizioDeviceManager,
         *,
-        change_detector: DeviceStateChangeDetector | None = None,
+        wake_notifier: DeviceRuleWakeNotifier | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
-        self._change_detector = change_detector
+        self._wake_notifier = wake_notifier
         self._mgr = mgr
         self._interval_s = interval_s
 
@@ -422,8 +432,8 @@ class VizioPollingWatcher(DeviceStateWatcher):
                         exc=exc,
                     )
                 else:
-                    if self._change_detector is not None:
-                        self._change_detector.note_bool_state(
+                    if self._wake_notifier is not None:
+                        self._wake_notifier.note_bool_transition(
                             DeviceFamilyId.VIZIO,
                             device.identifier,
                             device.is_on,
@@ -505,7 +515,7 @@ def _root_os_error(exc: BaseException) -> OSError | None:
 def build_default_watchers(
     state: DeviceManagersState,
     *,
-    change_detector: DeviceStateChangeDetector | None = None,
+    wake_notifier: DeviceRuleWakeNotifier | None = None,
     interval_s: float,
 ) -> list[DeviceStateWatcher]:
     """Return the default watcher list for a finished discovery state.
@@ -518,7 +528,7 @@ def build_default_watchers(
     watchers: list[DeviceStateWatcher] = [
         KasaPollingWatcher(
             state.kasa_mgr,
-            change_detector=change_detector,
+            wake_notifier=wake_notifier,
             interval_s=interval_s,
         ),
     ]
@@ -526,14 +536,14 @@ def build_default_watchers(
         watchers.append(
             Ep1SubscriptionWatcher(
                 state.ep1_mgr,
-                change_detector=change_detector,
+                wake_notifier=wake_notifier,
             )
         )
     if state.sonos_mgr is not None:
         watchers.append(
             SonosPollingWatcher(
                 state.sonos_mgr,
-                change_detector=change_detector,
+                wake_notifier=wake_notifier,
                 interval_s=interval_s,
             )
         )
@@ -541,7 +551,7 @@ def build_default_watchers(
         watchers.append(
             TailwindPollingWatcher(
                 state.tailwind_mgr,
-                change_detector=change_detector,
+                wake_notifier=wake_notifier,
                 interval_s=interval_s,
             )
         )
@@ -549,7 +559,7 @@ def build_default_watchers(
         watchers.append(
             VizioPollingWatcher(
                 state.vizio_mgr,
-                change_detector=change_detector,
+                wake_notifier=wake_notifier,
                 interval_s=interval_s,
             )
         )

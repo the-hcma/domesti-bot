@@ -294,13 +294,13 @@ async def test_run_subscription_session_applies_states_until_stop(
     mgr._fetched = True
 
     stop = asyncio.Event()
-    updated: list[str] = []
+    updated: list[tuple[str, str]] = []
 
     async def _run() -> None:
         await mgr.run_subscription_session(
             device,
             stop=stop,
-            on_reading_updated=lambda d: updated.append(d.identifier),
+            on_reading_updated=lambda d, role: updated.append((d.identifier, role)),
         )
 
     task = asyncio.create_task(_run())
@@ -314,7 +314,10 @@ async def test_run_subscription_session_applies_states_until_stop(
     assert device.occupancy_state == DeviceConditionState.OCCUPIED.value
     assert device.temperature_c == 22.0
     assert device.last_heard_at is not None
-    assert updated == [device.identifier, device.identifier]
+    assert updated == [
+        (device.identifier, "occupancy"),
+        (device.identifier, "temperature"),
+    ]
     stop.set()
     await asyncio.wait_for(task, timeout=1.0)
     client.disconnect.assert_awaited()

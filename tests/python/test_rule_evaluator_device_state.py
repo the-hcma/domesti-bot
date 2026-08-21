@@ -17,7 +17,7 @@ from app.api.schemas import (
     RuleOut,
     UsersOutsideGeofenceForSCondition,
 )
-from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
+from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1ReadingMetric, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
@@ -185,17 +185,23 @@ async def test_schedule_device_state_change_coalesces_in_flight_wakes(
     async def _gated(
         family_id: DeviceFamilyId,
         device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
     ) -> None:
+        del reading_metric
         calls.append((family_id, device_id))
         entered.set()
         await release.wait()
 
     evaluator.on_device_state_change = _gated  # type: ignore[method-assign]
-    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
-    evaluator.schedule_device_state_change(*key)
+    family_id = DeviceFamilyId.EP1
+    device_id = "aa:bb:cc:dd:ee:01"
+    key = (family_id, device_id, None)
+    call_key = (family_id, device_id)
+    evaluator.schedule_device_state_change(family_id, device_id)
     await asyncio.wait_for(entered.wait(), timeout=1.0)
-    evaluator.schedule_device_state_change(*key)
-    evaluator.schedule_device_state_change(*key)
+    evaluator.schedule_device_state_change(family_id, device_id)
+    evaluator.schedule_device_state_change(family_id, device_id)
     assert len(calls) == 1
     assert key in evaluator._pending_device_state_change_keys
     release.set()
@@ -203,7 +209,7 @@ async def test_schedule_device_state_change_coalesces_in_flight_wakes(
         if len(calls) >= 2 and key not in evaluator._in_flight_device_state_change_keys:
             break
         await asyncio.sleep(0.01)
-    assert calls == [key, key]
+    assert calls == [call_key, call_key]
     assert key not in evaluator._pending_device_state_change_keys
     assert key not in evaluator._in_flight_device_state_change_keys
 
@@ -223,20 +229,28 @@ async def test_schedule_device_state_change_invokes_real_handler(
     )
     real = evaluator.on_device_state_change
 
-    async def _wrap(family_id: DeviceFamilyId, device_id: str) -> None:
+    async def _wrap(
+        family_id: DeviceFamilyId,
+        device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
+    ) -> None:
         calls.append((family_id, device_id))
-        await real(family_id, device_id)
+        await real(family_id, device_id, reading_metric=reading_metric)
 
     evaluator.on_device_state_change = _wrap  # type: ignore[method-assign]
-    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:04")
-    evaluator.schedule_device_state_change(*key)
-    evaluator.schedule_device_state_change(*key)
-    evaluator.schedule_device_state_change(*key)
+    family_id = DeviceFamilyId.EP1
+    device_id = "aa:bb:cc:dd:ee:04"
+    key = (family_id, device_id, None)
+    call_key = (family_id, device_id)
+    evaluator.schedule_device_state_change(family_id, device_id)
+    evaluator.schedule_device_state_change(family_id, device_id)
+    evaluator.schedule_device_state_change(family_id, device_id)
     for _ in range(100):
         if calls and key not in evaluator._in_flight_device_state_change_keys:
             break
         await asyncio.sleep(0.01)
-    assert calls[0] == key
+    assert calls[0] == call_key
     assert 1 <= len(calls) <= 2
 
 
@@ -254,22 +268,30 @@ async def test_schedule_device_state_change_releases_key_when_handler_raises(
         now_fn=lambda: 1_700_000_000.0,
     )
 
-    async def _boom(_family_id: DeviceFamilyId, _device_id: str) -> None:
+    async def _boom(
+        _family_id: DeviceFamilyId,
+        _device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
+    ) -> None:
+        del reading_metric
         nonlocal calls
         calls += 1
         if calls == 1:
             raise RuntimeError("eval boom")
 
     evaluator.on_device_state_change = _boom  # type: ignore[method-assign]
-    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:02")
-    evaluator.schedule_device_state_change(*key)
+    family_id = DeviceFamilyId.EP1
+    device_id = "aa:bb:cc:dd:ee:02"
+    key = (family_id, device_id, None)
+    evaluator.schedule_device_state_change(family_id, device_id)
     for _ in range(100):
         if calls >= 1 and key not in evaluator._in_flight_device_state_change_keys:
             break
         await asyncio.sleep(0.01)
     assert calls == 1
     assert key not in evaluator._pending_device_state_change_keys
-    evaluator.schedule_device_state_change(*key)
+    evaluator.schedule_device_state_change(family_id, device_id)
     for _ in range(100):
         if calls >= 2:
             break
@@ -294,7 +316,13 @@ async def test_schedule_device_state_change_reschedules_after_raise_with_pending
         now_fn=lambda: 1_700_000_000.0,
     )
 
-    async def _boom_then_ok(_family_id: DeviceFamilyId, _device_id: str) -> None:
+    async def _boom_then_ok(
+        _family_id: DeviceFamilyId,
+        _device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
+    ) -> None:
+        del reading_metric
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -303,10 +331,12 @@ async def test_schedule_device_state_change_reschedules_after_raise_with_pending
             raise RuntimeError("eval boom")
 
     evaluator.on_device_state_change = _boom_then_ok  # type: ignore[method-assign]
-    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:03")
-    evaluator.schedule_device_state_change(*key)
+    family_id = DeviceFamilyId.EP1
+    device_id = "aa:bb:cc:dd:ee:03"
+    key = (family_id, device_id, None)
+    evaluator.schedule_device_state_change(family_id, device_id)
     await asyncio.wait_for(entered.wait(), timeout=1.0)
-    evaluator.schedule_device_state_change(*key)
+    evaluator.schedule_device_state_change(family_id, device_id)
     release.set()
     for _ in range(100):
         if calls >= 2 and key not in evaluator._in_flight_device_state_change_keys:
@@ -337,16 +367,22 @@ async def test_schedule_device_state_change_skips_requeue_after_close(
     async def _gated(
         family_id: DeviceFamilyId,
         device_id: str,
+        *,
+        reading_metric: Ep1ReadingMetric | None = None,
     ) -> None:
+        del reading_metric
         calls.append((family_id, device_id))
         entered.set()
         await release.wait()
 
     evaluator.on_device_state_change = _gated  # type: ignore[method-assign]
-    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:05")
-    evaluator.schedule_device_state_change(*key)
+    family_id = DeviceFamilyId.EP1
+    device_id = "aa:bb:cc:dd:ee:05"
+    key = (family_id, device_id, None)
+    call_key = (family_id, device_id)
+    evaluator.schedule_device_state_change(family_id, device_id)
     await asyncio.wait_for(entered.wait(), timeout=1.0)
-    evaluator.schedule_device_state_change(*key)
+    evaluator.schedule_device_state_change(family_id, device_id)
     assert key in evaluator._pending_device_state_change_keys
     await evaluator.close()
     release.set()
@@ -354,7 +390,7 @@ async def test_schedule_device_state_change_skips_requeue_after_close(
         if key not in evaluator._in_flight_device_state_change_keys:
             break
         await asyncio.sleep(0.01)
-    assert calls == [key]
+    assert calls == [call_key]
     assert key not in evaluator._pending_device_state_change_keys
     assert key not in evaluator._in_flight_device_state_change_keys
 
