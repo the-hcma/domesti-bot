@@ -176,6 +176,10 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
             device.identifier,
             occupied,
         )
+        self._change_detector.note_reading_update(
+            DeviceFamilyId.EP1,
+            device.identifier,
+        )
 
 
 class KasaPollingWatcher(DeviceStateWatcher):
