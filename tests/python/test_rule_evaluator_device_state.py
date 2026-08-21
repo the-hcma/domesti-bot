@@ -246,6 +246,46 @@ async def test_schedule_device_state_change_releases_key_when_handler_raises(
 
 
 @pytest.mark.asyncio
+async def test_schedule_device_state_change_reschedules_after_raise_with_pending_wake(
+    tmp_path: Path,
+) -> None:
+    """A wake during a failing eval is re-scheduled from ``finally`` (no manual re-wake)."""
+    db = tmp_path / "discovery.sqlite"
+    db.touch()
+    calls = 0
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: 1_700_000_000.0,
+    )
+
+    async def _boom_then_ok(_family_id: DeviceFamilyId, _device_id: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            await release.wait()
+            raise RuntimeError("eval boom")
+
+    evaluator.on_device_state_change = _boom_then_ok  # type: ignore[method-assign]
+    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:03")
+    evaluator.schedule_device_state_change(*key)
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+    evaluator.schedule_device_state_change(*key)
+    release.set()
+    for _ in range(100):
+        if calls >= 2 and key not in evaluator._in_flight_device_state_change_keys:
+            break
+        await asyncio.sleep(0.01)
+    assert calls == 2
+    assert key not in evaluator._pending_device_state_change_keys
+    assert key not in evaluator._in_flight_device_state_change_keys
+
+
+@pytest.mark.asyncio
 class _FakeTailwindDoor:
     def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
         self.identifier = identifier
