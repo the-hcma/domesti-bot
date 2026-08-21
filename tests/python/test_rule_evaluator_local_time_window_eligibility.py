@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TypedDict
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -28,11 +28,34 @@ from app.device_enums import (
 )
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1DeviceManager
+from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
 from app.rule_actions import RuleNotificationEmailOutcome
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
+
+_MAC = "aa:bb:cc:dd:ee:01"
+
+
+class _FakeEp1:
+    def __init__(self, identifier: str, label: str, *, illuminance_lx: float) -> None:
+        self.identifier = identifier
+        self.mac_address = identifier
+        self.preferred_label = label
+        self.host = "192.0.2.10"
+        self.port = 6053
+        self.illuminance_lx = illuminance_lx
+        self.humidity_pct = None
+        self.temperature_c = None
+        self.occupancy_state = None
+        self.unresponsive = False
+
+
+class _WindowFixture(TypedDict):
+    clock: dict[str, float]
+    evaluator: RuleEvaluator
+    window_start: datetime
 
 
 @pytest.mark.asyncio
@@ -99,29 +122,6 @@ async def test_after_window_end_reading_wake_conditions_fail(
             reading_metric=Ep1ReadingMetric.ILLUMINANCE_LX,
         )
         assert send_mock.call_count == 0
-
-
-_MAC = "aa:bb:cc:dd:ee:01"
-
-
-class _WindowFixture(TypedDict):
-    clock: dict[str, float]
-    evaluator: RuleEvaluator
-    window_start: datetime
-
-
-class _FakeEp1:
-    def __init__(self, identifier: str, label: str, *, illuminance_lx: float) -> None:
-        self.identifier = identifier
-        self.mac_address = identifier
-        self.preferred_label = label
-        self.host = "192.0.2.10"
-        self.port = 6053
-        self.illuminance_lx = illuminance_lx
-        self.humidity_pct = None
-        self.temperature_c = None
-        self.occupancy_state = None
-        self.unresponsive = False
 
 
 def _ep1_mgr(device: _FakeEp1) -> Ep1DeviceManager:
@@ -235,7 +235,7 @@ def _window_fixture(
     _seed_presence_db(db, now=clock["now"])
     device = _FakeEp1(_MAC, "Office EP1", illuminance_lx=20.0)
     state = DeviceManagersState(
-        kasa_mgr=None,
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
         sonos_mgr=None,
         tailwind_mgr=None,
         androidtv_mgr=None,

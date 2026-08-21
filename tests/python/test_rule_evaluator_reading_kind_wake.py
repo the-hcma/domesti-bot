@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from unittest.mock import patch
+from typing import TypedDict
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,8 +26,37 @@ from app.device_enums import (
 )
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1DeviceManager
+from app.kasa_device_manager import KasaDeviceManager
 from app.rule_actions import RuleNotificationEmailOutcome
 from app.rule_evaluator import RuleEvaluator
+
+_MAC = "aa:bb:cc:dd:ee:01"
+
+
+class _FakeEp1:
+    def __init__(
+        self,
+        identifier: str,
+        label: str,
+        *,
+        illuminance_lx: float | None = None,
+        occupancy_state: str | None = None,
+    ) -> None:
+        self.identifier = identifier
+        self.mac_address = identifier
+        self.preferred_label = label
+        self.host = "192.0.2.10"
+        self.port = 6053
+        self.illuminance_lx = illuminance_lx
+        self.humidity_pct = None
+        self.temperature_c = None
+        self.occupancy_state = occupancy_state
+        self.unresponsive = False
+
+
+class _ReadingKindFixture(TypedDict):
+    device: _FakeEp1
+    evaluator: RuleEvaluator
 
 
 @pytest.mark.asyncio
@@ -95,9 +125,6 @@ async def test_illuminance_wake_evaluates_lux_rule(
             reading_metric=Ep1ReadingMetric.ILLUMINANCE_LX,
         )
         assert send_mock.call_count == 1
-
-
-_MAC = "aa:bb:cc:dd:ee:01"
 
 
 def _ep1_mgr(device: _FakeEp1) -> Ep1DeviceManager:
@@ -171,7 +198,7 @@ def _reading_kind_fixture(
     *,
     include_lux: bool,
     include_occupancy: bool,
-) -> dict[str, object]:
+) -> _ReadingKindFixture:
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
     rules: list[RuleOut] = []
@@ -188,7 +215,7 @@ def _reading_kind_fixture(
         occupancy_state=DeviceConditionState.OCCUPIED.value,
     )
     state = DeviceManagersState(
-        kasa_mgr=None,
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
         sonos_mgr=None,
         tailwind_mgr=None,
         androidtv_mgr=None,
@@ -218,24 +245,3 @@ def _write_bundle(path: Path, rules: list[RuleOut]) -> None:
         "rules": [rule.model_dump(mode="json") for rule in rules],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-class _FakeEp1:
-    def __init__(
-        self,
-        identifier: str,
-        label: str,
-        *,
-        illuminance_lx: float | None = None,
-        occupancy_state: str | None = None,
-    ) -> None:
-        self.identifier = identifier
-        self.mac_address = identifier
-        self.preferred_label = label
-        self.host = "192.0.2.10"
-        self.port = 6053
-        self.illuminance_lx = illuminance_lx
-        self.humidity_pct = None
-        self.temperature_c = None
-        self.occupancy_state = occupancy_state
-        self.unresponsive = False
