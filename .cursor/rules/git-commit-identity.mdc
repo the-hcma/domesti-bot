@@ -61,11 +61,15 @@ signing is set up for the committer:
 6. Optional one-shot probe: `echo test | gpg --clearsign -u <KEYID>`. If it hangs or
    fails in the agent TTY, tell the operator to unlock via GUI pinentry or finish the
    commit in Terminal.app — agent terminals often cannot drive curses pinentry.
-7. GitHub Verified requires more than uploading a public key: the **committer email**
-   must appear on the signing key UID and be a **verified** email on the GitHub
-   account (same value as `git config user.email`). Optional list check:
-   `gh api user/gpg_keys` (needs `read:gpg_key`; `admin:gpg_key` also works). If the
-   API is unavailable, guide manual paste of `gpg --armor --export <KEYID>`.
+7. GitHub Verified checks depend on signing format:
+   - **OpenPGP** (`gpg.format` is `openpgp` or unset): the **committer email** must
+     appear on the GPG key UID and be a **verified** email on the GitHub account
+     (same value as `git config user.email`). Optional list check:
+     `gh api user/gpg_keys` (needs `read:gpg_key`; `admin:gpg_key` also works). If the
+     API is unavailable, guide manual paste of `gpg --armor --export <KEYID>`.
+   - **SSH** (`gpg.format=ssh`): UID / `user/gpg_keys` do **not** apply. Confirm the
+     configured public key is registered on GitHub as a **Signing Key** (not only
+     Authentication) and that `ssh-add -L` lists the matching private key.
 
 If signing is missing or incomplete, **alert the committer** and surface setup
 instructions before committing (unless they explicitly opt out for a one-off).
@@ -74,9 +78,9 @@ instructions before committing (unless they explicitly opt out for a one-off).
 
 - Prefer a **separate signing key per machine** (or at least personal vs work). Do
   **not** export a personal laptop’s secret key onto a corporate device.
-- Match `user.name` / `user.email` to the GitHub identity; put that same verified
-  email in the GPG UID; upload **that** public key to GitHub → Settings → SSH and
-  GPG keys.
+- Match `user.name` / `user.email` to the GitHub identity. For OpenPGP, put that same
+  verified email in the GPG UID; upload **that** public key to GitHub → Settings →
+  SSH and GPG keys. For SSH signing, upload the public key as a Signing Key.
 - When a work machine is retired, revoke/rotate that machine’s key on GitHub and
   remove the local secret.
 
