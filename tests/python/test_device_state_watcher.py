@@ -461,14 +461,36 @@ def test_ep1_watcher_reading_update_notes_reading_by_role() -> None:
     )
     on_change.assert_not_called()
 
+    device.temperature_c = 21.0
+    watcher._on_entity_role(device, Ep1EntityRole.TEMPERATURE)
+    device.temperature_c = 22.5
+    watcher._on_entity_role(device, Ep1EntityRole.TEMPERATURE)
+    assert on_reading.call_count == 2
+    on_reading.assert_called_with(
+        DeviceFamilyId.EP1,
+        "aa:bb:cc:dd:ee:01",
+        Ep1ReadingMetric.TEMPERATURE_C,
+    )
+
+    device.humidity_pct = 40.0
+    watcher._on_entity_role(device, Ep1EntityRole.HUMIDITY)
+    device.humidity_pct = 41.0
+    watcher._on_entity_role(device, Ep1EntityRole.HUMIDITY)
+    assert on_reading.call_count == 3
+    on_reading.assert_called_with(
+        DeviceFamilyId.EP1,
+        "aa:bb:cc:dd:ee:01",
+        Ep1ReadingMetric.HUMIDITY_PCT,
+    )
+
     watcher._on_entity_role(device, Ep1EntityRole.OCCUPANCY)
     on_seed.assert_called_once_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
     on_change.assert_not_called()
-    assert on_reading.call_count == 1
+    assert on_reading.call_count == 3
 
     device.occupancy_state = DeviceConditionState.OCCUPIED.value
     watcher._on_entity_role(device, Ep1EntityRole.OCCUPANCY)
-    assert on_reading.call_count == 1
+    assert on_reading.call_count == 3
     on_change.assert_called_once_with(
         DeviceFamilyId.EP1,
         "aa:bb:cc:dd:ee:01",
