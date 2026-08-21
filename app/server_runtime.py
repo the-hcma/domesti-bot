@@ -124,6 +124,7 @@ class DomestiServerRuntime:
     def build_device_rule_wake_notifier(self) -> DeviceRuleWakeNotifier:
         return DeviceRuleWakeNotifier(
             self._on_device_bool_transition,
+            on_bool_seed=self._on_device_bool_seed,
             on_reading=self._on_device_reading_update,
         )
 
@@ -294,6 +295,14 @@ class DomestiServerRuntime:
             if not task.done():
                 task.cancel()
         self._vacation_anomaly_tasks.clear()
+
+    def _on_device_bool_seed(
+        self,
+        family_id: DeviceFamilyId,
+        device_id: str,
+    ) -> None:
+        """First known bool sample after (re)start — evaluate rules, no vacation."""
+        self.schedule_rule_device_state_evaluation(family_id, device_id)
 
     def _on_device_bool_transition(
         self,

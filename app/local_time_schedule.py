@@ -13,13 +13,34 @@ _HHMM_RE_PARTS = 2
 
 
 def extract_top_level_local_time_window(rule: RuleOut) -> LocalTimeWindowCondition | None:
-    """Return the single top-level ``local_time_window``, if present."""
+    """Return the single top-level ``local_time_window``, if present.
+
+    Nested ``any``/``all`` groups are ignored — eligibility wakes require a
+    top-level window (same contract as astronomical anchors).
+    """
     windows: list[LocalTimeWindowCondition] = [
         condition for condition in rule.conditions.all if isinstance(condition, LocalTimeWindowCondition)
     ]
     if len(windows) != 1:
         return None
     return windows[0]
+
+
+def is_local_time_window_open(
+    window: LocalTimeWindowCondition,
+    *,
+    now: datetime,
+) -> bool:
+    """Return whether ``now`` falls in ``[start_hhmm, end_hhmm)`` (overnight wrap OK)."""
+    start = _parse_hhmm_minutes(window.start_hhmm)
+    end = _parse_hhmm_minutes(window.end_hhmm)
+    if start is None or end is None:
+        return False
+    local_now = now if now.tzinfo is not None else now
+    now_minutes = local_now.hour * 60 + local_now.minute
+    if start <= end:
+        return start <= now_minutes < end
+    return now_minutes >= start or now_minutes < end
 
 
 def local_time_window_start_datetime(
@@ -77,6 +98,14 @@ def uses_local_time_window_eligibility_wake(rule: RuleOut) -> bool:
 def uses_local_time_window_materialized_schedule(rule: RuleOut) -> bool:
     """True when the evaluator materializes a daily window-open cron for ``rule``."""
     return uses_local_time_window_eligibility_wake(rule)
+
+
+def _parse_hhmm_minutes(hhmm: str) -> int | None:
+    parsed = _parse_hhmm_parts(hhmm)
+    if parsed is None:
+        return None
+    hour, minute = parsed
+    return hour * 60 + minute
 
 
 def _parse_hhmm_parts(hhmm: str) -> tuple[int, int] | None:

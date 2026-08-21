@@ -186,11 +186,27 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
         metric = _EP1_ROLE_TO_READING_METRIC.get(role)
         if metric is None:
             return
+        value = self._reading_value_for_metric(device, metric)
+        if value is None:
+            return
         self._wake_notifier.note_reading(
             DeviceFamilyId.EP1,
             device.identifier,
             metric,
+            value,
         )
+
+    @staticmethod
+    def _reading_value_for_metric(device: Ep1Device, metric: Ep1ReadingMetric) -> float | None:
+        match metric:
+            case Ep1ReadingMetric.HUMIDITY_PCT:
+                return device.humidity_pct
+            case Ep1ReadingMetric.ILLUMINANCE_LX:
+                return device.illuminance_lx
+            case Ep1ReadingMetric.TEMPERATURE_C:
+                return device.temperature_c
+            case _:
+                return None
 
 
 class KasaPollingWatcher(DeviceStateWatcher):

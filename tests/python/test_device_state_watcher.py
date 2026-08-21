@@ -435,10 +435,12 @@ def test_ep1_watcher_reading_update_notes_reading_by_role() -> None:
     """EP1 climate/light pushes wake reading callback; occupancy uses bool only."""
     on_change = MagicMock()
     on_reading = MagicMock()
-    detector = DeviceRuleWakeNotifier(on_change, on_reading=on_reading)
+    on_seed = MagicMock()
+    detector = DeviceRuleWakeNotifier(on_change, on_bool_seed=on_seed, on_reading=on_reading)
     device = MagicMock(spec=Ep1Device)
     device.identifier = "aa:bb:cc:dd:ee:01"
     device.occupancy_state = DeviceConditionState.CLEAR.value
+    device.illuminance_lx = 10.0
     watcher = Ep1SubscriptionWatcher(
         MagicMock(spec=Ep1DeviceManager),
         wake_notifier=detector,
@@ -447,7 +449,11 @@ def test_ep1_watcher_reading_update_notes_reading_by_role() -> None:
 
     watcher._on_entity_role(device, Ep1EntityRole.ILLUMINANCE)
     watcher._on_entity_role(device, Ep1EntityRole.ILLUMINANCE)
-    assert on_reading.call_count == 2
+    assert on_reading.call_count == 0
+
+    device.illuminance_lx = 12.0
+    watcher._on_entity_role(device, Ep1EntityRole.ILLUMINANCE)
+    assert on_reading.call_count == 1
     on_reading.assert_called_with(
         DeviceFamilyId.EP1,
         "aa:bb:cc:dd:ee:01",
@@ -456,12 +462,13 @@ def test_ep1_watcher_reading_update_notes_reading_by_role() -> None:
     on_change.assert_not_called()
 
     watcher._on_entity_role(device, Ep1EntityRole.OCCUPANCY)
+    on_seed.assert_called_once_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
     on_change.assert_not_called()
-    assert on_reading.call_count == 2
+    assert on_reading.call_count == 1
 
     device.occupancy_state = DeviceConditionState.OCCUPIED.value
     watcher._on_entity_role(device, Ep1EntityRole.OCCUPANCY)
-    assert on_reading.call_count == 2
+    assert on_reading.call_count == 1
     on_change.assert_called_once_with(
         DeviceFamilyId.EP1,
         "aa:bb:cc:dd:ee:01",

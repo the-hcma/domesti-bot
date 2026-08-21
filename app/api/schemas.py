@@ -1894,6 +1894,7 @@ class RuleOut(BaseModel):
             from app.astronomical_schedule import uses_astronomical_eligibility_wake
             from app.local_time_schedule import uses_local_time_window_eligibility_wake
 
+            _reject_nested_local_time_windows(self.conditions.all)
             if uses_astronomical_eligibility_wake(self) and uses_local_time_window_eligibility_wake(self):
                 raise ValueError(
                     "Expected at most one eligibility window "
@@ -1903,6 +1904,7 @@ class RuleOut(BaseModel):
                 return self
             return self
 
+        _reject_nested_local_time_windows(self.conditions.all)
         anchor = extract_astronomical_anchor(self)
         astronomical_count = sum(
             1 for condition in self.conditions.all if condition.type in ("after_sunset", "before_sunrise")
@@ -1934,6 +1936,24 @@ class RuleOut(BaseModel):
             self.schedule_cron = None
             return self
         raise ValueError("scheduled rules require schedule_cron or a top-level after_sunset / before_sunrise condition")
+
+
+def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut]) -> bool:
+    for condition in conditions:
+        if isinstance(condition, LocalTimeWindowCondition):
+            return True
+        if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            if _condition_tree_contains_local_time_window(condition.conditions):
+                return True
+    return False
+
+
+def _reject_nested_local_time_windows(conditions: list[RuleConditionOut]) -> None:
+    """Reject ``local_time_window`` nested under ``all`` / ``any`` groups."""
+    for condition in conditions:
+        if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            if _condition_tree_contains_local_time_window(condition.conditions):
+                raise ValueError("Expected local_time_window at top-level conditions.all, got nested under all/any")
 
 
 def normalized_rule_notification_emails(rule: RuleOut) -> list[str]:

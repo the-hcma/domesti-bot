@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.api.schemas import (
     AfterSunsetCondition,
+    AllConditionsCondition,
     Ep1ReadingCompareCondition,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
@@ -25,6 +26,7 @@ from app.device_enums import (
 )
 from app.local_time_schedule import (
     extract_top_level_local_time_window,
+    is_local_time_window_open,
     local_time_window_start_datetime,
     materialize_local_time_window_cron,
     uses_local_time_window_eligibility_wake,
@@ -78,6 +80,18 @@ def test_materialize_local_time_window_cron() -> None:
     assert cron == "0 21 * * *"
 
 
+def test_is_local_time_window_open_overnight() -> None:
+    window = LocalTimeWindowCondition(
+        type="local_time_window",
+        start_hhmm="21:00",
+        end_hhmm="00:00",
+    )
+    tz = ZoneInfo("America/New_York")
+    assert is_local_time_window_open(window, now=datetime(2023, 11, 14, 21, 30, tzinfo=tz)) is True
+    assert is_local_time_window_open(window, now=datetime(2023, 11, 14, 20, 59, tzinfo=tz)) is False
+    assert is_local_time_window_open(window, now=datetime(2023, 11, 15, 0, 0, tzinfo=tz)) is False
+
+
 def test_rule_rejects_astronomical_and_local_time_window_eligibility() -> None:
     with pytest.raises(ValidationError, match="at most one eligibility window"):
         RuleOut(
@@ -106,6 +120,45 @@ def test_rule_rejects_astronomical_and_local_time_window_eligibility() -> None:
             enabled=True,
             id="dual-eligibility",
             label="Dual eligibility",
+            min_location_accuracy_m=50,
+            notification_emails=["ops@example.com"],
+            notify_on_fire=True,
+            triggers=[RuleTrigger.DEVICE_STATE],
+        )
+
+
+def test_rule_rejects_nested_local_time_window() -> None:
+    with pytest.raises(ValidationError, match="top-level conditions.all"):
+        RuleOut(
+            conditions=RuleConditionsOut(
+                all=[
+                    AllConditionsCondition(
+                        type="all",
+                        conditions=[
+                            LocalTimeWindowCondition(
+                                type="local_time_window",
+                                start_hhmm="21:00",
+                                end_hhmm="00:00",
+                            ),
+                        ],
+                    ),
+                    Ep1ReadingCompareCondition(
+                        type="ep1_reading_compare",
+                        comparison=Ep1ReadingComparison.BELOW,
+                        metric=Ep1ReadingMetric.ILLUMINANCE_LX,
+                        threshold=34.0,
+                        device=RuleConditionDeviceRefOut(
+                            device_id="aa:bb:cc:dd:ee:01",
+                            family_id=DeviceFamilyId.EP1,
+                        ),
+                    ),
+                ],
+            ),
+            cooldown_s=0,
+            device_actions=[],
+            enabled=True,
+            id="nested-window",
+            label="Nested window",
             min_location_accuracy_m=50,
             notification_emails=["ops@example.com"],
             notify_on_fire=True,

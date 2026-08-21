@@ -1354,9 +1354,11 @@ When a rule uses `triggers: ["device_state"]` (no `scheduled` cron required):
 | Bool transition (occupancy / switch / door / …) | Enabled `device_state` rules that watch the device via **bool** conditions only (`devices_all/any_in_state`, `devices_any_in_state_for_s`) |
 | EP1 reading push (`illuminance` / `temperature` / `humidity`) | Enabled `device_state` rules with `ep1_reading_compare` on that device **and** the same `metric` |
 
-Occupancy entity pushes never emit a reading wake — they only go through the bool path. Lux wakes therefore do not re-evaluate occupancy-only rules, and vice versa.
+Occupancy entity pushes never emit a reading wake — they only go through the bool path. The first known occupancy sample after notifier (re)start seeds a bool-rule evaluation (no vacation anomaly); later samples wake only on true transitions. Lux wakes therefore do not re-evaluate occupancy-only rules, and vice versa. Reading wakes fire only when the numeric sample **changes** (reconnect replays of the same value are ignored).
 
-**`local_time_window` eligibility:** a top-level `local_time_window` with `device_state` and/or `dwell_satisfied` (and **no** `scheduled` trigger / no `schedule_cron`) gets a one-shot eligibility evaluate at today's window `start_hhmm` — same idea as astronomical sunset eligibility. Prefer this over hand-rolled `0 21 * * *` crons for evening lux alerts.
+A rule may combine bool conditions and `ep1_reading_compare` (including on the same EP1 device): a reading wake matches via the reading branch and a bool wake via the bool branch; each wake still evaluates the **full** condition tree.
+
+**`local_time_window` eligibility:** a **top-level** `local_time_window` (not nested under `any`/`all` groups — nested windows are rejected at validation) with `device_state` and/or `dwell_satisfied` (and **no** `scheduled` trigger / no `schedule_cron`) gets a one-shot eligibility evaluate at today's window `start_hhmm` — same idea as astronomical sunset eligibility. Prefer this over hand-rolled `0 21 * * *` crons for evening lux alerts. If the process starts while the window is already open, eligibility evaluates promptly (not deferred to tomorrow's `start_hhmm`).
 
 #### Design: device-state conditions
 

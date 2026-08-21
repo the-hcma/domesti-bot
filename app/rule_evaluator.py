@@ -78,6 +78,8 @@ from app.geofence_transition_state_store import (
     upsert_geofence_transition_state,
 )
 from app.local_time_schedule import (
+    extract_top_level_local_time_window,
+    is_local_time_window_open,
     materialize_local_time_window_cron,
     uses_local_time_window_eligibility_wake,
     uses_local_time_window_materialized_schedule,
@@ -2754,12 +2756,19 @@ class RuleEvaluator:
             return None
         runtime.effective_schedule_cron = cron_expr
         runtime.schedule_materialized_for = local_date
-        runtime.next_evaluate_at = next_scheduled_evaluate_at(
-            cron_expr,
-            now,
-            timezone,
-            due_if_matching=True,
-        )
+        window = extract_top_level_local_time_window(rule)
+        local_now = now.astimezone(timezone) if now.tzinfo is not None else now.replace(tzinfo=timezone)
+        if window is not None and is_local_time_window_open(window, now=local_now):
+            # Already inside today's open window (e.g. process restart after
+            # start_hhmm): evaluate promptly rather than waiting until tomorrow.
+            runtime.next_evaluate_at = local_now.timestamp()
+        else:
+            runtime.next_evaluate_at = next_scheduled_evaluate_at(
+                cron_expr,
+                now,
+                timezone,
+                due_if_matching=True,
+            )
         self._persist_rule_schedule_state(rule.id)
         return cron_expr
 

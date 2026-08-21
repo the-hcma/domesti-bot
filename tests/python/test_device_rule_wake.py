@@ -11,29 +11,56 @@ from app.rule_evaluator import RuleEvaluator
 from app.server_runtime import DomestiServerRuntime
 
 
-def test_device_rule_wake_notifier_ignores_first_sample() -> None:
+def test_device_rule_wake_notifier_ignores_first_sample_without_seed() -> None:
     on_change = MagicMock()
     notifier = DeviceRuleWakeNotifier(on_change)
     notifier.note_bool_transition(DeviceFamilyId.TAILWIND, "Left", False)
     on_change.assert_not_called()
 
 
-def test_device_rule_wake_notifier_note_reading_invokes_every_sample() -> None:
+def test_device_rule_wake_notifier_seeds_first_bool_sample() -> None:
+    on_change = MagicMock()
+    on_seed = MagicMock()
+    notifier = DeviceRuleWakeNotifier(on_change, on_bool_seed=on_seed)
+    assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", True) is True
+    on_seed.assert_called_once_with(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    on_change.assert_not_called()
+    assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", True) is False
+    on_seed.assert_called_once()
+
+
+def test_device_rule_wake_notifier_note_reading_diffs_values() -> None:
     on_change = MagicMock()
     on_reading = MagicMock()
     notifier = DeviceRuleWakeNotifier(on_change, on_reading=on_reading)
-    notifier.note_reading(
-        DeviceFamilyId.EP1,
-        "aa:bb:cc:dd:ee:01",
-        Ep1ReadingMetric.ILLUMINANCE_LX,
+    assert (
+        notifier.note_reading(
+            DeviceFamilyId.EP1,
+            "aa:bb:cc:dd:ee:01",
+            Ep1ReadingMetric.ILLUMINANCE_LX,
+            10.0,
+        )
+        is False
     )
-    notifier.note_reading(
-        DeviceFamilyId.EP1,
-        "aa:bb:cc:dd:ee:01",
-        Ep1ReadingMetric.ILLUMINANCE_LX,
+    assert (
+        notifier.note_reading(
+            DeviceFamilyId.EP1,
+            "aa:bb:cc:dd:ee:01",
+            Ep1ReadingMetric.ILLUMINANCE_LX,
+            10.0,
+        )
+        is False
     )
-    assert on_reading.call_count == 2
-    on_reading.assert_called_with(
+    assert (
+        notifier.note_reading(
+            DeviceFamilyId.EP1,
+            "aa:bb:cc:dd:ee:01",
+            Ep1ReadingMetric.ILLUMINANCE_LX,
+            12.0,
+        )
+        is True
+    )
+    on_reading.assert_called_once_with(
         DeviceFamilyId.EP1,
         "aa:bb:cc:dd:ee:01",
         Ep1ReadingMetric.ILLUMINANCE_LX,
@@ -44,10 +71,23 @@ def test_device_rule_wake_notifier_note_reading_invokes_every_sample() -> None:
 def test_device_rule_wake_notifier_note_reading_noop_without_callback() -> None:
     on_change = MagicMock()
     notifier = DeviceRuleWakeNotifier(on_change)
-    notifier.note_reading(
-        DeviceFamilyId.EP1,
-        "aa:bb:cc:dd:ee:01",
-        Ep1ReadingMetric.TEMPERATURE_C,
+    assert (
+        notifier.note_reading(
+            DeviceFamilyId.EP1,
+            "aa:bb:cc:dd:ee:01",
+            Ep1ReadingMetric.TEMPERATURE_C,
+            21.0,
+        )
+        is False
+    )
+    assert (
+        notifier.note_reading(
+            DeviceFamilyId.EP1,
+            "aa:bb:cc:dd:ee:01",
+            Ep1ReadingMetric.TEMPERATURE_C,
+            22.0,
+        )
+        is False
     )
     on_change.assert_not_called()
 
@@ -82,10 +122,24 @@ def test_runtime_reading_update_schedules_rule_evaluation_not_vacation(
     schedule_spy = MagicMock(wraps=evaluator.schedule_device_state_change)
     evaluator.schedule_device_state_change = schedule_spy  # type: ignore[method-assign]
     notifier = holder.build_device_rule_wake_notifier()
-    notifier.note_reading(
-        DeviceFamilyId.EP1,
-        "aa:bb:cc:dd:ee:01",
-        Ep1ReadingMetric.ILLUMINANCE_LX,
+    assert (
+        notifier.note_reading(
+            DeviceFamilyId.EP1,
+            "aa:bb:cc:dd:ee:01",
+            Ep1ReadingMetric.ILLUMINANCE_LX,
+            10.0,
+        )
+        is False
+    )
+    schedule_spy.assert_not_called()
+    assert (
+        notifier.note_reading(
+            DeviceFamilyId.EP1,
+            "aa:bb:cc:dd:ee:01",
+            Ep1ReadingMetric.ILLUMINANCE_LX,
+            11.0,
+        )
+        is True
     )
     schedule_spy.assert_called_once_with(
         DeviceFamilyId.EP1,
