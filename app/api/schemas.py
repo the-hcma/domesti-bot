@@ -1891,12 +1891,15 @@ class RuleOut(BaseModel):
             raise ValueError("schedule_cron is only allowed when triggers includes scheduled")
         if not has_scheduled:
             self.schedule_cron = None
-            from app.astronomical_schedule import uses_astronomical_eligibility_wake
-            from app.local_time_schedule import uses_local_time_window_eligibility_wake
-
             _reject_nested_local_time_windows(self.conditions.all)
             _reject_multiple_top_level_local_time_windows_for_eligibility(self)
-            if uses_astronomical_eligibility_wake(self) and uses_local_time_window_eligibility_wake(self):
+            has_astronomical = any(
+                condition.type in ("after_sunset", "before_sunrise") for condition in self.conditions.all
+            )
+            has_local_time_window = any(
+                isinstance(condition, LocalTimeWindowCondition) for condition in self.conditions.all
+            )
+            if (has_device_state or has_dwell_satisfied) and has_astronomical and has_local_time_window:
                 raise ValueError(
                     "Expected at most one eligibility window "
                     "(after_sunset/before_sunrise or local_time_window), got both"
