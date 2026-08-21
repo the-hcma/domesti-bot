@@ -57,6 +57,15 @@ def test_local_time_window_rejects_invalid_hhmm() -> None:
         )
 
 
+def test_local_time_window_rejects_equal_start_and_end() -> None:
+    with pytest.raises(ValidationError, match="start_hhmm != end_hhmm"):
+        LocalTimeWindowCondition(
+            type="local_time_window",
+            start_hhmm="21:00",
+            end_hhmm="21:00",
+        )
+
+
 def test_local_time_window_start_datetime_builds_today() -> None:
     window = LocalTimeWindowCondition(
         type="local_time_window",

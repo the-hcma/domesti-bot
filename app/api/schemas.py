@@ -1627,6 +1627,16 @@ class LocalTimeWindowCondition(BaseModel):
     end_hhmm: str
     start_hhmm: str
 
+    @model_validator(mode="after")
+    def _require_nonempty_window(self) -> Self:
+        # Half-open [start, end) — equal bounds are never open (dead rule).
+        if self.start_hhmm == self.end_hhmm:
+            raise ValueError(
+                "Expected local_time_window start_hhmm != end_hhmm "
+                f"(half-open window), got start={self.start_hhmm!r} end={self.end_hhmm!r}",
+            )
+        return self
+
     @field_validator("end_hhmm", "start_hhmm", mode="before")
     @classmethod
     def _require_valid_hhmm(cls, value: object) -> str:
