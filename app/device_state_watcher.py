@@ -171,15 +171,16 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
             occupied = False
         else:
             occupied = None
-        self._change_detector.note_bool_state(
+        transitioned = self._change_detector.note_bool_state(
             DeviceFamilyId.EP1,
             device.identifier,
             occupied,
         )
-        self._change_detector.note_reading_update(
-            DeviceFamilyId.EP1,
-            device.identifier,
-        )
+        if not transitioned:
+            self._change_detector.note_reading_update(
+                DeviceFamilyId.EP1,
+                device.identifier,
+            )
 
 
 class KasaPollingWatcher(DeviceStateWatcher):

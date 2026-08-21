@@ -453,7 +453,8 @@ def test_ep1_watcher_reading_update_notes_reading_every_sample() -> None:
 
     device.occupancy_state = DeviceConditionState.OCCUPIED.value
     watcher._note_occupancy(device)
-    assert on_reading.call_count == 3
+    # Bool transition already schedules evaluation; reading wake is skipped.
+    assert on_reading.call_count == 2
     on_change.assert_called_once_with(
         DeviceFamilyId.EP1,
         "aa:bb:cc:dd:ee:01",

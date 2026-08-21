@@ -258,6 +258,7 @@ class RuleEvaluator:
         self._last_run_at: float | None = None
         self._last_astronomical_materialization_date: date | None = None
         self._next_sun_check_at: float | None = None
+        self._pending_device_state_change_keys: set[tuple[DeviceFamilyId, str]] = set()
         self._process_lock = asyncio.Lock()
         self._rule_state: dict[str, _RuleRuntimeState] = {}
         self._location_request_coordinator = LocationRequestCoordinator(
@@ -2030,9 +2031,20 @@ class RuleEvaluator:
         family_id: DeviceFamilyId,
         device_id: str,
     ) -> None:
+        key = (family_id, device_id)
+        if key in self._pending_device_state_change_keys:
+            return
+        self._pending_device_state_change_keys.add(key)
         loop = asyncio.get_running_loop()
+
+        async def _run_coalesced() -> None:
+            try:
+                await self.on_device_state_change(family_id, device_id)
+            finally:
+                self._pending_device_state_change_keys.discard(key)
+
         task = loop.create_task(
-            self.on_device_state_change(family_id, device_id),
+            _run_coalesced(),
             name=f"rule-eval-device-{family_id.value}-{device_id}",
         )
         task.add_done_callback(_log_device_state_evaluation_task)

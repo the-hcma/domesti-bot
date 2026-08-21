@@ -28,13 +28,18 @@ class DeviceStateChangeDetector:
         family_id: DeviceFamilyId,
         device_id: str,
         state: bool | None,
-    ) -> None:
-        """Record ``state`` and notify when it differs from the prior sample."""
+    ) -> bool:
+        """Record ``state`` and notify when it differs from the prior sample.
+
+        Returns ``True`` when the change callback fired (a real transition).
+        """
         key = (family_id, device_id)
         prior = self._prior.get(key)
         self._prior[key] = state
         if prior is not None and prior != state:
             self._on_change(family_id, device_id, prior, state)
+            return True
+        return False
 
     def note_reading_update(
         self,
