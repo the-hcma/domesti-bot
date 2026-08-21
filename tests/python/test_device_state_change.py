@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from app.device_enums import DeviceFamilyId
 from app.device_state_change import DeviceStateChangeDetector
+from app.rule_evaluator import RuleEvaluator
 from app.server_runtime import DomestiServerRuntime
 
 
@@ -47,14 +49,25 @@ def test_device_state_change_detector_notifies_on_transition() -> None:
     )
 
 
-def test_runtime_reading_update_schedules_rule_evaluation_not_vacation() -> None:
-    """build_device_state_change_detector wires reading wakes to rule eval only."""
+def test_runtime_reading_update_schedules_rule_evaluation_not_vacation(
+    tmp_path: Path,
+) -> None:
+    """Reading wakes forward through runtime → RuleEvaluator.schedule_device_state_change."""
+    db = tmp_path / "discovery.sqlite"
+    db.touch()
     holder = DomestiServerRuntime()
-    holder.schedule_rule_device_state_evaluation = MagicMock()  # type: ignore[method-assign]
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: 1_700_000_000.0,
+    )
+    holder.rule_evaluator = evaluator
     holder.schedule_vacation_anomaly_alert = MagicMock()  # type: ignore[method-assign]
+    schedule_spy = MagicMock(wraps=evaluator.schedule_device_state_change)
+    evaluator.schedule_device_state_change = schedule_spy  # type: ignore[method-assign]
     detector = holder.build_device_state_change_detector()
     detector.note_reading_update(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
-    holder.schedule_rule_device_state_evaluation.assert_called_once_with(
+    schedule_spy.assert_called_once_with(
         DeviceFamilyId.EP1,
         "aa:bb:cc:dd:ee:01",
     )

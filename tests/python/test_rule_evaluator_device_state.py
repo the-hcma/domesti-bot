@@ -209,6 +209,38 @@ async def test_schedule_device_state_change_coalesces_in_flight_wakes(
 
 
 @pytest.mark.asyncio
+async def test_schedule_device_state_change_invokes_real_handler(
+    tmp_path: Path,
+) -> None:
+    """schedule_device_state_change reaches the real on_device_state_change (not only mocks)."""
+    db = tmp_path / "discovery.sqlite"
+    db.touch()
+    calls: list[tuple[DeviceFamilyId, str]] = []
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: 1_700_000_000.0,
+    )
+    real = evaluator.on_device_state_change
+
+    async def _wrap(family_id: DeviceFamilyId, device_id: str) -> None:
+        calls.append((family_id, device_id))
+        await real(family_id, device_id)
+
+    evaluator.on_device_state_change = _wrap  # type: ignore[method-assign]
+    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:04")
+    evaluator.schedule_device_state_change(*key)
+    evaluator.schedule_device_state_change(*key)
+    evaluator.schedule_device_state_change(*key)
+    for _ in range(100):
+        if calls and key not in evaluator._in_flight_device_state_change_keys:
+            break
+        await asyncio.sleep(0.01)
+    assert calls[0] == key
+    assert 1 <= len(calls) <= 2
+
+
+@pytest.mark.asyncio
 async def test_schedule_device_state_change_releases_key_when_handler_raises(
     tmp_path: Path,
 ) -> None:
