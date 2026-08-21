@@ -1345,20 +1345,34 @@ Not addressed in code today. Optional future hardening: snapshot streak anchors 
 
 Status API: condition row detail like `hcma inside 12 min (need 10 min)` / `kristen outside`.
 
-#### Design: EP1 reading-kind subscribe contract (#672)
+#### Design: reading-kind subscribe contract (#670 / #672)
 
-When a rule uses `triggers: ["device_state"]` (no `scheduled` cron required):
+Authoritative subscribe contract for **reading-kind** wakes (numeric sensor samples). Implementation shipped in #668 / #673; this section closes the remaining #670 acceptance (non-EP1 out of scope + full subscribe shape).
+
+**Subscribe contract:** a rule “subscribes” to readings of kind **K** for device **D** during window **W** when **all** of the following hold:
+
+1. `enabled: true`
+2. `triggers` includes `device_state` (reading wakes do **not** need `schedule_cron` / `scheduled`; prefer omitting both)
+3. Conditions include `ep1_reading_compare` on device **D** with `metric` = **K** (the compare may nest under `any` / `all`; an optional activation window must be **top-level** — see below)
+4. Optional activation window **W** — one of:
+   - **Top-level** `local_time_window` (not nested under `any` / `all`; nested windows are rejected at validation): eligibility wake at today's `start_hhmm` (same idea as astronomical sunset eligibility). Outside the window the condition fails, so reading wakes cannot fire the rule. If the process starts while the window is already open, eligibility evaluates promptly (not deferred to tomorrow's `start_hhmm`).
+   - Astronomical daylight eligibility (`daylight` / sunrise–sunset style gates): same one-shot eligibility pattern as other `device_state` daylight rules — no hand-rolled cron.
+5. After eval, caps still apply: `fire_once_per_local_day`, `cooldown_s`, etc.
+
+**Wake routing table** (when a rule uses `triggers` including `device_state`):
 
 | Wake source | Matched rules |
 | --- | --- |
-| Bool transition (occupancy / switch / door / …) | Enabled `device_state` rules that watch the device via **bool** conditions only (`devices_all/any_in_state`, `devices_any_in_state_for_s`) |
+| Bool transition (occupancy / switch / door / …) | Enabled `device_state` rules that watch the device via matching **bool** conditions (`devices_all/any_in_state`, `devices_any_in_state_for_s`) — including mixed rules that also have `ep1_reading_compare` |
 | EP1 reading push (`illuminance` / `temperature` / `humidity`) | Enabled `device_state` rules with `ep1_reading_compare` on that device **and** the same `metric` |
 
-Occupancy entity pushes never emit a reading wake — they only go through the bool path. The first known occupancy sample after notifier (re)start seeds a bool-rule evaluation (no vacation anomaly); later samples wake only on true transitions. Lux wakes therefore do not re-evaluate occupancy-only rules, and vice versa. Reading wakes fire only when the numeric sample **changes** (reconnect replays of the same value are ignored).
+Occupancy entity pushes **never** emit a reading wake — they only go through the bool path. The first known occupancy sample after notifier (re)start seeds a bool-rule evaluation **only when** `on_bool_seed` is configured (server runtime always configures it; no vacation anomaly on seed). Later samples invoke `on_bool_transition` for **both** `true → false` and `false → true` (and `true/false → None` / reconnect unknowns when the prior was known); the server schedules rule eval on every such transition and vacation anomaly only on real prior→current transitions. Lux wakes therefore do not re-evaluate occupancy-only rules, and vice versa. Reading wakes fire only when the numeric sample **changes** (the first sample seeds without waking; reconnect replays of the same value are ignored).
 
 A rule may combine bool conditions and `ep1_reading_compare` (including on the same EP1 device): a reading wake matches via the reading branch and a bool wake via the bool branch; each wake still evaluates the **full** condition tree.
 
-**`local_time_window` eligibility:** a **top-level** `local_time_window` (not nested under `any`/`all` groups — nested windows are rejected at validation) with `device_state` and/or `dwell_satisfied` (and **no** `scheduled` trigger / no `schedule_cron`) gets a one-shot eligibility evaluate at today's window `start_hhmm` — same idea as astronomical sunset eligibility. Prefer this over hand-rolled `0 21 * * *` crons for evening lux alerts. If the process starts while the window is already open, eligibility evaluates promptly (not deferred to tomorrow's `start_hhmm`).
+**Out of scope (closes #670 “other families” AC):** only **EP1** currently streams numeric sensor readings into `DeviceRuleWakeNotifier.note_reading`. Families that expose on/off / playing / door state feed **bool transitions** into the notifier for live tiles and vacation anomaly. **Bool device-state rule predicates** today accept Kasa, Sonos, Vizio, EP1 occupancy, and Tailwind open/closed; Google Cast (`androidtv`) is rejected at validation (`supported_by_family` is false for every condition state). None of the non-EP1 families produce reading-kind wakes. When a future family streams numeric samples, the extension recipe is: push via `note_reading` (generalize the metric enum as needed), add a compare condition type plus a `rule_watches_*` filter parallel to `ep1_reading_compare`, and extend this table. Until then, non-EP1 reading sources are intentionally out of scope.
+
+**Motivating rule** (`daylight-dark-house-lights-on` in `automation-rules.json.example`): `triggers: ["device_state"]` + `daylight` + `ep1_reading_compare` — no `*/5` cron, no hand-rolled schedule. For evening clock windows, pair the same reading compare with a top-level `local_time_window` instead of `daylight` (prefer window eligibility over `schedule_cron`).
 
 #### Design: device-state conditions
 
@@ -1377,7 +1391,7 @@ A rule may combine bool conditions and `ep1_reading_compare` (including on the s
 
 Reads **cached** state from `DeviceStateWatcher` / manager objects — Kasa `is_on`, Sonos `is_playing`, Vizio `ui_power_state()` — same source as the tile UI, not a live LAN round-trip on every tick. If `device_state` is `None` (discovery incomplete), condition is **unmet** with detail `discovery not ready`.
 
-**Shipped families:** Kasa, Sonos, Vizio. Tailwind doors and Google Cast are not device-state predicates yet (validation fails for those `family_id` values).
+**Shipped families (bool device-state predicates):** Kasa, Sonos, Vizio, EP1 occupancy, and Tailwind open/closed. Google Cast is not a device-state predicate (validation fails for `androidtv`).
 
 #### Example bundle rule (target shape)
 

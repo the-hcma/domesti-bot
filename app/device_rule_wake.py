@@ -1,4 +1,10 @@
-"""Notify the rule evaluator of bool transitions and reading wakes."""
+"""Notify the rule evaluator of bool transitions and reading wakes.
+
+Reading wakes are EP1-only today (``Ep1ReadingMetric`` via ``note_reading``).
+For the subscribe contract, wake routing, and how to extend other families,
+see ``docs/RULE_ENGINE_PLAN.md`` — *Design: reading-kind subscribe contract
+(#670 / #672)*.
+"""
 
 from __future__ import annotations
 

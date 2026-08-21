@@ -30,6 +30,15 @@ For the tracking issue and field notes from the first Homey bring-up, see
 - Rule conditions: occupancy device-state and `ep1_reading_compare` (JSON-authored;
   see `automation-rules.json.example`)
 
+**Reading-kind wakes:** lux / temperature / humidity entity pushes re-evaluate
+`device_state` rules that subscribe via `ep1_reading_compare` (optionally gated
+by a top-level `local_time_window` or daylight eligibility) **when the numeric
+value changes** — the first sample seeds state without waking, and identical
+reconnect replays do not wake. Full subscribe contract, wake routing, and
+non-EP1 out-of-scope notes:
+[`docs/RULE_ENGINE_PLAN.md`](RULE_ENGINE_PLAN.md) — *Design: reading-kind
+subscribe contract (#670 / #672)*.
+
 EP1 is **2.4 GHz Wi‑Fi only**. There is no soft-AP hotspot when the unit blinks
 red after power-on — that means “ready for USB setup,” not “join my SSID.”
 
