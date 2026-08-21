@@ -32,8 +32,10 @@ For the tracking issue and field notes from the first Homey bring-up, see
 
 **Reading-kind wakes:** lux / temperature / humidity entity pushes re-evaluate
 `device_state` rules that subscribe via `ep1_reading_compare` (optionally gated
-by a top-level `local_time_window` or daylight eligibility). Full subscribe
-contract, wake routing, and non-EP1 out-of-scope notes:
+by a top-level `local_time_window` or daylight eligibility) **when the numeric
+value changes** — the first sample seeds state without waking, and identical
+reconnect replays do not wake. Full subscribe contract, wake routing, and
+non-EP1 out-of-scope notes:
 [`docs/RULE_ENGINE_PLAN.md`](RULE_ENGINE_PLAN.md) — *Design: reading-kind
 subscribe contract (#670 / #672)*.
 
