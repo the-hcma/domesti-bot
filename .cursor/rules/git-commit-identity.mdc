@@ -15,6 +15,13 @@ or other co-authors.
 - Do **not** add `Co-authored-by`, `Made-with: Cursor`, or any `--trailer` flags.
 - Do **not** append attribution lines to commit messages, even if Cursor defaults
   would add them.
+- Do **not** pass `--no-gpg-sign` (or otherwise skip signing) when `commit.gpgsign`
+  is enabled.
+- After any commit (hooks / tooling may rewrite the message), inspect
+  `git show -s --format=%B HEAD` before push. If it contains `Co-authored-by:` or
+  `Made-with:`, **stop**, fix the message, and do not push until clean.
+- Prefer `git verify-commit HEAD` after signing commits; confirm GitHub shows the
+  commit as Verified once pushed.
 
 ## Pull requests
 
@@ -27,6 +34,11 @@ or other co-authors.
   and `git config user.email`). Do not hardcode a specific name or email.
 - If `user.email` is unset, stop and ask the committer to configure git before
   committing (avoid hostname fallback addresses like `user@machine.local`).
+- Also survey **effective** identity (env overrides beat config): compare
+  `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT` to the approved
+  GitHub name/email. Reject machine-local addresses (e.g. `*.local`) and stop if
+  `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `EMAIL`, or `git commit --author` would produce
+  a different identity than configured.
 
 ## Commit signing (GPG / SSH)
 
@@ -36,29 +48,84 @@ signing is set up for the committer:
 1. `git config --get commit.gpgsign` should be `true` (global or local, as they intend).
 2. `git config --get user.signingkey` should be set (GPG key id, or SSH public key
    path when `gpg.format` is `ssh`).
-3. If `gpg.format` is `ssh`, confirm the signing key path exists; otherwise confirm
-   `gpg` can list the secret key for `user.signingkey`.
+3. Check `git config --get gpg.format` (and any repo-local override). For GPG
+   signing, prefer `openpgp` (or unset). If a leftover `gpg.format=ssh` is set
+   while `user.signingkey` is a GPG key id, Git will mis-treat the key — set
+   `gpg.format` to `openpgp` (or unset ssh) before committing.
+4. If `gpg.format` is `ssh`, confirm the public key path exists **and** the matching
+   private key is loaded (`ssh-add -L` should list it), or run a real signed-commit
+   probe. Otherwise confirm `gpg --list-secret-keys --keyid-format=long <signingkey>`
+   succeeds (secret present on **this** host).
+5. On Darwin (GPG): `pinentry-program` in `~/.gnupg/gpg-agent.conf` should point at an
+   existing binary (prefer `pinentry-mac` from Homebrew).
+6. Optional one-shot probe: `echo test | gpg --clearsign -u <KEYID>`. If it hangs or
+   fails in the agent TTY, tell the operator to unlock via GUI pinentry or finish the
+   commit in Terminal.app — agent terminals often cannot drive curses pinentry.
+7. GitHub Verified requires more than uploading a public key: the **committer email**
+   must appear on the signing key UID and be a **verified** email on the GitHub
+   account (same value as `git config user.email`). Optional list check:
+   `gh api user/gpg_keys` (needs `read:gpg_key`; `admin:gpg_key` also works). If the
+   API is unavailable, guide manual paste of `gpg --armor --export <KEYID>`.
 
 If signing is missing or incomplete, **alert the committer** and surface setup
-instructions before committing (unless they explicitly opt out for a one-off):
+instructions before committing (unless they explicitly opt out for a one-off).
 
-**GPG key**
+### Per-machine / personal vs work keys
+
+- Prefer a **separate signing key per machine** (or at least personal vs work). Do
+  **not** export a personal laptop’s secret key onto a corporate device.
+- Match `user.name` / `user.email` to the GitHub identity; put that same verified
+  email in the GPG UID; upload **that** public key to GitHub → Settings → SSH and
+  GPG keys.
+- When a work machine is retired, revoke/rotate that machine’s key on GitHub and
+  remove the local secret.
+
+### Passphrase
+
+- **Recommend using a passphrase** on the signing key (protects the secret at rest;
+  `gpg-agent` can cache it with `default-cache-ttl` / `max-cache-ttl`).
+- Do **not** suggest empty-passphrase keys “for agent convenience.”
+- Agent / non-TTY sessions usually cannot drive curses pinentry — use GUI
+  `pinentry-mac` (macOS) or commit from Terminal.app after unlocking once.
+
+### GPG key (macOS / Homebrew)
 
 ```bash
+brew install gnupg pinentry-mac
+# If brew cannot link into /opt/homebrew/bin (ownership / permissions), fix Homebrew
+# ownership for that prefix or use the full $(brew --prefix)/bin path below.
+
+mkdir -p ~/.gnupg
+chmod 700 ~/.gnupg
+echo "pinentry-program $(brew --prefix)/bin/pinentry-mac" >> ~/.gnupg/gpg-agent.conf
+# optional passphrase cache (seconds), so you are not prompted every commit:
+# echo "default-cache-ttl 28800" >> ~/.gnupg/gpg-agent.conf
+# echo "max-cache-ttl 86400" >> ~/.gnupg/gpg-agent.conf
+gpgconf --kill gpg-agent
+
 gpg --full-generate-key
+# Choose RSA (or default), key size ≥ 3072, set an expiration, and use a passphrase.
+# UID email must be a GitHub-verified address matching git config user.email.
 gpg --list-secret-keys --keyid-format=long
+git config --global gpg.format openpgp
 git config --global user.signingkey <KEYID>
 git config --global commit.gpgsign true
+# Clear a leftover repo-local ssh signing override if present:
+# git config --unset gpg.format   # run inside the repo if it forced ssh
 gpg --armor --export <KEYID>
 # Upload the armored public key: GitHub → Settings → SSH and GPG keys → New GPG key
+
+# Sanity check (GUI pinentry should appear if the agent needs the passphrase):
+echo test | gpg --clearsign -u <KEYID>
 ```
 
-**SSH signing (alternative)**
+### SSH signing (alternative)
 
 ```bash
 git config --global gpg.format ssh
 git config --global user.signingkey ~/.ssh/id_ed25519.pub
 git config --global commit.gpgsign true
+ssh-add -L   # private key must be available via ssh-agent
 # Add the same public key on GitHub as a Signing Key (not only Authentication)
 ```
 
