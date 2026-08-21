@@ -2041,14 +2041,16 @@ class RuleEvaluator:
 
         async def _run_coalesced() -> None:
             try:
-                while True:
+                while not self._stop.is_set():
                     self._pending_device_state_change_keys.discard(key)
                     await self.on_device_state_change(family_id, device_id)
                     if key not in self._pending_device_state_change_keys:
                         return
             finally:
                 self._in_flight_device_state_change_keys.discard(key)
-                if key in self._pending_device_state_change_keys:
+                if self._stop.is_set():
+                    self._pending_device_state_change_keys.discard(key)
+                elif key in self._pending_device_state_change_keys:
                     self._schedule_device_state_change_task(family_id, device_id)
 
         task = loop.create_task(
