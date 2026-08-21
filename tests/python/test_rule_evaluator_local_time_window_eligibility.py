@@ -121,6 +121,70 @@ async def test_local_time_window_eligibility_prompt_when_boot_inside_window(
 
 
 @pytest.mark.asyncio
+async def test_overnight_window_force_refresh_after_midnight_does_not_reprompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forced new-day materialization must not re-fire eligibility mid-overnight window."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    rule = _evening_lux_rule()
+    rule = rule.model_copy(
+        update={
+            "conditions": RuleConditionsOut(
+                all=[
+                    LocalTimeWindowCondition(
+                        type="local_time_window",
+                        start_hhmm="21:00",
+                        end_hhmm="02:00",
+                    ),
+                    *[c for c in rule.conditions.all if c.type != "local_time_window"],
+                ],
+            ),
+        },
+    )
+    _write_bundle(bundle, rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    tz = ZoneInfo("America/New_York")
+    after_midnight = datetime(2023, 11, 15, 0, 30, tzinfo=tz)
+    clock = {"now": after_midnight.timestamp()}
+    _seed_presence_db(db, now=clock["now"])
+    device = _FakeEp1(_MAC, "Office EP1", illuminance_lx=20.0)
+    state = DeviceManagersState(
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        ep1_mgr=_ep1_mgr(device),
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    from app.automation_rules_loader import list_automation_rules
+    from app.rule_evaluator import _RuleRuntimeState
+
+    overnight_rule = next(r for r in list_automation_rules() if r.id == "evening-lux-window")
+    evaluator._rule_state["evening-lux-window"] = _RuleRuntimeState()
+    cron = evaluator._ensure_local_time_window_schedule_materialized(
+        overnight_rule,
+        timezone=tz,
+        now=after_midnight,
+        force=True,
+    )
+    assert cron == "0 21 * * *"
+    next_at = evaluator.next_evaluate_at_for_rule("evening-lux-window")
+    expected = datetime(2023, 11, 15, 21, 0, tzinfo=tz).timestamp()
+    assert next_at == pytest.approx(expected)
+    assert next_at != pytest.approx(clock["now"])
+
+
+@pytest.mark.asyncio
 async def test_after_window_end_reading_wake_conditions_fail(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
