@@ -28,6 +28,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1DeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, evaluate_rule
+from app.rule_evaluator import _notification_detail_from_evaluation
 from app.rule_validation import (
     RuleValidationContext,
     build_roster_user_id_lookup,
@@ -111,6 +112,34 @@ def test_ep1_reading_compare_unmet_when_temperature_not_above() -> None:
     )
     assert result.all_met is False
     assert "not above" in result.conditions[0].detail
+
+
+def test_notification_detail_includes_ep1_illuminance_below_reading_and_threshold() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _ep1_state(_FakeEp1Sensor(_MAC, "Office EP1", illuminance_lx=27.6))
+    rule = _reading_rule(
+        comparison=Ep1ReadingComparison.BELOW,
+        metric=Ep1ReadingMetric.ILLUMINANCE_LX,
+        threshold=34.0,
+    )
+    ctx = _ctx(now=now, device_state=state)
+    detail = _notification_detail_from_evaluation(rule, ctx)
+    assert detail is not None
+    assert format_device_display(_MAC, "Office EP1") in detail
+    assert "27.6lx" in detail
+    assert "below 34lx" in detail
+
+
+def test_notification_detail_omits_ep1_reading_when_compare_unmet() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    state = _ep1_state(_FakeEp1Sensor(_MAC, "Office EP1", illuminance_lx=50.0))
+    rule = _reading_rule(
+        comparison=Ep1ReadingComparison.BELOW,
+        metric=Ep1ReadingMetric.ILLUMINANCE_LX,
+        threshold=34.0,
+    )
+    ctx = _ctx(now=now, device_state=state)
+    assert _notification_detail_from_evaluation(rule, ctx) is None
 
 
 def test_validate_rule_accepts_ep1_reading_compare() -> None:

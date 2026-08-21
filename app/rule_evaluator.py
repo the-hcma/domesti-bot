@@ -19,6 +19,7 @@ from app.api.schemas import (
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
+    Ep1ReadingCompareCondition,
     GeofenceOut,
     RuleConditionOut,
     RuleDeviceActionOut,
@@ -3177,6 +3178,11 @@ def _notification_detail_from_condition(
         )
         and condition.state == DeviceConditionState.OPEN
     ):
+        row = _evaluate_condition(condition, rule, ctx)
+        if row.met:
+            return row.detail
+        return None
+    if isinstance(condition, Ep1ReadingCompareCondition):
         row = _evaluate_condition(condition, rule, ctx)
         if row.met:
             return row.detail
