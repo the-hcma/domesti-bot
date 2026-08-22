@@ -790,14 +790,14 @@ def _resolve_calibration_timezone(timezone_name: str | None) -> ZoneInfo:
     if timezone_name:
         try:
             return ZoneInfo(timezone_name)
-        except ZoneInfoNotFoundError as exc:
+        except (ZoneInfoNotFoundError, ValueError) as exc:
             raise Ep1OvernightCalibrationError(f"Expected a valid IANA timezone, got {timezone_name!r}") from exc
 
     env_tz = (os.environ.get("TZ") or "").strip()
     if env_tz:
         try:
             return ZoneInfo(env_tz)
-        except ZoneInfoNotFoundError:
+        except (ZoneInfoNotFoundError, ValueError):
             pass
 
     system = _system_iana_timezone()
