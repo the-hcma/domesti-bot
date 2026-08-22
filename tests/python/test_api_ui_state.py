@@ -269,7 +269,7 @@ def test_build_ui_state_emits_sonos_between_kasa_and_tailwind() -> None:
     out = build_ui_state(state, cache_path=None)
     assert [f.id for f in out.families] == ["kasa", "sonos", "tailwind"]
     sonos = out.families[1]
-    assert sonos.label == "Sonos zones"
+    assert sonos.label == "Sonos speakers"
     assert sonos.color == "#8B5CF6"
     assert sonos.devices == [
         UIDeviceOut(

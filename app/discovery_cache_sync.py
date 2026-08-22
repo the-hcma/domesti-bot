@@ -243,10 +243,10 @@ def _live_kasa_macs(mgr: KasaDeviceManager, cache_path: Path) -> frozenset[str]:
 
 
 def _live_sonos_uids(mgr: SonosDeviceManager) -> frozenset[str]:
-    """Fingerprint live zones by RINCON uid, matching ``sonos_known_zones.uuid``.
+    """Fingerprint live speakers by RINCON uid, matching ``sonos_known_zones.uuid``.
 
     ``SonosSpeakerDevice.identifier`` is the MAC (primary UI id) and would
-    never match the cache; the zone's host is excluded so a DHCP move alone
+    never match the cache; the speaker's host is excluded so a DHCP move alone
     never looks like roster drift. UIDs are uppercased so mixed-case cache
     rows cannot flap against SoCo's usual uppercase ``.uid``.
     """

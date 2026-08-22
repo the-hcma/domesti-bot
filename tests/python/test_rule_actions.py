@@ -230,7 +230,8 @@ class _FakeSonosZone:
 
     async def pause(self) -> None:
         raise SonosTransitionUnavailableError(
-            "Sonos zone 'Living Room' cannot pause from its current transport state (likely already paused / stopped)."
+            "Sonos speaker 'Living Room' cannot pause from its current transport state "
+            "(likely already paused / stopped)."
         )
 
 

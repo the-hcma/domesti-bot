@@ -7,7 +7,7 @@
 
 A self-hosted home-automation control surface for the devices on your home
 network. `domesti-bot` discovers and controls TP-Link Kasa smart plugs/lights,
-Sonos zones, GoTailwind garage doors, Vizio SmartCast TVs, and Everything
+Sonos speakers, GoTailwind garage doors, Vizio SmartCast TVs, and Everything
 Presence One (EP1) occupancy / climate sensors, then exposes them through a
 tile-based web UI for one-tap control from any phone or laptop on the same LAN.
 
@@ -193,11 +193,11 @@ of the database path; see [`docs/AGENTS.md`](docs/AGENTS.md) for security notes.
 
 After starting the server, the landing page hydrates a tile UI:
 
-![domesti-bot mobile tile UI — Kasa lights, Sonos zones, and global bulk-off](docs/images/domesti-bot-mobile-ui.jpeg)
+![domesti-bot mobile tile UI — Kasa lights, Sonos speakers, and global bulk-off](docs/images/domesti-bot-mobile-ui.jpeg)
 
 *Compact mobile layout on a phone: family sections (green frame = connected), per-device tiles (green = on / playing, red = off / paused), and the global **Turn off / pause / close everything** control at the top.*
 
-- One section per device family (`Lights & plugs`, `Sonos zones`,
+- One section per device family (`Lights & plugs`, `Sonos speakers`,
   `Garage doors`, `Vizio TVs`, occupancy / EP1) with a family-coloured icon and frame.
 - One tile per device. Tap to toggle (on/off, play/pause, open/close) where the
   family supports actions; EP1 tiles are read-only occupancy. The tile updates

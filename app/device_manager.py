@@ -100,7 +100,7 @@ class DoorDeviceManager(DeviceManager[DoorT], ABC):
 
 
 class SpeakerDeviceManager(DeviceManager[SpeakerT], ABC):
-    """Speakers / zones: *pause* / *resume* playback."""
+    """Speakers: *pause* / *resume* playback."""
 
     def device_label(self, identifier: str) -> str:
         """Return the display label for *identifier* (raises on unknown id)."""

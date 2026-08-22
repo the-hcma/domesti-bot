@@ -390,7 +390,7 @@ def save_tailwind_host(path: Path, host: str, *, mac: str | None = None) -> None
 def load_sonos_zones(path: Path) -> list[tuple[str, str, str | None, str | None]]:
     """Return ``(uuid, host, zone_name, mac)`` rows ordered by zone_name.
 
-    The UUID (e.g. ``RINCON_…``) is the secondary Sonos zone identifier; ``host`` is
+    The UUID (e.g. ``RINCON_…``) is the secondary Sonos speaker identifier; ``host`` is
     the last known LAN address (may drift with DHCP) and ``zone_name`` is the
     user-facing label (e.g. ``"Living Room"``). ``mac`` is preferred as the UI /
     prefs canonical key when known. Cache consumers reconnect with

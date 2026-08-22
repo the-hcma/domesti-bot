@@ -60,7 +60,7 @@ _LOGGER = logging.getLogger(__name__)
 _FAMILIES: tuple[tuple[str, str, str], ...] = (
     ("ep1", "Everything Presence One", "#0EA5E9"),
     ("kasa", "Lights & plugs", "#3B82F6"),
-    ("sonos", "Sonos zones", "#8B5CF6"),
+    ("sonos", "Sonos speakers", "#8B5CF6"),
     ("vizio", "Vizio TVs", "#F97316"),
     ("tailwind", "Garage doors", "#10B981"),
 )
@@ -102,21 +102,21 @@ async def _bulk_pause_sonos_apply_impl(
     *,
     excluded: set[str],
 ) -> tuple[list[str], list[str]]:
-    """Iterate Sonos zones, pause non-excluded *playing* ones, return ``(affected, skipped)``.
+    """Iterate Sonos speakers, pause non-excluded *playing* ones, return ``(affected, skipped)``.
 
-    Zones with ``is_playing is False`` (already paused) are left alone.
-    Zones with ``is_playing is None`` (no poll yet) still get a
-    ``pause`` attempt so global all-off can catch a zone that is
-    playing before the first watcher tick. Excluded zones are reported
+    Speakers with ``is_playing is False`` (already paused) are left alone.
+    Speakers with ``is_playing is None`` (no poll yet) still get a
+    ``pause`` attempt so global all-off can catch a speaker that is
+    playing before the first watcher tick. Excluded speakers are reported
     in ``skipped`` even when they are already paused, matching the
     kasa helper's convention so the UI can honestly say "X devices
     weren't touched because you excluded them".
 
-    A zone that raises :class:`SonosTransitionUnavailableError` (UPnP
-    701 — the zone drifted out of ``PLAYING`` between our last poll
+    A speaker that raises :class:`SonosTransitionUnavailableError` (UPnP
+    701 — the speaker drifted out of ``PLAYING`` between our last poll
     and this call) is logged at warning and dropped from both lists:
-    the zone isn't truly excluded (the user didn't ask for it to be),
-    and we didn't actually pause it either. One stuck zone must not
+    the speaker isn't truly excluded (the user didn't ask for it to be),
+    and we didn't actually pause it either. One stuck speaker must not
     take down a global "Turn off / pause / close everything" action.
     """
 
@@ -136,7 +136,7 @@ async def _bulk_pause_sonos_apply_impl(
             await sp.pause()
         except SonosTransitionUnavailableError as exc:
             _LOGGER.warning(
-                "[ui bulk-pause] %s: skipping zone, Sonos refused pause (%s)",
+                "[ui bulk-pause] %s: skipping speaker, Sonos refused pause (%s)",
                 key,
                 exc,
             )
@@ -424,9 +424,9 @@ def _sonos_devices(
     excluded: set[str],
     hidden_on_mobile: set[str],
 ) -> list[UIDeviceOut]:
-    """One :class:`UIDeviceOut` per Sonos zone.
+    """One :class:`UIDeviceOut` per Sonos speaker.
 
-    Canonical key is the zone's MAC address (from ``RINCON_…`` or ARP). ``state`` is
+    Canonical key is the speaker's MAC address (from ``RINCON_…`` or ARP). ``state`` is
     derived from the cached :attr:`SonosSpeakerDevice.is_playing` flag —
     ``None`` (no poll yet) becomes ``"unknown"`` so the UI never blocks
     on a live UPnP call just to render a tile.
@@ -614,10 +614,10 @@ def build_sonos_device_view(
     device_id: str,
     cache_path: Path | None,
 ) -> UIDeviceOut:
-    """Build a fresh :class:`UIDeviceOut` for one Sonos zone after an action.
+    """Build a fresh :class:`UIDeviceOut` for one Sonos speaker after an action.
 
     Symmetric to :func:`build_kasa_device_view`. Raises :class:`KeyError`
-    when ``device_id`` doesn't match a known zone (the route handler
+    when ``device_id`` doesn't match a known speaker (the route handler
     maps that to a 404). Reads the cached
     :attr:`SonosSpeakerDevice.is_playing` rather than triggering a live
     UPnP call — the action handler updates the cache before this
@@ -802,8 +802,8 @@ async def bulk_off_global_apply(
     the global action spans families. Per-family translation:
 
     * ``kasa`` → ``turn_off`` for every non-excluded switch.
-    * ``sonos`` → ``pause`` for every non-excluded zone that's
-      currently playing (paused / unknown zones are left alone).
+    * ``sonos`` → ``pause`` for every non-excluded speaker that's
+      currently playing (paused / unknown speakers are left alone).
     * ``tailwind`` → ``close`` for every non-excluded door.
     * ``vizio`` → ``turn_off`` for every non-excluded TV.
 
@@ -866,10 +866,10 @@ async def bulk_off_vizio_apply(
 async def bulk_pause_sonos_apply(
     state: DeviceManagersState,
 ) -> tuple[list[str], list[str]]:
-    """Family-level "pause all Sonos zones" — ignores per-device exclusions.
+    """Family-level "pause all Sonos speakers" — ignores per-device exclusions.
 
-    Only currently-playing zones are paused; already-paused or
-    unknown-state zones drop out of the iteration without an extra LAN
+    Only currently-playing speakers are paused; already-paused or
+    unknown-state speakers drop out of the iteration without an extra LAN
     round-trip. When the Sonos manager isn't configured
     (``state.sonos_mgr is None``), both lists are empty.
     """
@@ -945,7 +945,7 @@ def find_kasa_by_id(mgr: KasaDeviceManager, device_id: str) -> KasaDevice | None
 
 
 def find_sonos_by_identifier(mgr: SonosDeviceManager, device_id: str) -> SonosSpeakerDevice | None:
-    """Look up a Sonos zone by MAC, ``RINCON_…`` UID, or identifier."""
+    """Look up a Sonos speaker by MAC, ``RINCON_…`` UID, or identifier."""
 
     needle = device_id.strip()
     if not needle:

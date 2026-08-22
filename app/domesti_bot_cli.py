@@ -1,4 +1,4 @@
-"""Interactive REPL for Google Cast, TP-Link Kasa switches, Sonos zones, and GoTailwind doors.
+"""Interactive REPL for Google Cast, TP-Link Kasa switches, Sonos speakers, and GoTailwind doors.
 
 Run::
 
@@ -17,7 +17,7 @@ Credentials:
   ``domesti-bot.config.json`` at the repo root (gitignored) or ``DOMESTI_BOT_SECRETS_KEY`` in the
   environment. Use the ``setup-secrets`` REPL command to create the JSON file.
 
-* **Sonos**: zones on your LAN (S1-class UPnP stacks included) via optional ``soco``;
+* **Sonos**: speakers on your LAN (S1-class UPnP stacks included) via optional ``soco``;
   use ``pause`` / ``resume`` in the REPL. Pass ``--no-sonos`` to skip discovery.
 
 * **Google Cast (Chromecast / Google TV / …)** — **PyChromecast** only (no ADB). ``is-on`` treats
@@ -179,7 +179,7 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
         "persist to encrypted storage when configured, and rediscover.",
     ),
     ("open-door", "Tell Tailwind to fully open a door."),
-    ("pause", "Pause playback on a Sonos zone."),
+    ("pause", "Pause playback on a Sonos speaker."),
     ("quit", "Leave the REPL (same as exit)."),
     (
         "read-ep1",
@@ -187,7 +187,7 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ),
     ("refresh", "Reconnect all backends; Kasa may reuse cached discovery."),
     ("refresh-discovery", "Full LAN discovery: Google Cast, EP1, Kasa, Sonos, Tailwind, Vizio."),
-    ("resume", "Resume playback on a Sonos zone."),
+    ("resume", "Resume playback on a Sonos speaker."),
     ("set-display-name", "Save a friendly label for a device (SQLite cache required)."),
     (
         "setup-secrets",
@@ -266,13 +266,13 @@ _FAMILY_BOOT_LABEL: dict[str, str] = {
     "vizio": "Vizio",
 }
 # Plural unit name used in the per-backend "ready" line. Singular forms are not
-# needed because the count is shown as a bare integer (``"0 zones"``, ``"1 zones"``).
+# needed because the count is shown as a bare integer (``"0 speakers"``, ``"1 speakers"``).
 _FAMILY_UNIT_PLURAL: dict[str, str] = {
     "androidtv": "devices",
     "ep1": "sensors",
     "gotailwind": "doors",
     "kasa": "switches",
-    "sonos": "zones",
+    "sonos": "speakers",
     "vizio": "TVs",
 }
 # Human-friendly label for the ``last_discovery_source`` signal each backend
@@ -1705,7 +1705,7 @@ async def _repl_cmd_show_devices(
                 )
         except NotInitializedError:
             print(theme.dim("  (not available)"))
-    print(theme.header("Sonos zones:"))
+    print(theme.header("Sonos speakers:"))
     if discovery is not None and discovery.families_pending("sonos"):
         print(theme.dim(f"  ({COMPLETION_DISCOVERING_HINT})"))
     elif sonos_mgr is None:
@@ -1827,13 +1827,13 @@ async def _repl_cmd_sonos_pause_resume(
     triples_pb = _collect_media_triples(sonos_mgr)
     if not triples_pb:
         print(
-            theme.err("No Sonos zones loaded (omit --no-sonos or check LAN discovery)."),
+            theme.err("No Sonos speakers loaded (omit --no-sonos or check LAN discovery)."),
             file=sys.stderr,
         )
         return
     api_id, amb, meta = _resolve_cli_target(arg.strip(), triples_pb)
     if api_id is None or meta is None:
-        _report_resolve_failure(theme, "Sonos zone", arg.strip(), amb)
+        _report_resolve_failure(theme, "Sonos speaker", arg.strip(), amb)
         return
     if sonos_mgr is None:
         print(theme.err("Sonos not configured."), file=sys.stderr)
@@ -2199,7 +2199,7 @@ async def dispatch_repl_action(
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (
-            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
+            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), {nz} Sonos speaker(s), "
             f"{nd} Tailwind door(s), {nv} Vizio TV(s))."
         )
         print(f"{theme.ok(REFRESH_DONE_PREFIX)} {theme.dim(tail)}")
@@ -2435,7 +2435,7 @@ async def dispatch_repl_action(
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (
-            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), {nz} Sonos zone(s), "
+            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), {nz} Sonos speaker(s), "
             f"{nd} Tailwind door(s), {nv} Vizio TV(s))."
         )
         print(f"{theme.ok('Discovery refreshed')} {theme.dim(tail)}")
@@ -3383,7 +3383,7 @@ async def bootstrap_device_managers(
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (
-            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {ns} Kasa switch(es), {nz} Sonos zone(s), "
+            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {ns} Kasa switch(es), {nz} Sonos speaker(s), "
             f"{nd} Tailwind door(s), {nv} Vizio TV(s)). Tab-complete commands and names."
         )
         print(f"{theme.ok('Ready')} {theme.dim(tail)}", flush=True)
@@ -3506,7 +3506,7 @@ async def _async_main_remote(args: argparse.Namespace) -> None:
 
 def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description=("Interactive REPL for Google Cast, Kasa switches, Sonos zones, and GoTailwind garage doors."),
+        description=("Interactive REPL for Google Cast, Kasa switches, Sonos speakers, and GoTailwind garage doors."),
         add_help=add_help,
     )
     p.add_argument(
@@ -3611,7 +3611,7 @@ def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argp
     p.add_argument(
         "--no-sonos",
         action="store_true",
-        help="Do not discover or control Sonos zones",
+        help="Do not discover or control Sonos speakers",
     )
     p.add_argument(
         "--no-androidtv",

@@ -17,7 +17,7 @@ export const DAY_OF_WEEK_LABELS = [
 
 export const FAMILY_ACTION_GROUP_LABELS: Record<string, string> = {
   kasa: "Lights & plugs",
-  sonos: "Sonos zones",
+  sonos: "Sonos speakers",
   tailwind: "Garage doors",
 };
 

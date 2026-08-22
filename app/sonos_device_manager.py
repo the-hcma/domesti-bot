@@ -1,4 +1,4 @@
-"""Sonos zone control via SoCo (UPnP over the LAN).
+"""Sonos speaker control via SoCo (UPnP over the LAN).
 
 Compatible with **S1-era and newer** households that expose the classic Sonos SOAP API on the
 local network (the same stack SoCo targets). Discovery uses UDP; playback calls are run in a
@@ -6,9 +6,9 @@ thread pool so async callers are not blocked.
 
 Cache-first startup mirrors :mod:`app.kasa_device_manager`: when a SQLite
 ``discovery_cache_path`` is supplied, :meth:`SonosDeviceManager.fetch` reconnects
-each cached zone by host and verifies ``SoCo.uid`` matches the cached UUID
+each cached speaker by host and verifies ``SoCo.uid`` matches the cached UUID
 before trusting it. The UDP discovery path runs only when the cache is empty,
-the user passes ``force_discovery=True``, or any cached zone fails to reconnect
+the user passes ``force_discovery=True``, or any cached speaker fails to reconnect
 / returns an unexpected UID (e.g. a Sonos rebind after DHCP churn).
 
 Requires the optional ``soco`` dependency (see ``pyproject.toml``).
@@ -50,9 +50,9 @@ _SONOS_TRANSPORT_LABELS: dict[str, str] = {
 
 # UPnP fault code Sonos returns when the requested transport transition
 # cannot proceed from the *current* state. Common triggers: ``Play`` on
-# a zone with an empty queue / no media source, ``Pause`` on a zone
+# a speaker with an empty queue / no media source, ``Pause`` on a speaker
 # that has already drifted out of ``PLAYING`` between our last poll and
-# the click, or any action on a zone that is mid-``TRANSITIONING``.
+# the click, or any action on a speaker that is mid-``TRANSITIONING``.
 # The code itself is a string in :mod:`soco` (see ``SoCoUPnPException``
 # docstring) — keep the comparison stringly-typed and defensive.
 _SONOS_UPNP_TRANSITION_UNAVAILABLE = "701"
@@ -64,7 +64,7 @@ class SonosTransitionUnavailableError(Exception):
     Wraps :class:`soco.exceptions.SoCoUPnPException` with fault code
     701 ("Transition not available") so the HTTP layer can surface a
     helpful 409 rather than a generic 500, and so the bulk-pause helper
-    can skip the offending zone without taking the whole batch down.
+    can skip the offending speaker without taking the whole batch down.
     The original exception is available via ``__cause__`` for logging.
     """
 
@@ -127,7 +127,7 @@ class SonosSpeakerDevice(SpeakerDevice):
             await asyncio.to_thread(self._soco.pause)
         except SoCoUPnPException as exc:
             if str(getattr(exc, "error_code", "")) == _SONOS_UPNP_TRANSITION_UNAVAILABLE:
-                # Sonos refused the pause — typically because the zone
+                # Sonos refused the pause — typically because the speaker
                 # has already drifted out of PLAYING (queue ended,
                 # someone hit pause on the phone app between our last
                 # poll and this click). Refresh from a live UPnP read
@@ -135,7 +135,7 @@ class SonosSpeakerDevice(SpeakerDevice):
                 # error the endpoint maps to 409.
                 await self.update_playback_state()
                 raise SonosTransitionUnavailableError(
-                    f"Sonos zone {self.preferred_label!r} cannot pause from "
+                    f"Sonos speaker {self.preferred_label!r} cannot pause from "
                     f"its current transport state (likely already paused / stopped)."
                 ) from exc
             raise
@@ -165,9 +165,9 @@ class SonosSpeakerDevice(SpeakerDevice):
                 if str(getattr(exc, "error_code", "")) == _SONOS_UPNP_TRANSITION_UNAVAILABLE:
                     await self.update_playback_state()
                     raise SonosTransitionUnavailableError(
-                        f"Sonos zone {self.preferred_label!r} cannot resume "
+                        f"Sonos speaker {self.preferred_label!r} cannot resume "
                         f"{favorite.name!r} — the stream may be unavailable or the "
-                        f"zone is mid-transition."
+                        f"speaker is mid-transition."
                     ) from exc
                 raise
             self._is_playing = True
@@ -178,13 +178,13 @@ class SonosSpeakerDevice(SpeakerDevice):
             if str(getattr(exc, "error_code", "")) == _SONOS_UPNP_TRANSITION_UNAVAILABLE:
                 # Most common trigger here is an empty queue: Sonos has
                 # nothing to play, so ``Play`` is rejected with UPnP
-                # 701. Less common: the zone is mid-TRANSITIONING.
+                # 701. Less common: the speaker is mid-TRANSITIONING.
                 # Refresh the cache from UPnP so the tile shows the
-                # zone's real state, then raise a domain error the
+                # speaker's real state, then raise a domain error the
                 # endpoint maps to 409.
                 await self.update_playback_state()
                 raise SonosTransitionUnavailableError(
-                    f"Sonos zone {self.preferred_label!r} has nothing to resume. "
+                    f"Sonos speaker {self.preferred_label!r} has nothing to resume. "
                     f"Configure a stream favorite in domesti-bot.config.json or start "
                     f"playback from the Sonos app first."
                 ) from exc
@@ -193,7 +193,7 @@ class SonosSpeakerDevice(SpeakerDevice):
 
     @property
     def stream_favorites(self) -> tuple[SonosStreamFavorite, ...]:
-        """Configured radio streams for this zone (from ``domesti-bot.config.json``)."""
+        """Configured radio streams for this speaker (from ``domesti-bot.config.json``)."""
 
         return self._stream_favorites
 
@@ -230,7 +230,7 @@ class SonosSpeakerDevice(SpeakerDevice):
         """Refresh :attr:`is_playing` from a live UPnP transport read.
 
         Used by :class:`app.device_state_watcher.SonosPollingWatcher` and
-        any code that needs to know "is this zone currently making
+        any code that needs to know "is this speaker currently making
         noise" without committing to the verbose label. Failures are
         swallowed (logged by the caller); the cache keeps its last
         known value so transient LAN blips don't flicker the tile.
@@ -238,12 +238,12 @@ class SonosSpeakerDevice(SpeakerDevice):
 
         # ``transport_state_summary`` already runs the UPnP call in the
         # event-loop thread (it's synchronous), so push it to a worker
-        # to avoid blocking the loop for slow zones.
+        # to avoid blocking the loop for slow speakers.
         await asyncio.to_thread(self.transport_state_summary)
 
 
 class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
-    """Discover zones with SoCo and drive *pause* / *resume* per zone.
+    """Discover speakers with SoCo and drive *pause* / *resume* per speaker.
 
     Pass ``discovery_cache_path`` to enable cache-first startup. Set
     ``force_discovery=True`` to bypass the cache (matches
@@ -262,7 +262,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         self._discovery_cache_path = Path(discovery_cache_path).expanduser().resolve() if discovery_cache_path else None
         self._force_discovery = bool(force_discovery)
         self._stream_favorites = load_sonos_stream_favorites()
-        # Set by :meth:`fetch` to ``"cache"`` (every cached zone reconnected
+        # Set by :meth:`fetch` to ``"cache"`` (every cached speaker reconnected
         # with a matching UID, no UDP traffic) or ``"discovery"`` (full
         # ``soco_discover`` UDP sweep). ``None`` before the first ``fetch``.
         self._last_discovery_source: str | None = None
@@ -272,7 +272,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             raise NotInitializedError
         d = self._alias_to_device.get(identifier)
         if d is None:
-            raise ValueError(f"Unknown Sonos zone: {identifier!r}")
+            raise ValueError(f"Unknown Sonos speaker: {identifier!r}")
         return d
 
     def _expand_lookup(self, devices: list[SonosSpeakerDevice]) -> dict[str, SonosSpeakerDevice]:
@@ -334,7 +334,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         device_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
 
     async def _retain_arp_visible_cached_zones(self, devices: list[SonosSpeakerDevice]) -> None:
-        """Keep cached zone MACs that still answer ARP when SSDP missed them."""
+        """Keep cached speaker MACs that still answer ARP when SSDP missed them."""
 
         if self._discovery_cache_path is None:
             return
@@ -367,11 +367,11 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             )
 
     async def _prime_playback_states(self, devices: list[SonosSpeakerDevice]) -> None:
-        """One concurrent UPnP transport read per zone after discovery.
+        """One concurrent UPnP transport read per speaker after discovery.
 
         Fills :attr:`SonosSpeakerDevice.is_playing` before the first UI
         poll so tiles are not stuck on ``unknown`` until the watcher
-        runs. Failures are swallowed per zone (``return_exceptions``).
+        runs. Failures are swallowed per speaker (``return_exceptions``).
         """
 
         if not devices:
@@ -382,7 +382,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         )
 
     async def _reconnect_from_cache(self) -> list[SonosSpeakerDevice] | None:
-        """Return cached zones if every row reconnects with a matching UID; ``None`` otherwise."""
+        """Return cached speakers if every row reconnects with a matching UID; ``None`` otherwise."""
 
         if self._discovery_cache_path is None:
             return None
@@ -394,7 +394,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             try:
                 zone = SoCo(host)
                 # Accessing ``.uid`` triggers a UPnP fetch; if the host moved
-                # or the zone vanished, this raises and we fall back to UDP.
+                # or the speaker vanished, this raises and we fall back to UDP.
                 actual = (zone.uid or "").strip()
             except Exception as exc:
                 _LOGGER.debug(
@@ -446,7 +446,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 mac = lookup_mac_via_arp(host)
         if mac is None:
             _LOGGER.warning(
-                "Skipping Sonos zone %s — MAC address required (RINCON/ARP miss)",
+                "Skipping Sonos speaker %s — MAC address required (RINCON/ARP miss)",
                 uid,
             )
             return None
@@ -506,12 +506,12 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         return self._alias_to_device.get(identifier)
 
     async def is_playing(self, identifier: str) -> bool | None:
-        """Refresh and return the zone's cached playback flag.
+        """Refresh and return the speaker's cached playback flag.
 
         Mirrors :meth:`KasaDeviceManager.is_on` so the polling watcher
         (:class:`app.device_state_watcher.SonosPollingWatcher`) follows
         the same shape as the kasa one. Returns ``None`` when the
-        single UPnP read failed; the zone's cached
+        single UPnP read failed; the speaker's cached
         :attr:`SonosSpeakerDevice.is_playing` keeps its previous value
         in that case.
         """
@@ -570,11 +570,11 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             self._force_discovery = previous
 
     async def reload_from_cache(self) -> bool:
-        """Replace the in-memory zone map from SQLite only (never SSDP/UDP).
+        """Replace the in-memory speaker map from SQLite only (never SSDP/UDP).
 
         On success the lookup map is replaced and the discovery table is **not**
         rewritten (the CLI owns those writes). Returns ``False`` (keeping the
-        prior map) when the cache is empty or any cached zone fails to reconnect.
+        prior map) when the cache is empty or any cached speaker fails to reconnect.
         """
 
         if self._discovery_cache_path is None:
@@ -599,7 +599,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         self._last_discovery_source = "cache"
         await self._prime_playback_states(devices)
         _LOGGER.info(
-            "Sonos reload_from_cache: replaced device map from cache (%d zone(s))",
+            "Sonos reload_from_cache: replaced device map from cache (%d speaker(s))",
             len(self.players),
         )
         return True

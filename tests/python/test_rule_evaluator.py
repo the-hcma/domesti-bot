@@ -1525,7 +1525,7 @@ async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors
             "app.rule_evaluator.dispatch_rule_device_actions",
             return_value=RuleDeviceDispatchResult(
                 action_outcomes=(),
-                errors=("Sonos zone 'Living Room' skipped: already paused",),
+                errors=("Sonos speaker 'Living Room' skipped: already paused",),
                 probable_successes=(),
             ),
         ),
