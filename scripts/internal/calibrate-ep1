@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Overnight empty-room calibrator for EP1 occupancy false positives.
+
+During a local-time window when the room is known empty (default midnight–6am),
+watches the occupancy binary. Any occupied reading is a false positive; the
+script then lowers one mmWave knob (or raises on-latency), logs the change to
+JSONL under ``$HOME/scratch/domesti-bot/ep1-overnight-calibration/``, and
+continues until consecutive clear observation windows succeed.
+
+Examples::
+
+  ./scripts/internal/calibrate-ep1 --list-devices
+  ./scripts/internal/calibrate-ep1 --device-id aa:bb:cc:dd:ee:ff --wait-for-window
+  ./scripts/internal/calibrate-ep1 --force-window --once --dry-run --observe-s 15
+  ./scripts/internal/calibrate-ep1 --window-start 0 --window-end 6 --clear-streak 3
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+import shutil
+import sys
+from pathlib import Path
+
+
+def _ensure_uv() -> None:
+    if os.environ.get("UV_ACTIVE") or "/.venv/" in (sys.executable or ""):
+        return
+    uv = shutil.which("uv")
+    if uv:
+        os.environ["UV_ACTIVE"] = "1"
+        os.execv(uv, [uv, "run", sys.argv[0], *sys.argv[1:]])
+
+
+_ensure_uv()
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from app.domesti_bot_cli import DEFAULT_DISCOVERY_DB  # noqa: E402
+from app.ep1_calibration import list_ep1_settings_targets  # noqa: E402
+from app.ep1_overnight_calibration import (  # noqa: E402
+    DEFAULT_CLEAR_STREAK_REQUIRED,
+    DEFAULT_OBSERVE_S,
+    DEFAULT_SETTLE_S,
+    DEFAULT_WINDOW_END_HOUR,
+    DEFAULT_WINDOW_START_HOUR,
+    Ep1OvernightCalibrationError,
+    Ep1OvernightCalibrationOutsideWindowError,
+    OvernightCalibrationRunResult,
+    default_calibration_log_path,
+    install_overnight_calibration_stop_signals,
+    remove_overnight_calibration_stop_signals,
+    run_overnight_ep1_calibration,
+    select_ep1_calibration_target,
+)
+from app.logging_config import apply_logging_from_env  # noqa: E402
+
+
+def main() -> int:
+    """Parse CLI flags and run the overnight calibrator."""
+    args = _parse_args()
+    apply_logging_from_env()
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        logging.getLogger("aioesphomeapi").setLevel(logging.WARNING)
+
+    cache_path = Path(args.discovery_cache).expanduser().resolve()
+    if args.list_devices:
+        targets = list_ep1_settings_targets(cache_path=cache_path)
+        if not targets:
+            print("No EP1 devices in discovery cache.", file=sys.stderr)
+            return 1
+        for target in targets:
+            print(f"{target.device_id}\t{target.display_label}\t{target.host}:{target.port}")
+        return 0
+
+    try:
+        target = select_ep1_calibration_target(args.device_id, cache_path=cache_path)
+    except Ep1OvernightCalibrationError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if args.log_file:
+        log_path = Path(args.log_file).expanduser()
+    else:
+        log_path = default_calibration_log_path(device_id=target.device_id)
+    max_cycles = 1 if args.once else args.max_cycles
+
+    # ``display_label`` is already ``preferred_label (mac)`` from Settings targets.
+    print(
+        f"Calibrating {target.display_label} at {target.host}:{target.port}\n"
+        f"  window={args.window_start:02d}:00–{args.window_end:02d}:00 local "
+        f"force_window={args.force_window} wait_for_window={args.wait_for_window} "
+        f"dry_run={args.dry_run}\n"
+        f"  observe_s={args.observe_s:g} settle_s={args.settle_s:g} "
+        f"clear_streak={args.clear_streak} max_cycles={max_cycles}\n"
+        f"  log={log_path}",
+        flush=True,
+    )
+
+    try:
+        result = asyncio.run(
+            _run_calibration(
+                args=args,
+                cache_path=cache_path,
+                device_id=target.device_id,
+                log_path=log_path,
+                max_cycles=max_cycles,
+            )
+        )
+    except Ep1OvernightCalibrationOutsideWindowError as exc:
+        print(str(exc), file=sys.stderr)
+        print("Hint: re-run with --force-window for a daytime dry-run / one-shot.", file=sys.stderr)
+        return 3
+    except Ep1OvernightCalibrationError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    print(
+        f"Done: success={result.success} cycles={result.cycles} "
+        f"false_positives={result.false_positives} clear_streak={result.clear_streak} "
+        f"exhausted={result.exhausted} window_ended={result.window_ended} "
+        f"interrupted={result.interrupted}",
+        flush=True,
+    )
+    if result.interrupted:
+        return 143
+    if result.success:
+        return 0
+    if result.exhausted:
+        return 4
+    if result.window_ended:
+        return 5
+    return 1
+
+
+async def _run_calibration(
+    *,
+    args: argparse.Namespace,
+    cache_path: Path,
+    device_id: str,
+    log_path: Path,
+    max_cycles: int | None,
+) -> OvernightCalibrationRunResult:
+    stop_event = asyncio.Event()
+    install_overnight_calibration_stop_signals(stop_event)
+    try:
+        return await run_overnight_ep1_calibration(
+            device_id=device_id,
+            cache_path=cache_path,
+            clear_streak_required=args.clear_streak,
+            dry_run=args.dry_run,
+            force_window=args.force_window,
+            log_path=log_path,
+            max_cycles=max_cycles,
+            observe_s=args.observe_s,
+            settle_s=args.settle_s,
+            stop_event=stop_event,
+            timezone_name=args.timezone,
+            wait_for_window=args.wait_for_window,
+            window_end_hour=args.window_end,
+            window_start_hour=args.window_start,
+        )
+    finally:
+        remove_overnight_calibration_stop_signals()
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--clear-streak",
+        default=DEFAULT_CLEAR_STREAK_REQUIRED,
+        type=int,
+        help=f"Consecutive clear observation windows required (default: {DEFAULT_CLEAR_STREAK_REQUIRED})",
+    )
+    parser.add_argument(
+        "--device-id",
+        default=None,
+        help="EP1 MAC / device_id (required when more than one EP1 is known)",
+    )
+    parser.add_argument(
+        "--discovery-cache",
+        default=str(DEFAULT_DISCOVERY_DB),
+        help=f"SQLite discovery cache path (default: {DEFAULT_DISCOVERY_DB})",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Log proposed knob changes without writing them to the device",
+    )
+    parser.add_argument(
+        "--force-window",
+        action="store_true",
+        help="Ignore the empty-room time window (for daytime smoke tests)",
+    )
+    parser.add_argument(
+        "--list-devices",
+        action="store_true",
+        help="Print known EP1 targets from the discovery cache and exit",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="JSONL log path (default: under $HOME/scratch/domesti-bot/ep1-overnight-calibration/)",
+    )
+    cycle_limit = parser.add_mutually_exclusive_group()
+    cycle_limit.add_argument(
+        "--max-cycles",
+        default=None,
+        type=int,
+        help="Stop after N observe/adjust cycles (default: run until success or window end)",
+    )
+    cycle_limit.add_argument(
+        "--once",
+        action="store_true",
+        help="Shorthand for --max-cycles 1",
+    )
+    parser.add_argument(
+        "--observe-s",
+        default=DEFAULT_OBSERVE_S,
+        type=float,
+        help=f"Seconds to watch occupancy per cycle (default: {DEFAULT_OBSERVE_S:g})",
+    )
+    parser.add_argument(
+        "--settle-s",
+        default=DEFAULT_SETTLE_S,
+        type=float,
+        help=f"Seconds to wait after applying a knob change (default: {DEFAULT_SETTLE_S:g})",
+    )
+    parser.add_argument(
+        "--timezone",
+        default=None,
+        help="IANA timezone for the empty-room window (default: system local)",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable DEBUG logging",
+    )
+    parser.add_argument(
+        "--wait-for-window",
+        action="store_true",
+        help="If outside the empty-room window, sleep until it opens (instead of exiting)",
+    )
+    parser.add_argument(
+        "--window-end",
+        default=DEFAULT_WINDOW_END_HOUR,
+        type=int,
+        help=f"Local hour when the empty-room window ends (default: {DEFAULT_WINDOW_END_HOUR})",
+    )
+    parser.add_argument(
+        "--window-start",
+        default=DEFAULT_WINDOW_START_HOUR,
+        type=int,
+        help=f"Local hour when the empty-room window starts (default: {DEFAULT_WINDOW_START_HOUR})",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
