@@ -1080,7 +1080,7 @@ function bulkOffAlreadyDoneMessage(scope: BulkOffScope): string {
     case BulkOffScope.Kasa:
       return "All lights and plugs are already off.";
     case BulkOffScope.Sonos:
-      return "All Sonos zones are already paused.";
+      return "All Sonos speakers are already paused.";
     case BulkOffScope.Tailwind:
       return "All garage doors are already closed.";
     case BulkOffScope.Vizio:
@@ -1149,8 +1149,8 @@ function bulkOffSuccessMessage(
           : `Turned off ${String(affectedCount)} lights and plugs.`;
       case BulkOffScope.Sonos:
         return affectedCount === 1
-          ? "Paused 1 zone."
-          : `Paused ${String(affectedCount)} zones.`;
+          ? "Paused 1 speaker."
+          : `Paused ${String(affectedCount)} speakers.`;
       case BulkOffScope.Tailwind:
         return affectedCount === 1
           ? "Closed 1 garage door."

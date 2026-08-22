@@ -121,7 +121,7 @@ export interface UIDeviceOut {
   unresponsive?: boolean;
   /** Temperature / humidity / illuminance for occupancy tiles; null otherwise. */
   occupancy_readings?: UIOccupancyReadingsOut | null;
-  /** Configured radio streams for Sonos zones (empty for other families). */
+  /** Configured radio streams for Sonos speakers (empty for other families). */
   stream_favorites: UISonosStreamFavoriteOut[];
 }
 

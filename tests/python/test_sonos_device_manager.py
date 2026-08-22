@@ -162,7 +162,7 @@ async def test_fetch_skips_udp_when_cache_warm(tmp_path: Path) -> None:
 async def test_fetch_cache_hit_uses_live_zone_name_over_stale_cache_label(
     tmp_path: Path,
 ) -> None:
-    """Renamed Sonos zones must show the current ``player_name``, not SQLite ``zone_name``."""
+    """Renamed Sonos speakers must show the current ``player_name``, not SQLite ``zone_name``."""
 
     db = tmp_path / "sonos.sqlite"
     device_discovery_store.save_sonos_zones(
@@ -254,7 +254,7 @@ async def test_fetch_falls_back_when_cached_host_unreachable(tmp_path: Path) -> 
 
     discover.assert_called_once()
     assert [p.identifier for p in mgr.players] == ["aa:aa:aa:aa:aa:aa"]
-    # Cache rewritten with the new host the zone is at.
+    # Cache rewritten with the new host the speaker is at.
     assert device_discovery_store.load_sonos_zones(db) == [
         ("RINCON_AAAAAAAAAAAA01400", "10.0.0.55", "Office", "aa:aa:aa:aa:aa:aa"),
     ]
@@ -338,7 +338,7 @@ async def test_fetch_persists_cache_after_udp_discovery(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_primes_is_playing_cache() -> None:
-    """After discovery, zones should have a definite playback flag so the
+    """After discovery, speakers should have a definite playback flag so the
     first UI poll is not stuck on yellow ``unknown``."""
 
     zone = MagicMock(
@@ -486,7 +486,7 @@ async def test_pause_raises_domain_error_on_upnp_701() -> None:
         await dev.pause()
     assert isinstance(exc_info.value.__cause__, SoCoUPnPException)
     # The handler refreshes from a live UPnP read so the cache mirrors
-    # truth (the zone is stopped → not playing) before returning to
+    # truth (the speaker is stopped → not playing) before returning to
     # the caller. Without this, the optimistic UI flip would leave a
     # stale ``is_playing=True`` value in place.
     assert dev.is_playing is False
@@ -505,7 +505,7 @@ async def test_pause_propagates_non_701_upnp_errors() -> None:
 @pytest.mark.asyncio
 async def test_resume_raises_domain_error_on_upnp_701_empty_queue() -> None:
     """The original 500 the user reported. UPnP 701 on play() means
-    the zone has nothing to play (empty queue or mid-transition);
+    the speaker has nothing to play (empty queue or mid-transition);
     callers see a clean domain exception they can map to 409."""
 
     zone = MagicMock(uid="u1", player_name="Living Room")
@@ -520,7 +520,7 @@ async def test_resume_raises_domain_error_on_upnp_701_empty_queue() -> None:
     assert "Living Room" in str(exc_info.value)
     assert "nothing to resume" in str(exc_info.value).lower()
     assert isinstance(exc_info.value.__cause__, SoCoUPnPException)
-    # Cache reflects reality after the failed action — the zone is
+    # Cache reflects reality after the failed action — the speaker is
     # stopped, not playing.
     assert dev.is_playing is False
 

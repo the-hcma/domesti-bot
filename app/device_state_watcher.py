@@ -278,16 +278,16 @@ class KasaPollingWatcher(DeviceStateWatcher):
 
 
 class SonosPollingWatcher(DeviceStateWatcher):
-    """Periodically re-read every Sonos zone's playback state.
+    """Periodically re-read every Sonos speaker's playback state.
 
     Drives refresh through :meth:`SonosDeviceManager.is_playing`, which
-    calls the zone's :meth:`SonosSpeakerDevice.update_playback_state`
+    calls the speaker's :meth:`SonosSpeakerDevice.update_playback_state`
     and updates the cached :attr:`SonosSpeakerDevice.is_playing` flag
     in place. The return value is discarded — we only want the side
     effect (the UI reads the cached flag, never blocks on UPnP).
 
     External mutations the watcher catches: the user pausing playback
-    from the Sonos app, AirPlay handing off, or the zone going idle
+    from the Sonos app, AirPlay handing off, or the speaker going idle
     after the queue runs out.
     """
 

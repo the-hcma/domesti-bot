@@ -8,7 +8,7 @@ Covers:
 and the underlying helpers (:func:`bulk_pause_sonos_apply`,
 :func:`find_sonos_by_identifier`, :func:`build_sonos_device_view`)
 plus the global-bulk endpoint after we extended it to also pause
-Sonos zones.
+Sonos speakers.
 
 Mock-based, no LAN traffic. The fake zone records every ``pause`` /
 ``resume`` call and updates ``is_playing`` so a follow-up
@@ -185,10 +185,10 @@ def test_build_sonos_device_view_unknown_when_is_playing_is_none() -> None:
 
 @pytest.mark.asyncio
 async def test_bulk_pause_sonos_apply_only_pauses_playing_zones() -> None:
-    """Already-paused zones are skipped; unknown zones still get a pause attempt.
+    """Already-paused speakers are skipped; unknown speakers still get a pause attempt.
 
     Asserts the helper iterates :attr:`SonosDeviceManager.players` and
-    skips only zones whose cached :attr:`is_playing` is ``False``.
+    skips only speakers whose cached :attr:`is_playing` is ``False``.
     """
 
     playing = _FakeSonosZone("RINCON_A", "A", is_playing=True)
@@ -205,7 +205,7 @@ async def test_bulk_pause_sonos_apply_only_pauses_playing_zones() -> None:
 
 @pytest.mark.asyncio
 async def test_bulk_pause_sonos_apply_skips_zone_that_refuses_transition() -> None:
-    """One stuck zone (UPnP 701: empty queue or mid-transition) must
+    """One stuck speaker (UPnP 701: empty queue or mid-transition) must
     not crash the whole batch. The skipped zone is dropped from both
     ``affected`` and ``skipped`` (the user didn't exclude it, and we
     didn't pause it either)."""

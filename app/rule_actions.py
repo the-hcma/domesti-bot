@@ -150,10 +150,10 @@ async def _dispatch_sonos_action(
         raise RuleActionDispatchError(f"{DeviceFamilyId.SONOS.display_name()} manager is not configured on this server")
     identifier = resolve_sonos_identifier_by_label(mgr, action.device_id)
     if identifier is None:
-        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.SONOS.display_name()} zone: {action.device_id!r}")
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.SONOS.display_name()} speaker: {action.device_id!r}")
     zone = find_sonos_by_identifier(mgr, identifier)
     if zone is None:
-        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.SONOS.display_name()} zone: {action.device_id!r}")
+        raise RuleActionDispatchError(f"Unknown {DeviceFamilyId.SONOS.display_name()} speaker: {action.device_id!r}")
     match action.action:
         case RuleDeviceActionType.PAUSE:
             await zone.pause()
@@ -308,7 +308,7 @@ def cached_kasa_is_on(state: DeviceManagersState, device_id: str) -> bool | None
 
 
 def cached_sonos_is_playing(state: DeviceManagersState, device_id: str) -> bool | None:
-    """Return cached playback state for a Sonos zone label, or ``None`` when not found."""
+    """Return cached playback state for a Sonos speaker label, or ``None`` when not found."""
     try:
         identifier = resolve_sonos_identifier_by_label(state.sonos_mgr, device_id)
     except RuleActionDispatchError:
@@ -665,7 +665,7 @@ def resolve_sonos_identifier_by_label(
     mgr: SonosDeviceManager | None,
     device_id: str,
 ) -> str | None:
-    """Resolve a Sonos zone label / MAC / RINCON to its canonical identifier."""
+    """Resolve a Sonos speaker label / MAC / RINCON to its canonical identifier."""
     if mgr is None:
         return None
     needle = device_id.strip()
@@ -691,7 +691,7 @@ def resolve_sonos_identifier_by_label(
         return unique[0]
     if len(unique) > 1:
         raise RuleActionDispatchError(
-            f"Ambiguous {DeviceFamilyId.SONOS.display_name()} zone {device_id!r}; matches: {', '.join(unique)}"
+            f"Ambiguous {DeviceFamilyId.SONOS.display_name()} speaker {device_id!r}; matches: {', '.join(unique)}"
         )
     return None
 

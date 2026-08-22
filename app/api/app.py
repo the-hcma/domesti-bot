@@ -660,7 +660,7 @@ def create_app(args: Any) -> FastAPI:
         # When the Sonos manager is absent (``--no-sonos`` or empty
         # discovery) returns an empty result rather than 404 so the UI
         # can call this unconditionally; the family won't be visible
-        # anyway. Already-paused zones drop out without LAN traffic.
+        # anyway. Already-paused speakers drop out without LAN traffic.
         affected, skipped = await bulk_pause_sonos_apply(state)
         log_ui_action(
             request,
@@ -712,7 +712,7 @@ def create_app(args: Any) -> FastAPI:
             ) from exc
         except (DeviceUnresponsiveError, SonosTransitionUnavailableError) as exc:
             # UPnP 701 from Sonos: empty queue, mid-transition, or any
-            # other state the zone can't transition out of right now.
+            # other state the speaker can't transition out of right now.
             # The device has already refreshed its cached
             # ``is_playing`` from a live UPnP read inside ``pause`` /
             # ``resume``, so the refreshed view below mirrors reality.

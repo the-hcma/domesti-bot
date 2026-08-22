@@ -67,7 +67,7 @@ Rules fire on location ingest as follows:
 | `evening-arrival-home-lights` | Henrique **or** Kristen enters `house` after sunset → three Kasa `turn_on` + email |
 | `evening-lights-off-both-home` | Dark + either arrives (edge): schedule `turn_off` 10 min later (example / operator) |
 | `evening-interior-lights-on-anyone-home` | Scheduled + **once per day**: anyone home after sunset → interior lamps `turn_on` (example) |
-| `away-pause-media` | Scheduled every 10 min: both outside `house`, any listed Sonos zone or Vizio TV on → `pause` / `turn_off` + email (example) |
+| `away-pause-media` | Scheduled every 10 min: both outside `house`, any listed Sonos speaker or Vizio TV on → `pause` / `turn_off` + email (example) |
 | `hdhomerun-nightly-power-cycle` | Scheduled 4am (example, **disabled**): Kasa `turn_off` then `turn_on` with `delay_s=60` |
 | `kristen-west-point-arrive` | Kristen enters `west-point` → email only |
 | `kristen-west-point-leave` | Kristen leaves `west-point` → email only |
@@ -1472,7 +1472,7 @@ Reads **cached** state from `DeviceStateWatcher` / manager objects — Kasa `is_
 }
 ```
 
-**Expected behavior:** every 10 minutes, when **both** users are outside the home geofence and **any** listed Sonos zone is playing or the Kitchen TV is on → pause all three zones, turn off the TV, send email. Device labels must match the tile UI (`preferred_label`).
+**Expected behavior:** every 10 minutes, when **both** users are outside the home geofence and **any** listed Sonos speaker is playing or the Kitchen TV is on → pause all three speakers, turn off the TV, send email. Device labels must match the tile UI (`preferred_label`).
 
 #### Evaluator changes (summary)
 

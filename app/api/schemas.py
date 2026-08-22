@@ -199,7 +199,7 @@ class UIDeviceOut(BaseModel):
       switches; ``"playing"`` / ``"paused"`` for speakers; ``"open"`` /
       ``"closed"`` for doors; ``"occupied"`` / ``"clear"`` for occupancy.
       ``"unknown"`` covers transient cases (a Tailwind door reporting
-      ``OPENING`` / ``CLOSING``, a Sonos zone we haven't polled yet) so the
+      ``OPENING`` / ``CLOSING``, a Sonos speaker we haven't polled yet) so the
       UI never has to crash on unexpected payloads. ARP-visible devices whose
       protocol is silent also report ``unknown`` with ``unresponsive=true``.
     * ``unresponsive``: the MAC is still on the LAN (ARP) but SmartCast /
@@ -280,7 +280,7 @@ class UIDeviceOut(BaseModel):
     stream_favorites: list[UISonosStreamFavoriteOut] = Field(
         default_factory=list,
         description=(
-            "Configured radio streams for Sonos zones (empty for other families). "
+            "Configured radio streams for Sonos speakers (empty for other families). "
             "Resume uses ``favorite_index`` into this list."
         ),
     )
@@ -357,7 +357,7 @@ class UIGlobalBulkActionItem(BaseModel):
 class UIGlobalBulkActionOut(BaseModel):
     """Result of ``POST /v1/ui/global/bulk-off``.
 
-    Mixes kasa hosts, Sonos zone UIDs, and tailwind door ids; the
+    Mixes kasa hosts, Sonos speaker UIDs, and tailwind door ids; the
     ``family_id`` field disambiguates them. ``affected`` lists only
     devices that were commanded because they were not already off,
     paused, or closed. ``skipped`` collects every device with

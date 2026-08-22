@@ -46,7 +46,7 @@ def _mock_device(host: str, alias: str, cfg: dict) -> MagicMock:
 
 
 def _sonos_player(*, rincon_uid: str, host: str, mac: str = "aa:bb:cc:dd:ee:ff") -> MagicMock:
-    """Live Sonos zone shaped like post-MAC-primary devices."""
+    """Live Sonos speaker shaped like post-MAC-primary devices."""
 
     live = MagicMock()
     live.identifier = mac
