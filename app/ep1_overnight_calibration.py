@@ -53,6 +53,7 @@ DEFAULT_SETTLE_S = 45.0
 DEFAULT_WINDOW_END_HOUR = 6
 DEFAULT_WINDOW_START_HOUR = 0
 EP1_OVERNIGHT_CALIBRATION_EXHAUSTED = "All false-positive levers are already at their floor/ceiling for {device_id}"
+EP1_OVERNIGHT_CALIBRATION_INVALID_TIMEZONE = "Expected a valid IANA timezone, got {timezone_name!r}"
 EP1_OVERNIGHT_CALIBRATION_NO_OCCUPANCY = (
     "EP1 at {host}:{port} has no occupancy binary sensor (expected object_id aliases: {aliases})"
 )
@@ -791,7 +792,9 @@ def _resolve_calibration_timezone(timezone_name: str | None) -> ZoneInfo:
         try:
             return ZoneInfo(timezone_name)
         except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise Ep1OvernightCalibrationError(f"Expected a valid IANA timezone, got {timezone_name!r}") from exc
+            raise Ep1OvernightCalibrationError(
+                EP1_OVERNIGHT_CALIBRATION_INVALID_TIMEZONE.format(timezone_name=timezone_name)
+            ) from exc
 
     env_tz = (os.environ.get("TZ") or "").strip()
     if env_tz:

@@ -16,6 +16,7 @@ from app.ep1_occupancy_tuning import Ep1OccupancyTuningField, Ep1OccupancyTuning
 from app.ep1_overnight_calibration import (
     DEFAULT_MAX_CONSECUTIVE_OBSERVE_FAILURES,
     DEFAULT_OBSERVE_RETRY_COUNT,
+    EP1_OVERNIGHT_CALIBRATION_INVALID_TIMEZONE,
     EP1_OVERNIGHT_CALIBRATION_OBSERVE_FAILURES_EXHAUSTED,
     Ep1OvernightCalibrationError,
     KnobAdjustDirection,
@@ -141,7 +142,10 @@ def test_seconds_until_empty_room_window_end_outside_is_zero() -> None:
 
 
 def test_resolve_calibration_timezone_rejects_absolute_path_keys() -> None:
-    with pytest.raises(Ep1OvernightCalibrationError, match="Expected a valid IANA timezone"):
+    with pytest.raises(
+        Ep1OvernightCalibrationError,
+        match=EP1_OVERNIGHT_CALIBRATION_INVALID_TIMEZONE.format(timezone_name="/UTC"),
+    ):
         _resolve_calibration_timezone("/UTC")
 
 
