@@ -167,7 +167,7 @@ class SonosSpeakerDevice(SpeakerDevice):
                     raise SonosTransitionUnavailableError(
                         f"Sonos speaker {self.preferred_label!r} cannot resume "
                         f"{favorite.name!r} — the stream may be unavailable or the "
-                        f"zone is mid-transition."
+                        f"speaker is mid-transition."
                     ) from exc
                 raise
             self._is_playing = True
