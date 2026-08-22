@@ -22,6 +22,7 @@ from app.ep1_overnight_calibration import (
     KnobAdjustment,
     OccupancyObservation,
     OvernightCalibrationCycleResult,
+    _resolve_calibration_timezone,
     _run_one_cycle,
     in_empty_room_window,
     propose_next_false_positive_adjustment,
@@ -137,6 +138,20 @@ def test_seconds_until_empty_room_window_end_inside() -> None:
 def test_seconds_until_empty_room_window_end_outside_is_zero() -> None:
     tz = ZoneInfo("UTC")
     assert seconds_until_empty_room_window_end(datetime(2026, 8, 11, 12, 0, tzinfo=tz)) == 0.0
+
+
+def test_resolve_calibration_timezone_rejects_absolute_path_keys() -> None:
+    with pytest.raises(Ep1OvernightCalibrationError, match="Expected a valid IANA timezone"):
+        _resolve_calibration_timezone("/UTC")
+
+
+def test_resolve_calibration_timezone_ignores_invalid_tz_env() -> None:
+    with patch.dict("os.environ", {"TZ": "../etc/localtime"}, clear=False):
+        with patch(
+            "app.ep1_overnight_calibration._system_iana_timezone",
+            return_value=ZoneInfo("UTC"),
+        ):
+            assert _resolve_calibration_timezone(None) == ZoneInfo("UTC")
 
 
 def test_propose_prefers_lowering_max_distance_first() -> None:

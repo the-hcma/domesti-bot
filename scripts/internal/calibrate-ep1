@@ -31,6 +31,7 @@ def _ensure_uv() -> None:
         return
     uv = shutil.which("uv")
     if uv:
+        os.environ["UV_ACTIVE"] = "1"
         os.execv(uv, [uv, "run", sys.argv[0], *sys.argv[1:]])
 
 
