@@ -456,6 +456,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             self._tailwind = None
             self._host = None
             self._hub_mac = None
+            self._last_discovery_source = None
             _LOGGER.info("Tailwind reload_from_cache: empty cache; cleared device map")
             return True
 
@@ -463,6 +464,8 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         previous_tailwind = self._tailwind
         previous_map = self._alias_to_device
         previous_host = self._host
+        previous_hub_mac = self._hub_mac
+        previous_source = self._last_discovery_source
 
         self._host_arg = host
         self._tailwind = None
@@ -486,6 +489,8 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             self._tailwind = previous_tailwind
             self._alias_to_device = previous_map
             self._host = previous_host
+            self._hub_mac = previous_hub_mac
+            self._last_discovery_source = previous_source
             return False
 
         self._host_arg = previous_host_arg

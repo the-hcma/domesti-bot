@@ -99,7 +99,10 @@ async def test_tailwind_reload_from_cache_never_calls_mdns(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tailwind_fetch_via_mdns_sets_discovery_source() -> None:
+async def test_tailwind_fetch_via_mdns_sets_discovery_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("TAILWIND_HOST", raising=False)
     mgr = GotailwindDeviceManager(token="123456")
     fake_status = MagicMock()
     fake_status.doors = {}
@@ -125,6 +128,54 @@ async def test_tailwind_fetch_via_mdns_sets_discovery_source() -> None:
     assert mgr.host == "192.168.1.50"
     assert mgr.last_discovery_source == "discovery"
     discover.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_tailwind_reload_from_cache_failure_restores_discovery_source(
+    tmp_path,
+) -> None:
+    db = tmp_path / "cached.sqlite"
+    device_discovery_store.save_tailwind_host(db, "192.168.1.40", mac="aa:bb:c0:a8:01:28")
+    mgr = GotailwindDeviceManager(
+        token="123456",
+        display_names_store_path=db,
+    )
+    mgr._alias_to_device = {"door-1": MagicMock()}
+    mgr._host = "192.168.1.50"
+    mgr._hub_mac = "aa:bb:c0:a8:01:32"
+    mgr._last_discovery_source = "discovery"
+    mgr._tailwind = MagicMock()
+    mgr._tailwind.close = AsyncMock()
+
+    with patch.object(mgr, "fetch", AsyncMock(side_effect=RuntimeError("unreachable"))):
+        ok = await mgr.reload_from_cache(cache_path=db)
+
+    assert ok is False
+    assert mgr.host == "192.168.1.50"
+    assert mgr.last_discovery_source == "discovery"
+
+
+@pytest.mark.asyncio
+async def test_tailwind_reload_from_cache_empty_clears_discovery_source(
+    tmp_path,
+) -> None:
+    db = tmp_path / "empty-cache.sqlite"
+    mgr = GotailwindDeviceManager(
+        token="123456",
+        display_names_store_path=db,
+    )
+    mgr._alias_to_device = {"door-1": MagicMock()}
+    mgr._host = "192.168.1.50"
+    mgr._hub_mac = "aa:bb:c0:a8:01:32"
+    mgr._last_discovery_source = "discovery"
+    mgr._tailwind = MagicMock()
+    mgr._tailwind.close = AsyncMock()
+
+    ok = await mgr.reload_from_cache(cache_path=db)
+
+    assert ok is True
+    assert mgr.last_discovery_source is None
+    assert mgr.host is None
 
 
 @pytest.mark.asyncio

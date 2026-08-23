@@ -60,7 +60,7 @@ def test_get_discovery_settings_returns_family_status(tmp_path: Path) -> None:
         families=(
             DiscoveryFamilyStatus(
                 available=True,
-                device_count=2,
+                device_count=1,
                 devices=(
                     DiscoveryDeviceSnapshot(
                         device_id="aa:bb:cc:dd:ee:01",
@@ -93,9 +93,10 @@ def test_get_discovery_settings_returns_family_status(tmp_path: Path) -> None:
     assert r.status_code == HTTPStatus.OK
     body = r.json()
     assert body["families"][0]["family_id"] == "kasa"
-    assert body["families"][0]["device_count"] == 2
+    assert body["families"][0]["device_count"] == 1
     assert body["families"][0]["last_discovery_source"] == "cache"
     assert body["families"][0]["devices"][0]["display"] == "Kitchen Plug (aa:bb:cc:dd:ee:01)"
+    assert len(body["families"][0]["devices"]) == body["families"][0]["device_count"]
     assert body["families"][1]["available"] is False
 
 
