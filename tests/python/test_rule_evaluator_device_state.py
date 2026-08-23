@@ -5,12 +5,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.api.schemas import (
+    AfterLocalTimeCondition,
     DevicesAnyInStateForSCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
@@ -19,6 +22,7 @@ from app.api.schemas import (
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1ReadingMetric, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
+from app.ep1_device_manager import Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
@@ -26,6 +30,10 @@ from app.presence_store import UserLocationRecord, upsert_user_location
 from app.rule_actions import RuleNotificationEmailOutcome
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
+
+
+_EP1_MAC = "28:05:a5:28:c8:48"
+_NY = ZoneInfo("America/New_York")
 
 
 @pytest.mark.asyncio
@@ -163,6 +171,87 @@ async def test_device_dwell_fires_when_door_open_for_threshold_while_away(
 
     send_mock.assert_called_once()
     assert evaluator.fire_state_for_rule("away-garage-open-alert").last_fired_at == (clock["now"])
+
+
+@pytest.mark.asyncio
+async def test_ep1_clear_dwell_fires_when_clear_long_enough(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=True)
+    state = _ep1_state(sensor)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    sensor.occupancy_state = DeviceConditionState.CLEAR.value
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await evaluator.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        assert send_mock.call_count == 0
+        clock["now"] += 20.0
+        await evaluator._maybe_process_device_dwell_satisfied(
+            DeviceFamilyId.EP1,
+            _EP1_MAC,
+        )
+
+    send_mock.assert_called_once()
+    assert evaluator.fire_state_for_rule("evening-ep1-clear-alert").last_fired_at == clock["now"]
+
+
+@pytest.mark.asyncio
+async def test_ep1_clear_dwell_retries_after_local_time_opens(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-window dwell must not debounce the same clear streak past 21:00 (#681)."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule(after_hhmm="21:00"))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": datetime(2026, 6, 9, 20, 30, tzinfo=_NY).timestamp()}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=True)
+    state = _ep1_state(sensor)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    sensor.occupancy_state = DeviceConditionState.CLEAR.value
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await evaluator.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        clock["now"] += 20.0
+        await evaluator._maybe_process_device_dwell_satisfied(
+            DeviceFamilyId.EP1,
+            _EP1_MAC,
+        )
+        assert send_mock.call_count == 0
+
+        clock["now"] = datetime(2026, 6, 9, 21, 0, tzinfo=_NY).timestamp()
+        await evaluator._maybe_process_device_dwell_satisfied(
+            DeviceFamilyId.EP1,
+            _EP1_MAC,
+        )
+
+    send_mock.assert_called_once()
+    assert evaluator.fire_state_for_rule("evening-ep1-clear-alert").last_fired_at == clock["now"]
 
 
 @pytest.mark.asyncio
@@ -396,6 +485,22 @@ async def test_schedule_device_state_change_skips_requeue_after_close(
 
 
 @pytest.mark.asyncio
+class _FakeEp1Sensor:
+    def __init__(self, identifier: str, label: str, *, occupied: bool | None) -> None:
+        self.identifier = identifier
+        self.mac_address = identifier
+        self.preferred_label = label
+        self.host = "192.0.2.10"
+        self.port = 6053
+        self.unresponsive = False
+        if occupied is True:
+            self.occupancy_state = DeviceConditionState.OCCUPIED.value
+        elif occupied is False:
+            self.occupancy_state = DeviceConditionState.CLEAR.value
+        else:
+            self.occupancy_state = "unknown"
+
+
 class _FakeTailwindDoor:
     def __init__(self, identifier: str, label: str, *, is_open: bool) -> None:
         self.identifier = identifier
@@ -437,6 +542,60 @@ def _away_garage_rule(*, cooldown_s: int = 0) -> RuleOut:
         notification_emails=["ops@example.com"],
         notify_on_fire=True,
         triggers=[RuleTrigger.DWELL_SATISFIED],
+    )
+
+
+def _ep1_clear_dwell_rule(*, after_hhmm: str | None = None) -> RuleOut:
+    conditions: list[
+        AfterLocalTimeCondition | DevicesAnyInStateForSCondition
+    ] = []
+    if after_hhmm is not None:
+        conditions.append(
+            AfterLocalTimeCondition(
+                type="after_local_time",
+                time_hhmm=after_hhmm,
+            ),
+        )
+    conditions.append(
+        DevicesAnyInStateForSCondition(
+            type="devices_any_in_state_for_s",
+            devices=[
+                RuleConditionDeviceRefOut(
+                    device_id=_EP1_MAC,
+                    display_name="Office EP1",
+                    family_id=DeviceFamilyId.EP1,
+                ),
+            ],
+            min_duration_s=20,
+            state=DeviceConditionState.CLEAR,
+        ),
+    )
+    return RuleOut(
+        conditions=RuleConditionsOut(all=list(conditions)),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="evening-ep1-clear-alert",
+        label="EP1 clear dwell alert",
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com"],
+        notify_on_fire=True,
+        triggers=[RuleTrigger.DWELL_SATISFIED],
+    )
+
+
+def _ep1_state(*sensors: _FakeEp1Sensor) -> DeviceManagersState:
+    mgr = MagicMock(spec=Ep1DeviceManager)
+    mgr.devices = tuple(sensors)
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        ep1_mgr=mgr,
+        args=argparse.Namespace(),
+        cache_path=None,
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        vizio_mgr=None,
     )
 
 

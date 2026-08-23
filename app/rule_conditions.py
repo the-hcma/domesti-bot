@@ -1745,13 +1745,21 @@ def natural_bool_for_device_family(
     family_id: DeviceFamilyId,
     device_id: str,
 ) -> bool | None:
-    """Return the family's natural cached bool (on/open/playing) for ``device_id``."""
+    """Return the family's natural cached bool (on/open/playing/occupied) for ``device_id``.
+
+    EP1 returns occupancy (``True`` = occupied, ``False`` = clear). That value
+    feeds device-dwell streak sync in the rule evaluator; omitting EP1 leaves
+    ``device_bool_since`` empty so ``dwell_satisfied`` + ``devices_any_in_state_for_s``
+    rules never cross (issue #681).
+    """
     ref = RuleConditionDeviceRefOut(device_id=device_id, family_id=family_id)
     match family_id:
-        case DeviceFamilyId.TAILWIND:
-            return _cached_device_is_open(ctx, ref)
+        case DeviceFamilyId.EP1:
+            return _cached_device_is_occupied(ctx, ref)
         case DeviceFamilyId.KASA | DeviceFamilyId.SONOS | DeviceFamilyId.VIZIO:
             return _cached_device_is_on(ctx, ref)
+        case DeviceFamilyId.TAILWIND:
+            return _cached_device_is_open(ctx, ref)
         case _:
             return None
 

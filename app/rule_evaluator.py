@@ -2207,9 +2207,15 @@ class RuleEvaluator:
             if dwell_episode_blocks_fire(rule, ctx):
                 self._device_dwell_satisfied_evaluated_since[rule_key] = since
                 continue
-            if runtime is not None and not self._cooldown_elapsed(rule, runtime):
-                continue
-            self._device_dwell_satisfied_evaluated_since[rule_key] = since
+            # Only debounce after a successful fire on this streak. Marking after
+            # conditions_not_met (e.g. after_local_time still closed) would poison
+            # the same clear/open streak when the clock gate later opens (#681).
+            if (
+                runtime is not None
+                and runtime.last_fired_at is not None
+                and runtime.last_fired_at >= since
+            ):
+                self._device_dwell_satisfied_evaluated_since[rule_key] = since
 
     async def _maybe_process_dwell_satisfied(self, roster_user_id: str) -> None:
         rules = list_automation_rules()
