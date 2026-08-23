@@ -19,7 +19,12 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
-from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, evaluate_rule
+from app.rule_conditions import (
+    RuleEvaluationContext,
+    compute_rules_sun_out,
+    evaluate_rule,
+    natural_bool_for_device_family,
+)
 from app.rule_validation import build_roster_user_id_lookup
 
 
@@ -99,6 +104,43 @@ def test_devices_any_in_state_for_s_unmet_when_discovery_not_ready() -> None:
     assert result.all_met is False
     assert result.conditions[0].met is False
     assert "discovery not ready" in result.conditions[0].detail
+
+
+def test_natural_bool_for_ep1_occupied_and_clear() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    mac = "02:00:00:00:00:20"
+    occupied_state = _ep1_state(_FakeEp1Sensor(mac, "Office EP1", occupied=True))
+    clear_state = _ep1_state(_FakeEp1Sensor(mac, "Office EP1", occupied=False))
+    assert (
+        natural_bool_for_device_family(
+            _ctx(now=now, device_state=occupied_state),
+            family_id=DeviceFamilyId.EP1,
+            device_id=mac,
+        )
+        is True
+    )
+    assert (
+        natural_bool_for_device_family(
+            _ctx(now=now, device_state=clear_state),
+            family_id=DeviceFamilyId.EP1,
+            device_id=mac,
+        )
+        is False
+    )
+
+
+def test_natural_bool_for_ep1_unknown_returns_none() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    mac = "02:00:00:00:00:20"
+    state = _ep1_state(_FakeEp1Sensor(mac, "Office EP1", occupied=None))
+    assert (
+        natural_bool_for_device_family(
+            _ctx(now=now, device_state=state),
+            family_id=DeviceFamilyId.EP1,
+            device_id=mac,
+        )
+        is None
+    )
 
 
 _SETTINGS = SettingsLocationOut(

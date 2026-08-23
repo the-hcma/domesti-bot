@@ -240,11 +240,14 @@ class RuleEvaluator:
         # Natural bool streak per backend device (on/open/playing vs off/closed/paused).
         self._device_bool_since: dict[tuple[DeviceFamilyId, str], float] = {}
         self._device_bool_value: dict[tuple[DeviceFamilyId, str], bool] = {}
-        # Ephemeral per-rule ``since`` epoch already evaluated for device-state
-        # ``dwell_satisfied`` this streak — cleared when the device bool flips.
+        # Ephemeral per-rule (streak ``since``, local calendar day) already
+        # evaluated for device-state ``dwell_satisfied``. Cleared when the device
+        # bool flips. ``fire_once_per_local_day`` re-arms when the stored day is
+        # stale (successful prior-day fire or failed attempt with no
+        # ``last_fired_at``); other rules debounce for the whole streak.
         self._device_dwell_satisfied_evaluated_since: dict[
             tuple[str, DeviceFamilyId, str, DeviceConditionState, int],
-            float,
+            tuple[float, date],
         ] = {}
         # Ephemeral per-rule ``since`` epoch already evaluated for
         # ``dwell_satisfied`` this streak — avoids re-running full rule checks on
@@ -2185,31 +2188,54 @@ class RuleEvaluator:
                     watch.state,
                     watch.min_duration_s,
                 )
-                if self._device_dwell_satisfied_evaluated_since.get(rule_key) == since:
-                    continue
+                marked = self._device_dwell_satisfied_evaluated_since.get(rule_key)
+                if marked is not None:
+                    marked_since, marked_day = marked
+                    if marked_since == since:
+                        rule = rules_by_id.get(rule_id)
+                        today = local_calendar_date(now_epoch, timezone)
+                        # fire_once_per_local_day re-arms after local midnight on a
+                        # persistent streak (success or failed attempt).
+                        if rule is not None and rule.fire_once_per_local_day and marked_day != today:
+                            del self._device_dwell_satisfied_evaluated_since[rule_key]
+                        else:
+                            continue
                 crossed_rule_ids.add(rule_id)
                 newly_evaluated_rules.append((rule_key, since))
         if not crossed_rule_ids:
             return
-        await self._process_dwell_satisfied_rules(
+        attempted_rule_ids = await self._process_dwell_satisfied_rules(
             crossed_rule_ids,
             rules=rules,
             ctx=ctx,
             now_epoch=now_epoch,
             timezone=timezone,
         )
+        evaluated_day = local_calendar_date(now_epoch, timezone)
         for rule_key, since in newly_evaluated_rules:
             rule_id = rule_key[0]
             rule = rules_by_id.get(rule_id)
             if rule is None:
                 continue
-            runtime = self._rule_state.get(rule_id)
             if dwell_episode_blocks_fire(rule, ctx):
-                self._device_dwell_satisfied_evaluated_since[rule_key] = since
+                self._device_dwell_satisfied_evaluated_since[rule_key] = (
+                    since,
+                    evaluated_day,
+                )
                 continue
+            # Debounce after an all-met attempt, except while cooldown is still
+            # active — leave the slot clear so cooldown_s can re-arm on the same
+            # streak (RULE_ENGINE_PLAN repeat-while-true). Never mark after
+            # conditions_not_met (e.g. after_local_time still closed) (#681).
+            if rule_id not in attempted_rule_ids:
+                continue
+            runtime = self._rule_state.get(rule_id)
             if runtime is not None and not self._cooldown_elapsed(rule, runtime):
                 continue
-            self._device_dwell_satisfied_evaluated_since[rule_key] = since
+            self._device_dwell_satisfied_evaluated_since[rule_key] = (
+                since,
+                evaluated_day,
+            )
 
     async def _maybe_process_dwell_satisfied(self, roster_user_id: str) -> None:
         rules = list_automation_rules()
@@ -2403,11 +2429,13 @@ class RuleEvaluator:
         ctx: RuleEvaluationContext,
         now_epoch: float,
         timezone: ZoneInfo,
-    ) -> None:
+    ) -> set[str]:
+        """Evaluate dwell-satisfied rules; return ids that were all-met (attempted)."""
         rules_by_id = {rule.id: rule for rule in rules if rule.enabled and RuleTrigger.DWELL_SATISFIED in rule.triggers}
         matched_rules = [rules_by_id[rule_id] for rule_id in sorted(rule_ids) if rule_id in rules_by_id]
+        attempted_rule_ids: set[str] = set()
         if not matched_rules:
-            return
+            return attempted_rule_ids
         _LOGGER.info(
             "[rules] evaluating dwell-satisfied rule_count=%d",
             len(matched_rules),
@@ -2441,6 +2469,7 @@ class RuleEvaluator:
                 runtime=runtime,
                 timezone=timezone,
             ):
+                attempted_rule_ids.add(rule.id)
                 continue
             if dwell_episode_blocks_fire(rule, ctx):
                 _log_rule_skipped(
@@ -2449,6 +2478,7 @@ class RuleEvaluator:
                     reason="dwell_episode_consumed",
                     detail="dwell already fired this away/inside episode",
                 )
+                attempted_rule_ids.add(rule.id)
                 continue
             if not self._cooldown_elapsed(rule, runtime):
                 remaining_s = rule.cooldown_s - (now_epoch - (runtime.last_fired_at or 0.0))
@@ -2466,6 +2496,8 @@ class RuleEvaluator:
                 log_user_ids=log_user_ids,
                 transitions=transitions,
             )
+            attempted_rule_ids.add(rule.id)
+        return attempted_rule_ids
 
     def _dwell_streak_since(
         self,
@@ -2617,28 +2649,6 @@ class RuleEvaluator:
                 ctx=ctx,
             )
 
-    def _sync_device_bool_streak(
-        self,
-        family_id: DeviceFamilyId,
-        backend_device_id: str,
-        *,
-        now_epoch: float,
-        ctx: RuleEvaluationContext,
-    ) -> None:
-        key = (family_id, backend_device_id)
-        current = natural_bool_for_device_family(
-            ctx,
-            family_id=family_id,
-            device_id=backend_device_id,
-        )
-        if current is None:
-            self._drop_device_bool_streak(key)
-            return
-        prior = self._device_bool_value.get(key)
-        since = self._device_bool_since.get(key)
-        if prior is None or since is None or prior != current:
-            self._set_device_bool_streak(key, current, now_epoch)
-
     def _seed_dwell_satisfied_eval_debounce(self) -> None:
         """Warm debounce slots after restart for ongoing fired/consumed dwell episodes."""
         rules = list_automation_rules()
@@ -2679,6 +2689,28 @@ class RuleEvaluator:
                     watch.min_s,
                 )
                 self._dwell_satisfied_evaluated_since[debounce_key] = since
+
+    def _sync_device_bool_streak(
+        self,
+        family_id: DeviceFamilyId,
+        backend_device_id: str,
+        *,
+        now_epoch: float,
+        ctx: RuleEvaluationContext,
+    ) -> None:
+        key = (family_id, backend_device_id)
+        current = natural_bool_for_device_family(
+            ctx,
+            family_id=family_id,
+            device_id=backend_device_id,
+        )
+        if current is None:
+            self._drop_device_bool_streak(key)
+            return
+        prior = self._device_bool_value.get(key)
+        since = self._device_bool_since.get(key)
+        if prior is None or since is None or prior != current:
+            self._set_device_bool_streak(key, current, now_epoch)
 
     def _ensure_astronomical_schedule_materialized(
         self,
