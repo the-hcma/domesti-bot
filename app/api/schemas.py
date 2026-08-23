@@ -752,6 +752,75 @@ class KasaMotionTuningSetIn(BaseModel):
     )
 
 
+class DiscoveryDeviceOut(BaseModel):
+    """A device newly admitted (or listed) during discovery refresh."""
+
+    device_id: str = Field(..., description="Stable device id (usually a MAC address).")
+    display: str = Field(
+        ...,
+        description="Human-readable ``preferred_label (mac)`` via format_device_display.",
+    )
+    preferred_label: str = Field(..., description="Preferred display label for the device.")
+
+
+class DiscoveryFamilyRefreshOut(BaseModel):
+    """Per-family result from ``POST /v1/settings/discovery/refresh``."""
+
+    device_count: int = Field(..., description="Device count after rediscover (0 when skipped/failed).")
+    error: str | None = Field(default=None, description="Error text when rediscover failed.")
+    family_id: str = Field(..., description="Family slug (androidtv, ep1, gotailwind, kasa, sonos, vizio).")
+    label: str = Field(..., description="Human-readable family label.")
+    new_devices: list[DiscoveryDeviceOut] = Field(
+        default_factory=list,
+        description="Devices admitted during this refresh that were not present before.",
+    )
+    ok: bool = Field(..., description="True when rediscover completed without error.")
+    skip_detail: str | None = Field(
+        default=None,
+        description="Why the family was skipped (for example not loaded).",
+    )
+    skipped: bool = Field(..., description="True when the family manager was not loaded.")
+    source: str | None = Field(
+        default=None,
+        description="``cache`` or ``discovery`` after rediscover when the family reports it.",
+    )
+
+
+class DiscoveryFamilyStatusOut(BaseModel):
+    """Per-family live status for ``GET /v1/settings/discovery``."""
+
+    available: bool = Field(..., description="True when the family manager is loaded.")
+    device_count: int = Field(..., description="Current in-memory device count.")
+    family_id: str = Field(..., description="Family slug (androidtv, ep1, gotailwind, kasa, sonos, vizio).")
+    label: str = Field(..., description="Human-readable family label.")
+    last_discovery_source: str | None = Field(
+        default=None,
+        description="``cache`` or ``discovery`` from the last fetch/rediscover when known.",
+    )
+
+
+class DiscoveryRefreshOut(BaseModel):
+    """Result of ``POST /v1/settings/discovery/refresh``."""
+
+    families: list[DiscoveryFamilyRefreshOut] = Field(
+        ...,
+        description="Per-family rediscover outcomes in stable family order.",
+    )
+    new_devices: list[DiscoveryDeviceOut] = Field(
+        default_factory=list,
+        description="All newly admitted devices across families.",
+    )
+
+
+class DiscoverySettingsOut(BaseModel):
+    """``GET /v1/settings/discovery`` — live roster status without running rediscover."""
+
+    families: list[DiscoveryFamilyStatusOut] = Field(
+        ...,
+        description="Per-family availability, counts, and last discovery source.",
+    )
+
+
 class Ep1BleAdvertisementSampleOut(BaseModel):
     """One BLE advertisement sample from an EP1 bluetooth proxy listen."""
 

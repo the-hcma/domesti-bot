@@ -52,6 +52,8 @@ import type {
   VacationModeTestEmailIn,
   VacationModeTestEmailOut,
   KasaCredentialsSetOut,
+  DiscoveryRefreshOut,
+  DiscoverySettingsOut,
   KasaCredentialsSettingsOut,
   KasaCredentialsTestIn,
   KasaDevicesSettingsOut,
@@ -426,7 +428,10 @@ export const api = {
       STATE_FETCH_TIMEOUT_MS,
     );
   },
-  fetchKasaCredentialsSettings(): Promise<KasaCredentialsSettingsOut> {
+  fetchDiscoverySettings(): Promise<DiscoverySettingsOut> {
+    return call<DiscoverySettingsOut>("GET", "/v1/settings/discovery");
+  },
+    fetchKasaCredentialsSettings(): Promise<KasaCredentialsSettingsOut> {
     return call<KasaCredentialsSettingsOut>("GET", "/v1/settings/kasa-credentials");
   },
   fetchKasaMotionDevices(): Promise<KasaDevicesSettingsOut> {
@@ -471,7 +476,10 @@ export const api = {
   pauseAllSonos(): Promise<UIBulkActionOut> {
     return call<UIBulkActionOut>("POST", "/v1/ui/sonos/pause-all", {});
   },
-  putSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {
+  refreshDiscovery(): Promise<DiscoveryRefreshOut> {
+    return call<DiscoveryRefreshOut>("POST", "/v1/settings/discovery/refresh");
+  },
+    putSmtpConfig(config: SmtpConfigIn): Promise<SmtpConfigOut> {
     return call<SmtpConfigOut>("PUT", "/v1/settings/smtp", config);
   },
   putMyTracksSettings(config: MyTracksSettingsIn): Promise<MyTracksSettingsOut> {

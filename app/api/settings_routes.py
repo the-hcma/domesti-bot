@@ -10,6 +10,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app import device_discovery_store
 from app.api.schemas import (
+    DiscoveryDeviceOut,
+    DiscoveryFamilyRefreshOut,
+    DiscoveryFamilyStatusOut,
+    DiscoveryRefreshOut,
+    DiscoverySettingsOut,
     Ep1BleAdvertisementSampleOut,
     Ep1BluetoothProxyOut,
     Ep1BluetoothProxySetIn,
@@ -60,6 +65,10 @@ from app.db.secrets import (
     tailwind_token_stored_in_db,
 )
 from app.device_enums import Ep1CalibrationOffsetKind, Ep1OccupancyTuningKind
+from app.discovery_refresh import (
+    discovery_settings_status,
+    refresh_all_device_discovery,
+)
 from app.domesti_bot_cli import DeviceManagersState, _bootstrap_tailwind, _parse_ep1_host_specs, _Theme
 from app.ep1_bluetooth_proxy import (
     DEFAULT_BLE_LISTEN_DURATION_S,
@@ -122,6 +131,73 @@ def discovery_cache_path_from_request(request: Request) -> Path | None:
     """Resolve the shared SQLite path for the running server process."""
     del request
     return runtime.discovery_cache_path()
+
+
+@router.get("/discovery", response_model=DiscoverySettingsOut)
+async def get_discovery_settings() -> DiscoverySettingsOut:
+    """Return per-family discovery status (cache vs LAN source and device counts)."""
+    state = runtime.device_state
+    if state is None:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Device discovery is not ready yet; try again shortly.",
+        )
+    status = discovery_settings_status(state)
+    return DiscoverySettingsOut(
+        families=[
+            DiscoveryFamilyStatusOut(
+                available=family.available,
+                device_count=family.device_count,
+                family_id=family.family_id,
+                label=family.label,
+                last_discovery_source=family.last_discovery_source,
+            )
+            for family in status.families
+        ]
+    )
+
+
+@router.post("/discovery/refresh", response_model=DiscoveryRefreshOut)
+async def post_discovery_refresh() -> DiscoveryRefreshOut:
+    """Run multi-family LAN rediscover and report newly admitted devices."""
+    state = runtime.device_state
+    if state is None:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Device discovery is not ready yet; try again shortly.",
+        )
+    result = await refresh_all_device_discovery(state, restart_watchers=True)
+    return DiscoveryRefreshOut(
+        families=[
+            DiscoveryFamilyRefreshOut(
+                device_count=family.device_count,
+                error=family.error,
+                family_id=family.family_id,
+                label=family.label,
+                new_devices=[
+                    DiscoveryDeviceOut(
+                        device_id=device.device_id,
+                        display=device.display,
+                        preferred_label=device.preferred_label,
+                    )
+                    for device in family.new_devices
+                ],
+                ok=family.ok,
+                skip_detail=family.skip_detail,
+                skipped=family.skipped,
+                source=family.source,
+            )
+            for family in result.families
+        ],
+        new_devices=[
+            DiscoveryDeviceOut(
+                device_id=device.device_id,
+                display=device.display,
+                preferred_label=device.preferred_label,
+            )
+            for device in result.new_devices
+        ],
+    )
 
 
 @router.delete("/kasa-credentials", response_model=KasaCredentialsSettingsOut)

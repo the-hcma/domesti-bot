@@ -251,6 +251,42 @@ export interface SettingsCredentialsTestOut {
   source?: SettingsCredentialsTestSource | null;
 }
 
+
+export interface DiscoveryDeviceOut {
+  device_id: string;
+  display: string;
+  preferred_label: string;
+}
+
+export interface DiscoveryFamilyRefreshOut {
+  device_count: number;
+  error: string | null;
+  family_id: string;
+  label: string;
+  new_devices: DiscoveryDeviceOut[];
+  ok: boolean;
+  skip_detail: string | null;
+  skipped: boolean;
+  source: string | null;
+}
+
+export interface DiscoveryFamilyStatusOut {
+  available: boolean;
+  device_count: number;
+  family_id: string;
+  label: string;
+  last_discovery_source: string | null;
+}
+
+export interface DiscoveryRefreshOut {
+  families: DiscoveryFamilyRefreshOut[];
+  new_devices: DiscoveryDeviceOut[];
+}
+
+export interface DiscoverySettingsOut {
+  families: DiscoveryFamilyStatusOut[];
+}
+
 export interface Ep1BleAdvertisementSampleOut {
   address: string;
   address_type: number | string | null;

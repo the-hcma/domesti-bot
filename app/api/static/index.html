@@ -761,7 +761,17 @@
       min-height: 44px; padding: 6px; }
     .settings-dialog-reveal svg { display: block; }
     .settings-dialog-lead a { color: var(--accent); }
-    .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
+    
+      .discovery-settings-family-list,
+      .discovery-settings-new-devices {
+        margin: 0.75rem 0 1rem;
+        padding-left: 1.25rem;
+      }
+      .discovery-settings-family-row {
+        margin: 0.25rem 0;
+      }
+
+      .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;
       justify-content: flex-end; }
     .mytracks-settings-tab { display: flex; flex-direction: column; gap: 8px; }
     .mytracks-connection-section { margin: 0; }

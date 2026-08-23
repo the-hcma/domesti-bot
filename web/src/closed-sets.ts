@@ -306,6 +306,7 @@ export type SettingsCredentialsTestSource =
 
 /** Settings hub tabs. */
 export const SettingsTabId = {
+  Discovery: "discovery",
   Ep1: "ep1",
   Kasa: "kasa",
   MyTracks: "my-tracks",
