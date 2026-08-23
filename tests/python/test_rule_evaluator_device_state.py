@@ -364,11 +364,46 @@ async def test_ep1_clear_dwell_restart_honors_fire_once_per_local_day(
             device_state_getter=lambda: state,
             now_fn=lambda: clock["now"],
         )
-        clock["now"] += 20.0
         await restarted.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        clock["now"] += 20.0
         await restarted._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
 
     assert send_mock.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ep1_clear_dwell_fire_once_rearms_after_local_day_on_same_streak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persistent clear overnight: fire_once must allow one fire per local day."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule(fire_once_per_local_day=True))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": datetime(2026, 6, 9, 21, 30, tzinfo=_NY).timestamp()}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=False)
+    state = _ep1_state(sensor)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await evaluator.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        clock["now"] += 20.0
+        await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+        assert send_mock.call_count == 1
+
+        clock["now"] = datetime(2026, 6, 10, 21, 30, tzinfo=_NY).timestamp()
+        await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+
+    assert send_mock.call_count == 2
 
 
 @pytest.mark.asyncio

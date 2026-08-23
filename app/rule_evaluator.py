@@ -2186,7 +2186,24 @@ class RuleEvaluator:
                     watch.min_duration_s,
                 )
                 if self._device_dwell_satisfied_evaluated_since.get(rule_key) == since:
-                    continue
+                    rule = rules_by_id.get(rule_id)
+                    runtime = self._rule_state.get(rule_id)
+                    # fire_once_per_local_day must re-arm after local midnight on a
+                    # persistent streak (e.g. EP1 stays clear overnight).
+                    if (
+                        rule is not None
+                        and rule.fire_once_per_local_day
+                        and runtime is not None
+                        and runtime.last_fired_at is not None
+                        and not fired_on_same_local_calendar_day(
+                            runtime.last_fired_at,
+                            now_epoch,
+                            timezone,
+                        )
+                    ):
+                        del self._device_dwell_satisfied_evaluated_since[rule_key]
+                    else:
+                        continue
                 crossed_rule_ids.add(rule_id)
                 newly_evaluated_rules.append((rule_key, since))
         if not crossed_rule_ids:
