@@ -111,7 +111,7 @@ def test_post_discovery_refresh_returns_new_devices(tmp_path: Path) -> None:
     result = DiscoveryRefreshResult(
         families=(
             DiscoveryFamilyResult(
-                device_count=2,
+                device_count=1,
                 devices=(new_device,),
                 error=None,
                 family_id="kasa",
@@ -139,4 +139,6 @@ def test_post_discovery_refresh_returns_new_devices(tmp_path: Path) -> None:
     assert body["families"][0]["ok"] is True
     assert body["families"][0]["source"] == "discovery"
     assert body["families"][0]["devices"][0]["display"] == "Porch Plug (aa:bb:cc:dd:ee:02)"
+    assert body["families"][0]["new_devices"][0]["device_id"] == "aa:bb:cc:dd:ee:02"
+    assert len(body["families"][0]["devices"]) == body["families"][0]["device_count"]
     refresh_mock.assert_awaited_once()
