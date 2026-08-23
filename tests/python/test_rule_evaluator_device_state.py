@@ -294,16 +294,16 @@ async def test_ep1_clear_dwell_failed_fire_does_not_retry_every_tick(
 
 
 @pytest.mark.asyncio
-async def test_ep1_clear_dwell_restart_does_not_refire_same_streak(
+async def test_ep1_clear_dwell_restart_honors_fire_once_per_local_day(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
-    _write_bundle(bundle, _ep1_clear_dwell_rule())
+    _write_bundle(bundle, _ep1_clear_dwell_rule(fire_once_per_local_day=True))
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
 
-    clock = {"now": 1_700_000_000.0}
+    clock = {"now": datetime(2026, 6, 9, 21, 30, tzinfo=_NY).timestamp()}
     _seed_presence_db(db, now=clock["now"])
     sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=False)
     state = _ep1_state(sensor)
@@ -624,7 +624,11 @@ def _away_garage_rule(*, cooldown_s: int = 0) -> RuleOut:
     )
 
 
-def _ep1_clear_dwell_rule(*, after_hhmm: str | None = None) -> RuleOut:
+def _ep1_clear_dwell_rule(
+    *,
+    after_hhmm: str | None = None,
+    fire_once_per_local_day: bool = False,
+) -> RuleOut:
     conditions: list[AfterLocalTimeCondition | DevicesAnyInStateForSCondition] = []
     if after_hhmm is not None:
         conditions.append(
@@ -652,6 +656,7 @@ def _ep1_clear_dwell_rule(*, after_hhmm: str | None = None) -> RuleOut:
         cooldown_s=0,
         device_actions=[],
         enabled=True,
+        fire_once_per_local_day=fire_once_per_local_day,
         id="evening-ep1-clear-alert",
         label="EP1 clear dwell alert",
         min_location_accuracy_m=50,

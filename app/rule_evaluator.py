@@ -2624,63 +2624,6 @@ class RuleEvaluator:
                 ctx=ctx,
             )
 
-    def _latest_device_dwell_fire_for_bool(
-        self,
-        family_id: DeviceFamilyId,
-        backend_device_id: str,
-        value: bool,
-    ) -> float | None:
-        """Return the newest ``last_fired_at`` among dwell watches for this bool."""
-        latest: float | None = None
-        index = build_device_dwell_watch_index(list_automation_rules())
-        needle = backend_device_id.strip()
-        for watch in index.watches:
-            if watch.family_id != family_id:
-                continue
-            if watch.device_id.strip() != needle:
-                continue
-            if desired_bool_for_device_condition_state(watch.state) != value:
-                continue
-            for rule_id in watch.rule_ids:
-                runtime = self._rule_state.get(rule_id)
-                if runtime is None or runtime.last_fired_at is None:
-                    continue
-                if latest is None or runtime.last_fired_at > latest:
-                    latest = runtime.last_fired_at
-        return latest
-
-    def _seed_device_dwell_debounce_for_streak(
-        self,
-        family_id: DeviceFamilyId,
-        backend_device_id: str,
-        value: bool,
-        since: float,
-    ) -> None:
-        """Mark device-dwell debounce when a prior fire already covers ``since``."""
-        index = build_device_dwell_watch_index(list_automation_rules())
-        needle = backend_device_id.strip()
-        for watch in index.watches:
-            if watch.family_id != family_id:
-                continue
-            if watch.device_id.strip() != needle:
-                continue
-            if desired_bool_for_device_condition_state(watch.state) != value:
-                continue
-            for rule_id in sorted(watch.rule_ids):
-                runtime = self._rule_state.get(rule_id)
-                if runtime is None or runtime.last_fired_at is None:
-                    continue
-                if runtime.last_fired_at < since:
-                    continue
-                rule_key = (
-                    rule_id,
-                    family_id,
-                    backend_device_id,
-                    watch.state,
-                    watch.min_duration_s,
-                )
-                self._device_dwell_satisfied_evaluated_since[rule_key] = since
-
     def _seed_dwell_satisfied_eval_debounce(self) -> None:
         """Warm debounce slots after restart for ongoing fired/consumed dwell episodes."""
         rules = list_automation_rules()
@@ -2742,28 +2685,7 @@ class RuleEvaluator:
         prior = self._device_bool_value.get(key)
         since = self._device_bool_since.get(key)
         if prior is None or since is None or prior != current:
-            streak_since = now_epoch
-            first_sample = prior is None or since is None
-            prior_fire_at: float | None = None
-            if first_sample:
-                # After restart, streaks are re-seeded at now. Backdate to a prior
-                # fire on this bool so last_fired_at >= since and debounce can warm
-                # (mirrors geofence _seed_dwell_satisfied_eval_debounce).
-                prior_fire_at = self._latest_device_dwell_fire_for_bool(
-                    family_id,
-                    backend_device_id,
-                    current,
-                )
-                if prior_fire_at is not None:
-                    streak_since = prior_fire_at
-            self._set_device_bool_streak(key, current, streak_since)
-            if first_sample and prior_fire_at is not None:
-                self._seed_device_dwell_debounce_for_streak(
-                    family_id,
-                    backend_device_id,
-                    current,
-                    streak_since,
-                )
+            self._set_device_bool_streak(key, current, now_epoch)
 
     def _ensure_astronomical_schedule_materialized(
         self,
