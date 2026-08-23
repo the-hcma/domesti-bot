@@ -254,6 +254,44 @@ async def test_ep1_clear_dwell_retries_after_local_time_opens(
 
 
 @pytest.mark.asyncio
+async def test_ep1_clear_dwell_cooldown_allows_refire_on_same_streak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule(cooldown_s=60))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=True)
+    state = _ep1_state(sensor)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    sensor.occupancy_state = DeviceConditionState.CLEAR.value
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await evaluator.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        clock["now"] += 20.0
+        await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+        assert send_mock.call_count == 1
+        clock["now"] += 30.0
+        await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+        assert send_mock.call_count == 1
+        clock["now"] += 40.0
+        await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+
+    assert send_mock.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_ep1_clear_dwell_failed_fire_does_not_retry_every_tick(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -627,6 +665,7 @@ def _away_garage_rule(*, cooldown_s: int = 0) -> RuleOut:
 def _ep1_clear_dwell_rule(
     *,
     after_hhmm: str | None = None,
+    cooldown_s: int = 0,
     fire_once_per_local_day: bool = False,
 ) -> RuleOut:
     conditions: list[AfterLocalTimeCondition | DevicesAnyInStateForSCondition] = []
@@ -653,7 +692,7 @@ def _ep1_clear_dwell_rule(
     )
     return RuleOut(
         conditions=RuleConditionsOut(all=list(conditions)),
-        cooldown_s=0,
+        cooldown_s=cooldown_s,
         device_actions=[],
         enabled=True,
         fire_once_per_local_day=fire_once_per_local_day,

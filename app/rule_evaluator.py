@@ -2206,11 +2206,16 @@ class RuleEvaluator:
             if dwell_episode_blocks_fire(rule, ctx):
                 self._device_dwell_satisfied_evaluated_since[rule_key] = since
                 continue
-            # Debounce after an all-met attempt (fire success/failure or daily cap)
-            # so we do not retry every tick — but never after conditions_not_met
-            # (e.g. after_local_time still closed) (#681).
-            if rule_id in attempted_rule_ids:
-                self._device_dwell_satisfied_evaluated_since[rule_key] = since
+            # Debounce after an all-met attempt, except while cooldown is still
+            # active — leave the slot clear so cooldown_s can re-arm on the same
+            # streak (RULE_ENGINE_PLAN repeat-while-true). Never mark after
+            # conditions_not_met (e.g. after_local_time still closed) (#681).
+            if rule_id not in attempted_rule_ids:
+                continue
+            runtime = self._rule_state.get(rule_id)
+            if runtime is not None and not self._cooldown_elapsed(rule, runtime):
+                continue
+            self._device_dwell_satisfied_evaluated_since[rule_key] = since
 
     async def _maybe_process_dwell_satisfied(self, roster_user_id: str) -> None:
         rules = list_automation_rules()
