@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -17,38 +18,60 @@ from app.discovery_refresh import (
     snapshot_family_devices,
 )
 from app.domesti_bot_cli import DeviceManagersState
+from app.kasa_device_manager import KasaDeviceManager
+from app.sonos_device_manager import SonosDeviceManager
+
+
+class _FakeKasaMgr:
+    """Per-instance Kasa stand-in (avoids MagicMock class-attribute leakage)."""
+
+    def __init__(self, *devices: SimpleNamespace) -> None:
+        self._switches: list[SimpleNamespace] | None = list(devices)
+        self.last_discovery_source: str | None = "discovery"
+        self.rediscover = AsyncMock()
+
+    @property
+    def switches(self) -> list[SimpleNamespace]:
+        if self._switches is None:
+            raise NotInitializedError
+        return self._switches
+
+    @switches.setter
+    def switches(self, value: list[SimpleNamespace] | None) -> None:
+        self._switches = value
+
+
+class _FakeSonosMgr:
+    """Per-instance Sonos stand-in."""
+
+    def __init__(self, *devices: SimpleNamespace) -> None:
+        self.players: list[SimpleNamespace] = list(devices)
+        self.last_discovery_source: str | None = "discovery"
+        self.rediscover = AsyncMock()
 
 
 def _device(device_id: str, label: str) -> SimpleNamespace:
     return SimpleNamespace(identifier=device_id, preferred_label=label)
 
 
-def _kasa_mgr(*devices: SimpleNamespace) -> MagicMock:
-    mgr = MagicMock()
-    mgr.switches = list(devices)
-    mgr.last_discovery_source = "discovery"
-    mgr.rediscover = AsyncMock()
-    return mgr
+def _kasa_mgr(*devices: SimpleNamespace) -> _FakeKasaMgr:
+    return _FakeKasaMgr(*devices)
 
 
-def _sonos_mgr(*devices: SimpleNamespace) -> MagicMock:
-    mgr = MagicMock()
-    mgr.players = list(devices)
-    mgr.last_discovery_source = "discovery"
-    mgr.rediscover = AsyncMock()
-    return mgr
+def _sonos_mgr(*devices: SimpleNamespace) -> _FakeSonosMgr:
+    return _FakeSonosMgr(*devices)
 
 
 def _state(
     *,
     cache_path: Path | None = None,
-    kasa_mgr: MagicMock | None = None,
-    sonos_mgr: MagicMock | None = None,
-    tailwind_mgr: MagicMock | None = None,
+    kasa_mgr: Any | None = None,
+    sonos_mgr: Any | None = None,
+    tailwind_mgr: Any | None = None,
 ) -> DeviceManagersState:
     return DeviceManagersState(
-        kasa_mgr=kasa_mgr or _kasa_mgr(),
-        sonos_mgr=sonos_mgr,
+        kasa_mgr=cast(KasaDeviceManager, kasa_mgr or _kasa_mgr()),
+        sonos_mgr=cast(SonosDeviceManager | None, sonos_mgr),
         tailwind_mgr=tailwind_mgr,
         androidtv_mgr=None,
         ep1_mgr=None,
@@ -129,9 +152,9 @@ async def test_refresh_skips_watcher_restart_when_no_live_runtime(
 
 
 def test_discovery_settings_status_marks_uninitialized_unavailable() -> None:
-    mgr = MagicMock()
+    mgr = _kasa_mgr()
+    mgr.switches = None
     mgr.last_discovery_source = None
-    type(mgr).switches = PropertyMock(side_effect=NotInitializedError)
     status = discovery_settings_status(_state(kasa_mgr=mgr))
     by_id = {family.family_id: family for family in status.families}
     assert by_id["kasa"].available is False
@@ -145,12 +168,11 @@ async def test_refresh_skips_new_device_diff_when_before_uninitialized(
     """Uninitialized before-snapshot must not announce the whole roster as new."""
     existing = _device("aa:bb:cc:dd:ee:01", "Kitchen Plug")
     new = _device("aa:bb:cc:dd:ee:02", "Porch Plug")
-    mgr = MagicMock()
-    mgr.last_discovery_source = "discovery"
-    type(mgr).switches = PropertyMock(side_effect=NotInitializedError)
+    mgr = _kasa_mgr()
+    mgr.switches = None
 
     async def _rediscover() -> None:
-        type(mgr).switches = PropertyMock(return_value=[existing, new])
+        mgr.switches = [existing, new]
 
     mgr.rediscover = AsyncMock(side_effect=_rediscover)
     state = _state(kasa_mgr=mgr)
@@ -173,11 +195,9 @@ async def test_refresh_failure_reports_post_failure_count_and_restarts_when_othe
     sonos = _sonos_mgr(_device("aa:bb:cc:dd:ee:10", "Living Room"))
 
     async def _kasa_fail() -> None:
-        type(kasa).switches = PropertyMock(side_effect=NotInitializedError)
+        kasa.switches = None
         raise RuntimeError("udp down")
 
-    # Assign rediscover mocks after both managers exist so MagicMock instance
-    # attributes are not overwritten by a later helper construction.
     kasa.rediscover = AsyncMock(side_effect=_kasa_fail)
     state = _state(kasa_mgr=kasa, sonos_mgr=sonos)
     restart = AsyncMock()
