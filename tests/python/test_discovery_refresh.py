@@ -170,13 +170,15 @@ async def test_refresh_failure_reports_post_failure_count_and_restarts_when_othe
 ) -> None:
     existing = _device("aa:bb:cc:dd:ee:01", "Kitchen Plug")
     kasa = _kasa_mgr(existing)
+    sonos = _sonos_mgr(_device("aa:bb:cc:dd:ee:10", "Living Room"))
 
     async def _kasa_fail() -> None:
         type(kasa).switches = PropertyMock(side_effect=NotInitializedError)
         raise RuntimeError("udp down")
 
+    # Assign rediscover mocks after both managers exist so MagicMock instance
+    # attributes are not overwritten by a later helper construction.
     kasa.rediscover = AsyncMock(side_effect=_kasa_fail)
-    sonos = _sonos_mgr(_device("aa:bb:cc:dd:ee:10", "Living Room"))
     state = _state(kasa_mgr=kasa, sonos_mgr=sonos)
     restart = AsyncMock()
     monkeypatch.setattr("app.server_runtime.runtime.device_state", state)
@@ -203,8 +205,8 @@ async def test_refresh_failure_keeps_readable_roster_count(
     """When rediscover raises but the roster stays readable (cache fallback / EP1 restore)."""
     existing = _device("aa:bb:cc:dd:ee:01", "Kitchen Plug")
     kasa = _kasa_mgr(existing)
-    kasa.rediscover = AsyncMock(side_effect=RuntimeError("udp down; cache reconnect ok"))
     sonos = _sonos_mgr(_device("aa:bb:cc:dd:ee:10", "Living Room"))
+    kasa.rediscover = AsyncMock(side_effect=RuntimeError("udp down; cache reconnect ok"))
     state = _state(kasa_mgr=kasa, sonos_mgr=sonos)
     restart = AsyncMock()
     monkeypatch.setattr("app.server_runtime.runtime.device_state", state)
@@ -229,8 +231,8 @@ async def test_refresh_skips_watcher_restart_when_all_families_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     kasa = _kasa_mgr(_device("aa:bb:cc:dd:ee:01", "Kitchen Plug"))
-    kasa.rediscover = AsyncMock(side_effect=RuntimeError("kasa boom"))
     sonos = _sonos_mgr(_device("aa:bb:cc:dd:ee:10", "Living Room"))
+    kasa.rediscover = AsyncMock(side_effect=RuntimeError("kasa boom"))
     sonos.rediscover = AsyncMock(side_effect=RuntimeError("sonos boom"))
     state = _state(kasa_mgr=kasa, sonos_mgr=sonos)
     restart = AsyncMock()
