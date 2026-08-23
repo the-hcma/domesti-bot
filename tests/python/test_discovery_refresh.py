@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
@@ -40,17 +41,19 @@ def _sonos_mgr(*devices: SimpleNamespace) -> MagicMock:
 
 def _state(
     *,
+    cache_path: object | None = None,
     kasa_mgr: MagicMock | None = None,
     sonos_mgr: MagicMock | None = None,
+    tailwind_mgr: MagicMock | None = None,
 ) -> DeviceManagersState:
     return DeviceManagersState(
         kasa_mgr=kasa_mgr or _kasa_mgr(),
         sonos_mgr=sonos_mgr,
-        tailwind_mgr=None,
+        tailwind_mgr=tailwind_mgr,
         androidtv_mgr=None,
         ep1_mgr=None,
         vizio_mgr=None,
-        cache_path=None,
+        cache_path=cache_path,
         args=argparse.Namespace(),
     )
 
@@ -211,3 +214,28 @@ async def test_refresh_skips_watcher_restart_when_all_families_fail(
     result = await refresh_all_device_discovery(state, restart_watchers=True)
     assert all(not family.ok or family.skipped for family in result.families)
     restart.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_persists_gotailwind_host(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cache = tmp_path / "discovery.sqlite"
+    tailwind = MagicMock()
+    tailwind.doors = []
+    tailwind.host = "192.168.1.40"
+    tailwind.last_discovery_source = "discovery"
+    tailwind.rediscover = AsyncMock()
+    state = _state(cache_path=cache, kasa_mgr=_kasa_mgr(), tailwind_mgr=tailwind)
+    save = MagicMock()
+    monkeypatch.setattr(
+        "app.discovery_refresh.device_discovery_store.save_tailwind_host",
+        save,
+    )
+    monkeypatch.setattr("app.server_runtime.runtime.device_state", None)
+
+    result = await refresh_all_device_discovery(state, restart_watchers=False)
+    save.assert_called_once_with(cache, "192.168.1.40")
+    gotailwind = next(family for family in result.families if family.family_id == "gotailwind")
+    assert gotailwind.ok is True

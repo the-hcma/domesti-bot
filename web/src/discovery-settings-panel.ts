@@ -72,13 +72,18 @@ export async function mountDiscoverySettingsPanel(
     setSettingsDialogStatus(status, message, tone);
   };
 
-  const renderFamilies = (families: readonly DiscoveryFamilyStatusOut[]): void => {
+  const renderFamilies = (
+    families: readonly (DiscoveryFamilyStatusOut & { error?: string | null })[],
+  ): void => {
     familyList.replaceChildren();
     for (const family of families) {
       const item = document.createElement("li");
       item.className = "discovery-settings-family-row";
       if (!family.available) {
         item.textContent = `${family.label}: not loaded`;
+      } else if (family.error) {
+        item.textContent =
+          `${family.label}: ${family.device_count} device(s) — refresh failed: ${family.error}`;
       } else {
         const source =
           family.last_discovery_source === "cache"
@@ -130,8 +135,9 @@ export async function mountDiscoverySettingsPanel(
         const result = await api.refreshDiscovery();
         renderFamilies(
           result.families.map((family) => ({
-            available: family.ok,
+            available: !family.skipped,
             device_count: family.device_count,
+            error: family.error,
             family_id: family.family_id,
             label: family.label,
             last_discovery_source: family.source,
@@ -141,9 +147,11 @@ export async function mountDiscoverySettingsPanel(
         const newCount = result.new_devices.length;
         const failed = result.families.filter((f) => !f.ok && !f.skipped);
         if (failed.length > 0) {
-          const detail = `Discovery finished with ${failed.length} family error(s).`;
-          showStatus(detail, ToastVariant.Error);
-          showErrorToast(detail);
+          const detail = failed
+            .map((f) => `${f.label}: ${f.error ?? "rediscover failed"}`)
+            .join("; ");
+          showStatus(`Discovery finished with errors — ${detail}`, ToastVariant.Error);
+          showErrorToast(`Discovery finished with errors — ${detail}`);
         } else if (newCount > 0) {
           const detail =
             newCount === 1
