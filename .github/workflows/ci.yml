@@ -121,6 +121,9 @@ jobs:
     needs: guard
     if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    # Finite backstop for worker hangs (pytest-timeout is the per-test guard;
+    # healthy hermetic runs finish in ~1 minute). See issue #675.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:

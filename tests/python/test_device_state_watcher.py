@@ -620,11 +620,11 @@ async def test_refresh_all_devices_concurrently_cancels_in_flight_on_stop() -> N
 
     async def refresh_a() -> None:
         a_started.set()
-        await asyncio.sleep(3600.0)
+        await asyncio.Event().wait()
 
     async def refresh_b() -> None:
         b_started.set()
-        await asyncio.sleep(3600.0)
+        await asyncio.Event().wait()
 
     task = asyncio.create_task(
         _refresh_all_devices_concurrently(
@@ -699,7 +699,7 @@ async def test_kasa_watcher_stops_mid_refresh_and_cancels_in_flight_polls() -> N
     async def slow_is_on(identifier: str) -> bool:
         if identifier == "host-a":
             first_poll_started.set()
-            await asyncio.sleep(3600.0)
+            await asyncio.Event().wait()
         return True
 
     cast(AsyncMock, mgr.is_on).side_effect = slow_is_on

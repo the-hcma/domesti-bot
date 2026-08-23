@@ -592,7 +592,7 @@ async def test_async_main_marks_families_failed_when_discovery_raises(
         raise ValueError("Expected a host:port, got 192.168.1.50:")
 
     async def _fake_cmd_loop(discovery: _CliDiscoverySession, *_args: object, **_kwargs: object) -> None:
-        await boom_started.wait()
+        await asyncio.wait_for(boom_started.wait(), timeout=2.0)
         assert all(status is FamilyDiscoveryStatus.FAILED for status in discovery.family_status.values())
 
     async def _noop_shutdown(_state: object) -> None:
@@ -678,7 +678,7 @@ async def test_async_main_requests_kasa_vendor_alias_sync() -> None:
         bootstrap_started.set()
 
     async def _fake_cmd_loop(*_args: object, **_kwargs: object) -> None:
-        await bootstrap_started.wait()
+        await asyncio.wait_for(bootstrap_started.wait(), timeout=2.0)
 
     async def _noop_shutdown(_state: object) -> None:
         return None
