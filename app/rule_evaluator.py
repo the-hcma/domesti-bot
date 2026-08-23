@@ -240,11 +240,14 @@ class RuleEvaluator:
         # Natural bool streak per backend device (on/open/playing vs off/closed/paused).
         self._device_bool_since: dict[tuple[DeviceFamilyId, str], float] = {}
         self._device_bool_value: dict[tuple[DeviceFamilyId, str], bool] = {}
-        # Ephemeral per-rule ``since`` epoch already evaluated for device-state
-        # ``dwell_satisfied`` this streak — cleared when the device bool flips.
+        # Ephemeral per-rule (streak ``since``, local calendar day) already
+        # evaluated for device-state ``dwell_satisfied``. Cleared when the device
+        # bool flips. ``fire_once_per_local_day`` re-arms when the stored day is
+        # stale (successful prior-day fire or failed attempt with no
+        # ``last_fired_at``); other rules debounce for the whole streak.
         self._device_dwell_satisfied_evaluated_since: dict[
             tuple[str, DeviceFamilyId, str, DeviceConditionState, int],
-            float,
+            tuple[float, date],
         ] = {}
         # Ephemeral per-rule ``since`` epoch already evaluated for
         # ``dwell_satisfied`` this streak — avoids re-running full rule checks on
@@ -2185,25 +2188,22 @@ class RuleEvaluator:
                     watch.state,
                     watch.min_duration_s,
                 )
-                if self._device_dwell_satisfied_evaluated_since.get(rule_key) == since:
-                    rule = rules_by_id.get(rule_id)
-                    runtime = self._rule_state.get(rule_id)
-                    # fire_once_per_local_day must re-arm after local midnight on a
-                    # persistent streak (e.g. EP1 stays clear overnight).
-                    if (
-                        rule is not None
-                        and rule.fire_once_per_local_day
-                        and runtime is not None
-                        and runtime.last_fired_at is not None
-                        and not fired_on_same_local_calendar_day(
-                            runtime.last_fired_at,
-                            now_epoch,
-                            timezone,
-                        )
-                    ):
-                        del self._device_dwell_satisfied_evaluated_since[rule_key]
-                    else:
-                        continue
+                marked = self._device_dwell_satisfied_evaluated_since.get(rule_key)
+                if marked is not None:
+                    marked_since, marked_day = marked
+                    if marked_since == since:
+                        rule = rules_by_id.get(rule_id)
+                        today = local_calendar_date(now_epoch, timezone)
+                        # fire_once_per_local_day re-arms after local midnight on a
+                        # persistent streak (success or failed attempt).
+                        if (
+                            rule is not None
+                            and rule.fire_once_per_local_day
+                            and marked_day != today
+                        ):
+                            del self._device_dwell_satisfied_evaluated_since[rule_key]
+                        else:
+                            continue
                 crossed_rule_ids.add(rule_id)
                 newly_evaluated_rules.append((rule_key, since))
         if not crossed_rule_ids:
@@ -2215,13 +2215,17 @@ class RuleEvaluator:
             now_epoch=now_epoch,
             timezone=timezone,
         )
+        evaluated_day = local_calendar_date(now_epoch, timezone)
         for rule_key, since in newly_evaluated_rules:
             rule_id = rule_key[0]
             rule = rules_by_id.get(rule_id)
             if rule is None:
                 continue
             if dwell_episode_blocks_fire(rule, ctx):
-                self._device_dwell_satisfied_evaluated_since[rule_key] = since
+                self._device_dwell_satisfied_evaluated_since[rule_key] = (
+                    since,
+                    evaluated_day,
+                )
                 continue
             # Debounce after an all-met attempt, except while cooldown is still
             # active — leave the slot clear so cooldown_s can re-arm on the same
@@ -2232,7 +2236,10 @@ class RuleEvaluator:
             runtime = self._rule_state.get(rule_id)
             if runtime is not None and not self._cooldown_elapsed(rule, runtime):
                 continue
-            self._device_dwell_satisfied_evaluated_since[rule_key] = since
+            self._device_dwell_satisfied_evaluated_since[rule_key] = (
+                since,
+                evaluated_day,
+            )
 
     async def _maybe_process_dwell_satisfied(self, roster_user_id: str) -> None:
         rules = list_automation_rules()
