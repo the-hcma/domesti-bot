@@ -789,7 +789,10 @@ class DiscoveryFamilyRefreshOut(BaseModel):
 class DiscoveryFamilyStatusOut(BaseModel):
     """Per-family live status for ``GET /v1/settings/discovery``."""
 
-    available: bool = Field(..., description="True when the family manager is loaded.")
+    available: bool = Field(
+        ...,
+        description=("True when the family manager is loaded and its in-memory roster is readable (fetch completed)."),
+    )
     device_count: int = Field(..., description="Current in-memory device count.")
     family_id: str = Field(..., description="Family slug (androidtv, ep1, gotailwind, kasa, sonos, vizio).")
     label: str = Field(..., description="Human-readable family label.")

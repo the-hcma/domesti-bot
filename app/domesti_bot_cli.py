@@ -2237,6 +2237,14 @@ async def dispatch_repl_action(
             refresh_all_device_discovery,
         )
 
+        cli_args = (
+            discovery.args
+            if discovery is not None
+            else argparse.Namespace(
+                androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
+                ep1_zeroconf_timeout=ep1_zeroconf_timeout,
+            )
+        )
         state = DeviceManagersState(
             kasa_mgr=kasa_mgr,
             sonos_mgr=sonos_mgr,
@@ -2245,7 +2253,7 @@ async def dispatch_repl_action(
             ep1_mgr=ep1_mgr,
             vizio_mgr=vizio_mgr,
             cache_path=cache_path,
-            args=argparse.Namespace(),
+            args=cli_args,
         )
         result = await refresh_all_device_discovery(state, restart_watchers=True)
         for family in result.families:

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import argparse
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
 
+from app.device_manager import NotInitializedError
 from app.discovery_refresh import (
     NEW_DEVICE_FOUND_PREFIX,
     discovery_settings_status,
@@ -110,3 +111,39 @@ async def test_refresh_skips_watcher_restart_when_no_live_runtime(
     )
     await refresh_all_device_discovery(state, restart_watchers=True)
     restart.assert_not_awaited()
+
+
+def test_discovery_settings_status_marks_uninitialized_unavailable() -> None:
+    mgr = MagicMock()
+    mgr.last_discovery_source = None
+    type(mgr).switches = PropertyMock(side_effect=NotInitializedError)
+    status = discovery_settings_status(_state(kasa_mgr=mgr))
+    by_id = {family.family_id: family for family in status.families}
+    assert by_id["kasa"].available is False
+    assert by_id["kasa"].device_count == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_skips_new_device_diff_when_before_uninitialized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uninitialized before-snapshot must not announce the whole roster as new."""
+    existing = _device("aa:bb:cc:dd:ee:01", "Kitchen Plug")
+    new = _device("aa:bb:cc:dd:ee:02", "Porch Plug")
+    mgr = MagicMock()
+    mgr.last_discovery_source = "discovery"
+    type(mgr).switches = PropertyMock(side_effect=NotInitializedError)
+
+    async def _rediscover() -> None:
+        type(mgr).switches = PropertyMock(return_value=[existing, new])
+
+    mgr.rediscover = AsyncMock(side_effect=_rediscover)
+    state = _state(kasa_mgr=mgr)
+    monkeypatch.setattr("app.server_runtime.runtime.device_state", None)
+
+    result = await refresh_all_device_discovery(state, restart_watchers=False)
+    assert result.new_devices == ()
+    kasa = next(family for family in result.families if family.family_id == "kasa")
+    assert kasa.ok is True
+    assert kasa.device_count == 2
+    assert kasa.new_devices == ()

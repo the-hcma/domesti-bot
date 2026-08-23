@@ -112,7 +112,18 @@ def discovery_settings_status(state: DeviceManagersState) -> DiscoverySettingsSt
                 )
             )
             continue
-        snapshot = snapshot_family_devices(state, slug)
+        snapshot = _try_snapshot_family_devices(state, slug)
+        if snapshot is None:
+            families.append(
+                DiscoveryFamilyStatus(
+                    available=False,
+                    device_count=0,
+                    family_id=slug,
+                    label=label,
+                    last_discovery_source=_last_discovery_source(mgr),
+                )
+            )
+            continue
         families.append(
             DiscoveryFamilyStatus(
                 available=True,
@@ -136,8 +147,12 @@ async def refresh_all_device_discovery(
     calls in parallel (same order as the CLI), then diffs after. When
     ``restart_watchers`` is true and at least one family rediscovered
     successfully, restarts device-state watchers once.
+
+    An uninitialized before-snapshot (``NotInitializedError``) is not treated as
+    an empty roster: new-device announcements are skipped for that family so a
+    successful rediscover cannot claim every existing device is new.
     """
-    before_by_family = {slug: snapshot_family_devices(state, slug) for slug in DISCOVERY_FAMILY_SLUGS}
+    before_by_family = {slug: _try_snapshot_family_devices(state, slug) for slug in DISCOVERY_FAMILY_SLUGS}
 
     bundles = await asyncio.gather(*(_rediscover_family(state, slug) for slug in DISCOVERY_FAMILY_SLUGS))
     bundle_by_slug = {b["slug"]: b for b in bundles}
@@ -148,6 +163,8 @@ async def refresh_all_device_discovery(
     for slug in DISCOVERY_FAMILY_SLUGS:
         bundle = bundle_by_slug[slug]
         label = DISCOVERY_FAMILY_LABELS[slug]
+        before = before_by_family[slug]
+        before_count = 0 if before is None else len(before)
         if bundle["skipped"]:
             family_results.append(
                 DiscoveryFamilyResult(
@@ -167,7 +184,7 @@ async def refresh_all_device_discovery(
             exc = bundle.get("exc")
             family_results.append(
                 DiscoveryFamilyResult(
-                    device_count=len(before_by_family[slug]),
+                    device_count=before_count,
                     error=repr(exc) if exc is not None else "rediscover failed",
                     family_id=slug,
                     label=label,
@@ -181,11 +198,13 @@ async def refresh_all_device_discovery(
             continue
 
         any_ok = True
-        after = snapshot_family_devices(state, slug)
-        before = before_by_family[slug]
-        new_ids = sorted(set(after) - set(before))
-        new_devices = tuple(after[device_id] for device_id in new_ids)
-        flat_new.extend(new_devices)
+        after = _try_snapshot_family_devices(state, slug) or {}
+        if before is None:
+            new_devices: tuple[DiscoveryDeviceSnapshot, ...] = ()
+        else:
+            new_ids = sorted(set(after) - set(before))
+            new_devices = tuple(after[device_id] for device_id in new_ids)
+            flat_new.extend(new_devices)
         mgr = _manager_for_slug(state, slug)
         family_results.append(
             DiscoveryFamilyResult(
@@ -224,16 +243,8 @@ def snapshot_family_devices(
     family_id: str,
 ) -> dict[str, DiscoveryDeviceSnapshot]:
     """Return ``device_id → snapshot`` for a family, or ``{}`` if unloaded/uninitialized."""
-    collector = _FAMILY_COLLECTORS.get(family_id)
-    if collector is None:
-        return {}
-    mgr = _manager_for_slug(state, family_id)
-    if mgr is None:
-        return {}
-    try:
-        return collector(mgr)
-    except NotInitializedError:
-        return {}
+    snapshot = _try_snapshot_family_devices(state, family_id)
+    return {} if snapshot is None else snapshot
 
 
 def _collect_androidtv(mgr: Any) -> dict[str, DiscoveryDeviceSnapshot]:
@@ -334,3 +345,25 @@ def _snapshots_from_devices(devices: Sequence[Any]) -> dict[str, DiscoveryDevice
             preferred_label=preferred,
         )
     return out
+
+
+def _try_snapshot_family_devices(
+    state: DeviceManagersState,
+    family_id: str,
+) -> dict[str, DiscoveryDeviceSnapshot] | None:
+    """Return a roster snapshot, or ``None`` when unloaded or not yet initialized.
+
+    ``None`` must not be confused with an empty ``{}`` roster: callers that diff
+    before/after rediscover skip new-device announcements when the baseline is
+    ``None``.
+    """
+    collector = _FAMILY_COLLECTORS.get(family_id)
+    if collector is None:
+        return None
+    mgr = _manager_for_slug(state, family_id)
+    if mgr is None:
+        return None
+    try:
+        return collector(mgr)
+    except NotInitializedError:
+        return None
