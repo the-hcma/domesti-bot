@@ -26,6 +26,12 @@ on:
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}-${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}-${{ github.event.action || github.event_name }}
   cancel-in-progress: true
+
+# Explicit least privilege (org default is already read-only). Jobs that need
+# more declare it locally (e.g. guard needs pull-requests: read).
+permissions:
+  contents: read
+
 jobs:
   guard:
     permissions:
@@ -121,6 +127,9 @@ jobs:
     needs: guard
     if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    # Finite backstop for worker hangs (pytest-timeout is the per-test guard;
+    # healthy hermetic runs finish in ~1 minute). See issue #675.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -138,6 +147,9 @@ jobs:
     needs: guard
     if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    # Playwright/Chromium can stall in native waits that pytest-timeout's
+    # thread method cannot interrupt; bound the job. See issue #675.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:

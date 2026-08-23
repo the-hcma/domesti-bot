@@ -96,10 +96,11 @@ def test_lifespan_yields_immediately_even_when_discovery_blocks() -> None:
 
     async def _slow_bootstrap(*_args: Any, **_kwargs: Any) -> Any:
         # Simulate a discovery sweep that never finishes within the test.
-        # ``asyncio.sleep`` raises ``CancelledError`` cleanly when the
-        # lifespan cancels the background task on shutdown.
-        await asyncio.sleep(60)
-        return None
+        # Wake every second until the lifespan cancels this task on shutdown —
+        # a bare ``Event().wait()`` parks in ``select(None)`` and can bypass
+        # pytest-timeout's thread method (issue #675).
+        while True:
+            await asyncio.sleep(1.0)
 
     args = argparse.Namespace()
     app = create_app(args)
@@ -107,8 +108,8 @@ def test_lifespan_yields_immediately_even_when_discovery_blocks() -> None:
         started = time.perf_counter()
         with TestClient(app) as client:
             startup_elapsed = time.perf_counter() - started
-            # If discovery were on the critical path the slow_bootstrap above
-            # would block startup for ~60s. A generous 5s upper bound proves
+            # If discovery were on the critical path the hanging bootstrap above
+            # would block startup indefinitely. A generous 5s upper bound proves
             # the lifespan returned without waiting.
             assert startup_elapsed < 5.0, f"lifespan startup took {startup_elapsed:.1f}s; discovery is still blocking"
             # Static routes must be live immediately:

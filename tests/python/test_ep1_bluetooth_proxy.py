@@ -285,7 +285,7 @@ async def test_probe_ep1_bluetooth_proxy_collects_samples() -> None:
         ads_delivered.set()
 
     async def _listen_sleep(_duration: float) -> None:
-        await ads_delivered.wait()
+        await asyncio.wait_for(ads_delivered.wait(), timeout=2.0)
         await _real_sleep(0)
 
     driver = asyncio.create_task(_drive())
@@ -368,7 +368,7 @@ async def test_probe_ep1_bluetooth_proxy_enables_when_disabled() -> None:
             enable_if_needed=True,
         )
     await driver
-    await initial_state_sent.wait()
+    await asyncio.wait_for(initial_state_sent.wait(), timeout=2.0)
 
     client.select_command.assert_called_once_with(7, Ep1BluetoothProxyState.ENABLED.value)
     assert result.ok is True

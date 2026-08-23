@@ -123,6 +123,16 @@ testpaths = ["tests/python"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+# Per-test hang guard (issue #675). ``thread`` works under pytest-xdist; ``signal``
+# does not interrupt stuck worker threads reliably. Override locally with
+# ``--timeout=0`` when debugging under pdb. Note: ``thread`` only raises at a
+# Python bytecode boundary — an idle ``await Event().wait()`` parked in
+# ``selectors.select(None)`` may not observe it; cancel-path forever-blocks should
+# use short ``asyncio.sleep`` loops (or ``wait_for``) so the loop keeps waking.
+# CI job ``timeout-minutes`` remains the hard backstop for native/C stalls.
+timeout = 60
+timeout_method = "thread"
+faulthandler_timeout = 70
 markers = [
     "browser: layout checks that need headless Chromium (install dev group + playwright)",
     "integration: exercises real LAN hardware; requires env-specific credentials",
@@ -149,6 +159,7 @@ dev = [
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.3",
 ]

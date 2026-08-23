@@ -51,7 +51,7 @@ The **primary clone** (repo root — first entry in `git worktree list`, usually
 - **Only `uv`** is used for Python package management. Never `pip` directly.
 - **Production vs dev dependency groups**:
   - **`[project] dependencies`** — runtime only (FastAPI, device libraries, uvicorn, …). Used by `scripts/on-deploy` (`uv sync --frozen`), production systemd installs, and a plain `uv sync` when you want a deploy-shaped venv.
-  - **`[dependency-groups] dev`** — contributors and CI only: `pyright`, `ruff`, `pytest`, `pytest-asyncio`, `pytest-xdist`, `playwright`, `icecream`. Install with `uv sync --group dev` (or `uv sync --all-groups`).
+  - **`[dependency-groups] dev`** — contributors and CI only: `pyright`, `ruff`, `pytest`, `pytest-asyncio`, `pytest-timeout`, `pytest-xdist`, `playwright`, `icecream`. Install with `uv sync --group dev` (or `uv sync --all-groups`).
   - Add runtime packages: `uv add <pkg>`. Add tooling: `uv add --group dev <pkg>`. Do not hand-edit `pyproject.toml` for additions.
 - **Contributors** should run `uv sync --group dev` after clone or pull when `pyproject.toml` / `uv.lock` change. Pyright, Ruff, and pytest are not installed by `uv sync` alone.
 - The lock file (`uv.lock`) **must always be committed**.
@@ -168,6 +168,7 @@ domesti-bot/
   - `testpaths = ["tests/python"]` — pytest discovery is scoped to the canonical test root.
   - `asyncio_mode = "auto"` — `async def test_*` works without `@pytest.mark.asyncio`. Continue using the explicit decorator for clarity in existing files where it is already present.
   - **Parallel hermetic runs** — CI and the pre-PR gate use **`pytest-xdist`** with **`-n auto`** so the hermetic suite spreads across CPU cores (`uv run pytest -m "not integration and not browser" -n auto`). Omit **`-n auto`** when you need a single process (e.g. `pdb`). New tests must stay **process-safe**: no fixed listen ports, no reliance on a shared mutable module global without a lock, no accidental dependence on collection order across workers.
+  - **Hang guards** — `pytest-timeout` enforces a **60s per-test** limit (`timeout_method = thread`, compatible with xdist). Prefer cancel-friendly forever-blocks that keep waking the event loop (`while True: await asyncio.sleep(1.0)`) over bare `await asyncio.Event().wait()` — the thread method cannot interrupt a loop parked in `selectors.select(None)`. Wrap synchronization `Event.wait()` calls the test itself awaits with `asyncio.wait_for(..., timeout=…)`. CI hermetic and browser jobs also have `timeout-minutes: 15` as the hard backstop for native/C stalls (Playwright, etc.). Override locally with `--timeout=0` under `pdb`.
   - **Browser layout tests** (`@pytest.mark.browser`) — headless Chromium via **Playwright** checks that long device labels stay inside compact/comfortable tiles using production CSS from `app/api/static/index.html`. They are **not** run under xdist (module-scoped browser fixture). CI runs them in a **separate parallel job** (`Pytest (browser layout)` in `ci.yml`). Locally (after `uv sync --group dev` and a one-time `uv run playwright install chromium`):
     ```
     uv run pytest tests/python/test_landing_compact_tile_label.py -m browser -v
@@ -622,8 +623,8 @@ CI lives in `.github/workflows/`:
 
 - **`ci.yml`** — runs on every PR and on `merge_group` (GitHub merge queue; skips legacy Graphite staging branches and already-merged PRs). Jobs after `Guard` run **in parallel**:
   - `Python lint & format checks` — one `uv sync --group dev`, then ruff check/format + pyright (via `.github/ci/python-static`)
-  - `Pytest (hermetic)` — `uv sync --group dev`, then `uv run pytest -m "not integration and not browser" -n auto` (**pytest-xdist**)
-  - `Pytest (browser layout)` — `uv sync --group dev`, `playwright install --with-deps chromium`, then `uv run pytest -m "browser and not integration"` (single process; parallel to hermetic job)
+  - `Pytest (hermetic)` — `uv sync --group dev`, then `uv run pytest -m "not integration and not browser" -n auto --durations=20` (**pytest-xdist**; job `timeout-minutes: 15`; per-test `pytest-timeout` 60s)
+  - `Pytest (browser layout)` — `uv sync --group dev`, `playwright install --with-deps chromium`, then `uv run pytest -m "browser and not integration"` (single process; parallel to hermetic job; job `timeout-minutes: 15`)
   - `Shellcheck` — every no-extension script under `scripts/`
   - `Web (typecheck + build)` — `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm run build`, asserts `app/api/static/dist/main.js` exists
   - `Workflow Lint (actionlint)` — validates the YAML in `.github/workflows/`
