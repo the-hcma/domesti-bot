@@ -1,7 +1,7 @@
 """Overnight empty-room EP1 occupancy false-positive calibrator.
 
 Assumes the target room is unoccupied during a local-time window (default
-00:00–06:00). Observes the combined ``occupancy`` binary; any occupied reading
+00:00-06:00). Observes the combined ``occupancy`` binary; any occupied reading
 is treated as a false positive. On each false positive, lowers one mmWave knob
 (or raises on-latency) via :func:`app.ep1_occupancy_tuning.apply_ep1_occupancy_tuning`,
 logs the change, and continues until consecutive clear windows succeed or the
