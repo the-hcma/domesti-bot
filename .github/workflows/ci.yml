@@ -26,6 +26,12 @@ on:
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}-${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}-${{ github.event.action || github.event_name }}
   cancel-in-progress: true
+
+# Explicit least privilege (org default is already read-only). Jobs that need
+# more declare it locally (e.g. guard needs pull-requests: read).
+permissions:
+  contents: read
+
 jobs:
   guard:
     permissions:
