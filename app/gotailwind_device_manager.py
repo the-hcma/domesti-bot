@@ -242,6 +242,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         )
         self._host: str | None = None
         self._hub_mac: str | None = None
+        self._last_discovery_source: str | None = None
         self._tailwind: Tailwind | None = None
         self._alias_to_device: dict[str, GotailwindDevice] | None = None
 
@@ -263,13 +264,15 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             raise ValueError(f"Unknown door: {identifier!r}")
         return d
 
-    async def _resolve_host(self) -> str:
+    async def _resolve_host(self) -> tuple[str, str]:
         host = self._host_arg
-        if not host:
-            host = (os.environ.get("TAILWIND_HOST") or "").strip()
-        if not host:
-            host = await discover_tailwind_host(timeout=self._discovery_timeout)
-        return host
+        if host:
+            return host, "cache"
+        host = (os.environ.get("TAILWIND_HOST") or "").strip()
+        if host:
+            return host, "cache"
+        host = await discover_tailwind_host(timeout=self._discovery_timeout)
+        return host, "discovery"
 
     async def _tailwind_status(self, identifier: str) -> TailwindDoor:
         gd = self._device_for(identifier)
@@ -289,6 +292,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         self._alias_to_device = None
         self._host = None
         self._hub_mac = None
+        self._last_discovery_source = None
 
     @property
     def doors(self) -> tuple[GotailwindDevice, ...]:
@@ -335,7 +339,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         if self._alias_to_device is not None:
             raise AlreadyInitializedError
 
-        self._host = await self._resolve_host()
+        self._host, self._last_discovery_source = await self._resolve_host()
         cached_mac: str | None = None
         if self._display_names_store_path is not None:
             row = device_discovery_store.load_tailwind_host_row(self._display_names_store_path)
@@ -409,6 +413,11 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         door = await self._tailwind_status(identifier)
         return door.state == TailwindDoorState.OPEN
 
+    @property
+    def last_discovery_source(self) -> str | None:
+        """``cache`` when the hub host was explicit or cached; ``discovery`` after mDNS hub lookup."""
+        return self._last_discovery_source
+
     async def open(self, identifier: str) -> None:
         await self._device_for(identifier).open()
 
@@ -447,6 +456,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             self._tailwind = None
             self._host = None
             self._hub_mac = None
+            self._last_discovery_source = None
             _LOGGER.info("Tailwind reload_from_cache: empty cache; cleared device map")
             return True
 
@@ -454,6 +464,8 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         previous_tailwind = self._tailwind
         previous_map = self._alias_to_device
         previous_host = self._host
+        previous_hub_mac = self._hub_mac
+        previous_source = self._last_discovery_source
 
         self._host_arg = host
         self._tailwind = None
@@ -477,6 +489,8 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             self._tailwind = previous_tailwind
             self._alias_to_device = previous_map
             self._host = previous_host
+            self._hub_mac = previous_hub_mac
+            self._last_discovery_source = previous_source
             return False
 
         self._host_arg = previous_host_arg

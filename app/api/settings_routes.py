@@ -66,6 +66,7 @@ from app.db.secrets import (
 )
 from app.device_enums import Ep1CalibrationOffsetKind, Ep1OccupancyTuningKind
 from app.discovery_refresh import (
+    DiscoveryDeviceSnapshot,
     discovery_settings_status,
     refresh_all_device_discovery,
 )
@@ -148,6 +149,7 @@ async def get_discovery_settings() -> DiscoverySettingsOut:
             DiscoveryFamilyStatusOut(
                 available=family.available,
                 device_count=family.device_count,
+                devices=[_discovery_device_out(device) for device in family.devices],
                 family_id=family.family_id,
                 label=family.label,
                 last_discovery_source=family.last_discovery_source,
@@ -171,17 +173,11 @@ async def post_discovery_refresh() -> DiscoveryRefreshOut:
         families=[
             DiscoveryFamilyRefreshOut(
                 device_count=family.device_count,
+                devices=[_discovery_device_out(device) for device in family.devices],
                 error=family.error,
                 family_id=family.family_id,
                 label=family.label,
-                new_devices=[
-                    DiscoveryDeviceOut(
-                        device_id=device.device_id,
-                        display=device.display,
-                        preferred_label=device.preferred_label,
-                    )
-                    for device in family.new_devices
-                ],
+                new_devices=[_discovery_device_out(device) for device in family.new_devices],
                 ok=family.ok,
                 skip_detail=family.skip_detail,
                 skipped=family.skipped,
@@ -189,14 +185,7 @@ async def post_discovery_refresh() -> DiscoveryRefreshOut:
             )
             for family in result.families
         ],
-        new_devices=[
-            DiscoveryDeviceOut(
-                device_id=device.device_id,
-                display=device.display,
-                preferred_label=device.preferred_label,
-            )
-            for device in result.new_devices
-        ],
+        new_devices=[_discovery_device_out(device) for device in result.new_devices],
     )
 
 
@@ -768,6 +757,14 @@ def _cli_tailwind_token() -> str | None:
         return None
     raw = getattr(args, "tailwind_token", None)
     return str(raw) if raw else None
+
+
+def _discovery_device_out(device: DiscoveryDeviceSnapshot) -> DiscoveryDeviceOut:
+    return DiscoveryDeviceOut(
+        device_id=device.device_id,
+        display=device.display,
+        preferred_label=device.preferred_label,
+    )
 
 
 def _ep1_ble_advertisement_sample_out(sample: Ep1BleAdvertisementSample) -> Ep1BleAdvertisementSampleOut:

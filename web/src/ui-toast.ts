@@ -5,9 +5,11 @@ export { ToastVariant } from "./closed-sets.js";
 
 const DEFAULT_TOAST_MS = 10_000;
 const SUCCESS_TOAST_MS = 5_000;
+const DISCOVERY_PROGRESS_POLL_MS = 200;
 
 let activeToast: HTMLDivElement | null = null;
 let activeToastTimer: number | null = null;
+let discoveryProgressTimer: number | null = null;
 
 /** CSS class list for an action toast of the given variant (always includes an explicit tone class). */
 export function actionToastClassName(variant: ToastVariant): string {
@@ -105,6 +107,99 @@ export function showSuccessToast(message: string): void {
   showToast(message, ToastVariant.Success);
 }
 
+export function dismissActiveToast(): void {
+  dismissToast();
+}
+
+/** Persistent info toast with optional elapsed/estimate progress (Settings discovery). */
+export function showDiscoveryProgressToast(
+  message: string,
+  estimatedMs: number | null,
+): () => void {
+  dismissToast();
+
+  const toast = document.createElement("div");
+  toast.className = `${actionToastClassName(ToastVariant.Info)} action-toast-persistent`;
+
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("class", "action-toast-clock-icon");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("aria-hidden", "true");
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", "12");
+  circle.setAttribute("cy", "12");
+  circle.setAttribute("r", "9");
+  circle.setAttribute("fill", "none");
+  circle.setAttribute("stroke", "currentColor");
+  circle.setAttribute("stroke-width", "2");
+  const hand = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  hand.setAttribute("class", "action-toast-clock-hand");
+  hand.setAttribute("x1", "12");
+  hand.setAttribute("y1", "12");
+  hand.setAttribute("x2", "12");
+  hand.setAttribute("y2", "7");
+  hand.setAttribute("stroke", "currentColor");
+  hand.setAttribute("stroke-width", "2");
+  hand.setAttribute("stroke-linecap", "round");
+  icon.append(circle, hand);
+
+  const body = document.createElement("div");
+  body.className = "action-toast-body";
+
+  const text = document.createElement("span");
+  text.className = "action-toast-message";
+  text.textContent = message;
+
+  body.append(text);
+
+  let progressBar: HTMLDivElement | null = null;
+  if (estimatedMs !== null && estimatedMs > 0) {
+    const track = document.createElement("div");
+    track.className = "discovery-progress-track";
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    track.setAttribute("aria-valuenow", "0");
+    progressBar = document.createElement("div");
+    progressBar.className = "discovery-progress-bar";
+    track.append(progressBar);
+    body.append(track);
+  }
+
+  toast.append(icon, body);
+  toast.setAttribute("role", "status");
+  toast.setAttribute("aria-live", "polite");
+  document.body.append(toast);
+  activeToast = toast;
+
+  let intervalId: number | null = null;
+  if (estimatedMs !== null && estimatedMs > 0 && progressBar !== null) {
+    const track = progressBar.parentElement;
+    const started = performance.now();
+    intervalId = window.setInterval(() => {
+      const elapsed = performance.now() - started;
+      const ratio = Math.min(1, elapsed / estimatedMs);
+      progressBar!.style.width = `${Math.round(ratio * 100)}%`;
+      track?.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+    }, DISCOVERY_PROGRESS_POLL_MS);
+    discoveryProgressTimer = intervalId;
+  }
+
+  return () => {
+    if (intervalId !== null) {
+      window.clearInterval(intervalId);
+      if (discoveryProgressTimer === intervalId) {
+        discoveryProgressTimer = null;
+      }
+      intervalId = null;
+    }
+    // Only tear down the toast this run created — a newer refresh may own activeToast.
+    if (activeToast === toast) {
+      dismissToast();
+    }
+  };
+}
+
 export function showToast(
   message: string,
   variant: ToastVariant = ToastVariant.Info,
@@ -148,6 +243,10 @@ export function showToast(
 }
 
 function dismissToast(): void {
+  if (discoveryProgressTimer !== null) {
+    window.clearInterval(discoveryProgressTimer);
+    discoveryProgressTimer = null;
+  }
   if (activeToastTimer !== null) {
     window.clearTimeout(activeToastTimer);
     activeToastTimer = null;

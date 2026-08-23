@@ -60,7 +60,14 @@ def test_get_discovery_settings_returns_family_status(tmp_path: Path) -> None:
         families=(
             DiscoveryFamilyStatus(
                 available=True,
-                device_count=2,
+                device_count=1,
+                devices=(
+                    DiscoveryDeviceSnapshot(
+                        device_id="aa:bb:cc:dd:ee:01",
+                        display="Kitchen Plug (aa:bb:cc:dd:ee:01)",
+                        preferred_label="Kitchen Plug",
+                    ),
+                ),
                 family_id="kasa",
                 label="Kasa",
                 last_discovery_source="cache",
@@ -68,6 +75,7 @@ def test_get_discovery_settings_returns_family_status(tmp_path: Path) -> None:
             DiscoveryFamilyStatus(
                 available=False,
                 device_count=0,
+                devices=(),
                 family_id="sonos",
                 label="Sonos",
                 last_discovery_source=None,
@@ -85,8 +93,10 @@ def test_get_discovery_settings_returns_family_status(tmp_path: Path) -> None:
     assert r.status_code == HTTPStatus.OK
     body = r.json()
     assert body["families"][0]["family_id"] == "kasa"
-    assert body["families"][0]["device_count"] == 2
+    assert body["families"][0]["device_count"] == 1
     assert body["families"][0]["last_discovery_source"] == "cache"
+    assert body["families"][0]["devices"][0]["display"] == "Kitchen Plug (aa:bb:cc:dd:ee:01)"
+    assert len(body["families"][0]["devices"]) == body["families"][0]["device_count"]
     assert body["families"][1]["available"] is False
 
 
@@ -101,7 +111,8 @@ def test_post_discovery_refresh_returns_new_devices(tmp_path: Path) -> None:
     result = DiscoveryRefreshResult(
         families=(
             DiscoveryFamilyResult(
-                device_count=2,
+                device_count=1,
+                devices=(new_device,),
                 error=None,
                 family_id="kasa",
                 label="Kasa",
@@ -127,4 +138,7 @@ def test_post_discovery_refresh_returns_new_devices(tmp_path: Path) -> None:
     assert body["new_devices"][0]["display"] == "Porch Plug (aa:bb:cc:dd:ee:02)"
     assert body["families"][0]["ok"] is True
     assert body["families"][0]["source"] == "discovery"
+    assert body["families"][0]["devices"][0]["display"] == "Porch Plug (aa:bb:cc:dd:ee:02)"
+    assert body["families"][0]["new_devices"][0]["device_id"] == "aa:bb:cc:dd:ee:02"
+    assert len(body["families"][0]["devices"]) == body["families"][0]["device_count"]
     refresh_mock.assert_awaited_once()

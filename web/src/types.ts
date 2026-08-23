@@ -260,6 +260,7 @@ export interface DiscoveryDeviceOut {
 
 export interface DiscoveryFamilyRefreshOut {
   device_count: number;
+  devices: DiscoveryDeviceOut[];
   error: string | null;
   family_id: string;
   label: string;
@@ -273,6 +274,7 @@ export interface DiscoveryFamilyRefreshOut {
 export interface DiscoveryFamilyStatusOut {
   available: boolean;
   device_count: number;
+  devices: DiscoveryDeviceOut[];
   family_id: string;
   label: string;
   last_discovery_source: string | null;

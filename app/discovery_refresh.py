@@ -59,6 +59,7 @@ class DiscoveryFamilyResult:
     """Per-family outcome of :func:`refresh_all_device_discovery`."""
 
     device_count: int
+    devices: tuple[DiscoveryDeviceSnapshot, ...]
     error: str | None
     family_id: str
     label: str
@@ -75,6 +76,7 @@ class DiscoveryFamilyStatus:
 
     available: bool
     device_count: int
+    devices: tuple[DiscoveryDeviceSnapshot, ...]
     family_id: str
     label: str
     last_discovery_source: str | None
@@ -106,6 +108,7 @@ def discovery_settings_status(state: DeviceManagersState) -> DiscoverySettingsSt
                 DiscoveryFamilyStatus(
                     available=False,
                     device_count=0,
+                    devices=(),
                     family_id=slug,
                     label=label,
                     last_discovery_source=None,
@@ -118,16 +121,19 @@ def discovery_settings_status(state: DeviceManagersState) -> DiscoverySettingsSt
                 DiscoveryFamilyStatus(
                     available=False,
                     device_count=0,
+                    devices=(),
                     family_id=slug,
                     label=label,
                     last_discovery_source=_last_discovery_source(mgr),
                 )
             )
             continue
+        devices = _sorted_device_snapshots(snapshot)
         families.append(
             DiscoveryFamilyStatus(
                 available=True,
-                device_count=len(snapshot),
+                device_count=len(devices),
+                devices=devices,
                 family_id=slug,
                 label=label,
                 last_discovery_source=_last_discovery_source(mgr),
@@ -168,6 +174,7 @@ async def refresh_all_device_discovery(
             family_results.append(
                 DiscoveryFamilyResult(
                     device_count=0,
+                    devices=(),
                     error=None,
                     family_id=slug,
                     label=label,
@@ -185,6 +192,7 @@ async def refresh_all_device_discovery(
             family_results.append(
                 DiscoveryFamilyResult(
                     device_count=len(after_failed),
+                    devices=_sorted_device_snapshots(after_failed),
                     error=repr(exc) if exc is not None else "rediscover failed",
                     family_id=slug,
                     label=label,
@@ -199,6 +207,7 @@ async def refresh_all_device_discovery(
 
         any_ok = True
         after = _try_snapshot_family_devices(state, slug) or {}
+        after_devices = _sorted_device_snapshots(after)
         if before is None:
             new_devices: tuple[DiscoveryDeviceSnapshot, ...] = ()
         else:
@@ -208,7 +217,8 @@ async def refresh_all_device_discovery(
         mgr = _manager_for_slug(state, slug)
         family_results.append(
             DiscoveryFamilyResult(
-                device_count=len(after),
+                device_count=len(after_devices),
+                devices=after_devices,
                 error=None,
                 family_id=slug,
                 label=label,
@@ -345,6 +355,12 @@ def _snapshots_from_devices(devices: Sequence[Any]) -> dict[str, DiscoveryDevice
             preferred_label=preferred,
         )
     return out
+
+
+def _sorted_device_snapshots(
+    snapshot: Mapping[str, DiscoveryDeviceSnapshot],
+) -> tuple[DiscoveryDeviceSnapshot, ...]:
+    return tuple(snapshot[device_id] for device_id in sorted(snapshot))
 
 
 def _try_snapshot_family_devices(
