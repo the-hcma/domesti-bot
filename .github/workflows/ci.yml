@@ -147,6 +147,9 @@ jobs:
     needs: guard
     if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    # Playwright/Chromium can stall in native waits that pytest-timeout's
+    # thread method cannot interrupt; bound the job. See issue #675.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7.0.1
         with:

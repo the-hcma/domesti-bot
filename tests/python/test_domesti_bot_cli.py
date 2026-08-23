@@ -616,11 +616,13 @@ async def test_async_main_starts_prompt_before_discovery_finishes() -> None:
     prompt_started = asyncio.Event()
 
     async def _hanging_bootstrap(*_args: object, **_kwargs: object) -> None:
-        await asyncio.Event().wait()
+        while True:
+            await asyncio.sleep(1.0)
 
     async def _fake_cmd_loop(*_args: object, **_kwargs: object) -> None:
         prompt_started.set()
-        await asyncio.Event().wait()
+        while True:
+            await asyncio.sleep(1.0)
 
     async def _noop_shutdown(_state: object) -> None:
         return None

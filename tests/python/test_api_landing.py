@@ -96,11 +96,11 @@ def test_lifespan_yields_immediately_even_when_discovery_blocks() -> None:
 
     async def _slow_bootstrap(*_args: Any, **_kwargs: Any) -> Any:
         # Simulate a discovery sweep that never finishes within the test.
-        # Block forever until the lifespan cancels this task on shutdown —
-        # prefer ``Event().wait()`` over a long ``sleep`` so a missed cancel
-        # cannot burn wall-clock under the per-test timeout guard.
-        await asyncio.Event().wait()
-        return None
+        # Wake every second until the lifespan cancels this task on shutdown —
+        # a bare ``Event().wait()`` parks in ``select(None)`` and can bypass
+        # pytest-timeout's thread method (issue #675).
+        while True:
+            await asyncio.sleep(1.0)
 
     args = argparse.Namespace()
     app = create_app(args)
