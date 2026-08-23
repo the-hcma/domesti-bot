@@ -97,6 +97,8 @@ def test_discovery_settings_status_marks_unloaded_families() -> None:
     assert by_id["kasa"].available is True
     assert by_id["kasa"].device_count == 1
     assert by_id["kasa"].last_discovery_source == "discovery"
+    assert len(by_id["kasa"].devices) == 1
+    assert by_id["kasa"].devices[0].display == "Kitchen Plug (aa:bb:cc:dd:ee:01)"
     assert by_id["sonos"].available is False
     assert by_id["sonos"].device_count == 0
 

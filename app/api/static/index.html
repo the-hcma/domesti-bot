@@ -289,6 +289,21 @@
       background: color-mix(in srgb, var(--accent) 18%, var(--card));
       color: var(--fg); }
     .action-toast-message { flex: 1; line-height: 1.4; }
+    .action-toast-persistent { align-items: flex-start; gap: 10px; }
+    .action-toast-body { flex: 1; min-width: 0; display: flex;
+      flex-direction: column; gap: 8px; }
+    .action-toast-clock-icon { flex: 0 0 auto; width: 20px; height: 20px;
+      color: var(--pending); margin-top: 1px; }
+    .action-toast-clock-hand { transform-origin: 12px 12px;
+      animation: discovery-clock-hand 1.2s linear infinite; }
+    @keyframes discovery-clock-hand {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .discovery-progress-track { height: 4px; border-radius: 999px;
+      background: var(--border); overflow: hidden; }
+    .discovery-progress-bar { height: 100%; width: 0; border-radius: inherit;
+      background: var(--accent); transition: width 180ms linear; }
     .action-toast-dismiss { background: transparent; color: inherit;
       border: 0; font-size: 18px; line-height: 1; padding: 0 4px;
       cursor: pointer; opacity: 0.85; }
@@ -762,13 +777,40 @@
     .settings-dialog-reveal svg { display: block; }
     .settings-dialog-lead a { color: var(--accent); }
     
-      .discovery-settings-family-list,
-      .discovery-settings-new-devices {
+      .discovery-settings-family-list {
         margin: 0.75rem 0 1rem;
-        padding-left: 1.25rem;
+        padding-left: 0;
+        list-style: none;
       }
       .discovery-settings-family-row {
-        margin: 0.25rem 0;
+        margin: 0.75rem 0;
+      }
+      .discovery-settings-family-heading {
+        font-weight: 600;
+      }
+      .discovery-settings-device-list {
+        margin: 0.35rem 0 0;
+        padding-left: 1.25rem;
+        list-style: disc;
+      }
+      .discovery-settings-device {
+        margin: 0.15rem 0;
+        color: var(--fg);
+      }
+      .discovery-settings-device-new {
+        color: var(--accent);
+      }
+      .discovery-settings-device-new-badge {
+        margin-left: 0.45rem;
+        padding: 1px 6px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        color: var(--accent);
+        border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
       }
 
       .settings-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px;

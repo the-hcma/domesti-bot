@@ -767,6 +767,10 @@ class DiscoveryFamilyRefreshOut(BaseModel):
     """Per-family result from ``POST /v1/settings/discovery/refresh``."""
 
     device_count: int = Field(..., description="Device count after rediscover (0 when skipped/failed).")
+    devices: list[DiscoveryDeviceOut] = Field(
+        default_factory=list,
+        description="Full device roster after rediscover (empty when skipped).",
+    )
     error: str | None = Field(default=None, description="Error text when rediscover failed.")
     family_id: str = Field(..., description="Family slug (androidtv, ep1, gotailwind, kasa, sonos, vizio).")
     label: str = Field(..., description="Human-readable family label.")
@@ -794,6 +798,10 @@ class DiscoveryFamilyStatusOut(BaseModel):
         description=("True when the family manager is loaded and its in-memory roster is readable (fetch completed)."),
     )
     device_count: int = Field(..., description="Current in-memory device count.")
+    devices: list[DiscoveryDeviceOut] = Field(
+        default_factory=list,
+        description="Known devices in this family (``preferred_label (mac)`` display).",
+    )
     family_id: str = Field(..., description="Family slug (androidtv, ep1, gotailwind, kasa, sonos, vizio).")
     label: str = Field(..., description="Human-readable family label.")
     last_discovery_source: str | None = Field(
