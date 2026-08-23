@@ -57,7 +57,7 @@ export const KASA_MOTION_SETTINGS_PIR_RANGE_LABEL = "PIR range";
 export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_DETAIL =
   "0–100 fine-tunes how easily motion counts as a trigger (writes Custom range on the device; Near/Mid/Far presets are skipped when you change threshold in the same Apply). Higher values are more sensitive (trip on smaller movements); lower values need a stronger signal. 100 = most sensitive; 0 = least.";
 export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_EXAMPLE =
-  "Try 70–90 if pets or hallway traffic false-trigger; raise toward 100 only when you need the switch to notice subtle movement.";
+  "Try 20–40 if pets or hallway traffic false-trigger; raise toward 100 only when you need the switch to notice subtle movement.";
 export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_LABEL = "PIR threshold (0–100)";
 export const KASA_MOTION_SETTINGS_REFRESH_LABEL = "Refresh sensors";
 export const KASA_MOTION_SETTINGS_SENSORS_HEADING = "Sensors";
