@@ -2232,202 +2232,47 @@ async def dispatch_repl_action(
         return
 
     if cmd == "refresh-discovery":
-
-        async def rd_androidtv() -> dict[str, Any]:
-            slug = "androidtv"
-            if androidtv_mgr is None:
-                return {
-                    "slug": slug,
-                    "skipped": True,
-                    "detail": FAMILY_SKIPPED_NOT_LOADED,
-                    "exc": None,
-                    "ok": False,
-                    "mgr": None,
-                }
-            try:
-                await androidtv_mgr.rediscover()
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": None,
-                    "ok": True,
-                    "mgr": None,
-                }
-            except Exception as ex:
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": ex,
-                    "ok": False,
-                    "mgr": None,
-                }
-
-        async def rd_kasa() -> dict[str, Any]:
-            slug = "kasa"
-            try:
-                await kasa_mgr.rediscover()
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": None,
-                    "ok": True,
-                    "mgr": None,
-                }
-            except Exception as ex:
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": ex,
-                    "ok": False,
-                    "mgr": None,
-                }
-
-        async def rd_sonos() -> dict[str, Any]:
-            slug = "sonos"
-            if sonos_mgr is None:
-                return {
-                    "slug": slug,
-                    "skipped": True,
-                    "detail": FAMILY_SKIPPED_NOT_LOADED,
-                    "exc": None,
-                    "ok": False,
-                    "mgr": None,
-                }
-            try:
-                await sonos_mgr.rediscover()
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": None,
-                    "ok": True,
-                    "mgr": None,
-                }
-            except Exception as ex:
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": ex,
-                    "ok": False,
-                    "mgr": None,
-                }
-
-        async def rd_ep1() -> dict[str, Any]:
-            slug = "ep1"
-            if ep1_mgr is None:
-                return {
-                    "slug": slug,
-                    "skipped": True,
-                    "detail": FAMILY_SKIPPED_NOT_LOADED,
-                    "exc": None,
-                    "ok": False,
-                    "mgr": None,
-                }
-            try:
-                await ep1_mgr.rediscover()
-                await _maybe_restart_device_state_watchers_after_ep1()
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": None,
-                    "ok": True,
-                    "mgr": None,
-                    "source": ep1_mgr.last_discovery_source,
-                    "count": _ep1_sensor_count(ep1_mgr),
-                }
-            except Exception as ex:
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": ex,
-                    "ok": False,
-                    "mgr": None,
-                }
-
-        async def rd_tailwind() -> dict[str, Any]:
-            slug = "gotailwind"
-            if tailwind_mgr is None:
-                return {
-                    "slug": slug,
-                    "skipped": True,
-                    "detail": FAMILY_SKIPPED_NOT_LOADED,
-                    "exc": None,
-                    "ok": False,
-                    "mgr": None,
-                }
-            try:
-                await tailwind_mgr.rediscover()
-                if cache_path is not None and tailwind_mgr.host:
-                    device_discovery_store.save_tailwind_host(cache_path, tailwind_mgr.host)
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": None,
-                    "ok": True,
-                    "mgr": None,
-                }
-            except Exception as ex:
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": ex,
-                    "ok": False,
-                    "mgr": None,
-                }
-
-        async def rd_vizio() -> dict[str, Any]:
-            slug = "vizio"
-            if vizio_mgr is None:
-                return {
-                    "slug": slug,
-                    "skipped": True,
-                    "detail": FAMILY_SKIPPED_NOT_LOADED,
-                    "exc": None,
-                    "ok": False,
-                    "mgr": None,
-                }
-            try:
-                await vizio_mgr.rediscover()
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": None,
-                    "ok": True,
-                    "mgr": None,
-                    "source": vizio_mgr.last_discovery_source,
-                    "count": _vizio_tv_count(vizio_mgr),
-                }
-            except Exception as ex:
-                return {
-                    "slug": slug,
-                    "skipped": False,
-                    "detail": "",
-                    "exc": ex,
-                    "ok": False,
-                    "mgr": None,
-                }
-
-        rd_bundles = await asyncio.gather(
-            rd_androidtv(),
-            rd_ep1(),
-            rd_tailwind(),
-            rd_kasa(),
-            rd_sonos(),
-            rd_vizio(),
+        from app.discovery_refresh import (
+            NEW_DEVICE_FOUND_PREFIX,
+            refresh_all_device_discovery,
         )
-        rd_by = {b["slug"]: b for b in rd_bundles}
-        for slug in _FAMILY_BOOT_SLUGS:
-            _print_family_parallel_line(theme, slug, rd_by[slug], ok_verb="rediscovered")
+
+        cli_args = (
+            discovery.args
+            if discovery is not None
+            else argparse.Namespace(
+                androidtv_zeroconf_timeout=androidtv_zeroconf_timeout,
+                ep1_zeroconf_timeout=ep1_zeroconf_timeout,
+            )
+        )
+        state = DeviceManagersState(
+            kasa_mgr=kasa_mgr,
+            sonos_mgr=sonos_mgr,
+            tailwind_mgr=tailwind_mgr,
+            androidtv_mgr=androidtv_mgr,
+            ep1_mgr=ep1_mgr,
+            vizio_mgr=vizio_mgr,
+            cache_path=cache_path,
+            args=cli_args,
+        )
+        result = await refresh_all_device_discovery(state, restart_watchers=True)
+        for family in result.families:
+            _print_family_parallel_line(
+                theme,
+                family.family_id,
+                {
+                    "slug": family.family_id,
+                    "skipped": family.skipped,
+                    "detail": family.skip_detail or "",
+                    "exc": family.error,
+                    "ok": family.ok,
+                    "source": family.source,
+                    "count": family.device_count if family.ok else None,
+                },
+                ok_verb="rediscovered",
+            )
+        for device in result.new_devices:
+            print(f"{theme.ok(NEW_DEVICE_FOUND_PREFIX)} {device.display}")
         nk = len(_kasa_switch_aliases(kasa_mgr))
         nz = _sonos_zone_count(sonos_mgr)
         na = _androidtv_switch_count(androidtv_mgr)
@@ -2435,8 +2280,8 @@ async def dispatch_repl_action(
         nd = _tailwind_door_count(tailwind_mgr)
         nv = _vizio_tv_count(vizio_mgr)
         tail = (
-            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), {nz} Sonos speaker(s), "
-            f"{nd} Tailwind door(s), {nv} Vizio TV(s))."
+            f"({na} Google Cast device(s), {ne} EP1 sensor(s), {nk} Kasa switch(es), "
+            f"{nz} Sonos speaker(s), {nd} Tailwind door(s), {nv} Vizio TV(s))."
         )
         print(f"{theme.ok('Discovery refreshed')} {theme.dim(tail)}")
         return

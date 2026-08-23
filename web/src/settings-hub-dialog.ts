@@ -1,6 +1,7 @@
 // Tabbed Settings hub (GoTailwind, Kasa, Vizio, My Tracks).
 
 import { createRulesDataSource } from "./rules-data-source.js";
+import { mountDiscoverySettingsPanel } from "./discovery-settings-panel.js";
 import { mountKasaSettingsPanel } from "./kasa-settings-panel.js";
 import { mountMyTracksSettingsPanel } from "./my-tracks-settings-panel.js";
 import { mountEp1SettingsPanel } from "./ep1-settings-panel.js";
@@ -10,6 +11,7 @@ import { mountVizioSettingsPanel } from "./vizio-settings-panel.js";
 import { SettingsTabId } from "./closed-sets.js";
 
 const SETTINGS_TABS: readonly [SettingsTabId, string][] = [
+  [SettingsTabId.Discovery, "Device Discovery"],
   [SettingsTabId.Tailwind, "GoTailwind"],
   [SettingsTabId.Ep1, "EP1"],
   [SettingsTabId.Kasa, "Kasa"],
@@ -92,6 +94,12 @@ export async function openSettingsHubDialog(options: {
     const mount = document.createElement("div");
     mount.className = "settings-hub-tab-mount";
     body.append(mount);
+    if (tabId === SettingsTabId.Discovery) {
+      await mountDiscoverySettingsPanel(mount, {
+        onDevicesChanged: options.onReloadDevices,
+      });
+      return;
+    }
     if (tabId === SettingsTabId.Ep1) {
       await mountEp1SettingsPanel(mount, {
         onDevicesChanged: options.onReloadDevices,

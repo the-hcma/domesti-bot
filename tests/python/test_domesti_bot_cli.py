@@ -46,6 +46,7 @@ from app.domesti_bot_cli import (
     split_invocation,
 )
 from app.kasa_device_manager import KasaDeviceManager
+from app.sonos_device_manager import SonosDeviceManager
 
 
 def test_parse_completion_alias_list_accepts_legacy_strings() -> None:
@@ -526,6 +527,58 @@ async def test_refresh_prints_ep1_skipped_when_not_loaded() -> None:
     text = out.getvalue()
     assert f"{_FAMILY_BOOT_LABEL['ep1']}: skipped — {FAMILY_SKIPPED_NOT_LOADED}" in text
     assert REFRESH_DONE_PREFIX in text
+
+
+@pytest.mark.asyncio
+async def test_refresh_discovery_prints_new_device_and_failed_family() -> None:
+    from contextlib import redirect_stderr, redirect_stdout
+    from io import StringIO
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.discovery_refresh import NEW_DEVICE_FOUND_PREFIX
+
+    existing = SimpleNamespace(identifier="aa:bb:cc:dd:ee:01", preferred_label="Kitchen Plug")
+    new = SimpleNamespace(identifier="aa:bb:cc:dd:ee:02", preferred_label="Porch Plug")
+    kasa = MagicMock()
+    kasa.switches = [existing]
+    kasa.last_discovery_source = "discovery"
+
+    async def _kasa_rediscover() -> None:
+        kasa.switches = [existing, new]
+
+    kasa.rediscover = AsyncMock(side_effect=_kasa_rediscover)
+
+    sonos = MagicMock()
+    sonos.players = ()
+    sonos.last_discovery_source = "discovery"
+    sonos.rediscover = AsyncMock(side_effect=RuntimeError("sonos down"))
+
+    out = StringIO()
+    err = StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        await dispatch_repl_action(
+            cast(KasaDeviceManager, kasa),
+            cast(SonosDeviceManager, sonos),
+            None,
+            None,
+            None,
+            None,
+            cache_path=None,
+            androidtv_zeroconf_timeout=1.0,
+            ep1_zeroconf_timeout=1.0,
+            theme=_Theme(enabled=False),
+            cmd="refresh-discovery",
+            arg="",
+        )
+    text = out.getvalue()
+    err_text = err.getvalue()
+    assert f"{_FAMILY_BOOT_LABEL['kasa']}: rediscovered" in text
+    assert NEW_DEVICE_FOUND_PREFIX in text
+    assert "Porch Plug (aa:bb:cc:dd:ee:02)" in text
+    assert f"{_FAMILY_BOOT_LABEL['sonos']}: failed —" in err_text
+    assert "sonos down" in err_text
+    assert "Discovery refreshed" in text
 
 
 @pytest.mark.asyncio
