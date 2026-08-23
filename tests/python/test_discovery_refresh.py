@@ -41,7 +41,7 @@ def _sonos_mgr(*devices: SimpleNamespace) -> MagicMock:
 
 def _state(
     *,
-    cache_path: object | None = None,
+    cache_path: Path | None = None,
     kasa_mgr: MagicMock | None = None,
     sonos_mgr: MagicMock | None = None,
     tailwind_mgr: MagicMock | None = None,
