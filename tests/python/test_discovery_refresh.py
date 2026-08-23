@@ -197,6 +197,34 @@ async def test_refresh_failure_reports_post_failure_count_and_restarts_when_othe
 
 
 @pytest.mark.asyncio
+async def test_refresh_failure_keeps_readable_roster_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When rediscover raises but the roster stays readable (cache fallback / EP1 restore)."""
+    existing = _device("aa:bb:cc:dd:ee:01", "Kitchen Plug")
+    kasa = _kasa_mgr(existing)
+    kasa.rediscover = AsyncMock(side_effect=RuntimeError("udp down; cache reconnect ok"))
+    sonos = _sonos_mgr(_device("aa:bb:cc:dd:ee:10", "Living Room"))
+    state = _state(kasa_mgr=kasa, sonos_mgr=sonos)
+    restart = AsyncMock()
+    monkeypatch.setattr("app.server_runtime.runtime.device_state", state)
+    monkeypatch.setattr(
+        "app.server_runtime.runtime.restart_device_state_watchers",
+        restart,
+    )
+
+    result = await refresh_all_device_discovery(state, restart_watchers=True)
+    kasa_result = next(family for family in result.families if family.family_id == "kasa")
+    assert kasa_result.ok is False
+    assert kasa_result.device_count == 1
+    assert kasa_result.new_devices == ()
+    assert kasa_result.source is None
+    assert "udp down" in (kasa_result.error or "")
+    assert result.new_devices == ()
+    restart.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_refresh_skips_watcher_restart_when_all_families_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
