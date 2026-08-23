@@ -622,17 +622,25 @@ class KasaMotionTuningOut(BaseModel):
     ambient_brightness_limit: int | None = Field(
         default=None,
         description=(
-            "Ambient brightness limit used when motion is inactive (day/night gate "
-            "threshold from ``dark_index`` / ``level_array``)."
+            "Ambient darkness cutoff for motion-when-dark gating. The room counts as "
+            "dark enough when the live ``ambient_light`` reading is at or below this "
+            "limit. Lower values need a darker room; higher values arm in brighter "
+            "conditions. Minimum 0."
         ),
     )
     ambient_brightness_limit_presets: list[KasaAmbientBrightnessPresetOut] = Field(
         default_factory=list,
-        description="Device-defined ambient brightness-limit presets (``level_array``).",
+        description=(
+            "Device-defined named presets (for example cloudy, dawn) mapping to "
+            "``ambient_brightness_limit`` values on the same scale."
+        ),
     )
     ambient_light: int | None = Field(
         default=None,
-        description="Live ambient light sensor reading (percent) when ambient is available.",
+        description=(
+            "Live ambient light sensor reading when ambient is available; higher "
+            "means a brighter room (compare against ``ambient_brightness_limit``)."
+        ),
     )
     ambient_light_enabled: bool | None = Field(
         default=None,
@@ -648,8 +656,8 @@ class KasaMotionTuningOut(BaseModel):
     inactivity_timeout_ms: int = Field(
         ...,
         description=(
-            "How long the switch keeps the light on after last motion (device "
-            "``cold_time`` / inactivity timeout), in milliseconds."
+            "Linger after last motion in milliseconds (device ``cold_time``). "
+            "Higher values keep the relay on longer; lower values turn off sooner."
         ),
         ge=0,
     )
@@ -666,14 +674,25 @@ class KasaMotionTuningOut(BaseModel):
         default=None,
         description="Live PIR percentile sensor (ADC-derived; polled snapshot).",
     )
-    pir_range: KasaPirRange = Field(..., description="Motion sensor range preset (Far / Mid / Near / Custom).")
+    pir_range: KasaPirRange = Field(
+        ...,
+        description=(
+            "PIR detection distance preset (Near / Mid / Far / Custom). On "
+            "KS200M-class switches, TP-Link documents Near at about 5 ft, Mid "
+            "at about 15 ft, and Far at about 25 ft. Far covers the largest area; "
+            "Near ignores distant movement."
+        ),
+    )
     pir_range_choices: list[KasaPirRange] = Field(
         ...,
         description="Range presets supported by this device.",
     )
     pir_threshold: int = Field(
         ...,
-        description="Motion sensor threshold (0–100; Custom range uses this value).",
+        description=(
+            "PIR sensitivity 0-100 (Custom range). Higher values trip on smaller "
+            "movements; lower values need a stronger signal. 100 is most sensitive."
+        ),
     )
     pir_triggered: bool = Field(
         ...,
@@ -695,9 +714,9 @@ class KasaMotionTuningSetIn(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Ambient brightness limit when motion is inactive (day/night gate). "
-            "See ``ambient_brightness_limit_presets`` for device-defined values; "
-            "custom values are also accepted by the device."
+            "Ambient darkness cutoff for motion-when-dark gating. Lower values need "
+            "a darker room; higher values arm in brighter conditions. See "
+            "``ambient_brightness_limit_presets`` for device-defined values."
         ),
     )
     ambient_light_enabled: bool | None = Field(
@@ -708,20 +727,28 @@ class KasaMotionTuningSetIn(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Linger after motion in milliseconds (device ``cold_time``). "
-            "Smart Control rules in the Kasa app can overwrite this."
+            "Linger after motion in milliseconds (device ``cold_time``). Higher "
+            "keeps the relay on longer; lower turns off sooner. Smart Control "
+            "rules in the Kasa app can overwrite this."
         ),
     )
     pir_enabled: bool | None = Field(default=None, description="Enable or disable PIR.")
     pir_range: KasaPirRange | None = Field(
         default=None,
-        description="Motion sensor range preset (Far / Mid / Near / Custom).",
+        description=(
+            "PIR detection distance preset (Near / Mid / Far / Custom). Far covers "
+            "the largest area; Near ignores distant movement. Exact distances are "
+            "device-specific."
+        ),
     )
     pir_threshold: int | None = Field(
         default=None,
         ge=0,
         le=100,
-        description="Motion sensor threshold 0–100 (writes Custom range on the device).",
+        description=(
+            "PIR sensitivity 0-100. Higher trips on smaller movements; lower needs "
+            "a stronger signal. Writes Custom range on the device."
+        ),
     )
 
 
