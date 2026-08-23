@@ -31,7 +31,6 @@ from app.rule_actions import RuleNotificationEmailOutcome
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
-
 _EP1_MAC = "28:05:a5:28:c8:48"
 _NY = ZoneInfo("America/New_York")
 
@@ -546,9 +545,7 @@ def _away_garage_rule(*, cooldown_s: int = 0) -> RuleOut:
 
 
 def _ep1_clear_dwell_rule(*, after_hhmm: str | None = None) -> RuleOut:
-    conditions: list[
-        AfterLocalTimeCondition | DevicesAnyInStateForSCondition
-    ] = []
+    conditions: list[AfterLocalTimeCondition | DevicesAnyInStateForSCondition] = []
     if after_hhmm is not None:
         conditions.append(
             AfterLocalTimeCondition(
