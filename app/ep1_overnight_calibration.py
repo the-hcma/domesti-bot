@@ -94,7 +94,9 @@ _LEVER_ORDER: tuple[Ep1OccupancyTuningKind, ...] = (
 )
 _NUMBER_VALUE_ABS_TOL = 1e-6
 _OCCUPANCY_ALIASES: tuple[str, ...] = ("occupancy",)
-_installed_stop_signals: list[signal.Signals] = []
+# (signal, previous_handler). ``previous_handler is _LOOP_SIGNAL_HANDLER`` means asyncio loop.
+_LOOP_SIGNAL_HANDLER = object()
+_installed_stop_signals: list[tuple[signal.Signals, object]] = []
 
 
 class Ep1OvernightCalibrationError(ValueError):
@@ -270,8 +272,11 @@ def install_overnight_calibration_stop_signals(stop_event: asyncio.Event) -> Non
             loop.add_signal_handler(sig, _on_stop)
         except (NotImplementedError, RuntimeError):
             # Fallback for environments without loop signal handlers.
+            previous = signal.getsignal(sig)
             signal.signal(sig, lambda *_args: _on_stop())
-        _installed_stop_signals.append(sig)
+            _installed_stop_signals.append((sig, previous))
+            continue
+        _installed_stop_signals.append((sig, _LOOP_SIGNAL_HANDLER))
 
 
 def propose_next_false_positive_adjustment(
@@ -304,11 +309,14 @@ def remove_overnight_calibration_stop_signals() -> None:
 
     loop = asyncio.get_running_loop()
     while _installed_stop_signals:
-        sig = _installed_stop_signals.pop()
-        try:
-            loop.remove_signal_handler(sig)
-        except (NotImplementedError, RuntimeError):
-            pass
+        sig, previous = _installed_stop_signals.pop()
+        if previous is _LOOP_SIGNAL_HANDLER:
+            try:
+                loop.remove_signal_handler(sig)
+            except (NotImplementedError, RuntimeError):
+                pass
+            continue
+        signal.signal(sig, previous)  # type: ignore[arg-type]
 
 
 async def run_overnight_ep1_calibration(
