@@ -2196,11 +2196,7 @@ class RuleEvaluator:
                         today = local_calendar_date(now_epoch, timezone)
                         # fire_once_per_local_day re-arms after local midnight on a
                         # persistent streak (success or failed attempt).
-                        if (
-                            rule is not None
-                            and rule.fire_once_per_local_day
-                            and marked_day != today
-                        ):
+                        if rule is not None and rule.fire_once_per_local_day and marked_day != today:
                             del self._device_dwell_satisfied_evaluated_since[rule_key]
                         else:
                             continue
