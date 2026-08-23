@@ -109,7 +109,7 @@ jobs:
         with:
           ref: ${{ needs.resolve-release-pr.outputs.head_sha }}
 
-      - uses: astral-sh/setup-uv@v10.0.0
+      - uses: astral-sh/setup-uv@v10.0.1
 
       - name: Regenerate uv.lock
         run: uv lock
@@ -165,7 +165,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@v10.0.0
+      - uses: astral-sh/setup-uv@v10.0.1
 
       # python-static asserts uv.lock before sync, then setup-python (uv sync) + lints.
       - name: Python lint & format checks
