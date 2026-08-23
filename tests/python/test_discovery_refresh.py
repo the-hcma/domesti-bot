@@ -30,10 +30,22 @@ def _kasa_mgr(*devices: SimpleNamespace) -> MagicMock:
     return mgr
 
 
-def _state(*, kasa_mgr: MagicMock | None = None) -> DeviceManagersState:
+def _sonos_mgr(*devices: SimpleNamespace) -> MagicMock:
+    mgr = MagicMock()
+    mgr.players = list(devices)
+    mgr.last_discovery_source = "discovery"
+    mgr.rediscover = AsyncMock()
+    return mgr
+
+
+def _state(
+    *,
+    kasa_mgr: MagicMock | None = None,
+    sonos_mgr: MagicMock | None = None,
+) -> DeviceManagersState:
     return DeviceManagersState(
         kasa_mgr=kasa_mgr or _kasa_mgr(),
-        sonos_mgr=None,
+        sonos_mgr=sonos_mgr,
         tailwind_mgr=None,
         androidtv_mgr=None,
         ep1_mgr=None,
@@ -147,3 +159,55 @@ async def test_refresh_skips_new_device_diff_when_before_uninitialized(
     assert kasa.ok is True
     assert kasa.device_count == 2
     assert kasa.new_devices == ()
+
+
+@pytest.mark.asyncio
+async def test_refresh_failure_reports_post_failure_count_and_restarts_when_other_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = _device("aa:bb:cc:dd:ee:01", "Kitchen Plug")
+    kasa = _kasa_mgr(existing)
+
+    async def _kasa_fail() -> None:
+        type(kasa).switches = PropertyMock(side_effect=NotInitializedError)
+        raise RuntimeError("udp down")
+
+    kasa.rediscover = AsyncMock(side_effect=_kasa_fail)
+    sonos = _sonos_mgr(_device("aa:bb:cc:dd:ee:10", "Living Room"))
+    state = _state(kasa_mgr=kasa, sonos_mgr=sonos)
+    restart = AsyncMock()
+    monkeypatch.setattr("app.server_runtime.runtime.device_state", state)
+    monkeypatch.setattr(
+        "app.server_runtime.runtime.restart_device_state_watchers",
+        restart,
+    )
+
+    result = await refresh_all_device_discovery(state, restart_watchers=True)
+    assert result.new_devices == ()
+    kasa_result = next(family for family in result.families if family.family_id == "kasa")
+    assert kasa_result.ok is False
+    assert kasa_result.device_count == 0
+    assert "udp down" in (kasa_result.error or "")
+    sonos_result = next(family for family in result.families if family.family_id == "sonos")
+    assert sonos_result.ok is True
+    restart.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_refresh_skips_watcher_restart_when_all_families_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kasa = _kasa_mgr(_device("aa:bb:cc:dd:ee:01", "Kitchen Plug"))
+    kasa.rediscover = AsyncMock(side_effect=RuntimeError("kasa boom"))
+    sonos = _sonos_mgr(_device("aa:bb:cc:dd:ee:10", "Living Room"))
+    sonos.rediscover = AsyncMock(side_effect=RuntimeError("sonos boom"))
+    state = _state(kasa_mgr=kasa, sonos_mgr=sonos)
+    restart = AsyncMock()
+    monkeypatch.setattr("app.server_runtime.runtime.device_state", state)
+    monkeypatch.setattr(
+        "app.server_runtime.runtime.restart_device_state_watchers",
+        restart,
+    )
+    result = await refresh_all_device_discovery(state, restart_watchers=True)
+    assert all(not family.ok or family.skipped for family in result.families)
+    restart.assert_not_awaited()

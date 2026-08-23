@@ -130,7 +130,7 @@ export async function mountDiscoverySettingsPanel(
         const result = await api.refreshDiscovery();
         renderFamilies(
           result.families.map((family) => ({
-            available: !family.skipped,
+            available: family.ok,
             device_count: family.device_count,
             family_id: family.family_id,
             label: family.label,

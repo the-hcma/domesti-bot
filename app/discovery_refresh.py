@@ -164,7 +164,6 @@ async def refresh_all_device_discovery(
         bundle = bundle_by_slug[slug]
         label = DISCOVERY_FAMILY_LABELS[slug]
         before = before_by_family[slug]
-        before_count = 0 if before is None else len(before)
         if bundle["skipped"]:
             family_results.append(
                 DiscoveryFamilyResult(
@@ -182,9 +181,10 @@ async def refresh_all_device_discovery(
             continue
         if not bundle["ok"]:
             exc = bundle.get("exc")
+            after_failed = _try_snapshot_family_devices(state, slug) or {}
             family_results.append(
                 DiscoveryFamilyResult(
-                    device_count=before_count,
+                    device_count=len(after_failed),
                     error=repr(exc) if exc is not None else "rediscover failed",
                     family_id=slug,
                     label=label,
