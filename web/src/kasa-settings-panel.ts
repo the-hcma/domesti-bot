@@ -19,13 +19,13 @@ import type {
 export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_INFO_DETAIL =
   "Numeric darkness cutoff for ambient gating (for example “motion when dark” in the Kasa app). Compare the live Ambient light reading under Sensors: the room counts as dark enough when the reading is at or below this limit. Lower values need a darker room before motion-when-dark can arm; higher values treat brighter rooms as dark enough. Minimum 0. Smart Control schedules still live in the Kasa app.";
 export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_INFO_EXAMPLE =
-  "Enter 8 for a strict gate (dawn-like) or 15 when you want motion-when-dark to arm while the room is still fairly bright (cloudy-like).";
+  "Use a lower value for a stricter gate and a higher value to arm motion-when-dark in brighter conditions.";
 export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_LABEL =
   "Ambient brightness limit";
 export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_PRESET_INFO_DETAIL =
   "Named shortcuts from the switch firmware (cloudy, dawn, …). Each option sets the ambient brightness limit to the number in parentheses — same scale as the custom field. Lower preset numbers need a darker room; higher numbers arm motion-when-dark in brighter conditions.";
 export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_PRESET_INFO_EXAMPLE =
-  "Pick dawn (8) for a strict darkness gate, or cloudy (15) when you want motion-when-dark to arm sooner.";
+  "Choose a device preset from the list; each switch supplies its own numeric value in parentheses.";
 export const KASA_MOTION_SETTINGS_AMBIENT_BRIGHTNESS_LIMIT_PRESET_LABEL =
   "Ambient limit preset";
 export const KASA_MOTION_SETTINGS_AMBIENT_ENABLED_INFO_DETAIL =
@@ -50,19 +50,19 @@ export const KASA_MOTION_SETTINGS_PIR_ENABLED_INFO_EXAMPLE =
   "Disable PIR temporarily while painting near the switch so lights do not keep firing.";
 export const KASA_MOTION_SETTINGS_PIR_ENABLED_LABEL = "PIR enabled";
 export const KASA_MOTION_SETTINGS_PIR_RANGE_INFO_DETAIL =
-  "How far out the PIR watches: Near (~5 ft), Mid (~15 ft), Far (~25 ft), or Custom. Far covers the largest area; Near ignores distant movement. This is separate from PIR threshold sensitivity. Choosing a preset updates the device range; setting a threshold in the same Apply writes Custom instead.";
+  "How far out the PIR watches: Near, Mid, Far, or Custom. On KS200M-class switches, TP-Link documents Near at about 5 ft, Mid at about 15 ft, and Far at about 25 ft. Far covers the largest area; Near ignores distant movement. This is separate from PIR threshold sensitivity. Choosing a preset updates the device range; setting a threshold in the same Apply writes Custom instead.";
 export const KASA_MOTION_SETTINGS_PIR_RANGE_INFO_EXAMPLE =
   "Use Near in a hallway so someone walking past the doorway does not trip the light.";
 export const KASA_MOTION_SETTINGS_PIR_RANGE_LABEL = "PIR range";
 export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_DETAIL =
   "0–100 fine-tunes how easily motion counts as a trigger (writes Custom range on the device; Near/Mid/Far presets are skipped when you change threshold in the same Apply). Higher values are more sensitive (trip on smaller movements); lower values need a stronger signal. 100 = most sensitive; 0 = least.";
 export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_INFO_EXAMPLE =
-  "Try 20–40 if pets or hallway traffic false-trigger; raise toward 100 only when you need the switch to notice subtle movement.";
+  "If pets or hallway traffic cause false triggers, lower the threshold; raise it toward 100 only when you need the switch to notice subtle movement.";
 export const KASA_MOTION_SETTINGS_PIR_THRESHOLD_LABEL = "PIR threshold (0–100)";
 export const KASA_MOTION_SETTINGS_REFRESH_LABEL = "Refresh sensors";
 export const KASA_MOTION_SETTINGS_SENSORS_HEADING = "Sensors";
 export const KASA_MOTION_SETTINGS_SENSORS_INFO_DETAIL =
-  "Read-only polled snapshots from the switch: live PIR / ambient readings plus low-level Motion ADC and signed PIR value. Ambient light: higher readings mean a brighter room (compare against your ambient brightness limit). PIR percent rises as movement grows stronger. Use Refresh sensors to update; short motion can be missed between polls.";
+  "Read-only polled snapshots from the switch: live PIR / ambient readings plus low-level Motion ADC and signed PIR value. Ambient light: higher readings mean a brighter room (compare against your ambient brightness limit). PIR percent is a signed, ADC-derived value relative to the sensor midpoint; use abs(PIR percent) or PIR triggered for activity strength. Use Refresh sensors to update; short motion can be missed between polls.";
 export const KASA_MOTION_SETTINGS_SENSORS_INFO_EXAMPLE =
   "Wave at the switch, then Refresh sensors — PIR triggered may flip to yes; if percent looks stuck, compare ADC value against ADC min / mid / max.";
 export const KASA_MOTION_SETTINGS_TARGET_DEVICE_LABEL = "Target device";

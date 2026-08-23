@@ -677,8 +677,10 @@ class KasaMotionTuningOut(BaseModel):
     pir_range: KasaPirRange = Field(
         ...,
         description=(
-            "PIR detection distance preset (Near ~5 ft, Mid ~15 ft, Far ~25 ft, or "
-            "Custom). Far covers the largest area; Near ignores distant movement."
+            "PIR detection distance preset (Near / Mid / Far / Custom). On "
+            "KS200M-class switches, TP-Link documents Near at about 5 ft, Mid "
+            "at about 15 ft, and Far at about 25 ft. Far covers the largest area; "
+            "Near ignores distant movement."
         ),
     )
     pir_range_choices: list[KasaPirRange] = Field(
@@ -688,7 +690,7 @@ class KasaMotionTuningOut(BaseModel):
     pir_threshold: int = Field(
         ...,
         description=(
-            "PIR sensitivity 0–100 (Custom range). Higher values trip on smaller "
+            "PIR sensitivity 0-100 (Custom range). Higher values trip on smaller "
             "movements; lower values need a stronger signal. 100 is most sensitive."
         ),
     )
@@ -735,7 +737,8 @@ class KasaMotionTuningSetIn(BaseModel):
         default=None,
         description=(
             "PIR detection distance preset (Near / Mid / Far / Custom). Far covers "
-            "the largest area; Near ignores distant movement."
+            "the largest area; Near ignores distant movement. Exact distances are "
+            "device-specific."
         ),
     )
     pir_threshold: int | None = Field(
@@ -743,7 +746,7 @@ class KasaMotionTuningSetIn(BaseModel):
         ge=0,
         le=100,
         description=(
-            "PIR sensitivity 0–100. Higher trips on smaller movements; lower needs "
+            "PIR sensitivity 0-100. Higher trips on smaller movements; lower needs "
             "a stronger signal. Writes Custom range on the device."
         ),
     )
