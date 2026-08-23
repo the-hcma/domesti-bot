@@ -27,7 +27,7 @@ from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
-from app.rule_actions import RuleNotificationEmailOutcome
+from app.rule_actions import RuleActionDispatchError, RuleNotificationEmailOutcome
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
@@ -251,6 +251,86 @@ async def test_ep1_clear_dwell_retries_after_local_time_opens(
 
     send_mock.assert_called_once()
     assert evaluator.fire_state_for_rule("evening-ep1-clear-alert").last_fired_at == clock["now"]
+
+
+@pytest.mark.asyncio
+async def test_ep1_clear_dwell_failed_fire_does_not_retry_every_tick(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=True)
+    state = _ep1_state(sensor)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    sensor.occupancy_state = DeviceConditionState.CLEAR.value
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        side_effect=RuleActionDispatchError("smtp down"),
+    ) as send_mock:
+        await evaluator.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        clock["now"] += 20.0
+        await evaluator._maybe_process_device_dwell_satisfied(
+            DeviceFamilyId.EP1,
+            _EP1_MAC,
+        )
+        clock["now"] += 60.0
+        await evaluator._maybe_process_device_dwell_satisfied(
+            DeviceFamilyId.EP1,
+            _EP1_MAC,
+        )
+
+    assert send_mock.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ep1_clear_dwell_restart_does_not_refire_same_streak(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule())
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": 1_700_000_000.0}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=False)
+    state = _ep1_state(sensor)
+    first = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await first.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        clock["now"] += 20.0
+        await first._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+        assert send_mock.call_count == 1
+
+        restarted = RuleEvaluator(
+            cache_path=db,
+            device_state_getter=lambda: state,
+            now_fn=lambda: clock["now"],
+        )
+        clock["now"] += 20.0
+        await restarted.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        await restarted._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+
+    assert send_mock.call_count == 1
 
 
 @pytest.mark.asyncio

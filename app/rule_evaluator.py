@@ -2191,7 +2191,7 @@ class RuleEvaluator:
                 newly_evaluated_rules.append((rule_key, since))
         if not crossed_rule_ids:
             return
-        await self._process_dwell_satisfied_rules(
+        attempted_rule_ids = await self._process_dwell_satisfied_rules(
             crossed_rule_ids,
             rules=rules,
             ctx=ctx,
@@ -2203,14 +2203,13 @@ class RuleEvaluator:
             rule = rules_by_id.get(rule_id)
             if rule is None:
                 continue
-            runtime = self._rule_state.get(rule_id)
             if dwell_episode_blocks_fire(rule, ctx):
                 self._device_dwell_satisfied_evaluated_since[rule_key] = since
                 continue
-            # Only debounce after a successful fire on this streak. Marking after
-            # conditions_not_met (e.g. after_local_time still closed) would poison
-            # the same clear/open streak when the clock gate later opens (#681).
-            if runtime is not None and runtime.last_fired_at is not None and runtime.last_fired_at >= since:
+            # Debounce after an all-met attempt (fire success/failure or daily cap)
+            # so we do not retry every tick — but never after conditions_not_met
+            # (e.g. after_local_time still closed) (#681).
+            if rule_id in attempted_rule_ids:
                 self._device_dwell_satisfied_evaluated_since[rule_key] = since
 
     async def _maybe_process_dwell_satisfied(self, roster_user_id: str) -> None:
@@ -2405,11 +2404,13 @@ class RuleEvaluator:
         ctx: RuleEvaluationContext,
         now_epoch: float,
         timezone: ZoneInfo,
-    ) -> None:
+    ) -> set[str]:
+        """Evaluate dwell-satisfied rules; return ids that were all-met (attempted)."""
         rules_by_id = {rule.id: rule for rule in rules if rule.enabled and RuleTrigger.DWELL_SATISFIED in rule.triggers}
         matched_rules = [rules_by_id[rule_id] for rule_id in sorted(rule_ids) if rule_id in rules_by_id]
+        attempted_rule_ids: set[str] = set()
         if not matched_rules:
-            return
+            return attempted_rule_ids
         _LOGGER.info(
             "[rules] evaluating dwell-satisfied rule_count=%d",
             len(matched_rules),
@@ -2443,6 +2444,7 @@ class RuleEvaluator:
                 runtime=runtime,
                 timezone=timezone,
             ):
+                attempted_rule_ids.add(rule.id)
                 continue
             if dwell_episode_blocks_fire(rule, ctx):
                 _log_rule_skipped(
@@ -2451,6 +2453,7 @@ class RuleEvaluator:
                     reason="dwell_episode_consumed",
                     detail="dwell already fired this away/inside episode",
                 )
+                attempted_rule_ids.add(rule.id)
                 continue
             if not self._cooldown_elapsed(rule, runtime):
                 remaining_s = rule.cooldown_s - (now_epoch - (runtime.last_fired_at or 0.0))
@@ -2468,6 +2471,8 @@ class RuleEvaluator:
                 log_user_ids=log_user_ids,
                 transitions=transitions,
             )
+            attempted_rule_ids.add(rule.id)
+        return attempted_rule_ids
 
     def _dwell_streak_since(
         self,
@@ -2619,27 +2624,62 @@ class RuleEvaluator:
                 ctx=ctx,
             )
 
-    def _sync_device_bool_streak(
+    def _latest_device_dwell_fire_for_bool(
         self,
         family_id: DeviceFamilyId,
         backend_device_id: str,
-        *,
-        now_epoch: float,
-        ctx: RuleEvaluationContext,
+        value: bool,
+    ) -> float | None:
+        """Return the newest ``last_fired_at`` among dwell watches for this bool."""
+        latest: float | None = None
+        index = build_device_dwell_watch_index(list_automation_rules())
+        needle = backend_device_id.strip()
+        for watch in index.watches:
+            if watch.family_id != family_id:
+                continue
+            if watch.device_id.strip() != needle:
+                continue
+            if desired_bool_for_device_condition_state(watch.state) != value:
+                continue
+            for rule_id in watch.rule_ids:
+                runtime = self._rule_state.get(rule_id)
+                if runtime is None or runtime.last_fired_at is None:
+                    continue
+                if latest is None or runtime.last_fired_at > latest:
+                    latest = runtime.last_fired_at
+        return latest
+
+    def _seed_device_dwell_debounce_for_streak(
+        self,
+        family_id: DeviceFamilyId,
+        backend_device_id: str,
+        value: bool,
+        since: float,
     ) -> None:
-        key = (family_id, backend_device_id)
-        current = natural_bool_for_device_family(
-            ctx,
-            family_id=family_id,
-            device_id=backend_device_id,
-        )
-        if current is None:
-            self._drop_device_bool_streak(key)
-            return
-        prior = self._device_bool_value.get(key)
-        since = self._device_bool_since.get(key)
-        if prior is None or since is None or prior != current:
-            self._set_device_bool_streak(key, current, now_epoch)
+        """Mark device-dwell debounce when a prior fire already covers ``since``."""
+        index = build_device_dwell_watch_index(list_automation_rules())
+        needle = backend_device_id.strip()
+        for watch in index.watches:
+            if watch.family_id != family_id:
+                continue
+            if watch.device_id.strip() != needle:
+                continue
+            if desired_bool_for_device_condition_state(watch.state) != value:
+                continue
+            for rule_id in sorted(watch.rule_ids):
+                runtime = self._rule_state.get(rule_id)
+                if runtime is None or runtime.last_fired_at is None:
+                    continue
+                if runtime.last_fired_at < since:
+                    continue
+                rule_key = (
+                    rule_id,
+                    family_id,
+                    backend_device_id,
+                    watch.state,
+                    watch.min_duration_s,
+                )
+                self._device_dwell_satisfied_evaluated_since[rule_key] = since
 
     def _seed_dwell_satisfied_eval_debounce(self) -> None:
         """Warm debounce slots after restart for ongoing fired/consumed dwell episodes."""
@@ -2681,6 +2721,49 @@ class RuleEvaluator:
                     watch.min_s,
                 )
                 self._dwell_satisfied_evaluated_since[debounce_key] = since
+
+    def _sync_device_bool_streak(
+        self,
+        family_id: DeviceFamilyId,
+        backend_device_id: str,
+        *,
+        now_epoch: float,
+        ctx: RuleEvaluationContext,
+    ) -> None:
+        key = (family_id, backend_device_id)
+        current = natural_bool_for_device_family(
+            ctx,
+            family_id=family_id,
+            device_id=backend_device_id,
+        )
+        if current is None:
+            self._drop_device_bool_streak(key)
+            return
+        prior = self._device_bool_value.get(key)
+        since = self._device_bool_since.get(key)
+        if prior is None or since is None or prior != current:
+            streak_since = now_epoch
+            first_sample = prior is None or since is None
+            prior_fire_at: float | None = None
+            if first_sample:
+                # After restart, streaks are re-seeded at now. Backdate to a prior
+                # fire on this bool so last_fired_at >= since and debounce can warm
+                # (mirrors geofence _seed_dwell_satisfied_eval_debounce).
+                prior_fire_at = self._latest_device_dwell_fire_for_bool(
+                    family_id,
+                    backend_device_id,
+                    current,
+                )
+                if prior_fire_at is not None:
+                    streak_since = prior_fire_at
+            self._set_device_bool_streak(key, current, streak_since)
+            if first_sample and prior_fire_at is not None:
+                self._seed_device_dwell_debounce_for_streak(
+                    family_id,
+                    backend_device_id,
+                    current,
+                    streak_since,
+                )
 
     def _ensure_astronomical_schedule_materialized(
         self,
