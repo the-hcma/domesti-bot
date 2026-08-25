@@ -51,7 +51,7 @@ dependencies = [
     "asyncclick==8.4.2.1",
     "certifi>=2026.7.22",
     "cffi>=2.1.1",
-    "charset-normalizer>=3.5.0",
+    "charset-normalizer>=3.5.1",
     "click>=8.4.2",
     "croniter>=6.2.4",
     "cryptography>=50.0.0",
