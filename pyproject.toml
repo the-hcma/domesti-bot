@@ -61,7 +61,7 @@ dependencies = [
     "httptools==0.8.0",
     "httpx>=0.28.1",
     "idna>=3.19",
-    "lxml==6.1.1",
+    "lxml>=6.1.2",
     "mashumaro==3.22",
     "playwright>=1.62.0",
     "prompt_toolkit>=3.0.43",
@@ -80,7 +80,7 @@ dependencies = [
     "typer>=0.27.1",
     "typing-extensions==4.16.0",
     "tzdata==2026.3",
-    "uvicorn[standard]>=0.52.3",
+    "uvicorn[standard]>=0.52.4",
     "watchfiles==1.2.0",
     "wcwidth>=0.8.2",
     "websockets>=17.0.1",
@@ -153,7 +153,7 @@ known-first-party = ["app", "config"]
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.10.0",
+    "httpx2>=2.12.0",
     "icecream>=2.2.0",
     "playwright>=1.62.0",
     "pyright>=1.1.411",
