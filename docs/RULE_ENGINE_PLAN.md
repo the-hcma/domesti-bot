@@ -1368,6 +1368,12 @@ Authoritative subscribe contract for **reading-kind** wakes (numeric sensor samp
 
 **`ignore_expected_device_changes` (opt-in, default false; #694):** when true, a **bool** `device_state` wake skips fire if `is_expected_device_change(family, device)` is live for the waking device (same store vacation anomaly uses for UI/rule actions). Reading-kind wakes are unaffected. Existing rules keep prior behavior until they set the flag.
 
+**Detection → action lag from INFO logs (#699):**
+
+1. `[device] state-transition family_id=… device_id=… metric=bool prior=… current=…` — true prior≠current bool flips on the wake notifier (all families that call `note_bool_transition`; first-sample seeds are silent; numeric reading wakes are not logged at INFO to avoid illuminance floods).
+2. `[rules] dwell-streak family_id=… device_id=… state=… since=…` when the evaluator starts/resets a device bool dwell streak; `[rules] dwell-streak-reset …` when the streak is dropped (unknown/reconnect).
+3. Existing `[rules] dwell-satisfied evaluate` / `[rules] fired` lines — correlate with streak `since` and the transition timestamp to split sensor→streak≈0, streak→satisfied≈`min_duration_s`, and satisfied→fire (evaluator queue).
+
 Occupancy entity pushes **never** emit a reading wake — they only go through the bool path. The first known occupancy sample after notifier (re)start seeds a bool-rule evaluation **only when** `on_bool_seed` is configured (server runtime always configures it; no vacation anomaly on seed). Later samples invoke `on_bool_transition` for **both** `true → false` and `false → true` (and `true/false → None` / reconnect unknowns when the prior was known); the server schedules rule eval on every such transition and vacation anomaly only on real prior→current transitions. Lux wakes therefore do not re-evaluate occupancy-only rules, and vice versa. Reading wakes fire only when the numeric sample **changes** (the first sample seeds without waking; reconnect replays of the same value are ignored).
 
 A rule may combine bool conditions and `ep1_reading_compare` (including on the same EP1 device): a reading wake matches via the reading branch and a bool wake via the bool branch; each wake still evaluates the **full** condition tree.
