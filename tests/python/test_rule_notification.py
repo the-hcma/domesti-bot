@@ -315,10 +315,7 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
     )
     assert RULE_FIRE_JUST_FIRED_TEMPLATE.format(label=rule.label, rule_id=rule.id) in plain
     assert f"{RULE_FIRE_TIMING_HEADING}:" in plain
-    assert (
-        RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="device_state")
-        in plain
-    )
+    assert RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="device_state") in plain
     assert RULE_FIRE_FIRED_TEMPLATE.format(when=_COMPLETED_AT_LOCAL) in plain
     assert RULE_FIRE_REACTION_TEMPLATE.format(duration="0.8 s") in plain
     assert f"{RULE_FIRE_TIMELINE_HEADING}:" in plain
