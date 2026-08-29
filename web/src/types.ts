@@ -615,6 +615,11 @@ interface RuleOutShared {
   triggers: RuleTrigger[];
   /** At most one fire per local calendar day (home timezone). */
   fire_once_per_local_day?: boolean;
+  /**
+   * When true, device_state bool wakes skip fire while a live expected-change
+   * mark covers the waking device (UI or rule action).
+   */
+  ignore_expected_device_changes?: boolean;
 }
 
 export type RuleOut = RuleOutShared;

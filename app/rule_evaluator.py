@@ -72,6 +72,7 @@ from app.dwell_watch_index import (
     build_device_dwell_watch_index,
     build_dwell_watch_index,
 )
+from app.expected_device_change import is_expected_device_change
 from app.geofence_transition_state_store import (
     GeofenceTransitionStateRecord,
     list_geofence_transition_states,
@@ -2372,6 +2373,21 @@ class RuleEvaluator:
             transitions: dict[str, GeofenceTransition] = {}
             for rule in matched_rules:
                 log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
+                if (
+                    reading_metric is None
+                    and rule.ignore_expected_device_changes
+                    and is_expected_device_change(family_id, device_id)
+                ):
+                    _log_rule_skipped(
+                        rule.id,
+                        log_user_ids,
+                        reason="expected_device_change",
+                        detail=(
+                            f"family_id={family_id.value} device_id={device_id} "
+                            "(UI/rule-attributed; ignore_expected_device_changes)"
+                        ),
+                    )
+                    continue
                 evaluation = evaluate_rule(rule, evaluation_ctx)
                 _LOGGER.info(
                     "[rules] device-state evaluate rule_id=%s met=%s",

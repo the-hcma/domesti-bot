@@ -190,6 +190,13 @@ export function mountRuleInspectorPanel(
   if (rule.fire_once_per_local_day === true) {
     appendDefinitionRow(meta, "Fire once per local day", "Yes");
   }
+  if (rule.ignore_expected_device_changes === true) {
+    appendDefinitionRow(
+      meta,
+      "Ignore expected device changes",
+      "Yes (skip UI/rule-attributed bool wakes)",
+    );
+  }
   appendDefinitionRow(meta, "Cooldown", `${rule.cooldown_s} s`);
   appendDefinitionRow(
     meta,
