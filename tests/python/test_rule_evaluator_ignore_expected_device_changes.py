@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -48,7 +49,7 @@ class _FakeKasa:
 
 
 @pytest.fixture(autouse=True)
-def _clear_expected_marks() -> None:
+def _clear_expected_marks() -> Iterator[None]:
     expected_device_changes.clear()
     yield
     expected_device_changes.clear()
