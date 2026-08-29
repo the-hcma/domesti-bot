@@ -16,12 +16,18 @@ from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_notification import (
     RULE_FIRE_ACTIONS_CANCELLED_NOTE,
     RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE,
+    RULE_FIRE_FIRED_TEMPLATE,
     RULE_FIRE_JUST_FIRED_TEMPLATE,
+    RULE_FIRE_NOTICED_TEMPLATE,
+    RULE_FIRE_REACTION_TEMPLATE,
     RULE_FIRE_TIMELINE_HEADING,
+    RULE_FIRE_TIMING_HEADING,
     build_rule_notification_bodies,
     format_completed_at_local,
     format_device_action_outcomes,
     format_devices_already_in_desired_state_message,
+    format_reaction_duration_s,
+    format_rule_fire_timing_lines,
     rule_automation_status_url,
     summarize_device_action_outcomes,
 )
@@ -29,6 +35,8 @@ from app.rule_notification import (
 _COMPLETED_AT = 1_700_000_000.0
 _HOME_TIMEZONE = "America/New_York"
 _COMPLETED_AT_LOCAL = format_completed_at_local(_COMPLETED_AT, timezone=_HOME_TIMEZONE)
+_NOTICED_AT = _COMPLETED_AT - 0.8
+_NOTICED_AT_LOCAL = format_completed_at_local(_NOTICED_AT, timezone=_HOME_TIMEZONE)
 
 
 @pytest.fixture(autouse=True)
@@ -250,6 +258,32 @@ def test_summarize_device_action_outcomes_reports_all_already_desired() -> None:
     assert summary.no_change_message == ("All devices already in their desired (on) state.")
 
 
+def test_format_reaction_duration_s_formats_short_and_long() -> None:
+    assert format_reaction_duration_s(0.8) == "0.8 s"
+    assert format_reaction_duration_s(12.4) == "12.4 s"
+    assert format_reaction_duration_s(90.0) == "1.5 min"
+    assert format_reaction_duration_s(-1.0) == "0.0 s"
+
+
+def test_format_rule_fire_timing_lines_includes_source_and_reaction() -> None:
+    lines = format_rule_fire_timing_lines(
+        noticed_at=_NOTICED_AT,
+        fire_at=_COMPLETED_AT,
+        fire_source="device_state",
+        timezone=_HOME_TIMEZONE,
+    )
+    assert lines == (
+        RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="device_state"),
+        RULE_FIRE_FIRED_TEMPLATE.format(when=_COMPLETED_AT_LOCAL),
+        RULE_FIRE_REACTION_TEMPLATE.format(duration="0.8 s"),
+    )
+
+
+def test_format_rule_fire_timing_lines_empty_without_epochs() -> None:
+    assert format_rule_fire_timing_lines(noticed_at=None, fire_at=_COMPLETED_AT) == ()
+    assert format_rule_fire_timing_lines(noticed_at=_NOTICED_AT, fire_at=None) == ()
+
+
 def test_build_rule_notification_bodies_includes_device_states_and_link(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -274,15 +308,23 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
         rule,
         cache_path=tmp_path / "cache.sqlite",
         device_action_outcomes=outcomes,
+        fire_at=_COMPLETED_AT,
+        fire_source="device_state",
+        noticed_at=_NOTICED_AT,
         notification_detail="Everyone left home.",
     )
     assert RULE_FIRE_JUST_FIRED_TEMPLATE.format(label=rule.label, rule_id=rule.id) in plain
+    assert f"{RULE_FIRE_TIMING_HEADING}:" in plain
+    assert RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="device_state") in plain
+    assert RULE_FIRE_FIRED_TEMPLATE.format(when=_COMPLETED_AT_LOCAL) in plain
+    assert RULE_FIRE_REACTION_TEMPLATE.format(duration="0.8 s") in plain
     assert f"{RULE_FIRE_TIMELINE_HEADING}:" in plain
     assert f"Kitchen TV (Vizio): on → off at {_COMPLETED_AT_LOCAL}" in plain
     assert "Everyone left home." in plain
     assert "https://domesti.example.com/#/automations/status/away-shutdown" in plain
     assert "Instance: https://domesti.example.com" in plain
     assert f"Kitchen TV (Vizio): on → off at {_COMPLETED_AT_LOCAL}" in html
+    assert RULE_FIRE_TIMING_HEADING in html
     assert 'href="https://domesti.example.com/#/automations/status/away-shutdown"' in html
     assert "Open Automations → Status" not in plain
     assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in plain

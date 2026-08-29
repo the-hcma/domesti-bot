@@ -167,6 +167,8 @@ class RulePendingFireNotification(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     cancelled_remaining: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fire_at: Mapped[float] = mapped_column(Float, nullable=False, index=True)
+    fire_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    noticed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     notification_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     outcomes_json: Mapped[str] = mapped_column(Text, nullable=False)
     rule_id: Mapped[str] = mapped_column(String, nullable=False, index=True)

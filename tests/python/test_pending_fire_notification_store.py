@@ -45,9 +45,12 @@ def _outcome(
 def test_insert_get_and_append_round_trip(tmp_path: Path) -> None:
     db = tmp_path / "discovery.sqlite"
     fire_at = 1_700_000_000.0
+    noticed_at = fire_at - 0.8
     insert_pending_fire_notification(
         db,
         fire_at=fire_at,
+        fire_source="scheduled",
+        noticed_at=noticed_at,
         notification_detail="Nightly power cycle.",
         outcomes=(_outcome(),),
         rule_id="hdhomerun-nightly-power-cycle",
@@ -59,6 +62,8 @@ def test_insert_get_and_append_round_trip(tmp_path: Path) -> None:
     )
     assert row is not None
     assert row.notification_detail == "Nightly power cycle."
+    assert row.fire_source == "scheduled"
+    assert row.noticed_at == noticed_at
     assert len(row.outcomes) == 1
     assert row.cancelled_remaining is False
 
@@ -76,6 +81,8 @@ def test_insert_get_and_append_round_trip(tmp_path: Path) -> None:
     assert updated is not None
     assert len(updated.outcomes) == 2
     assert updated.outcomes[1].action == RuleDeviceActionType.TURN_ON
+    assert updated.fire_source == "scheduled"
+    assert updated.noticed_at == noticed_at
 
 
 def test_list_skips_corrupt_outcomes_json(tmp_path: Path) -> None:
