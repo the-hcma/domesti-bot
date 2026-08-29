@@ -16,7 +16,7 @@
     "Rule 4 (away-shutdown-everyone-outside-20m) runs every 10 min: when Henrique AND Kristen have been outside house 20+ min and any listed light/media device is still on, turn them off (garage doors are not closed).",
     "Rule 5 (away-garage-open-alert) uses dwell_satisfied: when both have been outside house 20+ min and a watched garage door has been open 20+ min, email operator@example.com and resident@example.com (once per away episode).",
     "Rule 6 (morning-master-bedroom-fan-off) runs daily at 7:30am: when Henrique OR Kristen is inside house and Master Bedroom fan is on, turn it off and email operator@example.com.",
-    "Rule 7 (daylight-master-bedroom-fan-on-alert) uses device_state trigger only: during astronomical daylight (sunrise to sunset), when Henrique OR Kristen is inside house and Master Bedroom fan turns on, email operator@example.com.",
+    "Rule 7 (daylight-master-bedroom-fan-on-alert) uses device_state trigger only: during astronomical daylight (sunrise to sunset), when Henrique OR Kristen is inside house and Master Bedroom fan turns on, email operator@example.com. ignore_expected_device_changes=true so UI/rule-attributed turn-ons do not alert (#694).",
     "Rule 8 (office-ep1-occupied-alert, enabled false in the example) shows an EP1 occupancy condition: when the office sensor reports occupied, email operator@example.com. EP1 is read-only — no device_actions for this family.",
     "Rule 9 (office-ep1-hot-alert, enabled false) shows ep1_reading_compare: when office temperature is above 24°C, email operator@example.com (JSON-authored; no Automations UI editor yet).",
     "Rule 10 (daylight-dark-house-lights-on, enabled false; #554 / #670 / #672) uses triggers [device_state] only: EP1 illuminance entity pushes re-evaluate via device_state (reading-kind filtered — lux wakes do not re-eval occupancy-only rules). The general #670 reading-wake contract is EP1-only for numeric streams; other families use bool wakes only. Pair with local_time_window for evening windows: the evaluator materializes an eligibility wake at window open (no hand-rolled 0 21 schedule_cron). Daytime variants may use daylight instead of a clock window. When a window-placed EP1 reports illuminance_lx below 80 lx (tune from the EP1 header / Status reading — cloudy daytime can be darker than clear evenings), and Henrique OR Kristen is inside house, and any listed interior light is still off, turn those lights on. The EP1 is a whole-house ambient probe (near a window), not per-room pairing — the action list can be any lights. JSON-authored; no Automations UI editor for ep1_reading_compare yet.",
@@ -544,6 +544,7 @@
       ],
       "cooldown_s": 1800,
       "min_location_accuracy_m": 50,
+      "ignore_expected_device_changes": true,
       "notify_on_fire": true,
       "notification_emails": [
         "operator@example.com"

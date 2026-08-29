@@ -1929,6 +1929,14 @@ class RuleOut(BaseModel):
         description=("When true, fire at most once per local calendar day (timezone from settings_location)."),
     )
     id: str
+    ignore_expected_device_changes: bool = Field(
+        default=False,
+        description=(
+            "When true, ``device_state`` bool wakes skip fire while a live "
+            "``expected_device_change`` mark covers the waking device "
+            "(UI or rule action). Default false preserves existing behavior."
+        ),
+    )
     label: str
     min_location_accuracy_m: int
     notification_emails: list[str] = Field(
