@@ -1,0 +1,40 @@
+---
+description: Streamed device state flips and rule dwell streaks must leave greppable INFO timestamps
+globs: app/**/*device_manager*.py,app/device_state_watcher.py,app/device_rule_wake.py,app/rule_evaluator.py,app/server_runtime.py
+alwaysApply: false
+---
+
+# Streamed device state → rule lag observability
+
+When adding or extending a **device family** that wakes rules from live state
+(subscription, push, or poll that calls `DeviceRuleWakeNotifier`), keep
+**detection → action** lag measurable from default **INFO** logs. See issue #699
+(email counterpart: #696).
+
+## Sensor / watcher side
+
+- Route natural bool state through `note_bool_transition` (on / open / playing /
+  occupied). Do not bypass the wake notifier for rule-relevant flips.
+- On **prior ≠ current** only, emit a stable INFO line (shared message constant),
+  e.g. `[device] state-transition family_id=… device_id=… metric=… prior=… current=…`.
+- Label first-known samples distinctly if logged (`initial=` / seed path)—not as
+  transitions.
+- Do **not** INFO-log high-churn readings (illuminance, humidity, temperature) on
+  every tick; those stay reading wakes without transition spam.
+- Apply to **every** streaming/polling family on this path—not EP1-only.
+
+## Rule evaluator side
+
+- When a device (or geofence) dwell streak used by `dwell_satisfied` / `*_for_s`
+  **starts or resets**, INFO-log streak `since` + desired state + `min_duration_s`
+  (shared constants; greppable `[rules] dwell-streak …`).
+- Keep correlatable with existing `dwell-satisfied evaluate` / `fired` lines so
+  operators can compute: transition → streak → satisfied → fire.
+
+## Checklist for a new family PR
+
+1. Watcher calls `note_bool_transition` (or reading wake) on live updates.
+2. Transition INFO contract covered by hermetic tests.
+3. If the family is watched by `devices_any_in_state_for_s` / dwell rules,
+   streak start/reset logging still fires (evaluator path—not per-family fork).
+4. Link #699 in the PR if touching wake or dwell timing.
