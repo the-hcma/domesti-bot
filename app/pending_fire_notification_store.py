@@ -30,6 +30,8 @@ class PendingFireNotificationRecord:
 
     cancelled_remaining: bool
     fire_at: float
+    fire_source: str | None
+    noticed_at: float | None
     notification_detail: str | None
     outcomes: tuple[RuleDeviceActionOutcome, ...]
     row_id: int
@@ -108,6 +110,8 @@ def insert_pending_fire_notification(
     *,
     cancelled_remaining: bool = False,
     fire_at: float,
+    fire_source: str | None = None,
+    noticed_at: float | None = None,
     notification_detail: str | None,
     outcomes: tuple[RuleDeviceActionOutcome, ...],
     rule_id: str,
@@ -119,6 +123,8 @@ def insert_pending_fire_notification(
         row = RulePendingFireNotification(
             cancelled_remaining=1 if cancelled_remaining else 0,
             fire_at=fire_at,
+            fire_source=fire_source,
+            noticed_at=noticed_at,
             notification_detail=notification_detail,
             outcomes_json=_outcomes_to_json(list(outcomes)),
             rule_id=rule_id,
@@ -203,6 +209,8 @@ def _record_from_row(row: RulePendingFireNotification) -> PendingFireNotificatio
     return PendingFireNotificationRecord(
         cancelled_remaining=bool(row.cancelled_remaining),
         fire_at=row.fire_at,
+        fire_source=row.fire_source,
+        noticed_at=row.noticed_at,
         notification_detail=row.notification_detail,
         outcomes=tuple(_outcomes_from_json(row.outcomes_json)),
         row_id=row.id,

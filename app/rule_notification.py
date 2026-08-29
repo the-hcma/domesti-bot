@@ -37,6 +37,10 @@ RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE = (
 )
 RULE_FIRE_JUST_FIRED_TEMPLATE = 'The automation rule "{label}" ({rule_id}) just fired.'
 RULE_FIRE_TIMELINE_HEADING = "Timeline"
+RULE_FIRE_TIMING_HEADING = "Timing"
+RULE_FIRE_NOTICED_TEMPLATE = "Noticed: {when} ({source})"
+RULE_FIRE_FIRED_TEMPLATE = "Fired: {when}"
+RULE_FIRE_REACTION_TEMPLATE = "Reaction: {duration}"
 
 
 def build_rule_notification_bodies(
@@ -45,6 +49,9 @@ def build_rule_notification_bodies(
     cache_path: Path | None,
     cancelled_remaining: bool = False,
     device_action_outcomes: tuple[RuleDeviceActionOutcome, ...] = (),
+    fire_at: float | None = None,
+    fire_source: str | None = None,
+    noticed_at: float | None = None,
     notification_detail: str | None = None,
     sequence_completed: bool = False,
 ) -> tuple[str, str]:
@@ -59,6 +66,15 @@ def build_rule_notification_bodies(
     plain_parts = [intro, ""]
     if notification_detail:
         plain_parts.extend([notification_detail, ""])
+    timing_lines = format_rule_fire_timing_lines(
+        noticed_at=noticed_at,
+        fire_at=fire_at,
+        fire_source=fire_source,
+    )
+    if timing_lines:
+        plain_parts.append(f"{RULE_FIRE_TIMING_HEADING}:")
+        plain_parts.extend(f"- {line}" for line in timing_lines)
+        plain_parts.append("")
     if device_summary.changed_lines or device_summary.no_change_message is not None:
         plain_parts.append(f"{RULE_FIRE_TIMELINE_HEADING}:")
         if device_summary.changed_lines:
@@ -83,6 +99,12 @@ def build_rule_notification_bodies(
     if notification_detail:
         safe_detail = escape(notification_detail, quote=False).replace("\n", "<br>")
         html_parts.append(f"<p>{safe_detail}</p>")
+    if timing_lines:
+        html_parts.append(f"<p><strong>{escape(RULE_FIRE_TIMING_HEADING, quote=False)}</strong></p>")
+        html_parts.append("<ul>")
+        for line in timing_lines:
+            html_parts.append(f"<li>{escape(line, quote=False)}</li>")
+        html_parts.append("</ul>")
     if device_summary.changed_lines or device_summary.no_change_message is not None:
         html_parts.append(f"<p><strong>{escape(RULE_FIRE_TIMELINE_HEADING, quote=False)}</strong></p>")
         if device_summary.changed_lines:
@@ -117,6 +139,39 @@ def build_rule_notification_bodies(
         provenance=rule_fire_provenance_footer(rule.id),
     )
     return "\n".join(plain_parts) + "\n", "".join(html_parts)
+
+
+def format_reaction_duration_s(elapsed_s: float) -> str:
+    """Format noticed→fired elapsed seconds for rule-fire emails."""
+    seconds = max(0.0, float(elapsed_s))
+    if seconds < 60.0:
+        return f"{seconds:.1f} s"
+    minutes = seconds / 60.0
+    if minutes < 60.0:
+        return f"{minutes:.1f} min"
+    hours = minutes / 60.0
+    return f"{hours:.1f} h"
+
+
+def format_rule_fire_timing_lines(
+    *,
+    fire_at: float | None,
+    fire_source: str | None = None,
+    noticed_at: float | None,
+    timezone: str | ZoneInfo | None = None,
+) -> tuple[str, ...]:
+    """Return Timing section lines when both noticed and fired epochs are known."""
+    if noticed_at is None or fire_at is None:
+        return ()
+    source = (fire_source or "immediate").strip() or "immediate"
+    noticed = format_completed_at_local(noticed_at, timezone=timezone)
+    fired = format_completed_at_local(fire_at, timezone=timezone)
+    reaction = format_reaction_duration_s(fire_at - noticed_at)
+    return (
+        RULE_FIRE_NOTICED_TEMPLATE.format(when=noticed, source=source),
+        RULE_FIRE_FIRED_TEMPLATE.format(when=fired),
+        RULE_FIRE_REACTION_TEMPLATE.format(duration=reaction),
+    )
 
 
 def format_completed_at_local(

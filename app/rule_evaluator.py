@@ -983,6 +983,7 @@ class RuleEvaluator:
                         evaluation=evaluation,
                         fire_source=fire_source,
                         log_user_ids=log_user_ids,
+                        noticed_at=now_epoch,
                         transitions={},
                     )
                 else:
@@ -1079,6 +1080,7 @@ class RuleEvaluator:
                 evaluation=evaluation,
                 fire_source="deferred",
                 log_user_ids=user_id,
+                noticed_at=deferred.observed_at,
                 transitions=transitions,
             )
             fired_rule_ids.add(rule.id)
@@ -1279,6 +1281,7 @@ class RuleEvaluator:
         evaluation: RuleEvaluationResult,
         fire_source: RuleFireSource = "immediate",
         log_user_ids: str,
+        noticed_at: float | None = None,
         transitions: dict[str, GeofenceTransition],
     ) -> None:
         runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -1293,6 +1296,7 @@ class RuleEvaluator:
         dispatch_result = RuleDeviceDispatchResult.empty()
         deferred_enqueued = False
         fire_at = self._now_fn()
+        noticed_epoch = fire_at if noticed_at is None else noticed_at
         if device_state is None:
             if immediate or delayed:
                 errors.append("Device discovery still in progress; actions skipped")
@@ -1323,6 +1327,8 @@ class RuleEvaluator:
                     insert_pending_fire_notification(
                         self._cache_path,
                         fire_at=fire_at,
+                        fire_source=fire_source,
+                        noticed_at=noticed_epoch,
                         notification_detail=notification_detail,
                         outcomes=dispatch_result.action_outcomes,
                         rule_id=rule.id,
@@ -1333,6 +1339,9 @@ class RuleEvaluator:
                         send_rule_notification_email,
                         self._cache_path,
                         device_action_outcomes=dispatch_result.action_outcomes,
+                        fire_at=fire_at,
+                        fire_source=fire_source,
+                        noticed_at=noticed_epoch,
                         notification_detail=notification_detail,
                         rule=rule,
                     )
@@ -1467,6 +1476,9 @@ class RuleEvaluator:
                     cache_path,
                     cancelled_remaining=pending.cancelled_remaining,
                     device_action_outcomes=pending.outcomes,
+                    fire_at=pending.fire_at,
+                    fire_source=pending.fire_source,
+                    noticed_at=pending.noticed_at,
                     notification_detail=pending.notification_detail,
                     rule=rule,
                     sequence_completed=True,
@@ -1482,6 +1494,8 @@ class RuleEvaluator:
                     cache_path,
                     cancelled_remaining=pending.cancelled_remaining,
                     fire_at=pending.fire_at,
+                    fire_source=pending.fire_source,
+                    noticed_at=pending.noticed_at,
                     notification_detail=pending.notification_detail,
                     outcomes=pending.outcomes,
                     rule_id=pending.rule_id,
@@ -1889,6 +1903,7 @@ class RuleEvaluator:
                 edge_user_id=user_id,
                 evaluation=evaluation,
                 log_user_ids=user_id,
+                noticed_at=now,
                 transitions=transitions,
             )
         self._location_request_coordinator.maybe_request(
@@ -2433,6 +2448,7 @@ class RuleEvaluator:
                     evaluation=evaluation,
                     fire_source="device_state",
                     log_user_ids=log_user_ids,
+                    noticed_at=now_epoch,
                     transitions=transitions,
                 )
         await self._maybe_process_device_dwell_satisfied(family_id, device_id)
@@ -2510,6 +2526,7 @@ class RuleEvaluator:
                 evaluation=evaluation,
                 fire_source="dwell_satisfied",
                 log_user_ids=log_user_ids,
+                noticed_at=now_epoch,
                 transitions=transitions,
             )
             attempted_rule_ids.add(rule.id)
