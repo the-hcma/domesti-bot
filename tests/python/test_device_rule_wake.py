@@ -2,13 +2,64 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.device_enums import DeviceFamilyId, Ep1ReadingMetric
-from app.device_rule_wake import DeviceRuleWakeNotifier
-from app.rule_evaluator import RuleEvaluator
+from app.device_rule_wake import (
+    DEVICE_BOOL_METRIC_NAME,
+    DEVICE_STATE_TRANSITION_LOG,
+    DeviceRuleWakeNotifier,
+    format_bool_state_label,
+)
+from app.rule_evaluator import (
+    RULE_DWELL_STREAK_LOG,
+    RULE_DWELL_STREAK_RESET_LOG,
+    RuleEvaluator,
+)
 from app.server_runtime import DomestiServerRuntime
+
+
+def test_format_bool_state_label_by_family() -> None:
+    assert format_bool_state_label(DeviceFamilyId.EP1, True) == "occupied"
+    assert format_bool_state_label(DeviceFamilyId.EP1, False) == "clear"
+    assert format_bool_state_label(DeviceFamilyId.TAILWIND, True) == "open"
+    assert format_bool_state_label(DeviceFamilyId.TAILWIND, False) == "closed"
+    assert format_bool_state_label(DeviceFamilyId.SONOS, True) == "playing"
+    assert format_bool_state_label(DeviceFamilyId.SONOS, False) == "paused"
+    assert format_bool_state_label(DeviceFamilyId.KASA, True) == "on"
+    assert format_bool_state_label(DeviceFamilyId.KASA, False) == "off"
+    assert format_bool_state_label(DeviceFamilyId.KASA, None) == "unknown"
+
+
+def test_device_rule_wake_notifier_logs_bool_transition(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    on_change = MagicMock()
+    notifier = DeviceRuleWakeNotifier(on_change)
+    with caplog.at_level(logging.INFO, logger="app.device_rule_wake"):
+        assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", True) is False
+        assert notifier.note_bool_transition(DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01", False) is True
+    assert (
+        DEVICE_STATE_TRANSITION_LOG
+        % (
+            "ep1",
+            "aa:bb:cc:dd:ee:01",
+            DEVICE_BOOL_METRIC_NAME,
+            "occupied",
+            "clear",
+        )
+        in caplog.text
+    )
+    on_change.assert_called_once_with(
+        DeviceFamilyId.EP1,
+        "aa:bb:cc:dd:ee:01",
+        True,
+        False,
+    )
 
 
 def test_device_rule_wake_notifier_ignores_first_sample_without_seed() -> None:
@@ -158,3 +209,41 @@ def test_runtime_reading_update_schedules_rule_evaluation_not_vacation(
         reading_metric=Ep1ReadingMetric.ILLUMINANCE_LX,
     )
     holder.schedule_vacation_anomaly_alert.assert_not_called()
+
+
+def test_device_bool_streak_logs_start_and_reset(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    db = tmp_path / "discovery.sqlite"
+    db.touch()
+    since = 1_700_000_000.0
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: since,
+    )
+    key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
+    with caplog.at_level(logging.INFO, logger="app.rule_evaluator"):
+        evaluator._set_device_bool_streak(key, False, since)
+        evaluator._drop_device_bool_streak(key)
+    assert (
+        RULE_DWELL_STREAK_LOG
+        % (
+            "ep1",
+            "aa:bb:cc:dd:ee:01",
+            "clear",
+            "2023-11-14T22:13:20Z",
+        )
+        in caplog.text
+    )
+    assert (
+        RULE_DWELL_STREAK_RESET_LOG
+        % (
+            "ep1",
+            "aa:bb:cc:dd:ee:01",
+            "clear",
+            "unknown",
+        )
+        in caplog.text
+    )

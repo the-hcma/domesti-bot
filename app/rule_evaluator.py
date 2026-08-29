@@ -65,6 +65,7 @@ from app.device_enums import (
     RuleEvaluationCause,
     RuleTrigger,
 )
+from app.device_rule_wake import format_bool_state_label
 from app.domesti_bot_cli import DeviceManagersState
 from app.dwell_watch_index import (
     DeviceDwellWatch,
@@ -150,6 +151,9 @@ from app.wifi_home_presence import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+# Public dwell-streak log contracts (asserted by hermetic tests).
+RULE_DWELL_STREAK_LOG = "[rules] dwell-streak family_id=%s device_id=%s state=%s since=%s"
+RULE_DWELL_STREAK_RESET_LOG = "[rules] dwell-streak-reset family_id=%s device_id=%s prior_state=%s reason=%s"
 _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
 _GEO_INSIDE_STATE_RECONCILE_S = 600.0
 _GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
@@ -2583,9 +2587,19 @@ class RuleEvaluator:
             del self._dwell_satisfied_evaluated_since[key]
 
     def _drop_device_bool_streak(self, key: tuple[DeviceFamilyId, str]) -> None:
+        prior = self._device_bool_value.get(key)
+        had_streak = key in self._device_bool_since
         self._device_bool_since.pop(key, None)
         self._device_bool_value.pop(key, None)
         self._clear_device_dwell_satisfied_eval_for_device(key[0], key[1])
+        if had_streak:
+            _LOGGER.info(
+                RULE_DWELL_STREAK_RESET_LOG,
+                key[0].value,
+                key[1],
+                format_bool_state_label(key[0], prior),
+                "unknown",
+            )
 
     def _drop_geofence_inside_since(self, key: tuple[str, str]) -> None:
         self._clear_dwell_satisfied_eval_for_geofence_direction(
@@ -2614,6 +2628,13 @@ class RuleEvaluator:
         self._device_bool_since[key] = since
         if prior is not None and prior != value:
             self._clear_device_dwell_satisfied_eval_for_device(key[0], key[1])
+        _LOGGER.info(
+            RULE_DWELL_STREAK_LOG,
+            key[0].value,
+            key[1],
+            format_bool_state_label(key[0], value),
+            location_epoch_to_iso_z(since),
+        )
 
     def _set_geofence_inside_since(self, key: tuple[str, str], since: float) -> None:
         self._clear_dwell_satisfied_eval_for_geofence_direction(
