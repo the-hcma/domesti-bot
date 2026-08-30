@@ -166,6 +166,7 @@ class RulePendingFireNotification(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     cancelled_remaining: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    device_state_changed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     fire_at: Mapped[float] = mapped_column(Float, nullable=False, index=True)
     fire_source: Mapped[str | None] = mapped_column(String, nullable=True)
     noticed_at: Mapped[float | None] = mapped_column(Float, nullable=True)

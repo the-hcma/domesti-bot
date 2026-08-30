@@ -48,6 +48,7 @@ def test_insert_get_and_append_round_trip(tmp_path: Path) -> None:
     noticed_at = fire_at - 0.8
     insert_pending_fire_notification(
         db,
+        device_state_changed_at=noticed_at - 20.0,
         fire_at=fire_at,
         fire_source="scheduled",
         noticed_at=noticed_at,
@@ -64,6 +65,7 @@ def test_insert_get_and_append_round_trip(tmp_path: Path) -> None:
     assert row.notification_detail == "Nightly power cycle."
     assert row.fire_source == "scheduled"
     assert row.noticed_at == noticed_at
+    assert row.device_state_changed_at == noticed_at - 20.0
     assert len(row.outcomes) == 1
     assert row.cancelled_remaining is False
 
@@ -83,6 +85,7 @@ def test_insert_get_and_append_round_trip(tmp_path: Path) -> None:
     assert updated.outcomes[1].action == RuleDeviceActionType.TURN_ON
     assert updated.fire_source == "scheduled"
     assert updated.noticed_at == noticed_at
+    assert updated.device_state_changed_at == noticed_at - 20.0
 
 
 def test_list_skips_corrupt_outcomes_json(tmp_path: Path) -> None:

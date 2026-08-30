@@ -29,6 +29,7 @@ class PendingFireNotificationRecord:
     """One deferred notify_on_fire email awaiting delayed device_actions."""
 
     cancelled_remaining: bool
+    device_state_changed_at: float | None
     fire_at: float
     fire_source: str | None
     noticed_at: float | None
@@ -109,6 +110,7 @@ def insert_pending_fire_notification(
     path: Path,
     *,
     cancelled_remaining: bool = False,
+    device_state_changed_at: float | None = None,
     fire_at: float,
     fire_source: str | None = None,
     noticed_at: float | None = None,
@@ -122,6 +124,7 @@ def insert_pending_fire_notification(
     def _write(session: Session) -> int:
         row = RulePendingFireNotification(
             cancelled_remaining=1 if cancelled_remaining else 0,
+            device_state_changed_at=device_state_changed_at,
             fire_at=fire_at,
             fire_source=fire_source,
             noticed_at=noticed_at,
@@ -208,6 +211,7 @@ def _outcomes_to_json(outcomes: list[RuleDeviceActionOutcome]) -> str:
 def _record_from_row(row: RulePendingFireNotification) -> PendingFireNotificationRecord:
     return PendingFireNotificationRecord(
         cancelled_remaining=bool(row.cancelled_remaining),
+        device_state_changed_at=row.device_state_changed_at,
         fire_at=row.fire_at,
         fire_source=row.fire_source,
         noticed_at=row.noticed_at,
