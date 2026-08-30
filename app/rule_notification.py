@@ -35,12 +35,13 @@ RULE_FIRE_ACTIONS_CANCELLED_NOTE = "Remaining delayed device actions were cancel
 RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE = (
     'The automation rule "{label}" ({rule_id}) completed its device-action sequence.'
 )
+RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE = "Device state changed: {when}"
+RULE_FIRE_FIRED_TEMPLATE = "Fired: {when}"
 RULE_FIRE_JUST_FIRED_TEMPLATE = 'The automation rule "{label}" ({rule_id}) just fired.'
+RULE_FIRE_NOTICED_TEMPLATE = "Noticed: {when} ({source})"
+RULE_FIRE_REACTION_TEMPLATE = "Reaction: {duration}"
 RULE_FIRE_TIMELINE_HEADING = "Timeline"
 RULE_FIRE_TIMING_HEADING = "Timing"
-RULE_FIRE_NOTICED_TEMPLATE = "Noticed: {when} ({source})"
-RULE_FIRE_FIRED_TEMPLATE = "Fired: {when}"
-RULE_FIRE_REACTION_TEMPLATE = "Reaction: {duration}"
 
 
 def build_rule_notification_bodies(
@@ -49,6 +50,7 @@ def build_rule_notification_bodies(
     cache_path: Path | None,
     cancelled_remaining: bool = False,
     device_action_outcomes: tuple[RuleDeviceActionOutcome, ...] = (),
+    device_state_changed_at: float | None = None,
     fire_at: float | None = None,
     fire_source: str | None = None,
     noticed_at: float | None = None,
@@ -67,6 +69,7 @@ def build_rule_notification_bodies(
     if notification_detail:
         plain_parts.extend([notification_detail, ""])
     timing_lines = format_rule_fire_timing_lines(
+        device_state_changed_at=device_state_changed_at,
         noticed_at=noticed_at,
         fire_at=fire_at,
         fire_source=fire_source,
@@ -155,6 +158,7 @@ def format_reaction_duration_s(elapsed_s: float) -> str:
 
 def format_rule_fire_timing_lines(
     *,
+    device_state_changed_at: float | None = None,
     fire_at: float | None,
     fire_source: str | None = None,
     noticed_at: float | None,
@@ -164,14 +168,21 @@ def format_rule_fire_timing_lines(
     if noticed_at is None or fire_at is None:
         return ()
     source = (fire_source or "immediate").strip() or "immediate"
+    lines: list[str] = []
+    if device_state_changed_at is not None:
+        changed = format_completed_at_local(device_state_changed_at, timezone=timezone)
+        lines.append(RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE.format(when=changed))
     noticed = format_completed_at_local(noticed_at, timezone=timezone)
     fired = format_completed_at_local(fire_at, timezone=timezone)
     reaction = format_reaction_duration_s(fire_at - noticed_at)
-    return (
-        RULE_FIRE_NOTICED_TEMPLATE.format(when=noticed, source=source),
-        RULE_FIRE_FIRED_TEMPLATE.format(when=fired),
-        RULE_FIRE_REACTION_TEMPLATE.format(duration=reaction),
+    lines.extend(
+        (
+            RULE_FIRE_NOTICED_TEMPLATE.format(when=noticed, source=source),
+            RULE_FIRE_FIRED_TEMPLATE.format(when=fired),
+            RULE_FIRE_REACTION_TEMPLATE.format(duration=reaction),
+        )
     )
+    return tuple(lines)
 
 
 def format_completed_at_local(
@@ -183,14 +194,16 @@ def format_completed_at_local(
 
     Uses ``settings_location.timezone`` when ``timezone`` is omitted (same IANA zone
     as schedules / astronomical windows). The zone label is the abbreviation when
-    available (e.g. ``EDT``), otherwise the IANA name or UTC offset.
+    available (e.g. ``EDT``), otherwise the IANA name or UTC offset. Includes
+    milliseconds so sub-second reaction / action gaps are visible in mail.
     """
     tz, tz_name = _resolve_notification_timezone(timezone)
     dt = datetime.fromtimestamp(completed_at, tz=tz)
     zone_label = (dt.tzname() or "").strip()
     if not zone_label:
         zone_label = tz_name
-    return f"{dt.strftime('%Y-%m-%d %H:%M:%S')} {zone_label}"
+    millis = int(dt.microsecond / 1000)
+    return f"{dt.strftime('%Y-%m-%d %H:%M:%S')}.{millis:03d} {zone_label}"
 
 
 def format_device_action_outcome_line(outcome: RuleDeviceActionOutcome) -> str:

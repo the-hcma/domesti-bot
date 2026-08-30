@@ -28,6 +28,7 @@ from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
 from app.rule_actions import RuleActionDispatchError, RuleNotificationEmailOutcome
+from app.rule_conditions import evaluate_rule
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
@@ -329,6 +330,50 @@ async def test_ep1_clear_dwell_failed_fire_does_not_retry_every_tick(
         )
 
     assert send_mock.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ep1_clear_dwell_fire_once_debounces_same_streak_under_cooldown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fire_once + cooldown must mark debounce so same streak skips without daily_cap spam."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule(cooldown_s=300, fire_once_per_local_day=True))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": datetime(2026, 6, 9, 21, 30, tzinfo=_NY).timestamp()}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=False)
+    state = _ep1_state(sensor)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await evaluator.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+        streak_since = clock["now"]
+        clock["now"] += 20.0
+        await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+        assert send_mock.call_count == 1
+        send_kwargs = send_mock.call_args.kwargs
+        assert send_kwargs["device_state_changed_at"] == streak_since
+        assert send_kwargs["noticed_at"] == streak_since + 20.0
+        assert send_kwargs["fire_source"] == "dwell_satisfied"
+
+        with patch(
+            "app.rule_evaluator.evaluate_rule",
+            wraps=evaluate_rule,
+        ) as evaluate_mock:
+            clock["now"] += 5.0
+            await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+            assert send_mock.call_count == 1
+            assert evaluate_mock.call_count == 0
 
 
 @pytest.mark.asyncio

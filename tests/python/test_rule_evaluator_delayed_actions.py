@@ -860,7 +860,10 @@ async def test_notify_on_fire_smtp_failure_restores_claimed_pending_row(
     )
     insert_pending_fire_notification(
         db,
+        device_state_changed_at=1_700_000_040.0,
         fire_at=1_700_000_060.0,
+        fire_source="dwell_satisfied",
+        noticed_at=1_700_000_050.0,
         notification_detail=None,
         outcomes=(
             RuleDeviceActionOutcome(
@@ -894,6 +897,9 @@ async def test_notify_on_fire_smtp_failure_restores_claimed_pending_row(
         assert len(pending) == 1
         assert pending[0].rule_id == rule.id
         assert len(pending[0].outcomes) == 1
+        assert pending[0].device_state_changed_at == 1_700_000_040.0
+        assert pending[0].noticed_at == 1_700_000_050.0
+        assert pending[0].fire_source == "dwell_satisfied"
     finally:
         await evaluator.close()
 
@@ -924,7 +930,10 @@ async def test_notify_on_fire_orphan_pending_flushes_after_restart(
     )
     insert_pending_fire_notification(
         db,
+        device_state_changed_at=1_700_000_040.0,
         fire_at=1_700_000_060.0,
+        fire_source="dwell_satisfied",
+        noticed_at=1_700_000_050.0,
         notification_detail=None,
         outcomes=(
             RuleDeviceActionOutcome(
@@ -971,6 +980,9 @@ async def test_notify_on_fire_orphan_pending_flushes_after_restart(
             kwargs = send_mock.call_args.kwargs
             assert kwargs["sequence_completed"] is True
             assert len(kwargs["device_action_outcomes"]) == 2
+            assert kwargs["device_state_changed_at"] == 1_700_000_040.0
+            assert kwargs["noticed_at"] == 1_700_000_050.0
+            assert kwargs["fire_source"] == "dwell_satisfied"
             assert list_pending_fire_notifications(db) == []
     finally:
         await evaluator.close()

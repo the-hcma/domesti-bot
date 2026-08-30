@@ -16,6 +16,7 @@ from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_notification import (
     RULE_FIRE_ACTIONS_CANCELLED_NOTE,
     RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE,
+    RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE,
     RULE_FIRE_FIRED_TEMPLATE,
     RULE_FIRE_JUST_FIRED_TEMPLATE,
     RULE_FIRE_NOTICED_TEMPLATE,
@@ -93,13 +94,18 @@ def test_domesti_public_base_url_reads_mytracks_pair_status(
 
 def test_format_completed_at_local_includes_timezone_abbreviation() -> None:
     stamp = format_completed_at_local(_COMPLETED_AT, timezone=_HOME_TIMEZONE)
-    assert stamp == "2023-11-14 17:13:20 EST"
+    assert stamp == "2023-11-14 17:13:20.000 EST"
     assert stamp == _COMPLETED_AT_LOCAL
+
+
+def test_format_completed_at_local_includes_milliseconds() -> None:
+    stamp = format_completed_at_local(_COMPLETED_AT + 0.158, timezone=_HOME_TIMEZONE)
+    assert stamp == "2023-11-14 17:13:20.158 EST"
 
 
 def test_format_completed_at_local_falls_back_to_utc_for_invalid_timezone() -> None:
     stamp = format_completed_at_local(_COMPLETED_AT, timezone="Not/A_Real_Zone")
-    assert stamp == "2023-11-14 22:13:20 UTC"
+    assert stamp == "2023-11-14 22:13:20.000 UTC"
 
 
 def test_format_completed_at_local_falls_back_when_rules_file_missing(
@@ -110,7 +116,7 @@ def test_format_completed_at_local_falls_back_when_rules_file_missing(
         lambda: (_ for _ in ()).throw(AutomationRulesLoadError("missing")),
     )
     stamp = format_completed_at_local(_COMPLETED_AT)
-    assert stamp == "2023-11-14 22:13:20 UTC"
+    assert stamp == "2023-11-14 22:13:20.000 UTC"
 
 
 def test_rule_automation_status_url_builds_status_deep_link(
@@ -274,6 +280,24 @@ def test_format_rule_fire_timing_lines_includes_source_and_reaction() -> None:
     )
     assert lines == (
         RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="device_state"),
+        RULE_FIRE_FIRED_TEMPLATE.format(when=_COMPLETED_AT_LOCAL),
+        RULE_FIRE_REACTION_TEMPLATE.format(duration="0.8 s"),
+    )
+
+
+def test_format_rule_fire_timing_lines_includes_device_state_changed() -> None:
+    changed_at = _NOTICED_AT - 20.0
+    changed_local = format_completed_at_local(changed_at, timezone=_HOME_TIMEZONE)
+    lines = format_rule_fire_timing_lines(
+        device_state_changed_at=changed_at,
+        noticed_at=_NOTICED_AT,
+        fire_at=_COMPLETED_AT,
+        fire_source="dwell_satisfied",
+        timezone=_HOME_TIMEZONE,
+    )
+    assert lines == (
+        RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE.format(when=changed_local),
+        RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="dwell_satisfied"),
         RULE_FIRE_FIRED_TEMPLATE.format(when=_COMPLETED_AT_LOCAL),
         RULE_FIRE_REACTION_TEMPLATE.format(duration="0.8 s"),
     )

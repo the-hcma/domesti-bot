@@ -1281,6 +1281,7 @@ class RuleEvaluator:
         self,
         rule: RuleOut,
         *,
+        device_state_changed_at: float | None = None,
         edge_user_id: str | None = None,
         evaluation: RuleEvaluationResult,
         fire_source: RuleFireSource = "immediate",
@@ -1330,6 +1331,7 @@ class RuleEvaluator:
                 if deferred_enqueued:
                     insert_pending_fire_notification(
                         self._cache_path,
+                        device_state_changed_at=device_state_changed_at,
                         fire_at=fire_at,
                         fire_source=fire_source,
                         noticed_at=noticed_epoch,
@@ -1343,6 +1345,7 @@ class RuleEvaluator:
                         send_rule_notification_email,
                         self._cache_path,
                         device_action_outcomes=dispatch_result.action_outcomes,
+                        device_state_changed_at=device_state_changed_at,
                         fire_at=fire_at,
                         fire_source=fire_source,
                         noticed_at=noticed_epoch,
@@ -1480,6 +1483,7 @@ class RuleEvaluator:
                     cache_path,
                     cancelled_remaining=pending.cancelled_remaining,
                     device_action_outcomes=pending.outcomes,
+                    device_state_changed_at=pending.device_state_changed_at,
                     fire_at=pending.fire_at,
                     fire_source=pending.fire_source,
                     noticed_at=pending.noticed_at,
@@ -1497,6 +1501,7 @@ class RuleEvaluator:
                 insert_pending_fire_notification(
                     cache_path,
                     cancelled_remaining=pending.cancelled_remaining,
+                    device_state_changed_at=pending.device_state_changed_at,
                     fire_at=pending.fire_at,
                     fire_source=pending.fire_source,
                     noticed_at=pending.noticed_at,
@@ -2224,12 +2229,21 @@ class RuleEvaluator:
                 newly_evaluated_rules.append((rule_key, since))
         if not crossed_rule_ids:
             return
+        timing_by_rule_id: dict[str, tuple[float, float | None]] = {}
+        for rule_key, since in newly_evaluated_rules:
+            rule_id = rule_key[0]
+            min_duration_s = rule_key[4]
+            noticed = min(now_epoch, since + float(min_duration_s))
+            prior = timing_by_rule_id.get(rule_id)
+            if prior is None or since < (prior[1] if prior[1] is not None else prior[0]):
+                timing_by_rule_id[rule_id] = (noticed, since)
         attempted_rule_ids = await self._process_dwell_satisfied_rules(
             crossed_rule_ids,
             rules=rules,
             ctx=ctx,
             now_epoch=now_epoch,
             timezone=timezone,
+            timing_by_rule_id=timing_by_rule_id,
         )
         evaluated_day = local_calendar_date(now_epoch, timezone)
         for rule_key, since in newly_evaluated_rules:
@@ -2245,12 +2259,14 @@ class RuleEvaluator:
                 continue
             # Debounce after an all-met attempt, except while cooldown is still
             # active — leave the slot clear so cooldown_s can re-arm on the same
-            # streak (RULE_ENGINE_PLAN repeat-while-true). Never mark after
-            # conditions_not_met (e.g. after_local_time still closed) (#681).
+            # streak (RULE_ENGINE_PLAN repeat-while-true). fire_once_per_local_day
+            # still marks so the same streak does not re-evaluate every tick until
+            # local midnight (#703). Never mark after conditions_not_met (e.g.
+            # after_local_time still closed) (#681).
             if rule_id not in attempted_rule_ids:
                 continue
             runtime = self._rule_state.get(rule_id)
-            if runtime is not None and not self._cooldown_elapsed(rule, runtime):
+            if runtime is not None and not self._cooldown_elapsed(rule, runtime) and not rule.fire_once_per_local_day:
                 continue
             self._device_dwell_satisfied_evaluated_since[rule_key] = (
                 since,
@@ -2312,12 +2328,21 @@ class RuleEvaluator:
                 newly_evaluated_rules.append((rule_key, since))
         if not crossed_rule_ids:
             return
+        timing_by_rule_id: dict[str, tuple[float, float | None]] = {}
+        for rule_key, since in newly_evaluated_rules:
+            rule_id = rule_key[0]
+            min_s = rule_key[4]
+            noticed = min(now_epoch, since + float(min_s))
+            prior = timing_by_rule_id.get(rule_id)
+            if prior is None or noticed < prior[0]:
+                timing_by_rule_id[rule_id] = (noticed, None)
         await self._process_dwell_satisfied_rules(
             crossed_rule_ids,
             rules=rules,
             ctx=ctx,
             now_epoch=now_epoch,
             timezone=timezone,
+            timing_by_rule_id=timing_by_rule_id,
         )
         for rule_key, since in newly_evaluated_rules:
             rule_id = rule_key[0]
@@ -2328,6 +2353,10 @@ class RuleEvaluator:
             if dwell_episode_blocks_fire(rule, ctx):
                 self._dwell_satisfied_evaluated_since[rule_key] = since
                 continue
+            # Leave the slot clear while cooldown is active so cooldown_s can
+            # re-arm on the same streak. Do not special-case fire_once here: this
+            # map stores bare ``since`` (no local day), so marking under cooldown
+            # would suppress re-eval across midnight until the streak resets (#705).
             if runtime is not None and not self._cooldown_elapsed(rule, runtime):
                 continue
             self._dwell_satisfied_evaluated_since[rule_key] = since
@@ -2447,12 +2476,16 @@ class RuleEvaluator:
                         detail=f"remaining_s={max(0.0, remaining_s):.0f}",
                     )
                     continue
+                streak_since = (
+                    None if reading_metric is not None else self._device_bool_since.get((family_id, device_id))
+                )
                 await self._execute_rule(
                     rule,
+                    device_state_changed_at=streak_since,
                     evaluation=evaluation,
                     fire_source="device_state",
                     log_user_ids=log_user_ids,
-                    noticed_at=now_epoch,
+                    noticed_at=streak_since if streak_since is not None else now_epoch,
                     transitions=transitions,
                 )
         await self._maybe_process_device_dwell_satisfied(family_id, device_id)
@@ -2465,6 +2498,7 @@ class RuleEvaluator:
         ctx: RuleEvaluationContext,
         now_epoch: float,
         timezone: ZoneInfo,
+        timing_by_rule_id: dict[str, tuple[float, float | None]] | None = None,
     ) -> set[str]:
         """Evaluate dwell-satisfied rules; return ids that were all-met (attempted)."""
         rules_by_id = {rule.id: rule for rule in rules if rule.enabled and RuleTrigger.DWELL_SATISFIED in rule.triggers}
@@ -2525,12 +2559,16 @@ class RuleEvaluator:
                     detail=f"remaining_s={max(0.0, remaining_s):.0f}",
                 )
                 continue
+            timing = None if timing_by_rule_id is None else timing_by_rule_id.get(rule.id)
+            noticed_at = now_epoch if timing is None else timing[0]
+            device_state_changed_at = None if timing is None else timing[1]
             await self._execute_rule(
                 rule,
+                device_state_changed_at=device_state_changed_at,
                 evaluation=evaluation,
                 fire_source="dwell_satisfied",
                 log_user_ids=log_user_ids,
-                noticed_at=now_epoch,
+                noticed_at=noticed_at,
                 transitions=transitions,
             )
             attempted_rule_ids.add(rule.id)
