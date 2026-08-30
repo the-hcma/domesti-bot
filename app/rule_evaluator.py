@@ -2353,7 +2353,11 @@ class RuleEvaluator:
             if dwell_episode_blocks_fire(rule, ctx):
                 self._dwell_satisfied_evaluated_since[rule_key] = since
                 continue
-            if runtime is not None and not self._cooldown_elapsed(rule, runtime) and not rule.fire_once_per_local_day:
+            # Leave the slot clear while cooldown is active so cooldown_s can
+            # re-arm on the same streak. Do not special-case fire_once here: this
+            # map stores bare ``since`` (no local day), so marking under cooldown
+            # would suppress re-eval across midnight until the streak resets (#705).
+            if runtime is not None and not self._cooldown_elapsed(rule, runtime):
                 continue
             self._dwell_satisfied_evaluated_since[rule_key] = since
 
@@ -2472,7 +2476,9 @@ class RuleEvaluator:
                         detail=f"remaining_s={max(0.0, remaining_s):.0f}",
                     )
                     continue
-                streak_since = self._device_bool_since.get((family_id, device_id))
+                streak_since = (
+                    None if reading_metric is not None else self._device_bool_since.get((family_id, device_id))
+                )
                 await self._execute_rule(
                     rule,
                     device_state_changed_at=streak_since,

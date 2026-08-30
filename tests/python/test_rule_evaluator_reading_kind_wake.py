@@ -125,6 +125,11 @@ async def test_illuminance_wake_evaluates_lux_rule(
             reading_metric=Ep1ReadingMetric.ILLUMINANCE_LX,
         )
         assert send_mock.call_count == 1
+        send_kwargs = send_mock.call_args.kwargs
+        # Metric wakes must not borrow the occupancy bool streak for Timing (#705).
+        assert send_kwargs["device_state_changed_at"] is None
+        assert send_kwargs["noticed_at"] == 1_700_000_000.0
+        assert send_kwargs["fire_source"] == "device_state"
 
 
 def _ep1_mgr(device: _FakeEp1) -> Ep1DeviceManager:

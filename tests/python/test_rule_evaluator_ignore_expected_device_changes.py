@@ -96,10 +96,11 @@ async def test_ignore_expected_fires_when_unmarked(
 
     fan = _FakeKasa(_FAN_MAC, "Master bedroom fan", is_on=True)
     state = _kasa_state(fan)
+    now = 1_700_000_000.0
     evaluator = RuleEvaluator(
         cache_path=db,
         device_state_getter=lambda: state,
-        now_fn=lambda: 1_700_000_000.0,
+        now_fn=lambda: now,
     )
 
     with patch(
@@ -109,6 +110,10 @@ async def test_ignore_expected_fires_when_unmarked(
         await evaluator.on_device_state_change(DeviceFamilyId.KASA, _FAN_MAC)
 
     assert send_mock.call_count == 1
+    send_kwargs = send_mock.call_args.kwargs
+    assert send_kwargs["device_state_changed_at"] == now
+    assert send_kwargs["noticed_at"] == now
+    assert send_kwargs["fire_source"] == "device_state"
     assert evaluator.fire_state_for_rule("fan-on-alert").last_fired_at is not None
 
 
