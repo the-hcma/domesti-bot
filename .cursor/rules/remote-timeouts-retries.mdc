@@ -1,0 +1,74 @@
+---
+description: All remote/network I/O must use explicit timeouts and bounded retries
+alwaysApply: true
+---
+
+# Remote timeouts and retries
+
+Any code that talks to a network peer — My Tracks sync (`httpx`), Vizio SmartCast
+(`aiohttp`), Tailwind's HTTP API, Sonos UPnP (SoCo), python-kasa, pychromecast /
+AndroidTV, outbound SMTP, webhooks, package indexes, `gh`/`curl` helpers — must
+not hang indefinitely and must not retry without a bound. Org template sync:
+repository-helpers#570.
+
+## Timeouts (required)
+
+- Set an **explicit timeout** on every remote call (connect + read, or a single
+  overall deadline the library supports). Never leave a client on library
+  defaults that mean "wait forever."
+- Reuse the module's existing timeout constant rather than a new bare literal:
+  `_REQUEST_TIMEOUT_S` in `app/mytracks_service.py` (httpx), the
+  `aiohttp.ClientTimeout` pair in `app/vizio_smartcast_client.py`
+  (`_DEFAULT_REQUEST_TIMEOUT` / `_POLL_REQUEST_TIMEOUT`), and the short
+  cache-connect budget (`_CACHE_FAST_CONNECT_TIMEOUT_S`) for the AndroidTV
+  fast path. Defaults must be finite and documented.
+- **Never** call a blocking LAN/UPnP/HTTP library directly on the event loop —
+  wrap it in `asyncio.to_thread(...)` (see `device-family-async-polling.mdc`) so
+  a slow peer cannot park the loop even when the library's own timeout is coarse.
+- Agent / shell wrappers that hit the network should use the helpers' `--timeout`
+  / `run_command … --timeout` patterns when available.
+- HTTP routes that depend on discovery return `503` with a `Retry-After` header
+  (`_device_state`); clients (the web `DomestiBotController`, the remote CLI)
+  must honor that hint and cap total wait with a wall-clock deadline rather than
+  polling forever.
+
+## Retries (required when retrying)
+
+- Retries are for **transient** failures only (timeouts, 429, 502/503/504, reset,
+  `VizioSmartCastConnectionError`, `httpx.HTTPError` transport errors).
+- Cap attempts (small fixed `N`, typically 2–5) **or** a total retry budget.
+- Back off between attempts (exponential with jitter when practical). Honor
+  `Retry-After` when the peer sends it.
+- Do **not** retry non-idempotent writes (My Tracks `POST`/`PATCH` pairing and
+  config mutations, device power commands) unless the API contract is safe
+  (dedupe keys / explicit idempotency). Prefer fail fast on 4xx except 408/429.
+- Per-device poll sweeps already swallow one peer's failure
+  (`_refresh_all_devices_concurrently`); a retry layer must stay inside that
+  per-device budget and use `_await_with_stop` so shutdown cancels in-flight
+  attempts.
+- Log or surface a clear timeout / retry-exhaustion error (`error=timeout`,
+  `MyTracksSyncError`, the tile flipping to red) — never spin silently.
+
+## Anti-patterns
+
+```python
+# bad — no timeout
+httpx.get(url)
+aiohttp.ClientSession().get(url)
+session.things().list().execute()
+
+# bad — unbounded retry
+while True:
+    try:
+        return await call()
+    except TimeoutError:
+        continue
+```
+
+```python
+# good — timeout from the module constant + bounded retries
+async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
+    ...
+snapshot = await self.fetch_state_extended(timeout=_POLL_REQUEST_TIMEOUT)
+request_with_retries(call, max_attempts=3, retry_after_header=True)
+```
