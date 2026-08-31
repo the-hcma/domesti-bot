@@ -23,8 +23,9 @@ repository-helpers#570.
   cache-connect budget (`_CACHE_FAST_CONNECT_TIMEOUT_S`) for the AndroidTV
   fast path. Defaults must be finite and documented.
 - **Never** call a blocking LAN/UPnP/HTTP library directly on the event loop —
-  wrap it in `asyncio.to_thread(...)` (see `device-family-async-polling.mdc`) so
-  a slow peer cannot park the loop even when the library's own timeout is coarse.
+  wrap it in `asyncio.to_thread(...)` (see `.cursor/rules/device-family-async-polling.mdc`
+  and the *Continuous state monitoring* note in `docs/AGENTS.md`) so a slow peer
+  cannot park the loop even when the library's own timeout is coarse.
 - Agent / shell wrappers that hit the network should use the helpers' `--timeout`
   / `run_command … --timeout` patterns when available.
 - HTTP routes that depend on discovery return `503` with a `Retry-After` header
@@ -34,11 +35,17 @@ repository-helpers#570.
 
 ## Retries (required when retrying)
 
-- Retries are for **transient** failures only (timeouts, 429, 502/503/504, reset,
-  `VizioSmartCastConnectionError`, `httpx.HTTPError` transport errors).
+- Retries are for **transient** failures only: connect/read timeouts, connection
+  reset, and `429` / `502` / `503` / `504`. Do **not** blanket-retry a broad
+  exception base — `httpx.HTTPError` and domesti-bot's own
+  `VizioSmartCastConnectionError` (raised for *every* non-`200`, including
+  permanent `400` / `404`) both cover permanent responses. Inspect the status /
+  cause and retry only the transient subset.
 - Cap attempts (small fixed `N`, typically 2–5) **or** a total retry budget.
 - Back off between attempts (exponential with jitter when practical). Honor
-  `Retry-After` when the peer sends it.
+  `Retry-After` when the peer sends it, but **clamp** it to a sane ceiling and
+  enforce a wall-clock retry deadline so one large `Retry-After` cannot exceed
+  the budget.
 - Do **not** retry non-idempotent writes (My Tracks `POST`/`PATCH` pairing and
   config mutations, device power commands) unless the API contract is safe
   (dedupe keys / explicit idempotency). Prefer fail fast on 4xx except 408/429.
@@ -66,9 +73,18 @@ while True:
 ```
 
 ```python
-# good — timeout from the module constant + bounded retries
+# good — timeout from the module constant
 async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
     ...
 snapshot = await self.fetch_state_extended(timeout=_POLL_REQUEST_TIMEOUT)
-request_with_retries(call, max_attempts=3, retry_after_header=True)
+
+# good — bounded, backed-off retry of a transient read (no shared helper today;
+# keep the loop small and local, honor Retry-After when present)
+for attempt in range(1, _MAX_RETRIES + 1):
+    try:
+        return await self._get(path, timeout=_POLL_REQUEST_TIMEOUT)
+    except (TimeoutError, aiohttp.ClientError):
+        if attempt == _MAX_RETRIES:
+            raise
+        await asyncio.sleep(_RETRY_BACKOFF_S * 2 ** (attempt - 1))
 ```
