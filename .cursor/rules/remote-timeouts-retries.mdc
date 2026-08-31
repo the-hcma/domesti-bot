@@ -1,0 +1,104 @@
+---
+description: All remote/network I/O must use explicit timeouts and bounded retries
+alwaysApply: true
+---
+
+# Remote timeouts and retries
+
+Any code that talks to a network peer — My Tracks sync (`httpx`), Vizio SmartCast
+(`aiohttp`), Tailwind's HTTP API, Sonos UPnP (SoCo), python-kasa, pychromecast /
+AndroidTV, outbound SMTP, webhooks, package indexes, `gh`/`curl` helpers — must
+not hang indefinitely and must not retry without a bound. Org template sync:
+repository-helpers#570.
+
+## Timeouts (required)
+
+- Set an **explicit timeout** on every remote call (connect + read, or a single
+  overall deadline the library supports). Never leave a client on library
+  defaults that mean "wait forever."
+- Reuse the module's existing timeout constant rather than a new bare literal:
+  `_REQUEST_TIMEOUT_S` in `app/mytracks_service.py` (httpx), the
+  `aiohttp.ClientTimeout` pair in `app/vizio_smartcast_client.py`
+  (`_DEFAULT_REQUEST_TIMEOUT` / `_POLL_REQUEST_TIMEOUT`), and the short
+  cache-connect budget (`_CACHE_FAST_CONNECT_TIMEOUT_S`) for the AndroidTV
+  fast path. Defaults must be finite and documented.
+- **Never** call a blocking LAN/UPnP/HTTP library directly on the event loop —
+  wrap it in `asyncio.to_thread(...)` (see `.cursor/rules/device-family-async-polling.mdc`
+  and the *Continuous state monitoring* note in `docs/AGENTS.md`) so a slow peer
+  cannot park the loop even when the library's own timeout is coarse.
+- Agent / shell wrappers that hit the network should use the helpers' `--timeout`
+  / `run_command … --timeout` patterns when available.
+- HTTP routes that depend on discovery return `503` with a `Retry-After` header
+  (`_device_state`); clients (the web `DomestiBotController`, the remote CLI)
+  must honor that hint and cap total wait with a wall-clock deadline rather than
+  polling forever.
+
+## Retries (required when retrying)
+
+- **Retryable set (use this exact list everywhere):** connect/read timeouts,
+  connection reset, and HTTP `408`, `429`, `502`, `503`, `504`. Everything else —
+  including `400`, `401`, `403`, `404`, `500`, `501` — is **permanent**; fail
+  fast.
+- Do **not** blanket-retry a broad exception base — `httpx.HTTPError` covers
+  permanent 4xx too. For Vizio SmartCast (`app/vizio_smartcast_client.py`):
+  `VizioSmartCastAuthError` (`401`/`403`), `VizioSmartCastNotFoundError` (`404`)
+  and the `VizioSmartCastError` base are **permanent** — never retry them;
+  `VizioSmartCastConnectionError` wraps *both* a genuine connection failure
+  (retryable) *and* any other non-`{200,401,403,404}` status, so inspect the
+  wrapped status against the retryable set before retrying.
+- Cap attempts (small fixed `N`, typically 2–5) **or** a total retry budget.
+- Back off between attempts (exponential with jitter when practical). Honor
+  `Retry-After` when the peer sends it, but **clamp** it to a sane ceiling and
+  enforce a wall-clock retry deadline so one large `Retry-After` cannot exceed
+  the budget.
+- Do **not** retry non-idempotent writes (My Tracks `POST`/`PATCH` pairing and
+  config mutations, device power commands) unless the API contract is safe
+  (dedupe keys / explicit idempotency). Prefer fail fast on 4xx except the
+  retryable `408` / `429`.
+- Per-device poll sweeps already swallow one peer's failure
+  (`_refresh_all_devices_concurrently`); a retry layer must stay inside that
+  per-device budget and use `_await_with_stop` so shutdown cancels in-flight
+  attempts.
+- Log or surface a clear timeout / retry-exhaustion error — never spin silently.
+  Use the surface the caller already has: raise `MyTracksSyncError` from the My
+  Tracks helpers, return `RequestLocationResult(status="error", ...)` from the
+  location path, or let the family watcher flip the tile to red.
+
+## Anti-patterns
+
+```python
+# bad — no timeout
+httpx.get(url)
+aiohttp.ClientSession().get(url)
+session.things().list().execute()
+
+# bad — unbounded retry
+while True:
+    try:
+        return await call()
+    except TimeoutError:
+        continue
+```
+
+```python
+# good — timeout from the module constant
+async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
+    ...
+snapshot = await self.fetch_state_extended(timeout=_POLL_REQUEST_TIMEOUT)
+
+# good — bounded, backed-off retry of a transient CONNECTION failure (partial
+# example: a status-bearing peer also needs Retry-After clamping + a wall-clock
+# deadline per the Retries section above). No shared retry helper exists today;
+# keep the loop small and local (literals below are illustrative).
+max_attempts, backoff_s, deadline = 3, 0.5, time.monotonic() + 10.0
+for attempt in range(1, max_attempts + 1):
+    try:
+        return await self._get(path, timeout=_POLL_REQUEST_TIMEOUT)
+    # transient only — NOT aiohttp.ClientError (its base covers permanent 4xx
+    # via ClientResponseError). For a status-bearing error, gate e.status on the
+    # retryable set and honor a clamped Retry-After.
+    except (TimeoutError, aiohttp.ClientConnectionError):
+        if attempt == max_attempts or time.monotonic() >= deadline:
+            raise
+        await asyncio.sleep(backoff_s * 2 ** (attempt - 1))
+```
