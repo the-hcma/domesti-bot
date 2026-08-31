@@ -37,10 +37,13 @@ repository-helpers#570.
 
 - Retries are for **transient** failures only: connect/read timeouts, connection
   reset, and `429` / `502` / `503` / `504`. Do **not** blanket-retry a broad
-  exception base — `httpx.HTTPError` and domesti-bot's own
-  `VizioSmartCastConnectionError` (raised for *every* non-`200`, including
-  permanent `400` / `404`) both cover permanent responses. Inspect the status /
-  cause and retry only the transient subset.
+  exception base — `httpx.HTTPError` covers permanent 4xx too. For Vizio
+  SmartCast (`app/vizio_smartcast_client.py`): `VizioSmartCastAuthError`
+  (`401`/`403`), `VizioSmartCastNotFoundError` (`404`) and the
+  `VizioSmartCastError` base are **permanent** — never retry them;
+  `VizioSmartCastConnectionError` wraps *both* a genuine connection failure
+  (retryable) *and* any other non-`{200,401,403,404}` status (`400` is not
+  retryable, `429`/`5xx` are), so inspect the wrapped status before retrying.
 - Cap attempts (small fixed `N`, typically 2–5) **or** a total retry budget.
 - Back off between attempts (exponential with jitter when practical). Honor
   `Retry-After` when the peer sends it, but **clamp** it to a sane ceiling and
