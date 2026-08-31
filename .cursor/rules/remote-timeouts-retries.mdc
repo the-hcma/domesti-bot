@@ -53,8 +53,10 @@ repository-helpers#570.
   (`_refresh_all_devices_concurrently`); a retry layer must stay inside that
   per-device budget and use `_await_with_stop` so shutdown cancels in-flight
   attempts.
-- Log or surface a clear timeout / retry-exhaustion error (`error=timeout`,
-  `MyTracksSyncError`, the tile flipping to red) — never spin silently.
+- Log or surface a clear timeout / retry-exhaustion error — never spin silently.
+  Use the surface the caller already has: raise `MyTracksSyncError` from the My
+  Tracks helpers, return `RequestLocationResult(status="error", ...)` from the
+  location path, or let the family watcher flip the tile to red.
 
 ## Anti-patterns
 
@@ -78,13 +80,14 @@ async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
     ...
 snapshot = await self.fetch_state_extended(timeout=_POLL_REQUEST_TIMEOUT)
 
-# good — bounded, backed-off retry of a transient read (no shared helper today;
-# keep the loop small and local, honor Retry-After when present)
-for attempt in range(1, _MAX_RETRIES + 1):
+# good — bounded, backed-off retry of a transient read. No shared retry helper
+# exists today; keep the loop small and local (literals below are illustrative).
+max_attempts, backoff_s = 3, 0.5
+for attempt in range(1, max_attempts + 1):
     try:
         return await self._get(path, timeout=_POLL_REQUEST_TIMEOUT)
     except (TimeoutError, aiohttp.ClientError):
-        if attempt == _MAX_RETRIES:
+        if attempt == max_attempts:
             raise
-        await asyncio.sleep(_RETRY_BACKOFF_S * 2 ** (attempt - 1))
+        await asyncio.sleep(backoff_s * 2 ** (attempt - 1))
 ```
