@@ -35,15 +35,17 @@ repository-helpers#570.
 
 ## Retries (required when retrying)
 
-- Retries are for **transient** failures only: connect/read timeouts, connection
-  reset, and `429` / `502` / `503` / `504`. Do **not** blanket-retry a broad
-  exception base — `httpx.HTTPError` covers permanent 4xx too. For Vizio
-  SmartCast (`app/vizio_smartcast_client.py`): `VizioSmartCastAuthError`
-  (`401`/`403`), `VizioSmartCastNotFoundError` (`404`) and the
-  `VizioSmartCastError` base are **permanent** — never retry them;
+- **Retryable set (use this exact list everywhere):** connect/read timeouts,
+  connection reset, and HTTP `408`, `429`, `502`, `503`, `504`. Everything else —
+  including `400`, `401`, `403`, `404`, `500`, `501` — is **permanent**; fail
+  fast.
+- Do **not** blanket-retry a broad exception base — `httpx.HTTPError` covers
+  permanent 4xx too. For Vizio SmartCast (`app/vizio_smartcast_client.py`):
+  `VizioSmartCastAuthError` (`401`/`403`), `VizioSmartCastNotFoundError` (`404`)
+  and the `VizioSmartCastError` base are **permanent** — never retry them;
   `VizioSmartCastConnectionError` wraps *both* a genuine connection failure
-  (retryable) *and* any other non-`{200,401,403,404}` status (`400` is not
-  retryable, `429`/`5xx` are), so inspect the wrapped status before retrying.
+  (retryable) *and* any other non-`{200,401,403,404}` status, so inspect the
+  wrapped status against the retryable set before retrying.
 - Cap attempts (small fixed `N`, typically 2–5) **or** a total retry budget.
 - Back off between attempts (exponential with jitter when practical). Honor
   `Retry-After` when the peer sends it, but **clamp** it to a sane ceiling and
@@ -51,7 +53,8 @@ repository-helpers#570.
   the budget.
 - Do **not** retry non-idempotent writes (My Tracks `POST`/`PATCH` pairing and
   config mutations, device power commands) unless the API contract is safe
-  (dedupe keys / explicit idempotency). Prefer fail fast on 4xx except 408/429.
+  (dedupe keys / explicit idempotency). Prefer fail fast on 4xx except the
+  retryable `408` / `429`.
 - Per-device poll sweeps already swallow one peer's failure
   (`_refresh_all_devices_concurrently`); a retry layer must stay inside that
   per-device budget and use `_await_with_stop` so shutdown cancels in-flight
@@ -83,16 +86,19 @@ async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S) as client:
     ...
 snapshot = await self.fetch_state_extended(timeout=_POLL_REQUEST_TIMEOUT)
 
-# good — bounded, backed-off retry of a transient read. No shared retry helper
-# exists today; keep the loop small and local (literals below are illustrative).
-max_attempts, backoff_s = 3, 0.5
+# good — bounded, backed-off retry of a transient CONNECTION failure (partial
+# example: a status-bearing peer also needs Retry-After clamping + a wall-clock
+# deadline per the Retries section above). No shared retry helper exists today;
+# keep the loop small and local (literals below are illustrative).
+max_attempts, backoff_s, deadline = 3, 0.5, time.monotonic() + 10.0
 for attempt in range(1, max_attempts + 1):
     try:
         return await self._get(path, timeout=_POLL_REQUEST_TIMEOUT)
     # transient only — NOT aiohttp.ClientError (its base covers permanent 4xx
-    # via ClientResponseError). For a status-bearing error, gate on e.status.
+    # via ClientResponseError). For a status-bearing error, gate e.status on the
+    # retryable set and honor a clamped Retry-After.
     except (TimeoutError, aiohttp.ClientConnectionError):
-        if attempt == max_attempts:
+        if attempt == max_attempts or time.monotonic() >= deadline:
             raise
         await asyncio.sleep(backoff_s * 2 ** (attempt - 1))
 ```
