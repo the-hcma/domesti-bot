@@ -1551,7 +1551,7 @@ async def test_rule_evaluator_records_fire_when_email_sent_despite_action_errors
         and call.args[0]
         == (
             "[rules] fired rule_id=%s user_ids=%s source=%s transitions=%s "
-            "conditions=%s actions=%d email=%s duration_ms=%.0f%s%s"
+            "conditions=%s actions=%d email=%s duration_ms=%.0f%s%s%s"
         )
     ]
     assert len(fired_logs) == 1

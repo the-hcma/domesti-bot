@@ -17,6 +17,7 @@ from app.rule_notification import (
     RULE_FIRE_ACTIONS_CANCELLED_NOTE,
     RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE,
     RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE,
+    RULE_FIRE_DEVICE_TEMPLATE,
     RULE_FIRE_FIRED_TEMPLATE,
     RULE_FIRE_JUST_FIRED_TEMPLATE,
     RULE_FIRE_NOTICED_TEMPLATE,
@@ -28,6 +29,7 @@ from app.rule_notification import (
     format_device_action_outcomes,
     format_devices_already_in_desired_state_message,
     format_reaction_duration_s,
+    format_rule_fire_timing_for_log,
     format_rule_fire_timing_lines,
     rule_automation_status_url,
     summarize_device_action_outcomes,
@@ -265,10 +267,11 @@ def test_summarize_device_action_outcomes_reports_all_already_desired() -> None:
 
 
 def test_format_reaction_duration_s_formats_short_and_long() -> None:
-    assert format_reaction_duration_s(0.8) == "0.8 s"
-    assert format_reaction_duration_s(12.4) == "12.4 s"
-    assert format_reaction_duration_s(90.0) == "1.5 min"
-    assert format_reaction_duration_s(-1.0) == "0.0 s"
+    assert format_reaction_duration_s(0.043) == "0.043 s"
+    assert format_reaction_duration_s(0.8) == "0.800 s"
+    assert format_reaction_duration_s(12.4) == "12.400 s"
+    assert format_reaction_duration_s(90.0) == "1.500 min"
+    assert format_reaction_duration_s(-1.0) == "0.000 s"
 
 
 def test_format_rule_fire_timing_lines_includes_source_and_reaction() -> None:
@@ -281,8 +284,33 @@ def test_format_rule_fire_timing_lines_includes_source_and_reaction() -> None:
     assert lines == (
         RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="device_state"),
         RULE_FIRE_FIRED_TEMPLATE.format(when=_COMPLETED_AT_LOCAL),
-        RULE_FIRE_REACTION_TEMPLATE.format(duration="0.8 s"),
+        RULE_FIRE_REACTION_TEMPLATE.format(duration="0.800 s"),
     )
+
+
+def test_format_rule_fire_timing_lines_includes_trigger_device() -> None:
+    lines = format_rule_fire_timing_lines(
+        noticed_at=_NOTICED_AT,
+        fire_at=_COMPLETED_AT,
+        fire_source="device_state",
+        timezone=_HOME_TIMEZONE,
+        trigger_device_display="Office EP1 (aa:bb:cc:dd:ee:01)",
+    )
+    assert lines[0] == RULE_FIRE_DEVICE_TEMPLATE.format(device="Office EP1 (aa:bb:cc:dd:ee:01)")
+    assert RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="device_state") in lines
+
+
+def test_format_rule_fire_timing_for_log_joins_lines() -> None:
+    summary = format_rule_fire_timing_for_log(
+        noticed_at=_NOTICED_AT,
+        fire_at=_COMPLETED_AT,
+        fire_source="device_state",
+        timezone=_HOME_TIMEZONE,
+        trigger_device_display="Office EP1 (aa:bb:cc:dd:ee:01)",
+    )
+    assert summary is not None
+    assert summary.startswith(RULE_FIRE_DEVICE_TEMPLATE.format(device="Office EP1 (aa:bb:cc:dd:ee:01)"))
+    assert RULE_FIRE_REACTION_TEMPLATE.format(duration="0.800 s") in summary
 
 
 def test_format_rule_fire_timing_lines_includes_device_state_changed() -> None:
@@ -299,7 +327,7 @@ def test_format_rule_fire_timing_lines_includes_device_state_changed() -> None:
         RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE.format(when=changed_local),
         RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="dwell_satisfied"),
         RULE_FIRE_FIRED_TEMPLATE.format(when=_COMPLETED_AT_LOCAL),
-        RULE_FIRE_REACTION_TEMPLATE.format(duration="0.8 s"),
+        RULE_FIRE_REACTION_TEMPLATE.format(duration="0.800 s"),
     )
 
 
@@ -336,12 +364,14 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
         fire_source="device_state",
         noticed_at=_NOTICED_AT,
         notification_detail="Everyone left home.",
+        trigger_device_display="Office EP1 (aa:bb:cc:dd:ee:01)",
     )
     assert RULE_FIRE_JUST_FIRED_TEMPLATE.format(label=rule.label, rule_id=rule.id) in plain
     assert f"{RULE_FIRE_TIMING_HEADING}:" in plain
     assert RULE_FIRE_NOTICED_TEMPLATE.format(when=_NOTICED_AT_LOCAL, source="device_state") in plain
     assert RULE_FIRE_FIRED_TEMPLATE.format(when=_COMPLETED_AT_LOCAL) in plain
-    assert RULE_FIRE_REACTION_TEMPLATE.format(duration="0.8 s") in plain
+    assert RULE_FIRE_REACTION_TEMPLATE.format(duration="0.800 s") in plain
+    assert RULE_FIRE_DEVICE_TEMPLATE.format(device="Office EP1 (aa:bb:cc:dd:ee:01)") in plain
     assert f"{RULE_FIRE_TIMELINE_HEADING}:" in plain
     assert f"Kitchen TV (Vizio): on → off at {_COMPLETED_AT_LOCAL}" in plain
     assert "Everyone left home." in plain

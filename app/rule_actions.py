@@ -769,6 +769,7 @@ def send_rule_notification_email(
     notification_detail: str | None = None,
     rule: RuleOut,
     sequence_completed: bool = False,
+    trigger_device_display: str | None = None,
 ) -> RuleNotificationEmailOutcome:
     """Send the rule notification email when ``notify_on_fire`` is enabled."""
     if not rule.notify_on_fire:
@@ -797,6 +798,7 @@ def send_rule_notification_email(
         noticed_at=noticed_at,
         notification_detail=notification_detail,
         sequence_completed=sequence_completed,
+        trigger_device_display=trigger_device_display,
     )
     message = build_outbound_message(
         from_address=params.from_address,

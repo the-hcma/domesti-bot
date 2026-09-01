@@ -173,6 +173,7 @@ class RulePendingFireNotification(Base):
     notification_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     outcomes_json: Mapped[str] = mapped_column(Text, nullable=False)
     rule_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    trigger_device_display: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 

@@ -130,6 +130,7 @@ async def test_illuminance_wake_evaluates_lux_rule(
         assert send_kwargs["device_state_changed_at"] is None
         assert send_kwargs["noticed_at"] == 1_700_000_000.0
         assert send_kwargs["fire_source"] == "device_state"
+        assert send_kwargs["trigger_device_display"] == "Office EP1 (aa:bb:cc:dd:ee:01)"
 
 
 def _ep1_mgr(device: _FakeEp1) -> Ep1DeviceManager:

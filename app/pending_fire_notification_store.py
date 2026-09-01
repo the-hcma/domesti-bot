@@ -37,6 +37,7 @@ class PendingFireNotificationRecord:
     outcomes: tuple[RuleDeviceActionOutcome, ...]
     row_id: int
     rule_id: str
+    trigger_device_display: str | None
 
 
 def append_pending_fire_notification_outcomes(
@@ -117,6 +118,7 @@ def insert_pending_fire_notification(
     notification_detail: str | None,
     outcomes: tuple[RuleDeviceActionOutcome, ...],
     rule_id: str,
+    trigger_device_display: str | None = None,
 ) -> int:
     """Create a pending notification row; return its SQLite id."""
     now = time.time()
@@ -131,6 +133,7 @@ def insert_pending_fire_notification(
             notification_detail=notification_detail,
             outcomes_json=_outcomes_to_json(list(outcomes)),
             rule_id=rule_id,
+            trigger_device_display=trigger_device_display,
             updated_at=now,
         )
         session.add(row)
@@ -219,6 +222,7 @@ def _record_from_row(row: RulePendingFireNotification) -> PendingFireNotificatio
         outcomes=tuple(_outcomes_from_json(row.outcomes_json)),
         row_id=row.id,
         rule_id=row.rule_id,
+        trigger_device_display=row.trigger_device_display,
     )
 
 
