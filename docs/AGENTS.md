@@ -14,6 +14,7 @@ This file defines the non-negotiable standards for all contributors (human or AI
   - **`--refresh`** (first): syncs `main` via the stacking-tool marker (this repo: `gh-stack`), prunes merged worktrees and branches, pulls latest `main`, and ensures the systemd user unit (`domesti-bot.service` from `etc/systemd/`) is installed and running via `setup-service`. Exits immediately — it does **not** prompt for a worktree.
   - **plain** (second): repeats the sync/cleanup, then prompts you to name a new worktree for the upcoming work. Pass `--worktree <name> --no-interactive` to skip the prompt.
 - Both commands are required. This replaces any manual stack-sync step.
+- **Also read every `alwaysApply: true` rule under `.cursor/rules/*.mdc`** (plus any whose `globs` match files you will touch) — this `AGENTS.md` and the `.cursor/rules/` files together are the contract; neither alone is complete. `CLAUDE.md` (a `@AGENTS.md` import) and `.github/copilot-instructions.md` are thin shims so Claude Code and Copilot reach the same guidance.
 - After `start-development` finishes, **`cd` into the stack worktree** (`.worktrees/<stack-name>-wt`) before any other work. Do not stay in the primary clone.
 
 ### Main worktree is off-limits (agents)
