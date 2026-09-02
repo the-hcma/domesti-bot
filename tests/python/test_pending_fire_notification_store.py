@@ -55,6 +55,7 @@ def test_insert_get_and_append_round_trip(tmp_path: Path) -> None:
         notification_detail="Nightly power cycle.",
         outcomes=(_outcome(),),
         rule_id="hdhomerun-nightly-power-cycle",
+        trigger_device_display="Office EP1 (aa:bb:cc:dd:ee:01)",
     )
     row = get_pending_fire_notification(
         db,
@@ -66,6 +67,7 @@ def test_insert_get_and_append_round_trip(tmp_path: Path) -> None:
     assert row.fire_source == "scheduled"
     assert row.noticed_at == noticed_at
     assert row.device_state_changed_at == noticed_at - 20.0
+    assert row.trigger_device_display == "Office EP1 (aa:bb:cc:dd:ee:01)"
     assert len(row.outcomes) == 1
     assert row.cancelled_remaining is False
 

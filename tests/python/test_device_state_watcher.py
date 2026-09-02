@@ -184,7 +184,7 @@ async def test_kasa_watcher_keeps_going_when_one_device_raises() -> None:
 @pytest.mark.asyncio
 async def test_kasa_watcher_logs_transient_connect_without_traceback() -> None:
     mgr = _fake_kasa_mgr(["192.168.86.188"])
-    connect_error = OSError(113, "Connect call failed ('192.168.86.188', 9999)")
+    connect_error = OSError(errno.EHOSTUNREACH, "Connect call failed ('192.168.86.188', 9999)")
     cast(AsyncMock, mgr.is_on).side_effect = [connect_error, True, True]
     watcher = KasaPollingWatcher(mgr, interval_s=0.01)
     stop = asyncio.Event()

@@ -36,6 +36,7 @@ RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE = (
     'The automation rule "{label}" ({rule_id}) completed its device-action sequence.'
 )
 RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE = "Device state changed: {when}"
+RULE_FIRE_DEVICE_TEMPLATE = "Device: {device}"
 RULE_FIRE_FIRED_TEMPLATE = "Fired: {when}"
 RULE_FIRE_JUST_FIRED_TEMPLATE = 'The automation rule "{label}" ({rule_id}) just fired.'
 RULE_FIRE_NOTICED_TEMPLATE = "Noticed: {when} ({source})"
@@ -56,6 +57,7 @@ def build_rule_notification_bodies(
     noticed_at: float | None = None,
     notification_detail: str | None = None,
     sequence_completed: bool = False,
+    trigger_device_display: str | None = None,
 ) -> tuple[str, str]:
     """Return ``(plain_text, html)`` bodies for a rule fire notification."""
     status_url = rule_automation_status_url(cache_path, rule.id)
@@ -70,9 +72,10 @@ def build_rule_notification_bodies(
         plain_parts.extend([notification_detail, ""])
     timing_lines = format_rule_fire_timing_lines(
         device_state_changed_at=device_state_changed_at,
-        noticed_at=noticed_at,
         fire_at=fire_at,
         fire_source=fire_source,
+        noticed_at=noticed_at,
+        trigger_device_display=trigger_device_display,
     )
     if timing_lines:
         plain_parts.append(f"{RULE_FIRE_TIMING_HEADING}:")
@@ -148,12 +151,35 @@ def format_reaction_duration_s(elapsed_s: float) -> str:
     """Format noticed→fired elapsed seconds for rule-fire emails."""
     seconds = max(0.0, float(elapsed_s))
     if seconds < 60.0:
-        return f"{seconds:.1f} s"
+        return f"{seconds:.3f} s"
     minutes = seconds / 60.0
     if minutes < 60.0:
-        return f"{minutes:.1f} min"
+        return f"{minutes:.3f} min"
     hours = minutes / 60.0
-    return f"{hours:.1f} h"
+    return f"{hours:.3f} h"
+
+
+def format_rule_fire_timing_for_log(
+    *,
+    device_state_changed_at: float | None = None,
+    fire_at: float | None,
+    fire_source: str | None = None,
+    noticed_at: float | None,
+    timezone: str | ZoneInfo | None = None,
+    trigger_device_display: str | None = None,
+) -> str | None:
+    """Return a compact timing summary for operator-facing rule-fire logs."""
+    lines = format_rule_fire_timing_lines(
+        device_state_changed_at=device_state_changed_at,
+        fire_at=fire_at,
+        fire_source=fire_source,
+        noticed_at=noticed_at,
+        timezone=timezone,
+        trigger_device_display=trigger_device_display,
+    )
+    if not lines:
+        return None
+    return "; ".join(lines)
 
 
 def format_rule_fire_timing_lines(
@@ -163,12 +189,16 @@ def format_rule_fire_timing_lines(
     fire_source: str | None = None,
     noticed_at: float | None,
     timezone: str | ZoneInfo | None = None,
+    trigger_device_display: str | None = None,
 ) -> tuple[str, ...]:
     """Return Timing section lines when both noticed and fired epochs are known."""
     if noticed_at is None or fire_at is None:
         return ()
     source = (fire_source or "immediate").strip() or "immediate"
     lines: list[str] = []
+    device = (trigger_device_display or "").strip()
+    if device:
+        lines.append(RULE_FIRE_DEVICE_TEMPLATE.format(device=device))
     if device_state_changed_at is not None:
         changed = format_completed_at_local(device_state_changed_at, timezone=timezone)
         lines.append(RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE.format(when=changed))

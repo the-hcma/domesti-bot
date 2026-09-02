@@ -58,6 +58,7 @@ from app.deferred_device_action_store import (
     insert_deferred_device_action,
     list_deferred_device_actions,
 )
+from app.device_display import format_device_display
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
@@ -115,6 +116,7 @@ from app.rule_actions import (
     RuleDeviceDispatchResult,
     RuleNotificationEmailOutcome,
     dispatch_rule_device_actions,
+    lookup_preferred_label,
     partition_device_actions_by_delay,
     send_rule_notification_email,
 )
@@ -133,6 +135,7 @@ from app.rule_conditions import (
     presence_user_ids_for_rule,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
+from app.rule_notification import format_rule_fire_timing_for_log
 from app.rule_validation import (
     build_roster_user_id_lookup,
     collect_rule_user_ids,
@@ -1288,6 +1291,7 @@ class RuleEvaluator:
         log_user_ids: str,
         noticed_at: float | None = None,
         transitions: dict[str, GeofenceTransition],
+        trigger_device_display: str | None = None,
     ) -> None:
         runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
         started = time.monotonic()
@@ -1338,6 +1342,7 @@ class RuleEvaluator:
                         notification_detail=notification_detail,
                         outcomes=dispatch_result.action_outcomes,
                         rule_id=rule.id,
+                        trigger_device_display=trigger_device_display,
                     )
                     performed_side_effect = True
                 else:
@@ -1351,6 +1356,7 @@ class RuleEvaluator:
                         noticed_at=noticed_epoch,
                         notification_detail=notification_detail,
                         rule=rule,
+                        trigger_device_display=trigger_device_display,
                     )
                     performed_side_effect = True
             except RuleActionDispatchError as exc:
@@ -1389,9 +1395,17 @@ class RuleEvaluator:
         deferred_user_id = edge_user_id or log_user_ids.partition(",")[0]
         self._clear_deferred_accuracy_edges_for_rule(rule.id, deferred_user_id)
         duration_ms = (time.monotonic() - started) * 1000.0
+        timing_for_log = format_rule_fire_timing_for_log(
+            device_state_changed_at=device_state_changed_at,
+            fire_at=fire_at,
+            fire_source=fire_source,
+            noticed_at=noticed_epoch,
+            trigger_device_display=trigger_device_display,
+        )
+        timing_suffix = f" timing={timing_for_log!r}" if timing_for_log is not None else ""
         _LOGGER.info(
             "[rules] fired rule_id=%s user_ids=%s source=%s transitions=%s conditions=%s "
-            "actions=%d email=%s duration_ms=%.0f%s%s",
+            "actions=%d email=%s duration_ms=%.0f%s%s%s",
             rule.id,
             log_user_ids,
             fire_source,
@@ -1410,6 +1424,7 @@ class RuleEvaluator:
                 email_outcome=email_outcome,
             ),
             duration_ms,
+            timing_suffix,
             f" errors={runtime.last_error!r}" if runtime.last_error else "",
             f" probable={'; '.join(probable_successes)!r}" if probable_successes else "",
         )
@@ -1490,6 +1505,7 @@ class RuleEvaluator:
                     notification_detail=pending.notification_detail,
                     rule=rule,
                     sequence_completed=True,
+                    trigger_device_display=pending.trigger_device_display,
                 )
             except RuleActionDispatchError as exc:
                 _LOGGER.error(
@@ -1508,6 +1524,7 @@ class RuleEvaluator:
                     notification_detail=pending.notification_detail,
                     outcomes=pending.outcomes,
                     rule_id=pending.rule_id,
+                    trigger_device_display=pending.trigger_device_display,
                 )
                 continue
             _LOGGER.info(
@@ -2237,6 +2254,13 @@ class RuleEvaluator:
             prior = timing_by_rule_id.get(rule_id)
             if prior is None or since < (prior[1] if prior[1] is not None else prior[0]):
                 timing_by_rule_id[rule_id] = (noticed, since)
+        trigger_device_display = None
+        if family_id is not None and backend_device_id is not None:
+            trigger_device_display = _format_trigger_device_display(
+                device_state,
+                family_id=family_id,
+                device_id=backend_device_id,
+            )
         attempted_rule_ids = await self._process_dwell_satisfied_rules(
             crossed_rule_ids,
             rules=rules,
@@ -2244,6 +2268,7 @@ class RuleEvaluator:
             now_epoch=now_epoch,
             timezone=timezone,
             timing_by_rule_id=timing_by_rule_id,
+            trigger_device_display=trigger_device_display,
         )
         evaluated_day = local_calendar_date(now_epoch, timezone)
         for rule_key, since in newly_evaluated_rules:
@@ -2479,6 +2504,11 @@ class RuleEvaluator:
                 streak_since = (
                     None if reading_metric is not None else self._device_bool_since.get((family_id, device_id))
                 )
+                trigger_device_display = _format_trigger_device_display(
+                    device_state,
+                    family_id=family_id,
+                    device_id=device_id,
+                )
                 await self._execute_rule(
                     rule,
                     device_state_changed_at=streak_since,
@@ -2487,6 +2517,7 @@ class RuleEvaluator:
                     log_user_ids=log_user_ids,
                     noticed_at=streak_since if streak_since is not None else now_epoch,
                     transitions=transitions,
+                    trigger_device_display=trigger_device_display,
                 )
         await self._maybe_process_device_dwell_satisfied(family_id, device_id)
 
@@ -2499,6 +2530,7 @@ class RuleEvaluator:
         now_epoch: float,
         timezone: ZoneInfo,
         timing_by_rule_id: dict[str, tuple[float, float | None]] | None = None,
+        trigger_device_display: str | None = None,
     ) -> set[str]:
         """Evaluate dwell-satisfied rules; return ids that were all-met (attempted)."""
         rules_by_id = {rule.id: rule for rule in rules if rule.enabled and RuleTrigger.DWELL_SATISFIED in rule.triggers}
@@ -2570,6 +2602,7 @@ class RuleEvaluator:
                 log_user_ids=log_user_ids,
                 noticed_at=noticed_at,
                 transitions=transitions,
+                trigger_device_display=trigger_device_display,
             )
             attempted_rule_ids.add(rule.id)
         return attempted_rule_ids
@@ -3444,6 +3477,24 @@ def _format_rule_email_outcome_for_log(
     if cache_path is None:
         return f"not_attempted to={recipient_list}"
     return f"not_attempted to={recipient_list}"
+
+
+def _format_trigger_device_display(
+    device_state: DeviceManagersState | None,
+    *,
+    family_id: DeviceFamilyId,
+    device_id: str,
+) -> str:
+    """Return ``preferred_label (mac)`` for the backend device that triggered a rule fire."""
+    trimmed = device_id.strip()
+    if device_state is None:
+        return format_device_display(trimmed, None)
+    preferred_label = lookup_preferred_label(
+        device_state,
+        family_id=family_id,
+        device_id=trimmed,
+    )
+    return format_device_display(trimmed, preferred_label)
 
 
 def _notification_detail_from_condition(
