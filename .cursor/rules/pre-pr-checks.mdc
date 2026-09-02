@@ -1,0 +1,51 @@
+---
+description: Block PR submit until pre-pr-checks pass; format before check; no truncated output
+alwaysApply: true
+---
+
+# Pre-PR checks (required)
+
+Before **`gt submit`** / **`gh stack submit`** or opening a PR:
+
+1. Run **`scripts/dev/pre-pr-checks`** from the feature worktree (must exit 0).
+   - Prefer **`scripts/dev/submit-stack`** (or this repo’s submit helper) instead of bare submit.
+
+2. Do **not** submit if pre-pr-checks failed or was skipped. Escape hatch only:
+   `PRE_PR_CHECKS_SKIP=job1,job2` (documented; never silent).
+
+3. In the PR **Test plan**, note that `scripts/dev/pre-pr-checks` passed (or paste the final
+   `==> pre-pr-checks passed` line).
+
+4. Scripts must not leave changes on the **primary (main) worktree**.
+
+## Apply formatters before check (required)
+
+`pre-pr-checks` is **check-only** by default (e.g. `ruff format --check`, `cargo fmt -- --check`).
+After review-fix edits — especially string literals — **apply** formatters first, then run the gate:
+
+```bash
+# Python (match CI paths; adjust for the repo)
+uv run ruff format .
+# Rust
+cargo fmt --all
+# Then the gate
+scripts/dev/pre-pr-checks
+# Or apply + check in one shot (mutates the worktree):
+scripts/dev/pre-pr-checks --fix
+```
+
+Commit any format-only diff before submit. Do **not** treat a green `pytest` / `ruff check` /
+partial job as a pre-PR pass.
+
+## No truncated pre-PR output
+
+Do **not** pipe `pre-pr-checks` to `tail` / `head`. Require exit **0** and the final
+`==> pre-pr-checks passed` line from the full run.
+
+```bash
+# ❌ Truncated — hides failures above the last few lines
+scripts/dev/pre-pr-checks 2>&1 | tail -8
+
+# ✅ Full output + exit status
+scripts/dev/pre-pr-checks
+```
