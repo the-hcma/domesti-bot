@@ -216,6 +216,14 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
     there is nothing to clamp. ``before_local_time`` / ``before_sunrise`` are
     open starting at local midnight and never raise this instant.
 
+    Descends into nested ``all`` groups (every child must hold, so a temporal
+    gate nested under ``all`` constrains eligibility exactly like a top-level
+    one). Does **not** descend into ``any`` groups: a temporal gate nested
+    under ``any`` is optional — the group can be satisfied by a sibling branch
+    instead — so it must not clamp eligibility for the whole rule. Under- than
+    over-clamping is the safe default here; a rule with only a temporal gate
+    inside an ``any`` group is not clamped at all (tracked as a follow-up).
+
     Duration/dwell conditions (``devices_any_in_state_for_s`` and friends) use
     this to stop counting elapsed time that accrued before the rule could have
     fired: ``max(raw_streak_since, rule_eligible_since)``. The rule-fire
@@ -227,8 +235,12 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
     """
     now_minutes = _local_minutes_from_dt(ctx.now)
     opening_minutes: list[tuple[int, int]] = []  # (minutes_of_day, day_offset)
-    for condition in rule.conditions.all:
-        if isinstance(condition, AfterLocalTimeCondition):
+    pending: list[RuleConditionOut] = list(rule.conditions.all)
+    while pending:
+        condition = pending.pop()
+        if isinstance(condition, AllConditionsCondition):
+            pending.extend(condition.conditions)
+        elif isinstance(condition, AfterLocalTimeCondition):
             target = _parse_hhmm(condition.time_hhmm)
             if target is not None and now_minutes >= target:
                 opening_minutes.append((target, 0))

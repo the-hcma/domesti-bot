@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import (
     AfterLocalTimeCondition,
     AfterSunsetCondition,
+    AllConditionsCondition,
+    AnyConditionsCondition,
     BeforeLocalTimeCondition,
     DevicesAnyInStateForSCondition,
     LocalTimeWindowCondition,
@@ -115,6 +117,43 @@ def test_rule_eligible_since_ignores_before_local_time() -> None:
     now = datetime(2026, 9, 2, 8, 0, tzinfo=_TZ)
     rule = _rule_with_conditions(
         [BeforeLocalTimeCondition(type="before_local_time", time_hhmm="10:00")],
+    )
+    assert rule_eligible_since(rule, _ctx(now=now)) is None
+
+
+def test_rule_eligible_since_descends_into_nested_all_group() -> None:
+    # Every child of a nested "all" group must hold too, so a temporal gate
+    # buried inside one constrains eligibility exactly like a top-level gate.
+    now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [
+            AllConditionsCondition(
+                type="all",
+                conditions=[
+                    AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                ],
+            ),
+        ],
+    )
+    expected = datetime(2026, 9, 2, 21, 0, tzinfo=_TZ).timestamp()
+    assert rule_eligible_since(rule, _ctx(now=now)) == expected
+
+
+def test_rule_eligible_since_ignores_gate_nested_under_any() -> None:
+    # A temporal gate inside an "any" group is optional — the group can be
+    # satisfied by the sibling branch instead — so it must not clamp the
+    # whole rule's eligibility.
+    now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [
+            AnyConditionsCondition(
+                type="any",
+                conditions=[
+                    AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                    BeforeLocalTimeCondition(type="before_local_time", time_hhmm="23:00"),
+                ],
+            ),
+        ],
     )
     assert rule_eligible_since(rule, _ctx(now=now)) is None
 

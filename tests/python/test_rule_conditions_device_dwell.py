@@ -22,6 +22,7 @@ from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import (
     RuleEvaluationContext,
+    _format_dwell_elapsed_s,
     compute_rules_sun_out,
     evaluate_rule,
     natural_bool_for_device_family,
@@ -146,7 +147,7 @@ def test_devices_any_in_state_for_s_met_once_gate_open_for_min_duration() -> Non
     dwell_condition = next(row for row in result.conditions if "Any device" in row.label)
     assert dwell_condition.met is True
     # Elapsed is reported from the gate opening (10s), not the raw 2h streak.
-    assert "10 sec" in dwell_condition.detail
+    assert _format_dwell_elapsed_s(10.0) in dwell_condition.detail
 
 
 def test_devices_any_in_state_for_s_unclamped_when_streak_starts_after_gate() -> None:
