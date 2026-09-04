@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.api.schemas import (
+    AfterLocalTimeCondition,
     RuleConditionsOut,
     RuleDeviceActionOut,
     RuleOut,
@@ -21,8 +24,11 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
-from app.rule_evaluator import RuleEvaluator
+from app.rule_actions import RuleNotificationEmailOutcome
+from app.rule_evaluator import RuleEvaluator, _DeferredAccuracyEdge
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
+
+_NY = ZoneInfo("America/New_York")
 
 
 class _FakeKasa:
@@ -364,6 +370,110 @@ async def test_accuracy_edge_grace_disabled_when_zero(
     _move_inside(db, clock, accuracy_m=20)
     await evaluator.on_location_update("henrique")
     assert device.calls == ["on"]
+
+
+def _arrive_home_after_local_time_rule(
+    *,
+    accuracy_edge_grace_s: int,
+    time_hhmm: str,
+) -> RuleOut:
+    return RuleOut(
+        accuracy_edge_grace_s=accuracy_edge_grace_s,
+        conditions=RuleConditionsOut(
+            all=[
+                AfterLocalTimeCondition(type="after_local_time", time_hhmm=time_hhmm),
+                UsersInsideGeofenceCondition(
+                    type="users_inside_geofence",
+                    geofence_id="house",
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="arrive-home-after-local-time",
+        label="Arrive home after 9pm",
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com"],
+        notify_on_fire=True,
+        triggers=[RuleTrigger.EDGE_TRUE],
+    )
+
+
+@pytest.mark.asyncio
+async def test_deferred_edge_noticed_at_clamped_to_after_local_time_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reported-bug class: a GPS edge observed (and deferred for low accuracy)
+    hours before the rule's after_local_time gate opened must not appear as
+    the fire email's noticed_at once the deferred retry succeeds after the
+    gate opens. Drives _attempt_deferred_accuracy_edge_fires directly (rather
+    than through on_location_update's full transition-detection pipeline) so
+    the test isolates the clamp itself: a deferred edge, once registered, is
+    keyed off observed_at regardless of how transition detection got there."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _arrive_home_after_local_time_rule(accuracy_edge_grace_s=10_000, time_hhmm="21:00"))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    observed_at = datetime(2026, 9, 2, 18, 52, 52, tzinfo=_NY).timestamp()
+    gate_open_at = datetime(2026, 9, 2, 21, 0, tzinfo=_NY).timestamp()
+    clock = {"now": gate_open_at + 5.0}
+    _seed_presence_db(
+        db,
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        accuracy_m=20,
+        fix_at=clock["now"],
+        reported_at=clock["now"],
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: None,
+        now_fn=lambda: clock["now"],
+    )
+    evaluator._deferred_accuracy_edges[("arrive-home-after-local-time", "henrique", "house", "entered")] = (
+        _DeferredAccuracyEdge(
+            event="entered",
+            expires_at=clock["now"] + 3600.0,
+            geofence_id="house",
+            observed_at=observed_at,
+            rule_id="arrive-home-after-local-time",
+            user_id="henrique",
+        )
+    )
+
+    ctx = await evaluator._build_evaluation_context(
+        now=datetime.fromtimestamp(clock["now"], tz=UTC),
+    )
+    location = UserLocationRecord(
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        accuracy_m=20,
+        fix_at=clock["now"],
+        reported_at=clock["now"],
+        source="test",
+    )
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        fired_rule_ids = await evaluator._attempt_deferred_accuracy_edge_fires(
+            user_id="henrique",
+            location=location,
+            inside_ids={"house"},
+            ctx=ctx,
+            now=clock["now"],
+        )
+
+    assert fired_rule_ids == {"arrive-home-after-local-time"}
+    send_mock.assert_called_once()
+    send_kwargs = send_mock.call_args.kwargs
+    assert send_kwargs["noticed_at"] == gate_open_at
 
 
 @pytest.mark.asyncio

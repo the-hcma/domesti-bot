@@ -96,6 +96,10 @@ async def test_eligibility_wake_daytime_dwell_does_not_poison_evening_episode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Afternoon dwell must not debounce the sunset re-evaluation (the streak
+    stays live across the gate), but the 600s dwell itself must accrue *after*
+    sunset — home since the afternoon does not satisfy "home for 10 min after
+    sunset" the instant sunset arrives (the reported-bug fix, mirrors #712)."""
     fixture = _eligibility_fixture(tmp_path, monkeypatch)
     clock = fixture["clock"]
     evaluator = fixture["evaluator"]
@@ -113,7 +117,19 @@ async def test_eligibility_wake_daytime_dwell_does_not_poison_evening_episode(
 
         clock["now"] = sunset_local.timestamp()
         await evaluator._evaluate_scheduled_rules()
+        assert send_mock.call_count == 0
+
+        # The one-shot eligibility wake already ran for today; the geofence
+        # dwell watch (driven by location updates) is what retries once the
+        # 600s has actually elapsed inside the eligible window.
+        clock["now"] = sunset_local.timestamp() + 600.0
+        await evaluator.on_location_update("henrique")
         assert send_mock.call_count == 1
+
+    # The fire-timing clamp: noticed_at is sunset + 600s (when the dwell was
+    # genuinely satisfied), not the raw ~2h-earlier streak start.
+    send_kwargs = send_mock.call_args.kwargs
+    assert send_kwargs["noticed_at"] == sunset_local.timestamp() + 600.0
 
 
 @pytest.mark.asyncio
@@ -121,7 +137,9 @@ async def test_eligibility_wake_fires_at_sunset_when_dwell_and_devices_already_m
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Common path: home + lights on before sunset; fire once when eligible."""
+    """Common path: home + lights on before sunset; fires once eligible AND the
+    600s dwell has actually elapsed inside the eligible window (not at the
+    sunset instant itself off a streak that predates it)."""
     fixture = _eligibility_fixture(tmp_path, monkeypatch)
     clock = fixture["clock"]
     evaluator = fixture["evaluator"]
@@ -143,11 +161,20 @@ async def test_eligibility_wake_fires_at_sunset_when_dwell_and_devices_already_m
 
         clock["now"] = sunset_local.timestamp()
         await evaluator._evaluate_scheduled_rules()
+        assert send_mock.call_count == 0
+        assert front.calls == []
+        assert garage.calls == []
+
+        # The one-shot eligibility wake already ran for today; the geofence
+        # dwell watch (driven by location updates) is what retries once the
+        # 600s has actually elapsed inside the eligible window.
+        clock["now"] = sunset_local.timestamp() + 600.0
+        await evaluator.on_location_update("henrique")
         assert send_mock.call_count == 1
         assert front.calls == ["off"]
         assert garage.calls == ["off"]
 
-        clock["now"] = sunset_local.timestamp() + 120.0
+        clock["now"] = sunset_local.timestamp() + 720.0
         await evaluator._evaluate_scheduled_rules()
         await evaluator.on_location_update("kristen")
         assert send_mock.call_count == 1

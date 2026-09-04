@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from app.api.schemas import (
     AfterLocalTimeCondition,
+    BeforeLocalTimeCondition,
     DevicesAnyInStateForSCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
@@ -167,6 +168,41 @@ def test_devices_any_in_state_for_s_unclamped_when_streak_starts_after_gate() ->
     assert result.all_met is True
 
 
+def test_devices_any_in_state_for_s_pending_when_before_local_time_gate_just_reopened() -> None:
+    # EP1 has been clear since well before midnight (a pre-midnight streak);
+    # the before_local_time gate reopens at midnight, and "clear for 10s
+    # before 6am" must not count the pre-midnight portion of that streak.
+    now = datetime(2026, 9, 2, 0, 0, 1, tzinfo=_TZ)
+    since = now.timestamp() - 7200.0
+    mac = "28:05:a5:28:c8:48"
+    state = _ep1_state(_FakeEp1Sensor(mac, "Master bedroom EP1", occupied=False))
+    result = evaluate_rule(
+        _clear_for_s_before_local_time_rule(device_id=mac, min_duration_s=10, time_hhmm="06:00"),
+        _ctx(
+            now=now,
+            device_state=state,
+            device_bool_since={(DeviceFamilyId.EP1, mac): since},
+        ),
+    )
+    assert result.all_met is False
+
+
+def test_devices_any_in_state_for_s_met_once_before_local_time_gate_reopened_for_min_duration() -> None:
+    now = datetime(2026, 9, 2, 0, 0, 10, tzinfo=_TZ)
+    since = now.timestamp() - 7200.0
+    mac = "28:05:a5:28:c8:48"
+    state = _ep1_state(_FakeEp1Sensor(mac, "Master bedroom EP1", occupied=False))
+    result = evaluate_rule(
+        _clear_for_s_before_local_time_rule(device_id=mac, min_duration_s=10, time_hhmm="06:00"),
+        _ctx(
+            now=now,
+            device_state=state,
+            device_bool_since={(DeviceFamilyId.EP1, mac): since},
+        ),
+    )
+    assert result.all_met is True
+
+
 def test_natural_bool_for_ep1_occupied_and_clear() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     mac = "02:00:00:00:00:20"
@@ -267,6 +303,42 @@ def _clear_for_s_after_local_time_rule(
         enabled=True,
         id="evening-ep1-clear-master-bedroom-lamp-on",
         label="Turn on Master bedroom lamp when EP1 is clear after 9pm",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.DWELL_SATISFIED],
+    )
+
+
+def _clear_for_s_before_local_time_rule(
+    *,
+    device_id: str,
+    min_duration_s: int,
+    time_hhmm: str,
+) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                BeforeLocalTimeCondition(type="before_local_time", time_hhmm=time_hhmm),
+                DevicesAnyInStateForSCondition(
+                    type="devices_any_in_state_for_s",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id=device_id,
+                            display_name="Master bedroom EP1",
+                            family_id=DeviceFamilyId.EP1,
+                        ),
+                    ],
+                    min_duration_s=min_duration_s,
+                    state=DeviceConditionState.CLEAR,
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="morning-ep1-clear-before-6am",
+        label="Turn on lamp when EP1 is clear before 6am",
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
