@@ -126,6 +126,11 @@ async def test_eligibility_wake_daytime_dwell_does_not_poison_evening_episode(
         await evaluator.on_location_update("henrique")
         assert send_mock.call_count == 1
 
+    # The fire-timing clamp: noticed_at is sunset + 600s (when the dwell was
+    # genuinely satisfied), not the raw ~2h-earlier streak start.
+    send_kwargs = send_mock.call_args.kwargs
+    assert send_kwargs["noticed_at"] == sunset_local.timestamp() + 600.0
+
 
 @pytest.mark.asyncio
 async def test_eligibility_wake_fires_at_sunset_when_dwell_and_devices_already_met(

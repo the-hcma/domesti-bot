@@ -213,8 +213,10 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
     and ``after_sunset`` — gates that turn on partway through the day. A rule
     that is currently blocked by one of these gates (not yet open) does not
     contribute an instant — ``all_met`` is already false for other reasons, so
-    there is nothing to clamp. ``before_local_time`` / ``before_sunrise`` are
-    open starting at local midnight and never raise this instant.
+    there is nothing to clamp. ``before_local_time`` / ``before_sunrise`` reopen
+    at local midnight each day (the condition is unmet from the close time
+    until then) — when currently open, they contribute today's local midnight
+    so a streak that predates midnight does not count either.
 
     Descends into nested ``all`` groups (every child must hold, so a temporal
     gate nested under ``all`` constrains eligibility exactly like a top-level
@@ -262,6 +264,16 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
             start = sunset_minutes + condition.offset_minutes
             if start < MINUTES_PER_DAY and now_minutes >= start:
                 opening_minutes.append((start, 0))
+        elif isinstance(condition, BeforeLocalTimeCondition):
+            target = _parse_hhmm(condition.time_hhmm)
+            if target is not None and now_minutes < target:
+                # Open since local midnight today, not "always open".
+                opening_minutes.append((0, 0))
+        elif isinstance(condition, BeforeSunriseCondition):
+            sunrise_minutes = _local_minutes_from_iso(ctx.sun.sunrise_at, ctx.timezone)
+            end = sunrise_minutes + condition.offset_minutes
+            if now_minutes < end:
+                opening_minutes.append((0, 0))
     if not opening_minutes:
         return None
     local_midnight = ctx.now.replace(hour=0, minute=0, second=0, microsecond=0)

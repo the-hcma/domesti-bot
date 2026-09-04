@@ -11,6 +11,7 @@ from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
     BeforeLocalTimeCondition,
+    BeforeSunriseCondition,
     DevicesAnyInStateForSCondition,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
@@ -111,14 +112,31 @@ def test_rule_eligible_since_after_sunset_opens_at_sunset_plus_offset() -> None:
     assert rule_eligible_since(rule, _ctx(now=now)) == expected
 
 
-def test_rule_eligible_since_ignores_before_local_time() -> None:
-    # ``before_*`` gates are open starting at local midnight, so they never
-    # raise the eligibility instant above "no clamp".
+def test_rule_eligible_since_before_local_time_reopens_at_midnight() -> None:
+    # before_* gates reopen at local midnight each day (unmet from the close
+    # time until then) — a streak that predates midnight must not count as
+    # satisfying a dwell condition the instant the gate reopens.
     now = datetime(2026, 9, 2, 8, 0, tzinfo=_TZ)
     rule = _rule_with_conditions(
         [BeforeLocalTimeCondition(type="before_local_time", time_hhmm="10:00")],
     )
+    expected = datetime(2026, 9, 2, 0, 0, tzinfo=_TZ).timestamp()
+    assert rule_eligible_since(rule, _ctx(now=now)) == expected
+
+
+def test_rule_eligible_since_before_local_time_none_after_gate_closes() -> None:
+    now = datetime(2026, 9, 2, 10, 30, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [BeforeLocalTimeCondition(type="before_local_time", time_hhmm="10:00")],
+    )
     assert rule_eligible_since(rule, _ctx(now=now)) is None
+
+
+def test_rule_eligible_since_before_sunrise_reopens_at_midnight() -> None:
+    now = datetime(2026, 9, 2, 5, 0, tzinfo=_TZ)
+    rule = _rule_with_conditions([BeforeSunriseCondition(type="before_sunrise", offset_minutes=0)])
+    expected = datetime(2026, 9, 2, 0, 0, tzinfo=_TZ).timestamp()
+    assert rule_eligible_since(rule, _ctx(now=now)) == expected
 
 
 def test_rule_eligible_since_descends_into_nested_all_group() -> None:
