@@ -106,6 +106,11 @@ async def test_dwell_satisfied_skips_repeat_eval_on_later_location_pings(
         evaluator,
         "_process_dwell_satisfied_rules",
         new_callable=AsyncMock,
+        # Real _process_dwell_satisfied_rules returns the rule ids it
+        # actually attempted (all_met=True); the debounce marking that keeps
+        # a later ping from re-evaluating on the same streak now depends on
+        # that set (mirrors the device-dwell path's #681 fix).
+        return_value={"away-dwell-notify"},
     ) as proc_mock:
         await evaluator.on_location_update("henrique")
         assert proc_mock.await_count == 1
@@ -141,6 +146,8 @@ async def test_dwell_satisfied_re_evaluates_when_second_user_dwell_crosses(
         evaluator,
         "_process_dwell_satisfied_rules",
         new_callable=AsyncMock,
+        # See test_dwell_satisfied_skips_repeat_eval_on_later_location_pings.
+        return_value={"away-dwell-notify"},
     ) as proc_mock:
         await evaluator.on_location_update("henrique")
         assert proc_mock.await_count == 1

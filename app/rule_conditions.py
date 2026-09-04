@@ -1320,6 +1320,7 @@ def _evaluate_users_inside_geofence_for_s(
 
     min_accuracy_m = rule.min_location_accuracy_m
     now_epoch = ctx.now.timestamp()
+    eligible_since = rule_eligible_since(rule, ctx)
     need_label = _format_dwell_need_s(condition.min_inside_s)
     presence_lines: list[str] = []
     unmet = False
@@ -1350,6 +1351,8 @@ def _evaluate_users_inside_geofence_for_s(
         inside_since = ctx.geofence_inside_since.get(
             (roster_user_id, condition.geofence_id),
         )
+        if inside_since is not None and eligible_since is not None:
+            inside_since = max(inside_since, eligible_since)
         if inside_since is not None:
             inside_s = now_epoch - inside_since
             elapsed_label = _format_dwell_elapsed_s(inside_s)
@@ -1559,6 +1562,7 @@ def _evaluate_users_outside_geofence_for_s(
 
     min_accuracy_m = rule.min_location_accuracy_m
     now_epoch = ctx.now.timestamp()
+    eligible_since = rule_eligible_since(rule, ctx)
     need_label = _format_dwell_need_s(condition.min_outside_s)
     presence_lines: list[str] = []
     unmet = False
@@ -1589,6 +1593,8 @@ def _evaluate_users_outside_geofence_for_s(
         outside_since = ctx.geofence_outside_since.get(
             (roster_user_id, condition.geofence_id),
         )
+        if outside_since is not None and eligible_since is not None:
+            outside_since = max(outside_since, eligible_since)
         if outside_since is not None:
             outside_s = now_epoch - outside_since
             elapsed_label = _format_dwell_elapsed_s(outside_s)
@@ -2054,6 +2060,7 @@ def _roster_user_ids_satisfying_users_inside_geofence_for_s(
         return set()
     min_accuracy_m = rule.min_location_accuracy_m
     now_epoch = ctx.now.timestamp()
+    eligible_since = rule_eligible_since(rule, ctx)
     satisfied: set[str] = set()
     for rule_user_id in condition.user_ids:
         roster_user_id = ctx.resolve_user_id(rule_user_id)
@@ -2075,6 +2082,8 @@ def _roster_user_ids_satisfying_users_inside_geofence_for_s(
         inside_since = ctx.geofence_inside_since.get(
             (roster_user_id, condition.geofence_id),
         )
+        if inside_since is not None and eligible_since is not None:
+            inside_since = max(inside_since, eligible_since)
         if inside_since is not None:
             inside_s = now_epoch - inside_since
             if inside_s >= condition.min_inside_s:
@@ -2208,6 +2217,7 @@ def _roster_user_ids_satisfying_users_outside_geofence_for_s(
         return set()
     min_accuracy_m = rule.min_location_accuracy_m
     now_epoch = ctx.now.timestamp()
+    eligible_since = rule_eligible_since(rule, ctx)
     satisfied: set[str] = set()
     for rule_user_id in condition.user_ids:
         roster_user_id = ctx.resolve_user_id(rule_user_id)
@@ -2229,6 +2239,8 @@ def _roster_user_ids_satisfying_users_outside_geofence_for_s(
         outside_since = ctx.geofence_outside_since.get(
             (roster_user_id, condition.geofence_id),
         )
+        if outside_since is not None and eligible_since is not None:
+            outside_since = max(outside_since, eligible_since)
         if outside_since is not None:
             outside_s = now_epoch - outside_since
             if outside_s >= condition.min_outside_s:

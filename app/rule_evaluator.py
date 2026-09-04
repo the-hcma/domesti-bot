@@ -1082,13 +1082,17 @@ class RuleEvaluator:
                     left=deferred.event == "left",
                 ),
             }
+            noticed_at = deferred.observed_at
+            eligible_since = rule_eligible_since(rule, ctx)
+            if eligible_since is not None:
+                noticed_at = max(noticed_at, eligible_since)
             await self._execute_rule(
                 rule,
                 edge_user_id=user_id,
                 evaluation=evaluation,
                 fire_source="deferred",
                 log_user_ids=user_id,
-                noticed_at=deferred.observed_at,
+                noticed_at=noticed_at,
                 transitions=transitions,
             )
             fired_rule_ids.add(rule.id)
@@ -2361,11 +2365,14 @@ class RuleEvaluator:
         for rule_key, since in newly_evaluated_rules:
             rule_id = rule_key[0]
             min_s = rule_key[4]
-            noticed = min(now_epoch, since + float(min_s))
+            rule = rules_by_id.get(rule_id)
+            eligible_since = None if rule is None else rule_eligible_since(rule, ctx)
+            effective_since = since if eligible_since is None else max(since, eligible_since)
+            noticed = min(now_epoch, effective_since + float(min_s))
             prior = timing_by_rule_id.get(rule_id)
             if prior is None or noticed < prior[0]:
                 timing_by_rule_id[rule_id] = (noticed, None)
-        await self._process_dwell_satisfied_rules(
+        attempted_rule_ids = await self._process_dwell_satisfied_rules(
             crossed_rule_ids,
             rules=rules,
             ctx=ctx,
@@ -2382,10 +2389,16 @@ class RuleEvaluator:
             if dwell_episode_blocks_fire(rule, ctx):
                 self._dwell_satisfied_evaluated_since[rule_key] = since
                 continue
-            # Leave the slot clear while cooldown is active so cooldown_s can
-            # re-arm on the same streak. Do not special-case fire_once here: this
-            # map stores bare ``since`` (no local day), so marking under cooldown
-            # would suppress re-eval across midnight until the streak resets (#705).
+            # Never mark after conditions_not_met — a rule blocked by a still-
+            # closed gate (after_sunset, after_local_time, ...) must keep
+            # retrying on the same streak once the gate opens, mirroring the
+            # device-dwell path's #681 fix. Leave the slot clear while cooldown
+            # is active so cooldown_s can re-arm on the same streak. Do not
+            # special-case fire_once here: this map stores bare ``since`` (no
+            # local day), so marking under cooldown would suppress re-eval
+            # across midnight until the streak resets (#705).
+            if rule_id not in attempted_rule_ids:
+                continue
             if runtime is not None and not self._cooldown_elapsed(rule, runtime):
                 continue
             self._dwell_satisfied_evaluated_since[rule_key] = since
