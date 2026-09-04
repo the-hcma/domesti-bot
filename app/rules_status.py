@@ -41,8 +41,11 @@ from app.cron_schedule import fired_on_same_local_calendar_day
 from app.device_enums import RuleEvaluationCause, RuleTrigger
 from app.device_state_watcher import poll_interval_from_env
 from app.local_time_schedule import (
+    after_local_time_start_datetime,
+    extract_top_level_after_local_time,
     extract_top_level_local_time_window,
     local_time_window_start_datetime,
+    uses_after_local_time_eligibility_wake,
     uses_local_time_window_eligibility_wake,
 )
 from app.presence_store import (
@@ -160,6 +163,7 @@ def build_rules_status(
                 RuleTrigger.SCHEDULED in rule.triggers
                 or uses_astronomical_eligibility_wake(rule)
                 or uses_local_time_window_eligibility_wake(rule)
+                or uses_after_local_time_eligibility_wake(rule)
             )
             and rule.enabled
             and evaluator is not None
@@ -212,6 +216,26 @@ def build_rules_status(
             if window is not None:
                 start_dt = local_time_window_start_datetime(
                     window,
+                    local_date=effective_now.date(),
+                    timezone=tz,
+                )
+                if start_dt is not None:
+                    also_parts: list[str] = []
+                    if RuleTrigger.DWELL_SATISFIED in rule.triggers:
+                        also_parts.append("dwell threshold")
+                    if RuleTrigger.DEVICE_STATE in rule.triggers:
+                        also_parts.append("watched device/reading changes")
+                    also_clause = ""
+                    if also_parts:
+                        also_clause = f"; also on {' and '.join(also_parts)}"
+                    scheduled_detail = (
+                        f"Evaluates once when eligible at {_format_astronomical_anchor_label(start_dt)}{also_clause}"
+                    )
+        elif uses_after_local_time_eligibility_wake(rule) and evaluator is not None:
+            gate = extract_top_level_after_local_time(rule)
+            if gate is not None:
+                start_dt = after_local_time_start_datetime(
+                    gate,
                     local_date=effective_now.date(),
                     timezone=tz,
                 )
