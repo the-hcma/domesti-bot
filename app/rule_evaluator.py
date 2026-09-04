@@ -81,9 +81,14 @@ from app.geofence_transition_state_store import (
     upsert_geofence_transition_state,
 )
 from app.local_time_schedule import (
+    after_local_time_start_datetime,
+    extract_top_level_after_local_time,
     extract_top_level_local_time_window,
     is_local_time_window_open,
+    materialize_after_local_time_cron,
     materialize_local_time_window_cron,
+    uses_after_local_time_eligibility_wake,
+    uses_after_local_time_materialized_schedule,
     uses_local_time_window_eligibility_wake,
     uses_local_time_window_materialized_schedule,
 )
@@ -277,6 +282,7 @@ class RuleEvaluator:
         self._geofence_presence_episode: dict[tuple[str, str], int] = {}
         self._geofence_was_inside: dict[tuple[str, str], bool] = {}
         self._last_run_at: float | None = None
+        self._last_after_local_time_materialization_date: date | None = None
         self._last_astronomical_materialization_date: date | None = None
         self._last_local_time_window_materialization_date: date | None = None
         self._next_sun_check_at: float | None = None
@@ -621,6 +627,8 @@ class RuleEvaluator:
             self._persist_rule_schedule_state(rule.id)
         elif uses_local_time_window_materialized_schedule(rule):
             self._persist_rule_schedule_state(rule.id)
+        elif uses_after_local_time_materialized_schedule(rule):
+            self._persist_rule_schedule_state(rule.id)
 
     def _apply_persisted_geofence_state(self) -> None:
         """Load geofence transition maps from SQLite persistence."""
@@ -953,9 +961,11 @@ class RuleEvaluator:
             )
             if runtime.next_evaluate_at is None or runtime.next_evaluate_at > now_epoch:
                 continue
-            eligibility_wake = uses_astronomical_eligibility_wake(
-                rule,
-            ) or uses_local_time_window_eligibility_wake(rule)
+            eligibility_wake = (
+                uses_astronomical_eligibility_wake(rule)
+                or uses_local_time_window_eligibility_wake(rule)
+                or uses_after_local_time_eligibility_wake(rule)
+            )
             fire_source: RuleFireSource = "eligibility" if eligibility_wake else "scheduled"
             log_user_ids = _scheduled_rule_user_ids_for_log(rule, ctx)
             evaluation_ctx = replace(
@@ -1593,6 +1603,7 @@ class RuleEvaluator:
                     await self._flush_ready_pending_fire_notifications()
                     self._refresh_astronomical_schedules_for_new_day()
                     self._refresh_local_time_window_schedules_for_new_day()
+                    self._refresh_after_local_time_schedules_for_new_day()
                     await self._evaluate_scheduled_rules()
                     timezone = ZoneInfo(load_settings_location().timezone)
                     ctx = await self._build_evaluation_context(
@@ -2069,6 +2080,13 @@ class RuleEvaluator:
                     now=now,
                 )
                 continue
+            if uses_after_local_time_materialized_schedule(rule):
+                self._ensure_after_local_time_schedule_materialized(
+                    rule,
+                    timezone=timezone,
+                    now=now,
+                )
+                continue
             cron_expr = (rule.schedule_cron or "").strip()
             if cron_expr == "":
                 continue
@@ -2101,6 +2119,14 @@ class RuleEvaluator:
         if uses_local_time_window_materialized_schedule(rule):
             now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
             materialized = self._ensure_local_time_window_schedule_materialized(
+                rule,
+                timezone=timezone,
+                now=now,
+            )
+            return materialized or ""
+        if uses_after_local_time_materialized_schedule(rule):
+            now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+            materialized = self._ensure_after_local_time_schedule_materialized(
                 rule,
                 timezone=timezone,
                 now=now,
@@ -2858,6 +2884,56 @@ class RuleEvaluator:
         if prior is None or since is None or prior != current:
             self._set_device_bool_streak(key, current, now_epoch)
 
+    def _ensure_after_local_time_schedule_materialized(
+        self,
+        rule: RuleOut,
+        *,
+        timezone: ZoneInfo,
+        now: datetime,
+        force: bool = False,
+    ) -> str | None:
+        if not uses_after_local_time_materialized_schedule(rule):
+            return None
+        runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
+        local_date = local_calendar_date(now.timestamp(), timezone)
+        if (
+            not force
+            and runtime.schedule_materialized_for == local_date
+            and runtime.effective_schedule_cron is not None
+            and runtime.next_evaluate_at is not None
+        ):
+            return runtime.effective_schedule_cron
+        cron_expr = materialize_after_local_time_cron(
+            rule,
+            timezone=timezone,
+            now=now,
+        )
+        if cron_expr is None:
+            return None
+        runtime.effective_schedule_cron = cron_expr
+        runtime.schedule_materialized_for = local_date
+        condition = extract_top_level_after_local_time(rule)
+        local_now = now.astimezone(timezone) if now.tzinfo is not None else now.replace(tzinfo=timezone)
+        gate_open_at = (
+            None
+            if condition is None
+            else after_local_time_start_datetime(condition, local_date=local_now.date(), timezone=timezone)
+        )
+        if gate_open_at is not None and local_now >= gate_open_at and not force:
+            # Already past the gate (e.g. process restart after 21:00): evaluate
+            # promptly rather than waiting until tomorrow. Skip on forced new-day
+            # refresh so this does not double-fire right after local midnight.
+            runtime.next_evaluate_at = local_now.timestamp()
+        else:
+            runtime.next_evaluate_at = next_scheduled_evaluate_at(
+                cron_expr,
+                now,
+                timezone,
+                due_if_matching=True,
+            )
+        self._persist_rule_schedule_state(rule.id)
+        return cron_expr
+
     def _ensure_astronomical_schedule_materialized(
         self,
         rule: RuleOut,
@@ -2951,6 +3027,32 @@ class RuleEvaluator:
             )
         self._persist_rule_schedule_state(rule.id)
         return cron_expr
+
+    def _refresh_after_local_time_schedules_for_new_day(self) -> None:
+        settings = load_settings_location()
+        timezone = ZoneInfo(settings.timezone)
+        now = datetime.fromtimestamp(self._now_fn(), tz=timezone)
+        local_date = local_calendar_date(now.timestamp(), timezone)
+        if self._last_after_local_time_materialization_date == local_date:
+            return
+        self._last_after_local_time_materialization_date = local_date
+        for rule in list_automation_rules():
+            if not rule.enabled or not uses_after_local_time_materialized_schedule(rule):
+                continue
+            runtime = self._rule_state.get(rule.id)
+            if (
+                runtime is not None
+                and runtime.schedule_materialized_for == local_date
+                and runtime.effective_schedule_cron is not None
+                and runtime.next_evaluate_at is not None
+            ):
+                continue
+            self._ensure_after_local_time_schedule_materialized(
+                rule,
+                timezone=timezone,
+                now=now,
+                force=True,
+            )
 
     def _refresh_astronomical_schedules_for_new_day(self) -> None:
         settings = load_settings_location()
@@ -4019,6 +4121,7 @@ def _rule_uses_scheduled_evaluation_tick(rule: RuleOut) -> bool:
         RuleTrigger.SCHEDULED in rule.triggers
         or uses_astronomical_eligibility_wake(rule)
         or uses_local_time_window_eligibility_wake(rule)
+        or uses_after_local_time_eligibility_wake(rule)
     )
 
 
