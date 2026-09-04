@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.api.schemas import (
@@ -13,12 +13,15 @@ from app.api.schemas import (
     BeforeLocalTimeCondition,
     BeforeSunriseCondition,
     DevicesAnyInStateForSCondition,
+    GeofenceOut,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
     RuleConditionOut,
     RuleConditionsOut,
     RuleOut,
     SettingsLocationOut,
+    UserLocationOut,
+    UsersInsideGeofenceCondition,
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
 from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, rule_eligible_since
@@ -157,10 +160,10 @@ def test_rule_eligible_since_descends_into_nested_all_group() -> None:
     assert rule_eligible_since(rule, _ctx(now=now)) == expected
 
 
-def test_rule_eligible_since_ignores_gate_nested_under_any() -> None:
-    # A temporal gate inside an "any" group is optional — the group can be
-    # satisfied by the sibling branch instead — so it must not clamp the
-    # whole rule's eligibility.
+def test_rule_eligible_since_any_group_clamps_when_no_alternative_satisfies_it() -> None:
+    # Both children of this "any" are temporal gates — there is no
+    # non-temporal alternative, so the group's truth genuinely depends on one
+    # of them, and the (later-opening) after_local_time gate clamps.
     now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
     rule = _rule_with_conditions(
         [
@@ -169,6 +172,110 @@ def test_rule_eligible_since_ignores_gate_nested_under_any() -> None:
                 conditions=[
                     AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
                     BeforeLocalTimeCondition(type="before_local_time", time_hhmm="23:00"),
+                ],
+            ),
+        ],
+    )
+    expected = datetime(2026, 9, 2, 21, 0, tzinfo=_TZ).timestamp()
+    assert rule_eligible_since(rule, _ctx(now=now)) == expected
+
+
+def test_rule_eligible_since_any_group_no_clamp_when_alternative_already_met() -> None:
+    # The geofence branch is currently true, so the any-group is satisfied
+    # without needing after_local_time at all — no clamp.
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [
+            AnyConditionsCondition(
+                type="any",
+                conditions=[
+                    AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                    UsersInsideGeofenceCondition(
+                        type="users_inside_geofence",
+                        geofence_id="house",
+                        user_ids=["henrique"],
+                    ),
+                ],
+            ),
+        ],
+    )
+    ctx = _ctx(now=now, geofences=(_HOUSE_GEOFENCE,), user_inside_house=True)
+    assert rule_eligible_since(rule, ctx) is None
+
+
+def test_rule_eligible_since_any_group_clamps_when_alternative_not_met() -> None:
+    # Same shape, but the geofence branch is currently false — the any-group
+    # can only be true via after_local_time right now, so it clamps.
+    now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [
+            AnyConditionsCondition(
+                type="any",
+                conditions=[
+                    AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                    UsersInsideGeofenceCondition(
+                        type="users_inside_geofence",
+                        geofence_id="house",
+                        user_ids=["henrique"],
+                    ),
+                ],
+            ),
+        ],
+    )
+    ctx = _ctx(now=now, geofences=(_HOUSE_GEOFENCE,), user_inside_house=False)
+    expected = datetime(2026, 9, 2, 21, 0, tzinfo=_TZ).timestamp()
+    assert rule_eligible_since(rule, ctx) == expected
+
+
+def test_rule_eligible_since_any_group_with_dwell_sibling_does_not_recurse() -> None:
+    # Recursion-hazard shape: a *_for_s duration condition sitting directly
+    # alongside a temporal gate in the same any-group. _evaluate_devices_any_in_state_for_s
+    # calls rule_eligible_since, so naively re-evaluating this sibling to
+    # check "is the group already satisfied" would recurse back into itself.
+    # It must be excluded from the safe-to-evaluate allowlist and treated
+    # conservatively (still clamps) instead.
+    now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [
+            AnyConditionsCondition(
+                type="any",
+                conditions=[
+                    AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                    DevicesAnyInStateForSCondition(
+                        type="devices_any_in_state_for_s",
+                        devices=[
+                            RuleConditionDeviceRefOut(
+                                device_id="28:05:a5:28:c8:48",
+                                family_id=DeviceFamilyId.EP1,
+                            ),
+                        ],
+                        min_duration_s=10,
+                        state=DeviceConditionState.CLEAR,
+                    ),
+                ],
+            ),
+        ],
+    )
+    expected = datetime(2026, 9, 2, 21, 0, tzinfo=_TZ).timestamp()
+    assert rule_eligible_since(rule, _ctx(now=now)) == expected
+
+
+def test_rule_eligible_since_any_group_ignores_gate_nested_deeper_than_direct_child() -> None:
+    # A temporal gate nested inside an "all" that is itself inside an "any"
+    # is deeper than the direct-child case this fix handles (tracked as a
+    # further follow-up) — it is not clamped, but must not crash either.
+    now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [
+            AnyConditionsCondition(
+                type="any",
+                conditions=[
+                    AllConditionsCondition(
+                        type="all",
+                        conditions=[
+                            AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                        ],
+                    ),
                 ],
             ),
         ],
@@ -192,17 +299,44 @@ def test_rule_eligible_since_returns_latest_of_multiple_gates() -> None:
     assert rule_eligible_since(rule, _ctx(now=now)) == expected
 
 
-def _ctx(*, now: datetime) -> RuleEvaluationContext:
+_HOUSE_GEOFENCE = GeofenceOut(
+    geofence_id="house",
+    label="House",
+    center_lat=41.194072,
+    center_lon=-73.888325,
+    radius_m=250,
+    enabled=True,
+)
+
+
+def _ctx(
+    *,
+    now: datetime,
+    geofences: tuple[GeofenceOut, ...] = (),
+    user_inside_house: bool | None = None,
+) -> RuleEvaluationContext:
     sun = compute_rules_sun_out(_SETTINGS, now=now)
     user_display_names = {"henrique": "Henrique"}
+    user_locations: dict[str, UserLocationOut] = {}
+    if user_inside_house is not None:
+        lat, lon = (41.194085, -73.888365) if user_inside_house else (44.0, -73.0)
+        reported_iso = now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        user_locations["henrique"] = UserLocationOut(
+            lat=lat,
+            lon=lon,
+            accuracy_m=20,
+            fix_at=reported_iso,
+            reported_at=reported_iso,
+            source="test",
+        )
     return RuleEvaluationContext(
-        geofences=(),
+        geofences=geofences,
         now=now,
         roster_user_id_lookup=build_roster_user_id_lookup(list(user_display_names.keys())),
         sun=sun,
         timezone=_TZ,
         user_display_names=user_display_names,
-        user_locations={},
+        user_locations=user_locations,
     )
 
 

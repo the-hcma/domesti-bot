@@ -220,11 +220,15 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
 
     Descends into nested ``all`` groups (every child must hold, so a temporal
     gate nested under ``all`` constrains eligibility exactly like a top-level
-    one). Does **not** descend into ``any`` groups: a temporal gate nested
-    under ``any`` is optional — the group can be satisfied by a sibling branch
-    instead — so it must not clamp eligibility for the whole rule. Under- than
-    over-clamping is the safe default here; a rule with only a temporal gate
-    inside an ``any`` group is not clamped at all (tracked as a follow-up).
+    one). Descends into ``any`` groups too, but only includes a gate nested
+    there when no other, non-temporal sibling in the same group is already
+    met — see ``_any_group_temporal_candidates``: a temporal gate nested
+    under ``any`` is optional (the group can be satisfied by a sibling branch
+    instead), so it must clamp only when the group's truth currently depends
+    on it. Under- rather than over-clamping stays the default whenever that
+    can't be determined (siblings outside the safe-to-evaluate allowlist,
+    e.g. another duration condition or a nested group, are conservatively
+    treated as not proving the gate is unnecessary).
 
     Duration/dwell conditions (``devices_any_in_state_for_s`` and friends) use
     this to stop counting elapsed time that accrued before the rule could have
@@ -242,6 +246,8 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
         condition = pending.pop()
         if isinstance(condition, AllConditionsCondition):
             pending.extend(condition.conditions)
+        elif isinstance(condition, AnyConditionsCondition):
+            pending.extend(_any_group_temporal_candidates(condition, rule, ctx))
         elif isinstance(condition, AfterLocalTimeCondition):
             target = _parse_hhmm(condition.time_hhmm)
             if target is not None and now_minutes >= target:
@@ -484,6 +490,59 @@ def _accurate_inside_from_location(
     if counts_inside:
         return True
     return False
+
+
+# Condition types safe to re-evaluate from inside rule_eligible_since when
+# deciding whether an any-group's temporal children should clamp: none of
+# their evaluators call rule_eligible_since, so evaluating them here cannot
+# recurse back into the duration-condition evaluators that call this module
+# function in the first place. Deliberately excludes *_for_s duration
+# conditions and nested all/any groups — see rule_eligible_since's docstring.
+_ANY_GROUP_SAFE_TO_EVALUATE_TYPES: tuple[type[RuleConditionOut], ...] = (
+    DaylightCondition,
+    DaysOfWeekCondition,
+    DevicesAllInStateCondition,
+    DevicesAnyInStateCondition,
+    Ep1ReadingCompareCondition,
+    UsersInsideGeofenceCondition,
+    UsersMinDistanceFromHomeMCondition,
+    UsersOutsideGeofenceCondition,
+)
+
+_ANY_GROUP_TEMPORAL_GATE_TYPES: tuple[type[RuleConditionOut], ...] = (
+    AfterLocalTimeCondition,
+    AfterSunsetCondition,
+    BeforeLocalTimeCondition,
+    BeforeSunriseCondition,
+    LocalTimeWindowCondition,
+)
+
+
+def _any_group_temporal_candidates(
+    condition: AnyConditionsCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> list[RuleConditionOut]:
+    """Return ``condition``'s temporal-gate children that should clamp eligibility.
+
+    An ``any`` group is satisfied by *any* child, so a temporal gate nested in
+    one is optional — the group may be true via a sibling branch instead, in
+    which case the gate must not clamp the whole rule's dwell duration. This
+    checks whether a sibling from ``_ANY_GROUP_SAFE_TO_EVALUATE_TYPES`` is
+    currently met without needing the gate; if so, the group didn't need the
+    gate, so no temporal children are returned. Siblings outside that
+    allowlist (duration conditions, nested groups) are conservatively treated
+    as "cannot prove the group is satisfied without the gate" rather than
+    evaluated directly, to avoid recursing back into rule_eligible_since.
+    """
+    temporal_children = [c for c in condition.conditions if isinstance(c, _ANY_GROUP_TEMPORAL_GATE_TYPES)]
+    if not temporal_children:
+        return []
+    safe_children = [c for c in condition.conditions if isinstance(c, _ANY_GROUP_SAFE_TO_EVALUATE_TYPES)]
+    already_satisfied = any(_evaluate_condition(child, rule, ctx).met for child in safe_children)
+    if already_satisfied:
+        return []
+    return temporal_children
 
 
 def _device_condition_power_labels(
