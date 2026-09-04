@@ -220,15 +220,27 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
 
     Descends into nested ``all`` groups (every child must hold, so a temporal
     gate nested under ``all`` constrains eligibility exactly like a top-level
-    one). Descends into ``any`` groups too, but only includes a gate nested
-    there when no other, non-temporal sibling in the same group is already
-    met — see ``_any_group_temporal_candidates``: a temporal gate nested
-    under ``any`` is optional (the group can be satisfied by a sibling branch
+    one — combined with every other top-level/``all`` gate by taking the
+    *latest* opening instant, since the rule needs every one of them open).
+
+    Descends into ``any`` groups too, but only includes a gate nested there
+    when no other, non-temporal sibling in the same group is already met —
+    see ``_any_group_temporal_candidates``: a temporal gate nested under
+    ``any`` is optional (the group can be satisfied by a sibling branch
     instead), so it must clamp only when the group's truth currently depends
     on it. Under- rather than over-clamping stays the default whenever that
     can't be determined (siblings outside the safe-to-evaluate allowlist,
     e.g. another duration condition or a nested group, are conservatively
-    treated as not proving the gate is unnecessary).
+    treated as not proving the gate is unnecessary). When an ``any`` group
+    has *multiple* currently-open temporal children (e.g.
+    ``any = [after_local_time("21:00"), before_local_time("23:00")]`` — both
+    open at 21:10), the group itself has been satisfiable since the
+    *earliest* of them, not the latest: unlike ``all``/independent top-level
+    gates, an ``any`` group needs only one alternative open, so the whole
+    group's own contribution is the minimum among its currently-open
+    children — see ``_any_group_opening_minutes``. That single per-group
+    instant is then combined with every other top-level/``all`` gate the
+    normal (maximum) way.
 
     Duration/dwell conditions (``devices_any_in_state_for_s`` and friends) use
     this to stop counting elapsed time that accrued before the rule could have
@@ -247,39 +259,13 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
         if isinstance(condition, AllConditionsCondition):
             pending.extend(condition.conditions)
         elif isinstance(condition, AnyConditionsCondition):
-            pending.extend(_any_group_temporal_candidates(condition, rule, ctx))
-        elif isinstance(condition, AfterLocalTimeCondition):
-            target = _parse_hhmm(condition.time_hhmm)
-            if target is not None and now_minutes >= target:
-                opening_minutes.append((target, 0))
-        elif isinstance(condition, LocalTimeWindowCondition):
-            start = _parse_hhmm(condition.start_hhmm)
-            end = _parse_hhmm(condition.end_hhmm)
-            if start is None or end is None:
-                continue
-            if start <= end:
-                if start <= now_minutes < end:
-                    opening_minutes.append((start, 0))
-            elif now_minutes >= start:
-                opening_minutes.append((start, 0))
-            elif now_minutes < end:
-                # Overnight wrap tail — the window opened yesterday.
-                opening_minutes.append((start, -1))
-        elif isinstance(condition, AfterSunsetCondition):
-            sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
-            start = sunset_minutes + condition.offset_minutes
-            if start < MINUTES_PER_DAY and now_minutes >= start:
-                opening_minutes.append((start, 0))
-        elif isinstance(condition, BeforeLocalTimeCondition):
-            target = _parse_hhmm(condition.time_hhmm)
-            if target is not None and now_minutes < target:
-                # Open since local midnight today, not "always open".
-                opening_minutes.append((0, 0))
-        elif isinstance(condition, BeforeSunriseCondition):
-            sunrise_minutes = _local_minutes_from_iso(ctx.sun.sunrise_at, ctx.timezone)
-            end = sunrise_minutes + condition.offset_minutes
-            if now_minutes < end:
-                opening_minutes.append((0, 0))
+            group_opening = _any_group_opening_minutes(condition, rule, ctx, now_minutes)
+            if group_opening is not None:
+                opening_minutes.append(group_opening)
+        else:
+            opening = _temporal_gate_opening_minutes(condition, ctx, now_minutes)
+            if opening is not None:
+                opening_minutes.append(opening)
     if not opening_minutes:
         return None
     local_midnight = ctx.now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -518,6 +504,32 @@ _ANY_GROUP_TEMPORAL_GATE_TYPES: tuple[type[RuleConditionOut], ...] = (
 )
 
 
+def _any_group_opening_minutes(
+    condition: AnyConditionsCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+    now_minutes: int,
+) -> tuple[int, int] | None:
+    """Return the any-group's own ``(minutes_of_day, day_offset)`` contribution.
+
+    An ``any`` group needs only one child open, so — unlike ``all``/independent
+    top-level gates, which need every one of them open and therefore combine
+    by taking the *latest* opening instant — the group itself has been
+    satisfiable since the *earliest* of its currently-open temporal children.
+    Returns ``None`` when ``_any_group_temporal_candidates`` finds no clamp
+    candidates, or none of them are currently open.
+    """
+    candidates = _any_group_temporal_candidates(condition, rule, ctx)
+    openings = [
+        opening
+        for child in candidates
+        if (opening := _temporal_gate_opening_minutes(child, ctx, now_minutes)) is not None
+    ]
+    if not openings:
+        return None
+    return min(openings, key=lambda opening: (opening[1], opening[0]))
+
+
 def _any_group_temporal_candidates(
     condition: AnyConditionsCondition,
     rule: RuleOut,
@@ -543,6 +555,59 @@ def _any_group_temporal_candidates(
     if already_satisfied:
         return []
     return temporal_children
+
+
+def _temporal_gate_opening_minutes(
+    condition: RuleConditionOut,
+    ctx: RuleEvaluationContext,
+    now_minutes: int,
+) -> tuple[int, int] | None:
+    """Return ``(minutes_of_day, day_offset)`` for when ``condition`` last
+    opened, or ``None`` when it is not one of the counted temporal gate types
+    (``after_local_time``, ``local_time_window``, ``after_sunset``,
+    ``before_local_time``, ``before_sunrise``) or is not currently open.
+    Shared by ``rule_eligible_since``'s top-level/``all`` traversal and
+    ``_any_group_opening_minutes``.
+    """
+    if isinstance(condition, AfterLocalTimeCondition):
+        target = _parse_hhmm(condition.time_hhmm)
+        if target is not None and now_minutes >= target:
+            return (target, 0)
+        return None
+    if isinstance(condition, LocalTimeWindowCondition):
+        start = _parse_hhmm(condition.start_hhmm)
+        end = _parse_hhmm(condition.end_hhmm)
+        if start is None or end is None:
+            return None
+        if start <= end:
+            if start <= now_minutes < end:
+                return (start, 0)
+            return None
+        if now_minutes >= start:
+            return (start, 0)
+        if now_minutes < end:
+            # Overnight wrap tail — the window opened yesterday.
+            return (start, -1)
+        return None
+    if isinstance(condition, AfterSunsetCondition):
+        sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
+        start = sunset_minutes + condition.offset_minutes
+        if start < MINUTES_PER_DAY and now_minutes >= start:
+            return (start, 0)
+        return None
+    if isinstance(condition, BeforeLocalTimeCondition):
+        target = _parse_hhmm(condition.time_hhmm)
+        if target is not None and now_minutes < target:
+            # Open since local midnight today, not "always open".
+            return (0, 0)
+        return None
+    if isinstance(condition, BeforeSunriseCondition):
+        sunrise_minutes = _local_minutes_from_iso(ctx.sun.sunrise_at, ctx.timezone)
+        end = sunrise_minutes + condition.offset_minutes
+        if now_minutes < end:
+            return (0, 0)
+        return None
+    return None
 
 
 def _device_condition_power_labels(

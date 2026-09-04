@@ -161,9 +161,33 @@ def test_rule_eligible_since_descends_into_nested_all_group() -> None:
 
 
 def test_rule_eligible_since_any_group_clamps_when_no_alternative_satisfies_it() -> None:
-    # Both children of this "any" are temporal gates — there is no
-    # non-temporal alternative, so the group's truth genuinely depends on one
-    # of them, and the (later-opening) after_local_time gate clamps.
+    # Both children of this "any" are temporal gates, but only after_local_time
+    # is actually open right now (before_local_time("06:00") closed hours
+    # ago) — there is no non-temporal alternative either, so the group's
+    # truth genuinely depends on the one open gate, which clamps.
+    now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [
+            AnyConditionsCondition(
+                type="any",
+                conditions=[
+                    AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                    BeforeLocalTimeCondition(type="before_local_time", time_hhmm="06:00"),
+                ],
+            ),
+        ],
+    )
+    expected = datetime(2026, 9, 2, 21, 0, tzinfo=_TZ).timestamp()
+    assert rule_eligible_since(rule, _ctx(now=now)) == expected
+
+
+def test_rule_eligible_since_any_group_uses_earliest_of_multiple_open_alternatives() -> None:
+    # Both children are temporal gates AND both are currently open:
+    # after_local_time("21:00") opened at 21:00, but before_local_time("23:00")
+    # has been open continuously since local midnight. An "any" group needs
+    # only one alternative, so it has been satisfiable since the *earliest*
+    # open child (midnight) — not the latest (21:00). Using max here would
+    # wrongly discard dwell accrued all day via the before-gate.
     now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
     rule = _rule_with_conditions(
         [
@@ -176,7 +200,7 @@ def test_rule_eligible_since_any_group_clamps_when_no_alternative_satisfies_it()
             ),
         ],
     )
-    expected = datetime(2026, 9, 2, 21, 0, tzinfo=_TZ).timestamp()
+    expected = datetime(2026, 9, 2, 0, 0, tzinfo=_TZ).timestamp()
     assert rule_eligible_since(rule, _ctx(now=now)) == expected
 
 
