@@ -2199,6 +2199,11 @@ class RuleEvaluator:
         ctx = await self._build_evaluation_context(now=now)
         device_state = ctx.device_state
         if device_state is None:
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    "[rules] device dwell sweep skipped: device_state not ready (watch_count=%d)",
+                    len(index.watches),
+                )
             return
         watches: tuple[DeviceDwellWatch, ...]
         if family_id is not None and backend_device_id is not None:
@@ -2235,6 +2240,14 @@ class RuleEvaluator:
                     device_ref=watch.device_id,
                 )
                 if resolved is None:
+                    if _LOGGER.isEnabledFor(logging.DEBUG):
+                        _LOGGER.debug(
+                            "[rules] device dwell sweep skipped watch: could not resolve "
+                            "family_id=%s device_ref=%s to a backend id (rule_ids=%s)",
+                            watch.family_id.value,
+                            watch.device_id,
+                            ",".join(sorted(watch.rule_ids)),
+                        )
                     continue
                 streak_backend_id = resolved
             streak_key = (watch.family_id, streak_backend_id)

@@ -310,6 +310,62 @@ async def test_ep1_clear_dwell_timing_clamped_to_after_local_time_gate(
 
 
 @pytest.mark.asyncio
+async def test_ep1_clear_dwell_fires_via_bare_periodic_sweep(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reported #711 email fired via the device-event path
+    (_maybe_process_device_dwell_satisfied(family_id, device_id)); the bare
+    no-arg form used by the 60s periodic sweep (_periodic_loop) is a distinct
+    code path (it must itself resolve every watch's device ref to a backend
+    id via resolve_device_ref_to_backend_id) and had no direct regression
+    test. Confirms it correctly fires the same after_local_time + dwell rule
+    with no device event involved at all."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule(after_hhmm="21:00"))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": datetime(2026, 9, 2, 18, 52, 52, tzinfo=_NY).timestamp()}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=True)
+    state = _ep1_state(sensor)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    sensor.occupancy_state = DeviceConditionState.CLEAR.value
+    gate_open_at = datetime(2026, 9, 2, 21, 0, tzinfo=_NY).timestamp()
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        # Establish the streak without going through the device-event path,
+        # mirroring how a background state-watcher poll updates the streak
+        # outside of any rule-relevant event.
+        sync_ctx = await evaluator._build_evaluation_context(
+            now=datetime.fromtimestamp(clock["now"], tz=_NY),
+        )
+        evaluator._sync_device_bool_streak(
+            DeviceFamilyId.EP1,
+            _EP1_MAC,
+            now_epoch=clock["now"],
+            ctx=sync_ctx,
+        )
+
+        clock["now"] = gate_open_at
+        await evaluator._maybe_process_device_dwell_satisfied()
+        assert send_mock.call_count == 0
+
+        clock["now"] = gate_open_at + 20.0
+        await evaluator._maybe_process_device_dwell_satisfied()
+
+    send_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_ep1_clear_dwell_cooldown_allows_refire_on_same_streak(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
