@@ -215,7 +215,10 @@ async def test_ep1_clear_dwell_retries_after_local_time_opens(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pre-window dwell must not debounce the same clear streak past 21:00 (#681)."""
+    """Pre-window dwell must not debounce the same clear streak past 21:00 (#681),
+    and the 20s dwell itself must accrue *inside* the eligible window — a streak
+    that has been clear since well before 21:00 does not satisfy "clear for 20s"
+    the instant the gate opens; it needs 20s past the gate (the reported-bug fix)."""
     bundle = tmp_path / "rules.json"
     db = tmp_path / "discovery.sqlite"
     _write_bundle(bundle, _ep1_clear_dwell_rule(after_hhmm="21:00"))
@@ -249,9 +252,61 @@ async def test_ep1_clear_dwell_retries_after_local_time_opens(
             DeviceFamilyId.EP1,
             _EP1_MAC,
         )
+        assert send_mock.call_count == 0
+
+        clock["now"] += 20.0
+        await evaluator._maybe_process_device_dwell_satisfied(
+            DeviceFamilyId.EP1,
+            _EP1_MAC,
+        )
 
     send_mock.assert_called_once()
     assert evaluator.fire_state_for_rule("evening-ep1-clear-alert").last_fired_at == clock["now"]
+
+
+@pytest.mark.asyncio
+async def test_ep1_clear_dwell_timing_clamped_to_after_local_time_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reported bug: a streak that predates the gate must not appear in the fire
+    email's timing — ``device_state_changed_at`` / ``noticed_at`` are clamped to
+    when the rule's ``after_local_time`` gate opened, not the raw device
+    transition hours earlier."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_bundle(bundle, _ep1_clear_dwell_rule(after_hhmm="21:00"))
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    clock = {"now": datetime(2026, 9, 2, 18, 52, 52, tzinfo=_NY).timestamp()}
+    _seed_presence_db(db, now=clock["now"])
+    sensor = _FakeEp1Sensor(_EP1_MAC, "Office EP1", occupied=True)
+    state = _ep1_state(sensor)
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    sensor.occupancy_state = DeviceConditionState.CLEAR.value
+    gate_open_at = datetime(2026, 9, 2, 21, 0, tzinfo=_NY).timestamp()
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await evaluator.on_device_state_change(DeviceFamilyId.EP1, _EP1_MAC)
+
+        clock["now"] = gate_open_at
+        await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+        assert send_mock.call_count == 0
+
+        clock["now"] = gate_open_at + 20.0
+        await evaluator._maybe_process_device_dwell_satisfied(DeviceFamilyId.EP1, _EP1_MAC)
+
+    send_mock.assert_called_once()
+    send_kwargs = send_mock.call_args.kwargs
+    assert send_kwargs["device_state_changed_at"] == gate_open_at
+    assert send_kwargs["noticed_at"] == gate_open_at + 20.0
 
 
 @pytest.mark.asyncio

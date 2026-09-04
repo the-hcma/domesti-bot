@@ -133,6 +133,7 @@ from app.rule_conditions import (
     iter_dwell_for_s_conditions,
     natural_bool_for_device_family,
     presence_user_ids_for_rule,
+    rule_eligible_since,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
 from app.rule_notification import format_rule_fire_timing_for_log
@@ -2250,10 +2251,13 @@ class RuleEvaluator:
         for rule_key, since in newly_evaluated_rules:
             rule_id = rule_key[0]
             min_duration_s = rule_key[4]
-            noticed = min(now_epoch, since + float(min_duration_s))
+            rule = rules_by_id.get(rule_id)
+            eligible_since = None if rule is None else rule_eligible_since(rule, ctx)
+            effective_since = since if eligible_since is None else max(since, eligible_since)
+            noticed = min(now_epoch, effective_since + float(min_duration_s))
             prior = timing_by_rule_id.get(rule_id)
-            if prior is None or since < (prior[1] if prior[1] is not None else prior[0]):
-                timing_by_rule_id[rule_id] = (noticed, since)
+            if prior is None or effective_since < (prior[1] if prior[1] is not None else prior[0]):
+                timing_by_rule_id[rule_id] = (noticed, effective_since)
         trigger_device_display = None
         if family_id is not None and backend_device_id is not None:
             trigger_device_display = _format_trigger_device_display(
@@ -2504,6 +2508,10 @@ class RuleEvaluator:
                 streak_since = (
                     None if reading_metric is not None else self._device_bool_since.get((family_id, device_id))
                 )
+                if streak_since is not None:
+                    eligible_since = rule_eligible_since(rule, ctx)
+                    if eligible_since is not None:
+                        streak_since = max(streak_since, eligible_since)
                 trigger_device_display = _format_trigger_device_display(
                     device_state,
                     family_id=family_id,

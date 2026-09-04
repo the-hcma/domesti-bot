@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 from app.api.schemas import (
+    AfterLocalTimeCondition,
     DevicesAnyInStateForSCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
@@ -21,6 +22,7 @@ from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import (
     RuleEvaluationContext,
+    _format_dwell_elapsed_s,
     compute_rules_sun_out,
     evaluate_rule,
     natural_bool_for_device_family,
@@ -106,6 +108,65 @@ def test_devices_any_in_state_for_s_unmet_when_discovery_not_ready() -> None:
     assert "discovery not ready" in result.conditions[0].detail
 
 
+def test_devices_any_in_state_for_s_pending_when_time_gate_just_opened() -> None:
+    # EP1 has been clear for hours, well before the 21:00 after_local_time gate
+    # opened — but the gate itself only opened 1s ago, so "clear for 10s after
+    # 9pm" is not yet satisfied. The raw pre-gate streak must not count.
+    now = datetime(2026, 9, 2, 21, 0, 1, tzinfo=_TZ)
+    since = now.timestamp() - 7200.0
+    mac = "28:05:a5:28:c8:48"
+    state = _ep1_state(_FakeEp1Sensor(mac, "Master bedroom EP1", occupied=False))
+    result = evaluate_rule(
+        _clear_for_s_after_local_time_rule(device_id=mac, min_duration_s=10, time_hhmm="21:00"),
+        _ctx(
+            now=now,
+            device_state=state,
+            device_bool_since={(DeviceFamilyId.EP1, mac): since},
+        ),
+    )
+    assert result.all_met is False
+    dwell_condition = next(row for row in result.conditions if "Any device" in row.label)
+    assert dwell_condition.met is False
+    assert "need" in dwell_condition.detail
+
+
+def test_devices_any_in_state_for_s_met_once_gate_open_for_min_duration() -> None:
+    now = datetime(2026, 9, 2, 21, 0, 10, tzinfo=_TZ)
+    since = now.timestamp() - 7200.0
+    mac = "28:05:a5:28:c8:48"
+    state = _ep1_state(_FakeEp1Sensor(mac, "Master bedroom EP1", occupied=False))
+    result = evaluate_rule(
+        _clear_for_s_after_local_time_rule(device_id=mac, min_duration_s=10, time_hhmm="21:00"),
+        _ctx(
+            now=now,
+            device_state=state,
+            device_bool_since={(DeviceFamilyId.EP1, mac): since},
+        ),
+    )
+    assert result.all_met is True
+    dwell_condition = next(row for row in result.conditions if "Any device" in row.label)
+    assert dwell_condition.met is True
+    # Elapsed is reported from the gate opening (10s), not the raw 2h streak.
+    assert _format_dwell_elapsed_s(10.0) in dwell_condition.detail
+
+
+def test_devices_any_in_state_for_s_unclamped_when_streak_starts_after_gate() -> None:
+    # Streak began comfortably after the gate opened — the clamp is a no-op.
+    now = datetime(2026, 9, 2, 21, 30, 0, tzinfo=_TZ)
+    since = now.timestamp() - 1200.0
+    mac = "28:05:a5:28:c8:48"
+    state = _ep1_state(_FakeEp1Sensor(mac, "Master bedroom EP1", occupied=False))
+    result = evaluate_rule(
+        _clear_for_s_after_local_time_rule(device_id=mac, min_duration_s=10, time_hhmm="21:00"),
+        _ctx(
+            now=now,
+            device_state=state,
+            device_bool_since={(DeviceFamilyId.EP1, mac): since},
+        ),
+    )
+    assert result.all_met is True
+
+
 def test_natural_bool_for_ep1_occupied_and_clear() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     mac = "02:00:00:00:00:20"
@@ -175,6 +236,42 @@ class _FakeTailwindDoor:
         self.door_key = self.identifier
         self.preferred_label = label
         self.is_open = is_open
+
+
+def _clear_for_s_after_local_time_rule(
+    *,
+    device_id: str,
+    min_duration_s: int,
+    time_hhmm: str,
+) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterLocalTimeCondition(type="after_local_time", time_hhmm=time_hhmm),
+                DevicesAnyInStateForSCondition(
+                    type="devices_any_in_state_for_s",
+                    devices=[
+                        RuleConditionDeviceRefOut(
+                            device_id=device_id,
+                            display_name="Master bedroom EP1",
+                            family_id=DeviceFamilyId.EP1,
+                        ),
+                    ],
+                    min_duration_s=min_duration_s,
+                    state=DeviceConditionState.CLEAR,
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="evening-ep1-clear-master-bedroom-lamp-on",
+        label="Turn on Master bedroom lamp when EP1 is clear after 9pm",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.DWELL_SATISFIED],
+    )
 
 
 def _ctx(
