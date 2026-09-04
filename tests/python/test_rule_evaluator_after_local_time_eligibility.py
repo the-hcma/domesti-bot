@@ -169,6 +169,70 @@ async def test_after_local_time_forced_new_day_refresh_does_not_reprompt_same_da
     assert next_at != pytest.approx(clock["now"])
 
 
+@pytest.mark.asyncio
+async def test_after_local_time_schedule_advance_persists_across_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A same-day restart after the rule has fired must not re-fire it — the
+    advanced (tomorrow's) next_evaluate_at has to be persisted, not just held
+    in memory, the same way the astronomical / local_time_window paths do."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    # fire_once_per_local_day=False / cooldown_s=0 so a stale persisted
+    # next_evaluate_at is the only thing that could suppress a re-fire.
+    rule = _evening_lux_rule().model_copy(update={"cooldown_s": 0, "fire_once_per_local_day": False})
+    _write_bundle(bundle, rule)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    tz = ZoneInfo("America/New_York")
+    gate_open = datetime(2023, 11, 14, 21, 0, tzinfo=tz)
+    clock = {"now": (gate_open - timedelta(hours=2)).timestamp()}
+    _seed_presence_db(db, now=clock["now"])
+    device = _FakeEp1(_MAC, "Office EP1", illuminance_lx=20.0)
+    state = DeviceManagersState(
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        androidtv_mgr=None,
+        ep1_mgr=_ep1_mgr(device),
+        vizio_mgr=None,
+        cache_path=db,
+        args=argparse.Namespace(),
+    )
+    evaluator = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+
+    clock["now"] = gate_open.timestamp()
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await evaluator._evaluate_scheduled_rules()
+        assert send_mock.call_count == 1
+
+    # Simulate a same-day restart (deploy/crash): a fresh evaluator reloads
+    # whatever schedule state was persisted.
+    restarted = RuleEvaluator(
+        cache_path=db,
+        device_state_getter=lambda: state,
+        now_fn=lambda: clock["now"],
+    )
+    next_at = restarted.next_evaluate_at_for_rule("evening-lux-after-local-time")
+    assert next_at is not None
+    assert next_at > clock["now"]
+
+    with patch(
+        "app.rule_evaluator.send_rule_notification_email",
+        return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
+    ) as send_mock:
+        await restarted._evaluate_scheduled_rules()
+        assert send_mock.call_count == 0
+
+
 def _ep1_mgr(device: _FakeEp1) -> Ep1DeviceManager:
     mgr = Ep1DeviceManager.__new__(Ep1DeviceManager)
     mgr._devices = {device.identifier: device}  # type: ignore[attr-defined]

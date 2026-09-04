@@ -627,6 +627,8 @@ class RuleEvaluator:
             self._persist_rule_schedule_state(rule.id)
         elif uses_local_time_window_materialized_schedule(rule):
             self._persist_rule_schedule_state(rule.id)
+        elif uses_after_local_time_materialized_schedule(rule):
+            self._persist_rule_schedule_state(rule.id)
 
     def _apply_persisted_geofence_state(self) -> None:
         """Load geofence transition maps from SQLite persistence."""
