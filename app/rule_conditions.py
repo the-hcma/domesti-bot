@@ -7,7 +7,7 @@ import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -204,6 +204,59 @@ def evaluate_rule_conditions_met(
 ) -> bool:
     """Return whether every top-level condition is currently met."""
     return evaluate_rule(rule, ctx).all_met
+
+
+def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | None:
+    """Return the epoch instant the rule's opening-type temporal gate last opened.
+
+    Considers ``after_local_time``, ``local_time_window`` (its ``start_hhmm``),
+    and ``after_sunset`` — gates that turn on partway through the day. A rule
+    that is currently blocked by one of these gates (not yet open) does not
+    contribute an instant — ``all_met`` is already false for other reasons, so
+    there is nothing to clamp. ``before_local_time`` / ``before_sunrise`` are
+    open starting at local midnight and never raise this instant.
+
+    Duration/dwell conditions (``devices_any_in_state_for_s`` and friends) use
+    this to stop counting elapsed time that accrued before the rule could have
+    fired: ``max(raw_streak_since, rule_eligible_since)``. The rule-fire
+    notification email applies the same clamp to ``noticed_at`` /
+    ``device_state_changed_at`` so "Reaction" reflects real engine latency
+    instead of time that elapsed while the rule could not have fired. Returns
+    ``None`` when the rule carries none of the counted gate types, so callers
+    apply no clamp.
+    """
+    now_minutes = _local_minutes_from_dt(ctx.now)
+    opening_minutes: list[tuple[int, int]] = []  # (minutes_of_day, day_offset)
+    for condition in rule.conditions.all:
+        if isinstance(condition, AfterLocalTimeCondition):
+            target = _parse_hhmm(condition.time_hhmm)
+            if target is not None and now_minutes >= target:
+                opening_minutes.append((target, 0))
+        elif isinstance(condition, LocalTimeWindowCondition):
+            start = _parse_hhmm(condition.start_hhmm)
+            end = _parse_hhmm(condition.end_hhmm)
+            if start is None or end is None:
+                continue
+            if start <= end:
+                if start <= now_minutes < end:
+                    opening_minutes.append((start, 0))
+            elif now_minutes >= start:
+                opening_minutes.append((start, 0))
+            elif now_minutes < end:
+                # Overnight wrap tail — the window opened yesterday.
+                opening_minutes.append((start, -1))
+        elif isinstance(condition, AfterSunsetCondition):
+            sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
+            start = sunset_minutes + condition.offset_minutes
+            if start < MINUTES_PER_DAY and now_minutes >= start:
+                opening_minutes.append((start, 0))
+    if not opening_minutes:
+        return None
+    local_midnight = ctx.now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return max(
+        (local_midnight + timedelta(days=day_offset, minutes=minutes)).timestamp()
+        for minutes, day_offset in opening_minutes
+    )
 
 
 def users_any_inside_home_geofence(
@@ -878,7 +931,6 @@ def _evaluate_devices_any_in_state_for_s(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> RuleConditionStatusOut:
-    del rule  # unused; signature matches sibling evaluators
     label = f"Any device {condition.state.value} {_format_dwell_need_s(condition.min_duration_s)}+"
     if ctx.device_state is None:
         return RuleConditionStatusOut(
@@ -888,6 +940,7 @@ def _evaluate_devices_any_in_state_for_s(
             met=False,
         )
     now_epoch = ctx.now.timestamp()
+    eligible_since = rule_eligible_since(rule, ctx)
     matched_labels: list[str] = []
     pending_labels: list[str] = []
     unmet_labels: list[str] = []
@@ -910,7 +963,8 @@ def _evaluate_devices_any_in_state_for_s(
         if since is None:
             pending_labels.append(f"{device_label} (dwell not started)")
             continue
-        elapsed_s = now_epoch - since
+        effective_since = since if eligible_since is None else max(since, eligible_since)
+        elapsed_s = now_epoch - effective_since
         elapsed_label = _format_dwell_elapsed_s(elapsed_s)
         if elapsed_s >= condition.min_duration_s:
             matched_labels.append(f"{device_label} {elapsed_label}")
