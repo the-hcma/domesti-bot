@@ -1,15 +1,44 @@
-"""Daily cron materialization for local_time_window eligibility wakes."""
+"""Daily cron materialization for after_local_time / local_time_window eligibility wakes."""
 
 from __future__ import annotations
 
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
-from app.api.schemas import LocalTimeWindowCondition, RuleOut
+from app.api.schemas import AfterLocalTimeCondition, LocalTimeWindowCondition, RuleOut
 from app.astronomical_schedule import cron_expression_for_local_datetime
 from app.device_enums import RuleTrigger
 
 _HHMM_RE_PARTS = 2
+
+
+def after_local_time_start_datetime(
+    condition: AfterLocalTimeCondition,
+    *,
+    local_date: date,
+    timezone: ZoneInfo,
+) -> datetime | None:
+    """Return today's gate-open instant from ``time_hhmm`` in ``timezone``."""
+    parsed = _parse_hhmm_parts(condition.time_hhmm)
+    if parsed is None:
+        return None
+    hour, minute = parsed
+    return datetime.combine(local_date, time(hour=hour, minute=minute), tzinfo=timezone)
+
+
+def extract_top_level_after_local_time(rule: RuleOut) -> AfterLocalTimeCondition | None:
+    """Return the single top-level ``after_local_time``, if present.
+
+    Nested ``any``/``all`` groups are ignored — eligibility wakes require a
+    top-level gate (same contract as ``local_time_window`` and astronomical
+    anchors).
+    """
+    gates: list[AfterLocalTimeCondition] = [
+        condition for condition in rule.conditions.all if isinstance(condition, AfterLocalTimeCondition)
+    ]
+    if len(gates) != 1:
+        return None
+    return gates[0]
 
 
 def extract_top_level_local_time_window(rule: RuleOut) -> LocalTimeWindowCondition | None:
@@ -57,6 +86,27 @@ def local_time_window_start_datetime(
     return datetime.combine(local_date, time(hour=hour, minute=minute), tzinfo=timezone)
 
 
+def materialize_after_local_time_cron(
+    rule: RuleOut,
+    *,
+    timezone: ZoneInfo,
+    now: datetime,
+) -> str | None:
+    """Return today's once-per-day cron for an after_local_time eligibility rule."""
+    condition = extract_top_level_after_local_time(rule)
+    if condition is None:
+        return None
+    local_now = now.astimezone(timezone) if now.tzinfo is not None else now.replace(tzinfo=timezone)
+    start_dt = after_local_time_start_datetime(
+        condition,
+        local_date=local_now.date(),
+        timezone=timezone,
+    )
+    if start_dt is None:
+        return None
+    return cron_expression_for_local_datetime(start_dt)
+
+
 def materialize_local_time_window_cron(
     rule: RuleOut,
     *,
@@ -76,6 +126,34 @@ def materialize_local_time_window_cron(
     if start_dt is None:
         return None
     return cron_expression_for_local_datetime(start_dt)
+
+
+def uses_after_local_time_eligibility_wake(rule: RuleOut) -> bool:
+    """True when dwell/device_state rules need a one-shot eval at gate open.
+
+    Implicit eligibility (no ``scheduled`` trigger, no ``schedule_cron``): the
+    evaluator materializes today's top-level ``after_local_time`` instant and
+    evaluates once when that instant is due. Co-equal with
+    ``local_time_window`` / astronomical eligibility wakes — not a hand-rolled
+    clock cron. Mutually exclusive with those in practice: a rule with both a
+    top-level ``local_time_window`` (or astronomical anchor) and a top-level
+    ``after_local_time`` only wakes on the former (checked first in
+    ``RuleEvaluator._resolve_schedule_cron``) — the ``after_local_time`` gate
+    is still evaluated correctly by ``evaluate_rule``, it just does not arm a
+    second wake.
+    """
+    if RuleTrigger.SCHEDULED in rule.triggers:
+        return False
+    if extract_top_level_after_local_time(rule) is None:
+        return False
+    if (rule.schedule_cron or "").strip() != "":
+        return False
+    return RuleTrigger.DEVICE_STATE in rule.triggers or RuleTrigger.DWELL_SATISFIED in rule.triggers
+
+
+def uses_after_local_time_materialized_schedule(rule: RuleOut) -> bool:
+    """True when the evaluator materializes a daily gate-open cron for ``rule``."""
+    return uses_after_local_time_eligibility_wake(rule)
 
 
 def uses_local_time_window_eligibility_wake(rule: RuleOut) -> bool:

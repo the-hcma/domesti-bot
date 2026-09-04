@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import (
+    AfterLocalTimeCondition,
     AfterSunsetCondition,
     AllConditionsCondition,
     Ep1ReadingCompareCondition,
@@ -25,10 +26,15 @@ from app.device_enums import (
     RuleTrigger,
 )
 from app.local_time_schedule import (
+    after_local_time_start_datetime,
+    extract_top_level_after_local_time,
     extract_top_level_local_time_window,
     is_local_time_window_open,
     local_time_window_start_datetime,
+    materialize_after_local_time_cron,
     materialize_local_time_window_cron,
+    uses_after_local_time_eligibility_wake,
+    uses_after_local_time_materialized_schedule,
     uses_local_time_window_eligibility_wake,
     uses_local_time_window_materialized_schedule,
 )
@@ -229,6 +235,93 @@ def test_uses_local_time_window_eligibility_wake_false_when_scheduled() -> None:
 def test_uses_local_time_window_eligibility_wake_false_with_cron() -> None:
     with_cron = _eligibility_rule().model_copy(update={"schedule_cron": "0 21 * * *"})
     assert uses_local_time_window_eligibility_wake(with_cron) is False
+
+
+def test_extract_top_level_after_local_time_single() -> None:
+    gate = extract_top_level_after_local_time(_after_local_time_eligibility_rule())
+    assert gate is not None
+    assert gate.time_hhmm == "21:00"
+
+
+def test_after_local_time_start_datetime_builds_today() -> None:
+    gate = AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00")
+    tz = ZoneInfo("America/New_York")
+    start = after_local_time_start_datetime(
+        gate,
+        local_date=datetime(2023, 11, 14, tzinfo=tz).date(),
+        timezone=tz,
+    )
+    assert start == datetime(2023, 11, 14, 21, 0, tzinfo=tz)
+
+
+def test_materialize_after_local_time_cron() -> None:
+    rule = _after_local_time_eligibility_rule()
+    tz = ZoneInfo("America/New_York")
+    now = datetime(2023, 11, 14, 18, 0, tzinfo=tz)
+    cron = materialize_after_local_time_cron(rule, timezone=tz, now=now)
+    assert cron == "0 21 * * *"
+
+
+def test_uses_after_local_time_eligibility_wake_for_device_state() -> None:
+    assert uses_after_local_time_eligibility_wake(_after_local_time_eligibility_rule()) is True
+    assert uses_after_local_time_materialized_schedule(_after_local_time_eligibility_rule()) is True
+
+
+def test_uses_after_local_time_eligibility_wake_false_when_scheduled() -> None:
+    with_scheduled = _after_local_time_eligibility_rule().model_copy(
+        update={"triggers": [RuleTrigger.DEVICE_STATE, RuleTrigger.SCHEDULED]},
+    )
+    assert uses_after_local_time_eligibility_wake(with_scheduled) is False
+
+
+def test_uses_after_local_time_eligibility_wake_false_with_cron() -> None:
+    with_cron = _after_local_time_eligibility_rule().model_copy(update={"schedule_cron": "0 21 * * *"})
+    assert uses_after_local_time_eligibility_wake(with_cron) is False
+
+
+def test_uses_after_local_time_eligibility_wake_false_without_top_level_gate() -> None:
+    without_gate = _after_local_time_eligibility_rule().model_copy(
+        update={
+            "conditions": RuleConditionsOut(
+                all=[c for c in _after_local_time_eligibility_rule().conditions.all if c.type != "after_local_time"],
+            ),
+        },
+    )
+    assert uses_after_local_time_eligibility_wake(without_gate) is False
+
+
+def _after_local_time_eligibility_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                Ep1ReadingCompareCondition(
+                    type="ep1_reading_compare",
+                    comparison=Ep1ReadingComparison.BELOW,
+                    metric=Ep1ReadingMetric.ILLUMINANCE_LX,
+                    threshold=34.0,
+                    device=RuleConditionDeviceRefOut(
+                        device_id="aa:bb:cc:dd:ee:01",
+                        family_id=DeviceFamilyId.EP1,
+                    ),
+                ),
+                UsersInsideGeofenceCondition(
+                    type="users_inside_geofence",
+                    geofence_id="house",
+                    user_ids=["henrique"],
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="evening-after-local-time-eligibility",
+        label="Evening after-local-time eligibility",
+        min_location_accuracy_m=50,
+        notification_emails=["ops@example.com"],
+        notify_on_fire=True,
+        triggers=[RuleTrigger.DEVICE_STATE],
+    )
 
 
 def _eligibility_rule() -> RuleOut:
