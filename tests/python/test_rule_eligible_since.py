@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 from app.api.schemas import (
@@ -24,6 +26,9 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
+from app.domesti_bot_cli import DeviceManagersState
+from app.ep1_device_manager import Ep1DeviceManager
+from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, rule_eligible_since
 from app.rule_validation import build_roster_user_id_lookup
 
@@ -258,6 +263,13 @@ def test_rule_eligible_since_any_group_with_dwell_sibling_does_not_recurse() -> 
     # check "is the group already satisfied" would recurse back into itself.
     # It must be excluded from the safe-to-evaluate allowlist and treated
     # conservatively (still clamps) instead.
+    #
+    # device_state must be populated: _evaluate_devices_any_in_state_for_s
+    # returns met=False *before* its own rule_eligible_since call when
+    # device_state is None (discovery not ready), so with the default empty
+    # ctx this test would still pass even if the exclusion regressed —
+    # it needs to reach that call to actually exercise the recursion it
+    # claims to rule out.
     now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
     rule = _rule_with_conditions(
         [
@@ -280,8 +292,9 @@ def test_rule_eligible_since_any_group_with_dwell_sibling_does_not_recurse() -> 
             ),
         ],
     )
+    device_state = _ep1_device_state(_FakeEp1Sensor("28:05:a5:28:c8:48", "Office EP1", occupied=False))
     expected = datetime(2026, 9, 2, 21, 0, tzinfo=_TZ).timestamp()
-    assert rule_eligible_since(rule, _ctx(now=now)) == expected
+    assert rule_eligible_since(rule, _ctx(now=now, device_state=device_state)) == expected
 
 
 def test_rule_eligible_since_any_group_ignores_gate_nested_deeper_than_direct_child() -> None:
@@ -338,6 +351,7 @@ def _ctx(
     now: datetime,
     geofences: tuple[GeofenceOut, ...] = (),
     user_inside_house: bool | None = None,
+    device_state: DeviceManagersState | None = None,
 ) -> RuleEvaluationContext:
     sun = compute_rules_sun_out(_SETTINGS, now=now)
     user_display_names = {"henrique": "Henrique"}
@@ -361,6 +375,34 @@ def _ctx(
         timezone=_TZ,
         user_display_names=user_display_names,
         user_locations=user_locations,
+        device_state=device_state,
+    )
+
+
+class _FakeEp1Sensor:
+    def __init__(self, identifier: str, label: str, *, occupied: bool) -> None:
+        self.identifier = identifier
+        self.mac_address = identifier
+        self.preferred_label = label
+        self._occupancy_bool = occupied
+
+    @property
+    def occupancy_state(self) -> str:
+        return DeviceConditionState.OCCUPIED.value if self._occupancy_bool else DeviceConditionState.CLEAR.value
+
+
+def _ep1_device_state(*sensors: _FakeEp1Sensor) -> DeviceManagersState:
+    mgr = MagicMock(spec=Ep1DeviceManager)
+    mgr.devices = tuple(sensors)
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        ep1_mgr=mgr,
+        args=argparse.Namespace(),
+        cache_path=None,
+        kasa_mgr=MagicMock(spec=KasaDeviceManager),
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        vizio_mgr=None,
     )
 
 
