@@ -211,8 +211,14 @@ def test_rule_eligible_since_any_group_uses_earliest_of_multiple_open_alternativ
 
 def test_rule_eligible_since_any_group_no_clamp_when_alternative_already_met() -> None:
     # The geofence branch is currently true, so the any-group is satisfied
-    # without needing after_local_time at all — no clamp.
-    now = datetime(2026, 9, 2, 18, 0, tzinfo=_TZ)
+    # without needing after_local_time at all — no clamp. Uses the same
+    # gate-open time as the "not met" twin below (21:10, after the 21:00
+    # gate) rather than a time when the gate is simply still closed: with a
+    # closed gate this test would pass identically whether or not the
+    # sibling-met check actually works (a closed gate contributes nothing
+    # either way), so it would not catch a regression that deletes the
+    # sibling-met suppression from _any_group_temporal_candidates.
+    now = datetime(2026, 9, 2, 21, 10, tzinfo=_TZ)
     rule = _rule_with_conditions(
         [
             AnyConditionsCondition(
