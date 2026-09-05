@@ -346,6 +346,18 @@ _HOUSE_GEOFENCE = GeofenceOut(
 )
 
 
+class _FakeEp1Sensor:
+    def __init__(self, identifier: str, label: str, *, occupied: bool) -> None:
+        self.identifier = identifier
+        self.mac_address = identifier
+        self.preferred_label = label
+        self._occupancy_bool = occupied
+
+    @property
+    def occupancy_state(self) -> str:
+        return DeviceConditionState.OCCUPIED.value if self._occupancy_bool else DeviceConditionState.CLEAR.value
+
+
 def _ctx(
     *,
     now: datetime,
@@ -379,16 +391,18 @@ def _ctx(
     )
 
 
-class _FakeEp1Sensor:
-    def __init__(self, identifier: str, label: str, *, occupied: bool) -> None:
-        self.identifier = identifier
-        self.mac_address = identifier
-        self.preferred_label = label
-        self._occupancy_bool = occupied
-
-    @property
-    def occupancy_state(self) -> str:
-        return DeviceConditionState.OCCUPIED.value if self._occupancy_bool else DeviceConditionState.CLEAR.value
+def _dwell_condition() -> DevicesAnyInStateForSCondition:
+    return DevicesAnyInStateForSCondition(
+        type="devices_any_in_state_for_s",
+        devices=[
+            RuleConditionDeviceRefOut(
+                device_id="28:05:a5:28:c8:48",
+                family_id=DeviceFamilyId.EP1,
+            ),
+        ],
+        min_duration_s=10,
+        state=DeviceConditionState.CLEAR,
+    )
 
 
 def _ep1_device_state(*sensors: _FakeEp1Sensor) -> DeviceManagersState:
@@ -403,20 +417,6 @@ def _ep1_device_state(*sensors: _FakeEp1Sensor) -> DeviceManagersState:
         sonos_mgr=None,
         tailwind_mgr=None,
         vizio_mgr=None,
-    )
-
-
-def _dwell_condition() -> DevicesAnyInStateForSCondition:
-    return DevicesAnyInStateForSCondition(
-        type="devices_any_in_state_for_s",
-        devices=[
-            RuleConditionDeviceRefOut(
-                device_id="28:05:a5:28:c8:48",
-                family_id=DeviceFamilyId.EP1,
-            ),
-        ],
-        min_duration_s=10,
-        state=DeviceConditionState.CLEAR,
     )
 
 
