@@ -73,6 +73,7 @@ import type {
   Ep1NoisePreSharedKeyTestIn,
   Ep1OccupancyTuningOut,
   Ep1OccupancyTuningSetIn,
+  TailwindHubInfoOut,
   TailwindTokenSetOut,
   TailwindTokenSettingsOut,
   TailwindTokenTestIn,
@@ -466,6 +467,9 @@ export const api = {
       "GET",
       `/v1/settings/ep1/devices/${encodeURIComponent(deviceId)}/occupancy-tuning`,
     );
+  },
+  fetchTailwindHubInfo(): Promise<TailwindHubInfoOut> {
+    return call<TailwindHubInfoOut>("GET", "/v1/settings/tailwind/hub-info");
   },
   fetchTailwindTokenSettings(): Promise<TailwindTokenSettingsOut> {
     return call<TailwindTokenSettingsOut>("GET", "/v1/settings/tailwind-token");

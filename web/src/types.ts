@@ -427,6 +427,17 @@ export interface Ep1OccupancyTuningSetIn {
   trigger_sensitivity?: number | null;
 }
 
+export interface TailwindHubInfoOut {
+  device_id: string | null;
+  firmware_version: string | null;
+  host: string | null;
+  hub_mac: string | null;
+  number_of_doors: number | null;
+  product: string | null;
+  protocol_version: string | null;
+  reachable: boolean;
+}
+
 export interface TailwindTokenSettingsOut {
   configured: boolean;
   source: TailwindTokenSource;

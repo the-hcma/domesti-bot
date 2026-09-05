@@ -1227,6 +1227,46 @@ class Ep1NoisePreSharedKeyTestIn(BaseModel):
     )
 
 
+class TailwindHubInfoOut(BaseModel):
+    """GoTailwind hub hardware identity captured on the last successful connect."""
+
+    device_id: str | None = Field(
+        default=None,
+        description="Raw controller device id (``dev_id``); ``None`` when not connected.",
+    )
+    firmware_version: str | None = Field(
+        default=None,
+        description="Controller firmware version (``fw_ver``); ``None`` when not connected.",
+    )
+    host: str | None = Field(
+        default=None,
+        description="HTTP host used for the last successful connect; ``None`` when not connected.",
+    )
+    hub_mac: str | None = Field(
+        default=None,
+        description="Normalized hub MAC address; ``None`` when not connected.",
+    )
+    number_of_doors: int | None = Field(
+        default=None,
+        description="Door count the controller reported; ``None`` when not connected.",
+    )
+    product: str | None = Field(
+        default=None,
+        description="Hub model / product string (e.g. ``iQ3``); ``None`` when not connected.",
+    )
+    protocol_version: str | None = Field(
+        default=None,
+        description="Tailwind local API protocol version (``proto_ver``); ``None`` when not connected.",
+    )
+    reachable: bool = Field(
+        ...,
+        description=(
+            "True when GoTailwind discovery succeeded and the running manager holds live hub "
+            "metadata. False when no token is configured or discovery failed / is still pending."
+        ),
+    )
+
+
 class TailwindTokenSetIn(BaseModel):
     """Body for ``PUT /v1/settings/tailwind-token`` (token is never returned)."""
 
