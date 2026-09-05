@@ -22,7 +22,7 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       pr: ${{ steps.release.outputs.pr }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@# v7.0.1 7.0.1 # v7.0.1
 
       # Config/manifest own release-type + uv.lock self-version bump (extra-files).
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -105,7 +105,7 @@ jobs:
       contents: write
       pull-requests: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@# v7.0.1 7.0.1 # v7.0.1
         with:
           ref: ${{ needs.resolve-release-pr.outputs.head_sha }}
 
@@ -161,7 +161,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@# v7.0.1 7.0.1 # v7.0.1
         with:
           fetch-depth: 0
 
