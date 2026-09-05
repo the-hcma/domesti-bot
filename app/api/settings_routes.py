@@ -42,6 +42,7 @@ from app.api.schemas import (
     KasaMotionTuningOut,
     KasaMotionTuningSetIn,
     SettingsCredentialsTestOut,
+    TailwindHubInfoOut,
     TailwindTokenSetIn,
     TailwindTokenSetOut,
     TailwindTokenSettingsOut,
@@ -671,6 +672,13 @@ async def clear_tailwind_token(request: Request) -> TailwindTokenSettingsOut:
     return _tailwind_settings_response(request)
 
 
+@router.get("/tailwind/hub-info", response_model=TailwindHubInfoOut)
+async def get_tailwind_hub_info(request: Request) -> TailwindHubInfoOut:
+    """Report GoTailwind hub hardware identity (model / firmware) from the live manager."""
+    del request
+    return _tailwind_hub_info_response()
+
+
 @router.get("/tailwind-token", response_model=TailwindTokenSettingsOut)
 async def get_tailwind_token_settings(request: Request) -> TailwindTokenSettingsOut:
     """Return Tailwind credential status (includes stored DB token when present)."""
@@ -1068,6 +1076,27 @@ def _stored_token_for_settings(cache_path: Path | None) -> str | None:
         return load_tailwind_token_from_db(cache_path)
     except SecretsDecryptError:
         return None
+
+
+def _tailwind_hub_info_response() -> TailwindHubInfoOut:
+    state: DeviceManagersState | None = runtime.device_state
+    mgr = state.tailwind_mgr if state is not None else None
+    # ``product`` is populated only once ``fetch()`` reaches ``Tailwind.status()``.
+    # ``host`` alone is not enough: a failed in-place ``rediscover()`` leaves the
+    # manager installed with ``_host`` re-set (assigned early in ``fetch()``) but
+    # ``_hub_metadata`` cleared, so gate reachability on the metadata itself.
+    if mgr is None or mgr.host is None or mgr.product is None:
+        return TailwindHubInfoOut(reachable=False)
+    return TailwindHubInfoOut(
+        reachable=True,
+        device_id=mgr.device_id,
+        firmware_version=mgr.firmware_version,
+        host=mgr.host,
+        hub_mac=mgr.hub_mac,
+        number_of_doors=mgr.number_of_doors,
+        product=mgr.product,
+        protocol_version=mgr.protocol_version,
+    )
 
 
 def _tailwind_settings_response(request: Request) -> TailwindTokenSettingsOut:

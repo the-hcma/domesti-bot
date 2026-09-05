@@ -8,9 +8,20 @@ import {
   setSettingsDialogStatus,
 } from "./settings-status.js";
 import { showSuccessToast } from "./ui-toast.js";
-import type { TailwindTokenSettingsOut } from "./types.js";
+import type { TailwindHubInfoOut, TailwindTokenSettingsOut } from "./types.js";
 
 const TAILWIND_WEB_DASHBOARD_HREF = "https://web.gotailwind.com";
+
+const HUB_INFO_NOT_CONNECTED =
+  "Hub not connected — save a token, then restart domesti-bot so discovery can reach the controller.";
+
+function appendHubInfoRow(list: HTMLElement, term: string, value: string): void {
+  const dt = document.createElement("dt");
+  dt.textContent = term;
+  const dd = document.createElement("dd");
+  dd.textContent = value;
+  list.append(dt, dd);
+}
 
 function appendTailwindTokenIntro(parent: HTMLElement): void {
   const intro = document.createElement("p");
@@ -43,6 +54,46 @@ export async function mountTailwindSettingsPanel(
   form.noValidate = true;
 
   appendTailwindTokenIntro(form);
+
+  const hubInfo = document.createElement("dl");
+  hubInfo.className = "settings-dialog-info tailwind-hub-info";
+  hubInfo.hidden = true;
+  const hubInfoEmpty = document.createElement("p");
+  hubInfoEmpty.className = "settings-dialog-status";
+  hubInfoEmpty.textContent = HUB_INFO_NOT_CONNECTED;
+  hubInfoEmpty.hidden = true;
+
+  const renderHubInfo = (info: TailwindHubInfoOut): void => {
+    hubInfo.replaceChildren();
+    if (!info.reachable) {
+      hubInfo.hidden = true;
+      hubInfoEmpty.hidden = false;
+      return;
+    }
+    if (info.product) appendHubInfoRow(hubInfo, "Model", info.product);
+    if (info.firmware_version) appendHubInfoRow(hubInfo, "Firmware", info.firmware_version);
+    if (info.protocol_version) appendHubInfoRow(hubInfo, "Protocol", info.protocol_version);
+    if (info.number_of_doors !== null)
+      appendHubInfoRow(hubInfo, "Doors", String(info.number_of_doors));
+    if (info.hub_mac) appendHubInfoRow(hubInfo, "Hub MAC", info.hub_mac);
+    if (info.host) appendHubInfoRow(hubInfo, "Host", info.host);
+    hubInfo.hidden = false;
+    hubInfoEmpty.hidden = true;
+  };
+
+  let hubInfoRefreshGeneration = 0;
+  const refreshHubInfo = async (): Promise<void> => {
+    const generation = ++hubInfoRefreshGeneration;
+    try {
+      const info = await api.fetchTailwindHubInfo();
+      if (generation !== hubInfoRefreshGeneration) return;
+      renderHubInfo(info);
+    } catch {
+      if (generation !== hubInfoRefreshGeneration) return;
+      hubInfo.hidden = true;
+      hubInfoEmpty.hidden = true;
+    }
+  };
 
   const status = document.createElement("p");
   status.className = "settings-dialog-status";
@@ -88,7 +139,7 @@ export async function mountTailwindSettingsPanel(
   clearBtn.className = "btn btn-secondary";
   clearBtn.textContent = "Clear stored token";
   actions.append(saveBtn, testBtn, clearBtn);
-  form.append(status, label, actions);
+  form.append(hubInfo, hubInfoEmpty, status, label, actions);
   container.append(form);
 
   let settingsConfigured = false;
@@ -167,6 +218,7 @@ export async function mountTailwindSettingsPanel(
         setTokenRevealed(false);
         const s = await api.fetchTailwindTokenSettings();
         applyTokenFieldsFromSettings(s);
+        await refreshHubInfo();
         if (out.restart_required) {
           showStatusMessage(
             "Token saved. Restart domesti-bot (or remove TAILWIND_TOKEN) so garage doors use it.",
@@ -231,6 +283,7 @@ export async function mountTailwindSettingsPanel(
         syncTestEnabled();
         showSuccessToast("Stored token cleared.");
         await refreshStatus();
+        await refreshHubInfo();
         await options.onDevicesChanged?.();
       } catch (err) {
         showStatusMessage(
@@ -242,4 +295,5 @@ export async function mountTailwindSettingsPanel(
   });
 
   await refreshStatus();
+  await refreshHubInfo();
 }
