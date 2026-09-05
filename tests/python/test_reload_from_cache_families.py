@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app import device_discovery_store
-from app.gotailwind_device_manager import GotailwindDeviceManager
+from app.gotailwind_device_manager import GotailwindDeviceManager, _HubMetadata
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
 
@@ -140,9 +140,17 @@ async def test_tailwind_reload_from_cache_failure_restores_discovery_source(
         token="123456",
         display_names_store_path=db,
     )
+    seeded_metadata = _HubMetadata(
+        device_id="_aa_bb_c0_a8_01_32_",
+        firmware_version="10.80",
+        number_of_doors=2,
+        product="iQ3",
+        protocol_version="0.1",
+    )
     mgr._alias_to_device = {"door-1": MagicMock()}
     mgr._host = "192.168.1.50"
     mgr._hub_mac = "aa:bb:c0:a8:01:32"
+    mgr._hub_metadata = seeded_metadata
     mgr._last_discovery_source = "discovery"
     mgr._tailwind = MagicMock()
     mgr._tailwind.close = AsyncMock()
@@ -153,6 +161,40 @@ async def test_tailwind_reload_from_cache_failure_restores_discovery_source(
     assert ok is False
     assert mgr.host == "192.168.1.50"
     assert mgr.last_discovery_source == "discovery"
+    assert mgr._hub_metadata is seeded_metadata
+    assert mgr.product == "iQ3"
+
+
+@pytest.mark.asyncio
+async def test_tailwind_reload_from_cache_clears_hub_metadata_before_fetch(tmp_path) -> None:
+    """Stale hub metadata is dropped before ``fetch()`` runs, not merely restored on failure."""
+    db = tmp_path / "cached.sqlite"
+    device_discovery_store.save_tailwind_host(db, "192.168.1.40", mac="aa:bb:c0:a8:01:28")
+    mgr = GotailwindDeviceManager(token="123456", display_names_store_path=db)
+    mgr._alias_to_device = {"door-1": MagicMock()}
+    mgr._host = "192.168.1.50"
+    mgr._hub_mac = "aa:bb:c0:a8:01:32"
+    mgr._hub_metadata = _HubMetadata(
+        device_id="_aa_bb_c0_a8_01_32_",
+        firmware_version="10.80",
+        number_of_doors=2,
+        product="iQ3",
+        protocol_version="0.1",
+    )
+    mgr._tailwind = MagicMock()
+    mgr._tailwind.close = AsyncMock()
+
+    metadata_when_fetch_ran: list[object] = []
+
+    async def _capture_fetch() -> None:
+        metadata_when_fetch_ran.append(mgr._hub_metadata)
+        mgr._alias_to_device = {}
+
+    with patch.object(mgr, "fetch", _capture_fetch):
+        ok = await mgr.reload_from_cache(cache_path=db)
+
+    assert ok is True
+    assert metadata_when_fetch_ran == [None]
 
 
 @pytest.mark.asyncio
@@ -167,6 +209,13 @@ async def test_tailwind_reload_from_cache_empty_clears_discovery_source(
     mgr._alias_to_device = {"door-1": MagicMock()}
     mgr._host = "192.168.1.50"
     mgr._hub_mac = "aa:bb:c0:a8:01:32"
+    mgr._hub_metadata = _HubMetadata(
+        device_id="_aa_bb_c0_a8_01_32_",
+        firmware_version="10.80",
+        number_of_doors=2,
+        product="iQ3",
+        protocol_version="0.1",
+    )
     mgr._last_discovery_source = "discovery"
     mgr._tailwind = MagicMock()
     mgr._tailwind.close = AsyncMock()
@@ -176,6 +225,8 @@ async def test_tailwind_reload_from_cache_empty_clears_discovery_source(
     assert ok is True
     assert mgr.last_discovery_source is None
     assert mgr.host is None
+    assert mgr._hub_metadata is None
+    assert mgr.product is None
 
 
 @pytest.mark.asyncio

@@ -23,7 +23,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 # ``gotailwind`` depends on ``backoff``, which still calls ``asyncio.iscoroutinefunction``.
 # That API is deprecated in Python 3.14+ (removed in 3.16); delegate to ``inspect``.
@@ -46,6 +46,16 @@ _LOGGER = logging.getLogger(__name__)
 
 # Same browse type as ``tailwind scan`` (gotailwind CLI).
 _MDNS_HTTP_TCP_LOCAL = "_http._tcp.local."
+
+
+class _HubMetadata(NamedTuple):
+    """GoTailwind controller identity captured from ``Tailwind.status()``."""
+
+    device_id: str
+    firmware_version: str
+    number_of_doors: int
+    product: str
+    protocol_version: str
 
 
 class TailwindDiscoveryError(RuntimeError):
@@ -242,6 +252,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         )
         self._host: str | None = None
         self._hub_mac: str | None = None
+        self._hub_metadata: _HubMetadata | None = None
         self._last_discovery_source: str | None = None
         self._tailwind: Tailwind | None = None
         self._alias_to_device: dict[str, GotailwindDevice] | None = None
@@ -284,6 +295,11 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
     async def close(self, identifier: str) -> None:
         await self._device_for(identifier).close()
 
+    @property
+    def device_id(self) -> str | None:
+        """Hub controller id (``dev_id``) from the last successful connect; ``None`` when not connected."""
+        return self._hub_metadata.device_id if self._hub_metadata is not None else None
+
     async def disconnect(self) -> None:
         """Close the HTTP session; call ``fetch`` again to reuse the manager."""
         if self._tailwind is not None:
@@ -292,6 +308,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         self._alias_to_device = None
         self._host = None
         self._hub_mac = None
+        self._hub_metadata = None
         self._last_discovery_source = None
 
     @property
@@ -388,6 +405,22 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
                 )
             )
         self._finalize_tailwind_devices(uniq)
+        # Assign only after the door roster is finalized so ``_hub_metadata``
+        # (and the ``product`` reachability gate in the hub-info route) is a
+        # true full-``fetch()`` marker — a raise in the loop / finalize above
+        # must not leave a half-fetched manager reporting ``reachable``.
+        self._hub_metadata = _HubMetadata(
+            device_id=status.device_id,
+            firmware_version=status.firmware_version,
+            number_of_doors=status.number_of_doors,
+            product=status.product,
+            protocol_version=status.protocol_version,
+        )
+
+    @property
+    def firmware_version(self) -> str | None:
+        """Hub firmware version (``fw_ver``) from the last successful connect; ``None`` when not connected."""
+        return self._hub_metadata.firmware_version if self._hub_metadata is not None else None
 
     def get_device_by_alias(self, identifier: str) -> GotailwindDevice | None:
         """Resolve a door by Tailwind ``door_id`` or by numeric index as a string (e.g. ``\"0\"``)."""
@@ -418,8 +451,23 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         """``cache`` when the hub host was explicit or cached; ``discovery`` after mDNS hub lookup."""
         return self._last_discovery_source
 
+    @property
+    def number_of_doors(self) -> int | None:
+        """Door count the controller reported on connect; ``None`` when not connected."""
+        return self._hub_metadata.number_of_doors if self._hub_metadata is not None else None
+
     async def open(self, identifier: str) -> None:
         await self._device_for(identifier).open()
+
+    @property
+    def product(self) -> str | None:
+        """Hub model / product string (e.g. ``\"iQ3\"``); ``None`` when not connected."""
+        return self._hub_metadata.product if self._hub_metadata is not None else None
+
+    @property
+    def protocol_version(self) -> str | None:
+        """Tailwind local API protocol version (``proto_ver``); ``None`` when not connected."""
+        return self._hub_metadata.protocol_version if self._hub_metadata is not None else None
 
     async def rediscover(self) -> None:
         """Clear the session and run :meth:`fetch` again (same host/env/mDNS rules as the first connect).
@@ -456,6 +504,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             self._tailwind = None
             self._host = None
             self._hub_mac = None
+            self._hub_metadata = None
             self._last_discovery_source = None
             _LOGGER.info("Tailwind reload_from_cache: empty cache; cleared device map")
             return True
@@ -465,12 +514,17 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
         previous_map = self._alias_to_device
         previous_host = self._host
         previous_hub_mac = self._hub_mac
+        previous_hub_metadata = self._hub_metadata
         previous_source = self._last_discovery_source
 
         self._host_arg = host
         self._tailwind = None
         self._alias_to_device = None
         self._host = None
+        # Drop stale identity up front (restored below only if reconnect fails) so a
+        # concurrent GET /v1/settings/tailwind/hub-info during ``fetch()`` cannot pair
+        # the freshly-set ``_host`` / ``_hub_mac`` with the previous hub's metadata.
+        self._hub_metadata = None
         try:
             await self.fetch()
         except Exception:
@@ -490,6 +544,7 @@ class GotailwindDeviceManager(DoorDeviceManager[GotailwindDevice]):
             self._alias_to_device = previous_map
             self._host = previous_host
             self._hub_mac = previous_hub_mac
+            self._hub_metadata = previous_hub_metadata
             self._last_discovery_source = previous_source
             return False
 
