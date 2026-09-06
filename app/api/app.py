@@ -114,6 +114,10 @@ _QUIET_ACCESS_LOG_PATHS: frozenset[str] = frozenset(
     }
 )
 
+# Every response under this prefix is sent with ``Cache-Control: no-store``
+# (see :class:`_SettingsCacheControlMiddleware`).
+_SETTINGS_PATH_PREFIX: str = "/v1/settings"
+
 # Static assets (``/static/…``) are pure transport traffic — missing
 # icons and other browser fetches should not surface at INFO.
 _STATIC_ACCESS_LOG_PREFIX: str = "/static/"
@@ -185,6 +189,25 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
             response.status_code,
             elapsed_ms,
         )
+        return response
+
+
+class _SettingsCacheControlMiddleware(BaseHTTPMiddleware):
+    """Send ``Cache-Control: no-store`` on every ``/v1/settings`` response.
+
+    The settings surface is API-key-gated and several GETs return secret
+    material (Tailwind Local Control Key, Kasa account password, EP1 Noise
+    pre-shared key). ``no-store`` keeps a shared or proxied browser cache from
+    retaining those payloads after the API key or the stored value changes
+    (CWE-525). Applied as middleware rather than per-route so that error
+    responses (401 / 404 / 422) carry the header too.
+    """
+
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
+        response = await call_next(request)
+        path = request.url.path
+        if path == _SETTINGS_PATH_PREFIX or path.startswith(_SETTINGS_PATH_PREFIX + "/"):
+            response.headers["Cache-Control"] = "no-store"
         return response
 
 
@@ -371,6 +394,7 @@ def create_app(args: Any) -> FastAPI:
     app.include_router(rules_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(sensor_collection_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(webhooks_router)
+    app.add_middleware(_SettingsCacheControlMiddleware)
     app.add_middleware(_AccessLogMiddleware)
     app.add_middleware(
         CORSMiddleware,
