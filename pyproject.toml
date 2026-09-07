@@ -77,15 +77,15 @@ dependencies = [
     "soco>=0.31.2",
     "sqlalchemy>=2.0.52",
     "starlette>=1.6.0",
-    "typer>=0.27.1",
+    "typer>=0.27.2",
     "typing-extensions==4.16.0",
     "tzdata==2026.3",
     "uvicorn[standard]>=0.52.4",
     "watchfiles==1.2.0",
-    "wcwidth>=0.8.2",
+    "wcwidth>=0.8.3",
     "websockets>=17.1",
     "yarl>=1.24.5",
-    "zeroconf>=0.150.0",
+    "zeroconf>=0.151.1",
 ]
 
 [project.scripts]
