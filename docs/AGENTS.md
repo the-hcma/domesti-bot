@@ -487,9 +487,10 @@ New senders must comply from day one and ship hermetic tests for provenance (and
 - **Branch / commit creation**: `gh stack init <stack>/<topic>` (first layer) or `gh stack add <stack>/<topic>` (dependent layer), then `git add` + `git commit` with a Conventional Commit message. Always pass branch names to `init`/`add` (non-interactive).
 - **Amending an existing PR** (corrections, review fixes, fixups): commit on the same branch (`git commit --amend` only when hooks allow and the commit is unpushed / you intend a force-with-lease via stack push), or add fixup commits and fold before submit. Prefer `git commit` + `gh stack submit` to update the open PR.
 - **Submitting**: prefer `~/work/ai/repository-helpers/scripts/dev/submit-stack` (local gates + `gh stack submit --auto --open --remote origin`). Bare: `gh stack submit --auto --open --remote origin`.
-- **Filling in PR description** after submit when needed:
-  ```
-  gh pr edit <pr> --body "..."
+- **Filling in PR description** after submit when needed (route `gh` through the
+  throttled wrapper — see `.cursor/rules/github-api-throttle.mdc`):
+  ```shell
+  ~/work/ai/repository-helpers/scripts/gh-api pr edit <pr> --body "..."
   ```
 - **Sync / rebase**: `gh stack sync` / `gh stack rebase` after upstream PRs land (or `start-development --refresh`).
 - **View stack health**: `gh stack view --json` (never interactive `gh stack view` without `--json`).
@@ -517,7 +518,7 @@ New senders must comply from day one and ship hermetic tests for provenance (and
    gh pr view <pr> --json number,title,baseRefName,mergeable,mergeStateStatus,files
    ```
    `mergeable` must be `MERGEABLE`; `mergeStateStatus` must be `CLEAN` or `BLOCKED` (never `DIRTY` / `CONFLICTING`).
-4. **Verify title and description** against the actual diff — titles written before a rebase go stale fast. Update via `gh pr edit …`.
+4. **Verify title and description** against the actual diff — titles written before a rebase go stale fast. Update via `~/work/ai/repository-helpers/scripts/gh-api pr edit …` (throttled wrapper — see `.cursor/rules/github-api-throttle.mdc`).
 5. **Wait for CI** to pass. Do not ask the user to test before CI is green. Prefer `~/work/ai/repository-helpers/scripts/dev/post-pr-submission-checks --pr <pr>`.
 6. **User testing & approval** — explicit user approval is required before merge.
 7. **Merge**: enqueue on **GitHub’s merge queue** with `gh pr merge <pr> --auto --squash` (or Enable auto-merge in the UI). See `docs/STACKING.md`. Do **not** use the `merge-it` label. **Always ask the user for explicit confirmation before enabling auto-merge.**
