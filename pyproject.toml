@@ -65,7 +65,7 @@ dependencies = [
     "mashumaro==3.22",
     "playwright>=1.62.0",
     "prompt_toolkit>=3.0.43",
-    "protobuf>=7.36.0",
+    "protobuf>=7.36.1",
     "pychromecast>=14.0.10",
     "pyproj",
     "pyright>=1.1.411",
