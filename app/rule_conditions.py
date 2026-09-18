@@ -1961,7 +1961,7 @@ def _is_in_before_sunset_window(
     offset_minutes: int,
 ) -> bool:
     end = sunset_minutes + offset_minutes
-    if end >= MINUTES_PER_DAY:
+    if end > MINUTES_PER_DAY:
         return False
     return now_minutes >= sunrise_minutes and now_minutes < end
 

@@ -55,7 +55,7 @@ export function isInBeforeSunsetWindowAt(
   offsetMinutes: number,
 ): boolean {
   const end = sunsetMinutes + offsetMinutes;
-  if (end >= MINUTES_PER_DAY) {
+  if (end > MINUTES_PER_DAY) {
     return false;
   }
   return nowMinutes >= sunriseMinutes && nowMinutes < end;

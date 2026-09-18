@@ -35,7 +35,7 @@ def is_in_before_sunset_window_at(
     offset_minutes: int,
 ) -> bool:
     end = sunset_minutes + offset_minutes
-    if end >= MINUTES_PER_DAY:
+    if end > MINUTES_PER_DAY:
         return False
     return now_minutes >= sunrise_minutes and now_minutes < end
 
@@ -70,6 +70,19 @@ def test_before_sunset_window_is_sunrise_through_sunset() -> None:
     assert is_in_before_sunset_window_at(end - 1, sunrise, sunset, offset) is True
     assert is_in_before_sunset_window_at(end, sunrise, sunset, offset) is False
     assert is_in_before_sunset_window_at(22 * 60, sunrise, sunset, offset) is False
+
+
+def test_before_sunset_window_open_through_23_59_when_end_is_exactly_midnight() -> None:
+    # sunset + offset landing exactly on local midnight (1440) is a fully
+    # representable, non-overflowing endpoint — the window simply runs
+    # through the rest of today — unlike end > MINUTES_PER_DAY, which would
+    # wrap into a day this model can't represent.
+    sunrise = 6 * 60  # 06:00
+    sunset = 20 * 60  # 20:00
+    offset = 240  # sunset + offset == 24:00 exactly
+    end = sunset + offset
+    assert end == MINUTES_PER_DAY
+    assert is_in_before_sunset_window_at(23 * 60 + 59, sunrise, sunset, offset) is True
 
 
 def test_before_sunset_window_closed_when_offset_overflows_past_midnight() -> None:
