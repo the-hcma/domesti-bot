@@ -25,6 +25,7 @@ from app.api.schemas import (
     UserStatusOut,
 )
 from app.astronomical_schedule import (
+    _parse_iso_local,
     astronomical_anchor_datetime,
     extract_astronomical_anchor,
     uses_astronomical_edge_window_open_schedule,
@@ -193,7 +194,7 @@ def build_rules_status(
                     scheduled_detail = f"Evaluates every {effective_cron} from {anchor_label} until {window_label}"
                 elif anchor.condition_type == "before_sunset":
                     sunrise_label = _format_astronomical_anchor_label(
-                        datetime.fromisoformat(sun.sunrise_at.replace("Z", "+00:00")).astimezone(tz),
+                        _parse_iso_local(sun.sunrise_at, tz),
                     )
                     scheduled_detail = f"Evaluates every {effective_cron} from {sunrise_label} until {anchor_label}"
                 else:
