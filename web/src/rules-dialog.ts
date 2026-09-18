@@ -686,6 +686,21 @@ class RulesHubController {
     );
     timeField.append(sunriseRow);
 
+    const existingBeforeSunset = existing?.conditions.all.find(
+      (c): c is Extract<RuleConditionOut, { type: typeof RuleConditionType.BeforeSunset }> =>
+        c.type === RuleConditionType.BeforeSunset,
+    );
+    const beforeSunsetRow = document.createElement("label");
+    beforeSunsetRow.className = "rules-check-row";
+    const beforeSunsetCb = document.createElement("input");
+    beforeSunsetCb.type = "checkbox";
+    beforeSunsetCb.checked = existingBeforeSunset !== undefined;
+    beforeSunsetRow.append(
+      beforeSunsetCb,
+      document.createTextNode(" Before sunset (midnight to sunset)"),
+    );
+    timeField.append(beforeSunsetRow);
+
     const existingWindow = existing?.conditions.all.find(
       (c): c is Extract<RuleConditionOut, { type: typeof RuleConditionType.LocalTimeWindow }> =>
         c.type === RuleConditionType.LocalTimeWindow,
@@ -881,6 +896,13 @@ class RulesHubController {
           conditions.push({
             type: RuleConditionType.BeforeSunrise,
             offset_minutes: 0,
+            window_start: AstronomicalWindowBoundary.Midnight,
+          });
+        }
+        if (beforeSunsetCb.checked) {
+          conditions.push({
+            type: RuleConditionType.BeforeSunset,
+            offset_minutes: existingBeforeSunset?.offset_minutes ?? 0,
             window_start: AstronomicalWindowBoundary.Midnight,
           });
         }

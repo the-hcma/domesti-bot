@@ -2100,8 +2100,8 @@ class RuleOut(BaseModel):
                 )
             if anchor is None:
                 raise ValueError(
-                    "rules with both edge_true and scheduled triggers require a "
-                    "top-level after_sunset or before_sunrise condition"
+                    "rules with both edge_true and scheduled triggers require a top-level "
+                    "after_sunset, before_sunrise, or before_sunset condition"
                 )
             if cron != "":
                 raise ValueError("rules with both edge_true and scheduled triggers do not allow schedule_cron")
@@ -2115,7 +2115,10 @@ class RuleOut(BaseModel):
         if anchor is not None:
             self.schedule_cron = None
             return self
-        raise ValueError("scheduled rules require schedule_cron or a top-level after_sunset / before_sunrise condition")
+        raise ValueError(
+            "scheduled rules require schedule_cron or a top-level "
+            "after_sunset / before_sunrise / before_sunset condition"
+        )
 
 
 def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut]) -> bool:

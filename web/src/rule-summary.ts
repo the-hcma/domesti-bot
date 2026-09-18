@@ -293,6 +293,15 @@ export function formatPresenceEventLabel(
   return `When ${who} leave ${where}`;
 }
 
+function formatSunOffsetPhrase(offsetMinutes: number, anchor: "sunrise" | "sunset"): string {
+  if (offsetMinutes === 0) {
+    return anchor;
+  }
+  const minutes = Math.abs(offsetMinutes);
+  const unit = minutes === 1 ? "minute" : "minutes";
+  return offsetMinutes > 0 ? `${minutes} ${unit} after ${anchor}` : `${minutes} ${unit} before ${anchor}`;
+}
+
 export function formatTimingCondition(condition: RuleConditionOut): string | null {
   switch (condition.type) {
     case RuleConditionType.UsersInsideGeofence:
@@ -310,27 +319,14 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
       return null;
     case RuleConditionType.AfterSunset: {
       const offset = condition.offset_minutes;
-      const start =
-        offset > 0
-          ? `At least ${offset} minute${offset === 1 ? "" : "s"} after sunset`
-          : "After sunset";
+      const start = offset === 0 ? "After sunset" : `At least ${formatSunOffsetPhrase(offset, "sunset")}`;
       return `${start} until midnight`;
     }
     case RuleConditionType.BeforeSunrise: {
-      const offset = condition.offset_minutes;
-      const end =
-        offset > 0
-          ? `until ${offset} minute${offset === 1 ? "" : "s"} before sunrise`
-          : "until sunrise";
-      return `After midnight ${end}`;
+      return `After midnight until ${formatSunOffsetPhrase(condition.offset_minutes, "sunrise")}`;
     }
     case RuleConditionType.BeforeSunset: {
-      const offset = condition.offset_minutes;
-      const end =
-        offset > 0
-          ? `until ${offset} minute${offset === 1 ? "" : "s"} before sunset`
-          : "until sunset";
-      return `After midnight ${end}`;
+      return `After midnight until ${formatSunOffsetPhrase(condition.offset_minutes, "sunset")}`;
     }
     case RuleConditionType.Daylight:
       return "During daylight (sunrise to sunset)";

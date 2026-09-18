@@ -366,6 +366,16 @@ def test_before_sunset_met_before_offset_boundary() -> None:
     assert "Daytime window active" in result.conditions[0].detail
 
 
+def test_before_sunset_not_met_between_offset_boundary_and_sunset() -> None:
+    # Pins the -25 offset itself: 8:15 PM is still before actual sunset
+    # (~8:27 PM) but past sunset-25 (~8:02 PM), so this only fails if the
+    # offset is actually subtracted rather than ignored or its sign flipped.
+    now = datetime(2026, 6, 9, 20, 15, tzinfo=_TZ)
+    result = evaluate_rule(_before_sunset_rule(), _ctx(now=now))
+    assert result.conditions[0].met is False
+    assert "Outside midnight" in result.conditions[0].detail
+
+
 def test_before_sunset_not_met_after_offset_boundary() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     result = evaluate_rule(_before_sunset_rule(), _ctx(now=now))

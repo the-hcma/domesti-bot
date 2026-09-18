@@ -14,6 +14,7 @@ from app.api.schemas import (
     AnyConditionsCondition,
     BeforeLocalTimeCondition,
     BeforeSunriseCondition,
+    BeforeSunsetCondition,
     DevicesAnyInStateForSCondition,
     GeofenceOut,
     LocalTimeWindowCondition,
@@ -145,6 +146,24 @@ def test_rule_eligible_since_before_sunrise_reopens_at_midnight() -> None:
     rule = _rule_with_conditions([BeforeSunriseCondition(type="before_sunrise", offset_minutes=0)])
     expected = datetime(2026, 9, 2, 0, 0, tzinfo=_TZ).timestamp()
     assert rule_eligible_since(rule, _ctx(now=now)) == expected
+
+
+def test_rule_eligible_since_before_sunset_reopens_at_midnight() -> None:
+    # Sept 2 2026 sunset at this lat/lon is ~19:26 local, so sunset-25 is ~19:01.
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [BeforeSunsetCondition(type="before_sunset", offset_minutes=-25)],
+    )
+    expected = datetime(2026, 9, 2, 0, 0, tzinfo=_TZ).timestamp()
+    assert rule_eligible_since(rule, _ctx(now=now)) == expected
+
+
+def test_rule_eligible_since_none_when_before_sunset_gate_closed() -> None:
+    now = datetime(2026, 9, 2, 21, 0, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [BeforeSunsetCondition(type="before_sunset", offset_minutes=-25)],
+    )
+    assert rule_eligible_since(rule, _ctx(now=now)) is None
 
 
 def test_rule_eligible_since_descends_into_nested_all_group() -> None:

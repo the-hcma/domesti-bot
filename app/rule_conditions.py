@@ -1943,8 +1943,7 @@ def _is_in_before_sunrise_window(
     sunrise_minutes: int,
     offset_minutes: int,
 ) -> bool:
-    end = sunrise_minutes + offset_minutes
-    return now_minutes >= 0 and now_minutes < end
+    return _is_in_midnight_to_anchor_window(now_minutes, sunrise_minutes + offset_minutes)
 
 
 def _is_in_before_sunset_window(
@@ -1952,8 +1951,12 @@ def _is_in_before_sunset_window(
     sunset_minutes: int,
     offset_minutes: int,
 ) -> bool:
-    end = sunset_minutes + offset_minutes
-    return now_minutes >= 0 and now_minutes < end
+    return _is_in_midnight_to_anchor_window(now_minutes, sunset_minutes + offset_minutes)
+
+
+def _is_in_midnight_to_anchor_window(now_minutes: int, anchor_minutes: int) -> bool:
+    """Shared body for ``before_sunrise`` / ``before_sunset``: midnight through ``anchor_minutes``."""
+    return now_minutes >= 0 and now_minutes < anchor_minutes
 
 
 def desired_bool_for_device_condition_state(state: DeviceConditionState) -> bool:

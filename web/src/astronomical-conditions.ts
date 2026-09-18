@@ -42,8 +42,7 @@ export function isInBeforeSunriseWindowAt(
   sunriseMinutes: number,
   offsetMinutes: number,
 ): boolean {
-  const end = sunriseMinutes + offsetMinutes;
-  return nowMinutes >= 0 && nowMinutes < end;
+  return isInMidnightToAnchorWindowAt(nowMinutes, sunriseMinutes + offsetMinutes);
 }
 
 export function isInBeforeSunsetWindowAt(
@@ -51,8 +50,12 @@ export function isInBeforeSunsetWindowAt(
   sunsetMinutes: number,
   offsetMinutes: number,
 ): boolean {
-  const end = sunsetMinutes + offsetMinutes;
-  return nowMinutes >= 0 && nowMinutes < end;
+  return isInMidnightToAnchorWindowAt(nowMinutes, sunsetMinutes + offsetMinutes);
+}
+
+// Shared body for isInBeforeSunriseWindowAt / isInBeforeSunsetWindowAt: midnight through anchorMinutes.
+function isInMidnightToAnchorWindowAt(nowMinutes: number, anchorMinutes: number): boolean {
+  return nowMinutes >= 0 && nowMinutes < anchorMinutes;
 }
 
 export function isInAfterSunsetWindow(
@@ -139,10 +142,16 @@ export function beforeSunsetStatusMessage(sun: RulesSunOut): {
   primary: string;
 } {
   const inWindow = isInBeforeSunsetWindow(sun.sunset_at, 0);
-  if (inWindow) {
+  if (inWindow && !sun.is_dark) {
     return {
       dynamicLabel: "Before sunset (dynamic)",
       primary: `Daytime window active — sunset at ${formatLocalTime(sun.sunset_at)}`,
+    };
+  }
+  if (inWindow) {
+    return {
+      dynamicLabel: "Before sunset (dynamic)",
+      primary: `Overnight — window active until sunset at ${formatLocalTime(sun.sunset_at)}`,
     };
   }
   return {
