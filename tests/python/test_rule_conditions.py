@@ -18,6 +18,7 @@ from app.api.schemas import (
     AfterLocalTimeCondition,
     AfterSunsetCondition,
     AnyConditionsCondition,
+    BeforeSunsetCondition,
     DaylightCondition,
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
@@ -331,6 +332,45 @@ def test_after_sunset_not_met_midday() -> None:
     result = evaluate_rule(_evening_rule(), _ctx(now=now))
     assert result.conditions[0].met is False
     assert "Outside sunset" in result.conditions[0].detail
+
+
+def _before_sunset_rule() -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                BeforeSunsetCondition(
+                    type="before_sunset",
+                    offset_minutes=-25,
+                    window_start="midnight",
+                ),
+            ],
+        ),
+        cooldown_s=300,
+        device_actions=[],
+        enabled=True,
+        id="afternoon-window",
+        label="Afternoon window",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.SCHEDULED],
+        schedule_cron="*/10 * * * *",
+    )
+
+
+def test_before_sunset_met_before_offset_boundary() -> None:
+    # June 9 2026 sunset at this lat/lon is ~8:27 PM local, so sunset-25 is ~8:02 PM.
+    now = datetime(2026, 6, 9, 15, 0, tzinfo=_TZ)
+    result = evaluate_rule(_before_sunset_rule(), _ctx(now=now))
+    assert result.conditions[0].met is True
+    assert "Daytime window active" in result.conditions[0].detail
+
+
+def test_before_sunset_not_met_after_offset_boundary() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    result = evaluate_rule(_before_sunset_rule(), _ctx(now=now))
+    assert result.conditions[0].met is False
+    assert "Outside midnight" in result.conditions[0].detail
 
 
 def _daylight_rule() -> RuleOut:

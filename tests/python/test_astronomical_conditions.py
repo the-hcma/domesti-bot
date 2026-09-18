@@ -28,6 +28,15 @@ def is_in_before_sunrise_window_at(
     return now_minutes >= 0 and now_minutes < end
 
 
+def is_in_before_sunset_window_at(
+    now_minutes: int,
+    sunset_minutes: int,
+    offset_minutes: int,
+) -> bool:
+    end = sunset_minutes + offset_minutes
+    return now_minutes >= 0 and now_minutes < end
+
+
 def test_after_sunset_window_is_sunset_through_midnight() -> None:
     sunset = 20 * 60  # 20:00
     assert is_in_after_sunset_window_at(21 * 60, sunset, 0) is True
@@ -44,3 +53,14 @@ def test_before_sunrise_window_is_midnight_through_sunrise() -> None:
     assert is_in_before_sunrise_window_at(6 * 60 + 14, sunrise, 0) is True
     assert is_in_before_sunrise_window_at(6 * 60 + 15, sunrise, 0) is False
     assert is_in_before_sunrise_window_at(22 * 60, sunrise, 0) is False
+
+
+def test_before_sunset_window_is_midnight_through_sunset() -> None:
+    sunset = 20 * 60  # 20:00
+    offset = -25
+    end = sunset + offset  # 19:35
+    assert is_in_before_sunset_window_at(0, sunset, offset) is True
+    assert is_in_before_sunset_window_at(12 * 60, sunset, offset) is True
+    assert is_in_before_sunset_window_at(end - 1, sunset, offset) is True
+    assert is_in_before_sunset_window_at(end, sunset, offset) is False
+    assert is_in_before_sunset_window_at(22 * 60, sunset, offset) is False

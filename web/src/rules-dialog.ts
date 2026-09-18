@@ -5,6 +5,8 @@ import {
   afterSunsetStatusMessage,
   beforeSunriseStatusMessage,
   BEFORE_SUNRISE_WINDOW_DESCRIPTION,
+  beforeSunsetStatusMessage,
+  BEFORE_SUNSET_WINDOW_DESCRIPTION,
   DAYLIGHT_WINDOW_DESCRIPTION,
   daylightStatusMessage,
 } from "./astronomical-conditions.js";
@@ -1128,6 +1130,7 @@ class RulesHubController {
     const sunriseMsg = beforeSunriseStatusMessage(status.sun);
     const daylightMsg = daylightStatusMessage(status.sun);
     const sunsetMsg = afterSunsetStatusMessage(status.sun);
+    const beforeSunsetMsg = beforeSunsetStatusMessage(status.sun);
     const openHomeGeofence = (geofenceId: string | null): void => {
       this.pendingGeofenceFocusId = geofenceId;
       void this.setTab(RulesTabId.Geofences);
@@ -1160,6 +1163,15 @@ class RulesHubController {
       sunsetMsg.primary,
       "After sunset",
       AFTER_SUNSET_WINDOW_DESCRIPTION,
+      homeGeofence,
+      settings,
+      openHomeGeofence,
+    );
+    const beforeSunsetCard = appendAstronomicalConditionCard(
+      beforeSunsetMsg.dynamicLabel,
+      beforeSunsetMsg.primary,
+      "Before sunset",
+      BEFORE_SUNSET_WINDOW_DESCRIPTION,
       homeGeofence,
       settings,
       openHomeGeofence,
@@ -1243,6 +1255,7 @@ class RulesHubController {
       sunriseCard,
       daylightCard,
       sunsetCard,
+      beforeSunsetCard,
       clockHeading,
       clockLead,
       list,

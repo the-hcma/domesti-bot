@@ -21,6 +21,7 @@ from app.api.schemas import (
     AnyConditionsCondition,
     BeforeLocalTimeCondition,
     BeforeSunriseCondition,
+    BeforeSunsetCondition,
     DaylightCondition,
     DaysOfWeekCondition,
     DevicesAllInStateCondition,
@@ -213,10 +214,11 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
     and ``after_sunset`` — gates that turn on partway through the day. A rule
     that is currently blocked by one of these gates (not yet open) does not
     contribute an instant — ``all_met`` is already false for other reasons, so
-    there is nothing to clamp. ``before_local_time`` / ``before_sunrise`` reopen
-    at local midnight each day (the condition is unmet from the close time
-    until then) — when currently open, they contribute today's local midnight
-    so a streak that predates midnight does not count either.
+    there is nothing to clamp. ``before_local_time`` / ``before_sunrise`` /
+    ``before_sunset`` reopen at local midnight each day (the condition is
+    unmet from the close time until then) — when currently open, they
+    contribute today's local midnight so a streak that predates midnight does
+    not count either.
 
     Descends into nested ``all`` groups (every child must hold, so a temporal
     gate nested under ``all`` constrains eligibility exactly like a top-level
@@ -500,6 +502,7 @@ _ANY_GROUP_TEMPORAL_GATE_TYPES: tuple[type[RuleConditionOut], ...] = (
     AfterSunsetCondition,
     BeforeLocalTimeCondition,
     BeforeSunriseCondition,
+    BeforeSunsetCondition,
     LocalTimeWindowCondition,
 )
 
@@ -565,9 +568,9 @@ def _temporal_gate_opening_minutes(
     """Return ``(minutes_of_day, day_offset)`` for when ``condition`` last
     opened, or ``None`` when it is not one of the counted temporal gate types
     (``after_local_time``, ``local_time_window``, ``after_sunset``,
-    ``before_local_time``, ``before_sunrise``) or is not currently open.
-    Shared by ``rule_eligible_since``'s top-level/``all`` traversal and
-    ``_any_group_opening_minutes``.
+    ``before_local_time``, ``before_sunrise``, ``before_sunset``) or is not
+    currently open. Shared by ``rule_eligible_since``'s top-level/``all``
+    traversal and ``_any_group_opening_minutes``.
     """
     if isinstance(condition, AfterLocalTimeCondition):
         target = _parse_hhmm(condition.time_hhmm)
@@ -604,6 +607,12 @@ def _temporal_gate_opening_minutes(
     if isinstance(condition, BeforeSunriseCondition):
         sunrise_minutes = _local_minutes_from_iso(ctx.sun.sunrise_at, ctx.timezone)
         end = sunrise_minutes + condition.offset_minutes
+        if now_minutes < end:
+            return (0, 0)
+        return None
+    if isinstance(condition, BeforeSunsetCondition):
+        sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
+        end = sunset_minutes + condition.offset_minutes
         if now_minutes < end:
             return (0, 0)
         return None
@@ -952,6 +961,31 @@ def _evaluate_before_sunrise(
     )
 
 
+def _evaluate_before_sunset(
+    condition: BeforeSunsetCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
+    now_minutes = _local_minutes_from_dt(ctx.now)
+    met = _is_in_before_sunset_window(
+        now_minutes,
+        sunset_minutes,
+        condition.offset_minutes,
+    )
+    sunset_label = _format_iso_local_time(ctx.sun.sunset_at, ctx.timezone)
+    if met:
+        detail = f"Daytime window active (midnight to sunset {sunset_label})"
+    else:
+        detail = f"Outside midnight–sunset window (sunset {sunset_label})"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label="Before sunset",
+        met=met,
+    )
+
+
 def _evaluate_condition(
     condition: RuleConditionOut,
     rule: RuleOut,
@@ -969,6 +1003,8 @@ def _evaluate_condition(
         return _evaluate_before_local_time(condition, rule, ctx)
     if isinstance(condition, BeforeSunriseCondition):
         return _evaluate_before_sunrise(condition, rule, ctx)
+    if isinstance(condition, BeforeSunsetCondition):
+        return _evaluate_before_sunset(condition, rule, ctx)
     if isinstance(condition, DaylightCondition):
         return _evaluate_daylight(condition, rule, ctx)
     if isinstance(condition, DaysOfWeekCondition):
@@ -1911,6 +1947,15 @@ def _is_in_before_sunrise_window(
     return now_minutes >= 0 and now_minutes < end
 
 
+def _is_in_before_sunset_window(
+    now_minutes: int,
+    sunset_minutes: int,
+    offset_minutes: int,
+) -> bool:
+    end = sunset_minutes + offset_minutes
+    return now_minutes >= 0 and now_minutes < end
+
+
 def desired_bool_for_device_condition_state(state: DeviceConditionState) -> bool:
     """Return the natural cached bool that means ``state`` is currently true."""
     return state.desired_bool()
@@ -2088,6 +2133,7 @@ def _presence_user_ids_for_condition(
             AfterSunsetCondition,
             BeforeLocalTimeCondition,
             BeforeSunriseCondition,
+            BeforeSunsetCondition,
             DaylightCondition,
             DaysOfWeekCondition,
             DevicesAllInStateCondition,

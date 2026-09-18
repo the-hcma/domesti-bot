@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import (
     AfterSunsetCondition,
     BeforeSunriseCondition,
+    BeforeSunsetCondition,
     RuleOut,
     RulesSunOut,
     SettingsLocationOut,
@@ -25,7 +26,7 @@ from app.device_enums import RuleTrigger
 class AstronomicalAnchor:
     """One astronomical evaluation anchor extracted from rule conditions."""
 
-    condition_type: Literal["after_sunset", "before_sunrise"]
+    condition_type: Literal["after_sunset", "before_sunrise", "before_sunset"]
     offset_minutes: int
 
 
@@ -41,7 +42,12 @@ def astronomical_evaluation_window(
     anchor_dt: datetime,
     timezone: ZoneInfo,
 ) -> tuple[datetime, datetime]:
-    """Return the local ``[start, end)`` evaluation window for ``anchor_dt``."""
+    """Return the local ``[start, end)`` evaluation window for ``anchor_dt``.
+
+    ``after_sunset`` opens at the anchor and runs to the following midnight.
+    ``before_sunrise`` / ``before_sunset`` are the mirror shape: open at local
+    midnight and run up to the anchor.
+    """
     local_anchor = anchor_dt.astimezone(timezone)
     if anchor.condition_type == "after_sunset":
         window_end = local_midnight_after(local_anchor.date(), timezone)
@@ -61,6 +67,10 @@ def extract_astronomical_anchor(rule: RuleOut) -> AstronomicalAnchor | None:
         elif isinstance(condition, BeforeSunriseCondition):
             anchors.append(
                 AstronomicalAnchor("before_sunrise", condition.offset_minutes),
+            )
+        elif isinstance(condition, BeforeSunsetCondition):
+            anchors.append(
+                AstronomicalAnchor("before_sunset", condition.offset_minutes),
             )
     if len(anchors) != 1:
         return None
@@ -126,7 +136,7 @@ def astronomical_anchor_datetime(
     timezone: ZoneInfo,
 ) -> datetime:
     """Return the local evaluation instant for ``anchor`` on ``sun``'s calendar day."""
-    iso = sun.sunset_at if anchor.condition_type == "after_sunset" else sun.sunrise_at
+    iso = sun.sunset_at if anchor.condition_type in ("after_sunset", "before_sunset") else sun.sunrise_at
     base = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(timezone)
     return base + timedelta(minutes=anchor.offset_minutes)
 

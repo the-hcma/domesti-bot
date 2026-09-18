@@ -324,6 +324,14 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
           : "until sunrise";
       return `After midnight ${end}`;
     }
+    case RuleConditionType.BeforeSunset: {
+      const offset = condition.offset_minutes;
+      const end =
+        offset > 0
+          ? `until ${offset} minute${offset === 1 ? "" : "s"} before sunset`
+          : "until sunset";
+      return `After midnight ${end}`;
+    }
     case RuleConditionType.Daylight:
       return "During daylight (sunrise to sunset)";
     case RuleConditionType.AfterLocalTime:
