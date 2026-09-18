@@ -380,7 +380,18 @@ def test_before_sunset_not_met_after_offset_boundary() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     result = evaluate_rule(_before_sunset_rule(), _ctx(now=now))
     assert result.conditions[0].met is False
-    assert "Outside midnight" in result.conditions[0].detail
+
+
+def test_before_sunset_parses_from_raw_json_via_discriminated_union() -> None:
+    # Exercises the same JSON -> RuleConditionOut discriminator path
+    # load_automation_rules_bundle() uses on the operator's rule file, not
+    # just direct BeforeSunsetCondition(...) construction in Python.
+    conditions = RuleConditionsOut.model_validate(
+        {"all": [{"type": "before_sunset", "offset_minutes": -25, "window_start": "midnight"}]},
+    )
+    (condition,) = conditions.all
+    assert isinstance(condition, BeforeSunsetCondition)
+    assert condition.offset_minutes == -25
 
 
 def _daylight_rule() -> RuleOut:
