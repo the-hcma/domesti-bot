@@ -615,8 +615,7 @@ def _temporal_gate_opening_minutes(
     if isinstance(condition, BeforeSunsetCondition):
         sunrise_minutes = _local_minutes_from_iso(ctx.sun.sunrise_at, ctx.timezone)
         sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
-        end = sunset_minutes + condition.offset_minutes
-        if sunrise_minutes <= now_minutes < end:
+        if _is_in_before_sunset_window(now_minutes, sunrise_minutes, sunset_minutes, condition.offset_minutes):
             return (sunrise_minutes, 0)
         return None
     return None
@@ -1962,6 +1961,8 @@ def _is_in_before_sunset_window(
     offset_minutes: int,
 ) -> bool:
     end = sunset_minutes + offset_minutes
+    if end >= MINUTES_PER_DAY:
+        return False
     return now_minutes >= sunrise_minutes and now_minutes < end
 
 

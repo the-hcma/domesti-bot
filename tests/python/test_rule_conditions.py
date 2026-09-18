@@ -334,13 +334,13 @@ def test_after_sunset_not_met_midday() -> None:
     assert "Outside sunset" in result.conditions[0].detail
 
 
-def _before_sunset_rule() -> RuleOut:
+def _before_sunset_rule(*, offset_minutes: int = -25) -> RuleOut:
     return RuleOut(
         conditions=RuleConditionsOut(
             all=[
                 BeforeSunsetCondition(
                     type="before_sunset",
-                    offset_minutes=-25,
+                    offset_minutes=offset_minutes,
                     window_start="sunrise",
                 ),
             ],
@@ -388,6 +388,15 @@ def test_before_sunset_not_met_between_offset_boundary_and_sunset() -> None:
 def test_before_sunset_not_met_after_offset_boundary() -> None:
     now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
     result = evaluate_rule(_before_sunset_rule(), _ctx(now=now))
+    assert result.conditions[0].met is False
+
+
+def test_before_sunset_not_met_when_offset_overflows_past_midnight() -> None:
+    # A large positive offset can push sunset + offset past 24:00, which the
+    # minute-of-day model can't represent as "closes tomorrow" — the window
+    # reports closed rather than silently staying open through midnight.
+    now = datetime(2026, 6, 9, 23, 0, tzinfo=_TZ)
+    result = evaluate_rule(_before_sunset_rule(offset_minutes=300), _ctx(now=now))
     assert result.conditions[0].met is False
 
 

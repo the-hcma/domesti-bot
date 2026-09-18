@@ -35,6 +35,8 @@ def is_in_before_sunset_window_at(
     offset_minutes: int,
 ) -> bool:
     end = sunset_minutes + offset_minutes
+    if end >= MINUTES_PER_DAY:
+        return False
     return now_minutes >= sunrise_minutes and now_minutes < end
 
 
@@ -68,3 +70,16 @@ def test_before_sunset_window_is_sunrise_through_sunset() -> None:
     assert is_in_before_sunset_window_at(end - 1, sunrise, sunset, offset) is True
     assert is_in_before_sunset_window_at(end, sunrise, sunset, offset) is False
     assert is_in_before_sunset_window_at(22 * 60, sunrise, sunset, offset) is False
+
+
+def test_before_sunset_window_closed_when_offset_overflows_past_midnight() -> None:
+    # A large positive offset can push sunset + offset past 24:00, which this
+    # minute-of-day model can't represent as "closes tomorrow" — mirrors
+    # is_in_after_sunset_window_at's own MINUTES_PER_DAY guard by reporting
+    # the window closed rather than silently "open" for every minute of the
+    # day (since now_minutes never reaches an end >= MINUTES_PER_DAY).
+    sunrise = 6 * 60  # 06:00
+    sunset = 20 * 60  # 20:00
+    offset = 300  # nominal close would be 01:00 the next day
+    assert is_in_before_sunset_window_at(12 * 60, sunrise, sunset, offset) is False
+    assert is_in_before_sunset_window_at(23 * 60, sunrise, sunset, offset) is False
