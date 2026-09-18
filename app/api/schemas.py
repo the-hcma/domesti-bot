@@ -1699,9 +1699,11 @@ class BeforeSunriseCondition(BaseModel):
 
 
 class BeforeSunsetCondition(BaseModel):
+    """True from sunrise through ``sunset + offset_minutes`` (daylight hours only)."""
+
     type: Literal["before_sunset"]
     offset_minutes: int
-    window_start: Literal["midnight"] | None = None
+    window_start: Literal["sunrise"] | None = None
 
 
 class DaysOfWeekCondition(BaseModel):

@@ -148,14 +148,27 @@ def test_rule_eligible_since_before_sunrise_reopens_at_midnight() -> None:
     assert rule_eligible_since(rule, _ctx(now=now)) == expected
 
 
-def test_rule_eligible_since_before_sunset_reopens_at_midnight() -> None:
-    # Sept 2 2026 sunset at this lat/lon is ~19:26 local, so sunset-25 is ~19:01.
+def test_rule_eligible_since_before_sunset_reopens_at_sunrise() -> None:
+    # Sept 2 2026 sunrise at this lat/lon is ~06:29 local, sunset ~19:26, so
+    # sunset-25 is ~19:01 — 18:00 sits inside the sunrise-to-19:01 window.
     now = datetime(2026, 9, 2, 18, 0, tzinfo=_TZ)
     rule = _rule_with_conditions(
         [BeforeSunsetCondition(type="before_sunset", offset_minutes=-25)],
     )
-    expected = datetime(2026, 9, 2, 0, 0, tzinfo=_TZ).timestamp()
+    sun = compute_rules_sun_out(_SETTINGS, now=now)
+    sunrise_dt = datetime.fromisoformat(sun.sunrise_at.replace("Z", "+00:00")).astimezone(_TZ)
+    expected = sunrise_dt.replace(second=0, microsecond=0).timestamp()
     assert rule_eligible_since(rule, _ctx(now=now)) == expected
+
+
+def test_rule_eligible_since_none_when_before_sunset_gate_not_yet_open() -> None:
+    # Before sunrise — before_sunset excludes the pre-dawn hours, unlike
+    # before_sunrise/before_local_time, which are open from midnight.
+    now = datetime(2026, 9, 2, 3, 0, tzinfo=_TZ)
+    rule = _rule_with_conditions(
+        [BeforeSunsetCondition(type="before_sunset", offset_minutes=-25)],
+    )
+    assert rule_eligible_since(rule, _ctx(now=now)) is None
 
 
 def test_rule_eligible_since_none_when_before_sunset_gate_closed() -> None:

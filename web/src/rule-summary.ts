@@ -326,7 +326,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
       return `After midnight until ${formatSunOffsetPhrase(condition.offset_minutes, "sunrise")}`;
     }
     case RuleConditionType.BeforeSunset: {
-      return `After midnight until ${formatSunOffsetPhrase(condition.offset_minutes, "sunset")}`;
+      return `After sunrise until ${formatSunOffsetPhrase(condition.offset_minutes, "sunset")}`;
     }
     case RuleConditionType.Daylight:
       return "During daylight (sunrise to sunset)";

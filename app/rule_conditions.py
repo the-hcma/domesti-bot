@@ -214,11 +214,13 @@ def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | No
     and ``after_sunset`` — gates that turn on partway through the day. A rule
     that is currently blocked by one of these gates (not yet open) does not
     contribute an instant — ``all_met`` is already false for other reasons, so
-    there is nothing to clamp. ``before_local_time`` / ``before_sunrise`` /
-    ``before_sunset`` reopen at local midnight each day (the condition is
-    unmet from the close time until then) — when currently open, they
-    contribute today's local midnight so a streak that predates midnight does
-    not count either.
+    there is nothing to clamp. ``before_local_time`` / ``before_sunrise``
+    reopen at local midnight each day (the condition is unmet from the close
+    time until then) — when currently open, they contribute today's local
+    midnight so a streak that predates midnight does not count either.
+    ``before_sunset`` is the same shape but anchored on sunrise instead of
+    midnight (it excludes the pre-dawn hours) — when currently open, it
+    contributes today's sunrise.
 
     Descends into nested ``all`` groups (every child must hold, so a temporal
     gate nested under ``all`` constrains eligibility exactly like a top-level
@@ -611,10 +613,11 @@ def _temporal_gate_opening_minutes(
             return (0, 0)
         return None
     if isinstance(condition, BeforeSunsetCondition):
+        sunrise_minutes = _local_minutes_from_iso(ctx.sun.sunrise_at, ctx.timezone)
         sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
         end = sunset_minutes + condition.offset_minutes
-        if now_minutes < end:
-            return (0, 0)
+        if sunrise_minutes <= now_minutes < end:
+            return (sunrise_minutes, 0)
         return None
     return None
 
@@ -966,18 +969,23 @@ def _evaluate_before_sunset(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> RuleConditionStatusOut:
+    sunrise_minutes = _local_minutes_from_iso(ctx.sun.sunrise_at, ctx.timezone)
     sunset_minutes = _local_minutes_from_iso(ctx.sun.sunset_at, ctx.timezone)
     now_minutes = _local_minutes_from_dt(ctx.now)
     met = _is_in_before_sunset_window(
         now_minutes,
+        sunrise_minutes,
         sunset_minutes,
         condition.offset_minutes,
     )
+    sunrise_label = _format_iso_local_time(ctx.sun.sunrise_at, ctx.timezone)
     sunset_label = _format_iso_local_time(ctx.sun.sunset_at, ctx.timezone)
     if met:
-        detail = f"Daytime window active (midnight to sunset {sunset_label})"
+        detail = f"Daytime window active (sunrise {sunrise_label} to sunset {sunset_label})"
+    elif now_minutes < sunrise_minutes:
+        detail = f"Before sunrise — window opens at sunrise ({sunrise_label})"
     else:
-        detail = f"Outside midnight–sunset window (sunset {sunset_label})"
+        detail = f"Outside sunrise–sunset window (sunset {sunset_label})"
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
@@ -1943,20 +1951,18 @@ def _is_in_before_sunrise_window(
     sunrise_minutes: int,
     offset_minutes: int,
 ) -> bool:
-    return _is_in_midnight_to_anchor_window(now_minutes, sunrise_minutes + offset_minutes)
+    end = sunrise_minutes + offset_minutes
+    return now_minutes >= 0 and now_minutes < end
 
 
 def _is_in_before_sunset_window(
     now_minutes: int,
+    sunrise_minutes: int,
     sunset_minutes: int,
     offset_minutes: int,
 ) -> bool:
-    return _is_in_midnight_to_anchor_window(now_minutes, sunset_minutes + offset_minutes)
-
-
-def _is_in_midnight_to_anchor_window(now_minutes: int, anchor_minutes: int) -> bool:
-    """Shared body for ``before_sunrise`` / ``before_sunset``: midnight through ``anchor_minutes``."""
-    return now_minutes >= 0 and now_minutes < anchor_minutes
+    end = sunset_minutes + offset_minutes
+    return now_minutes >= sunrise_minutes and now_minutes < end
 
 
 def desired_bool_for_device_condition_state(state: DeviceConditionState) -> bool:

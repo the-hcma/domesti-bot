@@ -67,7 +67,7 @@ def _before_sunset_rule(*, schedule_cron: str | None) -> RuleOut:
                 BeforeSunsetCondition(
                     type="before_sunset",
                     offset_minutes=-25,
-                    window_start="midnight",
+                    window_start="sunrise",
                 ),
             ],
         ),
@@ -413,7 +413,10 @@ def test_astronomical_anchor_datetime_applies_offset_for_before_sunset() -> None
     assert anchor_dt == expected
 
 
-def test_next_astronomical_repeat_evaluate_at_after_before_sunset_window_returns_midnight() -> None:
+def test_next_astronomical_repeat_evaluate_at_after_before_sunset_window_returns_next_days_sunrise() -> None:
+    # before_sunset excludes the pre-dawn hours, so once its window closes for
+    # the day the next occurrence starts at tomorrow's sunrise, not midnight
+    # (unlike before_sunrise, covered by the sibling test above).
     tz = ZoneInfo("America/New_York")
     settings = SettingsLocationOut(
         lat=41.194072,
@@ -434,12 +437,11 @@ def test_next_astronomical_repeat_evaluate_at_after_before_sunset_window_returns
         timezone=tz,
         now=after_window,
     )
-    expected_midnight = datetime.combine(
-        after_window.date() + timedelta(days=1),
-        datetime.min.time(),
-        tzinfo=tz,
-    )
-    assert next_at == expected_midnight.timestamp()
+    next_day = after_window.date() + timedelta(days=1)
+    next_day_noon = datetime(next_day.year, next_day.month, next_day.day, 12, 0, tzinfo=tz)
+    next_day_sun = compute_rules_sun_out(settings, now=next_day_noon)
+    expected_sunrise = datetime.fromisoformat(next_day_sun.sunrise_at.replace("Z", "+00:00")).astimezone(tz)
+    assert next_at == expected_sunrise.timestamp()
 
 
 def test_next_astronomical_repeat_evaluate_at_polls_after_anchor() -> None:
@@ -520,7 +522,7 @@ def test_rule_out_rejects_after_sunset_with_before_sunset() -> None:
                     BeforeSunsetCondition(
                         type="before_sunset",
                         offset_minutes=-25,
-                        window_start="midnight",
+                        window_start="sunrise",
                     ),
                 ],
             ),

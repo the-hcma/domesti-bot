@@ -191,6 +191,11 @@ def build_rules_status(
                 if anchor.condition_type == "after_sunset":
                     window_label = "local midnight"
                     scheduled_detail = f"Evaluates every {effective_cron} from {anchor_label} until {window_label}"
+                elif anchor.condition_type == "before_sunset":
+                    sunrise_label = _format_astronomical_anchor_label(
+                        datetime.fromisoformat(sun.sunrise_at.replace("Z", "+00:00")).astimezone(tz),
+                    )
+                    scheduled_detail = f"Evaluates every {effective_cron} from {sunrise_label} until {anchor_label}"
                 else:
                     scheduled_detail = f"Evaluates every {effective_cron} from local midnight until {anchor_label}"
         elif uses_astronomical_edge_window_open_schedule(rule) and evaluator is not None:

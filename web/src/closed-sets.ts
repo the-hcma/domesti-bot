@@ -8,6 +8,7 @@
 /** Evening/morning astronomical window endpoint (rules). */
 export const AstronomicalWindowBoundary = {
   Midnight: "midnight",
+  Sunrise: "sunrise",
 } as const;
 export type AstronomicalWindowBoundary =
   (typeof AstronomicalWindowBoundary)[keyof typeof AstronomicalWindowBoundary];

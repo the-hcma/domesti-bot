@@ -697,7 +697,7 @@ class RulesHubController {
     beforeSunsetCb.checked = existingBeforeSunset !== undefined;
     beforeSunsetRow.append(
       beforeSunsetCb,
-      document.createTextNode(" Before sunset (midnight to sunset)"),
+      document.createTextNode(" Before sunset (sunrise to sunset)"),
     );
     timeField.append(beforeSunsetRow);
 
@@ -903,7 +903,7 @@ class RulesHubController {
           conditions.push({
             type: RuleConditionType.BeforeSunset,
             offset_minutes: existingBeforeSunset?.offset_minutes ?? 0,
-            window_start: AstronomicalWindowBoundary.Midnight,
+            window_start: AstronomicalWindowBoundary.Sunrise,
           });
         }
         if (clockStart.value !== "" && clockEnd.value !== "") {
