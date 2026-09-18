@@ -5,6 +5,8 @@ import {
   afterSunsetStatusMessage,
   beforeSunriseStatusMessage,
   BEFORE_SUNRISE_WINDOW_DESCRIPTION,
+  beforeSunsetStatusMessage,
+  BEFORE_SUNSET_WINDOW_DESCRIPTION,
   DAYLIGHT_WINDOW_DESCRIPTION,
   daylightStatusMessage,
 } from "./astronomical-conditions.js";
@@ -684,6 +686,21 @@ class RulesHubController {
     );
     timeField.append(sunriseRow);
 
+    const existingBeforeSunset = existing?.conditions.all.find(
+      (c): c is Extract<RuleConditionOut, { type: typeof RuleConditionType.BeforeSunset }> =>
+        c.type === RuleConditionType.BeforeSunset,
+    );
+    const beforeSunsetRow = document.createElement("label");
+    beforeSunsetRow.className = "rules-check-row";
+    const beforeSunsetCb = document.createElement("input");
+    beforeSunsetCb.type = "checkbox";
+    beforeSunsetCb.checked = existingBeforeSunset !== undefined;
+    beforeSunsetRow.append(
+      beforeSunsetCb,
+      document.createTextNode(" Before sunset (sunrise to sunset)"),
+    );
+    timeField.append(beforeSunsetRow);
+
     const existingWindow = existing?.conditions.all.find(
       (c): c is Extract<RuleConditionOut, { type: typeof RuleConditionType.LocalTimeWindow }> =>
         c.type === RuleConditionType.LocalTimeWindow,
@@ -880,6 +897,13 @@ class RulesHubController {
             type: RuleConditionType.BeforeSunrise,
             offset_minutes: 0,
             window_start: AstronomicalWindowBoundary.Midnight,
+          });
+        }
+        if (beforeSunsetCb.checked) {
+          conditions.push({
+            type: RuleConditionType.BeforeSunset,
+            offset_minutes: existingBeforeSunset?.offset_minutes ?? 0,
+            window_start: AstronomicalWindowBoundary.Sunrise,
           });
         }
         if (clockStart.value !== "" && clockEnd.value !== "") {
@@ -1128,6 +1152,7 @@ class RulesHubController {
     const sunriseMsg = beforeSunriseStatusMessage(status.sun);
     const daylightMsg = daylightStatusMessage(status.sun);
     const sunsetMsg = afterSunsetStatusMessage(status.sun);
+    const beforeSunsetMsg = beforeSunsetStatusMessage(status.sun);
     const openHomeGeofence = (geofenceId: string | null): void => {
       this.pendingGeofenceFocusId = geofenceId;
       void this.setTab(RulesTabId.Geofences);
@@ -1160,6 +1185,15 @@ class RulesHubController {
       sunsetMsg.primary,
       "After sunset",
       AFTER_SUNSET_WINDOW_DESCRIPTION,
+      homeGeofence,
+      settings,
+      openHomeGeofence,
+    );
+    const beforeSunsetCard = appendAstronomicalConditionCard(
+      beforeSunsetMsg.dynamicLabel,
+      beforeSunsetMsg.primary,
+      "Before sunset",
+      BEFORE_SUNSET_WINDOW_DESCRIPTION,
       homeGeofence,
       settings,
       openHomeGeofence,
@@ -1243,6 +1277,7 @@ class RulesHubController {
       sunriseCard,
       daylightCard,
       sunsetCard,
+      beforeSunsetCard,
       clockHeading,
       clockLead,
       list,

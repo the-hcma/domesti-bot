@@ -556,6 +556,12 @@ export type RuleConditionOut =
       /** Default ``midnight`` — morning window starts at local midnight. */
       window_start?: AstronomicalWindowBoundary;
     }
+  | {
+      type: typeof RuleConditionType.BeforeSunset;
+      offset_minutes: number;
+      /** Default ``sunrise`` — daytime window starts at sunrise (not midnight). */
+      window_start?: AstronomicalWindowBoundary;
+    }
   | { type: typeof RuleConditionType.Daylight }
   | { type: typeof RuleConditionType.AfterLocalTime; time_hhmm: string }
   | { type: typeof RuleConditionType.BeforeLocalTime; time_hhmm: string }

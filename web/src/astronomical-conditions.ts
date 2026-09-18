@@ -10,6 +10,8 @@ export const AFTER_SUNSET_WINDOW_DESCRIPTION =
   "Evening window: local sunset through midnight.";
 export const BEFORE_SUNRISE_WINDOW_DESCRIPTION =
   "Morning window: local midnight through sunrise.";
+export const BEFORE_SUNSET_WINDOW_DESCRIPTION =
+  "Daytime window: local sunrise through sunset.";
 export const DAYLIGHT_WINDOW_DESCRIPTION =
   "Daylight window: local sunrise through sunset.";
 
@@ -44,6 +46,21 @@ export function isInBeforeSunriseWindowAt(
   return nowMinutes >= 0 && nowMinutes < end;
 }
 
+// Daylight hours only (excludes the pre-dawn hours before sunrise), unlike
+// isInBeforeSunriseWindowAt, which is open from midnight.
+export function isInBeforeSunsetWindowAt(
+  nowMinutes: number,
+  sunriseMinutes: number,
+  sunsetMinutes: number,
+  offsetMinutes: number,
+): boolean {
+  const end = sunsetMinutes + offsetMinutes;
+  if (end > MINUTES_PER_DAY) {
+    return false;
+  }
+  return nowMinutes >= sunriseMinutes && nowMinutes < end;
+}
+
 export function isInAfterSunsetWindow(
   sunsetAtIso: string,
   offsetMinutes: number,
@@ -62,6 +79,19 @@ export function isInBeforeSunriseWindow(
   return isInBeforeSunriseWindowAt(
     localMinutesNow(),
     localMinutesFromIso(sunriseAtIso),
+    offsetMinutes,
+  );
+}
+
+export function isInBeforeSunsetWindow(
+  sunriseAtIso: string,
+  sunsetAtIso: string,
+  offsetMinutes: number,
+): boolean {
+  return isInBeforeSunsetWindowAt(
+    localMinutesNow(),
+    localMinutesFromIso(sunriseAtIso),
+    localMinutesFromIso(sunsetAtIso),
     offsetMinutes,
   );
 }
@@ -109,6 +139,36 @@ export function beforeSunriseStatusMessage(sun: RulesSunOut): {
   return {
     dynamicLabel: "Before sunrise (dynamic)",
     primary: `Outside morning window — sunrise was ${formatLocalTime(sun.sunrise_at)}`,
+  };
+}
+
+export function beforeSunsetStatusMessage(sun: RulesSunOut): {
+  dynamicLabel: string;
+  primary: string;
+} {
+  const nowMinutes = localMinutesNow();
+  const sunriseMinutes = localMinutesFromIso(sun.sunrise_at);
+  const inWindow = isInBeforeSunsetWindowAt(
+    nowMinutes,
+    sunriseMinutes,
+    localMinutesFromIso(sun.sunset_at),
+    0,
+  );
+  if (inWindow) {
+    return {
+      dynamicLabel: "Before sunset (dynamic)",
+      primary: `Daytime window active — sunset at ${formatLocalTime(sun.sunset_at)}`,
+    };
+  }
+  if (nowMinutes < sunriseMinutes) {
+    return {
+      dynamicLabel: "Before sunset (dynamic)",
+      primary: `Before sunrise — window opens at sunrise (${formatLocalTime(sun.sunrise_at)})`,
+    };
+  }
+  return {
+    dynamicLabel: "Before sunset (dynamic)",
+    primary: `Outside daytime window — sunset was ${formatLocalTime(sun.sunset_at)}`,
   };
 }
 

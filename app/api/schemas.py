@@ -1698,6 +1698,14 @@ class BeforeSunriseCondition(BaseModel):
     window_start: Literal["midnight"] | None = None
 
 
+class BeforeSunsetCondition(BaseModel):
+    """True from sunrise through ``sunset + offset_minutes`` (daylight hours only)."""
+
+    type: Literal["before_sunset"]
+    offset_minutes: int
+    window_start: Literal["sunrise"] | None = None
+
+
 class DaysOfWeekCondition(BaseModel):
     type: Literal["days_of_week"]
     days: list[int]
@@ -1882,6 +1890,7 @@ RuleConditionOut = Annotated[
     | AnyConditionsCondition
     | BeforeLocalTimeCondition
     | BeforeSunriseCondition
+    | BeforeSunsetCondition
     | DaylightCondition
     | DaysOfWeekCondition
     | DevicesAllInStateCondition
@@ -2059,7 +2068,8 @@ class RuleOut(BaseModel):
             _reject_nested_local_time_windows(self.conditions.all)
             _reject_multiple_top_level_local_time_windows_for_eligibility(self)
             has_astronomical = any(
-                condition.type in ("after_sunset", "before_sunrise") for condition in self.conditions.all
+                condition.type in ("after_sunset", "before_sunrise", "before_sunset")
+                for condition in self.conditions.all
             )
             has_local_time_window = any(
                 isinstance(condition, LocalTimeWindowCondition) for condition in self.conditions.all
@@ -2067,7 +2077,7 @@ class RuleOut(BaseModel):
             if (has_device_state or has_dwell_satisfied) and has_astronomical and has_local_time_window:
                 raise ValueError(
                     "Expected at most one eligibility window "
-                    "(after_sunset/before_sunrise or local_time_window), got both"
+                    "(after_sunset/before_sunrise/before_sunset or local_time_window), got both"
                 )
             if has_device_state:
                 return self
@@ -2076,11 +2086,14 @@ class RuleOut(BaseModel):
         _reject_nested_local_time_windows(self.conditions.all)
         anchor = extract_astronomical_anchor(self)
         astronomical_count = sum(
-            1 for condition in self.conditions.all if condition.type in ("after_sunset", "before_sunrise")
+            1
+            for condition in self.conditions.all
+            if condition.type in ("after_sunset", "before_sunrise", "before_sunset")
         )
         if astronomical_count > 1:
             raise ValueError(
-                "scheduled rules may include at most one top-level after_sunset or before_sunrise condition"
+                "scheduled rules may include at most one top-level after_sunset, "
+                "before_sunrise, or before_sunset condition"
             )
         if has_edge_true:
             if not self.fire_once_per_local_day:
@@ -2089,8 +2102,8 @@ class RuleOut(BaseModel):
                 )
             if anchor is None:
                 raise ValueError(
-                    "rules with both edge_true and scheduled triggers require a "
-                    "top-level after_sunset or before_sunrise condition"
+                    "rules with both edge_true and scheduled triggers require a top-level "
+                    "after_sunset, before_sunrise, or before_sunset condition"
                 )
             if cron != "":
                 raise ValueError("rules with both edge_true and scheduled triggers do not allow schedule_cron")
@@ -2104,7 +2117,10 @@ class RuleOut(BaseModel):
         if anchor is not None:
             self.schedule_cron = None
             return self
-        raise ValueError("scheduled rules require schedule_cron or a top-level after_sunset / before_sunrise condition")
+        raise ValueError(
+            "scheduled rules require schedule_cron or a top-level "
+            "after_sunset / before_sunrise / before_sunset condition"
+        )
 
 
 def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut]) -> bool:

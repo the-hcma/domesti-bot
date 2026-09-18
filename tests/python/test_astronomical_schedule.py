@@ -10,6 +10,7 @@ import pytest
 from app.api.schemas import (
     AfterSunsetCondition,
     BeforeSunriseCondition,
+    BeforeSunsetCondition,
     DevicesAnyInStateCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
@@ -51,6 +52,31 @@ def _before_sunrise_rule(*, schedule_cron: str | None) -> RuleOut:
         fire_once_per_local_day=True,
         id="morning-anchor",
         label="Morning anchor",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        schedule_cron=schedule_cron,
+        triggers=[RuleTrigger.SCHEDULED],
+    )
+
+
+def _before_sunset_rule(*, schedule_cron: str | None) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                BeforeSunsetCondition(
+                    type="before_sunset",
+                    offset_minutes=-25,
+                    window_start="sunrise",
+                ),
+            ],
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        fire_once_per_local_day=True,
+        id="afternoon-anchor",
+        label="Afternoon anchor",
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
@@ -364,6 +390,60 @@ def test_next_astronomical_repeat_evaluate_at_after_before_sunrise_window_return
     assert next_at == expected_midnight.timestamp()
 
 
+def test_extract_astronomical_anchor_recognizes_before_sunset() -> None:
+    anchor = extract_astronomical_anchor(_before_sunset_rule(schedule_cron=None))
+    assert anchor is not None
+    assert anchor.condition_type == "before_sunset"
+    assert anchor.offset_minutes == -25
+
+
+def test_astronomical_anchor_datetime_applies_offset_for_before_sunset() -> None:
+    tz = ZoneInfo("America/New_York")
+    sun = RulesSunOut(
+        is_dark=False,
+        sunrise_at="2023-11-14T11:30:00Z",
+        sunset_at="2023-11-14T22:30:00Z",
+    )
+    anchor = extract_astronomical_anchor(_before_sunset_rule(schedule_cron=None))
+    assert anchor is not None
+    anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
+    expected = datetime.fromisoformat("2023-11-14T22:30:00Z").astimezone(tz) - timedelta(
+        minutes=25,
+    )
+    assert anchor_dt == expected
+
+
+def test_next_astronomical_repeat_evaluate_at_after_before_sunset_window_returns_next_days_sunrise() -> None:
+    # before_sunset excludes the pre-dawn hours, so once its window closes for
+    # the day the next occurrence starts at tomorrow's sunrise, not midnight
+    # (unlike before_sunrise, covered by the sibling test above).
+    tz = ZoneInfo("America/New_York")
+    settings = SettingsLocationOut(
+        lat=41.194072,
+        lon=-73.8883254,
+        timezone="America/New_York",
+        home_label="Home",
+    )
+    rule = _before_sunset_rule(schedule_cron="*/10 * * * *")
+    anchor = extract_astronomical_anchor(rule)
+    assert anchor is not None
+    local_noon = datetime(2023, 11, 14, 12, 0, tzinfo=tz)
+    sun = compute_rules_sun_out(settings, now=local_noon)
+    anchor_dt = astronomical_anchor_datetime(anchor, sun, tz)
+    after_window = anchor_dt + timedelta(minutes=15)
+    next_at = next_astronomical_repeat_evaluate_at(
+        rule,
+        settings=settings,
+        timezone=tz,
+        now=after_window,
+    )
+    next_day = after_window.date() + timedelta(days=1)
+    next_day_noon = datetime(next_day.year, next_day.month, next_day.day, 12, 0, tzinfo=tz)
+    next_day_sun = compute_rules_sun_out(settings, now=next_day_noon)
+    expected_sunrise = datetime.fromisoformat(next_day_sun.sunrise_at.replace("Z", "+00:00")).astimezone(tz)
+    assert next_at == expected_sunrise.timestamp()
+
+
 def test_next_astronomical_repeat_evaluate_at_polls_after_anchor() -> None:
     tz = ZoneInfo("America/New_York")
     settings = SettingsLocationOut(
@@ -422,6 +502,35 @@ def test_rule_out_rejects_multiple_top_level_astronomical_conditions() -> None:
             enabled=True,
             id="too-many-anchors",
             label="Too many anchors",
+            min_location_accuracy_m=50,
+            notification_emails=[],
+            notify_on_fire=False,
+            triggers=[RuleTrigger.SCHEDULED],
+        )
+
+
+def test_rule_out_rejects_after_sunset_with_before_sunset() -> None:
+    with pytest.raises(ValueError, match="at most one top-level"):
+        RuleOut(
+            conditions=RuleConditionsOut(
+                all=[
+                    AfterSunsetCondition(
+                        type="after_sunset",
+                        offset_minutes=0,
+                        window_end="midnight",
+                    ),
+                    BeforeSunsetCondition(
+                        type="before_sunset",
+                        offset_minutes=-25,
+                        window_start="sunrise",
+                    ),
+                ],
+            ),
+            cooldown_s=0,
+            device_actions=[],
+            enabled=True,
+            id="too-many-sunset-anchors",
+            label="Too many sunset anchors",
             min_location_accuracy_m=50,
             notification_emails=[],
             notify_on_fire=False,

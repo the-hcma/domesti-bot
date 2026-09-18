@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import (
     AfterSunsetCondition,
     BeforeSunriseCondition,
+    BeforeSunsetCondition,
     RuleOut,
     RulesSunOut,
     SettingsLocationOut,
@@ -25,7 +26,7 @@ from app.device_enums import RuleTrigger
 class AstronomicalAnchor:
     """One astronomical evaluation anchor extracted from rule conditions."""
 
-    condition_type: Literal["after_sunset", "before_sunrise"]
+    condition_type: Literal["after_sunset", "before_sunrise", "before_sunset"]
     offset_minutes: int
 
 
@@ -39,13 +40,22 @@ def astronomical_evaluation_window(
     anchor: AstronomicalAnchor,
     *,
     anchor_dt: datetime,
+    sun: RulesSunOut,
     timezone: ZoneInfo,
 ) -> tuple[datetime, datetime]:
-    """Return the local ``[start, end)`` evaluation window for ``anchor_dt``."""
+    """Return the local ``[start, end)`` evaluation window for ``anchor_dt``.
+
+    ``after_sunset`` opens at the anchor and runs to the following midnight.
+    ``before_sunrise`` opens at local midnight and runs up to the anchor.
+    ``before_sunset`` opens at sunrise (not midnight — it excludes the
+    pre-dawn hours) and runs up to the anchor (``sunset + offset_minutes``).
+    """
     local_anchor = anchor_dt.astimezone(timezone)
     if anchor.condition_type == "after_sunset":
         window_end = local_midnight_after(local_anchor.date(), timezone)
         return local_anchor, window_end
+    if anchor.condition_type == "before_sunset":
+        return _parse_iso_local(sun.sunrise_at, timezone), local_anchor
     window_start = datetime.combine(local_anchor.date(), time.min, tzinfo=timezone)
     return window_start, local_anchor
 
@@ -61,6 +71,10 @@ def extract_astronomical_anchor(rule: RuleOut) -> AstronomicalAnchor | None:
         elif isinstance(condition, BeforeSunriseCondition):
             anchors.append(
                 AstronomicalAnchor("before_sunrise", condition.offset_minutes),
+            )
+        elif isinstance(condition, BeforeSunsetCondition):
+            anchors.append(
+                AstronomicalAnchor("before_sunset", condition.offset_minutes),
             )
     if len(anchors) != 1:
         return None
@@ -126,9 +140,8 @@ def astronomical_anchor_datetime(
     timezone: ZoneInfo,
 ) -> datetime:
     """Return the local evaluation instant for ``anchor`` on ``sun``'s calendar day."""
-    iso = sun.sunset_at if anchor.condition_type == "after_sunset" else sun.sunrise_at
-    base = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(timezone)
-    return base + timedelta(minutes=anchor.offset_minutes)
+    iso = sun.sunset_at if anchor.condition_type in ("after_sunset", "before_sunset") else sun.sunrise_at
+    return _parse_iso_local(iso, timezone) + timedelta(minutes=anchor.offset_minutes)
 
 
 def cron_expression_for_local_datetime(dt: datetime) -> str:
@@ -189,6 +202,7 @@ def next_astronomical_repeat_evaluate_at(
     window_start, window_end = astronomical_evaluation_window(
         anchor,
         anchor_dt=anchor_dt,
+        sun=sun,
         timezone=timezone,
     )
     next_at = next_windowed_repeat_evaluate_at(
@@ -201,15 +215,16 @@ def next_astronomical_repeat_evaluate_at(
     )
     if next_at is not None:
         return next_at
-    next_anchor_dt = _anchor_for_local_date(
-        anchor,
+    next_sun = _sun_for_local_date(
         settings=settings,
         local_date=local_now.date() + timedelta(days=1),
         timezone=timezone,
     )
+    next_anchor_dt = astronomical_anchor_datetime(anchor, next_sun, timezone)
     next_window_start, _ = astronomical_evaluation_window(
         anchor,
         anchor_dt=next_anchor_dt,
+        sun=next_sun,
         timezone=timezone,
     )
     return next_window_start.timestamp()
@@ -227,15 +242,18 @@ def parse_schedule_materialized_for(value: str | None) -> date | None:
     return date.fromisoformat(value.strip())
 
 
-def _anchor_for_local_date(
-    anchor: AstronomicalAnchor,
+def _parse_iso_local(iso: str, timezone: ZoneInfo) -> datetime:
+    """Parse a UTC ``Z``-suffixed ISO timestamp into ``timezone``'s local wall clock."""
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(timezone)
+
+
+def _sun_for_local_date(
     *,
     settings: SettingsLocationOut,
     local_date: date,
     timezone: ZoneInfo,
-) -> datetime:
+) -> RulesSunOut:
     from app.rule_conditions import compute_rules_sun_out
 
     noon = datetime.combine(local_date, time(hour=12), tzinfo=timezone)
-    sun = compute_rules_sun_out(settings, now=noon)
-    return astronomical_anchor_datetime(anchor, sun, timezone)
+    return compute_rules_sun_out(settings, now=noon)
