@@ -1,0 +1,23 @@
+---
+description: On every new agent session, read AGENTS.md and .agents/rules before acting
+alwaysApply: true
+---
+
+# Session start: read AGENTS.md and project rules
+
+At the **start of every new agent session** (before implementing, editing, or
+answering from assumed conventions), actively load project guidance:
+
+1. **Read** `AGENTS.md` at the repository root when it exists (use the Read tool;
+   do not rely only on auto-injected snippets).
+2. **List** `.agents/rules/*.md` and **read** each rule that applies to this
+   session — at minimum every `alwaysApply: true` rule, plus any glob-matched
+   rules for files you will touch. `.cursor/rules/*.mdc` files are Cursor
+   injection shims only (frontmatter + pointer to the matching `.agents/rules/`
+   file); do not treat the shim body as the rule.
+
+Do this on the first turn of a new conversation even if some guidance already
+appears in context — confirm the on-disk files are what you follow.
+
+If `AGENTS.md` is missing, note that and continue with `.agents/rules/` only.
+Do not invent org conventions that are not in those files.
