@@ -68,7 +68,7 @@ dependencies = [
     "protobuf>=7.36.1",
     "pychromecast>=14.0.10",
     "pyproj",
-    "pyright>=1.1.411",
+    "pyright>=1.1.413",
     # TEMPORARY: pin python-kasa to PR #1692 (IOT KLAP v2 transport selection).
     # Revert to a PyPI ``python-kasa`` release once
     # https://github.com/python-kasa/python-kasa/pull/1692 merges and ships.
@@ -156,7 +156,7 @@ dev = [
     "httpx2>=2.12.0",
     "icecream>=2.2.0",
     "playwright>=1.62.0",
-    "pyright>=1.1.411",
+    "pyright>=1.1.413",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-timeout>=2.4.0",
