@@ -1,0 +1,182 @@
+---
+description: Commits and PRs attribute only the committer — no agent or machine co-authors
+alwaysApply: true
+---
+
+# Git commit identity
+
+Commits and pull requests must attribute **only** whoever is making the commit —
+their configured git `user.name` and `user.email`. Do not leak hostnames, Cursor,
+or other co-authors.
+
+## Commits
+
+- Use plain `git commit -m "…"` or a HEREDOC with **subject and body only**.
+- Do **not** add `Co-authored-by`, `Made-with: Cursor`, or any `--trailer` flags.
+- Do **not** append attribution lines to commit messages, even if Cursor defaults
+  would add them.
+- Do **not** pass `--no-gpg-sign` (or otherwise skip signing) when `commit.gpgsign`
+  is enabled.
+- After any commit (hooks / tooling may rewrite the message), inspect
+  `git show -s --format=%B HEAD` before push. If it contains `Co-authored-by:` or
+  `Made-with:`, **stop**, fix the message, and do not push until clean.
+- Prefer `git verify-commit HEAD` after signing commits; confirm GitHub shows the
+  commit as Verified once pushed.
+
+## Pre-submit verification
+
+Before **`submit-stack`** / **`ship-and-review`**, every non-merge commit on the stack
+branch ahead of `main` / `origin/main` must pass local **`git verify-commit`**. After
+push, confirm GitHub shows **Verified** on the PR commits tab (or
+`gh api repos/{owner}/{repo}/commits/<sha> --jq .commit.verification.verified`).
+
+`scripts/dev/pre-pr-checks` runs the **`verified-commits`** job for that range. It
+checks both the **signature** (`reason=local` / `reason=github`) and the **message
+attribution** (`reason=trailer`, matched case-insensitively): a `Co-authored-by:`,
+`Made-with:`, or non-committer `Signed-off-by:` trailer, or a whole-line
+`[🤖 ]Generated with [Name](url)` footer (anchored to that exact shape — prose
+elsewhere in the body that merely discusses the phrase or emoji is not flagged); or
+an author email matching a known agent identity — `opencode@users.noreply.github.com`,
+the `claude`/`cursoragent`/`devin` localparts and their known domains (bounded so real
+human names like "claudette" don't collide), or any other
+`*@users.noreply.github.com` address that differs from the committer's own (a fully
+agent-authored-and-committed commit is still caught: the specific agent patterns are
+not exempted just because author equals committer). Do not submit if it fails with
+`ERROR: UNVERIFIED_COMMIT`. Fix signing setup (see below) or amend the message and
+recommit. Escape hatches: `PRE_PR_CHECKS_SKIP=verified-commits` skips the whole job;
+`PRE_PR_CHECKS_ALLOW_COAUTHOR=email1,email2` allowlists a specific email as a real
+human identity for the rare case the operator explicitly wants it — a
+`Co-authored-by:` trailer, or an author email from a rebased/cherry-picked teammate
+commit — use only when the operator asked for it, not to bypass a failing check.
+
+## Pull requests
+
+- Do **not** add `Co-authored-by` or `Made-with: Cursor` to `gh pr create --body`
+  or `gh pr edit --body`.
+
+## Git identity
+
+- Rely on git's configured author for the current committer (`git config user.name`
+  and `git config user.email`). Do not hardcode a specific name or email.
+- If `user.email` is unset, stop and ask the committer to configure git before
+  committing (avoid hostname fallback addresses like `user@machine.local`).
+- Also survey **effective** identity (env overrides beat config): compare
+  `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT` to the approved
+  GitHub name/email. Reject machine-local addresses (e.g. `*.local`) and stop if
+  `GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `EMAIL`, or `git commit --author` would produce
+  a different identity than configured.
+
+## Commit signing (GPG / SSH)
+
+At the **start of any session where the agent may commit**, survey whether commit
+signing is set up for the committer:
+
+1. `git config --get commit.gpgsign` should be `true` (global or local, as they intend).
+2. `git config --get user.signingkey` should be set (GPG key id, or SSH public key
+   path when `gpg.format` is `ssh`).
+3. Check `git config --get gpg.format` (and any repo-local override). For GPG
+   signing, prefer `openpgp` (or unset). If a leftover `gpg.format=ssh` is set
+   while `user.signingkey` is a GPG key id, Git will mis-treat the key — set
+   `gpg.format` to `openpgp` (or unset ssh) before committing.
+4. If `gpg.format` is `ssh`, confirm the public key path exists **and** the matching
+   private key is loaded (`ssh-add -L` should list it), or run a real signed-commit
+   probe. Otherwise confirm `gpg --list-secret-keys --keyid-format=long <signingkey>`
+   succeeds (secret present on **this** host).
+5. On Darwin (GPG): `pinentry-program` in `~/.gnupg/gpg-agent.conf` should point at an
+   existing binary (prefer `pinentry-mac` from Homebrew).
+6. Optional one-shot probe: `echo test | gpg --clearsign -u <KEYID>`. If it hangs or
+   fails in the agent TTY, tell the operator to unlock via GUI pinentry or finish the
+   commit in Terminal.app — agent terminals often cannot drive curses pinentry.
+7. GitHub Verified checks depend on signing format:
+   - **OpenPGP** (`gpg.format` is `openpgp` or unset): the **committer email** must
+     appear on the GPG key UID and be a **verified** email on the GitHub account
+     (same value as `git config user.email`). Optional list check:
+     `gh api user/gpg_keys` (needs `read:gpg_key`; `admin:gpg_key` also works). If the
+     API is unavailable, guide manual paste of `gpg --armor --export <KEYID>`.
+   - **SSH** (`gpg.format=ssh`): UID / `user/gpg_keys` do **not** apply. Confirm the
+     configured public key is registered on GitHub as a **Signing Key** (not only
+     Authentication) and that `ssh-add -L` lists the matching private key.
+
+If signing is missing or incomplete, **alert the committer** and surface setup
+instructions before committing (unless they explicitly opt out for a one-off).
+
+### Per-machine / personal vs work keys
+
+- Prefer a **separate signing key per machine** (or at least personal vs work). Do
+  **not** export a personal laptop’s secret key onto a corporate device.
+- Match `user.name` / `user.email` to the GitHub identity. For OpenPGP, put that same
+  verified email in the GPG UID; upload **that** public key to GitHub → Settings →
+  SSH and GPG keys. For SSH signing, upload the public key as a Signing Key.
+- When a work machine is retired, revoke/rotate that machine’s key on GitHub and
+  remove the local secret.
+
+### Passphrase
+
+- **Recommend using a passphrase** on the signing key (protects the secret at rest;
+  `gpg-agent` can cache it with `default-cache-ttl` / `max-cache-ttl`).
+- Do **not** suggest empty-passphrase keys “for agent convenience.”
+- Agent / non-TTY sessions usually cannot drive curses pinentry — use GUI
+  `pinentry-mac` (macOS) or commit from Terminal.app after unlocking once.
+
+### GPG key (macOS / Homebrew)
+
+```bash
+brew install gnupg pinentry-mac
+# If brew cannot link into /opt/homebrew/bin (ownership / permissions), fix Homebrew
+# ownership for that prefix or use the full $(brew --prefix)/bin path below.
+
+mkdir -p ~/.gnupg
+chmod 700 ~/.gnupg
+echo "pinentry-program $(brew --prefix)/bin/pinentry-mac" >> ~/.gnupg/gpg-agent.conf
+# optional passphrase cache (seconds), so you are not prompted every commit:
+# echo "default-cache-ttl 28800" >> ~/.gnupg/gpg-agent.conf
+# echo "max-cache-ttl 86400" >> ~/.gnupg/gpg-agent.conf
+gpgconf --kill gpg-agent
+
+gpg --full-generate-key
+# Choose RSA (or default), key size ≥ 3072, set an expiration, and use a passphrase.
+# UID email must be a GitHub-verified address matching git config user.email.
+gpg --list-secret-keys --keyid-format=long
+git config --global gpg.format openpgp
+git config --global user.signingkey <KEYID>
+git config --global commit.gpgsign true
+# Clear a leftover repo-local ssh signing override if present:
+# git config --unset gpg.format   # run inside the repo if it forced ssh
+gpg --armor --export <KEYID>
+# Upload the armored public key: GitHub → Settings → SSH and GPG keys → New GPG key
+
+# Sanity check (GUI pinentry should appear if the agent needs the passphrase):
+echo test | gpg --clearsign -u <KEYID>
+```
+
+### SSH signing (alternative)
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+ssh-add -L   # private key must be available via ssh-agent
+# Add the same public key on GitHub as a Signing Key (not only Authentication)
+```
+
+## Cursor CLI attribution (per machine)
+
+At the **start of any session where the agent may commit or open PRs**, read
+`~/.cursor/cli-config.json` (if present) and verify attribution is disabled:
+
+```json
+"attribution": {
+  "attributeCommitsToAgent": false,
+  "attributePRsToAgent": false
+}
+```
+
+If the file is missing, unreadable, or either flag is not `false`, **alert the
+committer** before committing and surface setup instructions — explain that Cursor
+will inject co-author trailers unless they fix their local config. Provide the
+exact keys to set (or create the file with the block above). Also remind them to
+disable **Settings → Git & PRs → Attribution** in the Cursor IDE (IDE and CLI
+settings are separate).
+
+Do not commit on their behalf until they acknowledge or fix the config (unless
+they explicitly opt out for a one-off commit).
