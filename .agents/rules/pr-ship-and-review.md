@@ -1,0 +1,125 @@
+---
+description: Ship a PR end-to-end — local gates, submit, agent review loop, operator email
+alwaysApply: true
+---
+
+# PR ship, agent review, and operator email
+
+When the user asks to **ship**, **submit**, **open a PR**, or **follow the flow**, run this
+sequence in a **stack worktree** (never the primary clone). Read `.github/stacking-tool` and
+`.cursor/rules/stacking-tool.mdc` before creating branches or submitting.
+
+Helper scripts live in **repository-helpers** (canonical agent review loop):
+
+```bash
+rh="${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}"
+"${rh}/scripts/wait-for-agent-review" …
+"${rh}/scripts/trigger-agent-review" …
+```
+
+Configure `~/.config/agent-review.env` from `${rh}/etc/agent-review.env.example` (`AGENT_REVIEW_REPORT_TO`, SMTP).
+
+<!-- pr-ship-canonical-skill: https://github.com/the-hcma/repository-helpers/blob/main/.agents/skills/ship-and-review/SKILL.md -->
+<!-- pr-ship-canonical-rule: https://github.com/the-hcma/repository-helpers/blob/main/.agents/rules/pr-ship-and-review.md -->
+
+**Canonical playbook (read first):** This file is a consumer summary. Exit codes,
+early-complete semantics, quota chains, and triage details are maintained in
+repository-helpers and may change between releases.
+
+Agents **must** read the canonical Skill before running the agent review loop:
+
+- **GitHub (`main`):** https://github.com/the-hcma/repository-helpers/blob/main/.agents/skills/ship-and-review/SKILL.md
+- **Local clone (when `${rh}` is synced to `main`):** `${rh}/.agents/skills/ship-and-review/SKILL.md`
+
+When this summary and the canonical Skill disagree, follow the canonical Skill.
+
+## 1. Local quality gates (all must pass before submit)
+
+Run this repository's quality gates from the stack worktree (tests, linters, etc.).
+
+## 2. Commit and submit
+
+Only after §1 quality gates pass. **Read** `.github/stacking-tool` (`graphite` or `gh-stack`)
+and follow `.cursor/rules/stacking-tool.mdc` — do not mix backends on the same stack.
+
+```bash
+# When marker is graphite (apply-fix comments the inactive backend):
+# gt create <stack>/<topic> -m 'feat: …'   # or gt modify -m '…'
+# gt submit --publish --no-interactive
+
+# When marker is gh-stack:
+gh stack init <stack>/<topic>   # or gh stack add for a higher layer
+git add -A && git commit -m 'feat: …'
+gh stack submit --auto --open --remote origin
+```
+
+Wait for CI:
+
+```bash
+"${rh}/scripts/dev/post-pr-submission-checks" --pr <n>
+```
+
+If stderr shows `NOTE: GITHUB_RATE_LIMIT_*`, the helpers are waiting on GitHub API
+quota reset — let them finish (do not treat as a hard local failure mid-wait).
+
+Patch title/body if stale: `gh pr edit <n> --title … --body …`
+
+## 3. Agent review loop
+
+> **Reply before resolve (required):** For every valid agent review thread (Copilot, Bugbot, CodeRabbit, …), post an **on-thread human reply** as the authenticated operator **before** resolving. Exit code **3** means threads **lack a human reply** — resolving without replying is non-compliant.
+
+**Prerequisites:** `gh auth` must be set up for the operator running the loop. Copy
+`${rh}/etc/agent-review.env.example` to `~/.config/agent-review.env` with
+`AGENT_REVIEW_REPORT_TO` and SMTP before `complete`. `complete_ready: true` is
+reported by `"${rh}/scripts/wait-for-agent-review" check --pr <n>` (or `status`)
+JSON when CI is green and agent review threads are clear.
+
+Prefer the built-in loop:
+
+```bash
+"${rh}/scripts/wait-for-agent-review" loop --pr <n>
+```
+
+**Early complete:** when all threads are addressed, CI is green, there is **no** pending requested
+Copilot/Bugbot review, and CodeRabbit’s workflow is **not** running, the loop finishes — no
+mandatory idle dwell. **12h PR cap** (`AGENT_REVIEW_PR_TIMEOUT`) when review cycles never
+converge (exit **6** give-up). Per-agent quota caches skip exhausted agents (CodeRabbit, Copilot,
+Bugbot).
+
+**CodeRabbit is on_push:** a new push starts CodeRabbit — never post `@coderabbitai review`.
+If quota-limited, wait the cooldown with feedback polls (issue #369; default poll **60s**) +
+grace (default **60s**); only then, if still no real review on head, the loop may post a
+one-shot `@coderabbitai full review`. When CodeRabbit says wait, do not re-ask until
+`retry_after`. Rate-limit stubs are not reviews. Mid-cooldown pending
+feedback wakes the loop (exit **3**).
+
+When `loop` exits **3**, triage each unaddressed agent thread:
+
+1. Fix in the worktree when actionable (or skip with a brief on-thread reason).
+2. **Reply on-thread** as the authenticated human:
+   ```bash
+   "${rh}/scripts/wait-for-agent-review" reply-thread --thread-id <PRRT_…> --body 'Fixed in abc1234: …'
+   ```
+3. **Resolve only after step 2:**
+   ```bash
+   "${rh}/scripts/wait-for-agent-review" resolve-thread --thread-id <PRRT_…>
+   ```
+   Or batch: `"${rh}/scripts/wait-for-agent-review" resolve-addressed --pr <n>` (requires an existing human reply per thread).
+
+**Never** resolve via raw GraphQL/API without an on-thread human reply first.
+
+Then push fixes, re-run `"${rh}/scripts/dev/post-pr-submission-checks" --pr <n>`, and start the next loop iteration.
+
+When `check` reports `complete_ready: true`:
+
+```bash
+"${rh}/scripts/wait-for-agent-review" complete --pr <n>
+```
+
+`complete_ready` requires an agent sign-off on the current head (not a bare CodeRabbit
+commit status / rate-limit stub). This emails `AGENT_REVIEW_REPORT_TO`. It does **not**
+run `gh pr review --approve` (self-approve is skipped; merge stays an explicit operator step).
+
+Do **not** add `merge-it` unless the user explicitly confirms. Org merge path is
+GitHub auto-merge (`gh pr merge --auto --squash` / Enable auto-merge) when the
+operator asks to merge.
