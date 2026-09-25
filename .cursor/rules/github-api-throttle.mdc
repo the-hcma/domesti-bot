@@ -1,5 +1,5 @@
 ---
-description: Run agent `gh` calls through repository-helpers/scripts/gh-api
+description: Every gh call site, agent or first-party code, must run through scripts/gh-api
 alwaysApply: true
 ---
 
