@@ -1,0 +1,7 @@
+---
+description: Format agent-authored GitHub issue/PR bodies and comments so they render correctly (blank lines + no hand-wrapped paragraphs)
+alwaysApply: true
+---
+
+<!-- agents-rule-shim: github-content-formatting -->
+Canonical rule: [`.agents/rules/github-content-formatting.md`](../../.agents/rules/github-content-formatting.md)
