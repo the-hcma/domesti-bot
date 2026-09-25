@@ -63,7 +63,7 @@ dependencies = [
     "idna>=3.19",
     "lxml>=6.1.3",
     "mashumaro==3.22",
-    "playwright>=1.62.0",
+    "playwright>=1.63.0",
     "prompt_toolkit>=3.0.43",
     "protobuf>=7.36.1",
     "pychromecast>=14.0.10",
@@ -75,7 +75,7 @@ dependencies = [
     "python-kasa @ git+https://github.com/python-kasa/python-kasa.git@refs/pull/1692/head",
     "requests>=2.34.2",
     "soco>=0.31.2",
-    "sqlalchemy>=2.0.53",
+    "sqlalchemy>=2.0.54",
     "starlette>=1.6.0",
     "typer>=0.27.2",
     "typing-extensions==4.16.0",
@@ -84,7 +84,7 @@ dependencies = [
     "watchfiles==1.2.0",
     "wcwidth>=0.8.3",
     "websockets>=17.1",
-    "yarl>=1.24.5",
+    "yarl>=1.25.1",
     "zeroconf>=0.151.3",
 ]
 
@@ -155,7 +155,7 @@ known-first-party = ["app", "config"]
 dev = [
     "httpx2>=2.13.0",
     "icecream>=2.2.0",
-    "playwright>=1.62.0",
+    "playwright>=1.63.0",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
