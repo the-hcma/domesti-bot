@@ -5,9 +5,7 @@ alwaysApply: true
 
 # PR ship, agent review, and operator email
 
-When the user asks to **ship**, **submit**, **open a PR**, or **follow the flow**, run this
-sequence in a **stack worktree** (never the primary clone). Read `.github/stacking-tool` and
-`.cursor/rules/stacking-tool.mdc` before creating branches or submitting.
+When the user asks to **ship**, **submit**, **open a PR**, or **follow the flow**, run this sequence in a **stack worktree** (never the primary clone). Read `.github/stacking-tool` and `.cursor/rules/stacking-tool.mdc` before creating branches or submitting.
 
 Helper scripts live in **repository-helpers** (canonical agent review loop):
 
@@ -22,9 +20,7 @@ Configure `~/.config/agent-review.env` from `${rh}/etc/agent-review.env.example`
 <!-- pr-ship-canonical-skill: https://github.com/the-hcma/repository-helpers/blob/main/.agents/skills/ship-and-review/SKILL.md -->
 <!-- pr-ship-canonical-rule: https://github.com/the-hcma/repository-helpers/blob/main/.agents/rules/pr-ship-and-review.md -->
 
-**Canonical playbook (read first):** This file is a consumer summary. Exit codes,
-early-complete semantics, quota chains, and triage details are maintained in
-repository-helpers and may change between releases.
+**Canonical playbook (read first):** This file is a consumer summary. Exit codes, early-complete semantics, quota chains, and triage details are maintained in repository-helpers and may change between releases.
 
 Agents **must** read the canonical Skill before running the agent review loop:
 
@@ -39,8 +35,7 @@ Run this repository's quality gates from the stack worktree (tests, linters, etc
 
 ## 2. Commit and submit
 
-Only after §1 quality gates pass. **Read** `.github/stacking-tool` (`graphite` or `gh-stack`)
-and follow `.cursor/rules/stacking-tool.mdc` — do not mix backends on the same stack.
+Only after §1 quality gates pass. **Read** `.github/stacking-tool` (`graphite` or `gh-stack`) and follow `.cursor/rules/stacking-tool.mdc` — do not mix backends on the same stack.
 
 ```bash
 # When marker is graphite (apply-fix comments the inactive backend):
@@ -59,20 +54,29 @@ Wait for CI:
 "${rh}/scripts/dev/post-pr-submission-checks" --pr <n>
 ```
 
-If stderr shows `NOTE: GITHUB_RATE_LIMIT_*`, the helpers are waiting on GitHub API
-quota reset — let them finish (do not treat as a hard local failure mid-wait).
+If stderr shows `NOTE: GITHUB_RATE_LIMIT_*`, the helpers are waiting on GitHub API quota reset — let them finish (do not treat as a hard local failure mid-wait).
 
-Patch title/body if stale: `gh pr edit <n> --title … --body …`
+`--auto` / publish-generated PR titles are derived from the branch name (or a single commit subject), **not** always from Conventional Commits. Before the review loop or merge, verify/set the PR title to a Conventional Commits header whenever the repo's squash-merge config makes the PR title the release-please signal (`squash_merge_commit_title=PR_TITLE`, `squash_merge_commit_message=BLANK`):
+
+```bash
+"${rh}/scripts/ensure-pr-conventional-title" --pr <n>
+# or: "${rh}/scripts/gh-api" pr edit <n> --title 'feat: …'
+```
+
+`post-pr-submission-checks` and `wait-for-agent-review complete` run this check automatically (auto-derive from commits when possible; fail when neither the title nor commits are Conventional Commits).
+
+Patch title/body if stale. For multi-paragraph bodies use `--body-file` (see `${rh}/.agents/rules/github-content-formatting.md`); lint first with `"${rh}/scripts/lint-github-markdown" <path>`. Issues: `"${rh}/scripts/gh-issue" create|edit` (lint before API). Do not hand-wrap paragraphs across short lines.
+
+```bash
+"${rh}/scripts/gh-api" pr edit <n> --title 'feat: …' --body-file /tmp/pr-body.md
+"${rh}/scripts/gh-issue" create --title '…' --body-file /tmp/issue.md
+```
 
 ## 3. Agent review loop
 
 > **Reply before resolve (required):** For every valid agent review thread (Copilot, Bugbot, CodeRabbit, …), post an **on-thread human reply** as the authenticated operator **before** resolving. Exit code **3** means threads **lack a human reply** — resolving without replying is non-compliant.
 
-**Prerequisites:** `gh auth` must be set up for the operator running the loop. Copy
-`${rh}/etc/agent-review.env.example` to `~/.config/agent-review.env` with
-`AGENT_REVIEW_REPORT_TO` and SMTP before `complete`. `complete_ready: true` is
-reported by `"${rh}/scripts/wait-for-agent-review" check --pr <n>` (or `status`)
-JSON when CI is green and agent review threads are clear.
+**Prerequisites:** `gh auth` must be set up for the operator running the loop. Copy `${rh}/etc/agent-review.env.example` to `~/.config/agent-review.env` with `AGENT_REVIEW_REPORT_TO` and SMTP before `complete`. `complete_ready: true` is reported by `"${rh}/scripts/wait-for-agent-review" check --pr <n>` (or `status`) JSON when CI is green and agent review threads are clear.
 
 Prefer the built-in loop:
 
@@ -80,18 +84,9 @@ Prefer the built-in loop:
 "${rh}/scripts/wait-for-agent-review" loop --pr <n>
 ```
 
-**Early complete:** when all threads are addressed, CI is green, there is **no** pending requested
-Copilot/Bugbot review, and CodeRabbit’s workflow is **not** running, the loop finishes — no
-mandatory idle dwell. **12h PR cap** (`AGENT_REVIEW_PR_TIMEOUT`) when review cycles never
-converge (exit **6** give-up). Per-agent quota caches skip exhausted agents (CodeRabbit, Copilot,
-Bugbot).
+**Early complete:** when all threads are addressed, CI is green, there is **no** pending requested Copilot/Bugbot review, and CodeRabbit’s workflow is **not** running, the loop finishes — no mandatory idle dwell. **12h PR cap** (`AGENT_REVIEW_PR_TIMEOUT`) when review cycles never converge (exit **6** give-up). Per-agent quota caches skip exhausted agents (CodeRabbit, Copilot, Bugbot).
 
-**CodeRabbit is on_push:** a new push starts CodeRabbit — never post `@coderabbitai review`.
-If quota-limited, wait the cooldown with feedback polls (issue #369; default poll **60s**) +
-grace (default **60s**); only then, if still no real review on head, the loop may post a
-one-shot `@coderabbitai full review`. When CodeRabbit says wait, do not re-ask until
-`retry_after`. Rate-limit stubs are not reviews. Mid-cooldown pending
-feedback wakes the loop (exit **3**).
+**CodeRabbit is on_push:** a new push starts CodeRabbit — never post `@coderabbitai review`. If quota-limited, wait the cooldown with feedback polls (issue #369; default poll **60s**) + grace (default **60s**); only then, if still no real review on head, the loop may post a one-shot `@coderabbitai full review`. When CodeRabbit says wait, do not re-ask until `retry_after`. Rate-limit stubs are not reviews. Mid-cooldown pending feedback wakes the loop (exit **3**).
 
 When `loop` exits **3**, triage each unaddressed agent thread:
 
@@ -116,10 +111,6 @@ When `check` reports `complete_ready: true`:
 "${rh}/scripts/wait-for-agent-review" complete --pr <n>
 ```
 
-`complete_ready` requires an agent sign-off on the current head (not a bare CodeRabbit
-commit status / rate-limit stub). This emails `AGENT_REVIEW_REPORT_TO`. It does **not**
-run `gh pr review --approve` (self-approve is skipped; merge stays an explicit operator step).
+`complete_ready` requires an agent sign-off on the current head (not a bare CodeRabbit commit status / rate-limit stub). This emails `AGENT_REVIEW_REPORT_TO`. It does **not** run `gh pr review --approve` (self-approve is skipped; merge stays an explicit operator step).
 
-Do **not** add `merge-it` unless the user explicitly confirms. Org merge path is
-GitHub auto-merge (`gh pr merge --auto --squash` / Enable auto-merge) when the
-operator asks to merge.
+Do **not** add `merge-it` unless the user explicitly confirms. Org merge path is GitHub auto-merge (`gh pr merge --auto --squash` / Enable auto-merge) when the operator asks to merge.

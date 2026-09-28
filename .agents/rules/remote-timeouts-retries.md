@@ -5,36 +5,26 @@ alwaysApply: true
 
 # Remote timeouts and retries
 
-Any code that talks to a network peer (HTTP APIs, OAuth token endpoints, webhooks,
-package indexes, `gh`/`curl` helpers, cloud SDKs, etc.) must not hang indefinitely
-and must not retry without a bound. See repository-helpers#570.
+Any code that talks to a network peer (HTTP APIs, OAuth token endpoints, webhooks, package indexes, `gh`/`curl` helpers, cloud SDKs, etc.) must not hang indefinitely and must not retry without a bound. See repository-helpers#570.
 
 ## Timeouts (required)
 
-- Set an **explicit timeout** on every remote call (connect + read, or a single
-  overall deadline the library supports).
-- Prefer the product's shared HTTP client / config timeout knob when one exists.
-  Defaults must be finite and documented. Never leave library defaults that mean
-  "wait forever."
-- Agent / shell wrappers that hit the network should use the helpers'
-  `--timeout` / `run_command … --timeout` patterns when available.
-- For GitHub API work, honor rate-limit / secondary-limit waits
-  (`GITHUB_API_RATE_LIMIT` / documented cooldown helpers) rather than spinning.
+- Set an **explicit timeout** on every remote call (connect + read, or a single overall deadline the library supports).
+- Prefer the product's shared HTTP client / config timeout knob when one exists. Defaults must be finite and documented. Never leave library defaults that mean "wait forever."
+- Agent / shell wrappers that hit the network should use the helpers' `--timeout` / `run_command … --timeout` patterns when available.
+- For GitHub API work, honor rate-limit / secondary-limit waits (`GITHUB_API_RATE_LIMIT` / documented cooldown helpers) rather than spinning.
 
 ## Retries (required when retrying)
 
 - Retries are for **transient** failures only (timeouts, 429, 502/503/504, reset).
 - Cap attempts (small fixed `N`, typically 2–5) **or** a total retry budget.
-- Back off between attempts (exponential with jitter when practical). Honor
-  `Retry-After` when the peer sends it.
-- Do **not** retry non-idempotent writes unless the API contract is safe
-  (dedupe keys / explicit idempotency). Prefer fail fast on 4xx except 408/429.
+- Back off between attempts (exponential with jitter when practical). Honor `Retry-After` when the peer sends it.
+- Do **not** retry non-idempotent writes unless the API contract is safe (dedupe keys / explicit idempotency). Prefer fail fast on 4xx except 408/429.
 - Log or surface a clear timeout/retry exhaustion error — never spin silently.
 
 ## Product-specific
 
-Wire timeouts through the repo's shared HTTP client / config knob. Do not add
-one-off unbounded clients beside that shared path.
+Wire timeouts through the repo's shared HTTP client / config knob. Do not add one-off unbounded clients beside that shared path.
 
 ## Anti-patterns
 
