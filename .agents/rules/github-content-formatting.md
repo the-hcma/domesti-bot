@@ -5,19 +5,19 @@ alwaysApply: true
 
 # GitHub content formatting (agent-authored)
 
-Agent-authored issue bodies, PR descriptions, and PR/review comments must render correctly on GitHub: separate paragraphs and list items with a blank line, and write one physical line per paragraph — GitHub's issue/PR/comment renderer treats a lone `\n` as a **visible hard break**, unlike the file/blob renderer's soft-break-as-space.
+Agent-authored issue bodies, issue comments and replies, PR descriptions, and PR/review comments must render correctly on GitHub: separate paragraphs and list items with a blank line, and write one physical line per paragraph — GitHub's issue/PR/comment renderer treats a lone `\n` as a **visible hard break**, unlike the file/blob renderer's soft-break-as-space.
 
 Write multi-paragraph or multi-line-list bodies to a temp file and post with `--body-file <path>`, never an inline `--body "..."` string with embedded `\n` escapes. Lint before posting:
 
 ```bash
-"${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/lint-github-markdown" <path>
+"${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/lint-github-markdown" path/to/body.md
 ```
 
 The same rule covers `.md` files committed to this repo: one physical line per paragraph, list item and blockquote, with no hard line breaks. YAML front matter, code blocks, tables, headings and HTML keep their own lines. Check a file, or unwrap it in place, before committing:
 
 ```bash
-"${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/lint-github-markdown" --repo-files <file.md>…
-"${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/lint-github-markdown" --repo-files --fix <file.md>…
+"${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/lint-github-markdown" --repo-files path/to/file.md
+"${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/lint-github-markdown" --repo-files --fix path/to/file.md
 ```
 
 Full authoring rules, the pre-flight linter, and `scripts/gh-issue` — the canonical rule in repository-helpers:

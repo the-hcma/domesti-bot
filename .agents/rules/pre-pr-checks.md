@@ -11,11 +11,11 @@ alwaysApply: true
 rh="${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}"
 ```
 
-`pre-pr-checks` resolves its target from `$PWD`, so it audits **this** repo when run from a feature worktree here. The `submit-stack` wrapper does **not** — it resolves the repo from its own path and would submit the repository-helpers clone, so consumers submit with a bare marker-aware command (not `"${rh}/scripts/dev/submit-stack"`).
+`pre-pr-checks` and the `submit-stack` wrapper both resolve their target from `$PWD`, so run from a feature worktree here they check and submit **this** repo, not the repository-helpers clone.
 
 Before submitting a PR:
 
-1. Run **`"${rh}/scripts/dev/pre-pr-checks"`** from this repo's feature worktree (must exit 0), then submit from the same worktree with the marker-aware bare command: **`gh stack submit --auto`** when `.github/stacking-tool` is `gh-stack`. When the marker is `graphite`, follow `.agents/rules/stacking-tool.md` / the Graphite skill (do not paste a Graphite-only submit into this rule). Do **not** use `"${rh}/scripts/dev/submit-stack"` from here.
+1. Run **`"${rh}/scripts/dev/pre-pr-checks"`** from this repo's feature worktree (must exit 0), then submit from the same worktree. Prefer **`"${rh}/scripts/dev/submit-stack"`**: it reruns pre-pr-checks, submits with the backend named in `.github/stacking-tool`, and waits for PR CI. For a bare submit when the marker is `gh-stack`, use **`gh stack submit --auto --open`** (without `--open` the PRs are drafts). When the marker is `graphite`, follow `.agents/rules/stacking-tool.md` / the Graphite skill (do not paste a Graphite-only submit into this rule).
 
 2. Do **not** submit if pre-pr-checks failed or was skipped. A skipped job is allowed **only** when the user has approved it for this PR: pass `PRE_PR_CHECKS_SKIP=job1,job2` (never a silent skip) and record the skipped jobs and the reason in the PR **Test plan**.
 

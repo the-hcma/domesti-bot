@@ -17,18 +17,18 @@ Canonical skills live in **repository-helpers** (not copied into this repo):
 
 Local clone (when `${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}` is synced):
 
-- `${REPOSITORY_HELPERS_DIR}/.agents/skills/graphite/SKILL.md`
-- `${REPOSITORY_HELPERS_DIR}/.agents/skills/gh-stack/SKILL.md`
+- `${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/.agents/skills/graphite/SKILL.md`
+- `${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/.agents/skills/gh-stack/SKILL.md`
 
 ## `graphite`
 
 - Follow the Graphite skill above (`gt create` / `gt submit` / `gt restack`).
-- Prefer repository-helpers `scripts/dev/submit-stack` when available in that clone.
+- Prefer repository-helpers `scripts/dev/submit-stack` when available in that clone. Run it from this repo's feature worktree: it submits the repository of the current directory.
 
 ## `gh-stack`
 
 - Follow the gh-stack skill (non-interactive: `view --json`, `submit --auto --open`, named `init`/`add`).
-- Prefer repository-helpers `scripts/dev/submit-stack` / `scripts/dev/ship-and-review` when available (they dispatch via `scripts/lib/stacking-tool`).
+- Prefer repository-helpers `scripts/dev/submit-stack` / `scripts/dev/ship-and-review` when available (they dispatch via `scripts/lib/stacking-tool`). Run them from this repo's feature worktree: they submit the repository of the current directory.
 - **Do not** mix with `gt create` / `gt submit` / `gt restack` on the same stack.
 
 ## Marker cutover checklist

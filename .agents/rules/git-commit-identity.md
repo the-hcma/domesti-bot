@@ -106,12 +106,14 @@ ssh-add -L   # private key must be available via ssh-agent
 At the **start of any session where the agent may commit or open PRs**, read `~/.cursor/cli-config.json` (if present) and verify attribution is disabled:
 
 ```json
-"attribution": {
-  "attributeCommitsToAgent": false,
-  "attributePRsToAgent": false
+{
+  "attribution": {
+    "attributeCommitsToAgent": false,
+    "attributePRsToAgent": false
+  }
 }
 ```
 
-If the file is missing, unreadable, or either flag is not `false`, **alert the committer** before committing and surface setup instructions — explain that Cursor will inject co-author trailers unless they fix their local config. Provide the exact keys to set (or create the file with the block above). Also remind them to disable **Settings → Git & PRs → Attribution** in the Cursor IDE (IDE and CLI settings are separate).
+If the file is missing, unreadable, or either flag is not `false`, **alert the committer** before committing and surface setup instructions — explain that Cursor will inject co-author trailers unless they fix their local config. Provide the exact keys to set: merge the `attribution` object into an existing file, keeping its other settings, or create the file with the block above. Also remind them to disable **Settings → Git & PRs → Attribution** in the Cursor IDE (IDE and CLI settings are separate).
 
 Do not commit on their behalf until they acknowledge or fix the config (unless they explicitly opt out for a one-off commit).
