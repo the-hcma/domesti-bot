@@ -15,6 +15,7 @@ This file defines the non-negotiable standards for all contributors (human or AI
   - **plain** (second): repeats the sync/cleanup, then prompts you to name a new worktree for the upcoming work. Pass `--worktree <name> --no-interactive` to skip the prompt.
 - Both commands are required. This replaces any manual stack-sync step.
 - **Also read every `alwaysApply: true` rule under `.cursor/rules/*.mdc`** (plus any whose `globs` match files you will touch) — this `AGENTS.md` and the `.cursor/rules/` files together are the contract; neither alone is complete. `CLAUDE.md` (a `@AGENTS.md` import) and `.github/copilot-instructions.md` are thin shims so Claude Code and Copilot reach the same guidance.
+- Markdown files you commit, this one included, use one physical line per paragraph, list item and blockquote, with no hard line breaks (see `.agents/rules/github-content-formatting.md`).
 - After `start-development` finishes, **`cd` into the stack worktree** (`.worktrees/<stack-name>-wt`) before any other work. Do not stay in the primary clone.
 
 ### Main worktree is off-limits (agents)
@@ -440,17 +441,8 @@ New senders must comply from day one and ship hermetic tests for provenance (and
 
 ## Security
 
-- **No secret exposure in agent channels:** `.cursor/rules/no-secret-exposure.mdc`
-  (`alwaysApply`). Never print or paste secrets into tool/shell/transcript logs,
-  PR/issue text, review replies, or commits. Complements CI `Secret Scan`
-  (prevention vs detection). Org template sync: [repository-helpers#566](https://github.com/the-hcma/repository-helpers/issues/566).
-- **Remote timeouts and bounded retries:** `.cursor/rules/remote-timeouts-retries.mdc`
-  (`alwaysApply`). Every network call (My Tracks `httpx`, Vizio SmartCast `aiohttp`,
-  Tailwind HTTP, Sonos UPnP, python-kasa, pychromecast, outbound SMTP, `gh`/`curl`)
-  sets an explicit timeout — reuse the module constant (`_REQUEST_TIMEOUT_S`,
-  `_DEFAULT_REQUEST_TIMEOUT` / `_POLL_REQUEST_TIMEOUT`) — and any retry is bounded
-  (cap or budget, backoff, `Retry-After`), transient-only, and never re-sends a
-  non-idempotent write. Org template sync: [repository-helpers#570](https://github.com/the-hcma/repository-helpers/issues/570).
+- **No secret exposure in agent channels:** `.cursor/rules/no-secret-exposure.mdc` (`alwaysApply`). Never print or paste secrets into tool/shell/transcript logs, PR/issue text, review replies, or commits. Complements CI `Secret Scan` (prevention vs detection). Org template sync: [repository-helpers#566](https://github.com/the-hcma/repository-helpers/issues/566).
+- **Remote timeouts and bounded retries:** `.cursor/rules/remote-timeouts-retries.mdc` (`alwaysApply`). Every network call (My Tracks `httpx`, Vizio SmartCast `aiohttp`, Tailwind HTTP, Sonos UPnP, python-kasa, pychromecast, outbound SMTP, `gh`/`curl`) sets an explicit timeout — reuse the module constant (`_REQUEST_TIMEOUT_S`, `_DEFAULT_REQUEST_TIMEOUT` / `_POLL_REQUEST_TIMEOUT`) — and any retry is bounded (cap or budget, backoff, `Retry-After`), transient-only, and never re-sends a non-idempotent write. Org template sync: [repository-helpers#570](https://github.com/the-hcma/repository-helpers/issues/570).
 - **Never log, store, or transmit credentials** (`KASA_PASSWORD`, `TAILWIND_TOKEN`, `DOMESTI_API_KEY`, `domesti_secrets_key`) in plain text. Read them from the environment or from mode-`600` files; do not echo them to stdout or commit `.env` / `domesti-bot.config.json` (the latter is gitignored; ship only `domesti-bot.config.json.example`).
 - **Wildcard HTTP (`0.0.0.0`)** is only appropriate on a trusted home LAN or behind proper auth/TLS. The `etc/systemd` user unit intentionally listens on all interfaces at port 8003 (no colocated nginx)—set `DOMESTI_API_KEY` (or front the service) before exposing that pattern anywhere less trusted.
 - **Validate user-controlled paths** (REPL filenames, future upload endpoints) with `pathlib.Path.resolve()` before any filesystem operation; reject paths that escape the working directory.
@@ -474,9 +466,7 @@ New senders must comply from day one and ship hermetic tests for provenance (and
 
 ## Commits, Stacking & Pull Requests
 
-> See **`docs/STACKING.md`** for gh-stack stacked PRs and GitHub’s native merge queue.
-> Stacking backend is `.github/stacking-tool` (`gh-stack`). Prefer repository-helpers
-> `scripts/dev/submit-stack` / `scripts/dev/ship-and-review`.
+> See **`docs/STACKING.md`** for gh-stack stacked PRs and GitHub’s native merge queue. Stacking backend is `.github/stacking-tool` (`gh-stack`). Prefer repository-helpers `scripts/dev/submit-stack` / `scripts/dev/ship-and-review`.
 
 - This project uses **`gh stack`** for branch stacking. All work happens in stacked branches.
 - **Never commit or push directly to `main`.** `main` is updated only via merged PRs. Enforcement layers, in order of strength:
@@ -487,8 +477,7 @@ New senders must comply from day one and ship hermetic tests for provenance (and
 - **Branch / commit creation**: `gh stack init <stack>/<topic>` (first layer) or `gh stack add <stack>/<topic>` (dependent layer), then `git add` + `git commit` with a Conventional Commit message. Always pass branch names to `init`/`add` (non-interactive).
 - **Amending an existing PR** (corrections, review fixes, fixups): commit on the same branch (`git commit --amend` only when hooks allow and the commit is unpushed / you intend a force-with-lease via stack push), or add fixup commits and fold before submit. Prefer `git commit` + `gh stack submit` to update the open PR.
 - **Submitting**: prefer `~/work/ai/repository-helpers/scripts/dev/submit-stack` (local gates + `gh stack submit --auto --open --remote origin`). Bare: `gh stack submit --auto --open --remote origin`.
-- **Filling in PR description** after submit when needed (route `gh` through the
-  throttled wrapper — see `.cursor/rules/github-api-throttle.mdc`):
+- **Filling in PR description** after submit when needed (route `gh` through the throttled wrapper — see `.cursor/rules/github-api-throttle.mdc`):
   ```shell
   ~/work/ai/repository-helpers/scripts/gh-api pr edit <pr> --body "..."
   ```
