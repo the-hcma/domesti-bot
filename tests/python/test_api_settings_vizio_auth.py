@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from http import HTTPStatus
 from pathlib import Path
 from types import SimpleNamespace
@@ -371,3 +372,26 @@ def test_vizio_tv_list_cli_token_still_reports_the_stored_row(
     assert isinstance(tv["updated_at"], float)
     assert "cli-token-value" not in str(tv)
     assert "stored-token-aaaa" not in str(tv)
+
+
+def test_vizio_resolver_logs_why_an_unreadable_token_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_vizio_auth_token_to_db(db, token="stored-token-aaaa", mac="00:bd:3e:d5:f0:11")
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    with caplog.at_level(logging.WARNING, logger="app.vizio_credentials"):
+        token, source = resolve_vizio_auth_token(
+            mac="00:bd:3e:d5:f0:11",
+            host="192.168.86.201",
+            cli_token=None,
+            env_token=None,
+            cache_path=db,
+        )
+    assert (token, source) == ("", "none")
+    assert "cannot be read" in caplog.text
+    assert "SecretsDecryptError" in caplog.text
+    assert "stored-token-aaaa" not in caplog.text

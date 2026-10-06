@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from cryptography.fernet import Fernet
 
 from app.db.secrets import save_kasa_credentials_to_db
 from app.device_enums import SettingsCredentialsTestSource
+from app.kasa_credentials import resolve_kasa_credentials
 from app.settings_credentials_test import CredentialsTestUnavailableError, _resolve_kasa_probe_credentials
 
 
@@ -56,3 +58,16 @@ def test_environment_credentials_are_not_mixed_with_a_single_form_field(
     monkeypatch.setenv("KASA_PASSWORD", "env-password")
     with pytest.raises(CredentialsTestUnavailableError, match="environment credentials are not mixed"):
         _resolve_kasa_probe_credentials(cache_path=tmp_path / "ui.sqlite", username=None, password="typed-password")
+
+
+def test_kasa_resolver_ignores_an_undecryptable_row_and_logs_why(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    stored_db: Path,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    with caplog.at_level(logging.WARNING, logger="app.kasa_credentials"):
+        assert resolve_kasa_credentials(cache_path=stored_db) == (None, "none")
+    assert "cannot be decrypted" in caplog.text
+    assert "hunter2" not in caplog.text
+    assert "alice@example.com" not in caplog.text

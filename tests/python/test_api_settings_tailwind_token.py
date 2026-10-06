@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from http import HTTPStatus
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.db.secrets import save_tailwind_token_to_db
+from app.tailwind_credentials import resolve_tailwind_token
 
 
 def _client(*, cache_path: Path | None) -> tuple[TestClient, FastAPI]:
@@ -149,3 +151,19 @@ def test_get_tailwind_token_settings_env_override_still_reports_the_stored_row(
     assert body["stored_in_database"] is True
     assert isinstance(body["updated_at"], float)
     assert "654321" not in str(body)
+
+
+def test_resolver_ignores_an_undecryptable_row_and_logs_why(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_tailwind_token_to_db(db, "123456")
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    with caplog.at_level(logging.WARNING, logger="app.tailwind_credentials"):
+        assert resolve_tailwind_token(cli_token=None, cache_path=db) == ("", "none")
+    assert "cannot be decrypted" in caplog.text
+    assert "123456" not in caplog.text

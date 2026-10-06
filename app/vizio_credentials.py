@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -14,6 +15,8 @@ from app.db.secrets import (
     vizio_auth_token_stored_in_db,
 )
 from app.vizio_mac import normalize_mac
+
+_LOGGER = logging.getLogger(__name__)
 
 VizioAuthSource = Literal["cli", "env", "database", "none"]
 
@@ -43,7 +46,12 @@ def resolve_vizio_auth_token(
     if cache_path is not None:
         try:
             stored = load_vizio_auth_token_from_db(cache_path, mac=mac, host=host)
-        except (SecretsConfigurationError, SecretsDecryptError):
+        except (SecretsConfigurationError, SecretsDecryptError) as exc:
+            _LOGGER.warning(
+                "Stored Vizio auth token cannot be read (%s); ignoring it (pair or paste the token again in "
+                "Settings > Vizio)",
+                type(exc).__name__,
+            )
             stored = None
         if stored:
             return stored, "database"

@@ -104,7 +104,6 @@ export async function mountMyTracksSettingsPanel(
   const passwordInput = document.createElement("input");
   passwordInput.type = "password";
   passwordInput.name = "mytracks-test-password";
-  passwordInput.autocomplete = "current-password";
   passwordInput.placeholder = "Required for Test (never stored)";
   preventBrowserAutofill(passwordInput);
 

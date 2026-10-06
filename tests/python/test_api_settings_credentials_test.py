@@ -105,6 +105,34 @@ def test_post_tailwind_token_test_with_an_undecryptable_row_explains_the_key_cha
     assert "cannot be decrypted" in response.json()["detail"]
 
 
+def test_post_tailwind_token_test_uses_the_env_token_when_the_row_is_undecryptable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_tailwind_token_to_db(db, "123456")
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    monkeypatch.setenv("TAILWIND_TOKEN", "654321")
+    client, _app = _client(cache_path=db)
+    fake_client = AsyncMock()
+    fake_client.__aenter__.return_value = fake_client
+    fake_client.status.return_value = MagicMock(doors=[object()])
+    with (
+        patch("app.settings_credentials_test.Tailwind", return_value=fake_client) as tailwind,
+        patch(
+            "app.settings_credentials_test._resolve_tailwind_probe_host",
+            new_callable=AsyncMock,
+            return_value="192.168.1.10",
+        ),
+    ):
+        response = client.post("/v1/settings/tailwind-token/test", json={})
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["source"] == "env"
+    assert tailwind.call_args.kwargs["token"] == "654321"
+
+
 def test_post_tailwind_token_test_auth_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("TAILWIND_TOKEN", "654321")
     client, _app = _client(cache_path=tmp_path / "ui.sqlite")

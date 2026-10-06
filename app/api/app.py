@@ -197,13 +197,11 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
 class _SettingsCacheControlMiddleware(BaseHTTPMiddleware):
     """Send ``Cache-Control: no-store`` on every ``/v1/settings`` response.
 
-    The settings surface is API-key-gated and, until the write-only secrets
-    stack (domesti-bot#727) lands, several GETs return secret material
-    (Tailwind Local Control Key, Kasa account password, EP1 Noise pre-shared
-    key). ``no-store`` keeps a shared or proxied browser cache from retaining
-    those payloads after the API key or the stored value changes (CWE-525),
-    and stays as defense in depth once they are write-only. Applied as middleware rather than per-route so that error
-    responses (401 / 404 / 422) carry the header too.
+    The settings surface is API-key-gated and no endpoint returns secret material (write-only secrets,
+    domesti-bot#727), so ``no-store`` is defense in depth: it keeps a shared or proxied browser cache from
+    retaining any settings payload (stored identifiers, status, error details) after the API key or a stored
+    value changes (CWE-525). Applied as middleware rather than per-route so that error responses
+    (401 / 404 / 422) carry the header too.
     """
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
