@@ -25,14 +25,13 @@ from app.api.schemas import (
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.db.secrets import (
     SecretsConfigurationError,
-    SecretsDecryptError,
     delete_app_secret,
     load_vizio_auth_hosts_from_db,
-    load_vizio_auth_token_from_db,
     save_vizio_auth_token_to_db,
     secrets_key_configured,
     secrets_key_source,
     vizio_auth_token_stored_in_db,
+    vizio_auth_token_updated_at,
 )
 from app.domesti_bot_cli import DeviceManagersState
 from app.server_runtime import runtime
@@ -419,20 +418,6 @@ def _optional_cache_path() -> Path | None:
     return runtime.discovery_cache_path()
 
 
-def _stored_token_for_tv(
-    cache_path: Path,
-    *,
-    host: str,
-    mac: str | None,
-) -> str | None:
-    if not vizio_auth_token_stored_in_db(cache_path, mac=mac, host=host):
-        return None
-    try:
-        return load_vizio_auth_token_from_db(cache_path, mac=mac, host=host)
-    except SecretsDecryptError:
-        return None
-
-
 def _vizio_tv_settings_out(
     cache_path: Path,
     *,
@@ -448,7 +433,6 @@ def _vizio_tv_settings_out(
         env_token=os.environ.get("VIZIO_AUTH_TOKEN"),
         cache_path=cache_path,
     )
-    stored = _stored_token_for_tv(cache_path, host=host, mac=mac) if source == "database" else None
     return VizioTvSettingsOut(
         device_id=canonical_id,
         mac=mac,
@@ -457,7 +441,7 @@ def _vizio_tv_settings_out(
         display_name=_display_name_for(cache_path, host=host, port=port, mac=mac),
         auth_configured=bool(token),
         auth_source=source,
-        stored_token=stored,
+        updated_at=vizio_auth_token_updated_at(cache_path, mac=mac, host=host),
     )
 
 

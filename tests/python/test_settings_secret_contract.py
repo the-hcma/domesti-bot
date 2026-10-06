@@ -47,7 +47,6 @@ _NON_SECRET_PROPERTY_NAMES = frozenset({"secrets_key_source"})
 # by the PR that converts that endpoint to write-only.
 _READBACK_PROPERTY_ALLOWLIST = frozenset(
     {
-        ("VizioTvSettingsOut", "stored_token"),
         ("Ep1NoisePreSharedKeySettingsOut", "stored_noise_psk"),
         ("MyTracksRelayKeySettingsOut", "stored_relay_key"),
     }
@@ -59,7 +58,6 @@ _IDENTIFIER_ALLOWLIST = frozenset({("KasaCredentialsSettingsOut", "stored_userna
 # GET path -> sentinel names that endpoint may still return in plaintext.
 _READBACK_PATH_ALLOWLIST: dict[str, frozenset[str]] = {
     "/v1/settings/ep1-noise-psk": frozenset({"ep1_noise_psk"}),
-    "/v1/settings/vizio/tvs": frozenset({"vizio_token"}),
     "/v1/settings/my-tracks/relay-key": frozenset({"relay_key"}),
 }
 
@@ -167,22 +165,23 @@ def _response_schemas(operation: dict[str, Any]) -> list[dict[str, Any]]:
     return schemas
 
 
-def test_settings_get_responses_do_not_return_secret_properties(tmp_path: Path) -> None:
+def test_settings_responses_do_not_return_secret_properties(tmp_path: Path) -> None:
     spec = _app(tmp_path / "ui.sqlite").openapi()
     components = spec["components"]["schemas"]
     seen_readbacks: set[tuple[str, str]] = set()
     violations: list[str] = []
-    for path, operation in _settings_operations(spec, "get"):
-        for response_schema in _response_schemas(operation):
-            for component, prop, prop_schema in _object_properties(response_schema, components, None, set()):
-                if not _is_stringish(prop_schema, components) or not _is_secret_property(prop):
-                    continue
-                if (component, prop) in _IDENTIFIER_ALLOWLIST:
-                    continue
-                if (component, prop) in _READBACK_PROPERTY_ALLOWLIST:
-                    seen_readbacks.add((component, prop))
-                    continue
-                violations.append(f"GET {path}: {component}.{prop}")
+    for method in ("get", "post", "put", "patch", "delete"):
+        for path, operation in _settings_operations(spec, method):
+            for response_schema in _response_schemas(operation):
+                for component, prop, prop_schema in _object_properties(response_schema, components, None, set()):
+                    if not _is_stringish(prop_schema, components) or not _is_secret_property(prop):
+                        continue
+                    if (component, prop) in _IDENTIFIER_ALLOWLIST:
+                        continue
+                    if (component, prop) in _READBACK_PROPERTY_ALLOWLIST:
+                        seen_readbacks.add((component, prop))
+                        continue
+                    violations.append(f"{method.upper()} {path}: {component}.{prop}")
     assert not violations, "secret-bearing response properties must be write-only: " + ", ".join(violations)
     stale = _READBACK_PROPERTY_ALLOWLIST - seen_readbacks
     assert not stale, f"stale readback allowlist entries (remove them): {sorted(stale)}"

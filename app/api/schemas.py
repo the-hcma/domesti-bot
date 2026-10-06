@@ -2322,16 +2322,16 @@ class VizioPairCancelIn(BaseModel):
 
     device_id: str = Field(..., min_length=1, max_length=128)
     challenge_type: int
-    pairing_req_token: int
+    pairing_req_token: int = Field(..., repr=False, json_schema_extra=_WRITE_ONLY_SECRET)
 
 
 class VizioPairCompleteIn(BaseModel):
     """Body for ``POST /v1/settings/vizio/pair/complete``."""
 
     device_id: str = Field(..., min_length=1, max_length=128)
-    pin: str = Field(..., min_length=4, max_length=8)
+    pin: str = Field(..., min_length=4, max_length=8, repr=False, json_schema_extra=_WRITE_ONLY_SECRET)
     challenge_type: int
-    pairing_req_token: int
+    pairing_req_token: int = Field(..., repr=False, json_schema_extra=_WRITE_ONLY_SECRET)
 
 
 class VizioPairCompleteOut(BaseModel):
@@ -2361,11 +2361,11 @@ class VizioTvSettingsOut(BaseModel):
     display_name: str | None = None
     auth_configured: bool
     auth_source: VizioAuthSourceOut
-    stored_token: str | None = Field(
+    updated_at: float | None = Field(
         default=None,
         description=(
-            "Decrypted per-TV token from the database when auth_source is "
-            "database; null when auth comes from CLI/env or no DB row exists."
+            "Epoch seconds the TV's stored token was last written; null when no database row exists. The token "
+            "itself is write-only and never returned."
         ),
     )
 

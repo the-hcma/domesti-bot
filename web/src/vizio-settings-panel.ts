@@ -2,7 +2,10 @@ import { ManagedSecretSource, ToastVariant } from "./closed-sets.js";
 // Vizio SmartCast TV settings panel (per-TV auth + optional PIN pairing).
 
 import { api, HttpError } from "./api.js";
-import { createSecretInputRow } from "./settings-secret-field.js";
+import {
+  applyWriteOnlySecretState,
+  createSecretInputRow,
+} from "./settings-secret-field.js";
 import {
   clearSettingsDialogStatus,
   setSettingsDialogStatus,
@@ -102,20 +105,15 @@ export async function mountVizioSettingsPanel(
   const tokenLabelText = document.createElement("span");
   tokenLabelText.textContent = "Auth token";
   const tokenRow = createSecretInputRow({
-    autocomplete: "off",
+    autocomplete: "new-password",
     maxLength: 256,
     placeholder: "Paste token from pairing",
     required: false,
   });
   const tokenInput = tokenRow.input;
   tokenInput.name = "token";
-  let storedToken: string | null = null;
-  let tokenRevealed = false;
+  // The token is write-only: the API never returns it, so this field only ever holds what is typed.
   const setTokenRevealed = (revealed: boolean): void => {
-    tokenRevealed = revealed;
-    if (revealed && !tokenInput.value && storedToken) {
-      tokenInput.value = storedToken;
-    }
     tokenRow.setRevealed(revealed);
   };
   setTokenRevealed(false);
@@ -219,25 +217,25 @@ export async function mountVizioSettingsPanel(
     clearSettingsDialogStatus(pairStatus);
   };
 
+  // Save appears when unpaired, or when a replacement token has been typed over a saved one.
+  const syncSaveVisibility = (): void => {
+    saveBtn.hidden = paired && tokenInput.value.trim() === "";
+  };
+
   const applyTokenFieldsFromTv = (tv: VizioTvSettingsOut | undefined): void => {
-    storedToken = tv?.stored_token ?? null;
     paired = tv?.auth_configured === true;
     authConfigured = tv?.auth_configured === true;
-    if (storedToken) {
-      tokenInput.value = storedToken;
-      tokenInput.placeholder = "";
-      if (!tokenRevealed) {
-        tokenInput.type = "password";
-      }
-    } else {
-      tokenInput.value = "";
-      tokenInput.placeholder = paired ? "" : "Paste token from pairing";
-      if (!tokenRevealed) {
-        tokenInput.type = "password";
-      }
-    }
+    const savedInDatabase =
+      paired && tv?.auth_source === ManagedSecretSource.Database;
+    applyWriteOnlySecretState(tokenInput, {
+      configured: savedInDatabase,
+      emptyPlaceholder: paired
+        ? "Provided by the environment or command line"
+        : "Paste token from pairing",
+    });
     tokenInput.required = !paired;
-    saveBtn.hidden = paired;
+    setTokenRevealed(false);
+    syncSaveVisibility();
     beginPairBtn.textContent = paired ? "Re-pair" : "Start pairing";
     clearBtn.disabled = !paired || tv?.auth_source !== ManagedSecretSource.Database;
     syncTestEnabled();
@@ -360,6 +358,7 @@ export async function mountVizioSettingsPanel(
     }
   });
   tokenInput.addEventListener("input", () => {
+    syncSaveVisibility();
     syncTestEnabled();
   });
 
@@ -378,8 +377,13 @@ export async function mountVizioSettingsPanel(
         if (tv !== undefined) {
           deviceId = tv.device_id;
         }
-      } catch {
-        // Fall back to host-based id when status cannot be loaded.
+      } catch (err) {
+        // The token is write-only, so a guessed host id could not reach a MAC-keyed stored token.
+        showStatusMessage(
+          err instanceof HttpError ? err.detail : "Could not load the TV list.",
+          ToastVariant.Error,
+        );
+        return;
       }
       testBtn.disabled = true;
       showStatusMessage("Testing auth…");
@@ -519,7 +523,6 @@ export async function mountVizioSettingsPanel(
       clearBtn.disabled = true;
       try {
         await api.clearVizioAuth(deviceId);
-        storedToken = null;
         tokenInput.value = "";
         setTokenRevealed(false);
         showSuccessToast("Stored token cleared.");

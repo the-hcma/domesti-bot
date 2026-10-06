@@ -476,7 +476,7 @@ export interface VizioTvSettingsOut {
   display_name: string | null;
   auth_configured: boolean;
   auth_source: VizioAuthSource;
-  stored_token: string | null;
+  updated_at: number | null;
 }
 
 export interface VizioTvsSettingsOut {
