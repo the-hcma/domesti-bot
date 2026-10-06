@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import FileResponse, HTMLResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from app import device_discovery_store
 from app.api.api_key_compare import api_keys_match
@@ -196,11 +197,12 @@ class _AccessLogMiddleware(BaseHTTPMiddleware):
 class _SettingsCacheControlMiddleware(BaseHTTPMiddleware):
     """Send ``Cache-Control: no-store`` on every ``/v1/settings`` response.
 
-    The settings surface is API-key-gated and several GETs return secret
-    material (Tailwind Local Control Key, Kasa account password, EP1 Noise
-    pre-shared key). ``no-store`` keeps a shared or proxied browser cache from
-    retaining those payloads after the API key or the stored value changes
-    (CWE-525). Applied as middleware rather than per-route so that error
+    The settings surface is API-key-gated and, until the write-only secrets
+    stack (domesti-bot#727) lands, several GETs return secret material
+    (Tailwind Local Control Key, Kasa account password, EP1 Noise pre-shared
+    key). ``no-store`` keeps a shared or proxied browser cache from retaining
+    those payloads after the API key or the stored value changes (CWE-525),
+    and stays as defense in depth once they are write-only. Applied as middleware rather than per-route so that error
     responses (401 / 404 / 422) carry the header too.
     """
 
@@ -210,6 +212,24 @@ class _SettingsCacheControlMiddleware(BaseHTTPMiddleware):
         if path == _SETTINGS_PATH_PREFIX or path.startswith(_SETTINGS_PATH_PREFIX + "/"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+
+async def _validation_error_handler(_request: Request, exc: Exception) -> JSONResponse:
+    """422 body that never echoes the submitted value.
+
+    FastAPI's default handler includes each error's ``input`` (and validator ``ctx``), which for a
+    rejected secret field (an over-long Kasa password, a malformed Tailwind token, a missing field,
+    where ``input`` is the whole body) returns the secret to the client and to anything that records
+    response bodies. Only ``type``, ``loc`` and ``msg`` are kept, in FastAPI's usual ``detail`` list
+    shape so existing clients keep working.
+    """
+    if not isinstance(exc, RequestValidationError):
+        raise exc
+    detail = [
+        {"type": error.get("type"), "loc": list(error.get("loc", ())), "msg": error.get("msg")}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, content={"detail": detail})
 
 
 def _expected_api_key() -> str:
@@ -386,6 +406,7 @@ def create_app(args: Any) -> FastAPI:
         version=get_build_info()[0],
         lifespan=lifespan,
     )
+    app.add_exception_handler(RequestValidationError, _validation_error_handler)
     app.include_router(settings_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(vizio_settings_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(smtp_router, dependencies=[Depends(_verify_api_key)])
