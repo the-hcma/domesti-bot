@@ -12,6 +12,7 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app import device_discovery_store
 from app.api.app import create_app
 from app.db.secrets import (
     save_kasa_credentials_to_db,
@@ -539,6 +540,37 @@ def test_post_vizio_auth_test_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     body = response.json()
     assert body["ok"] is True
     assert body["source"] == "database"
+
+
+def test_post_vizio_auth_test_with_a_blank_body_uses_the_stored_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("VIZIO_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    device_discovery_store.upsert_vizio_tv(
+        db,
+        host="192.168.86.201",
+        port=7345,
+        display_name="Kitchen TV",
+        model="V505M-K09",
+        mac="00:bd:3e:d5:f0:11",
+        diid="abc",
+    )
+    save_vizio_auth_token_to_db(db, token="Zmowtcpoxo", mac="00:bd:3e:d5:f0:11")
+    client, _app = _client(cache_path=db)
+    fake_client = MagicMock()
+    fake_client.get_power_on = AsyncMock(return_value=True)
+    fake_client.aclose = AsyncMock()
+    with patch("app.settings_credentials_test.VizioSmartCastClient", return_value=fake_client) as vizio:
+        response = client.post("/v1/settings/vizio/tvs/00:bd:3e:d5:f0:11/auth/test", json={})
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["ok"] is True
+    assert body["source"] == "database"
+    assert vizio.call_args.kwargs["auth_token"] == "Zmowtcpoxo"
+    assert "Zmowtcpoxo" not in response.text
 
 
 def test_post_vizio_auth_test_auth_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

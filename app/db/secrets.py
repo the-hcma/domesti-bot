@@ -315,8 +315,26 @@ def vizio_auth_token_stored_in_db(
     return False
 
 
+def vizio_auth_token_updated_at(
+    path: Path,
+    *,
+    mac: str | None = None,
+    host: str | None = None,
+) -> float | None:
+    """Epoch seconds a TV's stored token was last written (MAC key first, then legacy host), without decrypting."""
+    if mac:
+        updated = _app_secret_updated_at(path, _vizio_auth_secret_key_mac(mac))
+        if updated is not None:
+            return updated
+    if host:
+        return _app_secret_updated_at(path, _vizio_auth_secret_key_host(host))
+    return None
+
+
 def _app_secret_updated_at(path: Path, key: str) -> float | None:
     """``updated_at`` of one secret row (``None`` when absent); never reads the ciphertext's plaintext."""
+    if not path.expanduser().resolve().is_file():
+        return None
     with discovery_session(path) as session:
         row = session.get(AppSecret, key)
         return row.updated_at if row is not None else None
