@@ -6,9 +6,8 @@ Settings endpoints must not return secret material on read. This module holds th
 * a sentinel test that stores recognizable fake secrets and asserts they never appear in a GET response;
 * a validation-error test that a rejected secret is not echoed in the 422 body or in logs.
 
-Endpoints that still read a secret back are listed in the allowlists below, each tracked by the
-write-only secrets issue (domesti-bot#727). Every conversion PR removes its entries, and a stale entry
-fails the test, so the lists can only shrink.
+The readback allowlists below are empty now that every settings endpoint is write-only (domesti-bot#727);
+they and their stale-entry checks are removed in the lock-down PR.
 """
 
 from __future__ import annotations
@@ -45,19 +44,13 @@ _NON_SECRET_PROPERTY_NAMES = frozenset({"secrets_key_source"})
 
 # Response properties that still read a secret back: (component schema, property). Each is removed
 # by the PR that converts that endpoint to write-only.
-_READBACK_PROPERTY_ALLOWLIST = frozenset(
-    {
-        ("MyTracksRelayKeySettingsOut", "stored_relay_key"),
-    }
-)
+_READBACK_PROPERTY_ALLOWLIST: frozenset[tuple[str, str]] = frozenset()
 
 # Identifiers (not credentials) that may be returned: shown so the operator can tell which account is set.
 _IDENTIFIER_ALLOWLIST = frozenset({("KasaCredentialsSettingsOut", "stored_username")})
 
 # GET path -> sentinel names that endpoint may still return in plaintext.
-_READBACK_PATH_ALLOWLIST: dict[str, frozenset[str]] = {
-    "/v1/settings/my-tracks/relay-key": frozenset({"relay_key"}),
-}
+_READBACK_PATH_ALLOWLIST: dict[str, frozenset[str]] = {}
 
 # Built rather than written as literals: gitleaks' generic-api-key rule flags a literal next to a
 # ``token`` / ``key`` name and would fail the secret-scan job.

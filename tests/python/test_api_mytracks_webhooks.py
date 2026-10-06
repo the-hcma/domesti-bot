@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import logging
 from http import HTTPStatus
 from pathlib import Path
@@ -19,7 +20,7 @@ from app.db.secrets import (
     load_mytracks_relay_api_key_from_db,
     save_mytracks_relay_api_key_to_db,
 )
-from app.mytracks_service import MyTracksPairResult
+from app.mytracks_service import MyTracksPairResult, MyTracksSyncError
 from app.mytracks_store import load_mytracks_pair_status
 from app.presence_store import list_user_locations
 from app.rules_store import UserRecord, replace_users
@@ -673,28 +674,166 @@ def test_post_mytracks_pair_uses_forwarded_public_url(
     assert body["user_location_update_url"] == ("https://domesti.example.com/v1/webhooks/location_update")
 
 
-def test_get_mytracks_relay_key_returns_stored_secret(
+_PAIR_BODY = {
+    "domain": "https://tracks.example.com",
+    "username": "admin",
+    "password": "secret",
+}
+
+
+def test_relay_key_is_never_returned_by_the_pair_response_or_pair_status(
     tmp_path: Path,
     fernet_key: str,
 ) -> None:
     db = tmp_path / "ui.sqlite"
     client, _app = _client(cache_path=db)
     with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
-        client.post(
-            "/v1/settings/my-tracks/pair",
-            json={
-                "domain": "https://tracks.example.com",
-                "username": "admin",
-                "password": "secret",
-            },
-        )
-    response = client.get("/v1/settings/my-tracks/relay-key")
-    assert response.status_code == HTTPStatus.OK
-    body = response.json()
-    assert body["configured"] is True
+        paired = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
     stored = load_mytracks_relay_api_key_from_db(db)
     assert stored is not None
-    assert body["stored_relay_key"] == stored
+    assert paired.status_code == HTTPStatus.OK
+    status = client.get("/v1/settings/my-tracks/pair-status")
+    for response in (paired, status):
+        assert stored not in response.text
+        body = response.json()
+        assert body["relay_key_configured"] is True
+        assert isinstance(body["relay_key_updated_at"], float)
+        assert "stored_relay_key" not in body
+        assert "relay_key" not in body
+
+
+def test_the_relay_key_readback_endpoint_is_gone(tmp_path: Path, fernet_key: str) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
+        client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    assert client.get("/v1/settings/my-tracks/relay-key").status_code == HTTPStatus.NOT_FOUND
+
+
+def test_re_pairing_replaces_the_relay_key_and_moves_updated_at(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    times = itertools.count(100.0, 300.0)
+    monkeypatch.setattr("app.db.secrets.time.time", lambda: next(times))
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
+        first = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+        first_key = load_mytracks_relay_api_key_from_db(db)
+        second = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    second_key = load_mytracks_relay_api_key_from_db(db)
+    assert first_key is not None
+    assert second_key is not None
+    assert first_key != second_key
+    assert first.json()["relay_key_updated_at"] < second.json()["relay_key_updated_at"]
+
+
+def test_pair_status_is_null_before_any_pairing(tmp_path: Path, fernet_key: str) -> None:
+    client, _app = _client(cache_path=tmp_path / "ui.sqlite")
+    assert client.get("/v1/settings/my-tracks/pair-status").json() is None
+
+
+def test_a_failed_first_pair_stores_no_relay_key_and_reports_the_error(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", side_effect=MyTracksSyncError("rejected")):
+        failed = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    assert failed.status_code == HTTPStatus.BAD_GATEWAY
+    assert load_mytracks_relay_api_key_from_db(db) is None
+    status = client.get("/v1/settings/my-tracks/pair-status").json()
+    assert status["relay_key_configured"] is False
+    assert status["relay_key_updated_at"] is None
+    assert status["paired_at"] is None
+    assert status["last_pair_error"] == "rejected"
+
+
+def test_a_failed_re_pair_keeps_the_previous_working_relay_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    times = itertools.count(100.0, 300.0)
+    monkeypatch.setattr("app.db.secrets.time.time", lambda: next(times))
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
+        first = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    registered_key = load_mytracks_relay_api_key_from_db(db)
+    assert first.status_code == HTTPStatus.OK
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", side_effect=MyTracksSyncError("bad password")):
+        failed = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    assert failed.status_code == HTTPStatus.BAD_GATEWAY
+    assert load_mytracks_relay_api_key_from_db(db) == registered_key
+    status = client.get("/v1/settings/my-tracks/pair-status").json()
+    assert status["relay_key_updated_at"] == first.json()["relay_key_updated_at"]
+    assert status["paired_at"] is not None
+
+
+def test_a_storage_failure_after_my_tracks_accepted_the_key_is_recorded_as_a_mismatch(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
+        first = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    assert first.status_code == HTTPStatus.OK
+    old_key = load_mytracks_relay_api_key_from_db(db)
+    with (
+        patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK),
+        patch(
+            "app.api.mytracks_routes.save_mytracks_relay_api_key_to_db",
+            side_effect=OSError("disk full"),
+        ),
+    ):
+        failed = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    assert failed.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert "webhooks fail until you pair again" in failed.json()["detail"]
+    assert load_mytracks_relay_api_key_from_db(db) == old_key
+    status = client.get("/v1/settings/my-tracks/pair-status").json()
+    assert status["paired_at"] is not None
+    assert "accepted a new relay key" in status["last_pair_error"]
+    assert "disk full" not in status["last_pair_error"]
+
+
+def test_a_successful_pair_clears_a_recorded_mismatch(tmp_path: Path, fernet_key: str) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
+        client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    with (
+        patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK),
+        patch("app.api.mytracks_routes.save_mytracks_relay_api_key_to_db", side_effect=OSError("disk full")),
+    ):
+        client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):
+        repaired = client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    assert repaired.status_code == HTTPStatus.OK
+    assert repaired.json()["last_pair_error"] is None
+
+
+def test_the_key_is_registered_with_my_tracks_before_it_is_stored(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    seen_at_registration: list[str | None] = []
+
+    def _pair(**kwargs: str) -> MyTracksPairResult:
+        seen_at_registration.append(load_mytracks_relay_api_key_from_db(db))
+        assert kwargs["api_key"]
+        return _PAIR_OK
+
+    with patch("app.api.mytracks_routes.pair_with_my_tracks", side_effect=_pair):
+        client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
+    assert seen_at_registration == [None]
+    assert load_mytracks_relay_api_key_from_db(db) is not None
 
 
 def test_delete_mytracks_pair_clears_relay_key(
@@ -719,8 +858,4 @@ def test_delete_mytracks_pair_clears_relay_key(
     assert body["paired_at"] is None
     assert body["relay_key_configured"] is False
     assert load_mytracks_relay_api_key_from_db(db) is None
-    relay_response = client.get("/v1/settings/my-tracks/relay-key")
-    assert relay_response.json() == {
-        "configured": False,
-        "stored_relay_key": None,
-    }
+    assert body["relay_key_updated_at"] is None

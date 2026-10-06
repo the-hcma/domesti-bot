@@ -4,7 +4,7 @@ This document is the **domesti-bot** side of integrating with [my-tracks](https:
 
 **Rule evaluation, geofence definitions, and device actions stay in domesti-bot.** my-tracks remains the location ingest and map service. After pairing, my-tracks **pushes** live location updates to domesti-bot; roster and geofence **definitions** are still pulled manually by domesti-bot (no my-tracks push webhooks for those).
 
-**Status:** **domesti-bot integration is complete** for the operator workflow shipped in PRs [#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216): relay-key webhooks, pairing APIs + Settings UI (pair/re-pair, retention, relay-key reveal, reset), manual roster/geofence sync, live user map with legend + polling, and `scripts/internal/verify-mytracks-pairing`. **Rule evaluation** on live location ingest is **shipped** (file-backed `RuleEvaluator`, Phase 2a–2c in `docs/RULE_ENGINE_PLAN.md`). **Deferred (not integration blockers):** verify-roundtrip and emergency-toggle **buttons** in Settings (APIs exist; use the verify script today), and my-tracks production cutover for live relay (my-tracks repo).
+**Status:** **domesti-bot integration is complete** for the operator workflow shipped in PRs [#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216): relay-key webhooks, pairing APIs + Settings UI (pair/re-pair, retention, relay-key status (never shown), reset), manual roster/geofence sync, live user map with legend + polling, and `scripts/internal/verify-mytracks-pairing`. **Rule evaluation** on live location ingest is **shipped** (file-backed `RuleEvaluator`, Phase 2a–2c in `docs/RULE_ENGINE_PLAN.md`). **Deferred (not integration blockers):** verify-roundtrip and emergency-toggle **buttons** in Settings (APIs exist; use the verify script today), and my-tracks production cutover for live relay (my-tracks repo).
 
 ---
 
@@ -30,7 +30,7 @@ Pairing does **not** require deploy-time env vars for URLs or the my-tracks rela
 | --- | --- | --- |
 | **My Tracks base URL** | Operator | Pairing form (HTTPS) |
 | **domesti-bot public base URL** | domesti-bot derives | From each pairing request (`X-Forwarded-*` / ASGI base URL); operator does not edit a separate public URL field |
-| **Relay API key** | domesti-bot generates | At pair (or re-pair); stored encrypted in SQLite; sent once to my-tracks |
+| **Relay API key** | domesti-bot generates | At pair (or re-pair); sent to my-tracks, then stored encrypted in SQLite only once my-tracks accepts it; never shown or returned |
 | **User location update URL** | domesti-bot derives | `{domesti_public_base_url}/v1/webhooks/location_update` — registered on my-tracks at pair |
 | **User location test URL** | domesti-bot derives | `{domesti_public_base_url}/v1/webhooks/location_update/test` — registered on my-tracks at pair |
 
@@ -40,13 +40,13 @@ Listen bind (`--listen-all`, port 8003, reverse proxy, TLS termination) is ortho
 
 domesti-bot is the **source of truth** for the relay secret. my-tracks only receives it at pair time.
 
-1. On **Pair** / **Re-pair**, domesti-bot generates a new key (`secrets.token_urlsafe(32)`).
-2. domesti-bot stores it encrypted in `app_secrets` under e.g. `mytracks_relay_api_key` (Fernet via `app/db/secrets.py`, same pattern as Tailwind token).
-3. domesti-bot POSTs the plaintext key once to my-tracks `POST /api/admin/domesti-bot/pair/`.
-4. my-tracks stores its copy encrypted in `DomestiBotConfig`.
+1. On **Pair** / **Re-pair**, domesti-bot first checks that a secrets key is configured, then generates a new key (`secrets.token_urlsafe(32)`).
+2. domesti-bot POSTs the plaintext key once to my-tracks `POST /api/admin/domesti-bot/pair/`.
+3. my-tracks stores its copy encrypted in `DomestiBotConfig`.
+4. Only after my-tracks accepts the pair, domesti-bot stores the key encrypted in `app_secrets` under e.g. `mytracks_relay_api_key` (Fernet via `app/db/secrets.py`, same pattern as Tailwind token). A rejected or failed pair therefore never replaces the previous key.
 5. Incoming `POST /v1/webhooks/location_update` and `…/location_update/test` validate `X-Domesti-Api-Key` against the **decrypted DB key**, not `DOMESTI_API_KEY`.
 
-Re-pair **rotates** the key in domesti-bot DB and pushes the new value to my-tracks; the previous key is invalid everywhere.
+Re-pair **rotates** the key: domesti-bot sends the new value to my-tracks and stores it in its own DB only after my-tracks accepts it, so a failed pair leaves the previous key working on both sides, and after a successful pair the previous key is invalid everywhere. One failure leaves the two out of step: if my-tracks accepts the new key but domesti-bot then cannot store it locally (a database error, since the secrets key is checked up front), my-tracks holds the new key while domesti-bot keeps the old one and webhooks fail until the operator pairs again. The response says so and the same message is recorded as the pairing's `last_pair_error`, which the panel shows even while the pairing still reads as paired.
 
 Before the first successful pair, webhook routes return **`401`** (or **`503`** with “not paired”) — never open.
 
@@ -79,7 +79,7 @@ Optional override: `DOMESTI_PUBLIC_BASE_URL` env may pre-fill the pairing form w
 | Pairing APIs | `POST /v1/settings/my-tracks/pair`, `GET /v1/settings/my-tracks/pair-status` |
 | Emergency switch (API) | `PATCH /v1/settings/my-tracks/location-updates` |
 | Location-history retention (API) | `PATCH /v1/settings/my-tracks/location-history-retention` |
-| Pairing UI (Settings → My Tracks) | `web/src/my-tracks-pairing-panel.ts` — pair/re-pair, retention, relay-key reveal, reset |
+| Pairing UI (Settings → My Tracks) | `web/src/my-tracks-pairing-panel.ts` — pair/re-pair, retention, relay-key status (never shown), reset |
 | User presence map (Automations) | `web/src/presence-map.ts` — legend, device colors, 5s status polling |
 | Operator verify script | `scripts/internal/verify-mytracks-pairing` |
 
@@ -99,12 +99,13 @@ sequenceDiagram
 
   Op->>Bot: Settings → My Tracks: My Tracks HTTPS URL + admin user
   Op->>Bot: Pair (admin password prompt)
-  Bot->>Bot: Generate relay_api_key; encrypt → app_secrets
+  Bot->>Bot: Check secrets key; generate relay_api_key
   Bot->>Bot: Build location-update + test webhook URLs from public URL
   Bot->>MT: POST /api/admin/domesti-bot/pair/ (admin session)
   Note over Bot,MT: api_key, user_location_update_url,<br/>user_location_test_url, domesti_base_url
   MT->>MT: Store DomestiBotConfig, location_updates_enabled=true
   MT-->>Bot: 200 paired
+  Bot->>Bot: Encrypt relay_api_key → app_secrets (only now)
   Bot->>Bot: Persist paired_at + URLs in mytracks_settings
   Op->>Bot: Optional: Sync users + geofences
   Note over MT,Bot: Later: location updates → POST …/location_update<br/>Tests → POST …/location_update/test
@@ -161,7 +162,7 @@ X-Domesti-Api-Key: <UI session key, same as other settings routes>
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `api_key` | yes | Fresh relay secret; domesti-bot persists encrypted before send; my-tracks stores encrypted; never returned in API responses |
+| `api_key` | yes | Fresh relay secret; sent to my-tracks, which stores it encrypted; domesti-bot persists its own copy encrypted only after my-tracks accepts the pair, so a failed pair leaves the previous key untouched; never returned in API responses |
 | `domesti_base_url` | yes | From pairing form |
 | `user_location_update_url` | yes | Live GPS relay target |
 | `user_location_test_url` | yes | Synthetic / verify traffic only (see below) |
@@ -169,7 +170,7 @@ X-Domesti-Api-Key: <UI session key, same as other settings routes>
 **Responses:**
 
 - `200` — pair succeeded; body includes `paired_at`, echoed public URLs; `relay_key_configured: true` (never the key itself).
-- `400` / `422` — validation (bad URL, missing Fernet key, my-tracks rejected body).
+- `400` / `422` — validation (bad URL, missing Fernet key, my-tracks rejected body), or my-tracks accepted the pair but the new key could not be stored locally (pair again).
 - `502` — my-tracks unreachable or pair endpoint error.
 
 **Side effects:** upsert My Tracks settings (`domain`, `username`, public URL, webhook URLs, location-history retention), encrypt/store relay key in `app_secrets`, set `paired_at`, clear `last_pair_error`. Pairing attempts log at `[mytracks] pairing starting|complete|failed` (INFO/WARNING).
@@ -262,7 +263,7 @@ The My Tracks settings tab ships **connection settings** (domain + default admin
 
 - **Location history retention** controls (see below) — editable before pair and via **Save retention** when paired.
 - **Pair** / **Re-pair** → password prompt → `POST /v1/settings/my-tracks/pair` (includes retention in body).
-- **Relay API key** reveal (read-only after pair).
+- **Relay API key** status only: it is generated and delivered at pair time and never shown or returned (re-pair to replace it).
 - **Reset** clears pairing metadata and relay key.
 - Status line: `Paired at …`, `Last pairing failed: …`, or **Not paired**.
 - Public domesti-bot URL is derived server-side from the pairing request (not a separate editable field).
@@ -283,6 +284,7 @@ GET /v1/settings/my-tracks/pair-status
   "user_location_update_url": "https://domesti.example.com/v1/webhooks/location_update",
   "user_location_test_url": "https://domesti.example.com/v1/webhooks/location_update/test",
   "relay_key_configured": true,
+  "relay_key_updated_at": 1790000000.0,
   "location_history_retention": {
     "max_age_hours": 24,
     "min_keep_count": 20,
@@ -435,7 +437,7 @@ Helpers in `app/db/secrets.py`: `save_mytracks_relay_api_key_to_db`, `load_mytra
 | --- | --- | --- |
 | **D1** | Relay-key verifier; `LocationUpdateWebhookIn`; live + test webhooks; `PUT /v1/location_update/{id}`; `rule_user_location_history` + retention prune; hermetic tests | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)) |
 | **D2** | `app_secrets` relay key; `pair_with_my_tracks()`; pairing APIs; `PATCH …/location-updates`; `PATCH …/location-history-retention`; pairing attempt logging | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)) |
-| **D3** | Settings UI: pair/re-pair, retention, relay-key reveal, reset; Automations user map legend + live polling | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216)) |
+| **D3** | Settings UI: pair/re-pair, retention, relay-key status (never shown), reset; Automations user map legend + live polling | **Done** ([#209](https://github.com/the-hcma/domesti-bot/pull/209)–[#216](https://github.com/the-hcma/domesti-bot/pull/216)) |
 | **D3b** (optional) | Verify-roundtrip + emergency-toggle buttons in Settings | Deferred (APIs + verify script exist) |
 | **D4** | File-backed `RuleEvaluator` on live `POST /v1/webhooks/location_update` (rules in `automation-rules.json`, no rule SQLite yet) | **Done** — Phase 2a–2c in `docs/RULE_ENGINE_PLAN.md`; example bundle in `automation-rules.json.example` |
 

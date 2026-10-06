@@ -269,6 +269,11 @@ def mytracks_admin_password_stored_in_db(path: Path) -> bool:
     return _app_secret_stored_in_db(path, _MYTRACKS_ADMIN_PASSWORD_KEY)
 
 
+def mytracks_relay_api_key_updated_at(path: Path) -> float | None:
+    """Epoch seconds the my-tracks relay key was last written (pairing), without decrypting it."""
+    return _app_secret_updated_at(path, _MYTRACKS_RELAY_API_KEY)
+
+
 def mytracks_relay_api_key_stored_in_db(path: Path) -> bool:
     """True when an ``app_secrets`` row exists for the my-tracks relay API key."""
     return _app_secret_stored_in_db(path, _MYTRACKS_RELAY_API_KEY)

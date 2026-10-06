@@ -10,7 +10,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.db.models import MyTracksSettings
-from app.db.secrets import delete_app_secret, mytracks_relay_api_key_stored_in_db
+from app.db.secrets import delete_app_secret, mytracks_relay_api_key_stored_in_db, mytracks_relay_api_key_updated_at
 from app.db.session import discovery_session, discovery_write
 from app.location_history_retention import (
     DEFAULT_LOCATION_HISTORY_MAX_AGE_S,
@@ -61,6 +61,7 @@ class MyTracksPairStatusRecord:
     location_updates_accepted: bool
     paired_at: str | None
     relay_key_configured: bool
+    relay_key_updated_at: float | None
     remote_request_location_enabled: bool | None
     user_location_test_url: str | None
     user_location_update_url: str | None
@@ -178,6 +179,7 @@ def load_mytracks_pair_status(path: Path) -> MyTracksPairStatusRecord | None:
             location_updates_accepted=bool(row.location_updates_accepted),
             paired_at=_iso_from_epoch(row.paired_at),
             relay_key_configured=mytracks_relay_api_key_stored_in_db(path),
+            relay_key_updated_at=mytracks_relay_api_key_updated_at(path),
             remote_request_location_enabled=_bool_from_int(
                 row.remote_request_location_enabled,
             ),

@@ -139,6 +139,14 @@ function renderPairStatus(
         `per-device ${String(rateLimits.device_cooldown_seconds)} s`;
     }
     statusEl.append(document.createElement("br"), limitsLine);
+    if (status.last_pair_error) {
+      // A failed (re-)pair leaves the previous pairing in place, but it must stay visible: after a failure that
+      // came after my-tracks accepted a new key, webhooks fail until the next successful pair.
+      const failed = document.createElement("span");
+      failed.className = "settings-dialog-help";
+      failed.textContent = `Last pairing failed: ${status.last_pair_error}`;
+      statusEl.append(document.createElement("br"), failed);
+    }
     if (approachRequestIntervalS !== null && rateLimits !== null) {
       const approachCooldown = effectiveUserCooldownSeconds(rateLimits, "approach_monitoring");
       if (
@@ -188,6 +196,10 @@ function updateResetButton(
   resetBtn.disabled = !hasSettings;
   resetBtn.title = hasSettings ? "" : "No settings to reset";
 }
+
+const RELAY_KEY_PENDING_NOTE = "Created automatically when pairing completes. It is never shown.";
+const RELAY_KEY_CONFIGURED_NOTE =
+  "Saved and delivered to My Tracks automatically. It is never shown; re-pair to replace it.";
 
 function updateSaveRetentionButton(
   saveRetentionBtn: HTMLButtonElement,
@@ -336,17 +348,15 @@ export async function mountMyTracksPairingPanel(
   form.noValidate = true;
   form.setAttribute("autocomplete", "off");
 
+  // The relay key is generated and delivered to My Tracks automatically during pairing, so it is never
+  // shown or returned by the API; re-pairing replaces it.
   const relayKeyField = document.createElement("div");
   relayKeyField.className = "settings-dialog-field mytracks-relay-key-field";
   const relayKeyLabel = createFieldLabel("Relay API key");
-  const relayKeyPending = document.createElement("p");
-  relayKeyPending.className = "settings-dialog-help mytracks-relay-key-pending";
-  relayKeyPending.textContent = "Will be populated when pairing is complete.";
-  const relayKeyRow = createSecretInputRow({ autocomplete: "off" });
-  relayKeyRow.input.readOnly = true;
-  relayKeyRow.input.tabIndex = -1;
-  relayKeyRow.row.hidden = true;
-  relayKeyField.append(relayKeyLabel, relayKeyPending, relayKeyRow.row);
+  const relayKeyNote = document.createElement("p");
+  relayKeyNote.className = "settings-dialog-help";
+  relayKeyNote.textContent = RELAY_KEY_PENDING_NOTE;
+  relayKeyField.append(relayKeyLabel, relayKeyNote);
   form.append(relayKeyField);
 
   const retentionGroup = document.createElement("fieldset");
@@ -424,8 +434,6 @@ export async function mountMyTracksPairingPanel(
   let approachRequestIntervalS: number | null = null;
   let savedRetention: LocationHistoryRetentionIn | null = null;
   let storedConnection: MyTracksSettingsOut | null = null;
-  let storedRelayKey: string | null = null;
-  let relayKeyRevealed = false;
 
   const retentionControls = {
     maxAgeHoursInput,
@@ -433,29 +441,11 @@ export async function mountMyTracksPairingPanel(
     unlimitedInput,
   };
 
-  const setRelayKeyRevealed = (revealed: boolean): void => {
-    relayKeyRevealed = revealed;
-    if (revealed && relayKeyRow.input.value === "" && storedRelayKey) {
-      relayKeyRow.input.value = storedRelayKey;
-    }
-    relayKeyRow.setRevealed(revealed);
-  };
-  setRelayKeyRevealed(false);
-
   const applyRelayKeyDisplay = (): void => {
-    const showKey = pairStatus?.paired_at !== null && pairStatus?.paired_at !== undefined
-      && storedRelayKey !== null;
-    relayKeyPending.hidden = showKey;
-    relayKeyRow.row.hidden = !showKey;
-    if (storedRelayKey) {
-      relayKeyRow.input.value = storedRelayKey;
-      if (!relayKeyRevealed) {
-        relayKeyRow.input.type = "password";
-      }
-    } else {
-      relayKeyRow.input.value = "";
-      setRelayKeyRevealed(false);
-    }
+    const paired = pairStatus?.paired_at !== null && pairStatus?.paired_at !== undefined;
+    relayKeyNote.textContent = paired && pairStatus?.relay_key_configured === true
+      ? RELAY_KEY_CONFIGURED_NOTE
+      : RELAY_KEY_PENDING_NOTE;
   };
 
   const syncResetButtonState = (): void => {
@@ -500,12 +490,6 @@ export async function mountMyTracksPairingPanel(
       }
       renderPairStatus(status, pairStatus, approachRequestIntervalS);
       updatePairButtonLabel(pairBtn, pairStatus);
-      if (pairStatus?.paired_at) {
-        const relaySettings = await api.fetchMyTracksRelayKeySettings();
-        storedRelayKey = relaySettings.stored_relay_key;
-      } else {
-        storedRelayKey = null;
-      }
       applyRelayKeyDisplay();
       syncRetentionSaveState();
       syncResetButtonState();
@@ -552,8 +536,6 @@ export async function mountMyTracksPairingPanel(
         savedRetention = { ...pairStatus.location_history_retention };
         renderPairStatus(status, pairStatus, approachRequestIntervalS);
         updatePairButtonLabel(pairBtn, pairStatus);
-        const relaySettings = await api.fetchMyTracksRelayKeySettings();
-        storedRelayKey = relaySettings.stored_relay_key;
         applyRelayKeyDisplay();
         syncRetentionSaveState();
         syncResetButtonState();
@@ -601,7 +583,6 @@ export async function mountMyTracksPairingPanel(
           options.clearConnectionFields();
           pairStatus = null;
           storedConnection = null;
-          storedRelayKey = null;
           savedRetention = null;
           renderPairStatus(status, pairStatus, approachRequestIntervalS);
           updatePairButtonLabel(pairBtn, pairStatus);

@@ -1480,19 +1480,6 @@ class MyTracksPairIn(BaseModel):
     username: str = Field(..., min_length=1)
 
 
-class MyTracksRelayKeySettingsOut(BaseModel):
-    """Relay API key status for my-tracks webhook authentication."""
-
-    configured: bool = Field(
-        ...,
-        description="True when an encrypted relay key row exists in the discovery database.",
-    )
-    stored_relay_key: str | None = Field(
-        default=None,
-        description="Decrypted relay key when stored; never returned when unpaired.",
-    )
-
-
 class MyTracksPairStatusOut(BaseModel):
     """Pairing status for domesti-bot ↔ my-tracks integration."""
 
@@ -1510,6 +1497,13 @@ class MyTracksPairStatusOut(BaseModel):
     user_location_test_url: str | None = None
     user_location_update_url: str | None = None
     relay_key_configured: bool = False
+    relay_key_updated_at: float | None = Field(
+        default=None,
+        description=(
+            "Epoch seconds the relay key was generated at pairing; ``None`` when none is stored. The key itself is "
+            "never returned: it is delivered to my-tracks automatically, and re-pairing replaces it."
+        ),
+    )
     username: str
 
 
