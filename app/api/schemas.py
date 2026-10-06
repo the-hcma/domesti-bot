@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Final, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -39,6 +39,11 @@ KasaCredentialsSourceOut = Literal["env", "database", "none"]
 SecretsKeySourceOut = Literal["env", "file", "none"]
 TailwindTokenSourceOut = Literal["cli", "env", "database", "none"]
 VizioAuthSourceOut = Literal["cli", "env", "database", "none"]
+
+
+# Request-only secret fields: ``writeOnly`` in the generated OpenAPI marks them as never returned, and
+# ``repr=False`` keeps them out of ``repr()``, tracebacks and log lines (see docs/AGENTS.md, write-only secrets).
+_WRITE_ONLY_SECRET: Final[dict[str, Any]] = {"writeOnly": True}
 
 
 class CompletionAliasItem(BaseModel):
@@ -437,6 +442,8 @@ class SmtpConfigIn(BaseModel):
     password: str | None = Field(
         default=None,
         description="Null keeps the stored password on update.",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
     port: int = Field(..., ge=1, le=65535)
     username: str = Field(default="")
@@ -475,6 +482,8 @@ class KasaCredentialsSetIn(BaseModel):
         min_length=1,
         max_length=256,
         description="Kasa/Tapo account password for KLAP LAN auth.",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
     username: str = Field(
         ...,
@@ -559,6 +568,8 @@ class KasaCredentialsTestIn(BaseModel):
         default=None,
         max_length=256,
         description="Account password override; both username and password must be set to use form credentials.",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
     username: str | None = Field(
         default=None,
@@ -1153,6 +1164,8 @@ class Ep1NoisePreSharedKeySetIn(BaseModel):
         min_length=1,
         max_length=128,
         description=("ESPHome API Noise pre-shared key (PSK), base64, for Everything Presence One."),
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
 
 
@@ -1224,6 +1237,8 @@ class Ep1NoisePreSharedKeyTestIn(BaseModel):
     noise_psk: str | None = Field(
         default=None,
         description="Override Noise pre-shared key (PSK) for this probe only.",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
 
 
@@ -1275,6 +1290,8 @@ class TailwindTokenSetIn(BaseModel):
         min_length=1,
         max_length=64,
         description="GoTailwind Local Control Key (six-digit code from the Tailwind dashboard).",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
 
 
@@ -1345,6 +1362,8 @@ class TailwindTokenTestIn(BaseModel):
         default=None,
         max_length=64,
         description="Local Control Key override; when omitted, CLI / env / database is used.",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
 
 
@@ -1397,6 +1416,8 @@ class MyTracksCredentialsTestIn(BaseModel):
         min_length=1,
         max_length=256,
         description="Admin password for a one-shot authenticated read (never stored).",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
     username: str | None = Field(
         default=None,
@@ -1430,7 +1451,7 @@ class MyTracksLocationUpdatesIn(BaseModel):
     """Body for ``PATCH /v1/settings/my-tracks/location-updates``."""
 
     accepted: bool
-    password: str | None = None
+    password: str | None = Field(default=None, repr=False, json_schema_extra=_WRITE_ONLY_SECRET)
 
 
 class MyTracksLocationUpdatesOut(BaseModel):
@@ -1445,7 +1466,7 @@ class MyTracksPairIn(BaseModel):
 
     domain: str = Field(..., min_length=1)
     location_history_retention: LocationHistoryRetentionIn = Field(default_factory=LocationHistoryRetentionIn)
-    password: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1, repr=False, json_schema_extra=_WRITE_ONLY_SECRET)
     username: str = Field(..., min_length=1)
 
 
@@ -1508,7 +1529,7 @@ class MyTracksSettingsOut(BaseModel):
 class MyTracksSyncIn(BaseModel):
     """Admin credentials for a one-shot sync request (password is never stored)."""
 
-    password: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1, repr=False, json_schema_extra=_WRITE_ONLY_SECRET)
     username: str | None = None
 
 
@@ -2239,6 +2260,8 @@ class VizioAuthTestIn(BaseModel):
         default=None,
         max_length=256,
         description="SmartCast auth token override; when omitted, CLI / env / database is used.",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
 
 
@@ -2250,6 +2273,8 @@ class VizioAuthTokenSetIn(BaseModel):
         min_length=1,
         max_length=256,
         description="SmartCast auth token from a completed pairing session.",
+        repr=False,
+        json_schema_extra=_WRITE_ONLY_SECRET,
     )
 
 
