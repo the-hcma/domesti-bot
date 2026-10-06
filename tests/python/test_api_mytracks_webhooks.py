@@ -13,6 +13,7 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.api_key_compare import api_keys_match
 from app.api.app import create_app
 from app.db.secrets import (
     load_mytracks_relay_api_key_from_db,
@@ -99,6 +100,59 @@ def test_location_update_webhook_rejects_env_api_key_instead_of_relay_key(
         "/v1/webhooks/location_update",
         json=_LOCATION_UPDATE_PAYLOAD,
         headers={"X-Domesti-Api-Key": "operator-key"},
+    )
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_location_update_webhook_checks_relay_key_with_the_constant_time_helper(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    relay_key = "relay-secret-value"
+    _store_relay_key(db, relay_key, fernet_key)
+    with patch("app.api.mytracks_relay_auth.api_keys_match", wraps=api_keys_match) as match:
+        response = client.post(
+            "/v1/webhooks/location_update",
+            json=_LOCATION_UPDATE_PAYLOAD,
+            headers={"X-Domesti-Api-Key": relay_key},
+        )
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    match.assert_called_once_with(relay_key, relay_key)
+
+
+@pytest.mark.parametrize("presented", ["relay-secret-valuX", "", "   "])
+def test_location_update_webhook_rejects_wrong_same_length_and_blank_keys(
+    tmp_path: Path,
+    fernet_key: str,
+    presented: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    _store_relay_key(db, "relay-secret-value", fernet_key)
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=_LOCATION_UPDATE_PAYLOAD,
+        headers={"X-Domesti-Api-Key": presented},
+    )
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_location_update_webhook_rejects_non_ascii_key_without_error(
+    tmp_path: Path,
+    fernet_key: str,
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    client, _app = _client(cache_path=db)
+    _seed_user(db)
+    _store_relay_key(db, "relay-secret-value", fernet_key)
+    response = client.post(
+        "/v1/webhooks/location_update",
+        json=_LOCATION_UPDATE_PAYLOAD,
+        headers=[(b"X-Domesti-Api-Key", "caf\u00e9".encode("latin-1"))],
     )
     assert response.status_code == HTTPStatus.UNAUTHORIZED
 

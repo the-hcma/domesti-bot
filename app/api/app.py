@@ -18,6 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, HTMLResponse, Response
 
 from app import device_discovery_store
+from app.api.api_key_compare import api_keys_match
 from app.api.location_update_routes import router as location_update_router
 from app.api.mytracks_routes import rules_router as mytracks_rules_router
 from app.api.mytracks_routes import settings_router as mytracks_settings_router
@@ -221,7 +222,7 @@ async def _verify_api_key(
     expected = _expected_api_key()
     if not expected:
         return
-    if (x_domesti_api_key or "").strip() != expected:
+    if not api_keys_match((x_domesti_api_key or "").strip(), expected):
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail="Invalid or missing X-Domesti-Api-Key",
