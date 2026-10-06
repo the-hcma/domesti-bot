@@ -1224,10 +1224,11 @@ class Ep1NoisePreSharedKeySettingsOut(BaseModel):
         ...,
         description="True when an encrypted ``ep1_noise_psk`` row exists.",
     )
-    stored_noise_psk: str | None = Field(
+    updated_at: float | None = Field(
         default=None,
         description=(
-            "Decrypted Noise pre-shared key (PSK) when stored in the database (Settings is API-key protected)."
+            "Epoch seconds the stored Noise pre-shared key was last written; ``None`` when none is stored. The key "
+            "itself is write-only and never returned."
         ),
     )
 

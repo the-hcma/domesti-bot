@@ -21,7 +21,7 @@ from kasa.deviceconfig import DeviceConfig
 from kasa.exceptions import AuthenticationError, _ConnectionError
 
 from app import device_discovery_store
-from app.db.secrets import SecretsDecryptError, load_kasa_credentials_from_db
+from app.db.secrets import SecretsDecryptError, ep1_noise_psk_stored_in_db, load_kasa_credentials_from_db
 from app.device_enums import SettingsCredentialsTestSource
 from app.ep1_calibration import resolve_ep1_settings_target
 from app.ep1_credentials import resolve_ep1_noise_psk
@@ -208,6 +208,11 @@ async def probe_ep1_noise_psk(
             cli_psk=cli_psk,
             cache_path=cache_path,
         )
+        if not resolved_psk_raw and cache_path is not None and ep1_noise_psk_stored_in_db(cache_path):
+            raise CredentialsTestUnavailableError(
+                "The stored EP1 Noise pre-shared key cannot be decrypted with the current secrets key; "
+                "enter the key again"
+            )
         if resolved_psk_raw:
             resolved_psk = resolved_psk_raw
             source = SettingsCredentialsTestSource(resolved_source)

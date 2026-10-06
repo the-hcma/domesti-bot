@@ -241,6 +241,11 @@ def save_vizio_auth_token_to_db(
     raise ValueError("Expected mac or host for Vizio auth token storage, got neither")
 
 
+def ep1_noise_psk_updated_at(path: Path) -> float | None:
+    """Epoch seconds the stored EP1 Noise PSK was last written, without decrypting it."""
+    return _app_secret_updated_at(path, _EP1_NOISE_PSK_KEY)
+
+
 def ep1_noise_psk_stored_in_db(path: Path) -> bool:
     """True when an ``app_secrets`` row exists for the EP1 Noise PSK."""
     return _app_secret_stored_in_db(path, _EP1_NOISE_PSK_KEY)

@@ -47,7 +47,6 @@ _NON_SECRET_PROPERTY_NAMES = frozenset({"secrets_key_source"})
 # by the PR that converts that endpoint to write-only.
 _READBACK_PROPERTY_ALLOWLIST = frozenset(
     {
-        ("Ep1NoisePreSharedKeySettingsOut", "stored_noise_psk"),
         ("MyTracksRelayKeySettingsOut", "stored_relay_key"),
     }
 )
@@ -57,7 +56,6 @@ _IDENTIFIER_ALLOWLIST = frozenset({("KasaCredentialsSettingsOut", "stored_userna
 
 # GET path -> sentinel names that endpoint may still return in plaintext.
 _READBACK_PATH_ALLOWLIST: dict[str, frozenset[str]] = {
-    "/v1/settings/ep1-noise-psk": frozenset({"ep1_noise_psk"}),
     "/v1/settings/my-tracks/relay-key": frozenset({"relay_key"}),
 }
 

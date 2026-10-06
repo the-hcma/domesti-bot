@@ -386,7 +386,7 @@ export interface Ep1NoisePreSharedKeySettingsOut {
   secrets_key_configured: boolean;
   secrets_key_source: SecretsKeySource;
   stored_in_database: boolean;
-  stored_noise_psk: string | null;
+  updated_at: number | null;
 }
 
 export interface Ep1NoisePreSharedKeyTestIn {

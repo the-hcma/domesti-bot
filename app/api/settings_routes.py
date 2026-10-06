@@ -54,9 +54,9 @@ from app.db.secrets import (
     delete_app_secret,
     delete_kasa_credentials_from_db,
     ep1_noise_psk_stored_in_db,
+    ep1_noise_psk_updated_at,
     kasa_credentials_stored_in_db,
     kasa_credentials_updated_at,
-    load_ep1_noise_psk_from_db,
     load_kasa_credentials_from_db,
     save_ep1_noise_psk_to_db,
     save_kasa_credentials_to_db,
@@ -598,7 +598,7 @@ async def clear_ep1_noise_psk(request: Request) -> Ep1NoisePreSharedKeySettingsO
 
 @router.get("/ep1-noise-psk", response_model=Ep1NoisePreSharedKeySettingsOut)
 async def get_ep1_noise_psk_settings(request: Request) -> Ep1NoisePreSharedKeySettingsOut:
-    """Return EP1 Noise pre-shared key (PSK) status (includes stored DB value when present)."""
+    """Return EP1 Noise pre-shared key (PSK) status; the key itself is write-only and never returned."""
     return _ep1_settings_response(request)
 
 
@@ -895,19 +895,13 @@ def _ep1_settings_response(request: Request) -> Ep1NoisePreSharedKeySettingsOut:
         cache_path=cache_path,
     )
     stored = ep1_noise_psk_stored_in_db(cache_path) if cache_path is not None else False
-    stored_psk: str | None = None
-    if cache_path is not None and stored:
-        try:
-            stored_psk = load_ep1_noise_psk_from_db(cache_path)
-        except SecretsDecryptError:
-            stored_psk = None
     return Ep1NoisePreSharedKeySettingsOut(
         configured=bool(psk),
         source=source,
         secrets_key_configured=secrets_key_configured(),
         secrets_key_source=secrets_key_source(),
         stored_in_database=stored,
-        stored_noise_psk=stored_psk if stored and source not in ("env", "cli") else None,
+        updated_at=ep1_noise_psk_updated_at(cache_path) if cache_path is not None and stored else None,
     )
 
 
