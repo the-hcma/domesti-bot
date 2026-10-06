@@ -699,7 +699,7 @@ async def get_tailwind_hub_info(request: Request) -> TailwindHubInfoOut:
 
 @router.get("/tailwind-token", response_model=TailwindTokenSettingsOut)
 async def get_tailwind_token_settings(request: Request) -> TailwindTokenSettingsOut:
-    """Return Tailwind credential status (includes stored DB token when present)."""
+    """Return Tailwind credential status; the token itself is write-only and never returned."""
     return _tailwind_settings_response(request)
 
 
@@ -1103,14 +1103,10 @@ def _tailwind_hub_info_response() -> TailwindHubInfoOut:
 
 def _tailwind_settings_response(request: Request) -> TailwindTokenSettingsOut:
     cache_path = discovery_cache_path_from_request(request)
-    try:
-        token, source = resolve_tailwind_token(
-            cli_token=_cli_tailwind_token(),
-            cache_path=cache_path,
-        )
-    except SecretsDecryptError:
-        # The row exists but the secrets key changed: report it as stored but not usable (like Kasa).
-        token, source = "", "none"
+    token, source = resolve_tailwind_token(
+        cli_token=_cli_tailwind_token(),
+        cache_path=cache_path,
+    )
     stored = tailwind_token_stored_in_db(cache_path) if cache_path is not None else False
     return TailwindTokenSettingsOut(
         configured=bool(token),

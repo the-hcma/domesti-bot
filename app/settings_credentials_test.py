@@ -21,7 +21,13 @@ from kasa.deviceconfig import DeviceConfig
 from kasa.exceptions import AuthenticationError, _ConnectionError
 
 from app import device_discovery_store
-from app.db.secrets import SecretsDecryptError, ep1_noise_psk_stored_in_db, load_kasa_credentials_from_db
+from app.db.secrets import (
+    SecretsDecryptError,
+    ep1_noise_psk_stored_in_db,
+    load_kasa_credentials_from_db,
+    secrets_key_configured,
+    tailwind_token_stored_in_db,
+)
 from app.device_enums import SettingsCredentialsTestSource
 from app.ep1_calibration import resolve_ep1_settings_target
 from app.ep1_credentials import resolve_ep1_noise_psk
@@ -283,15 +289,17 @@ async def probe_tailwind_token(
         resolved_token = form_token
         source = SettingsCredentialsTestSource.FORM
     else:
-        try:
-            resolved_token, resolved_source = resolve_tailwind_token(
-                cli_token=cli_token,
-                cache_path=cache_path,
-            )
-        except SecretsDecryptError as exc:
+        resolved_token, resolved_source = resolve_tailwind_token(
+            cli_token=cli_token,
+            cache_path=cache_path,
+        )
+        if not resolved_token and cache_path is not None and tailwind_token_stored_in_db(cache_path):
             raise CredentialsTestUnavailableError(
-                "The stored Tailwind token cannot be decrypted with the current secrets key; enter the token again"
-            ) from exc
+                "The stored Tailwind token cannot be read because no secrets key is configured; add one, then enter "
+                "the token again"
+                if not secrets_key_configured()
+                else "The stored Tailwind token cannot be decrypted with the current secrets key; enter the token again"
+            )
         if not resolved_token:
             raise CredentialsTestUnavailableError("No Tailwind token configured; enter a token or save one first")
         source = SettingsCredentialsTestSource(resolved_source)

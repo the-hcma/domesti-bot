@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Literal
@@ -9,6 +10,8 @@ from typing import Literal
 from kasa import Credentials
 
 from app.db.secrets import SecretsDecryptError, load_kasa_credentials_from_db
+
+_LOGGER = logging.getLogger(__name__)
 
 KasaCredentialsSource = Literal["env", "database", "none"]
 
@@ -31,6 +34,10 @@ def resolve_kasa_credentials(
         try:
             stored = load_kasa_credentials_from_db(cache_path)
         except SecretsDecryptError:
+            _LOGGER.warning(
+                "Stored Kasa credentials cannot be decrypted with the current secrets key; ignoring them "
+                "(enter them again in Settings > Kasa)"
+            )
             return None, "none"
         if stored is not None:
             username, password = stored

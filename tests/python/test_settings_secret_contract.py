@@ -6,8 +6,9 @@ Settings endpoints must not return secret material on read. This module holds th
 * a sentinel test that stores recognizable fake secrets and asserts they never appear in a GET response;
 * a validation-error test that a rejected secret is not echoed in the 422 body or in logs.
 
-The readback allowlists below are empty now that every settings endpoint is write-only (domesti-bot#727);
-they and their stale-entry checks are removed in the lock-down PR.
+Every settings endpoint is write-only (domesti-bot#727), so there is no allowlist of endpoints that may still
+read a secret back: any secret-bearing string property in a response, or any seeded secret in a GET body, fails.
+Only identifiers (see ``_IDENTIFIER_ALLOWLIST``) may be returned.
 """
 
 from __future__ import annotations
@@ -28,29 +29,26 @@ from fastapi.testclient import TestClient
 from app.api.app import create_app
 from app.api.schemas import KasaCredentialsSetIn
 from app.db.secrets import (
+    load_mytracks_relay_api_key_from_db,
     save_mytracks_admin_password_to_db,
     save_mytracks_relay_api_key_to_db,
-    save_smtp_password_to_db,
 )
+from app.mytracks_service import MyTracksPairResult, MyTracksSyncError
 from app.vizio_smartcast_client import VizioDeviceInfoSnapshot
 
 _SETTINGS_PREFIX = "/v1/settings"
 
 # A string-ish property whose name contains one of these (or starts with ``stored_``) carries a secret.
-_SECRET_NAME = re.compile(r"(pass|token|secret|psk|key)", re.IGNORECASE)
+_SECRET_NAME = re.compile(r"(pass|token|secret|psk|key|auth|cred|bearer|(^|_)pin($|_))", re.IGNORECASE)
 
-# Names that match but are not secrets (``secrets_key_source`` is "env" / "file").
-_NON_SECRET_PROPERTY_NAMES = frozenset({"secrets_key_source"})
-
-# Response properties that still read a secret back: (component schema, property). Each is removed
-# by the PR that converts that endpoint to write-only.
-_READBACK_PROPERTY_ALLOWLIST: frozenset[tuple[str, str]] = frozenset()
+# Names that match but are not secrets: ``secrets_key_source`` / ``auth_source`` hold "env" / "database" / ...,
+# and the Kasa host lists hold LAN addresses.
+_NON_SECRET_PROPERTY_NAMES = frozenset(
+    {"secrets_key_source", "auth_source", "hosts_requiring_klap_auth", "skipped_auth_hosts"}
+)
 
 # Identifiers (not credentials) that may be returned: shown so the operator can tell which account is set.
 _IDENTIFIER_ALLOWLIST = frozenset({("KasaCredentialsSettingsOut", "stored_username")})
-
-# GET path -> sentinel names that endpoint may still return in plaintext.
-_READBACK_PATH_ALLOWLIST: dict[str, frozenset[str]] = {}
 
 # Built rather than written as literals: gitleaks' generic-api-key rule flags a literal next to a
 # ``token`` / ``key`` name and would fail the secret-scan job.
@@ -65,6 +63,11 @@ _SENTINEL_NAMES = (
 )
 _SENTINELS = {name: "-".join(["SENTINEL", name.replace("_", "-"), "value"]) for name in _SENTINEL_NAMES}
 _REJECTED_PREFIX = "SENTINEL-rejected-secret"
+
+# GET paths that legitimately answer something other than 200 in this fixture (nothing discovered yet).
+_EXPECTED_GET_STATUSES: dict[str, set[int]] = {
+    "/v1/settings/discovery": {HTTPStatus.SERVICE_UNAVAILABLE},
+}
 
 
 @pytest.fixture(autouse=True)
@@ -105,7 +108,10 @@ def _is_stringish(schema: dict[str, Any], components: dict[str, Any]) -> bool:
     if resolved.get("type") == "object" and isinstance(resolved.get("additionalProperties"), dict):
         return _is_stringish(resolved["additionalProperties"], components)
     members = [m for key in ("anyOf", "oneOf", "allOf") for m in resolved.get(key, []) if isinstance(m, dict)]
-    return any(_is_stringish(m, components) for m in members)
+    if members:
+        return any(_is_stringish(m, components) for m in members)
+    # No type information (an ``Any`` field) could carry a string, so it is treated as one.
+    return "type" not in resolved and "properties" not in resolved
 
 
 def _is_secret_property(name: str) -> bool:
@@ -159,8 +165,8 @@ def _response_schemas(operation: dict[str, Any]) -> list[dict[str, Any]]:
 def test_settings_responses_do_not_return_secret_properties(tmp_path: Path) -> None:
     spec = _app(tmp_path / "ui.sqlite").openapi()
     components = spec["components"]["schemas"]
-    seen_readbacks: set[tuple[str, str]] = set()
     violations: list[str] = []
+    exempted: set[tuple[str, str]] = set()
     for method in ("get", "post", "put", "patch", "delete"):
         for path, operation in _settings_operations(spec, method):
             for response_schema in _response_schemas(operation):
@@ -168,14 +174,12 @@ def test_settings_responses_do_not_return_secret_properties(tmp_path: Path) -> N
                     if not _is_stringish(prop_schema, components) or not _is_secret_property(prop):
                         continue
                     if (component, prop) in _IDENTIFIER_ALLOWLIST:
-                        continue
-                    if (component, prop) in _READBACK_PROPERTY_ALLOWLIST:
-                        seen_readbacks.add((component, prop))
+                        exempted.add((component, prop))
                         continue
                     violations.append(f"{method.upper()} {path}: {component}.{prop}")
     assert not violations, "secret-bearing response properties must be write-only: " + ", ".join(violations)
-    stale = _READBACK_PROPERTY_ALLOWLIST - seen_readbacks
-    assert not stale, f"stale readback allowlist entries (remove them): {sorted(stale)}"
+    # An exemption that no response reaches is dead weight that could mask a new readback.
+    assert exempted == _IDENTIFIER_ALLOWLIST
 
 
 def test_settings_request_secret_fields_are_marked_write_only(tmp_path: Path) -> None:
@@ -194,20 +198,22 @@ def test_settings_request_secret_fields_are_marked_write_only(tmp_path: Path) ->
     assert not unmarked, "request secret fields need writeOnly: " + ", ".join(sorted(set(unmarked)))
 
 
-def _seed_secrets(client: TestClient, db: Path) -> None:
-    assert (
+def _seed_secrets(client: TestClient, db: Path) -> list[str]:
+    """Store every kind of secret; return the text of every write response so it can be checked for leaks."""
+    write_responses: list[str] = []
+
+    def _record(response: Any) -> None:
+        assert response.status_code == HTTPStatus.OK
+        write_responses.append(response.text)
+
+    _record(
         client.put(
             "/v1/settings/kasa-credentials",
             json={"username": "alice@example.com", "password": _SENTINELS["kasa_password"]},
-        ).status_code
-        == HTTPStatus.OK
+        )
     )
-    assert client.put("/v1/settings/tailwind-token", json={"token": _SENTINELS["tailwind_token"]}).status_code == (
-        HTTPStatus.OK
-    )
-    assert client.put("/v1/settings/ep1-noise-psk", json={"noise_psk": _SENTINELS["ep1_noise_psk"]}).status_code == (
-        HTTPStatus.OK
-    )
+    _record(client.put("/v1/settings/tailwind-token", json={"token": _SENTINELS["tailwind_token"]}))
+    _record(client.put("/v1/settings/ep1-noise-psk", json={"noise_psk": _SENTINELS["ep1_noise_psk"]}))
     info = VizioDeviceInfoSnapshot(model_name="V505M-K09", cast_name="Kitchen TV", diid="abc", mac="00:bd:3e:d5:f0:11")
     with (
         patch(
@@ -221,16 +227,56 @@ def _seed_secrets(client: TestClient, db: Path) -> None:
             return_value="00:bd:3e:d5:f0:11",
         ),
     ):
-        assert (
-            client.put(
-                "/v1/settings/vizio/tvs/192.168.86.201/auth",
-                json={"token": _SENTINELS["vizio_token"]},
-            ).status_code
-            == HTTPStatus.OK
-        )
+        _record(client.put("/v1/settings/vizio/tvs/192.168.86.201/auth", json={"token": _SENTINELS["vizio_token"]}))
     save_mytracks_relay_api_key_to_db(db, _SENTINELS["relay_key"])
     save_mytracks_admin_password_to_db(db, _SENTINELS["mytracks_admin_password"])
-    save_smtp_password_to_db(db, _SENTINELS["smtp_password"])
+    _record(
+        client.put(
+            "/v1/settings/smtp",
+            json={
+                "from_address": "bot@example.com",
+                "host": "smtp.example.com",
+                "mail_domain": "example.com",
+                "port": 587,
+                "username": "bot",
+                "password": _SENTINELS["smtp_password"],
+            },
+        )
+    )
+    return write_responses
+
+
+def _pair(client: TestClient) -> str:
+    """Pair through the real route (network calls patched); return the response text."""
+    with (
+        patch(
+            "app.api.mytracks_routes.pair_with_my_tracks", return_value=MyTracksPairResult(status_code=HTTPStatus.OK)
+        ),
+        patch("app.api.mytracks_routes.fetch_mytracks_domesti_config", side_effect=MyTracksSyncError("offline")),
+    ):
+        response = client.post(
+            "/v1/settings/my-tracks/pair",
+            json={
+                "domain": "https://tracks.example.com",
+                "username": "admin",
+                "password": _SENTINELS["mytracks_admin_password"],
+            },
+        )
+    assert response.status_code == HTTPStatus.OK
+    return response.text
+
+
+def _scan_gets(client: TestClient, paths: list[str], secrets_to_find: dict[str, str]) -> dict[str, set[str]]:
+    leaks: dict[str, set[str]] = {}
+    for path in paths:
+        response = client.get(path)
+        assert response.status_code in _EXPECTED_GET_STATUSES.get(path, {HTTPStatus.OK}), (
+            f"GET {path} returned {response.status_code}, so it could not have shown a leak"
+        )
+        for name, value in secrets_to_find.items():
+            if value in response.text:
+                leaks.setdefault(path, set()).add(name)
+    return leaks
 
 
 def test_settings_get_responses_never_contain_stored_secret_values(
@@ -245,30 +291,35 @@ def test_settings_get_responses_never_contain_stored_secret_values(
     db = tmp_path / "ui.sqlite"
     app = _app(db)
     client = TestClient(app)
-    _seed_secrets(client, db)
+    write_responses = _seed_secrets(client, db)
 
     spec = app.openapi()
     get_paths = sorted(path for path, _op in _settings_operations(spec, "get") if "{" not in path)
     assert "/v1/settings/vizio/tvs" in get_paths
-    leaks: dict[str, set[str]] = {}
-    for path in get_paths:
-        response = client.get(path)
-        for name, value in _SENTINELS.items():
-            if value in response.text:
-                leaks.setdefault(path, set()).add(name)
+    assert "/v1/settings/smtp" in get_paths
 
-    unexpected = {
-        path: sorted(names - _READBACK_PATH_ALLOWLIST.get(path, frozenset()))
-        for path, names in leaks.items()
-        if names - _READBACK_PATH_ALLOWLIST.get(path, frozenset())
-    }
-    assert not unexpected, f"GET responses leak stored secrets: {unexpected}"
-    stale = {
-        path: sorted(allowed - leaks.get(path, set()))
-        for path, allowed in _READBACK_PATH_ALLOWLIST.items()
-        if allowed - leaks.get(path, set())
-    }
-    assert not stale, f"stale readback path allowlist entries (remove them): {stale}"
+    # Scan once with only the seeded sentinels stored, and again after pairing has generated a relay key.
+    leaks = _scan_gets(client, get_paths, _SENTINELS)
+    write_responses.append(_pair(client))
+    generated_relay_key = load_mytracks_relay_api_key_from_db(db)
+    assert generated_relay_key is not None
+    assert generated_relay_key != _SENTINELS["relay_key"]
+    secrets_to_find = {**_SENTINELS, "generated_relay_key": generated_relay_key}
+    for path, names in _scan_gets(client, get_paths, secrets_to_find).items():
+        leaks.setdefault(path, set()).update(names)
+
+    # Clearing must not echo what was stored either.
+    for delete_path in ("/v1/settings/kasa-credentials", "/v1/settings/tailwind-token", "/v1/settings/ep1-noise-psk"):
+        response = client.delete(delete_path)
+        assert response.status_code == HTTPStatus.OK
+        write_responses.append(response.text)
+
+    for text in write_responses:
+        for name, value in secrets_to_find.items():
+            if value in text:
+                leaks.setdefault("<write response>", set()).add(name)
+
+    assert not leaks, f"settings responses leak stored secrets: {leaks}"
 
 
 _OVERSIZED = _REJECTED_PREFIX + "-" + "x" * 300
