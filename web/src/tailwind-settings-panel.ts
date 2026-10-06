@@ -2,7 +2,10 @@ import { ManagedSecretSource, ToastVariant } from "./closed-sets.js";
 // GoTailwind token settings panel for the Settings hub.
 
 import { api, HttpError } from "./api.js";
-import { createSecretInputRow } from "./settings-secret-field.js";
+import {
+  applyWriteOnlySecretState,
+  createSecretInputRow,
+} from "./settings-secret-field.js";
 import {
   clearSettingsDialogStatus,
   setSettingsDialogStatus,
@@ -104,20 +107,15 @@ export async function mountTailwindSettingsPanel(
   const labelText = document.createElement("span");
   labelText.textContent = "Token";
   const tokenRow = createSecretInputRow({
-    autocomplete: "off",
+    autocomplete: "new-password",
     inputMode: "numeric",
     maxLength: 64,
     required: true,
   });
   const input = tokenRow.input;
   input.name = "token";
-  let storedToken: string | null = null;
-  let tokenRevealed = false;
+  // The token is write-only: the API never returns it, so this field only ever holds what is typed.
   const setTokenRevealed = (revealed: boolean): void => {
-    tokenRevealed = revealed;
-    if (revealed && !input.value && storedToken) {
-      input.value = storedToken;
-    }
     tokenRow.setRevealed(revealed);
   };
   setTokenRevealed(false);
@@ -150,17 +148,11 @@ export async function mountTailwindSettingsPanel(
 
   const applyTokenFieldsFromSettings = (s: TailwindTokenSettingsOut): void => {
     settingsConfigured = s.configured;
-    storedToken = s.stored_token;
-    if (storedToken) {
-      input.value = storedToken;
-      input.required = false;
-      if (!tokenRevealed) {
-        input.type = "password";
-      }
-    } else {
-      input.required = true;
-    }
-    input.placeholder = storedToken ? "" : "Six-digit token";
+    applyWriteOnlySecretState(input, {
+      configured: s.stored_in_database,
+      emptyPlaceholder: "Six-digit token",
+    });
+    setTokenRevealed(false);
     syncTestEnabled();
   };
 
@@ -188,6 +180,14 @@ export async function mountTailwindSettingsPanel(
       );
       return;
     }
+    if (s.stored_in_database && s.source === ManagedSecretSource.None) {
+      // The row exists but the secrets key changed, so the saved token cannot be read.
+      showStatusMessage(
+        "The saved token cannot be read with the current secrets key. Enter it again, or clear it.",
+        ToastVariant.Error,
+      );
+      return;
+    }
     hideStatus();
   };
 
@@ -205,26 +205,39 @@ export async function mountTailwindSettingsPanel(
   };
 
   const saveToken = (): void => {
+    if (saveBtn.disabled) {
+      return;
+    }
     void (async () => {
       const token = input.value.trim();
       if (!token) {
-        showStatusMessage("Enter a token before saving.", ToastVariant.Error);
+        showStatusMessage(
+          settingsConfigured
+            ? "Type a new token to replace the saved one."
+            : "Enter a token before saving.",
+          ToastVariant.Error,
+        );
         return;
       }
       saveBtn.disabled = true;
       try {
         const out = await api.putTailwindToken(token);
         showSuccessToast("Token saved.");
-        setTokenRevealed(false);
-        const s = await api.fetchTailwindTokenSettings();
-        applyTokenFieldsFromSettings(s);
-        await refreshHubInfo();
+        // The save already succeeded; a failed status refresh must not be reported as a failed save.
+        let s: TailwindTokenSettingsOut | null = null;
+        try {
+          s = await api.fetchTailwindTokenSettings();
+          applyTokenFieldsFromSettings(s);
+          await refreshHubInfo();
+        } catch {
+          input.value = "";
+        }
         if (out.restart_required) {
           showStatusMessage(
             "Token saved. Restart domesti-bot (or remove TAILWIND_TOKEN) so garage doors use it.",
             ToastVariant.Success,
           );
-        } else {
+        } else if (s !== null) {
           updateStatusHint(s);
           await options.onDevicesChanged?.();
         }
@@ -275,10 +288,11 @@ export async function mountTailwindSettingsPanel(
     void (async () => {
       try {
         await api.clearTailwindToken();
-        storedToken = null;
         settingsConfigured = false;
-        input.value = "";
-        input.required = true;
+        applyWriteOnlySecretState(input, {
+          configured: false,
+          emptyPlaceholder: "Six-digit token",
+        });
         setTokenRevealed(false);
         syncTestEnabled();
         showSuccessToast("Stored token cleared.");

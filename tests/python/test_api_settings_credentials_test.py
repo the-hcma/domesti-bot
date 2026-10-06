@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from http import HTTPStatus
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
@@ -59,6 +59,49 @@ def test_post_tailwind_token_test_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert "door" in body["detail"]
     assert body["source"] == "database"
     probe.assert_awaited_once()
+
+
+def test_post_tailwind_token_test_with_a_blank_body_uses_the_stored_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_tailwind_token_to_db(db, "123456")
+    client, _app = _client(cache_path=db)
+    fake_client = AsyncMock()
+    fake_client.__aenter__.return_value = fake_client
+    fake_client.status.return_value = MagicMock(doors=[object(), object()])
+    with (
+        patch("app.settings_credentials_test.Tailwind", return_value=fake_client) as tailwind,
+        patch(
+            "app.settings_credentials_test._resolve_tailwind_probe_host",
+            new_callable=AsyncMock,
+            return_value="192.168.1.10",
+        ),
+    ):
+        response = client.post("/v1/settings/tailwind-token/test", json={})
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body["ok"] is True
+    assert body["source"] == "database"
+    assert tailwind.call_args.kwargs["token"] == "123456"
+
+
+def test_post_tailwind_token_test_with_an_undecryptable_row_explains_the_key_change(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_tailwind_token_to_db(db, "123456")
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    client, _app = _client(cache_path=db)
+    response = client.post("/v1/settings/tailwind-token/test", json={})
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert "cannot be decrypted" in response.json()["detail"]
 
 
 def test_post_tailwind_token_test_auth_fail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

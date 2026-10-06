@@ -450,7 +450,7 @@ export interface TailwindTokenSettingsOut {
   secrets_key_configured: boolean;
   secrets_key_source: SecretsKeySource;
   stored_in_database: boolean;
-  stored_token: string | null;
+  updated_at: number | null;
 }
 
 export interface TailwindTokenSetOut {

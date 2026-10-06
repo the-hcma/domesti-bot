@@ -58,13 +58,13 @@ from app.db.secrets import (
     kasa_credentials_updated_at,
     load_ep1_noise_psk_from_db,
     load_kasa_credentials_from_db,
-    load_tailwind_token_from_db,
     save_ep1_noise_psk_to_db,
     save_kasa_credentials_to_db,
     save_tailwind_token_to_db,
     secrets_key_configured,
     secrets_key_source,
     tailwind_token_stored_in_db,
+    tailwind_token_updated_at,
 )
 from app.device_enums import Ep1CalibrationOffsetKind, Ep1OccupancyTuningKind
 from app.discovery_refresh import (
@@ -1086,15 +1086,6 @@ async def _reload_tailwind_manager() -> bool:
     return mgr is not None
 
 
-def _stored_token_for_settings(cache_path: Path | None) -> str | None:
-    if cache_path is None:
-        return None
-    try:
-        return load_tailwind_token_from_db(cache_path)
-    except SecretsDecryptError:
-        return None
-
-
 def _tailwind_hub_info_response() -> TailwindHubInfoOut:
     state: DeviceManagersState | None = runtime.device_state
     mgr = state.tailwind_mgr if state is not None else None
@@ -1118,10 +1109,14 @@ def _tailwind_hub_info_response() -> TailwindHubInfoOut:
 
 def _tailwind_settings_response(request: Request) -> TailwindTokenSettingsOut:
     cache_path = discovery_cache_path_from_request(request)
-    token, source = resolve_tailwind_token(
-        cli_token=_cli_tailwind_token(),
-        cache_path=cache_path,
-    )
+    try:
+        token, source = resolve_tailwind_token(
+            cli_token=_cli_tailwind_token(),
+            cache_path=cache_path,
+        )
+    except SecretsDecryptError:
+        # The row exists but the secrets key changed: report it as stored but not usable (like Kasa).
+        token, source = "", "none"
     stored = tailwind_token_stored_in_db(cache_path) if cache_path is not None else False
     return TailwindTokenSettingsOut(
         configured=bool(token),
@@ -1129,5 +1124,5 @@ def _tailwind_settings_response(request: Request) -> TailwindTokenSettingsOut:
         secrets_key_configured=secrets_key_configured(),
         secrets_key_source=secrets_key_source(),
         stored_in_database=stored,
-        stored_token=_stored_token_for_settings(cache_path) if stored else None,
+        updated_at=tailwind_token_updated_at(cache_path) if cache_path is not None and stored else None,
     )

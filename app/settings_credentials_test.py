@@ -278,10 +278,15 @@ async def probe_tailwind_token(
         resolved_token = form_token
         source = SettingsCredentialsTestSource.FORM
     else:
-        resolved_token, resolved_source = resolve_tailwind_token(
-            cli_token=cli_token,
-            cache_path=cache_path,
-        )
+        try:
+            resolved_token, resolved_source = resolve_tailwind_token(
+                cli_token=cli_token,
+                cache_path=cache_path,
+            )
+        except SecretsDecryptError as exc:
+            raise CredentialsTestUnavailableError(
+                "The stored Tailwind token cannot be decrypted with the current secrets key; enter the token again"
+            ) from exc
         if not resolved_token:
             raise CredentialsTestUnavailableError("No Tailwind token configured; enter a token or save one first")
         source = SettingsCredentialsTestSource(resolved_source)
