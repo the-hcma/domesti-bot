@@ -47,7 +47,6 @@ _NON_SECRET_PROPERTY_NAMES = frozenset({"secrets_key_source"})
 # by the PR that converts that endpoint to write-only.
 _READBACK_PROPERTY_ALLOWLIST = frozenset(
     {
-        ("KasaCredentialsSettingsOut", "stored_password"),
         ("TailwindTokenSettingsOut", "stored_token"),
         ("VizioTvSettingsOut", "stored_token"),
         ("Ep1NoisePreSharedKeySettingsOut", "stored_noise_psk"),
@@ -60,7 +59,6 @@ _IDENTIFIER_ALLOWLIST = frozenset({("KasaCredentialsSettingsOut", "stored_userna
 
 # GET path -> sentinel names that endpoint may still return in plaintext.
 _READBACK_PATH_ALLOWLIST: dict[str, frozenset[str]] = {
-    "/v1/settings/kasa-credentials": frozenset({"kasa_password"}),
     "/v1/settings/tailwind-token": frozenset({"tailwind_token"}),
     "/v1/settings/ep1-noise-psk": frozenset({"ep1_noise_psk"}),
     "/v1/settings/vizio/tvs": frozenset({"vizio_token"}),
@@ -315,18 +313,17 @@ def test_rejected_secret_is_not_echoed_in_422_or_logs(
     assert _REJECTED_PREFIX not in caplog.text
 
 
-def test_missing_field_422_does_not_echo_the_request_body(
+def test_missing_required_field_422_does_not_echo_the_rest_of_the_request_body(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """A missing required field makes FastAPI's default handler echo the whole body as ``input``."""
     monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
     client = _client(tmp_path / "ui.sqlite")
-    response = client.put(
-        "/v1/settings/kasa-credentials",
-        json={"password": _SENTINELS["kasa_password"]},
-    )
+    response = client.put("/v1/settings/tailwind-token", json={"note": _SENTINELS["tailwind_token"]})
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
-    assert _SENTINELS["kasa_password"] not in response.text
+    assert _SENTINELS["tailwind_token"] not in response.text
+    assert [error["type"] for error in response.json()["detail"]] == ["missing"]
 
 
 def test_default_fastapi_handler_would_echo_the_rejected_secret() -> None:

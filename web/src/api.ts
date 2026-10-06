@@ -51,6 +51,7 @@ import type {
   VacationModeSettingsStatusOut,
   VacationModeTestEmailIn,
   VacationModeTestEmailOut,
+  KasaCredentialsSetIn,
   KasaCredentialsSetOut,
   DiscoveryRefreshOut,
   DiscoverySettingsOut,
@@ -517,13 +518,13 @@ export const api = {
     );
   },
   putKasaCredentials(
-    username: string,
-    password: string,
+    input: KasaCredentialsSetIn,
   ): Promise<KasaCredentialsSetOut> {
-    return call<KasaCredentialsSetOut>("PUT", "/v1/settings/kasa-credentials", {
-      username,
-      password,
-    });
+    return call<KasaCredentialsSetOut>(
+      "PUT",
+      "/v1/settings/kasa-credentials",
+      input,
+    );
   },
   putKasaMotionTuning(
     deviceId: string,

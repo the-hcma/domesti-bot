@@ -246,6 +246,11 @@ def ep1_noise_psk_stored_in_db(path: Path) -> bool:
     return _app_secret_stored_in_db(path, _EP1_NOISE_PSK_KEY)
 
 
+def kasa_credentials_updated_at(path: Path) -> float | None:
+    """Epoch seconds the stored Kasa credentials were last written, without decrypting them."""
+    return _app_secret_updated_at(path, _KASA_PASSWORD_KEY)
+
+
 def kasa_credentials_stored_in_db(path: Path) -> bool:
     """True when both Kasa username and password rows exist."""
     return _app_secret_stored_in_db(path, _KASA_USERNAME_KEY) and _app_secret_stored_in_db(
@@ -303,6 +308,13 @@ def vizio_auth_token_stored_in_db(
     if host:
         return _app_secret_stored_in_db(path, _vizio_auth_secret_key_host(host))
     return False
+
+
+def _app_secret_updated_at(path: Path, key: str) -> float | None:
+    """``updated_at`` of one secret row (``None`` when absent); never reads the ciphertext's plaintext."""
+    with discovery_session(path) as session:
+        row = session.get(AppSecret, key)
+        return row.updated_at if row is not None else None
 
 
 def _app_secret_stored_in_db(path: Path, key: str) -> bool:
