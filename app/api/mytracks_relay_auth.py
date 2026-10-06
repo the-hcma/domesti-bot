@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import Header, HTTPException, Request
 
+from app.api.api_key_compare import api_keys_match
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.db.secrets import load_mytracks_relay_api_key_from_db
 
@@ -29,7 +30,7 @@ async def verify_mytracks_relay_api_key(
             detail="My Tracks relay not configured",
         )
     provided = (x_domesti_api_key or "").strip()
-    if provided != relay_key:
+    if not api_keys_match(provided, relay_key):
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
             detail="Invalid or missing X-Domesti-Api-Key",
