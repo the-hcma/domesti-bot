@@ -222,3 +222,24 @@ def test_a_non_string_entry_in_the_config_file_key_list_is_a_configuration_error
     monkeypatch.setenv("DOMESTI_BOT_CONFIG_FILE", str(config))
     with pytest.raises(SecretsConfigurationError, match="only strings"):
         secrets_key_configured()
+
+
+def test_dry_run_reports_undecryptable_rows_without_raising_or_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    db = tmp_path / "ui.sqlite"
+    old, new, stranger = _key(), _key(), _key()
+    _use_keys(monkeypatch, old)
+    save_tailwind_token_to_db(db, _TOKEN)
+    _use_keys(monkeypatch, stranger)
+    save_kasa_credentials_to_db(db, username="me@example.test", password="kasa-pass")
+    before = _ciphertexts(db)
+
+    _use_keys(monkeypatch, new, old)
+    with caplog.at_level(logging.INFO, logger="app.db.secrets"):
+        result = rotate_app_secrets(db, dry_run=True)
+
+    assert result.rotated == ["tailwind_token"]
+    assert result.undecryptable == ["kasa_password", "kasa_username"]
+    assert _ciphertexts(db) == before
+    assert not [r for r in caplog.records if r.name == "app.db.secrets"]

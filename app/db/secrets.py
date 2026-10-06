@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -161,13 +162,20 @@ def load_vizio_auth_token_from_db(
     return None
 
 
-def rotate_app_secrets(path: Path, *, skip_undecryptable: bool = False) -> SecretsRotationResult:
+def rotate_app_secrets(
+    path: Path,
+    *,
+    dry_run: bool = False,
+    skip_undecryptable: bool = False,
+) -> SecretsRotationResult:
     """Re-encrypt every ``app_secrets`` row under the newest configured key, in one transaction.
 
     Rows already under the newest key are left untouched, and ``updated_at`` is never changed (it
     records when the operator last wrote the value, not when the ciphertext was refreshed). A row
     no configured key can decrypt aborts the whole run, leaving every row as it was, unless
-    ``skip_undecryptable`` is set, in which case it is reported and left alone.
+    ``skip_undecryptable`` is set, in which case it is reported and left alone. ``dry_run`` reports
+    what would happen without writing, logging or failing on undecryptable rows (it still raises
+    :class:`SecretsConfigurationError` when no valid key is configured).
     """
     fernets = _fernets_from_config()
     if not fernets:
@@ -180,33 +188,46 @@ def rotate_app_secrets(path: Path, *, skip_undecryptable: bool = False) -> Secre
     rotated: list[str] = []
     undecryptable: list[str] = []
 
-    def _write(session: Session) -> None:
-        already_current.clear()
-        rotated.clear()
-        undecryptable.clear()
-        for row in session.scalars(select(AppSecret).order_by(AppSecret.key)):
-            try:
-                newest.decrypt(row.ciphertext)
-            except InvalidToken:
-                pass
-            else:
-                already_current.append(row.key)
-                continue
-            try:
-                row.ciphertext = multi.rotate(row.ciphertext)
-            except InvalidToken:
-                undecryptable.append(row.key)
-                continue
-            rotated.append(row.key)
-        if undecryptable and not skip_undecryptable:
-            raise SecretsDecryptError(
-                f"Expected every stored secret to decrypt with a configured key, got undecryptable rows: "
-                f"{', '.join(undecryptable)}; nothing was changed"
-            )
+    def _classify(name: str, ciphertext: bytes) -> bytes | None:
+        """Bucket one row; return its re-encrypted ciphertext when it must change."""
+        try:
+            newest.decrypt(ciphertext)
+        except InvalidToken:
+            pass
+        else:
+            already_current.append(name)
+            return None
+        try:
+            fresh = multi.rotate(ciphertext)
+        except InvalidToken:
+            undecryptable.append(name)
+            return None
+        rotated.append(name)
+        return fresh
 
-    discovery_write(path, _write)
-    for name in rotated:
-        _audit_secret_change("re-encrypted", name)
+    if dry_run:
+        # Read-only on purpose: ``discovery_write`` / ``discovery_session`` bootstrap the schema.
+        for name, ciphertext in _read_only_secret_rows(path):
+            _classify(name, ciphertext)
+    else:
+
+        def _write(session: Session) -> None:
+            already_current.clear()
+            rotated.clear()
+            undecryptable.clear()
+            for row in session.scalars(select(AppSecret).order_by(AppSecret.key)):
+                fresh = _classify(row.key, row.ciphertext)
+                if fresh is not None:
+                    row.ciphertext = fresh
+            if undecryptable and not skip_undecryptable:
+                raise SecretsDecryptError(
+                    f"Expected every stored secret to decrypt with a configured key, got undecryptable rows: "
+                    f"{', '.join(undecryptable)}; nothing was changed"
+                )
+
+        discovery_write(path, _write)
+        for name in rotated:
+            _audit_secret_change("re-encrypted", name)
     return SecretsRotationResult(
         already_current=list(already_current),
         rotated=list(rotated),
@@ -463,6 +484,31 @@ def _require_fernet() -> MultiFernet:
             "encrypted secrets"
         )
     return fernet
+
+
+def _read_only_secret_rows(path: Path) -> list[tuple[str, bytes]]:
+    """``(key, ciphertext)`` for every secret, over a read-only connection that never creates or alters anything.
+
+    ``discovery_session`` bootstraps the schema, so a preview must not use it. A missing database or table
+    simply has no rows.
+    """
+    resolved = path.expanduser().resolve()
+    if not resolved.is_file():
+        return []
+    try:
+        connection = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True, timeout=5.0)
+    except sqlite3.Error:
+        return []
+    try:
+        return [
+            (str(k), bytes(c)) for k, c in connection.execute("SELECT key, ciphertext FROM app_secrets ORDER BY key")
+        ]
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return []
+        raise
+    finally:
+        connection.close()
 
 
 def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:

@@ -61,6 +61,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import json
 import logging
 import os
 import sys
@@ -76,6 +77,7 @@ from prompt_toolkit import HTML, PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.enums import EditingMode
 from prompt_toolkit.patch_stdout import patch_stdout
+from sqlalchemy.exc import OperationalError
 
 from app import device_discovery_store
 from app.androidtv_device_manager import (
@@ -86,8 +88,13 @@ from app.androidtv_device_manager import (
     discover_cast_adb_specs_via_zeroconf,
 )
 from app.build_info import format_cli_version_line
-from app.db.secrets import SecretsConfigurationError, save_kasa_credentials_to_db
-from app.db.secrets_key import generate_fernet_key, secrets_json_path, write_secrets_json
+from app.db.secrets import (
+    SecretsConfigurationError,
+    SecretsDecryptError,
+    rotate_app_secrets,
+    save_kasa_credentials_to_db,
+)
+from app.db.secrets_key import generate_fernet_key, parse_secrets_key_list, secrets_json_path, write_secrets_json
 from app.device_completion import (
     CompletionAlias,
     completion_alias_matches,
@@ -135,6 +142,7 @@ COMMANDS = (
     "refresh",
     "refresh-discovery",
     "resume",
+    "rotate-secrets",
     "set-display-name",
     "setup-secrets",
     "show-devices",
@@ -188,6 +196,10 @@ _COMMAND_HELP_LINES: tuple[tuple[str, str], ...] = (
     ("refresh", "Reconnect all backends; Kasa may reuse cached discovery."),
     ("refresh-discovery", "Full LAN discovery: Google Cast, EP1, Kasa, Sonos, Tailwind, Vizio."),
     ("resume", "Resume playback on a Sonos speaker."),
+    (
+        "rotate-secrets",
+        "Re-encrypt stored secrets under the newest Fernet key (--check to preview, --skip-undecryptable).",
+    ),
     ("set-display-name", "Save a friendly label for a device (SQLite cache required)."),
     (
         "setup-secrets",
@@ -675,6 +687,69 @@ async def _repl_cmd_kasa_creds(
     print(theme.ok(f"Kasa: ready ({n_switches} switch(es))"))
 
 
+def _is_sqlite_lock_error(exc: OperationalError) -> bool:
+    """True for SQLite ``database is locked`` / ``busy`` contention (the message omits SQL parameters)."""
+    detail = str(exc.orig).lower()
+    return "locked" in detail or "busy" in detail
+
+
+def _repl_cmd_rotate_secrets(*, arg: str, cache_path: Path | None, theme: _Theme) -> None:
+    """Re-encrypt every stored secret under the newest configured Fernet key."""
+
+    flags = arg.split()
+    unknown = [flag for flag in flags if flag not in ("--check", "--skip-undecryptable")]
+    if unknown:
+        print(theme.err(f"rotate-secrets: unknown option {unknown[0]!r}; use --check or --skip-undecryptable"))
+        return
+    if cache_path is None:
+        print(theme.err("rotate-secrets: needs the SQLite cache (do not pass --no-discovery-cache)"))
+        return
+    dry_run = "--check" in flags
+    try:
+        result = rotate_app_secrets(
+            cache_path,
+            dry_run=dry_run,
+            skip_undecryptable=dry_run or "--skip-undecryptable" in flags,
+        )
+    except (SecretsConfigurationError, SecretsDecryptError) as ex:
+        print(theme.err(f"rotate-secrets: {ex}"))
+        return
+    except OperationalError as ex:
+        if _is_sqlite_lock_error(ex):
+            # The server is a separate process; a write that raced it rolls back whole, so a retry is safe.
+            print(theme.err("rotate-secrets: the database was busy; nothing was changed, retry"))
+        else:
+            print(theme.err(f"rotate-secrets: database error ({type(ex.orig).__name__}); nothing was changed"))
+        return
+    verb = "would re-encrypt" if dry_run else "re-encrypted"
+    print(
+        theme.ok(
+            f"rotate-secrets: {verb} {len(result.rotated)} secret(s); "
+            f"{len(result.already_current)} already on the newest key"
+        )
+    )
+    if result.undecryptable:
+        print(
+            theme.warn(
+                f"rotate-secrets: no configured key decrypts {len(result.undecryptable)} secret(s): "
+                f"{', '.join(result.undecryptable)} (re-enter them in Settings, or add the key that wrote them)"
+            )
+        )
+    elif not dry_run and result.rotated:
+        print(theme.dim("The older keys can now be removed from DOMESTI_BOT_SECRETS_KEY / domesti-bot.config.json."))
+
+
+def _secrets_file_key_count(path: Path) -> int:
+    """How many keys ``domesti-bot.config.json`` lists (0 when unreadable); the environment is ignored."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8")).get("domesti_secrets_key")
+    except (AttributeError, OSError, ValueError):
+        return 0
+    if isinstance(value, list):
+        return len([item for item in value if str(item).strip()])
+    return len(parse_secrets_key_list(str(value or "")))
+
+
 async def _repl_cmd_setup_secrets(
     *,
     prompt_fn: Callable[[str, bool], Awaitable[str]],
@@ -687,6 +762,14 @@ async def _repl_cmd_setup_secrets(
     if (os.environ.get("DOMESTI_BOT_SECRETS_KEY") or "").strip():
         print(theme.warn("DOMESTI_BOT_SECRETS_KEY is set in the environment and overrides the JSON file."))
     if path.is_file():
+        existing_keys = _secrets_file_key_count(path)
+        if existing_keys > 1:
+            print(
+                theme.warn(
+                    f"The file lists {existing_keys} keys; overwriting replaces all of them "
+                    "(see docs/SECRETS_KEY_ROTATION.md)."
+                )
+            )
         try:
             overwrite = await prompt_fn(
                 "  domesti-bot.config.json already exists. Overwrite? [y/N]: ",
@@ -2222,6 +2305,10 @@ async def dispatch_repl_action(
         )
         return
 
+    if cmd == "rotate-secrets":
+        _repl_cmd_rotate_secrets(arg=arg, cache_path=cache_path, theme=theme)
+        return
+
     if cmd == "setup-secrets":
 
         async def _secrets_prompt(message: str, is_password: bool) -> str:
@@ -2419,6 +2506,8 @@ async def execute_line_for_api(
         return "", "", "not supported over HTTP"
     if cmd == "edit-mode":
         return "", "", "edit-mode is local to the CLI session"
+    if cmd == "rotate-secrets":
+        return "", "", "rotate-secrets is local to the CLI session"
     plain = _Theme(enabled=False)
     out_buf, err_buf = io.StringIO(), io.StringIO()
     with redirect_stdout(out_buf), redirect_stderr(err_buf):
