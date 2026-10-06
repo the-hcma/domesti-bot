@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 import time
@@ -275,8 +276,8 @@ def _cors_allowed_origins() -> list[str]:
     """Origins from ``DOMESTI_CORS_ORIGINS`` (comma-separated ``scheme://host[:port]``).
 
     The bundled UI is served same-origin and needs no CORS, so the default is none. Entries are
-    normalized to the form browsers send in ``Origin`` (lowercase scheme and host, no default
-    port), because Starlette matches that header by exact string. A wildcard or an entry that
+    normalized to the form browsers send in ``Origin`` (lowercase ASCII/punycode host, compressed IPv6,
+    no default port), because Starlette matches that header by exact string. A wildcard or an entry that
     could never match (path, query, fragment, userinfo, bad port) is ignored with a warning rather
     than widening access or failing silently.
     """
@@ -306,7 +307,15 @@ def _normalize_cors_origin(entry: str) -> str | None:
     if parsed.path or parsed.query or parsed.fragment or parsed.username is not None or parsed.password is not None:
         return None
     if ":" in host:
-        host = f"[{host}]"
+        try:
+            host = f"[{ipaddress.IPv6Address(host.split('%')[0]).compressed}]"
+        except ValueError:
+            return None
+    else:
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return None
     default_port = 80 if scheme == "http" else 443
     return f"{scheme}://{host}" if port in (None, default_port) else f"{scheme}://{host}:{port}"
 

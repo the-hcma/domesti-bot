@@ -83,6 +83,7 @@ def test_wildcard_and_malformed_entries_are_ignored_with_a_warning(
         "https://user@ui.example.test",
         "https://ui.example.test:abc",
         "https://ui.example.test:99999",
+        "http://[2001:db8::zz]",
     ]
     monkeypatch.setenv("DOMESTI_CORS_ORIGINS", ",".join([*bad, _ALLOWED, _ALLOWED]))
     with caplog.at_level(logging.WARNING, logger="app.api"):
@@ -100,6 +101,8 @@ def test_wildcard_and_malformed_entries_are_ignored_with_a_warning(
         ("http://ui.example.test:8080", "http://ui.example.test:8080"),
         ("https://ui.example.test:80", "https://ui.example.test:80"),
         ("http://[::1]:3000", "http://[::1]:3000"),
+        ("http://[2001:0DB8:0000:0000:0000:0000:0000:0001]:3000", "http://[2001:db8::1]:3000"),
+        ("https://bücher.example", "https://xn--bcher-kva.example"),
         ("http://192.168.1.10:5173", "http://192.168.1.10:5173"),
     ],
 )
