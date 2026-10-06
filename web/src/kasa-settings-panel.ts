@@ -3,7 +3,10 @@ import { KasaCredentialsSource, ToastVariant, type KasaPirRange } from "./closed
 
 import { api, HttpError } from "./api.js";
 import { createFieldLabel, createInfoBadge } from "./rules-ui-helpers.js";
-import { createSecretInputRow } from "./settings-secret-field.js";
+import {
+  applyWriteOnlySecretState,
+  createSecretInputRow,
+} from "./settings-secret-field.js";
 import {
   clearSettingsDialogStatus,
   setSettingsDialogStatus,
@@ -11,6 +14,7 @@ import {
 import { showErrorToast, showSuccessToast } from "./ui-toast.js";
 import type {
   KasaCredentialsSettingsOut,
+  KasaCredentialsTestIn,
   KasaDeviceSettingsOut,
   KasaMotionTuningOut,
   KasaMotionTuningSetIn,
@@ -258,19 +262,17 @@ export async function mountKasaSettingsPanel(
   const passwordText = document.createElement("span");
   passwordText.textContent = "Password";
   const passwordRow = createSecretInputRow({
-    autocomplete: "current-password",
+    autocomplete: "new-password",
     required: true,
   });
   const passwordInput = passwordRow.input;
   passwordInput.name = "password";
   passwordInput.placeholder = "Account password";
-  let storedPassword: string | null = null;
-  let passwordRevealed = false;
+  // The password is write-only: the API never returns it, so this field only ever holds what is typed.
+  let passwordStored = false;
+  // The email the panel pre-filled from the database, so an untouched value is not sent as a Test override.
+  let prefilledUsername = "";
   const setPasswordRevealed = (revealed: boolean): void => {
-    passwordRevealed = revealed;
-    if (revealed && !passwordInput.value && storedPassword) {
-      passwordInput.value = storedPassword;
-    }
     passwordRow.setRevealed(revealed);
   };
   setPasswordRevealed(false);
@@ -698,21 +700,18 @@ export async function mountKasaSettingsPanel(
 
   const applyFieldsFromSettings = (s: KasaCredentialsSettingsOut): void => {
     settingsConfigured = s.configured;
-    storedPassword = s.stored_password;
+    // Rows that exist but cannot be decrypted (the secrets key changed) come back without an email: treat the
+    // password as not saved so the field is required again instead of promising "Saved".
+    passwordStored = s.password_stored && s.stored_username !== null;
     if (s.stored_username) {
       emailInput.value = s.stored_username;
     }
-    if (storedPassword) {
-      passwordInput.value = storedPassword;
-      passwordInput.required = false;
-      if (!passwordRevealed) {
-        passwordInput.type = "password";
-      }
-    } else {
-      passwordInput.value = "";
-      passwordInput.required = true;
-    }
-    passwordInput.placeholder = storedPassword ? "" : "Account password";
+    prefilledUsername = s.stored_username ?? "";
+    applyWriteOnlySecretState(passwordInput, {
+      configured: passwordStored,
+      emptyPlaceholder: "Account password",
+    });
+    setPasswordRevealed(false);
     syncTestEnabled();
   };
 
@@ -778,6 +777,9 @@ export async function mountKasaSettingsPanel(
   };
 
   const saveCredentials = (): void => {
+    if (saveBtn.disabled) {
+      return;
+    }
     void (async () => {
       const username = emailInput.value.trim();
       const password = passwordInput.value;
@@ -788,7 +790,7 @@ export async function mountKasaSettingsPanel(
         );
         return;
       }
-      if (!password) {
+      if (!password && !passwordStored) {
         showStatusMessage(
           "Enter the account password before saving.",
           ToastVariant.Error,
@@ -797,7 +799,10 @@ export async function mountKasaSettingsPanel(
       }
       saveBtn.disabled = true;
       try {
-        const out = await api.putKasaCredentials(username, password);
+        // A blank password keeps the stored one (write-only), so it is only sent when typed.
+        const out = await api.putKasaCredentials(
+          password ? { username, password } : { username },
+        );
         showSuccessToast("Kasa credentials saved.");
         setPasswordRevealed(false);
         if (out.restart_required) {
@@ -844,13 +849,20 @@ export async function mountKasaSettingsPanel(
     void (async () => {
       const username = emailInput.value.trim();
       const password = passwordInput.value;
-      const formReady = username !== "" && password !== "";
       testBtn.disabled = true;
       showStatusMessage("Testing credentials…");
       try {
-        const result = await api.testKasaCredentials(
-          formReady ? { username, password } : {},
-        );
+        // The server completes a partial override from the stored pair, since the password is write-only.
+        // An unchanged pre-filled email is not an override: with environment credentials active it would make
+        // the server test the stored database pair instead of the environment credentials.
+        const overrides: KasaCredentialsTestIn = {};
+        if (username && username !== prefilledUsername) {
+          overrides.username = username;
+        }
+        if (password) {
+          overrides.password = password;
+        }
+        const result = await api.testKasaCredentials(overrides);
         showStatusMessage(
           result.detail,
           result.ok ? ToastVariant.Success : ToastVariant.Error,
@@ -871,11 +883,13 @@ export async function mountKasaSettingsPanel(
       try {
         await api.clearKasaCredentials();
         emailInput.value = "";
-        storedPassword = null;
+        prefilledUsername = "";
+        passwordStored = false;
         settingsConfigured = false;
-        passwordInput.value = "";
-        passwordInput.required = true;
-        passwordInput.placeholder = "Account password";
+        applyWriteOnlySecretState(passwordInput, {
+          configured: false,
+          emptyPlaceholder: "Account password",
+        });
         setPasswordRevealed(false);
         syncTestEnabled();
         showSuccessToast("Stored Kasa credentials cleared.");

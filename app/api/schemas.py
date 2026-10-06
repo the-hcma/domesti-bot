@@ -475,22 +475,31 @@ class SmtpTestEmailOut(BaseModel):
 
 
 class KasaCredentialsSetIn(BaseModel):
-    """Body for ``PUT /v1/settings/kasa-credentials`` (password is never returned)."""
+    """Body for ``PUT /v1/settings/kasa-credentials`` (the password is write-only and never returned).
 
-    password: str = Field(
-        ...,
+    Omit a field to keep its stored value, so the email can change without re-entering the password.
+    """
+
+    password: str | None = Field(
+        default=None,
         min_length=1,
         max_length=256,
-        description="Kasa/Tapo account password for KLAP LAN auth.",
+        description="Kasa/Tapo account password for KLAP LAN auth; omit to keep the stored password.",
         repr=False,
         json_schema_extra=_WRITE_ONLY_SECRET,
     )
-    username: str = Field(
-        ...,
+    username: str | None = Field(
+        default=None,
         min_length=1,
         max_length=256,
-        description="Kasa/Tapo account email for KLAP LAN auth.",
+        description="Kasa/Tapo account email for KLAP LAN auth; omit to keep the stored email.",
     )
+
+    @model_validator(mode="after")
+    def _require_a_field(self) -> Self:
+        if self.password is None and self.username is None:
+            raise ValueError("Expected a username or a password to update, got neither")
+        return self
 
 
 class KasaCredentialsSetOut(BaseModel):
@@ -548,16 +557,16 @@ class KasaCredentialsSettingsOut(BaseModel):
         ...,
         description="True when both encrypted username and password rows exist.",
     )
-    stored_password: str | None = Field(
+    updated_at: float | None = Field(
         default=None,
-        description=(
-            "Decrypted password from the database row when present; ``None`` when "
-            "nothing is stored, decryption is unavailable, or env overrides credentials."
-        ),
+        description="Epoch seconds the stored credentials were last written; ``None`` when none are stored.",
     )
     stored_username: str | None = Field(
         default=None,
-        description="Decrypted account email when stored in the database.",
+        description=(
+            "Account email when stored in the database. An identifier, not a secret: shown so the operator "
+            "can tell which account is configured. The password is write-only and never returned."
+        ),
     )
 
 
@@ -567,14 +576,14 @@ class KasaCredentialsTestIn(BaseModel):
     password: str | None = Field(
         default=None,
         max_length=256,
-        description="Account password override; both username and password must be set to use form credentials.",
+        description="Account password override; omit to use the stored password (it is write-only and never returned).",
         repr=False,
         json_schema_extra=_WRITE_ONLY_SECRET,
     )
     username: str | None = Field(
         default=None,
         max_length=256,
-        description="Account email override; both username and password must be set to use form credentials.",
+        description="Account email override; omit to use the stored email.",
     )
 
 

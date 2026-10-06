@@ -21,6 +21,7 @@ from kasa.deviceconfig import DeviceConfig
 from kasa.exceptions import AuthenticationError, _ConnectionError
 
 from app import device_discovery_store
+from app.db.secrets import SecretsDecryptError, load_kasa_credentials_from_db
 from app.device_enums import SettingsCredentialsTestSource
 from app.ep1_calibration import resolve_ep1_settings_target
 from app.ep1_credentials import resolve_ep1_noise_psk
@@ -424,8 +425,19 @@ def _resolve_kasa_probe_credentials(
             SettingsCredentialsTestSource.FORM,
         )
     if form_username or form_password:
+        # The password is write-only (never sent back to the browser), so a form that changes only the
+        # email, or only the password, is completed from the stored database pair.
+        stored = _stored_kasa_pair(cache_path)
+        username_value = form_username or (stored[0] if stored else "")
+        password_value = form_password or (stored[1] if stored else "")
+        if username_value and password_value:
+            return (
+                Credentials(username=username_value, password=password_value),
+                SettingsCredentialsTestSource.FORM,
+            )
         raise CredentialsTestUnavailableError(
-            "Expected both username and password for form override, got a partial pair"
+            "Expected both account email and password; enter the missing one or save them first "
+            "(environment credentials are not mixed with form fields)"
         )
     creds, resolved_source = resolve_kasa_credentials(cache_path=cache_path)
     if creds is None:
@@ -433,6 +445,15 @@ def _resolve_kasa_probe_credentials(
             "No Kasa credentials configured; enter account email and password or save them first"
         )
     return creds, SettingsCredentialsTestSource(resolved_source)
+
+
+def _stored_kasa_pair(cache_path: Path | None) -> tuple[str, str] | None:
+    if cache_path is None:
+        return None
+    try:
+        return load_kasa_credentials_from_db(cache_path)
+    except SecretsDecryptError:
+        return None
 
 
 def _resolve_ep1_probe_endpoint(

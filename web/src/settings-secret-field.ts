@@ -58,3 +58,21 @@ export function createSecretInputRow(options: {
   row.append(input, revealBtn);
   return { input, row, setRevealed };
 }
+
+/** Placeholder shown on a write-only secret field when a value is already saved. */
+export const WRITE_ONLY_SAVED_PLACEHOLDER = "Saved. Leave blank to keep current";
+
+/**
+ * Write-only secret fields never receive the stored value back from the API: the input stays empty and the
+ * placeholder tells the operator a value is saved. Typing replaces it; leaving it blank keeps it.
+ */
+export function applyWriteOnlySecretState(
+  input: HTMLInputElement,
+  options: { configured: boolean; emptyPlaceholder: string },
+): void {
+  input.value = "";
+  input.required = !options.configured;
+  input.placeholder = options.configured
+    ? WRITE_ONLY_SAVED_PLACEHOLDER
+    : options.emptyPlaceholder;
+}

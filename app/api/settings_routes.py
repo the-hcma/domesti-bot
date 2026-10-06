@@ -55,6 +55,7 @@ from app.db.secrets import (
     delete_kasa_credentials_from_db,
     ep1_noise_psk_stored_in_db,
     kasa_credentials_stored_in_db,
+    kasa_credentials_updated_at,
     load_ep1_noise_psk_from_db,
     load_kasa_credentials_from_db,
     load_tailwind_token_from_db,
@@ -216,7 +217,7 @@ async def clear_kasa_credentials(request: Request) -> KasaCredentialsSettingsOut
 
 @router.get("/kasa-credentials", response_model=KasaCredentialsSettingsOut)
 async def get_kasa_credentials_settings(request: Request) -> KasaCredentialsSettingsOut:
-    """Return Kasa credential status (stored password returned when in database)."""
+    """Return Kasa credential status; the password is write-only and never returned."""
     return _kasa_settings_response(request)
 
 
@@ -259,10 +260,27 @@ async def put_kasa_credentials(body: KasaCredentialsSetIn, request: Request) -> 
             ),
         )
     try:
+        existing = load_kasa_credentials_from_db(cache_path)
+    except SecretsDecryptError:
+        existing = None
+    username = body.username or (existing[0] if existing else None)
+    password = body.password or (existing[1] if existing else None)
+    missing = [name for name, value in (("username", username), ("password", password)) if not value]
+    if missing or username is None or password is None:
+        hint = (
+            "; the stored credentials cannot be decrypted with the current secrets key, so enter both"
+            if existing is None and kasa_credentials_stored_in_db(cache_path)
+            else ""
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=f"Expected account email and password, no stored value to keep for: {', '.join(missing)}{hint}",
+        )
+    try:
         save_kasa_credentials_to_db(
             cache_path,
-            username=body.username,
-            password=body.password,
+            username=username,
+            password=password,
         )
     except SecretsConfigurationError as exc:
         raise HTTPException(
@@ -988,7 +1006,6 @@ def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:
     cache_path = runtime.discovery_cache_path()
     creds, source = resolve_kasa_credentials(cache_path=cache_path)
     stored = kasa_credentials_stored_in_db(cache_path) if cache_path is not None else False
-    stored_password: str | None = None
     stored_username: str | None = None
     # Row existence (not decryptability) drives "password stored" UI state.
     password_stored = stored
@@ -998,7 +1015,7 @@ def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:
         except SecretsDecryptError:
             pair = None
         if pair is not None:
-            stored_username, stored_password = pair
+            stored_username = pair[0]
     skipped: list[str] = []
     klap_hosts: list[str] = []
     state = runtime.device_state
@@ -1011,8 +1028,8 @@ def _kasa_settings_response(request: Request) -> KasaCredentialsSettingsOut:
         secrets_key_configured=secrets_key_configured(),
         secrets_key_source=secrets_key_source(),
         stored_in_database=stored,
-        stored_password=stored_password if stored and source != "env" else None,
         stored_username=stored_username if stored else None,
+        updated_at=kasa_credentials_updated_at(cache_path) if cache_path is not None and stored else None,
         password_stored=password_stored,
         skipped_auth_hosts=skipped,
         hosts_requiring_klap_auth=klap_hosts,
