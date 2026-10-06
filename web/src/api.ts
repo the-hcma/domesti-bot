@@ -21,7 +21,6 @@ import type {
   MyTracksLocationMonitoringOut,
   MyTracksPairIn,
   MyTracksPairStatusOut,
-  MyTracksRelayKeySettingsOut,
   MyTracksUsersSyncOut,
   MyTracksSettingsIn,
   MyTracksSettingsOut,
@@ -282,9 +281,6 @@ export const api = {
   },
   fetchMyTracksPairStatus(): Promise<MyTracksPairStatusOut | null> {
     return callNullableJson<MyTracksPairStatusOut>("GET", "/v1/settings/my-tracks/pair-status");
-  },
-  fetchMyTracksRelayKeySettings(): Promise<MyTracksRelayKeySettingsOut> {
-    return call<MyTracksRelayKeySettingsOut>("GET", "/v1/settings/my-tracks/relay-key");
   },
   fetchMyTracksUsersSync(): Promise<MyTracksUsersSyncOut> {
     return call<MyTracksUsersSyncOut>("GET", "/v1/rules/users/sync-status");

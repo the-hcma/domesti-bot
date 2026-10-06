@@ -700,11 +700,6 @@ export interface MyTracksPairIn {
   username: string;
 }
 
-export interface MyTracksRelayKeySettingsOut {
-  configured: boolean;
-  stored_relay_key: string | null;
-}
-
 export interface LocationRequestRateLimitsOut {
   device_cooldown_seconds: number;
   user_cooldown_seconds: number;
@@ -735,6 +730,7 @@ export interface MyTracksPairStatusOut {
   user_location_test_url: string | null;
   user_location_update_url: string | null;
   relay_key_configured: boolean;
+  relay_key_updated_at: number | null;
   username: string;
 }
 

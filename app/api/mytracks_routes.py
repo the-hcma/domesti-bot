@@ -7,6 +7,7 @@ from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.schemas import (
     LocationHistoryRetentionIn,
@@ -20,7 +21,6 @@ from app.api.schemas import (
     MyTracksLocationUpdatesOut,
     MyTracksPairIn,
     MyTracksPairStatusOut,
-    MyTracksRelayKeySettingsOut,
     MyTracksSettingsIn,
     MyTracksSettingsOut,
     MyTracksSyncIn,
@@ -30,9 +30,6 @@ from app.api.schemas import (
 from app.api.settings_routes import discovery_cache_path_from_request
 from app.db.secrets import (
     SecretsConfigurationError,
-    SecretsDecryptError,
-    load_mytracks_relay_api_key_from_db,
-    mytracks_relay_api_key_stored_in_db,
     save_mytracks_relay_api_key_to_db,
     secrets_key_configured,
 )
@@ -144,22 +141,6 @@ async def get_mytracks_pair_status(request: Request) -> MyTracksPairStatusOut | 
     if record is None:
         return None
     return _pair_status_to_schema(record, cache_path=cache_path)
-
-
-@settings_router.get("/my-tracks/relay-key", response_model=MyTracksRelayKeySettingsOut)
-async def get_mytracks_relay_key_settings(request: Request) -> MyTracksRelayKeySettingsOut:
-    """Return relay API key status (includes stored key when paired)."""
-    cache_path = discovery_cache_path_from_request(request)
-    if cache_path is None:
-        return MyTracksRelayKeySettingsOut(configured=False, stored_relay_key=None)
-    stored = mytracks_relay_api_key_stored_in_db(cache_path)
-    if not stored:
-        return MyTracksRelayKeySettingsOut(configured=False, stored_relay_key=None)
-    try:
-        relay_key = load_mytracks_relay_api_key_from_db(cache_path)
-    except SecretsDecryptError:
-        relay_key = None
-    return MyTracksRelayKeySettingsOut(configured=True, stored_relay_key=relay_key)
 
 
 @settings_router.get(
@@ -284,7 +265,7 @@ async def post_mytracks_pair(
     body: MyTracksPairIn,
     request: Request,
 ) -> MyTracksPairStatusOut:
-    """Generate a relay secret, persist it, and register webhook URLs on my-tracks."""
+    """Generate a relay secret, register it and the webhook URLs on my-tracks, then persist it."""
     cache_path = _require_discovery_cache(request)
     _require_secrets_key_for_pairing()
     mytracks_base = _validated_mytracks_domain(body.domain)
@@ -316,19 +297,6 @@ async def post_mytracks_pair(
         mytracks_log_host(domesti_public),
     )
     try:
-        save_mytracks_relay_api_key_to_db(cache_path, relay_key)
-    except SecretsConfigurationError as exc:
-        _LOGGER.warning(
-            "pairing failed for %s as %s before my-tracks call: %s",
-            mytracks_log_host(mytracks_base),
-            username,
-            exc,
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-    try:
         pair_result = pair_with_my_tracks(
             api_key=relay_key,
             base_url=mytracks_base,
@@ -349,6 +317,31 @@ async def post_mytracks_pair(
         raise HTTPException(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail=str(exc),
+        ) from exc
+    # Persist the new key only once My Tracks has accepted it: a failed (re-)pair must leave the previous,
+    # still-registered key (and its updated_at) untouched instead of replacing it with one My Tracks never saw.
+    try:
+        save_mytracks_relay_api_key_to_db(cache_path, relay_key)
+    except (SecretsConfigurationError, SQLAlchemyError, OSError) as exc:
+        # My Tracks already holds the new key, so the two services are out of step until the next successful pair.
+        # Record that as the pairing's last error (the panel shows it even while paired) instead of leaving the
+        # old key looking healthy. The up-front secrets-key check makes this rare: it is mostly a database error.
+        mismatch = (
+            "My Tracks accepted a new relay key but domesti-bot could not store it "
+            f"({type(exc).__name__}); webhooks fail until you pair again"
+        )
+        set_last_pair_error(cache_path, mismatch)
+        _LOGGER.warning(
+            "pairing registered on %s as %s but the relay key could not be stored: %s",
+            mytracks_log_host(mytracks_base),
+            username,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY
+            if isinstance(exc, SecretsConfigurationError)
+            else HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail=mismatch,
         ) from exc
     save_mytracks_config(
         cache_path,
@@ -669,6 +662,7 @@ def _pair_status_to_schema(
         user_location_update_url=record.user_location_update_url,
         user_location_test_url=record.user_location_test_url,
         relay_key_configured=record.relay_key_configured,
+        relay_key_updated_at=record.relay_key_updated_at,
         location_history_retention=_retention_record_to_schema(record.location_history_retention),
         location_updates_accepted=record.location_updates_accepted,
         mytracks_location_updates_enabled=_maybe_mytracks_location_updates_enabled(
