@@ -291,6 +291,11 @@ def smtp_password_stored_in_db(path: Path) -> bool:
     return _app_secret_stored_in_db(path, _SMTP_PASSWORD_KEY)
 
 
+def tailwind_token_updated_at(path: Path) -> float | None:
+    """Epoch seconds the stored Tailwind token was last written, without decrypting it."""
+    return _app_secret_updated_at(path, _TAILWIND_SECRET_KEY)
+
+
 def tailwind_token_stored_in_db(path: Path) -> bool:
     """True when an ``app_secrets`` row exists for the Tailwind token."""
     return _app_secret_stored_in_db(path, _TAILWIND_SECRET_KEY)

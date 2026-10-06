@@ -68,7 +68,9 @@ def test_put_tailwind_token_persists_when_secrets_key_in_json_file(
     get_r = client.get("/v1/settings/tailwind-token")
     body = get_r.json()
     assert body["stored_in_database"] is True
-    assert body["stored_token"] == "123456"
+    assert "stored_token" not in body
+    assert "123456" not in get_r.text
+    assert isinstance(body["updated_at"], float)
     assert body["secrets_key_source"] == "file"
 
 
@@ -100,3 +102,50 @@ def test_delete_tailwind_token_clears_database_row(monkeypatch: pytest.MonkeyPat
     assert r.status_code == HTTPStatus.OK
     assert r.json()["configured"] is False
     assert r.json()["stored_in_database"] is False
+
+
+def test_get_tailwind_token_updated_at_follows_the_stored_row(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    client, _app = _client(cache_path=tmp_path / "ui.sqlite")
+    assert client.get("/v1/settings/tailwind-token").json()["updated_at"] is None
+    assert client.put("/v1/settings/tailwind-token", json={"token": "123456"}).status_code == HTTPStatus.OK
+    stored = client.get("/v1/settings/tailwind-token").json()
+    assert stored["stored_in_database"] is True
+    assert isinstance(stored["updated_at"], float)
+    assert client.delete("/v1/settings/tailwind-token").status_code == HTTPStatus.OK
+    assert client.get("/v1/settings/tailwind-token").json()["updated_at"] is None
+
+
+def test_get_tailwind_token_settings_with_an_undecryptable_row_is_stored_but_not_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_tailwind_token_to_db(db, "123456")
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    client, _app = _client(cache_path=db)
+    r = client.get("/v1/settings/tailwind-token")
+    assert r.status_code == HTTPStatus.OK
+    body = r.json()
+    assert body["stored_in_database"] is True
+    assert body["configured"] is False
+    assert body["source"] == "none"
+
+
+def test_get_tailwind_token_settings_env_override_still_reports_the_stored_row(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_tailwind_token_to_db(db, "123456")
+    monkeypatch.setenv("TAILWIND_TOKEN", "654321")
+    client, _app = _client(cache_path=db)
+    body = client.get("/v1/settings/tailwind-token").json()
+    assert body["source"] == "env"
+    assert body["stored_in_database"] is True
+    assert isinstance(body["updated_at"], float)
+    assert "654321" not in str(body)
