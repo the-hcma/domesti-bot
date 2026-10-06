@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from app.db.models import AppSecret
 from app.db.secrets_key import SecretsKeySource, load_secrets_key_material
 from app.db.session import discovery_session, discovery_write
 from app.vizio_mac import normalize_mac
+
+_LOGGER = logging.getLogger(__name__)
 
 _EP1_NOISE_PSK_KEY = "ep1_noise_psk"
 _KASA_PASSWORD_KEY = "kasa_password"
@@ -31,27 +34,41 @@ class SecretsDecryptError(ValueError):
     """Raised when ciphertext cannot be decrypted with the configured key."""
 
 
+def _audit_secret_change(action: str, key: str) -> None:
+    """Record that a secret changed (which one and how, never the value) for the audit trail."""
+    _LOGGER.info("secret %s key=%s", action, key)
+
+
 def delete_app_secret(path: Path, *, key: str) -> None:
     """Remove one secret row if present."""
+    removed = False
 
     def _write(session: Session) -> None:
+        nonlocal removed
         row = session.get(AppSecret, key.strip())
         if row is not None:
             session.delete(row)
+            removed = True
 
     discovery_write(path, _write)
+    if removed:
+        _audit_secret_change("removed", key.strip())
 
 
 def delete_kasa_credentials_from_db(path: Path) -> None:
     """Remove encrypted Kasa account username and password rows atomically."""
+    removed: list[str] = []
 
     def _write(session: Session) -> None:
         for key in (_KASA_PASSWORD_KEY, _KASA_USERNAME_KEY):
             row = session.get(AppSecret, key)
             if row is not None:
                 session.delete(row)
+                removed.append(key)
 
     discovery_write(path, _write)
+    for key in removed:
+        _audit_secret_change("removed", key)
 
 
 def load_ep1_noise_psk_from_db(path: Path) -> str | None:
@@ -159,6 +176,7 @@ def save_kasa_credentials_to_db(
         )
     fernet = _require_fernet()
     now = time.time()
+    actions: dict[str, str] = {}
 
     def _write(session: Session) -> None:
         for key, value in ((_KASA_PASSWORD_KEY, pw), (_KASA_USERNAME_KEY, un)):
@@ -172,11 +190,15 @@ def save_kasa_credentials_to_db(
                         updated_at=now,
                     )
                 )
+                actions[key] = "created"
             else:
                 row.ciphertext = ciphertext
                 row.updated_at = now
+                actions[key] = "replaced"
 
     discovery_write(path, _write)
+    for key, action in actions.items():
+        _audit_secret_change(action, key)
 
 
 def save_mytracks_admin_password_to_db(path: Path, password: str) -> None:
@@ -338,8 +360,10 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
     fernet = _require_fernet()
     ciphertext = fernet.encrypt(value.encode("utf-8"))
     now = time.time()
+    created = False
 
     def _write(session: Session) -> None:
+        nonlocal created
         row = session.get(AppSecret, key)
         if row is None:
             session.add(
@@ -349,11 +373,13 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
                     updated_at=now,
                 )
             )
+            created = True
         else:
             row.ciphertext = ciphertext
             row.updated_at = now
 
     discovery_write(path, _write)
+    _audit_secret_change("created" if created else "replaced", key)
 
 
 def _vizio_auth_secret_key_host(host: str) -> str:
