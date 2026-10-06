@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 import time
@@ -10,6 +11,7 @@ from contextlib import asynccontextmanager
 from http import HTTPStatus
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -270,6 +272,54 @@ async def _validation_error_handler(_request: Request, exc: Exception) -> JSONRe
     return JSONResponse(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, content={"detail": detail})
 
 
+def _cors_allowed_origins() -> list[str]:
+    """Origins from ``DOMESTI_CORS_ORIGINS`` (comma-separated ``scheme://host[:port]``).
+
+    The bundled UI is served same-origin and needs no CORS, so the default is none. Entries are
+    normalized to the form browsers send in ``Origin`` (lowercase ASCII/punycode host, compressed IPv6,
+    no default port), because Starlette matches that header by exact string. A wildcard or an entry that
+    could never match (path, query, fragment, userinfo, bad port) is ignored with a warning rather
+    than widening access or failing silently.
+    """
+    origins: list[str] = []
+    for raw in (os.environ.get("DOMESTI_CORS_ORIGINS") or "").split(","):
+        entry = raw.strip().rstrip("/")
+        if not entry:
+            continue
+        origin = _normalize_cors_origin(entry)
+        if origin is None:
+            _LOGGER.warning("[cors] ignoring DOMESTI_CORS_ORIGINS entry %r: expected scheme://host[:port]", entry)
+        elif origin not in origins:
+            origins.append(origin)
+    return origins
+
+
+def _normalize_cors_origin(entry: str) -> str | None:
+    try:
+        parsed = urlsplit(entry)
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname
+    if scheme not in ("http", "https") or not host:
+        return None
+    if parsed.path or parsed.query or parsed.fragment or parsed.username is not None or parsed.password is not None:
+        return None
+    if ":" in host:
+        try:
+            host = f"[{ipaddress.IPv6Address(host.split('%')[0]).compressed}]"
+        except ValueError:
+            return None
+    else:
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return None
+    default_port = 80 if scheme == "http" else 443
+    return f"{scheme}://{host}" if port in (None, default_port) else f"{scheme}://{host}:{port}"
+
+
 def _expected_api_key() -> str:
     return (os.environ.get("DOMESTI_API_KEY") or "").strip()
 
@@ -457,13 +507,17 @@ def create_app(args: Any) -> FastAPI:
     app.add_middleware(_SettingsCacheControlMiddleware)
     app.add_middleware(_SecurityHeadersMiddleware)
     app.add_middleware(_AccessLogMiddleware)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    cors_origins = _cors_allowed_origins()
+    if cors_origins:
+        # Opt-in only: the same-origin UI needs no CORS. Credentials stay off because the API
+        # authenticates with the ``X-Domesti-Api-Key`` header, not cookies.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=False,
+            allow_methods=["DELETE", "GET", "PATCH", "POST", "PUT"],
+            allow_headers=["Content-Type", "X-Domesti-Api-Key"],
+        )
 
     # Serve the static landing page + the compiled TypeScript bundle from
     # ``app/api/static/`` at ``/static/``. Mounted unconditionally — the
