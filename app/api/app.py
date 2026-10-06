@@ -214,6 +214,46 @@ class _SettingsCacheControlMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Content-Security-Policy for every HTML document the app serves. Deliberately limited to directives the UI can
+# satisfy without a per-resource inventory: the page loads one same-origin module script (no inline script), so
+# ``script-src 'self'`` blocks injected scripts, which is what makes a readable secret dangerous in the first
+# place. ``default-src`` is intentionally absent: the page also pulls Leaflet CSS from unpkg, OpenStreetMap
+# tiles and device artwork from LAN hosts, and uses inline styles, so a strict default would break it.
+# ``frame-ancestors 'none'`` means the UI cannot be embedded in another page (for example a dashboard iframe).
+_HTML_CSP = "; ".join(
+    [
+        "script-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ]
+)
+
+# A standalone design prototype that runs an inline script, opened from disk or from /static during development
+# only. It renders no user data and does nothing with the API, so it is exempt rather than broken by the CSP.
+_CSP_EXEMPT_PATHS = frozenset({"/static/compact-layout-prototype.html"})
+
+
+class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Browser hardening headers on every response; CSP on every HTML document.
+
+    The CSP goes on all ``text/html`` responses (the landing page at ``/`` and the same file at
+    ``/static/index.html``), not just ``/``, so there is no unprotected copy of the UI.
+    ``Referrer-Policy: strict-origin-when-cross-origin`` rather than ``no-referrer``: OpenStreetMap's tile
+    servers expect a Referer, so a stricter policy would break the maps. Existing headers are not overridden.
+    """
+
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        is_html = response.headers.get("content-type", "").lower().startswith("text/html")
+        if is_html and request.url.path not in _CSP_EXEMPT_PATHS:
+            response.headers.setdefault("Content-Security-Policy", _HTML_CSP)
+        return response
+
+
 async def _validation_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     """422 body that never echoes the submitted value.
 
@@ -417,6 +457,7 @@ def create_app(args: Any) -> FastAPI:
     app.include_router(sensor_collection_router, dependencies=[Depends(_verify_api_key)])
     app.include_router(webhooks_router)
     app.add_middleware(_SettingsCacheControlMiddleware)
+    app.add_middleware(_SecurityHeadersMiddleware)
     app.add_middleware(_AccessLogMiddleware)
     app.add_middleware(
         CORSMiddleware,
