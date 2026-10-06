@@ -197,3 +197,14 @@ def test_check_on_a_missing_or_unbootstrapped_database_creates_nothing(
     assert bare.read_bytes() == before
     with sqlite3.connect(bare) as conn:
         assert conn.execute("select name from sqlite_master").fetchall() == []
+
+
+def test_check_on_an_unreadable_database_reports_it_instead_of_zero_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", _key())
+    db = tmp_path / "ui.sqlite"
+    db.write_bytes(b"this is not a sqlite database" * 200)
+    output = _run("--check", db)
+    assert "unreadable" in output
+    assert "would re-encrypt 0" not in output
