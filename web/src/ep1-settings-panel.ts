@@ -7,7 +7,10 @@ import {
   Ep1OccupancyTuningKind,
   ToastVariant,
 } from "./closed-sets.js";
-import { createSecretInputRow } from "./settings-secret-field.js";
+import {
+  applyWriteOnlySecretState,
+  createSecretInputRow,
+} from "./settings-secret-field.js";
 import {
   setSettingsDialogStatus,
   setSettingsDialogStatusTone,
@@ -71,6 +74,12 @@ export const EP1_SETTINGS_PSK_OPTIONAL_HINT =
   "Optional for Homey / stock firmware (plaintext API). Required only when the device has ESPHome API encryption enabled.";
 export const EP1_SETTINGS_SAVE_REQUIRES_PSK =
   "Enter a Noise pre-shared key (PSK) to save. For plaintext Homey firmware, leave this blank and use Test (or Clear stored key).";
+export const EP1_SETTINGS_SAVE_PSK_ALREADY_SAVED =
+  "A key is already saved. Type a replacement to change it, or use Clear stored key.";
+export const EP1_SETTINGS_PSK_OVERRIDDEN_NOTE =
+  "EP1_NOISE_PSK (or --ep1-noise-psk) overrides the saved key until it is removed.";
+export const EP1_SETTINGS_PSK_UNREADABLE_NOTE =
+  "The saved key cannot be read with the current secrets key. Enter it again, or use Clear stored key.";
 export const EP1_SETTINGS_STEP_MISALIGNED = (
   kindLabel: string,
   step: number,
@@ -634,20 +643,23 @@ export async function mountEp1SettingsPanel(
   const labelText = document.createElement("span");
   labelText.textContent = "Noise pre-shared key (PSK)";
   const secretRow = createSecretInputRow({
-    autocomplete: "off",
+    autocomplete: "new-password",
     required: false,
   });
   const input = secretRow.input;
   input.name = "noise_psk";
-  let storedPsk: string | null = null;
+  // The key is write-only: the API never returns it, so this field only ever holds what is typed.
   const setRevealed = (next: boolean): void => {
-    if (next && !input.value && storedPsk) {
-      input.value = storedPsk;
-    }
     secretRow.setRevealed(next);
   };
   setRevealed(false);
   label.append(labelText, secretRow.row);
+
+  // Notes about the saved key (unreadable, overridden) live in their own line: the shared status line below is
+  // rewritten by the device panels and would otherwise hide them as soon as a device loads.
+  const pskNote = document.createElement("p");
+  pskNote.className = "settings-dialog-status";
+  pskNote.hidden = true;
 
   const pskActions = document.createElement("div");
   pskActions.className = "settings-dialog-actions";
@@ -666,7 +678,7 @@ export async function mountEp1SettingsPanel(
   saveBtn.className = "btn";
   saveBtn.textContent = "Save";
   pskActions.append(testBtn, clearBtn, saveBtn);
-  pskSection.append(label, pskActions);
+  pskSection.append(label, pskNote, pskActions);
 
   const calibrationSection = document.createElement("fieldset");
   calibrationSection.className =
@@ -951,17 +963,30 @@ export async function mountEp1SettingsPanel(
     syncDeviceControls();
   };
 
+  let keySaved = false;
+  // The row exists but cannot be decrypted (the secrets key changed): not a usable saved key.
+  let keyUnreadable = false;
+
   const applyFromSettings = (s: Ep1NoisePreSharedKeySettingsOut): void => {
-    storedPsk = s.stored_noise_psk;
-    if (storedPsk) {
-      input.value = storedPsk;
-    } else {
-      input.value = "";
-    }
+    keyUnreadable = s.stored_in_database && s.source === "none";
+    keySaved = s.stored_in_database && !keyUnreadable;
+    applyWriteOnlySecretState(input, {
+      configured: keySaved,
+      emptyPlaceholder: "Leave empty for plaintext (Homey) firmware",
+    });
+    // The key is optional (plaintext firmware needs none), so it is never browser-required.
     input.required = false;
     setRevealed(false);
     status.hidden = true;
     setSettingsDialogStatusTone(status, null);
+    if (keyUnreadable) {
+      setSettingsDialogStatus(pskNote, EP1_SETTINGS_PSK_UNREADABLE_NOTE, ToastVariant.Error);
+    } else if (s.stored_in_database && (s.source === "env" || s.source === "cli")) {
+      setSettingsDialogStatus(pskNote, EP1_SETTINGS_PSK_OVERRIDDEN_NOTE, ToastVariant.Info);
+    } else {
+      pskNote.hidden = true;
+      setSettingsDialogStatusTone(pskNote, null);
+    }
   };
 
   const showError = (message: string): void => {
@@ -1081,7 +1106,13 @@ export async function mountEp1SettingsPanel(
   saveBtn.addEventListener("click", async () => {
     const noisePsk = input.value.trim();
     if (!noisePsk) {
-      showError(EP1_SETTINGS_SAVE_REQUIRES_PSK);
+      showError(
+        keyUnreadable
+          ? EP1_SETTINGS_PSK_UNREADABLE_NOTE
+          : keySaved
+            ? EP1_SETTINGS_SAVE_PSK_ALREADY_SAVED
+            : EP1_SETTINGS_SAVE_REQUIRES_PSK,
+      );
       return;
     }
     saveBtn.disabled = true;
