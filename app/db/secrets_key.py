@@ -86,8 +86,24 @@ def load_secrets_key_material() -> tuple[str | None, SecretsKeySource]:
     value = raw.get("domesti_secrets_key")
     if value is None:
         return None, "none"
-    key = str(value).strip()
+    if isinstance(value, list):
+        if not all(isinstance(item, str) for item in value):
+            raise ValueError(f"Expected {path} domesti_secrets_key list to hold only strings, got another type")
+        key = ",".join(item.strip() for item in value if item.strip())
+        if not key:
+            raise ValueError(f"Expected {path} domesti_secrets_key list to hold at least one key, got an empty list")
+    else:
+        key = str(value).strip()
     return (key, "file") if key else (None, "none")
+
+
+def parse_secrets_key_list(material: str) -> list[str]:
+    """Split key material into individual Fernet keys, newest first.
+
+    ``DOMESTI_BOT_SECRETS_KEY`` and ``domesti_secrets_key`` hold one key, or several separated by
+    commas: the first encrypts, every key can decrypt (key rotation). Blank entries are dropped.
+    """
+    return [part.strip() for part in material.split(",") if part.strip()]
 
 
 def secrets_json_path() -> Path:
@@ -100,13 +116,18 @@ def secrets_json_path() -> Path:
 
 def write_secrets_json(domesti_secrets_key: str, *, path: Path | None = None) -> Path:
     """Write ``domesti-bot.config.json`` (mode ``0600``) after validating the Fernet key."""
-    key = domesti_secrets_key.strip()
-    if not key:
+    keys = parse_secrets_key_list(domesti_secrets_key)
+    if not keys:
         raise ValueError("Expected a non-empty domesti_secrets_key, got whitespace only")
-    try:
-        Fernet(key.encode("ascii"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Expected domesti_secrets_key to be a url-safe base64-encoded 32-byte Fernet key") from exc
+    for candidate in keys:
+        try:
+            Fernet(candidate.encode("ascii"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Expected domesti_secrets_key to be a url-safe base64-encoded 32-byte Fernet key "
+                "(or several, comma-separated, newest first)"
+            ) from exc
+    key = ",".join(keys)
     target = (path or secrets_json_path()).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     existing: dict[str, object] = {}

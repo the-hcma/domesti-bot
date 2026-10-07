@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import AppSecret
-from app.db.secrets_key import SecretsKeySource, load_secrets_key_material
+from app.db.secrets_key import SecretsKeySource, load_secrets_key_material, parse_secrets_key_list
 from app.db.session import discovery_session, discovery_write
 from app.vizio_mac import normalize_mac
 
@@ -32,6 +33,15 @@ class SecretsConfigurationError(ValueError):
 
 class SecretsDecryptError(ValueError):
     """Raised when ciphertext cannot be decrypted with the configured key."""
+
+
+@dataclass(frozen=True)
+class SecretsRotationResult:
+    """Outcome of :func:`rotate_app_secrets`: row names only, never values."""
+
+    already_current: list[str] = field(default_factory=list)
+    rotated: list[str] = field(default_factory=list)
+    undecryptable: list[str] = field(default_factory=list)
 
 
 def _audit_secret_change(action: str, key: str) -> None:
@@ -149,6 +159,59 @@ def load_vizio_auth_token_from_db(
         stripped = token.strip()
         return stripped if stripped else None
     return None
+
+
+def rotate_app_secrets(path: Path, *, skip_undecryptable: bool = False) -> SecretsRotationResult:
+    """Re-encrypt every ``app_secrets`` row under the newest configured key, in one transaction.
+
+    Rows already under the newest key are left untouched, and ``updated_at`` is never changed (it
+    records when the operator last wrote the value, not when the ciphertext was refreshed). A row
+    no configured key can decrypt aborts the whole run, leaving every row as it was, unless
+    ``skip_undecryptable`` is set, in which case it is reported and left alone.
+    """
+    fernets = _fernets_from_config()
+    if not fernets:
+        raise SecretsConfigurationError(
+            "Expected a configured Fernet key (domesti_secrets_key or DOMESTI_BOT_SECRETS_KEY) before rotating secrets"
+        )
+    newest = fernets[0]
+    multi = MultiFernet(fernets)
+    already_current: list[str] = []
+    rotated: list[str] = []
+    undecryptable: list[str] = []
+
+    def _write(session: Session) -> None:
+        already_current.clear()
+        rotated.clear()
+        undecryptable.clear()
+        for row in session.scalars(select(AppSecret).order_by(AppSecret.key)):
+            try:
+                newest.decrypt(row.ciphertext)
+            except InvalidToken:
+                pass
+            else:
+                already_current.append(row.key)
+                continue
+            try:
+                row.ciphertext = multi.rotate(row.ciphertext)
+            except InvalidToken:
+                undecryptable.append(row.key)
+                continue
+            rotated.append(row.key)
+        if undecryptable and not skip_undecryptable:
+            raise SecretsDecryptError(
+                f"Expected every stored secret to decrypt with a configured key, got undecryptable rows: "
+                f"{', '.join(undecryptable)}; nothing was changed"
+            )
+
+    discovery_write(path, _write)
+    for name in rotated:
+        _audit_secret_change("re-encrypted", name)
+    return SecretsRotationResult(
+        already_current=list(already_current),
+        rotated=list(rotated),
+        undecryptable=list(undecryptable),
+    )
 
 
 def save_ep1_noise_psk_to_db(path: Path, psk: str) -> None:
@@ -290,8 +353,8 @@ def secrets_key_source() -> SecretsKeySource:
     if not _material:
         return "none"
     try:
-        Fernet(_material.encode("ascii"))
-    except (TypeError, ValueError):
+        _validated_fernets(_material)
+    except SecretsConfigurationError:
         return "none"
     return source
 
@@ -359,19 +422,20 @@ def _app_secret_stored_in_db(path: Path, key: str) -> bool:
         return row is not None
 
 
-def _fernet_from_config() -> Fernet | None:
+def _fernet_from_config() -> MultiFernet | None:
+    fernets = _fernets_from_config()
+    return MultiFernet(fernets) if fernets else None
+
+
+def _fernets_from_config() -> list[Fernet]:
+    """Every configured Fernet key, newest first (empty when none is configured)."""
     try:
         raw, _source = load_secrets_key_material()
     except ValueError as exc:
         raise SecretsConfigurationError(str(exc)) from exc
     if not raw:
-        return None
-    try:
-        return Fernet(raw.encode("ascii"))
-    except (TypeError, ValueError) as exc:
-        raise SecretsConfigurationError(
-            "Expected domesti_secrets_key to be a url-safe base64-encoded 32-byte Fernet key"
-        ) from exc
+        return []
+    return _validated_fernets(raw)
 
 
 def _load_app_secret_plaintext(path: Path, key: str) -> str | None:
@@ -390,7 +454,7 @@ def _load_app_secret_plaintext(path: Path, key: str) -> str | None:
         return text if text else None
 
 
-def _require_fernet() -> Fernet:
+def _require_fernet() -> MultiFernet:
     fernet = _fernet_from_config()
     if fernet is None:
         raise SecretsConfigurationError(
@@ -425,6 +489,19 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
 
     discovery_write(path, _write)
     _audit_secret_change("created" if created else "replaced", key)
+
+
+def _validated_fernets(material: str) -> list[Fernet]:
+    keys = parse_secrets_key_list(material)
+    if not keys:
+        raise SecretsConfigurationError("Expected at least one Fernet key in domesti_secrets_key, got none")
+    try:
+        return [Fernet(key.encode("ascii")) for key in keys]
+    except (TypeError, ValueError) as exc:
+        raise SecretsConfigurationError(
+            "Expected domesti_secrets_key to be a url-safe base64-encoded 32-byte Fernet key "
+            "(or several, comma-separated, newest first)"
+        ) from exc
 
 
 def _vizio_auth_secret_key_host(host: str) -> str:
