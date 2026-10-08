@@ -85,7 +85,7 @@ dependencies = [
     "wcwidth>=0.9.1",
     "websockets>=17.1",
     "yarl>=1.25.1",
-    "zeroconf>=0.151.3",
+    "zeroconf>=0.151.5",
 ]
 
 [project.scripts]
