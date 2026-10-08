@@ -53,7 +53,7 @@ def _client(tmp_path: Path) -> TestClient:
 def test_operator_key_check_uses_the_constant_time_helper(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("DOMESTI_API_KEY", "operator-key")
     client = _client(tmp_path)
-    with patch("app.api.app.api_keys_match", wraps=api_keys_match) as match:
+    with patch("app.api.api_scopes.api_keys_match", wraps=api_keys_match) as match:
         response = client.get("/v1/settings/tailwind-token", headers={"X-Domesti-Api-Key": "operator-key"})
     assert response.status_code == HTTPStatus.OK
     match.assert_called_once_with("operator-key", "operator-key")

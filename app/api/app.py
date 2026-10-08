@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,7 +21,14 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 from app import device_discovery_store
-from app.api.api_key_compare import api_keys_match
+from app.api.api_scopes import (
+    InsufficientScopeError,
+    insufficient_scope_handler,
+    log_key_configuration_warnings,
+    require_scope,
+    require_scope_by_method,
+    validate_key_configuration,
+)
 from app.api.location_update_routes import router as location_update_router
 from app.api.mytracks_routes import rules_router as mytracks_rules_router
 from app.api.mytracks_routes import settings_router as mytracks_settings_router
@@ -320,23 +327,6 @@ def _normalize_cors_origin(entry: str) -> str | None:
     return f"{scheme}://{host}" if port in (None, default_port) else f"{scheme}://{host}:{port}"
 
 
-def _expected_api_key() -> str:
-    return (os.environ.get("DOMESTI_API_KEY") or "").strip()
-
-
-async def _verify_api_key(
-    x_domesti_api_key: Annotated[str | None, Header(alias="X-Domesti-Api-Key")] = None,
-) -> None:
-    expected = _expected_api_key()
-    if not expected:
-        return
-    if not api_keys_match((x_domesti_api_key or "").strip(), expected):
-        raise HTTPException(
-            status_code=HTTPStatus.UNAUTHORIZED,
-            detail="Invalid or missing X-Domesti-Api-Key",
-        )
-
-
 def _device_state(request: Request) -> DeviceManagersState:
     del request
     st: Any = runtime.device_state
@@ -357,16 +347,17 @@ def _device_state(request: Request) -> DeviceManagersState:
 
 
 DeviceState = Annotated[DeviceManagersState, Depends(_device_state)]
-Auth = Annotated[None, Depends(_verify_api_key)]
 
 
 def create_app(args: Any) -> FastAPI:
     """Build the app; ``args`` is the same :class:`argparse.Namespace` as the REPL CLI."""
+    validate_key_configuration()
     runtime.reset()
     runtime.bind_cli_args(args)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        log_key_configuration_warnings()
         # The HTTP server must accept connections as soon as the ASGI lifespan
         # yields. Device discovery (Cast mDNS, Sonos UDP, Kasa LAN sweep) can
         # take 20+ seconds on a cold cache, so we run it as a background task
@@ -495,14 +486,24 @@ def create_app(args: Any) -> FastAPI:
         lifespan=lifespan,
     )
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
-    app.include_router(settings_router, dependencies=[Depends(_verify_api_key)])
-    app.include_router(vizio_settings_router, dependencies=[Depends(_verify_api_key)])
-    app.include_router(smtp_router, dependencies=[Depends(_verify_api_key)])
-    app.include_router(mytracks_settings_router, dependencies=[Depends(_verify_api_key)])
-    app.include_router(mytracks_rules_router, dependencies=[Depends(_verify_api_key)])
-    app.include_router(location_update_router, dependencies=[Depends(_verify_api_key)])
-    app.include_router(rules_router, dependencies=[Depends(_verify_api_key)])
-    app.include_router(sensor_collection_router, dependencies=[Depends(_verify_api_key)])
+    app.add_exception_handler(InsufficientScopeError, insufficient_scope_handler)
+    app.include_router(settings_router, dependencies=[Depends(require_scope("admin"))])
+    app.include_router(vizio_settings_router, dependencies=[Depends(require_scope("admin"))])
+    app.include_router(smtp_router, dependencies=[Depends(require_scope("admin"))])
+    app.include_router(mytracks_settings_router, dependencies=[Depends(require_scope("admin"))])
+    app.include_router(
+        mytracks_rules_router,
+        dependencies=[Depends(require_scope_by_method(safe="read", unsafe="admin"))],
+    )
+    app.include_router(location_update_router, dependencies=[Depends(require_scope("control"))])
+    app.include_router(
+        rules_router,
+        dependencies=[Depends(require_scope_by_method(safe="read", unsafe="control"))],
+    )
+    app.include_router(
+        sensor_collection_router,
+        dependencies=[Depends(require_scope_by_method(safe="read", unsafe="control"))],
+    )
     app.include_router(webhooks_router)
     app.add_middleware(_SettingsCacheControlMiddleware)
     app.add_middleware(_SecurityHeadersMiddleware)
@@ -588,7 +589,7 @@ def create_app(args: Any) -> FastAPI:
         ver, commit = get_build_info()
         return MetaOut(version=ver, commit=commit)
 
-    @app.get("/v1/completion-aliases", dependencies=[Depends(_verify_api_key)])
+    @app.get("/v1/completion-aliases", dependencies=[Depends(require_scope("read"))])
     async def completion_aliases(state: DeviceState) -> CompletionAliasesOut:
         return CompletionAliasesOut(
             switch=_completion_alias_items(_switch_completion_items(state.kasa_mgr, state.androidtv_mgr)),
@@ -599,7 +600,7 @@ def create_app(args: Any) -> FastAPI:
             ),
         )
 
-    @app.post("/v1/execute-line", dependencies=[Depends(_verify_api_key)])
+    @app.post("/v1/execute-line", dependencies=[Depends(require_scope("admin"))])
     async def execute_line(body: ExecuteLineIn, state: DeviceState) -> ExecuteLineOut:
         out, err, api_err = await execute_line_for_api(
             state.kasa_mgr,
@@ -619,7 +620,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/global/bulk-off",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def global_bulk_off(
         request: Request,
@@ -642,7 +643,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/kasa/bulk-off",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def kasa_bulk_off(
         request: Request,
@@ -661,7 +662,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/devices/{family_id}/{device_id}/toggle",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def ui_device_toggle(
         family_id: str,
@@ -686,7 +687,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/kasa/devices/{device_id}/toggle",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def kasa_set_power(
         device_id: str,
@@ -725,7 +726,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.put(
         "/v1/ui/preferences/{family_id}/{device_id}",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def set_ui_preference(
         family_id: str,
@@ -789,7 +790,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/sonos/pause-all",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def sonos_pause_all(
         request: Request,
@@ -811,7 +812,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/sonos/zones/{device_id}/toggle",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def sonos_set_playback(
         device_id: str,
@@ -868,7 +869,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/tailwind/close-all",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def tailwind_close_all(
         request: Request,
@@ -889,7 +890,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/tailwind/doors/{device_id}/close",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def tailwind_close_door(
         device_id: str,
@@ -926,7 +927,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/tailwind/doors/{device_id}/open",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def tailwind_open_door(
         device_id: str,
@@ -963,7 +964,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/vizio/bulk-off",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def vizio_bulk_off(
         request: Request,
@@ -980,7 +981,7 @@ def create_app(args: Any) -> FastAPI:
 
     @app.post(
         "/v1/ui/vizio/tvs/{device_id}/toggle",
-        dependencies=[Depends(_verify_api_key)],
+        dependencies=[Depends(require_scope("control"))],
     )
     async def vizio_set_power(
         device_id: str,
@@ -1026,7 +1027,7 @@ def create_app(args: Any) -> FastAPI:
             )
         )
 
-    @app.get("/v1/ui/state", dependencies=[Depends(_verify_api_key)])
+    @app.get("/v1/ui/state", dependencies=[Depends(require_scope("read"))])
     async def ui_state(state: DeviceState) -> UIStateOut:
         # Pull CLI-updated device rosters from the shared discovery cache before
         # joining in-memory manager state with ``ui_preferences``.

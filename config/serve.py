@@ -37,6 +37,7 @@ import webbrowser
 
 import uvicorn
 
+from app.api.api_scopes import configured_keys
 from app.api.app import create_app
 from app.build_info import format_cli_version_line
 from app.domesti_bot_cli import build_arg_parser
@@ -279,7 +280,7 @@ async def _open_browser_after_server_ready(
 
 def _log_listening_banner(sock: socket.socket) -> None:
     bound_host, bound_port = sock.getsockname()[:2]
-    api_key_set = bool((os.environ.get("DOMESTI_API_KEY") or "").strip())
+    api_key_set = not configured_keys().open_mode
     api_key_state = "set" if api_key_set else "unset"
     _LOGGER.info(
         "[http] listening on http://%s:%d (api-key %s)",
@@ -298,10 +299,10 @@ def _log_listening_banner(sock: socket.socket) -> None:
             # warning so it can't happen by accident on, say, a coffee-
             # shop wifi without the operator noticing.
             _LOGGER.warning(
-                "[http] bound to a wildcard address with DOMESTI_API_KEY unset — "
-                "every LAN client can reach the API unauthenticated. Set "
-                "DOMESTI_API_KEY or bind back to 127.0.0.1 if this isn't a "
-                "trusted network."
+                "[http] bound to a wildcard address with DOMESTI_API_KEY unset (and no "
+                "DOMESTI_ADMIN_API_KEY or DOMESTI_READ_API_KEY) — every LAN client can "
+                "reach the API unauthenticated. Set DOMESTI_API_KEY or bind back to "
+                "127.0.0.1 if this isn't a trusted network."
             )
 
 
