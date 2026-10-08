@@ -4,5 +4,6 @@ set -euo pipefail
 cd web
 pnpm install --frozen-lockfile
 pnpm run typecheck
+pnpm run test
 pnpm run build
 test -f ../app/api/static/dist/main.js

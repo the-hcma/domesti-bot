@@ -941,10 +941,15 @@ class RulesDataSourceWithHttpSettings implements RulesDataSource {
   }
 }
 
+/** The API exists when it answers: `200`, `401` (key needed) or `403` (key valid but the scope is too low). */
+function apiPresent(status: number): boolean {
+  return (status >= 200 && status < 300) || status === 401 || status === 403;
+}
+
 async function rulesApiAvailable(): Promise<boolean> {
   try {
-    const res = await fetch("/v1/rules/geofences", { headers: authHeaders() });
-    return res.ok || res.status === 401;
+    const res = await fetch("/v1/rules/geofences", { headers: authHeaders("/v1/rules/geofences") });
+    return apiPresent(res.status);
   } catch {
     return false;
   }
@@ -952,14 +957,11 @@ async function rulesApiAvailable(): Promise<boolean> {
 
 async function settingsApiAvailable(): Promise<boolean> {
   try {
-    const headers = authHeaders();
     const [smtp, myTracks] = await Promise.all([
-      fetch("/v1/settings/smtp", { headers }),
-      fetch("/v1/settings/my-tracks", { headers }),
+      fetch("/v1/settings/smtp", { headers: authHeaders("/v1/settings/smtp") }),
+      fetch("/v1/settings/my-tracks", { headers: authHeaders("/v1/settings/my-tracks") }),
     ]);
-    const smtpOk = smtp.ok || smtp.status === 401;
-    const myTracksOk = myTracks.ok || myTracks.status === 401;
-    return smtpOk && myTracksOk;
+    return apiPresent(smtp.status) && apiPresent(myTracks.status);
   } catch {
     return false;
   }
