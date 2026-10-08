@@ -52,7 +52,9 @@ Line editing defaults to **Vim**-style keys (prompt_toolkit). Use ``--edit-mode 
 **Remote REPL:** pass ``--api-base-url http://HOST:PORT`` (or ``DEVICE_MANAGER_API_URL``) to
 drive devices through the FastAPI service from :mod:`app.api` / ``config/serve.py`` instead
 of local discovery. Optional ``--api-key`` / ``DEVICE_MANAGER_API_KEY`` must match
-``DOMESTI_API_KEY`` on the server when that env var is set. Run the API with
+``DOMESTI_API_KEY`` on the server when that env var is set. ``POST /v1/execute-line`` needs the admin
+scope, so when the server sets ``DOMESTI_ADMIN_API_KEY`` also pass ``--admin-api-key`` /
+``DEVICE_MANAGER_ADMIN_API_KEY``. Run the API with
 ``scripts/domesti-bot-server``.
 """
 
@@ -69,6 +71,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import redirect_stderr, redirect_stdout, suppress
 from enum import StrEnum
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -2605,17 +2608,50 @@ async def _cmd_loop(
         )
 
 
+def _remote_api_key_headers(key: str | None) -> dict[str, str]:
+    """``X-Domesti-Api-Key`` header for a (possibly blank) key."""
+    stripped = (key or "").strip()
+    return {"X-Domesti-Api-Key": stripped} if stripped else {}
+
+
+def _remote_key_headers(api_key: str | None, admin_api_key: str | None) -> tuple[dict[str, str], dict[str, str]]:
+    """``(read headers, execute-line headers)``.
+
+    Reads (completion aliases) use the regular key, falling back to the admin key when it is the only one;
+    ``POST /v1/execute-line`` needs the admin scope, so it uses the admin key when one is given.
+    """
+    return (
+        _remote_api_key_headers((api_key or "").strip() or admin_api_key),
+        _remote_api_key_headers((admin_api_key or "").strip() or api_key),
+    )
+
+
+def _remote_execute_line_hint(status_code: int, *, has_admin_key: bool) -> str | None:
+    """Extra advice for a failed ``POST /v1/execute-line``: that route needs the admin scope."""
+    if status_code == HTTPStatus.FORBIDDEN:
+        if has_admin_key:
+            return (
+                "The key passed as the admin key is valid but is not the admin key; "
+                "check DOMESTI_ADMIN_API_KEY on the server."
+            )
+        return (
+            "This command needs the admin API key: pass --admin-api-key or set "
+            "DEVICE_MANAGER_ADMIN_API_KEY (or use the admin key as --api-key)."
+        )
+    if status_code == HTTPStatus.UNAUTHORIZED:
+        return "The API key was not accepted; check --api-key / --admin-api-key."
+    return None
+
+
 async def _cmd_loop_remote(
     base_url: str,
     api_key: str | None,
     *,
+    admin_api_key: str | None = None,
     editing_mode: EditingMode,
     theme: _Theme,
 ) -> None:
-    headers: dict[str, str] = {}
-    key = (api_key or "").strip()
-    if key:
-        headers["X-Domesti-Api-Key"] = key
+    headers, execute_headers = _remote_key_headers(api_key, admin_api_key)
 
     timeout = httpx.Timeout(120.0)
     async with httpx.AsyncClient(
@@ -2683,13 +2719,16 @@ async def _cmd_loop_remote(
 
             stripped = line.strip()
             try:
-                resp = await client.post("/v1/execute-line", json={"line": stripped})
+                resp = await client.post("/v1/execute-line", json={"line": stripped}, headers=execute_headers)
                 resp.raise_for_status()
             except httpx.HTTPStatusError as ex:
                 print(
                     theme.err(f"POST /v1/execute-line failed: HTTP {ex.response.status_code}"),
                     file=sys.stderr,
                 )
+                hint = _remote_execute_line_hint(ex.response.status_code, has_admin_key=bool(admin_api_key))
+                if hint:
+                    print(theme.warn(hint), file=sys.stderr)
                 detail = (ex.response.text or "").strip()
                 if detail:
                     print(theme.dim(detail[:800]), file=sys.stderr)
@@ -3434,6 +3473,7 @@ async def _async_main_remote(args: argparse.Namespace) -> None:
     await _cmd_loop_remote(
         base,
         args.api_key,
+        admin_api_key=args.admin_api_key,
         editing_mode=_editing_mode_enum(args.edit_mode),
         theme=theme,
     )
@@ -3484,6 +3524,16 @@ def build_arg_parser(*, add_help: bool = True, add_version: bool = True) -> argp
         help=(
             "Use a remote domesti HTTP API instead of local hardware "
             "(e.g. http://192.168.1.10:8003). Also DEVICE_MANAGER_API_URL."
+        ),
+    )
+    p.add_argument(
+        "--admin-api-key",
+        type=str,
+        default=(os.environ.get("DEVICE_MANAGER_ADMIN_API_KEY") or "").strip() or None,
+        metavar="TOKEN",
+        help=(
+            "Admin-scope X-Domesti-Api-Key for POST /v1/execute-line when the server separates "
+            "DOMESTI_ADMIN_API_KEY from DOMESTI_API_KEY. Also DEVICE_MANAGER_ADMIN_API_KEY."
         ),
     )
     p.add_argument(
