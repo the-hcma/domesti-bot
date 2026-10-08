@@ -37,12 +37,29 @@ class SecretsDecryptError(ValueError):
 
 
 @dataclass(frozen=True)
+class SecretsKeyStatus:
+    """Counts only: how many stored secrets sit on the newest key, an older one, or none."""
+
+    configured: bool
+    source: SecretsKeySource
+    generation_count: int
+    rows_current: int
+    rows_on_older_generation: int
+    rows_total: int
+    rows_unreadable: int
+
+
+@dataclass(frozen=True)
 class SecretsRotationResult:
     """Outcome of :func:`rotate_app_secrets`: row names only, never values."""
 
     already_current: list[str] = field(default_factory=list)
     rotated: list[str] = field(default_factory=list)
     undecryptable: list[str] = field(default_factory=list)
+
+
+class SecretsStoreError(RuntimeError):
+    """Raised when the secrets database exists but cannot be read (busy, unreadable, corrupt)."""
 
 
 def _audit_secret_change(action: str, key: str) -> None:
@@ -380,6 +397,52 @@ def secrets_key_source() -> SecretsKeySource:
     return source
 
 
+def secrets_key_status(path: Path | None) -> SecretsKeyStatus:
+    """Summarize which key generation every stored secret is under, without changing anything.
+
+    Every count comes from one read-only pass over the rows, so the total always equals the sum of the
+    three buckets even while the server writes.
+    """
+    try:
+        fernets, source = _fernets_and_source()
+    except SecretsConfigurationError:
+        fernets, source = [], "none"
+    row_ciphertexts = [c for _name, c in _read_only_secret_rows(path)] if path is not None else []
+    if not fernets:
+        return SecretsKeyStatus(
+            configured=False,
+            source="none",
+            generation_count=0,
+            rows_current=0,
+            rows_on_older_generation=0,
+            rows_total=len(row_ciphertexts),
+            rows_unreadable=len(row_ciphertexts),
+        )
+    newest, multi = fernets[0], MultiFernet(fernets)
+    current = older = unreadable = 0
+    for ciphertext in row_ciphertexts:
+        try:
+            newest.decrypt(ciphertext)
+        except InvalidToken:
+            try:
+                multi.decrypt(ciphertext)
+            except InvalidToken:
+                unreadable += 1
+            else:
+                older += 1
+        else:
+            current += 1
+    return SecretsKeyStatus(
+        configured=True,
+        source=source,
+        generation_count=len(fernets),
+        rows_current=current,
+        rows_on_older_generation=older,
+        rows_total=len(row_ciphertexts),
+        rows_unreadable=unreadable,
+    )
+
+
 def smtp_password_stored_in_db(path: Path) -> bool:
     """True when an ``app_secrets`` row exists for the SMTP password."""
     return _app_secret_stored_in_db(path, _SMTP_PASSWORD_KEY)
@@ -448,15 +511,20 @@ def _fernet_from_config() -> MultiFernet | None:
     return MultiFernet(fernets) if fernets else None
 
 
-def _fernets_from_config() -> list[Fernet]:
-    """Every configured Fernet key, newest first (empty when none is configured)."""
+def _fernets_and_source() -> tuple[list[Fernet], SecretsKeySource]:
+    """Every configured Fernet key (newest first) and where it came from, from one read of the config."""
     try:
-        raw, _source = load_secrets_key_material()
+        raw, source = load_secrets_key_material()
     except ValueError as exc:
         raise SecretsConfigurationError(str(exc)) from exc
     if not raw:
-        return []
-    return _validated_fernets(raw)
+        return [], "none"
+    return _validated_fernets(raw), source
+
+
+def _fernets_from_config() -> list[Fernet]:
+    """Every configured Fernet key, newest first (empty when none is configured)."""
+    return _fernets_and_source()[0]
 
 
 def _load_app_secret_plaintext(path: Path, key: str) -> str | None:
@@ -489,26 +557,30 @@ def _require_fernet() -> MultiFernet:
 def _read_only_secret_rows(path: Path) -> list[tuple[str, bytes]]:
     """``(key, ciphertext)`` for every secret, over a read-only connection that never creates or alters anything.
 
-    ``discovery_session`` bootstraps the schema, so a preview must not use it. A missing database or table
-    simply has no rows.
+    ``discovery_session`` bootstraps the schema, so a preview must not use it. A missing database file or
+    table simply has no rows; a database that exists but cannot be read raises :class:`SecretsStoreError`
+    rather than being reported as empty.
     """
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
         return []
+    connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(f"{resolved.as_uri()}?mode=ro", uri=True, timeout=5.0)
-    except sqlite3.Error:
-        return []
-    try:
         return [
             (str(k), bytes(c)) for k, c in connection.execute("SELECT key, ciphertext FROM app_secrets ORDER BY key")
         ]
-    except sqlite3.OperationalError as exc:
-        if "no such table" in str(exc).lower():
+    except sqlite3.Error as exc:
+        detail = str(exc).lower()
+        if "no such table" in detail:
             return []
-        raise
+        reason = "busy" if "locked" in detail or "busy" in detail else "unreadable"
+        raise SecretsStoreError(
+            f"Expected a readable secrets database, got a {reason} one ({type(exc).__name__})"
+        ) from exc
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
 
 
 def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:

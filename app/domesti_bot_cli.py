@@ -91,6 +91,7 @@ from app.build_info import format_cli_version_line
 from app.db.secrets import (
     SecretsConfigurationError,
     SecretsDecryptError,
+    SecretsStoreError,
     rotate_app_secrets,
     save_kasa_credentials_to_db,
 )
@@ -711,7 +712,7 @@ def _repl_cmd_rotate_secrets(*, arg: str, cache_path: Path | None, theme: _Theme
             dry_run=dry_run,
             skip_undecryptable=dry_run or "--skip-undecryptable" in flags,
         )
-    except (SecretsConfigurationError, SecretsDecryptError) as ex:
+    except (SecretsConfigurationError, SecretsDecryptError, SecretsStoreError) as ex:
         print(theme.err(f"rotate-secrets: {ex}"))
         return
     except OperationalError as ex:

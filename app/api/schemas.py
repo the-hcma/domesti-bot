@@ -2379,6 +2379,24 @@ class VizioTvsSettingsOut(BaseModel):
     tvs: list[VizioTvSettingsOut] = Field(default_factory=list)
 
 
+class SecretsKeyStatusOut(BaseModel):
+    """Which key generation the stored secrets are under (counts only; ``GET /v1/settings/secrets-key``)."""
+
+    configured: bool = Field(..., description="True when a valid Fernet key (list) is available.")
+    source: SecretsKeySourceOut = Field(
+        ...,
+        description="``env`` → ``DOMESTI_BOT_SECRETS_KEY``; ``file`` → ``domesti-bot.config.json``.",
+    )
+    generation_count: int = Field(..., description="How many keys are listed (newest first).")
+    rows_total: int = Field(..., description="Stored secret rows.")
+    rows_current: int = Field(..., description="Rows already encrypted with the newest key.")
+    rows_on_older_generation: int = Field(
+        ...,
+        description="Rows encrypted with an older listed key; run ``rotate-secrets`` before dropping that key.",
+    )
+    rows_unreadable: int = Field(..., description="Rows no listed key can decrypt (re-enter them or add the key).")
+
+
 class SettingsCredentialsTestOut(BaseModel):
     """Result of a read-only Settings credential probe."""
 

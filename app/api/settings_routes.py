@@ -7,6 +7,7 @@ from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from app import device_discovery_store
 from app.api.schemas import (
@@ -41,6 +42,7 @@ from app.api.schemas import (
     KasaDevicesSettingsOut,
     KasaMotionTuningOut,
     KasaMotionTuningSetIn,
+    SecretsKeyStatusOut,
     SettingsCredentialsTestOut,
     TailwindHubInfoOut,
     TailwindTokenSetIn,
@@ -51,6 +53,7 @@ from app.api.schemas import (
 from app.db.secrets import (
     SecretsConfigurationError,
     SecretsDecryptError,
+    SecretsStoreError,
     delete_app_secret,
     delete_kasa_credentials_from_db,
     ep1_noise_psk_stored_in_db,
@@ -63,6 +66,7 @@ from app.db.secrets import (
     save_tailwind_token_to_db,
     secrets_key_configured,
     secrets_key_source,
+    secrets_key_status,
     tailwind_token_stored_in_db,
     tailwind_token_updated_at,
 )
@@ -134,6 +138,24 @@ def discovery_cache_path_from_request(request: Request) -> Path | None:
     """Resolve the shared SQLite path for the running server process."""
     del request
     return runtime.discovery_cache_path()
+
+
+@router.get("/secrets-key", response_model=SecretsKeyStatusOut)
+async def get_secrets_key_status() -> SecretsKeyStatusOut:
+    """Counts of stored secrets per key generation, so the operator knows when an old key can be dropped."""
+    try:
+        status = await run_in_threadpool(secrets_key_status, runtime.discovery_cache_path())
+    except SecretsStoreError as exc:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    return SecretsKeyStatusOut(
+        configured=status.configured,
+        source=status.source,
+        generation_count=status.generation_count,
+        rows_total=status.rows_total,
+        rows_current=status.rows_current,
+        rows_on_older_generation=status.rows_on_older_generation,
+        rows_unreadable=status.rows_unreadable,
+    )
 
 
 @router.get("/discovery", response_model=DiscoverySettingsOut)
