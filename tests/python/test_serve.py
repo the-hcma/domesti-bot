@@ -332,6 +332,23 @@ def test_log_listening_banner_quiet_on_wildcard_with_api_key(
     assert warnings == [], [r.getMessage() for r in warnings]
 
 
+@pytest.mark.parametrize("variable", ["DOMESTI_ADMIN_API_KEY", "DOMESTI_READ_API_KEY"])
+def test_log_listening_banner_quiet_on_wildcard_with_any_scoped_key(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    variable: str,
+) -> None:
+    # Any configured key means the API is no longer open, so the wildcard-bind warning stays quiet.
+    monkeypatch.delenv("DOMESTI_API_KEY", raising=False)
+    monkeypatch.setenv(variable, "secret-token")
+    monkeypatch.setattr(serve_module, "_lan_addresses", lambda: [])
+    sock = _mock_sock("0.0.0.0", 8765)
+    with caplog.at_level(logging.INFO, logger="config.serve"):
+        serve_module._log_listening_banner(sock)
+    warnings = [r for r in caplog.records if r.name == "config.serve" and r.levelno >= logging.WARNING]
+    assert warnings == [], [r.getMessage() for r in warnings]
+
+
 def test_log_listening_banner_quiet_on_loopback_without_api_key(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
