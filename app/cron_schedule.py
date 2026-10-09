@@ -126,12 +126,10 @@ def validate_schedule_cron_expression(cron_expr: str) -> None:
     fields = trimmed.split()
     if len(fields) != 5:
         raise ValueError(
-            "Expected 5-field cron expression (minute hour day month weekday), "
-            f"got {len(fields)} fields in {trimmed!r}",
+            f"Expected 5-field cron expression (minute hour day month weekday), got {len(fields)} fields",
         )
     try:
         croniter(trimmed)
     except (KeyError, ValueError) as exc:
-        raise ValueError(
-            f"Expected valid 5-field cron expression, got {trimmed!r}: {exc}",
-        ) from exc
+        # Neither the expression nor croniter's own message (which quotes it) goes into the error text.
+        raise ValueError("Expected valid 5-field cron expression") from exc
