@@ -19,7 +19,8 @@ without a colocated reverse proxy; the **system** template under
 from other devices on the same network — handy for validating the UI on a
 phone or another laptop. The banner enumerates every non-loopback IPv4 address
 the host knows about so it's a copy/paste into the device's browser. When
-``DOMESTI_API_KEY`` is unset, the launcher also logs a warning since wildcard
+no API key is configured (``DOMESTI_API_KEY``, ``DOMESTI_ADMIN_API_KEY`` and
+``DOMESTI_READ_API_KEY`` all unset), the launcher also logs a warning since wildcard
 bind + no shared secret is fine for ad-hoc UI testing on a trusted home
 network but not for anything more public.
 """

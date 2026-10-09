@@ -15,7 +15,8 @@
 # Logs: ``~/scratch/domesti-bot/domesti-bot.log`` (``setup-service`` also
 # ensures ``~/scratch/domesti-bot/`` exists).
 #
-# Secrets (``TAILWIND_TOKEN``, ``KASA_*``, ``DOMESTI_API_KEY``): use
+# Secrets (``TAILWIND_TOKEN``, ``KASA_*``, ``DOMESTI_API_KEY``, and optionally
+# ``DOMESTI_ADMIN_API_KEY`` / ``DOMESTI_READ_API_KEY`` to scope the API): use
 # ``systemctl --user edit domesti-bot`` and set ``EnvironmentFile=`` to a
 # mode-600 file under your home directory, or export them via
 # ``~/.config/environment.d/*.conf`` (see docs/AGENTS.md Security).
