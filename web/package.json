@@ -9,7 +9,7 @@
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build",
-    "test": "esbuild src/api-keys.ts --format=esm --outfile=.test-build/api-keys.mjs --log-level=warning && node --test test/*.test.mjs"
+    "test": "esbuild src/api-keys.ts src/settings-secret-field.ts --format=esm --outdir=.test-build --out-extension:.js=.mjs --log-level=warning && node --test test/*.test.mjs"
   },
   "devDependencies": {
     "@types/leaflet": "1.9.22",
