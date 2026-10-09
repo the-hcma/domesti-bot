@@ -10,7 +10,12 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.db.models import MyTracksSettings
-from app.db.secrets import delete_app_secret, mytracks_relay_api_key_stored_in_db, mytracks_relay_api_key_updated_at
+from app.db.secrets import (
+    app_secret_stored,
+    app_secret_updated_at,
+    mytracks_relay_api_key_stored_in_db,
+    mytracks_relay_api_key_updated_at,
+)
 from app.db.session import discovery_session, discovery_write
 from app.location_history_retention import (
     DEFAULT_LOCATION_HISTORY_MAX_AGE_S,
@@ -24,6 +29,8 @@ from app.location_request_rate_limits import (
     serialize_user_cooldown_by_reason,
     user_cooldown_by_reason_from_json,
 )
+from app.mytracks_relay_keys import PROTOCOL_SPLIT, ROW_OUTBOUND, RelayState, clear_relay_rows, pending_is_usable
+from app.mytracks_relay_keys import load_state as load_relay_state
 
 _MYTRACKS_SETTINGS_ID = 1
 DEFAULT_APPROACH_MONITORING_DISTANCE_M = 500
@@ -62,7 +69,10 @@ class MyTracksPairStatusRecord:
     paired_at: str | None
     relay_key_configured: bool
     relay_key_updated_at: float | None
+    relay_pairing_state: str
+    relay_protocol_version: int
     remote_request_location_enabled: bool | None
+    require_relay_protocol_2: bool
     user_location_test_url: str | None
     user_location_update_url: str | None
     username: str
@@ -77,9 +87,28 @@ class MyTracksPairingSave:
     username: str
 
 
+def _relay_key_configured(path: Path, state: RelayState) -> bool:
+    if state.protocol_version >= PROTOCOL_SPLIT:
+        return app_secret_stored(path, ROW_OUTBOUND)
+    return mytracks_relay_api_key_stored_in_db(path)
+
+
+def _relay_key_updated_at(path: Path, state: RelayState) -> float | None:
+    if state.protocol_version >= PROTOCOL_SPLIT:
+        return app_secret_updated_at(path, ROW_OUTBOUND)
+    return mytracks_relay_api_key_updated_at(path)
+
+
+def _relay_pairing_state(state: RelayState) -> str:
+    """``none``, ``active``, or the stage of a pending pairing (``staged``, ``probing``, ``activating``)."""
+    if state.pending is not None and pending_is_usable(state.pending):
+        return state.pending.state
+    return "active" if state.protocol_version >= PROTOCOL_SPLIT else "none"
+
+
 def clear_mytracks_pairing(path: Path) -> None:
-    """Clear pairing metadata and delete the stored relay API key."""
-    delete_app_secret(path, key="mytracks_relay_api_key")
+    """Clear pairing metadata and delete every stored relay credential (protocol 1 and 2)."""
+    clear_relay_rows(path)
     set_location_request_rate_limits(path, limits=None)
     set_remote_request_location_enabled(path, enabled=None)
     now = time.time()
@@ -169,6 +198,7 @@ def load_mytracks_pair_status(path: Path) -> MyTracksPairStatusRecord | None:
         row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
         if row is None:
             return None
+        relay_state = load_relay_state(path)
         return MyTracksPairStatusRecord(
             domain=row.domain,
             domesti_public_base_url=row.domesti_public_base_url,
@@ -178,11 +208,14 @@ def load_mytracks_pair_status(path: Path) -> MyTracksPairStatusRecord | None:
             location_history_retention=_retention_record_from_row(row),
             location_updates_accepted=bool(row.location_updates_accepted),
             paired_at=_iso_from_epoch(row.paired_at),
-            relay_key_configured=mytracks_relay_api_key_stored_in_db(path),
-            relay_key_updated_at=mytracks_relay_api_key_updated_at(path),
+            relay_key_configured=_relay_key_configured(path, relay_state),
+            relay_key_updated_at=_relay_key_updated_at(path, relay_state),
+            relay_pairing_state=_relay_pairing_state(relay_state),
+            relay_protocol_version=relay_state.protocol_version,
             remote_request_location_enabled=_bool_from_int(
                 row.remote_request_location_enabled,
             ),
+            require_relay_protocol_2=bool(row.require_relay_protocol_2),
             user_location_test_url=row.user_location_test_url,
             user_location_update_url=row.user_location_update_url,
             username=row.username,
@@ -305,6 +338,42 @@ def save_location_history_retention(
     return discovery_write(path, _write)
 
 
+def record_unconfirmed_pairing(path: Path, pairing: MyTracksPairingSave) -> None:
+    """Remember the URLs of a first pairing whose activation My Tracks has not confirmed yet.
+
+    ``paired_at`` stays unset (it is not paired until My Tracks confirms), and an existing pairing is left
+    untouched because it is still the one in use. :func:`mark_mytracks_paired` completes the record later.
+    """
+    now = time.time()
+
+    def _write(session: Session) -> None:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None or row.paired_at is not None:
+            return
+        row.domesti_public_base_url = pairing.domesti_public_base_url.strip()
+        row.user_location_update_url = pairing.user_location_update_url.strip()
+        row.user_location_test_url = pairing.user_location_test_url.strip()
+        row.updated_at = now
+
+    discovery_write(path, _write)
+
+
+def mark_mytracks_paired(path: Path) -> None:
+    """Record that a pairing is now active (My Tracks confirmed it): set ``paired_at`` and clear the error."""
+    now = time.time()
+
+    def _write(session: Session) -> None:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None:
+            return
+        row.paired_at = now
+        row.last_pair_error = None
+        row.location_updates_accepted = 1
+        row.updated_at = now
+
+    discovery_write(path, _write)
+
+
 def save_mytracks_pairing(path: Path, pairing: MyTracksPairingSave) -> MyTracksPairStatusRecord:
     """Persist successful pairing metadata."""
     now = time.time()
@@ -360,6 +429,28 @@ def set_last_pair_error(path: Path, error: str | None) -> None:
         row.updated_at = now
 
     discovery_write(path, _write)
+
+
+def load_require_relay_protocol_2(path: Path) -> bool:
+    """True when pairing must use relay protocol 2 (refuse to fall back to one shared key)."""
+    with discovery_session(path) as session:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        return bool(row.require_relay_protocol_2) if row is not None else False
+
+
+def save_require_relay_protocol_2(path: Path, *, required: bool) -> bool:
+    """Persist the "require relay protocol 2" setting; it needs a stored My Tracks configuration."""
+    now = time.time()
+
+    def _write(session: Session) -> None:
+        row = session.get(MyTracksSettings, _MYTRACKS_SETTINGS_ID)
+        if row is None:
+            raise RuntimeError("Expected My Tracks settings before saving the protocol requirement, got None")
+        row.require_relay_protocol_2 = 1 if required else 0
+        row.updated_at = now
+
+    discovery_write(path, _write)
+    return load_require_relay_protocol_2(path)
 
 
 def save_approach_monitoring_distance_m(path: Path, *, distance_m: int) -> int:

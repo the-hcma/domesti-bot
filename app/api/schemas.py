@@ -1497,6 +1497,21 @@ class MyTracksPairStatusOut(BaseModel):
     user_location_test_url: str | None = None
     user_location_update_url: str | None = None
     relay_key_configured: bool = False
+    relay_pairing_state: str = Field(
+        default="none",
+        description=(
+            "``none``, ``active``, or the stage of a pairing in progress: ``staged``, ``probing`` or "
+            "``activating`` (activation sent, My Tracks has not confirmed it yet)."
+        ),
+    )
+    relay_protocol_version: int = Field(
+        default=1,
+        description="1: one shared key for both directions; 2: a key per direction with a verifier-only inbound key.",
+    )
+    require_relay_protocol_2: bool = Field(
+        default=False,
+        description="When true, pairing refuses to fall back to protocol 1 if My Tracks does not support protocol 2.",
+    )
     relay_key_updated_at: float | None = Field(
         default=None,
         description=(
@@ -1505,6 +1520,26 @@ class MyTracksPairStatusOut(BaseModel):
         ),
     )
     username: str
+
+
+class MyTracksRelayProtocolIn(BaseModel):
+    """``PATCH /v1/settings/my-tracks/relay-protocol`` body."""
+
+    require_protocol_2: bool
+
+
+class MyTracksReconcileIn(BaseModel):
+    """``POST /v1/settings/my-tracks/pair/reconcile`` body: the My Tracks admin session to settle with."""
+
+    password: str = Field(..., min_length=1, repr=False, json_schema_extra=_WRITE_ONLY_SECRET)
+    username: str | None = None
+
+
+class MyTracksReconcileOut(BaseModel):
+    """Result of settling a pairing left ``activating``."""
+
+    result: str = Field(description="``none``, ``promoted``, ``aborted`` or ``unconfirmed``.")
+    status: MyTracksPairStatusOut | None = None
 
 
 class MyTracksUsersSyncOut(BaseModel):

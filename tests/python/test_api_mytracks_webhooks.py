@@ -787,7 +787,7 @@ def test_a_storage_failure_after_my_tracks_accepted_the_key_is_recorded_as_a_mis
     with (
         patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK),
         patch(
-            "app.api.mytracks_routes.save_mytracks_relay_api_key_to_db",
+            "app.api.mytracks_routes.adopt_legacy_shared_key",
             side_effect=OSError("disk full"),
         ),
     ):
@@ -808,7 +808,7 @@ def test_a_successful_pair_clears_a_recorded_mismatch(tmp_path: Path, fernet_key
         client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
     with (
         patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK),
-        patch("app.api.mytracks_routes.save_mytracks_relay_api_key_to_db", side_effect=OSError("disk full")),
+        patch("app.api.mytracks_routes.adopt_legacy_shared_key", side_effect=OSError("disk full")),
     ):
         client.post("/v1/settings/my-tracks/pair", json=_PAIR_BODY)
     with patch("app.api.mytracks_routes.pair_with_my_tracks", return_value=_PAIR_OK):

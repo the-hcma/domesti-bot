@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from http import HTTPStatus
 from pathlib import Path
+from typing import NoReturn
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.schemas import (
@@ -21,6 +23,9 @@ from app.api.schemas import (
     MyTracksLocationUpdatesOut,
     MyTracksPairIn,
     MyTracksPairStatusOut,
+    MyTracksReconcileIn,
+    MyTracksReconcileOut,
+    MyTracksRelayProtocolIn,
     MyTracksSettingsIn,
     MyTracksSettingsOut,
     MyTracksSyncIn,
@@ -28,15 +33,21 @@ from app.api.schemas import (
     SettingsCredentialsTestOut,
 )
 from app.api.settings_routes import discovery_cache_path_from_request
-from app.db.secrets import (
-    SecretsConfigurationError,
-    save_mytracks_relay_api_key_to_db,
-    secrets_key_configured,
-)
+from app.db.secrets import SecretsConfigurationError, secrets_key_configured
 from app.location_monitoring_policy import approach_request_interval_s
 from app.location_report import parse_iso_timestamp_to_epoch
 from app.location_request_rate_limits import LocationRequestRateLimits
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
+from app.mytracks_pairing_flow import (
+    DISCARDED_PAIRING_MESSAGE,
+    PairingBusyError,
+    PairingRefusedError,
+    adopt_legacy_shared_key,
+    reconcile_pairing,
+    run_pairing_v2,
+)
+from app.mytracks_relay_keys import PROTOCOL_SPLIT, PairingInProgressError
+from app.mytracks_relay_keys import load_state as load_relay_state
 from app.mytracks_service import (
     DomestiBotConfigFromMyTracks,
     ExportedUser,
@@ -65,12 +76,15 @@ from app.mytracks_store import (
     load_mytracks_config,
     load_mytracks_pair_status,
     load_remote_request_location_enabled,
+    load_require_relay_protocol_2,
     record_mytracks_geofences_sync,
     record_mytracks_users_sync,
+    record_unconfirmed_pairing,
     save_approach_monitoring_distance_m,
     save_location_history_retention,
     save_mytracks_config,
     save_mytracks_pairing,
+    save_require_relay_protocol_2,
     set_last_pair_error,
     set_location_request_rate_limits,
     set_location_updates_accepted,
@@ -264,8 +278,9 @@ async def post_mytracks_credentials_test(
 async def post_mytracks_pair(
     body: MyTracksPairIn,
     request: Request,
+    response: Response,
 ) -> MyTracksPairStatusOut:
-    """Generate a relay secret, register it and the webhook URLs on my-tracks, then persist it."""
+    """Pair with My Tracks: relay protocol 2 (a key per direction) when it supports it, else one shared key."""
     cache_path = _require_discovery_cache(request)
     _require_secrets_key_for_pairing()
     mytracks_base = _validated_mytracks_domain(body.domain)
@@ -289,60 +304,173 @@ async def post_mytracks_pair(
         min_keep_count=retention_input.min_keep_count,
         unlimited=retention_input.unlimited,
     )
-    relay_key = secrets.token_urlsafe(32)
+    # A previous activation that My Tracks never confirmed is settled first: its staged keys may already be active
+    # on My Tracks, so they are kept (and block a new pairing) until My Tracks answers.
+    try:
+        settled = await asyncio.to_thread(
+            reconcile_pairing, cache_path, base_url=mytracks_base, username=username, password=body.password
+        )
+    except MyTracksSyncError as exc:
+        message = (
+            f"An earlier pairing could not be settled with My Tracks yet: {exc}. "
+            "Use Check activation, or reset the pairing."
+        )
+        set_last_pair_error(cache_path, message)
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=message) from exc
+    if settled == "unconfirmed":
+        message = (
+            "An earlier pairing is still waiting for My Tracks to confirm its activation. Use Check activation "
+            "once My Tracks is reachable, or reset the pairing to start over."
+        )
+        set_last_pair_error(cache_path, message)
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
+    if settled == "promoted":
+        _LOGGER.info("settled an earlier unconfirmed pairing before pairing again")
+    require_v2 = load_require_relay_protocol_2(cache_path)
     _LOGGER.info(
         "pairing starting for %s as %s (domesti %s)",
         mytracks_log_host(mytracks_base),
         username,
         mytracks_log_host(domesti_public),
     )
+    # Ask My Tracks which relay protocol it speaks before sending any key. If it cannot be asked, pairing carries on
+    # with protocol 1, whose request reports the real problem (bad credentials, unreachable host); with protocol 2
+    # required the failure is reported instead of silently downgrading.
     try:
-        pair_result = pair_with_my_tracks(
-            api_key=relay_key,
-            base_url=mytracks_base,
-            domesti_base_url=domesti_public,
-            user_location_update_url=update_url,
-            user_location_test_url=test_url,
-            password=body.password,
-            username=username,
+        remote_config = await asyncio.to_thread(
+            fetch_mytracks_domesti_config, base_url=mytracks_base, password=body.password, username=username
         )
+        supports_v2 = (remote_config.protocol_version or 1) >= PROTOCOL_SPLIT
     except MyTracksSyncError as exc:
-        set_last_pair_error(cache_path, str(exc))
-        _LOGGER.warning(
-            "pairing failed for %s as %s: %s",
-            mytracks_log_host(mytracks_base),
-            username,
-            exc,
+        if require_v2 or load_relay_state(cache_path).protocol_version >= PROTOCOL_SPLIT:
+            # Never downgrade a protocol 2 pairing (or break a stated requirement) because My Tracks could not be asked.
+            _fail_pairing(cache_path, mytracks_base, username, exc)
+        supports_v2 = False
+    if require_v2 and not supports_v2:
+        message = (
+            "Pairing with relay protocol 2 is required, but My Tracks does not support it yet; "
+            "nothing was changed. Upgrade My Tracks or turn the requirement off."
         )
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_GATEWAY,
-            detail=str(exc),
-        ) from exc
-    # Persist the new key only once My Tracks has accepted it: a failed (re-)pair must leave the previous,
-    # still-registered key (and its updated_at) untouched instead of replacing it with one My Tracks never saw.
-    try:
-        save_mytracks_relay_api_key_to_db(cache_path, relay_key)
-    except (SecretsConfigurationError, SQLAlchemyError, OSError) as exc:
-        # My Tracks already holds the new key, so the two services are out of step until the next successful pair.
-        # Record that as the pairing's last error (the panel shows it even while paired) instead of leaving the
-        # old key looking healthy. The up-front secrets-key check makes this rare: it is mostly a database error.
-        mismatch = (
-            "My Tracks accepted a new relay key but domesti-bot could not store it "
-            f"({type(exc).__name__}); webhooks fail until you pair again"
-        )
-        set_last_pair_error(cache_path, mismatch)
-        _LOGGER.warning(
-            "pairing registered on %s as %s but the relay key could not be stored: %s",
-            mytracks_log_host(mytracks_base),
-            username,
-            type(exc).__name__,
-        )
-        raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_ENTITY
-            if isinstance(exc, SecretsConfigurationError)
-            else HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=mismatch,
-        ) from exc
+        set_last_pair_error(cache_path, message)
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=message)
+
+    if supports_v2:
+        try:
+            # Off the event loop: the flow blocks on HTTP, and during the probe My Tracks calls back into this server.
+            result = await asyncio.to_thread(
+                run_pairing_v2,
+                cache_path,
+                base_url=mytracks_base,
+                domesti_base_url=domesti_public,
+                user_location_test_url=test_url,
+                user_location_update_url=update_url,
+                username=username,
+                password=body.password,
+                require_v2=require_v2,
+            )
+        except (PairingRefusedError, PairingBusyError, PairingInProgressError) as exc:
+            set_last_pair_error(cache_path, str(exc))
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
+        except MyTracksSyncError as exc:
+            _fail_pairing(cache_path, mytracks_base, username, exc)
+        except (SecretsConfigurationError, SQLAlchemyError, OSError) as exc:
+            _raise_store_failure(cache_path, mytracks_base, username, exc)
+        if result.activation == "unconfirmed":
+            set_last_pair_error(cache_path, result.detail)
+            save_mytracks_config(cache_path, MyTracksConfigSave(domain=mytracks_base, username=username))
+            record_unconfirmed_pairing(
+                cache_path,
+                MyTracksPairingSave(
+                    domain=mytracks_base,
+                    username=username,
+                    domesti_public_base_url=domesti_public,
+                    user_location_update_url=update_url,
+                    user_location_test_url=test_url,
+                ),
+            )
+            response.status_code = HTTPStatus.ACCEPTED
+            record = load_mytracks_pair_status(cache_path)
+            if record is None:
+                raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Pairing state unavailable")
+            return _pair_status_to_schema(record, cache_path=cache_path)
+        pair_result = MyTracksPairResult(status_code=HTTPStatus.OK)
+    else:
+        relay_key = secrets.token_urlsafe(32)
+        try:
+            pair_result = pair_with_my_tracks(
+                api_key=relay_key,
+                base_url=mytracks_base,
+                domesti_base_url=domesti_public,
+                user_location_update_url=update_url,
+                user_location_test_url=test_url,
+                password=body.password,
+                username=username,
+            )
+        except MyTracksSyncError as exc:
+            _fail_pairing(cache_path, mytracks_base, username, exc)
+        # Persist the new key only once My Tracks has accepted it: a failed (re-)pair must leave the previous,
+        # still-registered key (and its updated_at) untouched instead of replacing it with one My Tracks never saw.
+        try:
+            adopt_legacy_shared_key(cache_path, relay_key)
+        except (SecretsConfigurationError, SQLAlchemyError, OSError) as exc:
+            _raise_store_failure(cache_path, mytracks_base, username, exc)
+    return await asyncio.to_thread(
+        _finish_pairing,
+        cache_path,
+        request,
+        mytracks_base=mytracks_base,
+        username=username,
+        password=body.password,
+        pair_result=pair_result,
+    )
+
+
+def _fail_pairing(cache_path: Path, mytracks_base: str, username: str, exc: MyTracksSyncError) -> NoReturn:
+    set_last_pair_error(cache_path, str(exc))
+    _LOGGER.warning(
+        "pairing failed for %s as %s: %s",
+        mytracks_log_host(mytracks_base),
+        username,
+        exc,
+    )
+    raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+
+
+def _raise_store_failure(cache_path: Path, mytracks_base: str, username: str, exc: Exception) -> NoReturn:
+    # My Tracks already holds the new key, so the two services are out of step until the next successful pair.
+    # Record that as the pairing's last error (the panel shows it even while paired) instead of leaving the
+    # old key looking healthy. The up-front secrets-key check makes this rare: it is mostly a database error.
+    mismatch = (
+        "My Tracks accepted a new relay key but domesti-bot could not store it "
+        f"({type(exc).__name__}); webhooks fail until you pair again"
+    )
+    set_last_pair_error(cache_path, mismatch)
+    _LOGGER.warning(
+        "pairing registered on %s as %s but the relay key could not be stored: %s",
+        mytracks_log_host(mytracks_base),
+        username,
+        type(exc).__name__,
+    )
+    raise HTTPException(
+        status_code=HTTPStatus.UNPROCESSABLE_ENTITY
+        if isinstance(exc, SecretsConfigurationError)
+        else HTTPStatus.INTERNAL_SERVER_ERROR,
+        detail=mismatch,
+    ) from exc
+
+
+def _finish_pairing(
+    cache_path: Path,
+    request: Request,
+    *,
+    mytracks_base: str,
+    username: str,
+    password: str,
+    pair_result: MyTracksPairResult,
+) -> MyTracksPairStatusOut:
+    """Record the completed pairing's metadata and cache My Tracks's admin config (shared by pair and reconcile)."""
+    domesti_public = _resolve_domesti_public_base_url_from_request(request)
+    update_url, test_url = build_location_update_webhook_urls(domesti_public)
     save_mytracks_config(
         cache_path,
         MyTracksConfigSave(domain=mytracks_base, username=username),
@@ -362,7 +490,7 @@ async def post_mytracks_pair(
     try:
         domesti_config = fetch_mytracks_domesti_config(
             base_url=mytracks_base,
-            password=body.password,
+            password=password,
             username=username,
         )
     except MyTracksSyncError:
@@ -379,6 +507,65 @@ async def post_mytracks_pair(
         pair_result.status_code,
     )
     return _pair_status_to_schema(saved, cache_path=cache_path)
+
+
+@settings_router.post("/my-tracks/pair/reconcile", response_model=MyTracksReconcileOut)
+async def post_mytracks_pair_reconcile(body: MyTracksReconcileIn, request: Request) -> MyTracksReconcileOut:
+    """Settle a pairing left ``activating``: ask My Tracks (or retry) and promote or discard the staged keys."""
+    cache_path = _require_discovery_cache(request)
+    config = load_mytracks_config(cache_path)
+    if config is None:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="Save the My Tracks settings before reconciling")
+    username = (body.username or config.username).strip()
+    try:
+        base_url = normalize_mytracks_base_url(config.domain)
+    except MyTracksSyncError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT, detail=f"The saved My Tracks domain is invalid: {exc}"
+        ) from exc
+    try:
+        result = await asyncio.to_thread(
+            reconcile_pairing, cache_path, base_url=base_url, username=username, password=body.password
+        )
+    except PairingBusyError as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
+    except MyTracksSyncError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=str(exc)) from exc
+    if result == "aborted":
+        set_last_pair_error(cache_path, DISCARDED_PAIRING_MESSAGE)
+    status = None
+    if result == "promoted":
+        status = await asyncio.to_thread(
+            _finish_pairing,
+            cache_path,
+            request,
+            mytracks_base=base_url,
+            username=username,
+            password=body.password,
+            pair_result=MyTracksPairResult(status_code=HTTPStatus.OK),
+        )
+        set_last_pair_error(cache_path, None)
+    else:
+        record = load_mytracks_pair_status(cache_path)
+        status = _pair_status_to_schema(record, cache_path=cache_path) if record is not None else None
+    return MyTracksReconcileOut(result=result, status=status)
+
+
+@settings_router.patch("/my-tracks/relay-protocol", response_model=MyTracksPairStatusOut)
+async def patch_mytracks_relay_protocol(body: MyTracksRelayProtocolIn, request: Request) -> MyTracksPairStatusOut:
+    """Require (or stop requiring) relay protocol 2 when pairing."""
+    cache_path = _require_discovery_cache(request)
+    try:
+        save_require_relay_protocol_2(cache_path, required=body.require_protocol_2)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail="Save the My Tracks settings before changing the protocol requirement",
+        ) from exc
+    record = load_mytracks_pair_status(cache_path)
+    if record is None:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="My Tracks is not configured")
+    return _pair_status_to_schema(record, cache_path=cache_path)
 
 
 @settings_router.put("/my-tracks", response_model=MyTracksSettingsOut)
@@ -663,6 +850,9 @@ def _pair_status_to_schema(
         user_location_test_url=record.user_location_test_url,
         relay_key_configured=record.relay_key_configured,
         relay_key_updated_at=record.relay_key_updated_at,
+        relay_pairing_state=record.relay_pairing_state,
+        relay_protocol_version=record.relay_protocol_version,
+        require_relay_protocol_2=record.require_relay_protocol_2,
         location_history_retention=_retention_record_to_schema(record.location_history_retention),
         location_updates_accepted=record.location_updates_accepted,
         mytracks_location_updates_enabled=_maybe_mytracks_location_updates_enabled(

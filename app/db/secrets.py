@@ -108,6 +108,16 @@ def load_app_secret_text(path: Path, key: str) -> str | None:
     return _load_app_secret_plaintext(path, key)
 
 
+def app_secret_stored(path: Path, key: str) -> bool:
+    """True when an ``app_secrets`` row exists under ``key``."""
+    return _app_secret_stored_in_db(path, key)
+
+
+def app_secret_updated_at(path: Path, key: str) -> float | None:
+    """Epoch seconds a row was last written (``None`` when absent), without decrypting it."""
+    return _app_secret_updated_at(path, key)
+
+
 def load_ep1_noise_psk_from_db(path: Path) -> str | None:
     """Return the decrypted EP1 Noise PSK from the database, or ``None``."""
     psk = _load_app_secret_plaintext(path, _EP1_NOISE_PSK_KEY)
