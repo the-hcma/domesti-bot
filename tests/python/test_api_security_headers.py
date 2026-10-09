@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 
-from app.api.app import _CSP_EXEMPT_PATHS, _SecurityHeadersMiddleware, create_app
+from app.api.app import _SecurityHeadersMiddleware, create_app
 
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "app" / "api" / "static"
 
@@ -60,12 +60,22 @@ def test_the_same_ui_served_under_static_has_the_csp_too(tmp_path: Path) -> None
     assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
 
 
-def test_only_the_dev_prototype_is_exempt_from_the_csp(tmp_path: Path) -> None:
+def test_the_dev_design_prototype_is_neither_served_nor_packaged(tmp_path: Path) -> None:
+    """It runs an inline script, so it lives outside ``app/api/static`` instead of being exempt from the CSP."""
     client = _client(tmp_path)
-    prototype = client.get("/static/compact-layout-prototype.html")
-    assert prototype.status_code == HTTPStatus.OK
-    assert "content-security-policy" not in prototype.headers
-    assert prototype.headers["x-content-type-options"] == "nosniff"
+    assert client.get("/static/compact-layout-prototype.html").status_code == HTTPStatus.NOT_FOUND
+    assert not list(_STATIC_DIR.rglob("*prototype*"))
+    assert (Path(__file__).resolve().parents[2] / "docs" / "prototypes" / "compact-layout-prototype.html").is_file()
+
+
+def test_every_html_page_served_gets_the_csp_with_no_exemption(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    pages = list(_STATIC_DIR.rglob("*.html"))
+    assert pages, "expected the landing page"
+    for page in pages:
+        response = client.get(f"/static/{page.relative_to(_STATIC_DIR).as_posix()}")
+        assert response.status_code == HTTPStatus.OK
+        assert "script-src 'self'" in response.headers["content-security-policy"], page.name
 
 
 def test_json_api_responses_do_not_carry_the_html_csp(tmp_path: Path) -> None:
@@ -86,7 +96,7 @@ def test_middleware_does_not_override_headers_a_route_already_set() -> None:
 
 
 def _served_html_pages() -> list[Path]:
-    return sorted(p for p in _STATIC_DIR.glob("*.html") if f"/static/{p.name}" not in _CSP_EXEMPT_PATHS)
+    return sorted(_STATIC_DIR.rglob("*.html"))
 
 
 def test_served_html_pages_have_no_inline_script_or_event_handlers() -> None:

@@ -237,10 +237,6 @@ _HTML_CSP = "; ".join(
     ]
 )
 
-# A standalone design prototype that runs an inline script, opened from disk or from /static during development
-# only. It renders no user data and does nothing with the API, so it is exempt rather than broken by the CSP.
-_CSP_EXEMPT_PATHS = frozenset({"/static/compact-layout-prototype.html"})
-
 
 class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Browser hardening headers on every response; CSP on every HTML document.
@@ -256,7 +252,7 @@ class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         is_html = response.headers.get("content-type", "").lower().startswith("text/html")
-        if is_html and request.url.path not in _CSP_EXEMPT_PATHS:
+        if is_html:
             response.headers.setdefault("Content-Security-Policy", _HTML_CSP)
         return response
 
