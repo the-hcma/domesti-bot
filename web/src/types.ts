@@ -738,6 +738,8 @@ export interface MyTracksPairStatusOut {
   /** 1: one shared key; 2: a key per direction with a verifier-only inbound key. */
   relay_protocol_version: number;
   require_relay_protocol_2: boolean;
+  /** Plain-HTTP warnings for the pairing addresses (HTTP on the LAN, or a stored public HTTP address). */
+  transport_warnings: string[];
   username: string;
 }
 
