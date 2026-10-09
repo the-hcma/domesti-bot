@@ -12,9 +12,10 @@ from typing import Literal
 
 from app.api.schemas import RuleOut
 from app.automation_rules_loader import list_automation_rules, load_settings_location
-from app.db.secrets import SecretsDecryptError, load_mytracks_relay_api_key_from_db
+from app.db.secrets import SecretsDecryptError
 from app.device_enums import RuleTrigger
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
+from app.mytracks_relay_keys import outbound_key
 from app.mytracks_service import request_user_location
 from app.mytracks_store import (
     MyTracksPairStatusRecord,
@@ -359,7 +360,7 @@ class LocationRequestCoordinator:
                 return None
             resolved_rule_id, resolved_geofence_id, resolved_reason = trigger
         try:
-            relay_key = load_mytracks_relay_api_key_from_db(cache_path)
+            relay_key = outbound_key(cache_path)
         except SecretsDecryptError as exc:
             if log_skips:
                 _LOGGER.warning(

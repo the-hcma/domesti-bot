@@ -1504,6 +1504,13 @@ class MyTracksPairStatusOut(BaseModel):
             "``activating`` (activation sent, My Tracks has not confirmed it yet)."
         ),
     )
+    relay_previous_key_expires_at: float | None = Field(
+        default=None,
+        description=(
+            "Epoch seconds the previous inbound relay key stops working (a short grace after a protocol 2 "
+            "activation); ``None`` when no previous key is still accepted."
+        ),
+    )
     relay_protocol_version: int = Field(
         default=1,
         description="1: one shared key for both directions; 2: a key per direction with a verifier-only inbound key.",

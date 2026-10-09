@@ -17,7 +17,7 @@ import {
   type MyTracksSettingsIn,
   type MyTracksSettingsOut,
 } from "./types.js";
-import { confirmAction, showErrorToast, showSuccessToast } from "./ui-toast.js";
+import { confirmAction, showErrorToast, showInfoToast, showSuccessToast } from "./ui-toast.js";
 
 export interface MyTracksPairingPanelOptions {
   clearConnectionFields: () => void;
@@ -356,7 +356,20 @@ export async function mountMyTracksPairingPanel(
   const relayKeyNote = document.createElement("p");
   relayKeyNote.className = "settings-dialog-help";
   relayKeyNote.textContent = RELAY_KEY_PENDING_NOTE;
-  relayKeyField.append(relayKeyLabel, relayKeyNote);
+  const relayProtocolNote = document.createElement("p");
+  relayProtocolNote.className = "settings-dialog-help mytracks-relay-protocol-note";
+  relayProtocolNote.hidden = true;
+  const requireV2Input = document.createElement("input");
+  requireV2Input.type = "checkbox";
+  requireV2Input.id = "mytracks-require-relay-protocol-2";
+  const requireV2Label = document.createElement("label");
+  requireV2Label.className = "settings-dialog-checkbox";
+  requireV2Label.htmlFor = requireV2Input.id;
+  requireV2Label.append(
+    requireV2Input,
+    document.createTextNode(" Require relay protocol 2 (refuse to pair with a My Tracks that does not support it)"),
+  );
+  relayKeyField.append(relayKeyLabel, relayKeyNote, relayProtocolNote, requireV2Label);
   form.append(relayKeyField);
 
   const retentionGroup = document.createElement("fieldset");
@@ -424,7 +437,17 @@ export async function mountMyTracksPairingPanel(
   resetBtn.type = "button";
   resetBtn.className = "btn btn-secondary";
   resetBtn.textContent = "Reset";
-  actions.append(pairBtn, saveRetentionBtn, resetBtn);
+  const checkActivationBtn = document.createElement("button");
+  checkActivationBtn.type = "button";
+  checkActivationBtn.className = "btn btn-secondary";
+  checkActivationBtn.textContent = "Check activation";
+  checkActivationBtn.hidden = true;
+  const revokePreviousBtn = document.createElement("button");
+  revokePreviousBtn.type = "button";
+  revokePreviousBtn.className = "btn btn-secondary";
+  revokePreviousBtn.textContent = "Revoke previous key";
+  revokePreviousBtn.hidden = true;
+  actions.append(pairBtn, checkActivationBtn, revokePreviousBtn, saveRetentionBtn, resetBtn);
   form.append(actions);
 
   section.append(heading, lead, status, form);
@@ -446,6 +469,36 @@ export async function mountMyTracksPairingPanel(
     relayKeyNote.textContent = paired && pairStatus?.relay_key_configured === true
       ? RELAY_KEY_CONFIGURED_NOTE
       : RELAY_KEY_PENDING_NOTE;
+  };
+
+  const applyRelayProtocolDisplay = (): void => {
+    const state = pairStatus?.relay_pairing_state ?? "none";
+    const version = pairStatus?.relay_protocol_version ?? 1;
+    const parts: string[] = [];
+    if (pairStatus?.relay_key_configured === true) {
+      parts.push(
+        version >= 2
+          ? "Relay protocol 2: separate keys per direction; domesti-bot keeps only a verifier of the key My Tracks sends."
+          : "Relay protocol 1: one shared key for both directions. Pair again with a current My Tracks to upgrade.",
+      );
+    }
+    if (state === "activating") {
+      parts.push(
+        "Activation sent but not confirmed by My Tracks yet. The previous pairing still works; use Check activation.",
+      );
+    } else if (state === "staged" || state === "probing") {
+      parts.push("A new pairing is staged and being verified.");
+    }
+    const previousUntil = pairStatus?.relay_previous_key_expires_at ?? null;
+    if (previousUntil !== null) {
+      parts.push(`The previous key is still accepted until ${new Date(previousUntil * 1000).toLocaleTimeString()}.`);
+    }
+    relayProtocolNote.textContent = parts.join(" ");
+    relayProtocolNote.hidden = parts.length === 0;
+    requireV2Input.checked = pairStatus?.require_relay_protocol_2 === true;
+    requireV2Input.disabled = storedConnection === null;
+    checkActivationBtn.hidden = state !== "activating";
+    revokePreviousBtn.hidden = previousUntil === null;
   };
 
   const syncResetButtonState = (): void => {
@@ -491,6 +544,7 @@ export async function mountMyTracksPairingPanel(
       renderPairStatus(status, pairStatus, approachRequestIntervalS);
       updatePairButtonLabel(pairBtn, pairStatus);
       applyRelayKeyDisplay();
+      applyRelayProtocolDisplay();
       syncRetentionSaveState();
       syncResetButtonState();
     } catch (err) {
@@ -537,14 +591,99 @@ export async function mountMyTracksPairingPanel(
         renderPairStatus(status, pairStatus, approachRequestIntervalS);
         updatePairButtonLabel(pairBtn, pairStatus);
         applyRelayKeyDisplay();
+        applyRelayProtocolDisplay();
         syncRetentionSaveState();
         syncResetButtonState();
-        showSuccessToast(rePair ? "My Tracks re-pairing complete." : "My Tracks pairing complete.");
+        if (pairStatus.relay_pairing_state === "activating") {
+          showInfoToast("Pairing staged; My Tracks has not confirmed the activation yet.");
+        } else {
+          showSuccessToast(rePair ? "My Tracks re-pairing complete." : "My Tracks pairing complete.");
+        }
       } catch (err) {
         const message = formatError(err);
         setSettingsDialogStatus(status, message, ToastVariant.Error);
         showErrorToast(message);
         await refreshStatus();
+      }
+    })();
+  });
+
+  requireV2Input.addEventListener("change", () => {
+    // One request at a time: a second click while the first PATCH is pending cannot race it.
+    requireV2Input.disabled = true;
+    void api
+      .patchMyTracksRelayProtocol({ require_protocol_2: requireV2Input.checked })
+      .then((next) => {
+        pairStatus = next;
+        applyRelayProtocolDisplay();
+        showSuccessToast(
+          next.require_relay_protocol_2 ? "Relay protocol 2 is now required." : "Relay protocol 2 is no longer required.",
+        );
+      })
+      .catch((err: unknown) => {
+        // Back to what the server last confirmed, not an inversion of whatever the box shows now.
+        requireV2Input.checked = pairStatus?.require_relay_protocol_2 === true;
+        showErrorToast(formatError(err));
+      })
+      .finally(() => {
+        requireV2Input.disabled = storedConnection === null;
+      });
+  });
+
+  checkActivationBtn.addEventListener("click", () => {
+    void (async () => {
+      const connection = options.readConnectionSettings();
+      const password = await promptPairPassword(connection.username, true);
+      if (password === null) {
+        return;
+      }
+      try {
+        const outcome = await api.postMyTracksPairReconcile({ password, username: connection.username });
+        if (outcome.status !== null) {
+          pairStatus = outcome.status;
+        }
+        const messages: Record<string, string> = {
+          aborted: "My Tracks never activated the new keys; the previous pairing is unchanged.",
+          none: "There is no pairing waiting for activation.",
+          promoted: "My Tracks confirmed the activation; the new keys are active.",
+          unconfirmed: "My Tracks still has not confirmed the activation.",
+        };
+        (outcome.result === "promoted" ? showSuccessToast : showInfoToast)(
+          messages[outcome.result] ?? "Activation checked.",
+        );
+        await refreshStatus();
+      } catch (err) {
+        const message = formatError(err);
+        setSettingsDialogStatus(status, message, ToastVariant.Error);
+        showErrorToast(message);
+      }
+    })();
+  });
+
+  revokePreviousBtn.addEventListener("click", () => {
+    // Disabled for the whole confirm-and-request sequence so a second click cannot open another confirmation.
+    revokePreviousBtn.disabled = true;
+    void (async () => {
+      try {
+        const confirmed = await confirmAction({
+          title: "Revoke the previous key?",
+          message:
+            "My Tracks requests signed with the previous relay key are rejected immediately instead of after the " +
+            "short grace period. Use this if the previous key may have been exposed.",
+          confirmLabel: "Revoke",
+          variant: ConfirmButtonVariant.Danger,
+        });
+        if (!confirmed) {
+          return;
+        }
+        pairStatus = await api.postMyTracksRevokePreviousKey();
+        applyRelayProtocolDisplay();
+        showSuccessToast("The previous relay key was revoked.");
+      } catch (err) {
+        showErrorToast(formatError(err));
+      } finally {
+        // The display above hides the button after a successful revoke; either way it is usable again.
+        revokePreviousBtn.disabled = false;
       }
     })();
   });
@@ -587,6 +726,7 @@ export async function mountMyTracksPairingPanel(
           renderPairStatus(status, pairStatus, approachRequestIntervalS);
           updatePairButtonLabel(pairBtn, pairStatus);
           applyRelayKeyDisplay();
+          applyRelayProtocolDisplay();
           applyRetentionToForm(
             { max_age_hours: 24, min_keep_count: 20, unlimited: false },
             retentionControls,

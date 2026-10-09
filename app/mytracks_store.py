@@ -70,6 +70,7 @@ class MyTracksPairStatusRecord:
     relay_key_configured: bool
     relay_key_updated_at: float | None
     relay_pairing_state: str
+    relay_previous_key_expires_at: float | None
     relay_protocol_version: int
     remote_request_location_enabled: bool | None
     require_relay_protocol_2: bool
@@ -97,6 +98,14 @@ def _relay_key_updated_at(path: Path, state: RelayState) -> float | None:
     if state.protocol_version >= PROTOCOL_SPLIT:
         return app_secret_updated_at(path, ROW_OUTBOUND)
     return mytracks_relay_api_key_updated_at(path)
+
+
+def _relay_previous_key_expires_at(state: RelayState) -> float | None:
+    """When the previous inbound key stops working, while it still does (``None`` otherwise)."""
+    expires = state.previous_expires_at
+    if state.previous_inbound_verifier and expires is not None and expires > time.time():
+        return expires
+    return None
 
 
 def _relay_pairing_state(state: RelayState) -> str:
@@ -211,6 +220,7 @@ def load_mytracks_pair_status(path: Path) -> MyTracksPairStatusRecord | None:
             relay_key_configured=_relay_key_configured(path, relay_state),
             relay_key_updated_at=_relay_key_updated_at(path, relay_state),
             relay_pairing_state=_relay_pairing_state(relay_state),
+            relay_previous_key_expires_at=_relay_previous_key_expires_at(relay_state),
             relay_protocol_version=relay_state.protocol_version,
             remote_request_location_enabled=_bool_from_int(
                 row.remote_request_location_enabled,

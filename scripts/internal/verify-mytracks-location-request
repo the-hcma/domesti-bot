@@ -32,9 +32,9 @@ _ensure_uv()
 
 from app.db.secrets import (  # noqa: E402
     load_mytracks_admin_password_from_db,
-    load_mytracks_relay_api_key_from_db,
     mytracks_admin_password_stored_in_db,
 )
+from app.mytracks_relay_keys import outbound_key  # noqa: E402
 from app.mytracks_service import (  # noqa: E402
     MyTracksSyncError,
     fetch_mytracks_domesti_config,
@@ -183,7 +183,7 @@ def main() -> int:
         )
         return 2
 
-    relay_key = load_mytracks_relay_api_key_from_db(cache_path)
+    relay_key = outbound_key(cache_path)  # K_out under protocol 2, the shared key under protocol 1
     if relay_key is None or relay_key.strip() == "":
         print("No my-tracks relay API key in the discovery cache", file=sys.stderr)
         return 1
