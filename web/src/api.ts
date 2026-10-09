@@ -25,6 +25,9 @@ import type {
   MyTracksLocationMonitoringOut,
   MyTracksPairIn,
   MyTracksPairStatusOut,
+  MyTracksReconcileIn,
+  MyTracksReconcileOut,
+  MyTracksRelayProtocolIn,
   MyTracksUsersSyncOut,
   MyTracksSettingsIn,
   MyTracksSettingsOut,
@@ -315,6 +318,15 @@ export const api = {
       "/v1/settings/my-tracks/location-monitoring",
       body,
     );
+  },
+  patchMyTracksRelayProtocol(body: MyTracksRelayProtocolIn): Promise<MyTracksPairStatusOut> {
+    return call<MyTracksPairStatusOut>("PATCH", "/v1/settings/my-tracks/relay-protocol", body);
+  },
+  postMyTracksPairReconcile(body: MyTracksReconcileIn): Promise<MyTracksReconcileOut> {
+    return call<MyTracksReconcileOut>("POST", "/v1/settings/my-tracks/pair/reconcile", body);
+  },
+  postMyTracksRevokePreviousKey(): Promise<MyTracksPairStatusOut> {
+    return call<MyTracksPairStatusOut>("POST", "/v1/settings/my-tracks/pair/revoke-previous", {});
   },
   postMyTracksPair(body: MyTracksPairIn): Promise<MyTracksPairStatusOut> {
     return call<MyTracksPairStatusOut>("POST", "/v1/settings/my-tracks/pair", body);

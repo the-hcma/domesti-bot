@@ -28,6 +28,7 @@ from app.location_request_coordinator import (
     _cooldown_until_from_result,
     _location_request_context_log_value,
 )
+from app.mytracks_relay_keys import promote_pending, stage_pairing
 from app.mytracks_service import RequestLocationResult
 from app.mytracks_store import (
     MyTracksConfigSave,
@@ -231,6 +232,77 @@ async def test_accuracy_streak_requests_fresh_location(
     request_mock.assert_awaited_once()
     assert request_mock.await_args is not None
     assert request_mock.await_args.kwargs["reason"] == "accuracy_streak"
+    assert request_mock.await_args.kwargs["relay_api_key"] == "relay-secret"
+
+
+@pytest.mark.asyncio
+async def test_accuracy_streak_request_presents_the_outbound_key_under_protocol_2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_edge_rule(bundle)
+    _seed_db(db)
+    outbound = "-".join(["outbound", "relay", "key", "9876543210"])
+    stage_pairing(
+        db,
+        pairing_id="pairing-0001-abcdef",
+        inbound_key="-".join(["inbound", "relay", "key", "0123456789"]),
+        outbound_key=outbound,
+    )
+    promote_pending(db, "pairing-0001-abcdef")
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    monkeypatch.setattr(
+        "app.location_request_coordinator.ACCURACY_STREAK_COUNT",
+        2,
+    )
+
+    now = 1_700_000_000.0
+    for offset, accuracy_m in [(0.0, 120), (10.0, 130)]:
+        upsert_user_location(
+            db,
+            UserLocationRecord(
+                user_id="henrique",
+                lat=41.194085,
+                lon=-73.888365,
+                accuracy_m=accuracy_m,
+                fix_at=now + offset,
+                reported_at=now + offset,
+                source="test",
+            ),
+            retention=default_location_history_retention(),
+        )
+
+    coordinator = LocationRequestCoordinator(cache_path=db, now_fn=lambda: now + 10.0)
+    request_mock = AsyncMock(
+        return_value=RequestLocationResult(status="accepted"),
+    )
+    with patch(
+        "app.location_request_coordinator.request_user_location",
+        request_mock,
+    ):
+        await coordinator._maybe_request_async(
+            "henrique",
+            context=LocationRequestContext(
+                deferred_edges=(),
+                location=UserLocationRecord(
+                    user_id="henrique",
+                    lat=41.194085,
+                    lon=-73.888365,
+                    accuracy_m=130,
+                    fix_at=now + 10.0,
+                    reported_at=now + 10.0,
+                    source="test",
+                ),
+                now=now + 10.0,
+            ),
+        )
+
+    request_mock.assert_awaited_once()
+    assert request_mock.await_args is not None
+    assert request_mock.await_args.kwargs["reason"] == "accuracy_streak"
+    assert request_mock.await_args.kwargs["relay_api_key"] == outbound
 
 
 @pytest.mark.asyncio

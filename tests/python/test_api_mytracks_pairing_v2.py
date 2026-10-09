@@ -532,3 +532,27 @@ async def test_startup_reconcile_uses_the_normalized_domain_and_records_a_discar
         await app_module._reconcile_pairing_on_start()
     assert reconcile.call_args.kwargs["base_url"] == "https://tracks.example.com"
     assert client.get("/v1/settings/my-tracks/pair-status").json()["last_pair_error"] == DISCARDED_PAIRING_MESSAGE
+
+
+# --- presenting the outbound key and the previous-key revoke ------------------------------------------------
+
+
+def test_the_status_reports_the_previous_key_grace_and_revoke_ends_it(db: Path, client: TestClient) -> None:
+    from app.db.secrets import save_mytracks_relay_api_key_to_db
+
+    _save_settings(client)
+    save_mytracks_relay_api_key_to_db(db, "-".join(["shared", "legacy", "key", "1111111111"]))
+    _pair(client, flow=lambda *a, **k: _fake_v2_pairing(db))
+
+    before = client.get("/v1/settings/my-tracks/pair-status").json()
+    assert before["relay_previous_key_expires_at"] is not None
+
+    revoked = client.post("/v1/settings/my-tracks/pair/revoke-previous")
+    assert revoked.status_code == HTTPStatus.OK
+    assert revoked.json()["relay_previous_key_expires_at"] is None
+    assert load_state(db).previous_inbound_verifier == ""
+    assert client.post("/v1/settings/my-tracks/pair/revoke-previous").json()["relay_previous_key_expires_at"] is None
+
+
+def test_revoke_previous_needs_a_configured_my_tracks(client: TestClient) -> None:
+    assert client.post("/v1/settings/my-tracks/pair/revoke-previous").status_code == HTTPStatus.CONFLICT

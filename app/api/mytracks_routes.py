@@ -46,7 +46,7 @@ from app.mytracks_pairing_flow import (
     reconcile_pairing,
     run_pairing_v2,
 )
-from app.mytracks_relay_keys import PROTOCOL_SPLIT, PairingInProgressError
+from app.mytracks_relay_keys import PROTOCOL_SPLIT, PairingInProgressError, revoke_previous
 from app.mytracks_relay_keys import load_state as load_relay_state
 from app.mytracks_service import (
     DomestiBotConfigFromMyTracks,
@@ -551,6 +551,17 @@ async def post_mytracks_pair_reconcile(body: MyTracksReconcileIn, request: Reque
     return MyTracksReconcileOut(result=result, status=status)
 
 
+@settings_router.post("/my-tracks/pair/revoke-previous", response_model=MyTracksPairStatusOut)
+async def post_mytracks_revoke_previous_key(request: Request) -> MyTracksPairStatusOut:
+    """Stop accepting the previous inbound relay key right now (use after a suspected compromise)."""
+    cache_path = _require_discovery_cache(request)
+    revoke_previous(cache_path)
+    record = load_mytracks_pair_status(cache_path)
+    if record is None:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="My Tracks is not configured")
+    return _pair_status_to_schema(record, cache_path=cache_path)
+
+
 @settings_router.patch("/my-tracks/relay-protocol", response_model=MyTracksPairStatusOut)
 async def patch_mytracks_relay_protocol(body: MyTracksRelayProtocolIn, request: Request) -> MyTracksPairStatusOut:
     """Require (or stop requiring) relay protocol 2 when pairing."""
@@ -851,6 +862,7 @@ def _pair_status_to_schema(
         relay_key_configured=record.relay_key_configured,
         relay_key_updated_at=record.relay_key_updated_at,
         relay_pairing_state=record.relay_pairing_state,
+        relay_previous_key_expires_at=record.relay_previous_key_expires_at,
         relay_protocol_version=record.relay_protocol_version,
         require_relay_protocol_2=record.require_relay_protocol_2,
         location_history_retention=_retention_record_to_schema(record.location_history_retention),

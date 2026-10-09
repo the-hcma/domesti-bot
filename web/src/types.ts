@@ -731,7 +731,29 @@ export interface MyTracksPairStatusOut {
   user_location_update_url: string | null;
   relay_key_configured: boolean;
   relay_key_updated_at: number | null;
+  /** ``none``, ``active`` or the stage of a pairing in progress (``staged``, ``probing``, ``activating``). */
+  relay_pairing_state: string;
+  /** Epoch seconds the previous inbound key stops working, while it still does. */
+  relay_previous_key_expires_at: number | null;
+  /** 1: one shared key; 2: a key per direction with a verifier-only inbound key. */
+  relay_protocol_version: number;
+  require_relay_protocol_2: boolean;
   username: string;
+}
+
+export interface MyTracksReconcileIn {
+  password: string;
+  username?: string | null;
+}
+
+export interface MyTracksReconcileOut {
+  /** ``none``, ``promoted``, ``aborted`` or ``unconfirmed``. */
+  result: string;
+  status: MyTracksPairStatusOut | null;
+}
+
+export interface MyTracksRelayProtocolIn {
+  require_protocol_2: boolean;
 }
 
 export interface MyTracksSettingsIn {
