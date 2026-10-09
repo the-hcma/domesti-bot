@@ -4,12 +4,16 @@
 //
 // Auth: when the server is started with `DOMESTI_API_KEY=…`, every
 // protected `/v1/...` route (everything except ``GET /v1/meta``) requires
-// the `X-Domesti-Api-Key` header. The browser
-// reads the key from a `<meta name="domesti-api-key" content="…">` tag if
-// present (so a deployment can inject it server-side without us exposing
-// it to JS at build time). Default LAN deployments leave the env var
-// unset and the page works without the meta tag.
+// the `X-Domesti-Api-Key` header. The browser reads the (control) key from a
+// `<meta name="domesti-api-key" content="…">` tag if present, so a deployment
+// can inject it server-side without us exposing it to JS at build time.
+// Routes that need the admin scope (settings, `execute-line`, My Tracks sync)
+// ask for the admin key in a prompt and keep it in memory only; see
+// `api-keys.ts` and docs/API_KEY_SCOPES.md. Default LAN deployments leave the
+// env var unset and the page works without the meta tag.
 
+import { promptForKey } from "./admin-key-prompt.js";
+import { fetchProtected, keyForRequest } from "./api-keys.js";
 import type {
   GeofenceOut,
   HealthOut,
@@ -146,15 +150,24 @@ function apiKeyFromMeta(): string | null {
 }
 
 /** Headers for protected ``/v1/...`` routes (rules wire-up, manual fetch). */
-export function authHeaders(): Record<string, string> {
+export function authHeaders(path = ""): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/json",
   };
-  const apiKey = apiKeyFromMeta();
+  const apiKey = keyForRequest(path, apiKeyFromMeta());
   if (apiKey) {
     headers["X-Domesti-Api-Key"] = apiKey;
   }
   return headers;
+}
+
+/** `fetch` for a protected route: picks the right key and asks for the admin key when the server needs it. */
+function protectedFetch(path: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
+  return fetchProtected(path, init, {
+    fetchImpl: (p, i) => (timeoutMs === undefined ? fetch(p, i) : fetchWithTimeout(p, i, timeoutMs)),
+    metaKey: apiKeyFromMeta,
+    promptForKey,
+  });
 }
 
 const HEALTH_FETCH_TIMEOUT_MS = 3000;
@@ -180,16 +193,13 @@ async function call<T>(
   body?: unknown,
   timeoutMs?: number,
 ): Promise<T> {
-  const headers = authHeaders();
+  const headers = authHeaders(path);
   const init: RequestInit = { method, headers };
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  const response =
-    timeoutMs === undefined
-      ? await fetch(path, init)
-      : await fetchWithTimeout(path, init, timeoutMs);
+  const response = await protectedFetch(path, init, timeoutMs);
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new HttpError(response.status, text);
@@ -201,7 +211,7 @@ async function callNoContent(
   method: "DELETE",
   path: string,
 ): Promise<void> {
-  const response = await fetch(path, { method, headers: authHeaders() });
+  const response = await protectedFetch(path, { method, headers: authHeaders(path) });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new HttpError(response.status, text);
@@ -212,7 +222,7 @@ async function callNullableJson<T>(
   method: "GET",
   path: string,
 ): Promise<T | null> {
-  const response = await fetch(path, { method, headers: authHeaders() });
+  const response = await protectedFetch(path, { method, headers: authHeaders(path) });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new HttpError(response.status, text);
