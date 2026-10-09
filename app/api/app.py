@@ -72,6 +72,7 @@ from app.api.ui_state import (
 from app.api.vizio_settings_routes import router as vizio_settings_router
 from app.api.webhooks_routes import router as webhooks_router
 from app.build_info import get_build_info
+from app.db.secrets import load_mytracks_admin_password_from_db
 from app.device_completion import CompletionAlias
 from app.device_enums import DeviceFamilyId, UiActionType
 from app.device_state_watcher import (
@@ -94,6 +95,9 @@ from app.domesti_bot_cli import (
 from app.ep1_device_manager import DEFAULT_EP1_ZEROCONF_TIMEOUT_S
 from app.expected_device_change import mark_expected_device_change
 from app.logging_config import TRACE_LEVEL
+from app.mytracks_pairing_flow import DISCARDED_PAIRING_MESSAGE, reconcile_with_stored_credentials
+from app.mytracks_service import normalize_mytracks_base_url
+from app.mytracks_store import load_mytracks_config, mark_mytracks_paired, set_last_pair_error
 from app.rule_engine import DeviceUnresponsiveError
 from app.server_runtime import runtime
 from app.sonos_device_manager import SonosTransitionUnavailableError
@@ -323,6 +327,34 @@ def _normalize_cors_origin(entry: str) -> str | None:
     return f"{scheme}://{host}" if port in (None, default_port) else f"{scheme}://{host}:{port}"
 
 
+async def _reconcile_pairing_on_start() -> None:
+    """Settle a My Tracks pairing left ``activating`` by a lost answer, using the saved admin password if any."""
+    cache_path = runtime.discovery_cache_path()
+    if cache_path is None:
+        return
+    try:
+        config = await asyncio.to_thread(load_mytracks_config, cache_path)
+        if config is None:
+            return
+        result = await asyncio.to_thread(
+            reconcile_with_stored_credentials,
+            cache_path,
+            base_url=normalize_mytracks_base_url(config.domain),
+            username=config.username,
+            load_password=load_mytracks_admin_password_from_db,
+        )
+    except Exception:  # best effort: the operator can still press Check activation
+        _LOGGER.warning("[startup] could not settle the My Tracks pairing", exc_info=True)
+        return
+    if result == "promoted":
+        # The pairing may have started as a first, unconfirmed one: complete its record so pair-status says paired.
+        await asyncio.to_thread(mark_mytracks_paired, cache_path)
+    elif result == "aborted":
+        await asyncio.to_thread(set_last_pair_error, cache_path, DISCARDED_PAIRING_MESSAGE)
+    if result != "none":
+        _LOGGER.info("[startup] My Tracks pairing reconcile: %s", result)
+
+
 def _device_state(request: Request) -> DeviceManagersState:
     del request
     st: Any = runtime.device_state
@@ -424,9 +456,12 @@ def create_app(args: Any) -> FastAPI:
             name="device-discovery",
         )
         discovery_task = runtime.discovery_task
+        pairing_task = asyncio.create_task(_reconcile_pairing_on_start(), name="mytracks-pairing-reconcile")
         try:
             yield
         finally:
+            if not pairing_task.done():
+                pairing_task.cancel()
             shutdown_started = time.monotonic()
             runtime.signal_shutdown()
             if discovery_task is not None and not discovery_task.done():

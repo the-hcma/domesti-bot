@@ -16,6 +16,7 @@ from app.location_request_rate_limits import (
     location_request_rate_limits_from_payload,
 )
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
+from app.mytracks_relay_keys import PROTOCOL_SPLIT as PROTOCOL_VERSION_SPLIT
 from app.user_names import (
     default_display_name,
     format_person_display_name,
@@ -25,7 +26,13 @@ from app.user_names import (
 _LOGGER = mytracks_logger(__name__)
 
 _DOMESTI_BOT_CONFIG_PATH = "/api/admin/domesti-bot/config/"
+_DOMESTI_BOT_AUTH_CHECK_PATH = "/api/domesti-bot/auth-check/"
+_DOMESTI_BOT_PAIR_ABORT_PATH = "/api/admin/domesti-bot/pair/abort/"
+_DOMESTI_BOT_PAIR_ACTIVATE_PATH = "/api/admin/domesti-bot/pair/activate/"
 _DOMESTI_BOT_PAIR_PATH = "/api/admin/domesti-bot/pair/"
+_DOMESTI_BOT_PAIR_STATE_PATH = "/api/admin/domesti-bot/pair/state/"
+_DOMESTI_BOT_TEST_UPDATE_PATH = "/api/admin/domesti-bot/test-location-update/"
+_PROBE_TIMEOUT_S = 15.0
 _REQUEST_LOCATION_PATH = "/api/domesti-bot/users/{user_id}/request-location/"
 _USERS_WITH_DEVICES_PATH = "/api/admin/users-with-devices/"
 _WAYPOINTS_PATH = "/api/admin/waypoints/"
@@ -54,6 +61,7 @@ class RequestLocationResult:
 @dataclass(frozen=True)
 class DomestiBotConfigFromMyTracks:
     domesti_base_url: str | None = None
+    protocol_version: int | None = None
     location_request_rate_limits: LocationRequestRateLimits | None = None
     location_updates_enabled: bool | None = None
     remote_request_location_enabled: bool | None = None
@@ -153,8 +161,11 @@ def fetch_mytracks_domesti_config(
     remote_request_location_enabled = bool(remote_raw) if remote_raw is not None else None
     update_url = _optional_str(payload.get("user_location_update_url"))
     test_url = _optional_str(payload.get("user_location_test_url"))
+    version_raw = payload.get("protocol_version")
+    protocol_version = version_raw if isinstance(version_raw, int) and not isinstance(version_raw, bool) else None
     return DomestiBotConfigFromMyTracks(
         domesti_base_url=_optional_str(payload.get("domesti_base_url")),
+        protocol_version=protocol_version,
         location_request_rate_limits=location_request_rate_limits_from_payload(payload),
         location_updates_enabled=location_updates_enabled,
         remote_request_location_enabled=remote_request_location_enabled,
@@ -206,6 +217,180 @@ def normalize_mytracks_base_url(domain: str) -> str:
     if parsed.netloc == "":
         raise MyTracksSyncError(f"Expected My Tracks domain, got {domain!r}")
     return trimmed
+
+
+class MyTracksAmbiguousError(MyTracksSyncError):
+    """The outcome of a request that may have changed My Tracks is unknown (timeout, dropped response, 5xx)."""
+
+
+@dataclass(frozen=True)
+class StageResult:
+    """My Tracks's answer to a protocol 2 stage: the version it chose and the pairing status it reports."""
+
+    protocol_version: int
+    status: str
+
+
+def _stage_result(payload: dict[str, Any] | None) -> StageResult:
+    """Parse My Tracks's stage answer. A body that is not a JSON object is malformed, not a protocol 1 signal."""
+    if payload is None:
+        raise MyTracksSyncError(
+            "My Tracks answered the protocol 2 stage with something that is not a JSON object "
+            "(a proxy error page or an empty body?); the previous pairing is unchanged"
+        )
+    version_raw = payload.get("protocol_version")
+    version = version_raw if isinstance(version_raw, int) and not isinstance(version_raw, bool) else 1
+    return StageResult(protocol_version=version, status=str(payload.get("status", "")))
+
+
+def _raise_for_pair_status(response: httpx.Response, *, base_url: str, username: str, action: str) -> None:
+    """Map a failed My Tracks pairing response to a ``MyTracksSyncError`` (shared by every pairing call)."""
+    if response.status_code < HTTPStatus.BAD_REQUEST:
+        return
+    if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
+        message = f"My Tracks rejected the admin session during {action} (staff account required)"
+    elif response.status_code == HTTPStatus.NOT_FOUND:
+        message = (
+            f"My Tracks domesti-bot {action} endpoint not found — upgrade my-tracks to a build with relay protocol 2"
+        )
+    else:
+        message = f"My Tracks {action} returned HTTP {response.status_code}: {_response_error_detail(response)}"
+    _LOGGER.warning("%s request failed for %s as %s: %s", action, mytracks_log_host(base_url), username, message)
+    raise MyTracksSyncError(message)
+
+
+class MyTracksAdminSession:
+    """One logged-in My Tracks admin session for a whole pairing (stage, probe, activate).
+
+    Use as a context manager. Every call carries the session's CSRF token and a Referer, and has an explicit
+    timeout. Transport failures on calls that may have changed My Tracks raise :class:`MyTracksAmbiguousError`.
+    """
+
+    def __init__(self, base_url: str, *, username: str, password: str) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.username = username
+        self._password = password
+        self._client: httpx.Client | None = None
+        self._csrf = ""
+
+    def __enter__(self) -> MyTracksAdminSession:
+        self._client = _login_client(self.base_url, username=self.username, password=self._password)
+        self._csrf = _session_csrf_token(self._client)
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def _post(self, path: str, body: dict[str, Any], *, ambiguous: bool) -> httpx.Response:
+        if self._client is None:
+            raise MyTracksSyncError("Expected an open My Tracks admin session, got none")
+        try:
+            return self._client.post(
+                path,
+                json=body,
+                headers={"X-CSRFToken": self._csrf, "Referer": f"{self.base_url}/"},
+                timeout=_PROBE_TIMEOUT_S if path != _DOMESTI_BOT_PAIR_PATH else _REQUEST_TIMEOUT_S,
+            )
+        except httpx.HTTPError as exc:
+            error_type = MyTracksAmbiguousError if ambiguous else MyTracksSyncError
+            raise error_type(f"My Tracks request to {path} failed for {self.base_url}: {type(exc).__name__}") from exc
+
+    def stage_pairing(
+        self,
+        *,
+        pairing_id: str,
+        inbound_key: str,
+        outbound_key: str,
+        domesti_base_url: str,
+        user_location_test_url: str,
+        user_location_update_url: str,
+    ) -> StageResult:
+        """Stage protocol 2 keys on My Tracks. Nothing is active there until :meth:`activate`."""
+        response = self._post(
+            _DOMESTI_BOT_PAIR_PATH,
+            {
+                "protocol_version": PROTOCOL_VERSION_SPLIT,
+                "pairing_id": pairing_id,
+                "api_key": inbound_key,
+                "outbound_api_key": outbound_key,
+                "domesti_base_url": domesti_base_url,
+                "user_location_test_url": user_location_test_url,
+                "user_location_update_url": user_location_update_url,
+            },
+            ambiguous=False,
+        )
+        _raise_for_pair_status(response, base_url=self.base_url, username=self.username, action="pair")
+        try:
+            parsed = response.json()
+        except ValueError:
+            parsed = None
+        return _stage_result(parsed if isinstance(parsed, dict) else None)
+
+    def probe_inbound(self, pairing_id: str) -> bool:
+        """Ask My Tracks to post a test location to our staged URL with the staged inbound key."""
+        response = self._post(_DOMESTI_BOT_TEST_UPDATE_PATH, {"pairing_id": pairing_id}, ambiguous=False)
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            return False
+        try:
+            parsed = response.json()
+        except ValueError:
+            return False
+        return bool(parsed.get("ok")) if isinstance(parsed, dict) else False
+
+    def activate(self, pairing_id: str) -> str:
+        """Promote the staged pairing on My Tracks. ``active``, ``unknown`` or ``expired``; ambiguous on loss."""
+        response = self._post(_DOMESTI_BOT_PAIR_ACTIVATE_PATH, {"pairing_id": pairing_id}, ambiguous=True)
+        if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise MyTracksAmbiguousError(f"My Tracks activation returned HTTP {response.status_code}")
+        if response.status_code in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
+            raise MyTracksSyncError("My Tracks rejected the admin session during activation (staff account required)")
+        return _status_from(response)
+
+    def state(self, pairing_id: str) -> str:
+        """``active``, ``staged``, ``expired`` or ``unknown`` for a pairing id; ambiguous when unreachable."""
+        if self._client is None:
+            raise MyTracksSyncError("Expected an open My Tracks admin session, got none")
+        try:
+            response = self._client.get(
+                _DOMESTI_BOT_PAIR_STATE_PATH, params={"pairing_id": pairing_id}, timeout=_PROBE_TIMEOUT_S
+            )
+        except httpx.HTTPError as exc:
+            raise MyTracksAmbiguousError(f"My Tracks state query failed: {type(exc).__name__}") from exc
+        if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise MyTracksAmbiguousError(f"My Tracks state query returned HTTP {response.status_code}")
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            raise MyTracksSyncError(f"My Tracks state query returned HTTP {response.status_code}")
+        return _status_from(response)
+
+    def abort(self, pairing_id: str) -> None:
+        """Best-effort discard of a staged pairing; failures are ignored (the staged keys expire on their own)."""
+        try:
+            self._post(_DOMESTI_BOT_PAIR_ABORT_PATH, {"pairing_id": pairing_id}, ambiguous=False)
+        except MyTracksSyncError:
+            _LOGGER.info("abort of staged pairing on %s did not reach My Tracks; it will expire", self.base_url)
+
+
+def _status_from(response: httpx.Response) -> str:
+    try:
+        parsed = response.json()
+    except ValueError:
+        return "unknown"
+    return str(parsed.get("status", "unknown")) if isinstance(parsed, dict) else "unknown"
+
+
+def probe_outbound_key(*, base_url: str, outbound_key: str, pairing_id: str) -> bool:
+    """Does My Tracks accept the staged outbound key? Calls the auth-check, which queues and changes nothing."""
+    try:
+        response = httpx.get(
+            f"{base_url.rstrip('/')}{_DOMESTI_BOT_AUTH_CHECK_PATH}",
+            headers={"X-Domesti-Api-Key": outbound_key, "X-Domesti-Pairing-Id": pairing_id},
+            timeout=_PROBE_TIMEOUT_S,
+        )
+    except httpx.HTTPError:
+        return False
+    return response.status_code == HTTPStatus.OK
 
 
 def pair_with_my_tracks(

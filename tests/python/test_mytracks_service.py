@@ -419,3 +419,20 @@ def test_fetch_users_rejects_html_export_response(
             username="admin",
             password="secret",
         )
+
+
+def test_a_stage_answer_that_is_not_a_json_object_is_an_error_not_a_protocol_1_signal() -> None:
+    import pytest
+
+    from app.mytracks_service import MyTracksSyncError, _stage_result
+
+    with pytest.raises(MyTracksSyncError, match="not a JSON object"):
+        _stage_result(None)
+
+
+def test_a_stage_answer_object_without_a_version_still_means_protocol_1() -> None:
+    from app.mytracks_service import _stage_result
+
+    assert _stage_result({"detail": "ok"}).protocol_version == 1
+    assert _stage_result({"protocol_version": 2, "status": "staged"}).protocol_version == 2
+    assert _stage_result({"protocol_version": True}).protocol_version == 1

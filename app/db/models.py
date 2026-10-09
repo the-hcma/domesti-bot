@@ -103,6 +103,7 @@ class MyTracksSettings(Base):
     location_updates_accepted: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     paired_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     remote_request_location_enabled: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    require_relay_protocol_2: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     user_location_test_url: Mapped[str | None] = mapped_column(String, nullable=True)
     user_location_update_url: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
