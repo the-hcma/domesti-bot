@@ -68,10 +68,11 @@ export const WRITE_ONLY_SAVED_PLACEHOLDER = "Saved. Leave blank to keep current"
  */
 export function applyWriteOnlySecretState(
   input: HTMLInputElement,
-  options: { configured: boolean; emptyPlaceholder: string },
+  options: { configured: boolean; emptyPlaceholder: string; optional?: boolean },
 ): void {
   input.value = "";
-  input.required = !options.configured;
+  // An optional secret (for example the SMTP password) is never required, saved or not.
+  input.required = !options.configured && options.optional !== true;
   input.placeholder = options.configured
     ? WRITE_ONLY_SAVED_PLACEHOLDER
     : options.emptyPlaceholder;

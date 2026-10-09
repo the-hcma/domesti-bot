@@ -4,6 +4,7 @@ import { HttpError } from "./api.js";
 import { ToastVariant } from "./closed-sets.js";
 import type { RulesDataSource } from "./rules-data-source.js";
 import { createFieldLabel } from "./rules-ui-helpers.js";
+import { applyWriteOnlySecretState } from "./settings-secret-field.js";
 import { setSettingsDialogStatus } from "./settings-status.js";
 import { ConfirmButtonVariant, type SmtpConfigIn, type SmtpConfigOut } from "./types.js";
 import { defaultMailDomainFromUi } from "./ui-instance.js";
@@ -176,9 +177,11 @@ export async function mountMailSettingsPanel(
   const passwordInput = document.createElement("input");
   passwordInput.type = "password";
   passwordInput.autocomplete = "new-password";
-  passwordInput.placeholder = existing?.password_configured
-    ? "leave blank to keep current"
-    : "leave blank if not required";
+  applyWriteOnlySecretState(passwordInput, {
+    configured: existing?.password_configured === true,
+    emptyPlaceholder: "leave blank if not required",
+    optional: true,
+  });
   appendFieldRow(
     form,
     createLabeledField(createFieldLabel("Username (optional)"), usernameInput),
@@ -196,8 +199,12 @@ export async function mountMailSettingsPanel(
           `Saved SMTP settings for ${saved.host}:${saved.port}`,
           ToastVariant.Success,
         );
-        passwordInput.value = "";
-        passwordInput.placeholder = "leave blank to keep current";
+        // Reflect what the server stored: settings saved without a password must not claim one is saved.
+        applyWriteOnlySecretState(passwordInput, {
+          configured: saved.password_configured,
+          emptyPlaceholder: "leave blank if not required",
+          optional: true,
+        });
         resetBtn.disabled = false;
         fromAddressManual = true;
       })
