@@ -1690,7 +1690,7 @@ class LocationUpdateWebhookIn(BaseModel):
         normalized = normalize_presence_connection_type(value)
         if normalized is None:
             raise ValueError(
-                f"Expected OwnTracks conn code w, m, or o, got {value!r}",
+                "Expected OwnTracks conn code w, m, or o",
             )
         return normalized
 
@@ -1847,8 +1847,7 @@ class LocalTimeWindowCondition(BaseModel):
         # Half-open [start, end) — equal bounds are never open (dead rule).
         if self.start_hhmm == self.end_hhmm:
             raise ValueError(
-                "Expected local_time_window start_hhmm != end_hhmm "
-                f"(half-open window), got start={self.start_hhmm!r} end={self.end_hhmm!r}",
+                "Expected local_time_window start_hhmm != end_hhmm (half-open window)",
             )
         return self
 
@@ -1863,18 +1862,18 @@ class LocalTimeWindowCondition(BaseModel):
         parts = trimmed.split(":")
         if len(parts) != 2:
             raise ValueError(
-                f"Expected HH:MM for local_time_window, got {value!r}",
+                "Expected HH:MM for local_time_window",
             )
         try:
             hour = int(parts[0])
             minute = int(parts[1])
         except ValueError as exc:
             raise ValueError(
-                f"Expected HH:MM for local_time_window, got {value!r}",
+                "Expected HH:MM for local_time_window",
             ) from exc
         if hour < 0 or hour > 23 or minute < 0 or minute > 59:
             raise ValueError(
-                f"Expected HH:MM in 00:00–23:59 for local_time_window, got {value!r}",
+                "Expected HH:MM in 00:00–23:59 for local_time_window",
             )
         return f"{hour:02d}:{minute:02d}"
 
