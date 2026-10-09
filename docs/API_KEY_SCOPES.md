@@ -1,6 +1,6 @@
 # Scoped API keys
 
-Status: design, tracked in #793. Nothing here is implemented yet.
+Status: implemented (#793). The server-side scopes landed in #804, the web client prompt in #805 and the CLI flag and unit-file notes in #807. This document is the design record; the sections below describe the behavior that shipped, and what was deliberately left out is under "Deferred".
 
 ## Problem
 
@@ -79,23 +79,23 @@ Rules:
 | LAN attacker with no key, a key configured | `401` everywhere | Same |
 | LAN attacker, open mode | Everything | Everything (unchanged; configure a key). Startup warns when listening on all interfaces |
 
-## Implementation outline
+## Implementation
 
-1. **Scope dependency.** Replace `_verify_api_key` with `require_scope("read" | "control" | "admin")` built on one resolver that reads the key once and applies the fallback before comparing. Every router and route declares its scope explicitly; the settings routers use `admin`, and the two sync routes override their router's scope. Keep `_verify_api_key` as an alias of `require_scope("control")` for one release if anything else imports it.
-2. **Coverage test.** A test enumerates every route (including the included routers, the mounts and `/docs`, `/redoc`, `/openapi.json`) and fails for any route without a declared scope or public marker, or whose scope differs from the inventory above. Another sends the key matrix (none, wrong, read, control, admin) at one route per scope and asserts `401`, `403` or success.
-3. **Startup checks.** Strip and treat blanks as unset, reject read-only configuration, warn on equal values, and log the unset-admin line.
-4. **Web client.** The prompt, per-request key selection, the `403` typed error and the two availability probes. Tests cover the prompt on opening Settings, the retry after entering a key, the probes treating `403` as available, clearing only the right key on `401`, and that the admin key never reaches the DOM or any storage.
-5. **CLI and tooling.** `domesti-bot` remote mode (`_cmd_loop_remote`) posts to `/v1/execute-line`, which becomes `admin`. It gains `--admin-api-key` / `DEVICE_MANAGER_ADMIN_API_KEY` (next to the existing `--api-key` / `DEVICE_MANAGER_API_KEY`), uses the admin key for that call, and prints a clear message on a `403` ("this command needs the admin key"). The systemd unit, the system unit template, the example environment files and `config/serve.py` mention the new variables.
+1. **Scope dependency.** `app/api/api_scopes.py`: `require_scope("read" | "control" | "admin")` and the router-level `require_scope_by_method`, built on one resolver that reads the key once, compares it against every configured key and takes the highest scope; `DOMESTI_API_KEY` also grants admin while `DOMESTI_ADMIN_API_KEY` is unset. Every router and route in `app/api/app.py` declares its scope, and the two My Tracks sync routes override their router's scope.
+2. **Coverage test.** `tests/python/test_api_key_scopes.py` sends every OpenAPI route every kind of key against an independent copy of the table above; an unclassified route fails the suite. It also pins that `HEAD` is not served, that the public paths stay public, and that a single-key deployment behaves exactly as before.
+3. **Startup checks.** Values are stripped and blank means unset, a read key alone refuses to start, equal values are allowed with a warning, and the warnings are logged once from the lifespan.
+4. **Web client.** `web/src/api-keys.ts` (tested with `node --test`) and `web/src/admin-key-prompt.ts`: the prompt on a `403` naming the admin scope, per-request key selection, one shared prompt, a decline cooldown, and the Rules and Settings availability probes accepting `403`.
+5. **CLI and tooling.** `--admin-api-key` / `DEVICE_MANAGER_ADMIN_API_KEY` for the remote REPL, a hint on `401` and `403`, and the new variables in the systemd units and `config/serve.py`.
 
 ## Rollout
 
-Three PRs: the scope dependency, inventory test and startup checks (behaviorally identical when only `DOMESTI_API_KEY` is set); then the web client; then the CLI flags, unit files and documentation. Operators opt in by setting `DOMESTI_ADMIN_API_KEY` and, optionally, `DOMESTI_READ_API_KEY`. Before that nothing changes, and a test pins it.
+Shipped in three PRs: the scope dependency, inventory test and startup checks (behaviorally identical when only `DOMESTI_API_KEY` is set); the web client; then the CLI flags, unit-file notes and documentation. Operators opt in by setting `DOMESTI_ADMIN_API_KEY` and, optionally, `DOMESTI_READ_API_KEY`; until they do nothing changes, and a test pins it. The admin key and the page-held control key must be different values: if they match, that value is granted admin, which is what the fallback already does.
 
 ## Rotation
 
 Keys are independent. To rotate the control key, set a new `DOMESTI_API_KEY`, restart, and update whatever injects the meta tag. To rotate the admin key, set a new `DOMESTI_ADMIN_API_KEY` and restart; browsers re-prompt on the next `401`. Neither touches the Fernet key or stored secrets.
 
-## Test plan
+## Tests
 
 - Backward compatibility: with only `DOMESTI_API_KEY` set, that key gets success on `/v1/settings/**`, `/v1/execute-line` and both sync routes with no prompt, and every existing API test passes unchanged.
 - The inventory test and the key matrix above, including `GET /v1/meta` staying unauthenticated, `OPTIONS`/preflight needing no key, and the relay webhooks being untouched by the resolver.
@@ -105,7 +105,7 @@ Keys are independent. To rotate the control key, set a new `DOMESTI_API_KEY`, re
 - Web: the prompt flow (including the admin-only configuration, where the first protected request is preceded by the prompt and the entered key is sent everywhere), memory-only storage, the header sent only to admin routes, the probes on `403`, and that the Settings pages work unchanged when no admin key is configured.
 - CLI: remote mode with only a control key prints the `403` message; with an admin key it succeeds.
 
-## Decisions taken (change in review)
+## Decisions taken
 
 1. Three scopes with `read` optional; a read key requires a control or admin key.
 2. `POST /v1/execute-line`, all of `/v1/settings/**` and the two My Tracks sync routes require `admin`.
