@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeVar
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from sqlalchemy import select
@@ -18,6 +20,8 @@ from app.db.session import discovery_session, discovery_write
 from app.vizio_mac import normalize_mac
 
 _LOGGER = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 _EP1_NOISE_PSK_KEY = "ep1_noise_psk"
 _KASA_PASSWORD_KEY = "kasa_password"
@@ -97,6 +101,11 @@ def delete_kasa_credentials_from_db(path: Path) -> None:
     discovery_write(path, _write)
     for key in removed:
         _audit_secret_change("removed", key)
+
+
+def load_app_secret_text(path: Path, key: str) -> str | None:
+    """Decrypt one ``app_secrets`` row by name (``None`` when absent or empty)."""
+    return _load_app_secret_plaintext(path, key)
 
 
 def load_ep1_noise_psk_from_db(path: Path) -> str | None:
@@ -250,6 +259,69 @@ def rotate_app_secrets(
         rotated=list(rotated),
         undecryptable=list(undecryptable),
     )
+
+
+def replace_app_secrets(path: Path, updates: dict[str, str | None]) -> None:
+    """Write several ``app_secrets`` rows in one transaction; a ``None`` value deletes the row.
+
+    Either every row changes or none does. Each change is audited by name after the commit, never by value.
+    """
+    update_app_secrets(path, lambda _read: (updates, None))
+
+
+def update_app_secrets(
+    path: Path,
+    compute: Callable[[Callable[[str], str | None]], tuple[dict[str, str | None], T]],
+) -> T:
+    """Read rows, decide and write in ONE writer transaction, so the decision cannot rest on a stale read.
+
+    ``compute(read)`` gets a reader (a row's decrypted text, or ``None`` when absent or unreadable) and returns the
+    updates to write (a ``None`` value deletes the row) together with a result that this function returns. An
+    exception from ``compute`` rolls everything back. Each change is audited by name after the commit.
+    """
+    fernet = _fernet_from_config()  # may be absent: deleting rows must still work without a key
+    now = time.time()
+    outcomes: list[tuple[str, str]] = []
+    results: list[T] = []
+
+    def _write(session: Session) -> None:
+        outcomes.clear()
+        results.clear()
+
+        def read(name: str) -> str | None:
+            row = session.get(AppSecret, name)
+            if row is None or fernet is None:
+                return None
+            try:
+                text = fernet.decrypt(row.ciphertext).decode("utf-8")
+            except InvalidToken:
+                return None
+            return text or None
+
+        updates, result = compute(read)
+        for name, value in updates.items():
+            row = session.get(AppSecret, name)
+            if value is None:
+                if row is not None:
+                    session.delete(row)
+                    outcomes.append(("removed", name))
+                continue
+            if fernet is None:
+                raise SecretsConfigurationError("Expected a Fernet key to encrypt secret rows, got none")
+            ciphertext = fernet.encrypt(value.encode("utf-8"))
+            if row is None:
+                session.add(AppSecret(key=name, ciphertext=ciphertext, updated_at=now))
+                outcomes.append(("created", name))
+            else:
+                row.ciphertext = ciphertext
+                row.updated_at = now
+                outcomes.append(("replaced", name))
+        results.append(result)
+
+    discovery_write(path, _write)
+    for action, name in outcomes:
+        _audit_secret_change(action, name)
+    return results[0]
 
 
 def save_ep1_noise_psk_to_db(path: Path, psk: str) -> None:
