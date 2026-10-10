@@ -1497,6 +1497,13 @@ class MyTracksPairStatusOut(BaseModel):
     user_location_test_url: str | None = None
     user_location_update_url: str | None = None
     relay_key_configured: bool = False
+    transport_warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Plain-HTTP warnings for the pairing addresses: HTTP on the local network (allowed; the relay keys are "
+            "not encrypted there) or a stored public HTTP address (re-pair with https)."
+        ),
+    )
     relay_pairing_state: str = Field(
         default="none",
         description=(

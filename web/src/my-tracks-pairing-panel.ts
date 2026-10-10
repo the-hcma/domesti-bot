@@ -372,6 +372,14 @@ export async function mountMyTracksPairingPanel(
   relayKeyField.append(relayKeyLabel, relayKeyNote, relayProtocolNote, requireV2Label);
   form.append(relayKeyField);
 
+  // Plain-HTTP warnings for the pairing addresses (the relay keys are not encrypted on that hop).
+  const transportNote = document.createElement("p");
+  transportNote.className = "settings-dialog-help mytracks-transport-warning";
+  transportNote.hidden = true;
+  // A stored public-HTTP address breaks sync and request-location, so screen readers should announce it.
+  transportNote.setAttribute("role", "status");
+  relayKeyField.append(transportNote);
+
   const retentionGroup = document.createElement("fieldset");
   retentionGroup.className = "settings-dialog-fieldset";
   const retentionLegend = document.createElement("legend");
@@ -465,6 +473,9 @@ export async function mountMyTracksPairingPanel(
   };
 
   const applyRelayKeyDisplay = (): void => {
+    const warnings = pairStatus?.transport_warnings ?? [];
+    transportNote.textContent = warnings.join(" ");
+    transportNote.hidden = warnings.length === 0;
     const paired = pairStatus?.paired_at !== null && pairStatus?.paired_at !== undefined;
     relayKeyNote.textContent = paired && pairStatus?.relay_key_configured === true
       ? RELAY_KEY_CONFIGURED_NOTE

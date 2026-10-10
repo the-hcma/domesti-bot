@@ -17,6 +17,7 @@ from app.location_request_rate_limits import (
 )
 from app.mytracks_logging import mytracks_log_host, mytracks_logger
 from app.mytracks_relay_keys import PROTOCOL_SPLIT as PROTOCOL_VERSION_SPLIT
+from app.pairing_transport import transport_refusal
 from app.user_names import (
     default_display_name,
     format_person_display_name,
@@ -216,6 +217,9 @@ def normalize_mytracks_base_url(domain: str) -> str:
     parsed = urlparse(trimmed)
     if parsed.netloc == "":
         raise MyTracksSyncError(f"Expected My Tracks domain, got {domain!r}")
+    refusal = transport_refusal(trimmed, label="My Tracks address")
+    if refusal is not None:
+        raise MyTracksSyncError(refusal)
     return trimmed
 
 
@@ -572,6 +576,10 @@ async def request_user_location(
             status="error",
             detail="Expected relay API key, got empty value",
         )
+    refusal = transport_refusal(base_url, label="My Tracks address")
+    if refusal is not None:
+        # The relay key goes in a header; never send it over plain HTTP to a public host, even for a stored address.
+        return RequestLocationResult(status="error", detail=refusal)
     payload: dict[str, str] = {"reason": reason.strip()}
     if rule_id is not None and rule_id.strip() != "":
         payload["rule_id"] = rule_id.strip()
