@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
@@ -25,6 +26,8 @@ _LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal", ".localdomain")
 # 100.64.0.0/10 is shared address space (carrier-grade NAT, Tailscale): not routable on the internet, so LAN-like.
 _SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 _NUMERIC_LABEL = re.compile(r"^(0x[0-9a-f]+|[0-9]+)$")
+# IDNA (UTS 46) treats these as label separators, so HTTP clients dial "tracks.example.com" for "tracks。example.com".
+_IDEOGRAPHIC_FULL_STOPS = str.maketrans({"\u3002": ".", "\uff61": "."})
 
 
 @dataclass(frozen=True)
@@ -42,7 +45,7 @@ def assess_url(url: str) -> TransportAssessment:
         # WHATWG-style clients read a backslash as a path delimiter and urllib does not: they would disagree on host.
         raise ValueError("Expected a URL without backslashes")
     parts = urlsplit(trimmed)
-    host = (parts.hostname or "").lower().rstrip(".")
+    host = _normalize_host(parts.hostname or "")
     if host == "":
         raise ValueError("Expected a URL with a host")
     if parts.scheme == "https":
@@ -70,6 +73,11 @@ def _assess_name(host: str) -> TransportAssessment:
     if len(labels) == 1 or host.endswith(_LOCAL_SUFFIXES):
         return TransportAssessment("lan", host)
     return TransportAssessment("public", host)
+
+
+def _normalize_host(hostname: str) -> str:
+    """Lowercase ``hostname`` and fold Unicode dots and fullwidth forms the way the HTTP client's IDNA step does."""
+    return unicodedata.normalize("NFKC", hostname).translate(_IDEOGRAPHIC_FULL_STOPS).lower().rstrip(".")
 
 
 def transport_refusal(url: str, *, label: str) -> str | None:

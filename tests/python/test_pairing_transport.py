@@ -58,6 +58,11 @@ from app.pairing_transport import assess_url, transport_refusal, transport_warni
         ("http://[fe80::1%25eth0]", "lan"),
         ("http://[::ffff:192.168.1.1]", "lan"),
         ("http://[::ffff:8.8.8.8]", "public"),
+        # Unicode dots are label separators to IDNA, so these reach the public host tracks.example.com
+        ("http://tracks\u3002example.com", "public"),
+        ("http://tracks\uff61example.com", "public"),
+        ("http://tracks\uff0eexample.com", "public"),
+        ("http://nas\u3002local", "lan"),
         # hostnames that only look local
         ("http://localhost.evil.com", "public"),
         ("http://192.168.1.1@evil.com/", "public"),
