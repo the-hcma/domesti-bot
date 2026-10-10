@@ -376,7 +376,8 @@ export async function mountMyTracksPairingPanel(
   const transportNote = document.createElement("p");
   transportNote.className = "settings-dialog-help mytracks-transport-warning";
   transportNote.hidden = true;
-  transportNote.setAttribute("role", "note");
+  // A stored public-HTTP address breaks sync and request-location, so screen readers should announce it.
+  transportNote.setAttribute("role", "status");
   relayKeyField.append(transportNote);
 
   const retentionGroup = document.createElement("fieldset");

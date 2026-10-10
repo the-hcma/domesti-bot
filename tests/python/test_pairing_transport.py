@@ -6,15 +6,29 @@ import argparse
 import socket
 from http import HTTPStatus
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import httpx2
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from app.api.app import create_app
-from app.mytracks_service import DomestiBotConfigFromMyTracks, MyTracksPairResult
-from app.pairing_transport import assess_url, transport_refusal, transport_warning, transport_warnings
+from app.api.mytracks_routes import SAVED_DOMAIN_INVALID_PREFIX
+from app.mytracks_service import DomestiBotConfigFromMyTracks, MyTracksPairResult, request_user_location
+from app.mytracks_store import MyTracksConfigSave, save_mytracks_config
+from app.pairing_transport import (
+    TRANSPORT_BACKSLASH_ERROR,
+    TRANSPORT_LAN_WARNING,
+    TRANSPORT_REFUSAL,
+    TRANSPORT_STORED_PUBLIC_WARNING,
+    TRANSPORT_TLS_PROXY_HINT,
+    TRANSPORT_UNUSABLE,
+    assess_url,
+    transport_refusal,
+    transport_warning,
+    transport_warnings,
+)
 
 
 @pytest.mark.parametrize(
@@ -95,8 +109,9 @@ def test_only_public_http_is_refused_and_only_lan_http_warns() -> None:
     assert transport_refusal("https://tracks.example.com", label="x") is None
     assert transport_refusal("http://192.168.1.10", label="x") is None
     assert transport_refusal("http://localhost", label="x") is None
-    refusal = transport_refusal("http://tracks.example.com", label="My Tracks address")
-    assert refusal is not None and "My Tracks address" in refusal and "https://" in refusal
+    assert transport_refusal("http://tracks.example.com", label="My Tracks address") == _refusal(
+        "My Tracks address", "tracks.example.com"
+    )
 
     assert transport_warning("http://192.168.1.10", label="x") is not None
     for quiet in ("https://tracks.example.com", "http://localhost", "http://tracks.example.com"):
@@ -115,9 +130,14 @@ def test_stored_urls_produce_warnings_including_an_old_public_http_one() -> None
             "g": "http://localhost",
         }
     )
-    assert len(warnings) == 2
-    assert "local network" in warnings[0] and "192.168.1.10" in warnings[0]
-    assert "public host" in warnings[1] and "re-pair" in warnings[1]
+    assert warnings == [
+        TRANSPORT_LAN_WARNING.format(label="a", host="192.168.1.10"),
+        TRANSPORT_STORED_PUBLIC_WARNING.format(label="c", host="legacy.example.com"),
+    ]
+
+
+def _refusal(label: str, host: str) -> str:
+    return TRANSPORT_REFUSAL.format(label=label, host=host, tls_hint=TRANSPORT_TLS_PROXY_HINT)
 
 
 # --- the pair route -----------------------------------------------------------------------------------------
@@ -136,7 +156,9 @@ def client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(argparse.Namespace(discovery_cache=str(tmp_path / "ui.sqlite"), tailwind_token=None)))
 
 
-def _pair(client: TestClient, domain: str, *, headers: dict[str, str] | None = None):
+def _pair(
+    client: TestClient, domain: str, *, headers: dict[str, str] | None = None
+) -> tuple[httpx2.Response, MagicMock]:
     # No test here may touch the network: the pre-flight config fetch and the pairing call are both replaced.
     with (
         patch("app.api.mytracks_routes.fetch_mytracks_domesti_config", return_value=DomestiBotConfigFromMyTracks()),
@@ -153,8 +175,7 @@ def _pair(client: TestClient, domain: str, *, headers: dict[str, str] | None = N
 def test_pairing_with_plain_http_to_a_public_my_tracks_is_refused_before_anything_is_sent(client: TestClient) -> None:
     response, pair = _pair(client, "http://tracks.example.com")
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
-    assert "plain HTTP to a public host" in response.json()["detail"]
-    assert "My Tracks address" in response.json()["detail"]
+    assert response.json()["detail"] == _refusal("My Tracks address", "tracks.example.com")
     pair.assert_not_called()
     assert client.get("/v1/settings/my-tracks/pair-status").json() is None, "nothing was recorded"
 
@@ -166,7 +187,7 @@ def test_pairing_when_domesti_bot_itself_is_public_over_http_is_refused(client: 
         headers={"x-forwarded-host": "bot.example.com", "x-forwarded-proto": "http"},
     )
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
-    assert "public domesti-bot address" in response.json()["detail"]
+    assert response.json()["detail"] == _refusal("public domesti-bot address", "bot.example.com")
     pair.assert_not_called()
 
 
@@ -190,8 +211,10 @@ def test_pairing_over_http_on_the_lan_works_and_the_status_warns_about_it(client
     assert response.status_code == HTTPStatus.OK, response.text
     pair.assert_called_once()
     warnings = response.json()["transport_warnings"]
-    assert any("My Tracks address" in w and "192.168.1.20" in w for w in warnings)
-    assert any("public domesti-bot address" in w for w in warnings)
+    assert warnings == [
+        TRANSPORT_LAN_WARNING.format(label="My Tracks address", host="192.168.1.20"),
+        TRANSPORT_LAN_WARNING.format(label="public domesti-bot address", host="192.168.1.30"),
+    ]
     assert client.get("/v1/settings/my-tracks/pair-status").json()["transport_warnings"] == warnings
 
 
@@ -206,15 +229,13 @@ def test_a_bare_host_defaults_to_https_so_it_passes_the_policy(client: TestClien
 
 
 def _store_domain(db: Path, domain: str) -> None:
-    from app.mytracks_store import MyTracksConfigSave, save_mytracks_config
-
     save_mytracks_config(db, MyTracksConfigSave(domain=domain, username="admin"))
 
 
 def test_saving_a_plain_http_public_address_is_refused(client: TestClient) -> None:
     response = client.put("/v1/settings/my-tracks", json={"domain": "http://tracks.example.com", "username": "admin"})
     assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
-    assert "plain HTTP to a public host" in response.json()["detail"]
+    assert response.json()["detail"] == _refusal("My Tracks address", "tracks.example.com")
     assert (
         client.put(
             "/v1/settings/my-tracks", json={"domain": "http://192.168.1.20:8000", "username": "admin"}
@@ -231,30 +252,28 @@ def test_an_old_stored_public_http_address_blocks_reconcile_and_the_status_asks_
     with patch("app.api.mytracks_routes.reconcile_pairing") as reconcile:
         response = client.post("/v1/settings/my-tracks/pair/reconcile", json={"password": "x"})
     assert response.status_code == HTTPStatus.CONFLICT
-    assert "saved My Tracks domain is invalid" in response.json()["detail"]
+    assert SAVED_DOMAIN_INVALID_PREFIX in response.json()["detail"]
     reconcile.assert_not_called()
     warnings = client.get("/v1/settings/my-tracks/pair-status").json()["transport_warnings"]
-    assert any("re-pair" in w and "tracks.example.com" in w for w in warnings)
+    assert warnings == [TRANSPORT_STORED_PUBLIC_WARNING.format(label="My Tracks address", host="tracks.example.com")]
 
 
 @pytest.mark.asyncio
 async def test_request_location_never_sends_the_relay_key_over_plain_http_to_a_public_host() -> None:
-    from app.mytracks_service import request_user_location
-
     with patch("app.mytracks_service.httpx.AsyncClient") as client_cls:
         result = await request_user_location(
             base_url="http://tracks.example.com", relay_api_key="k" * 43, user_id="henrique", reason="x"
         )
     assert result.status == "error"
-    assert result.detail is not None and "plain HTTP to a public host" in result.detail
+    assert result.detail == _refusal("My Tracks address", "tracks.example.com")
     client_cls.assert_not_called()
 
 
 def test_the_refusal_says_how_to_fix_a_tls_proxy_setup() -> None:
     refusal = transport_refusal("http://bot.example.com", label="public domesti-bot address")
-    assert refusal is not None and "X-Forwarded-Proto: https" in refusal
+    assert refusal is not None and TRANSPORT_TLS_PROXY_HINT in refusal
 
 
 def test_an_ambiguous_url_is_a_refusal_not_a_crash() -> None:
     refusal = transport_refusal("http://evil.com\\@192.168.1.1", label="My Tracks address")
-    assert refusal is not None and "backslashes" in refusal
+    assert refusal == TRANSPORT_UNUSABLE.format(label="My Tracks address", reason=TRANSPORT_BACKSLASH_ERROR)

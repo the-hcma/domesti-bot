@@ -113,6 +113,8 @@ from app.settings_credentials_test import (
 settings_router = APIRouter(prefix="/v1/settings", tags=["settings"])
 rules_router = APIRouter(prefix="/v1/rules", tags=["rules"])
 
+SAVED_DOMAIN_INVALID_PREFIX = "The saved My Tracks domain is invalid"
+
 _LOGGER = mytracks_logger(__name__)
 
 
@@ -299,6 +301,9 @@ async def post_mytracks_pair(
             detail="Expected My Tracks admin password, got empty value",
         )
     update_url, test_url = build_location_update_webhook_urls(domesti_public)
+    # The live-location webhook URLs are built from ``domesti_public``, so checking it covers them. The My Tracks
+    # address was already refused above by ``_validated_mytracks_domain`` when it is public HTTP; here it can only
+    # produce the LAN warning log line.
     _require_acceptable_transport(
         {"My Tracks address": mytracks_base, "public domesti-bot address": domesti_public},
     )
@@ -525,9 +530,7 @@ async def post_mytracks_pair_reconcile(body: MyTracksReconcileIn, request: Reque
     try:
         base_url = normalize_mytracks_base_url(config.domain)
     except MyTracksSyncError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.CONFLICT, detail=f"The saved My Tracks domain is invalid: {exc}"
-        ) from exc
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"{SAVED_DOMAIN_INVALID_PREFIX}: {exc}") from exc
     try:
         result = await asyncio.to_thread(
             reconcile_pairing, cache_path, base_url=base_url, username=username, password=body.password
@@ -872,7 +875,6 @@ def _pair_status_to_schema(
             {
                 "My Tracks address": record.domain,
                 "public domesti-bot address": record.domesti_public_base_url,
-                "live location webhook URL": record.user_location_update_url,
             },
         ),
         relay_protocol_version=record.relay_protocol_version,

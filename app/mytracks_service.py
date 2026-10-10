@@ -576,15 +576,15 @@ async def request_user_location(
             status="error",
             detail="Expected relay API key, got empty value",
         )
+    refusal = transport_refusal(base_url, label="My Tracks address")
+    if refusal is not None:
+        # The relay key goes in a header; never send it over plain HTTP to a public host, even for a stored address.
+        return RequestLocationResult(status="error", detail=refusal)
     payload: dict[str, str] = {"reason": reason.strip()}
     if rule_id is not None and rule_id.strip() != "":
         payload["rule_id"] = rule_id.strip()
     if geofence_id is not None and geofence_id.strip() != "":
         payload["geofence_id"] = geofence_id.strip()
-    refusal = transport_refusal(base_url, label="My Tracks address")
-    if refusal is not None:
-        # The relay key goes in a header; never send it over plain HTTP to a public host, even for a stored address.
-        return RequestLocationResult(status="error", detail=refusal)
     path = _REQUEST_LOCATION_PATH.format(user_id=quote(trimmed_user, safe=""))
     url = f"{base_url.rstrip('/')}{path}"
     try:
