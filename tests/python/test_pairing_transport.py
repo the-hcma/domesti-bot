@@ -77,6 +77,12 @@ from app.pairing_transport import (
         ("http://tracks\uff61example.com", "public"),
         ("http://tracks\uff0eexample.com", "public"),
         ("http://nas\u3002local", "lan"),
+        # blocks that are not private-network ranges: ipaddress.is_private is True for some of them on older Pythons
+        ("http://[2001:1::1]", "public"),
+        ("http://[2001:db8::1]", "public"),
+        ("http://192.0.2.7", "public"),
+        ("http://198.18.0.1", "public"),
+        ("http://[::ffff:127.0.0.1]", "loopback"),
         # hostnames that only look local
         ("http://localhost.evil.com", "public"),
         ("http://192.168.1.1@evil.com/", "public"),

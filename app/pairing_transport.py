@@ -72,9 +72,11 @@ def assess_url(url: str) -> TransportAssessment:
         address = ipaddress.ip_address(host.split("%", 1)[0])
     except ValueError:
         return _assess_name(host)
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
     if address.is_loopback:
         return TransportAssessment(TransportClass.LOOPBACK, host)
-    if address.is_private or address.is_link_local or address in _SHARED_ADDRESS_SPACE:
+    if any(address in network for network in _LAN_NETWORKS):
         return TransportAssessment(TransportClass.LAN, host)
     return TransportAssessment(TransportClass.PUBLIC, host)
 
@@ -121,11 +123,24 @@ def transport_warnings(urls: Mapping[str, str | None]) -> list[str]:
     return warnings
 
 
+# Explicit ranges, not ``is_private``: that property also covers documentation, benchmarking and (on older Pythons)
+# globally reachable blocks such as 2001:1::1, which must never be trusted as local. 100.64.0.0/10 is shared address
+# space (carrier-grade NAT, Tailscale): not routable on the internet, so LAN-like.
+_LAN_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "10.0.0.0/8",
+        "100.64.0.0/10",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
 _LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal", ".localdomain")
 _IDEOGRAPHIC_FULL_STOPS = str.maketrans({"。": ".", "｡": "."})
 _NUMERIC_LABEL = re.compile(r"^(0x[0-9a-f]+|[0-9]+)$")
-# 100.64.0.0/10 is shared address space (carrier-grade NAT, Tailscale): not routable on the internet, so LAN-like.
-_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 
 
 def _assess_name(host: str) -> TransportAssessment:
