@@ -6,8 +6,6 @@ resolution-markers = [
     "platform_machine != 'x86_64' or sys_platform != 'darwin'",
 ]
 
-[options]
-
 [[package]]
 name = "aioesphomeapi"
 version = "45.6.2"
@@ -759,7 +757,7 @@ requires-dist = [
     { name = "pychromecast", specifier = ">=14.0.10" },
     { name = "pyproj" },
     { name = "pyright", specifier = ">=1.1.414" },
-    { name = "python-kasa", git = "https://github.com/python-kasa/python-kasa.git?rev=refs%2Fpull%2F1692%2Fhead" },
+    { name = "python-kasa", specifier = ">=0.11.0.1" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "soco", specifier = ">=0.31.4" },
     { name = "sqlalchemy", specifier = ">=2.1.2" },
@@ -1986,14 +1984,18 @@ wheels = [
 
 [[package]]
 name = "python-kasa"
-version = "0.10.2"
-source = { git = "https://github.com/python-kasa/python-kasa.git?rev=refs%2Fpull%2F1692%2Fhead#8b1f6b8c40588584f5d89df37e4610e2ece9a8cb" }
+version = "0.11.0.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "asyncclick" },
     { name = "cryptography" },
     { name = "mashumaro" },
     { name = "tzdata", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5f/49/30b3526b58892f8407f164aa9b891db3ab6dbebd86f151124e557a7279f6/python_kasa-0.11.0.1.tar.gz", hash = "sha256:378e6bb923690cda5cf1e9d33d4d4094c21a6e337614fd29a0f2d4af40da23e4", size = 526277, upload-time = "2026-10-04T18:41:39.431Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/f1/0d1b2b6617263ba925675b604454fc0686898ac856487827067a1331aa8d/python_kasa-0.11.0.1-py3-none-any.whl", hash = "sha256:58e0ad5c5b71e60c2b58f3a5a17bd9b9427b8947ec72aecb96edaaa6a78d84ad", size = 276609, upload-time = "2026-10-04T18:41:38.098Z" },
 ]
 
 [[package]]
