@@ -95,9 +95,9 @@ def _audited_write(path: Path, write: Callable[[Session], _Outcomes]) -> _Outcom
 
     Three records bracket each change, by name and never by value: ``secret <action>ing key=...`` (INFO) just before
     the commit, ``secret <action> key=...`` (INFO) after it, and ``secret change rolled back action=... key=...``
-    (WARNING) when the commit fails. A process that dies mid-commit leaves the first record without the second, which
-    tells the operator the outcome is unknown. A write that raises before it reports any change (a rejected update,
-    an undecryptable row) logs nothing, because nothing was about to change.
+    (WARNING) when the transaction raises. A process that dies, or is interrupted, mid-commit leaves the first record
+    without the second, which tells the operator the outcome is unknown. A write that raises before it reports any
+    change (a rejected update, an undecryptable row) logs nothing, because nothing was about to change.
     """
     planned: _Outcomes = []
 
@@ -109,7 +109,8 @@ def _audited_write(path: Path, write: Callable[[Session], _Outcomes]) -> _Outcom
 
     try:
         discovery_write(path, _write)
-    except BaseException:
+    except Exception:
+        # Not BaseException: an interrupt in this thread says nothing about the writer thread's commit.
         for action, key in planned:
             _audit_secret_rolled_back(action, key)
         raise
