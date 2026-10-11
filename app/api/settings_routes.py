@@ -735,6 +735,7 @@ async def post_tailwind_token_test(
     try:
         result = await probe_tailwind_token(
             cache_path=cache_path,
+            cli_host=_cli_tailwind_host(),
             cli_token=_cli_tailwind_token(),
             token=body.token,
             host=body.host,
@@ -796,6 +797,14 @@ def _cli_ep1_noise_psk() -> str | None:
     if args is None:
         return None
     raw = getattr(args, "ep1_noise_psk", None)
+    return str(raw) if raw else None
+
+
+def _cli_tailwind_host() -> str | None:
+    args = runtime.cli_args
+    if args is None:
+        return None
+    raw = getattr(args, "tailwind_host", None)
     return str(raw) if raw else None
 
 

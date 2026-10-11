@@ -289,7 +289,9 @@ export async function mountVizioSettingsPanel(
     hideStatus();
   };
 
-  const refreshStatus = async (): Promise<void> => {
+  // ``keepTypedToken``: the host field's change handler reloads the status while the operator may already be pasting
+  // the token, so what is in the field when the response lands must survive it.
+  const refreshStatus = async (keepTypedToken = false): Promise<void> => {
     try {
       const settings = await api.fetchVizioTvsSettings();
       if (!settings.secrets_key_configured) {
@@ -301,7 +303,13 @@ export async function mountVizioSettingsPanel(
         return;
       }
       const tv = findTvRow(settings.tvs, hostInput.value);
+      const typedToken = keepTypedToken ? tokenInput.value : "";
       applyTvStatus(tv);
+      if (typedToken !== "") {
+        tokenInput.value = typedToken;
+        syncSaveVisibility();
+        syncTestEnabled();
+      }
     } catch (err) {
       showStatusMessage(
         err instanceof HttpError ? err.detail : "Could not load Vizio TV status.",
@@ -311,7 +319,7 @@ export async function mountVizioSettingsPanel(
   };
 
   hostInput.addEventListener("change", () => {
-    void refreshStatus();
+    void refreshStatus(true);
   });
 
   const saveToken = (): void => {

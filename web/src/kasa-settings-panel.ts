@@ -716,6 +716,16 @@ export async function mountKasaSettingsPanel(
   };
 
   const updateStatusHint = (s: KasaCredentialsSettingsOut): void => {
+    if (s.password_stored && s.stored_username === null && !s.configured) {
+      // The row exists but cannot be read: the secrets key changed, or none is configured any more.
+      showStatusMessage(
+        s.secrets_key_configured
+          ? "The saved account cannot be read with the current secrets key. Enter the email and password again, or clear them."
+          : "A saved account exists but cannot be read without a secrets key. Add domesti_secrets_key to domesti-bot.config.json (or set DOMESTI_BOT_SECRETS_KEY), or enter the email and password again.",
+        ToastVariant.Error,
+      );
+      return;
+    }
     if (!s.secrets_key_configured) {
       showStatusMessage(
         "Add domesti_secrets_key to domesti-bot.config.json (see domesti-bot.config.json.example) or set DOMESTI_BOT_SECRETS_KEY before saving to the database.",
