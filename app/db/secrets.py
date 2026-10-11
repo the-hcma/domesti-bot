@@ -23,6 +23,15 @@ _LOGGER = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+_Outcomes = list[tuple[str, str]]
+
+_PENDING_ACTION_TO_PROGRESSIVE = {
+    "created": "creating",
+    "re-encrypted": "re-encrypting",
+    "removed": "removing",
+    "replaced": "replacing",
+}
+
 _EP1_NOISE_PSK_KEY = "ep1_noise_psk"
 _KASA_PASSWORD_KEY = "kasa_password"
 _KASA_USERNAME_KEY = "kasa_username"
@@ -71,36 +80,70 @@ def _audit_secret_change(action: str, key: str) -> None:
     _LOGGER.info("secret %s key=%s", action, key)
 
 
-def delete_app_secret(path: Path, *, key: str) -> None:
-    """Remove one secret row if present."""
-    removed = False
+def _audit_secret_pending(action: str, key: str) -> None:
+    """Record the intent to change a secret, before the commit, so a crash during the commit still leaves a trace."""
+    _LOGGER.info("secret %s key=%s", _PENDING_ACTION_TO_PROGRESSIVE.get(action, action), key)
+
+
+def _audit_secret_rolled_back(action: str, key: str) -> None:
+    """Record that a change announced by :func:`_audit_secret_pending` did not commit."""
+    _LOGGER.warning("secret change rolled back action=%s key=%s", action, key)
+
+
+def _audited_write(path: Path, write: Callable[[Session], _Outcomes]) -> _Outcomes:
+    """Run ``write`` in one writer transaction and audit every change it reports as ``(action, key)``.
+
+    Three records bracket each change, by name and never by value: ``secret <action>ing key=...`` (INFO) just before
+    the commit, ``secret <action> key=...`` (INFO) after it, and ``secret change rolled back action=... key=...``
+    (WARNING) when the commit fails. A process that dies mid-commit leaves the first record without the second, which
+    tells the operator the outcome is unknown. A write that raises before it reports any change (a rejected update,
+    an undecryptable row) logs nothing, because nothing was about to change.
+    """
+    planned: _Outcomes = []
 
     def _write(session: Session) -> None:
-        nonlocal removed
-        row = session.get(AppSecret, key.strip())
-        if row is not None:
-            session.delete(row)
-            removed = True
+        planned.clear()
+        planned.extend(write(session))
+        for action, key in planned:
+            _audit_secret_pending(action, key)
 
-    discovery_write(path, _write)
-    if removed:
-        _audit_secret_change("removed", key.strip())
+    try:
+        discovery_write(path, _write)
+    except BaseException:
+        for action, key in planned:
+            _audit_secret_rolled_back(action, key)
+        raise
+    for action, key in planned:
+        _audit_secret_change(action, key)
+    return planned
+
+
+def delete_app_secret(path: Path, *, key: str) -> None:
+    """Remove one secret row if present."""
+
+    def _write(session: Session) -> _Outcomes:
+        row = session.get(AppSecret, key.strip())
+        if row is None:
+            return []
+        session.delete(row)
+        return [("removed", key.strip())]
+
+    _audited_write(path, _write)
 
 
 def delete_kasa_credentials_from_db(path: Path) -> None:
     """Remove encrypted Kasa account username and password rows atomically."""
-    removed: list[str] = []
 
-    def _write(session: Session) -> None:
+    def _write(session: Session) -> _Outcomes:
+        outcomes: _Outcomes = []
         for key in (_KASA_PASSWORD_KEY, _KASA_USERNAME_KEY):
             row = session.get(AppSecret, key)
             if row is not None:
                 session.delete(row)
-                removed.append(key)
+                outcomes.append(("removed", key))
+        return outcomes
 
-    discovery_write(path, _write)
-    for key in removed:
-        _audit_secret_change("removed", key)
+    _audited_write(path, _write)
 
 
 def load_app_secret_text(path: Path, key: str) -> str | None:
@@ -247,7 +290,7 @@ def rotate_app_secrets(
             _classify(name, ciphertext)
     else:
 
-        def _write(session: Session) -> None:
+        def _write(session: Session) -> _Outcomes:
             already_current.clear()
             rotated.clear()
             undecryptable.clear()
@@ -260,10 +303,9 @@ def rotate_app_secrets(
                     f"Expected every stored secret to decrypt with a configured key, got undecryptable rows: "
                     f"{', '.join(undecryptable)}; nothing was changed"
                 )
+            return [("re-encrypted", name) for name in rotated]
 
-        discovery_write(path, _write)
-        for name in rotated:
-            _audit_secret_change("re-encrypted", name)
+        _audited_write(path, _write)
     return SecretsRotationResult(
         already_current=list(already_current),
         rotated=list(rotated),
@@ -291,11 +333,10 @@ def update_app_secrets(
     """
     fernet = _fernet_from_config()  # may be absent: deleting rows must still work without a key
     now = time.time()
-    outcomes: list[tuple[str, str]] = []
     results: list[T] = []
 
-    def _write(session: Session) -> None:
-        outcomes.clear()
+    def _write(session: Session) -> _Outcomes:
+        outcomes: _Outcomes = []
         results.clear()
 
         def read(name: str) -> str | None:
@@ -327,10 +368,9 @@ def update_app_secrets(
                 row.updated_at = now
                 outcomes.append(("replaced", name))
         results.append(result)
+        return outcomes
 
-    discovery_write(path, _write)
-    for action, name in outcomes:
-        _audit_secret_change(action, name)
+    _audited_write(path, _write)
     return results[0]
 
 
@@ -359,9 +399,9 @@ def save_kasa_credentials_to_db(
         )
     fernet = _require_fernet()
     now = time.time()
-    actions: dict[str, str] = {}
 
-    def _write(session: Session) -> None:
+    def _write(session: Session) -> _Outcomes:
+        outcomes: _Outcomes = []
         for key, value in ((_KASA_PASSWORD_KEY, pw), (_KASA_USERNAME_KEY, un)):
             ciphertext = fernet.encrypt(value.encode("utf-8"))
             row = session.get(AppSecret, key)
@@ -373,15 +413,14 @@ def save_kasa_credentials_to_db(
                         updated_at=now,
                     )
                 )
-                actions[key] = "created"
+                outcomes.append(("created", key))
             else:
                 row.ciphertext = ciphertext
                 row.updated_at = now
-                actions[key] = "replaced"
+                outcomes.append(("replaced", key))
+        return outcomes
 
-    discovery_write(path, _write)
-    for key, action in actions.items():
-        _audit_secret_change(action, key)
+    _audited_write(path, _write)
 
 
 def save_mytracks_admin_password_to_db(path: Path, password: str) -> None:
@@ -669,10 +708,8 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
     fernet = _require_fernet()
     ciphertext = fernet.encrypt(value.encode("utf-8"))
     now = time.time()
-    created = False
 
-    def _write(session: Session) -> None:
-        nonlocal created
+    def _write(session: Session) -> _Outcomes:
         row = session.get(AppSecret, key)
         if row is None:
             session.add(
@@ -682,13 +719,12 @@ def _save_app_secret_plaintext(path: Path, key: str, value: str) -> None:
                     updated_at=now,
                 )
             )
-            created = True
-        else:
-            row.ciphertext = ciphertext
-            row.updated_at = now
+            return [("created", key)]
+        row.ciphertext = ciphertext
+        row.updated_at = now
+        return [("replaced", key)]
 
-    discovery_write(path, _write)
-    _audit_secret_change("created" if created else "replaced", key)
+    _audited_write(path, _write)
 
 
 def _validated_fernets(material: str) -> list[Fernet]:

@@ -108,7 +108,10 @@ def test_rotate_reencrypts_every_row_under_the_newest_key_and_keeps_updated_at(
         assert not _decrypts_with(old, ciphertext), name
         assert updated_at == before[name][1], name
     messages = [r.getMessage() for r in caplog.records if r.name == "app.db.secrets"]
-    assert sorted(messages) == sorted(f"secret re-encrypted key={name}" for name in before)
+    expected = [f"secret re-encrypting key={name}" for name in before] + [
+        f"secret re-encrypted key={name}" for name in before
+    ]
+    assert sorted(messages) == sorted(expected)
     assert _TOKEN not in caplog.text
 
     # The old key can now be dropped without losing anything.
