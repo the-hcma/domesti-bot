@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from collections.abc import Mapping
 from http import HTTPStatus
 from pathlib import Path
 from typing import NoReturn
@@ -90,6 +91,7 @@ from app.mytracks_store import (
     set_location_updates_accepted,
     set_remote_request_location_enabled,
 )
+from app.pairing_transport import transport_refusal, transport_warnings
 from app.presence_store import (
     UserLocationRecord,
     prune_all_user_location_history,
@@ -110,6 +112,8 @@ from app.settings_credentials_test import (
 
 settings_router = APIRouter(prefix="/v1/settings", tags=["settings"])
 rules_router = APIRouter(prefix="/v1/rules", tags=["rules"])
+
+SAVED_DOMAIN_INVALID_PREFIX = "The saved My Tracks domain is invalid"
 
 _LOGGER = mytracks_logger(__name__)
 
@@ -297,6 +301,12 @@ async def post_mytracks_pair(
             detail="Expected My Tracks admin password, got empty value",
         )
     update_url, test_url = build_location_update_webhook_urls(domesti_public)
+    # The live-location webhook URLs are built from ``domesti_public``, so checking it covers them. The My Tracks
+    # address was already refused above by ``_validated_mytracks_domain`` when it is public HTTP; here it can only
+    # produce the LAN warning log line.
+    _require_acceptable_transport(
+        {"My Tracks address": mytracks_base, "public domesti-bot address": domesti_public},
+    )
     retention_input = body.location_history_retention
     save_location_history_retention(
         cache_path,
@@ -520,9 +530,7 @@ async def post_mytracks_pair_reconcile(body: MyTracksReconcileIn, request: Reque
     try:
         base_url = normalize_mytracks_base_url(config.domain)
     except MyTracksSyncError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.CONFLICT, detail=f"The saved My Tracks domain is invalid: {exc}"
-        ) from exc
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"{SAVED_DOMAIN_INVALID_PREFIX}: {exc}") from exc
     try:
         result = await asyncio.to_thread(
             reconcile_pairing, cache_path, base_url=base_url, username=username, password=body.password
@@ -863,6 +871,12 @@ def _pair_status_to_schema(
         relay_key_updated_at=record.relay_key_updated_at,
         relay_pairing_state=record.relay_pairing_state,
         relay_previous_key_expires_at=record.relay_previous_key_expires_at,
+        transport_warnings=transport_warnings(
+            {
+                "My Tracks address": record.domain,
+                "public domesti-bot address": record.domesti_public_base_url,
+            },
+        ),
         relay_protocol_version=record.relay_protocol_version,
         require_relay_protocol_2=record.require_relay_protocol_2,
         location_history_retention=_retention_record_to_schema(record.location_history_retention),
@@ -998,6 +1012,16 @@ def _resolve_sync_credentials(
             detail="Expected My Tracks admin password, got empty value",
         )
     return record, username
+
+
+def _require_acceptable_transport(urls: Mapping[str, str]) -> None:
+    """Refuse to pair when a relay key would cross the internet over plain HTTP; log LAN HTTP as a warning."""
+    for label, url in urls.items():
+        refusal = transport_refusal(url, label=label)
+        if refusal is not None:
+            raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=refusal)
+    for warning in transport_warnings(urls):
+        _LOGGER.warning("[pairing] %s", warning)
 
 
 def _validated_mytracks_domain(domain: str) -> str:

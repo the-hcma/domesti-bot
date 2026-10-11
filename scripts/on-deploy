@@ -36,7 +36,7 @@
 
 set -euo pipefail
 
-# shellcheck disable=SC2317  # Invoked indirectly via `trap ... ERR` below.
+# shellcheck disable=SC2317,SC2329  # Invoked indirectly via `trap ... ERR` below.
 _on_deploy_fail() {
     local rc=$?
     echo ""
