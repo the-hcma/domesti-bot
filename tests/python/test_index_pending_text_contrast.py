@@ -9,7 +9,8 @@ import pytest
 
 _INDEX_HTML = Path(__file__).resolve().parents[2] / "app" / "api" / "static" / "index.html"
 _MIN_TEXT_CONTRAST = 4.5  # WCAG AA for small text
-_WHITE = (255, 255, 255)
+_THEME_BLOCKS = 4  # :root, prefers dark, [data-theme=light], [data-theme=dark]
+_BLOCK_WINDOW = 1200
 
 
 def _contrast(foreground: tuple[int, int, int], background: tuple[int, int, int]) -> float:
@@ -26,12 +27,21 @@ def _rgb(hex_color: str) -> tuple[int, int, int]:
     return int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
 
 
-def test_pending_text_is_readable_on_a_white_card() -> None:
+def test_pending_text_is_readable_on_the_card_surfaces_of_every_theme_block() -> None:
+    """Every ``--pending-text`` declaration (light, dark, forced light, forced dark) against its block's surfaces."""
     html = _INDEX_HTML.read_text(encoding="utf-8")
-    light_values = re.findall(r"--pending-text:\s*(#[0-9a-fA-F]{6});\s*/\*", html)
-    assert light_values, "Expected a light-theme --pending-text declaration, got none"
-    for value in light_values:
-        assert _contrast(_rgb(value), _WHITE) >= _MIN_TEXT_CONTRAST, value
+    declarations = list(re.finditer(r"--pending-text:\s*(#[0-9a-fA-F]{6});", html))
+    assert len(declarations) == _THEME_BLOCKS, (
+        f"Expected {_THEME_BLOCKS} --pending-text declarations, got {len(declarations)}"
+    )
+    for declaration in declarations:
+        # The surfaces are declared in the same variable block, after the text color.
+        block = html[declaration.end() : declaration.end() + _BLOCK_WINDOW]
+        surfaces = re.findall(r"--(?:card|card-elev):\s*(#[0-9a-fA-F]{6});", block)
+        assert len(surfaces) >= 2, f"Expected card surfaces after {declaration.group(0)}, got {surfaces}"
+        for surface in surfaces[:2]:
+            ratio = _contrast(_rgb(declaration.group(1)), _rgb(surface))
+            assert ratio >= _MIN_TEXT_CONTRAST, f"{declaration.group(1)} on {surface} is {ratio:.2f}:1"
 
 
 @pytest.mark.parametrize(
