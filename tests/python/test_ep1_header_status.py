@@ -475,7 +475,7 @@ def test_index_html_ep1_header_status_css_contract() -> None:
         '.ep1-header-occupancy-glyph[data-occupancy="clear"]',
     )
     assert "var(--accent)" in occupied
-    assert "var(--pending)" in clear
+    assert "var(--pending-text)" in clear
     light_occupied = _css_rule_block(
         style,
         'html[data-theme="light"] .ep1-header-occupancy-glyph[data-occupancy="occupied"]',

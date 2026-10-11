@@ -282,6 +282,7 @@ async def probe_tailwind_token(
     cli_token: str | None,
     token: str | None = None,
     host: str | None = None,
+    cli_host: str | None = None,
 ) -> CredentialsTestResult:
     """One-shot Tailwind status read with an ephemeral client."""
     form_token = (token or "").strip()
@@ -305,6 +306,7 @@ async def probe_tailwind_token(
         source = SettingsCredentialsTestSource(resolved_source)
     resolved_host = await _resolve_tailwind_probe_host(
         cache_path=cache_path,
+        cli_host=cli_host,
         host=host,
     )
     client = Tailwind(host=resolved_host, token=resolved_token, request_timeout=8)
@@ -532,18 +534,17 @@ def _split_ep1_host_port(spec: str) -> tuple[str, int]:
 async def _resolve_tailwind_probe_host(
     *,
     cache_path: Path | None,
+    cli_host: str | None,
     host: str | None,
 ) -> str:
-    form_host = (host or "").strip()
-    if form_host:
-        return form_host
+    """Form host, then ``--tailwind-host``, ``TAILWIND_HOST``, the cached host, then mDNS (the server's own order)."""
+    for candidate in (host, cli_host, os.environ.get("TAILWIND_HOST")):
+        if candidate and candidate.strip():
+            return candidate.strip()
     if cache_path is not None:
         cached = device_discovery_store.load_tailwind_host(cache_path)
         if cached:
             return cached
-    env_host = (os.environ.get("TAILWIND_HOST") or "").strip()
-    if env_host:
-        return env_host
     try:
         return await discover_tailwind_host(timeout=8.0)
     except TailwindDiscoveryError as exc:

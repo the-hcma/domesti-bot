@@ -26,9 +26,10 @@ from app.settings_credentials_test import CredentialsTestResult
 from app.vizio_smartcast_client import VizioSmartCastAuthError, VizioSmartCastBusyError
 
 
-def _client(*, cache_path: Path | None) -> tuple[TestClient, FastAPI]:
+def _client(*, cache_path: Path | None, tailwind_host: str | None = None) -> tuple[TestClient, FastAPI]:
     args = argparse.Namespace(
         discovery_cache=str(cache_path) if cache_path is not None else None,
+        tailwind_host=tailwind_host,
         tailwind_token=None,
         vizio_auth_token=None,
         vizio_host=[],
@@ -88,6 +89,74 @@ def test_post_tailwind_token_test_with_a_blank_body_uses_the_stored_token(
     assert body["ok"] is True
     assert body["source"] == "database"
     assert tailwind.call_args.kwargs["token"] == "123456"
+
+
+def _probe_host(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    cached_host: str,
+    cli_host: str | None,
+    env_host: str | None,
+    form_host: str | None,
+) -> str:
+    """Run the Tailwind Test with the given host sources and return the host the probe dialed."""
+    monkeypatch.delenv("TAILWIND_TOKEN", raising=False)
+    monkeypatch.delenv("TAILWIND_HOST", raising=False)
+    if env_host is not None:
+        monkeypatch.setenv("TAILWIND_HOST", env_host)
+    monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
+    db = tmp_path / "ui.sqlite"
+    save_tailwind_token_to_db(db, "123456")
+    device_discovery_store.save_tailwind_host(db, cached_host)
+    client, _app = _client(cache_path=db, tailwind_host=cli_host)
+    fake_client = AsyncMock()
+    fake_client.__aenter__.return_value = fake_client
+    fake_client.status.return_value = MagicMock(doors=[object()])
+    body = {} if form_host is None else {"host": form_host}
+    with patch("app.settings_credentials_test.Tailwind", return_value=fake_client) as tailwind:
+        response = client.post("/v1/settings/tailwind-token/test", json=body)
+    assert response.status_code == HTTPStatus.OK
+    return str(tailwind.call_args.kwargs["host"])
+
+
+def test_post_tailwind_token_test_dials_the_cli_host_before_the_cached_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    host = _probe_host(
+        monkeypatch, tmp_path, cached_host="192.168.1.99", cli_host="192.168.1.20", env_host=None, form_host=None
+    )
+    assert host == "192.168.1.20"
+
+
+def test_post_tailwind_token_test_dials_the_env_host_before_the_cached_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    host = _probe_host(
+        monkeypatch, tmp_path, cached_host="192.168.1.99", cli_host=None, env_host="192.168.1.30", form_host=None
+    )
+    assert host == "192.168.1.30"
+
+
+def test_post_tailwind_token_test_dials_the_cached_host_without_cli_or_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    host = _probe_host(monkeypatch, tmp_path, cached_host="192.168.1.99", cli_host=None, env_host=None, form_host=None)
+    assert host == "192.168.1.99"
+
+
+def test_post_tailwind_token_test_dials_the_form_host_before_every_other(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    host = _probe_host(
+        monkeypatch,
+        tmp_path,
+        cached_host="192.168.1.99",
+        cli_host="192.168.1.20",
+        env_host="192.168.1.30",
+        form_host="192.168.1.40",
+    )
+    assert host == "192.168.1.40"
 
 
 def test_post_tailwind_token_test_with_an_undecryptable_row_explains_the_key_change(

@@ -722,6 +722,14 @@ export async function mountKasaSettingsPanel(
       );
       return;
     }
+    if (s.password_stored && s.stored_username === null && !s.configured) {
+      // The row exists but the secrets key changed, so the saved account cannot be read.
+      showStatusMessage(
+        "The saved account cannot be read with the current secrets key. Enter the email and password again, or clear them.",
+        ToastVariant.Error,
+      );
+      return;
+    }
     if (s.skipped_auth_hosts.length > 0 && s.configured) {
       const sample = s.skipped_auth_hosts.slice(0, 3).join(", ");
       const more =
