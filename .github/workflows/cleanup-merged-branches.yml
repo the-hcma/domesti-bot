@@ -40,13 +40,40 @@ jobs:
             esac
           }
 
+          # Read-only GitHub calls: explicit timeout, at most three attempts, linear backoff
+          # (CLEANUP_RETRY_DELAY_S seconds times the attempt number). A persistent failure is returned to
+          # the caller, which must not mistake it for an empty result and decide a branch's fate from it.
+          retry_delay_s="${CLEANUP_RETRY_DELAY_S:-5}"
+          gh_read_with_retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout 60 gh "$@"; then
+                return 0
+              fi
+              if [[ "${attempt}" -lt 3 ]]; then
+                sleep $(( attempt * retry_delay_s ))
+              fi
+            done
+            return 1
+          }
+
           delete_branch_ref() {
             local branch="$1"
             local encoded="${branch//\//%2F}"
-            gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/${encoded}" >/dev/null 2>&1
+            # A write: bounded by a timeout but never retried here; the next daily run is the retry.
+            if timeout 60 gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/${encoded}" >/dev/null; then
+              echo "Deleted ${branch}"
+            else
+              echo "Failed to delete ${branch}" >&2
+              return 1
+            fi
           }
 
-          branches="$(gh api "repos/${REPOSITORY}/branches" --paginate --jq '.[].name' | grep -v '^main$' || true)"
+          if ! all_branches="$(gh_read_with_retry api "repos/${REPOSITORY}/branches" --paginate --jq '.[].name')"; then
+            echo "Failed to list branches of ${REPOSITORY}; nothing was deleted." >&2
+            exit 1
+          fi
+          branches="$(grep -v '^main$' <<<"${all_branches}" || true)"
           if [[ -z "${branches}" ]]; then
             echo "No branches found besides main."
             exit 0
@@ -56,27 +83,43 @@ jobs:
           repo_practices_cutoff="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
           deleted=0
           kept=0
+          delete_failures=0
 
           for branch in ${branches}; do
-            open_pr_number="$(
-              gh api "repos/${REPOSITORY}/pulls?state=open&head=${REPOSITORY_OWNER}:${branch}" \
-                --jq '.[0].number // empty' 2>/dev/null || true
-            )"
+            # Match on the PR's head ref instead of the REST ``head=owner:branch`` filter: GitHub
+            # ignores that filter when the branch name contains a slash and returns every PR, which
+            # made unrelated open or merged PRs decide the fate of ``repo-practices/*`` style branches.
+            # A PR counts only when its head repository is this repository (owner and name): a same-named
+            # branch in a fork must not decide this repository's branch. A failed lookup is not "no PR":
+            # keep the branch rather than decide from missing data.
+            if ! open_pr_number="$(
+              gh_read_with_retry pr list --repo "${REPOSITORY}" --head "${branch}" --state open --limit 100 \
+                --json number,headRepository,headRepositoryOwner \
+                --jq '[.[] | select(.headRepositoryOwner.login == env.REPOSITORY_OWNER and .headRepository.name == (env.REPOSITORY | split("/")[1]))][0].number // empty'
+            )"; then
+              echo "Could not look up open PRs for ${branch}; keeping it." >&2
+              kept=$(( kept + 1 ))
+              continue
+            fi
             if [[ -n "${open_pr_number}" ]]; then
               kept=$(( kept + 1 ))
               continue
             fi
 
-            closed_pr_number="$(
-              gh api "repos/${REPOSITORY}/pulls?state=closed&head=${REPOSITORY_OWNER}:${branch}" \
-                --jq '.[0].number // empty' 2>/dev/null || true
-            )"
+            if ! pr_data="$(
+              gh_read_with_retry pr list --repo "${REPOSITORY}" --head "${branch}" --state all --limit 100 \
+                --json number,state,mergedAt,closedAt,headRepository,headRepositoryOwner \
+                --jq '[.[] | select(.headRepositoryOwner.login == env.REPOSITORY_OWNER and .headRepository.name == (env.REPOSITORY | split("/")[1]) and .state != "OPEN")][0] // empty'
+            )"; then
+              echo "Could not look up closed PRs for ${branch}; keeping it." >&2
+              kept=$(( kept + 1 ))
+              continue
+            fi
 
             delete_branch=0
-            if [[ -n "${closed_pr_number}" ]]; then
-              pr_data="$(gh api "repos/${REPOSITORY}/pulls/${closed_pr_number}" --jq '{merged, closed_at}')"
-              pr_merged="$(jq -r '.merged' <<<"${pr_data}")"
-              pr_closed_at="$(jq -r '.closed_at' <<<"${pr_data}")"
+            if [[ -n "${pr_data}" ]]; then
+              pr_merged="$(jq -r '.mergedAt != null' <<<"${pr_data}")"
+              pr_closed_at="$(jq -r '.closedAt' <<<"${pr_data}")"
 
               if [[ "${pr_merged}" == "true" ]]; then
                 delete_branch=1
@@ -100,6 +143,7 @@ jobs:
                 deleted=$(( deleted + 1 ))
               else
                 kept=$(( kept + 1 ))
+                delete_failures=$(( delete_failures + 1 ))
               fi
             else
               kept=$(( kept + 1 ))
@@ -107,3 +151,9 @@ jobs:
           done
 
           echo "Deleted ${deleted} branches; kept ${kept} branches."
+
+          # Do not report success after an incomplete cleanup; the next daily run retries.
+          if [[ "${delete_failures}" -gt 0 ]]; then
+            echo "Failed to delete ${delete_failures} branch(es)." >&2
+            exit 1
+          fi
