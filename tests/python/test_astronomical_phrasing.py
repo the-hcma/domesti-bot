@@ -27,6 +27,7 @@ from app.astronomical_phrasing import (
     format_duration_minutes,
     offset_phrase,
     rule_has_astronomical_condition,
+    unreachable_window_reason,
 )
 from app.device_enums import RuleTrigger
 from app.rule_evaluator import _sun_timing_notes_for_rule  # pyright: ignore[reportPrivateUsage]
@@ -189,3 +190,43 @@ def test_sun_timing_notes_for_rule_skip_settings_when_rule_has_no_sun_condition(
     rule = _rule(AllConditionsCondition(type="all", conditions=[]))
     with patch("app.rule_evaluator.load_settings_location", side_effect=AssertionError("must not load")):
         assert _sun_timing_notes_for_rule(rule, at_epoch=0.0) == ()
+
+
+def test_after_sunset_offset_past_midnight_says_window_does_not_open() -> None:
+    condition = AfterSunsetCondition(type="after_sunset", offset_minutes=360)
+    note = describe_astronomical_condition(condition, sun=_SUN, timezone=_TZ)
+    assert note is not None
+    assert note.sentence == (
+        "Sunset today is at 6:32 PM. The evening window would open 6 hours after sunset,"
+        " which is at or past midnight, so it does not open today."
+    )
+    assert note.compact == note.sentence
+
+
+def test_before_sunset_offset_past_midnight_says_window_does_not_apply() -> None:
+    reason = unreachable_window_reason(
+        BeforeSunsetCondition(type="before_sunset", offset_minutes=360),
+        sun=_SUN,
+        timezone=_TZ,
+    )
+    assert reason is not None
+    assert "past midnight" in reason
+
+
+def test_before_sunrise_offset_before_midnight_says_window_does_not_apply() -> None:
+    reason = unreachable_window_reason(
+        BeforeSunriseCondition(type="before_sunrise", offset_minutes=-500),
+        sun=_SUN,
+        timezone=_TZ,
+    )
+    assert reason is not None
+    assert "does not apply today" in reason
+
+
+def test_reachable_windows_have_no_unreachable_reason() -> None:
+    for condition in (
+        AfterSunsetCondition(type="after_sunset", offset_minutes=-25),
+        BeforeSunriseCondition(type="before_sunrise", offset_minutes=10),
+        BeforeSunsetCondition(type="before_sunset", offset_minutes=-25),
+    ):
+        assert unreachable_window_reason(condition, sun=_SUN, timezone=_TZ) is None

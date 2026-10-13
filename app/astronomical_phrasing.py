@@ -23,6 +23,7 @@ from app.api.schemas import (
     RulesSunOut,
 )
 
+MINUTES_PER_DAY = 24 * 60
 MINUTES_PER_HOUR = 60
 
 
@@ -55,6 +56,9 @@ def describe_astronomical_condition(
     timezone: ZoneInfo,
 ) -> SunTimingNote | None:
     """Describe one sunrise/sunset condition, or ``None`` for any other condition type."""
+    unreachable = unreachable_window_reason(condition, sun=sun, timezone=timezone)
+    if unreachable is not None:
+        return SunTimingNote(compact=unreachable, sentence=unreachable)
     if isinstance(condition, AfterSunsetCondition):
         offset = condition.offset_minutes
         sunset_at = parse_local_iso(sun.sunset_at, timezone)
@@ -146,6 +150,53 @@ def rule_has_astronomical_condition(rule: RuleOut) -> bool:
         isinstance(condition, (AfterSunsetCondition, BeforeSunriseCondition, BeforeSunsetCondition))
         for condition in _walk_conditions(rule.conditions.all)
     )
+
+
+def unreachable_window_reason(
+    condition: RuleConditionOut,
+    *,
+    sun: RulesSunOut,
+    timezone: ZoneInfo,
+) -> str | None:
+    """Explain why an offset window never applies today, mirroring the evaluator's boundaries.
+
+    ``after_sunset`` never opens when ``sunset + offset`` reaches midnight, ``before_sunset``
+    never applies when ``sunset + offset`` passes midnight and ``before_sunrise`` never applies
+    when ``sunrise + offset`` is at or before midnight. ``None`` means the window can be active.
+    """
+    if isinstance(condition, AfterSunsetCondition):
+        sunset_at = parse_local_iso(sun.sunset_at, timezone)
+        if _minutes_of_day(sunset_at) + condition.offset_minutes >= MINUTES_PER_DAY:
+            phrase = offset_phrase(event="sunset", offset_minutes=condition.offset_minutes)
+            return (
+                f"Sunset today is at {format_clock_time(sunset_at)}. "
+                f"The evening window would open {phrase},"
+                " which is at or past midnight, so it does not open today."
+            )
+    if isinstance(condition, BeforeSunriseCondition):
+        sunrise_at = parse_local_iso(sun.sunrise_at, timezone)
+        if _minutes_of_day(sunrise_at) + condition.offset_minutes <= 0:
+            phrase = offset_phrase(event="sunrise", offset_minutes=condition.offset_minutes)
+            return (
+                f"Sunrise today is at {format_clock_time(sunrise_at)}. "
+                f"The morning window would close {phrase},"
+                " which is at or before midnight, so it does not apply today."
+            )
+    if isinstance(condition, BeforeSunsetCondition):
+        sunset_at = parse_local_iso(sun.sunset_at, timezone)
+        if _minutes_of_day(sunset_at) + condition.offset_minutes > MINUTES_PER_DAY:
+            phrase = offset_phrase(event="sunset", offset_minutes=condition.offset_minutes)
+            return (
+                f"Sunset today is at {format_clock_time(sunset_at)}. "
+                f"The daytime window would close {phrase},"
+                " which is past midnight, so it does not apply today."
+            )
+    return None
+
+
+def _minutes_of_day(moment: datetime) -> int:
+    """Return minutes since local midnight."""
+    return moment.hour * MINUTES_PER_HOUR + moment.minute
 
 
 def _opens_phrase(*, event: str, event_at: datetime, offset_minutes: int) -> str:

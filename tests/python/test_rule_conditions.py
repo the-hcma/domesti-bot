@@ -2063,3 +2063,20 @@ def test_after_sunset_detail_states_offset_open_time_and_sunset() -> None:
     assert "25 minutes before sunset" in detail
     assert "8:02 PM" in detail
     assert "8:27 PM" in detail
+
+
+def test_after_sunset_detail_explains_offset_past_midnight() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    rule = _evening_rule()
+    condition = rule.conditions.all[0]
+    assert isinstance(condition, AfterSunsetCondition)
+    late_rule = rule.model_copy(
+        update={
+            "conditions": rule.conditions.model_copy(
+                update={"all": [condition.model_copy(update={"offset_minutes": 360}), *rule.conditions.all[1:]]},
+            ),
+        },
+    )
+    result = evaluate_rule(late_rule, _ctx(now=now)).conditions[0]
+    assert result.met is False
+    assert "does not open today" in result.detail

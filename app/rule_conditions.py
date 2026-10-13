@@ -43,7 +43,7 @@ from app.api.schemas import (
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
 )
-from app.astronomical_phrasing import anchor_clause, parse_local_iso
+from app.astronomical_phrasing import anchor_clause, parse_local_iso, unreachable_window_reason
 from app.automation_rules_loader import load_settings_location
 from app.device_display import format_device_display
 from app.device_enums import (
@@ -868,6 +868,9 @@ def _evaluate_after_sunset(
         detail = f"Evening window active (opened {opens}; until midnight)"
     else:
         detail = f"Outside evening window (opens {opens}; until midnight)"
+    unreachable = unreachable_window_reason(condition, sun=ctx.sun, timezone=ctx.timezone)
+    if unreachable is not None:
+        detail = unreachable
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
@@ -964,6 +967,9 @@ def _evaluate_before_sunrise(
         detail = f"Morning window active (midnight until {closes})"
     else:
         detail = f"Outside morning window (midnight until {closes})"
+    unreachable = unreachable_window_reason(condition, sun=ctx.sun, timezone=ctx.timezone)
+    if unreachable is not None:
+        detail = unreachable
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
@@ -998,6 +1004,9 @@ def _evaluate_before_sunset(
         detail = f"Before sunrise — window opens at sunrise ({sunrise_label}) and runs until {closes}"
     else:
         detail = f"Outside sunrise–sunset window (sunrise {sunrise_label} until {closes})"
+    unreachable = unreachable_window_reason(condition, sun=ctx.sun, timezone=ctx.timezone)
+    if unreachable is not None:
+        detail = unreachable
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
