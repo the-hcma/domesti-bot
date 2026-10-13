@@ -2060,6 +2060,7 @@ def test_after_sunset_detail_states_offset_open_time_and_sunset() -> None:
         },
     )
     detail = evaluate_rule(offset_rule, _ctx(now=now)).conditions[0].detail
+    assert "opened at 8:02 PM" in detail or "opens at 8:02 PM" in detail
     assert "25 minutes before sunset" in detail
     assert "8:02 PM" in detail
     assert "8:27 PM" in detail

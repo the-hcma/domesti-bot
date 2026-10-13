@@ -41,10 +41,10 @@ def anchor_clause(
     event_at: datetime,
     offset_minutes: int,
 ) -> str:
-    """Return ``"6:07 PM, 25 minutes before sunset at 6:32 PM"`` (or ``"sunset at 6:32 PM"``)."""
+    """Return ``"6:07 PM, 25 minutes before sunset at 6:32 PM"`` (or ``"6:32 PM, at sunset"``)."""
     event_clock = format_clock_time(event_at)
     if offset_minutes == 0:
-        return f"{event} at {event_clock}"
+        return f"{event_clock}, at {event}"
     anchor_clock = format_clock_time(event_at + timedelta(minutes=offset_minutes))
     return f"{anchor_clock}, {offset_phrase(event=event, offset_minutes=offset_minutes)} at {event_clock}"
 
@@ -162,36 +162,55 @@ def unreachable_window_reason(
 
     ``after_sunset`` never opens when ``sunset + offset`` reaches midnight, ``before_sunset``
     never applies when ``sunset + offset`` passes midnight and ``before_sunrise`` never applies
-    when ``sunrise + offset`` is at or before midnight. ``None`` means the window can be active.
+    when ``sunrise + offset`` is at or before midnight; ``before_sunset`` also never applies when
+    it closes at or before sunrise. ``None`` means the window can be active.
     """
     if isinstance(condition, AfterSunsetCondition):
         sunset_at = parse_local_iso(sun.sunset_at, timezone)
         if _minutes_of_day(sunset_at) + condition.offset_minutes >= MINUTES_PER_DAY:
-            phrase = offset_phrase(event="sunset", offset_minutes=condition.offset_minutes)
             return (
-                f"Sunset today is at {format_clock_time(sunset_at)}. "
-                f"The evening window would open {phrase},"
-                " which is at or past midnight, so it does not open today."
+                f"Sunset today is at {format_clock_time(sunset_at)}. The evening window would open at "
+                f"{_adjusted_clock(sunset_at, 'sunset', condition.offset_minutes)}, "
+                "which is at or past midnight, so it does not open today."
             )
     if isinstance(condition, BeforeSunriseCondition):
         sunrise_at = parse_local_iso(sun.sunrise_at, timezone)
         if _minutes_of_day(sunrise_at) + condition.offset_minutes <= 0:
-            phrase = offset_phrase(event="sunrise", offset_minutes=condition.offset_minutes)
             return (
-                f"Sunrise today is at {format_clock_time(sunrise_at)}. "
-                f"The morning window would close {phrase},"
-                " which is at or before midnight, so it does not apply today."
+                f"Sunrise today is at {format_clock_time(sunrise_at)}. The morning window would close at "
+                f"{_adjusted_clock(sunrise_at, 'sunrise', condition.offset_minutes)}, "
+                "which is at or before midnight, so it does not apply today."
             )
     if isinstance(condition, BeforeSunsetCondition):
+        sunrise_at = parse_local_iso(sun.sunrise_at, timezone)
         sunset_at = parse_local_iso(sun.sunset_at, timezone)
-        if _minutes_of_day(sunset_at) + condition.offset_minutes > MINUTES_PER_DAY:
-            phrase = offset_phrase(event="sunset", offset_minutes=condition.offset_minutes)
+        closes_minutes = _minutes_of_day(sunset_at) + condition.offset_minutes
+        if closes_minutes > MINUTES_PER_DAY:
             return (
-                f"Sunset today is at {format_clock_time(sunset_at)}. "
-                f"The daytime window would close {phrase},"
-                " which is past midnight, so it does not apply today."
+                f"Sunset today is at {format_clock_time(sunset_at)}. The daytime window would close at "
+                f"{_adjusted_clock(sunset_at, 'sunset', condition.offset_minutes)}, "
+                "which is past midnight, so it does not apply today."
+            )
+        if closes_minutes <= _minutes_of_day(sunrise_at):
+            return (
+                f"Sunrise today is at {format_clock_time(sunrise_at)} and sunset is at "
+                f"{format_clock_time(sunset_at)}. The daytime window would close at "
+                f"{_adjusted_clock(sunset_at, 'sunset', condition.offset_minutes)}, "
+                "which is at or before sunrise, so it does not apply today."
             )
     return None
+
+
+def _adjusted_clock(event_at: datetime, event: str, offset_minutes: int) -> str:
+    """Return ``12:32 AM the next day (6 hours after sunset)`` for an offset anchor."""
+    adjusted = event_at + timedelta(minutes=offset_minutes)
+    if adjusted.date() > event_at.date():
+        day = " the next day"
+    elif adjusted.date() < event_at.date():
+        day = " the previous day"
+    else:
+        day = ""
+    return f"{format_clock_time(adjusted)}{day} ({offset_phrase(event=event, offset_minutes=offset_minutes)})"
 
 
 def _minutes_of_day(moment: datetime) -> int:

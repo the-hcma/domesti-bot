@@ -865,9 +865,9 @@ def _evaluate_after_sunset(
         offset_minutes=condition.offset_minutes,
     )
     if met:
-        detail = f"Evening window active (opened {opens}; until midnight)"
+        detail = f"Evening window active (opened at {opens}; until midnight)"
     else:
-        detail = f"Outside evening window (opens {opens}; until midnight)"
+        detail = f"Outside evening window (opens at {opens}; until midnight)"
     unreachable = unreachable_window_reason(condition, sun=ctx.sun, timezone=ctx.timezone)
     if unreachable is not None:
         detail = unreachable

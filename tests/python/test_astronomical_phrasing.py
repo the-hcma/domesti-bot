@@ -93,7 +93,7 @@ def test_anchor_clause_names_event_time_and_resulting_time() -> None:
         anchor_clause(event="sunset", event_at=sunset, offset_minutes=-25)
         == "6:07 PM, 25 minutes before sunset at 6:32 PM"
     )
-    assert anchor_clause(event="sunset", event_at=sunset, offset_minutes=0) == "sunset at 6:32 PM"
+    assert anchor_clause(event="sunset", event_at=sunset, offset_minutes=0) == "6:32 PM, at sunset"
 
 
 def test_after_sunset_sentence_matches_user_example() -> None:
@@ -197,8 +197,8 @@ def test_after_sunset_offset_past_midnight_says_window_does_not_open() -> None:
     note = describe_astronomical_condition(condition, sun=_SUN, timezone=_TZ)
     assert note is not None
     assert note.sentence == (
-        "Sunset today is at 6:32 PM. The evening window would open 6 hours after sunset,"
-        " which is at or past midnight, so it does not open today."
+        "Sunset today is at 6:32 PM. The evening window would open at 12:32 AM the next day"
+        " (6 hours after sunset), which is at or past midnight, so it does not open today."
     )
     assert note.compact == note.sentence
 
@@ -236,3 +236,26 @@ def test_sun_timing_notes_for_rule_return_empty_when_settings_cannot_load() -> N
     rule = _rule(AfterSunsetCondition(type="after_sunset", offset_minutes=-25))
     with patch("app.rule_evaluator.load_settings_location", side_effect=ValueError("settings unreadable")):
         assert _sun_timing_notes_for_rule(rule, at_epoch=0.0) == ()
+
+
+def test_before_sunset_closing_before_sunrise_says_window_does_not_apply() -> None:
+    reason = unreachable_window_reason(
+        BeforeSunsetCondition(type="before_sunset", offset_minutes=-900),
+        sun=_SUN,
+        timezone=_TZ,
+    )
+    assert reason == (
+        "Sunrise today is at 7:20 AM and sunset is at 6:32 PM. The daytime window would close at"
+        " 3:32 AM (15 hours before sunset), which is at or before sunrise, so it does not apply today."
+    )
+
+
+def test_before_sunset_closing_exactly_at_sunrise_is_unreachable() -> None:
+    # 6:32 PM minus 11 h 12 min is exactly the 7:20 AM sunrise.
+    reason = unreachable_window_reason(
+        BeforeSunsetCondition(type="before_sunset", offset_minutes=-672),
+        sun=_SUN,
+        timezone=_TZ,
+    )
+    assert reason is not None
+    assert "at or before sunrise" in reason
