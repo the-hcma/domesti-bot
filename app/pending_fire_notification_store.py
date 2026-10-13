@@ -135,7 +135,7 @@ def insert_pending_fire_notification(
             notification_detail=notification_detail,
             outcomes_json=_outcomes_to_json(list(outcomes)),
             rule_id=rule_id,
-            sun_timing="\n".join(sun_timing) or None,
+            sun_timing=json.dumps(list(sun_timing)) if sun_timing else None,
             trigger_device_display=trigger_device_display,
             updated_at=now,
         )
@@ -225,7 +225,7 @@ def _record_from_row(row: RulePendingFireNotification) -> PendingFireNotificatio
         outcomes=tuple(_outcomes_from_json(row.outcomes_json)),
         row_id=row.id,
         rule_id=row.rule_id,
-        sun_timing=tuple(row.sun_timing.split("\n")) if row.sun_timing else (),
+        sun_timing=tuple(json.loads(row.sun_timing)) if row.sun_timing else (),
         trigger_device_display=row.trigger_device_display,
     )
 

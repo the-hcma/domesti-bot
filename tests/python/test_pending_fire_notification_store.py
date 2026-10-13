@@ -149,7 +149,10 @@ def test_mark_cancelled_and_delete(tmp_path: Path) -> None:
 
 def test_sun_timing_lines_round_trip_through_pending_row(tmp_path: Path) -> None:
     db = tmp_path / "discovery.sqlite"
-    lines = ("Sunset today is at 6:32 PM.", "The evening window opens at 6:07 PM (25 minutes before sunset).")
+    lines = (
+        "Sunset today is at 6:32 PM.\nSecond line.",
+        "The evening window opens at 6:07 PM (25 minutes before sunset).",
+    )
     insert_pending_fire_notification(
         db,
         fire_at=1_700_000_000.0,

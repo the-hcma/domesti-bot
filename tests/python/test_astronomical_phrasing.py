@@ -230,3 +230,9 @@ def test_reachable_windows_have_no_unreachable_reason() -> None:
         BeforeSunsetCondition(type="before_sunset", offset_minutes=-25),
     ):
         assert unreachable_window_reason(condition, sun=_SUN, timezone=_TZ) is None
+
+
+def test_sun_timing_notes_for_rule_return_empty_when_settings_cannot_load() -> None:
+    rule = _rule(AfterSunsetCondition(type="after_sunset", offset_minutes=-25))
+    with patch("app.rule_evaluator.load_settings_location", side_effect=ValueError("settings unreadable")):
+        assert _sun_timing_notes_for_rule(rule, at_epoch=0.0) == ()

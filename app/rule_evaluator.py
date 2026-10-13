@@ -4166,10 +4166,15 @@ def _sun_timing_notes_for_rule(rule: RuleOut, *, at_epoch: float) -> tuple[SunTi
     """Describe the rule's sunrise/sunset windows for ``at_epoch``; empty when it has none."""
     if not rule_has_astronomical_condition(rule):
         return ()
-    settings = load_settings_location()
-    tz = ZoneInfo(settings.timezone)
-    sun = compute_rules_sun_out(settings, now=datetime.fromtimestamp(at_epoch, tz=tz))
-    return describe_rule_sun_timing(rule, sun=sun, timezone=tz)
+    try:
+        settings = load_settings_location()
+        tz = ZoneInfo(settings.timezone)
+        sun = compute_rules_sun_out(settings, now=datetime.fromtimestamp(at_epoch, tz=tz))
+        return describe_rule_sun_timing(rule, sun=sun, timezone=tz)
+    except Exception:
+        # The wording is cosmetic: a bad settings file, timezone or polar day must never abort a fire.
+        _LOGGER.warning("[rules] sun timing text unavailable rule_id=%s", rule.id, exc_info=True)
+        return ()
 
 
 def _user_triggered_geofence_edge(
