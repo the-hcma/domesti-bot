@@ -145,3 +145,33 @@ def test_mark_cancelled_and_delete(tmp_path: Path) -> None:
     assert get_pending_fire_notification(db, fire_at=fire_at, rule_id="a") is None
     delete_pending_fire_notifications_for_rule(db, "b")
     assert list_pending_fire_notifications(db) == []
+
+
+def test_sun_timing_lines_round_trip_through_pending_row(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    lines = ("Sunset today is at 6:32 PM.", "The evening window opens at 6:07 PM (25 minutes before sunset).")
+    insert_pending_fire_notification(
+        db,
+        fire_at=1_700_000_000.0,
+        notification_detail=None,
+        outcomes=(_outcome(),),
+        rule_id="evening-lamps",
+        sun_timing=lines,
+    )
+    row = get_pending_fire_notification(db, fire_at=1_700_000_000.0, rule_id="evening-lamps")
+    assert row is not None
+    assert row.sun_timing == lines
+
+
+def test_pending_row_without_sun_timing_reads_back_empty(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    insert_pending_fire_notification(
+        db,
+        fire_at=1_700_000_000.0,
+        notification_detail=None,
+        outcomes=(_outcome(),),
+        rule_id="no-sun",
+    )
+    row = get_pending_fire_notification(db, fire_at=1_700_000_000.0, rule_id="no-sun")
+    assert row is not None
+    assert row.sun_timing == ()

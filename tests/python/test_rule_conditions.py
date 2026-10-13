@@ -331,7 +331,7 @@ def test_after_sunset_not_met_midday() -> None:
     now = datetime(2026, 6, 9, 12, 0, tzinfo=_TZ)
     result = evaluate_rule(_evening_rule(), _ctx(now=now))
     assert result.conditions[0].met is False
-    assert "Outside sunset" in result.conditions[0].detail
+    assert "Outside evening window" in result.conditions[0].detail
 
 
 def _before_sunset_rule(*, offset_minutes: int = -25) -> RuleOut:
@@ -2045,3 +2045,21 @@ def test_build_rules_status_from_example_bundle(
         rule.label for rule in load_automation_rules_bundle().rules if rule.id == "daylight-dark-house-lights-on"
     )
     assert dark.label == expected_label
+
+
+def test_after_sunset_detail_states_offset_open_time_and_sunset() -> None:
+    now = datetime(2026, 6, 9, 21, 0, tzinfo=_TZ)
+    rule = _evening_rule()
+    condition = rule.conditions.all[0]
+    assert isinstance(condition, AfterSunsetCondition)
+    offset_rule = rule.model_copy(
+        update={
+            "conditions": rule.conditions.model_copy(
+                update={"all": [condition.model_copy(update={"offset_minutes": -25}), *rule.conditions.all[1:]]},
+            ),
+        },
+    )
+    detail = evaluate_rule(offset_rule, _ctx(now=now)).conditions[0].detail
+    assert "25 minutes before sunset" in detail
+    assert "8:02 PM" in detail
+    assert "8:27 PM" in detail

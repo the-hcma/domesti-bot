@@ -426,6 +426,10 @@ When the mail is about a decision involving people, place, distance, or time, in
 
 When the decision depends on how far a user is from **home** or a **geofence**, also report the **observed** distance(s) (and which home point / geofence) when those GPS readings are available — not only the configured threshold.
 
+### Astronomical events
+
+When copy mentions sunrise or sunset with an offset, state the event time, the offset in words and the resulting clock time (for example "opens at 6:07 PM (25 minutes before sunset), sunset today is at 6:32 PM"). Use the helpers in :mod:`app.astronomical_phrasing` so emails, `[rules] fired` log lines and condition status text stay identical.
+
 ### Test vs real
 
 Settings / Automations / Mail **test** sends must:
