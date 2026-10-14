@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
+    DeviceNotManuallyOffWithinCondition,
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
@@ -729,7 +730,7 @@ def _walk_device_refs(
         for ref in condition.devices:
             refs.add((ref.family_id, ref.device_id))
         return
-    if isinstance(condition, Ep1ReadingCompareCondition):
+    if isinstance(condition, DeviceNotManuallyOffWithinCondition | Ep1ReadingCompareCondition):
         refs.add((condition.device.family_id, condition.device.device_id))
         return
     if isinstance(condition, AllConditionsCondition):

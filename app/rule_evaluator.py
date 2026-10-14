@@ -105,6 +105,7 @@ from app.location_request_coordinator import (
     LocationRequestContext,
     LocationRequestCoordinator,
 )
+from app.manual_device_off_store import list_manual_device_off_at
 from app.mytracks_store import load_location_history_retention
 from app.pending_fire_notification_store import (
     append_pending_fire_notification_outcomes,
@@ -588,6 +589,7 @@ class RuleEvaluator:
             user_locations=user_locations,
             device_bool_since=self.device_bool_since_snapshot(),
             device_bool_value=self.device_bool_value_snapshot(),
+            device_manual_off_at=await asyncio.to_thread(list_manual_device_off_at, cache_path),
             device_state=self._device_state_getter(),
             geofence_inside_since=self.geofence_inside_since_snapshot(),
             geofence_outside_since=self.geofence_outside_since_snapshot(),

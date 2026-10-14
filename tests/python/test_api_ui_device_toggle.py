@@ -13,9 +13,11 @@ from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.device_display import DEVICE_UNRESPONSIVE_ON_LAN
+from app.device_enums import DeviceFamilyId
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
+from app.manual_device_off_store import list_manual_device_off_at, record_manual_device_off
 from app.rule_engine import DeviceUnresponsiveError
 from app.server_runtime import runtime
 from app.sonos_device_manager import (
@@ -444,3 +446,60 @@ def test_ui_device_toggle_endpoint_appears_in_openapi_schema() -> None:
     client, app = _client()
     paths = app.openapi()["paths"]
     assert "/v1/ui/devices/{family_id}/{device_id}/toggle" in paths
+
+
+def test_post_ui_device_toggle_records_manual_off_for_kasa_switch(tmp_path: Path) -> None:
+    fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
+    client, _ = _client()
+    cache = tmp_path / "cache.sqlite"
+    runtime.device_state = _state(kasa_devices=[fake], cache_path=cache)
+    runtime.discovery_error = None
+
+    response = client.post("/v1/ui/devices/kasa/10.0.0.1/toggle")
+
+    assert response.status_code == HTTPStatus.OK
+    assert (DeviceFamilyId.KASA, "aa:bb:cc:dd:ee:ff") in list_manual_device_off_at(cache)
+
+
+def test_post_ui_device_toggle_clears_manual_off_when_kasa_switch_turned_on(tmp_path: Path) -> None:
+    fake = _FakeKasa("10.0.0.1", "Desk", is_on=False)
+    client, _ = _client()
+    cache = tmp_path / "cache.sqlite"
+    record_manual_device_off(cache, DeviceFamilyId.KASA, "aa:bb:cc:dd:ee:ff", now=1000.0)
+    runtime.device_state = _state(kasa_devices=[fake], cache_path=cache)
+    runtime.discovery_error = None
+
+    response = client.post("/v1/ui/devices/kasa/10.0.0.1/toggle")
+
+    assert response.status_code == HTTPStatus.OK
+    assert list_manual_device_off_at(cache) == {}
+
+
+def test_post_kasa_set_power_records_manual_off_and_on_clears_it(tmp_path: Path) -> None:
+    fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
+    client, _ = _client()
+    cache = tmp_path / "cache.sqlite"
+    runtime.device_state = _state(kasa_devices=[fake], cache_path=cache)
+    runtime.discovery_error = None
+
+    off = client.post("/v1/ui/kasa/devices/10.0.0.1/toggle", json={"on": False})
+    assert off.status_code == HTTPStatus.OK
+    assert (DeviceFamilyId.KASA, "10.0.0.1") in list_manual_device_off_at(cache)
+
+    on = client.post("/v1/ui/kasa/devices/10.0.0.1/toggle", json={"on": True})
+    assert on.status_code == HTTPStatus.OK
+    assert list_manual_device_off_at(cache) == {}
+
+
+def test_post_ui_device_toggle_does_not_record_manual_off_for_unresponsive_kasa(tmp_path: Path) -> None:
+    fake = _FakeKasa("10.0.0.1", "Desk", is_on=True)
+    fake.unresponsive = True
+    client, _ = _client()
+    cache = tmp_path / "cache.sqlite"
+    runtime.device_state = _state(kasa_devices=[fake], cache_path=cache)
+    runtime.discovery_error = None
+
+    response = client.post("/v1/ui/devices/kasa/10.0.0.1/toggle")
+
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert list_manual_device_off_at(cache) == {}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from http import HTTPStatus
 
@@ -19,11 +20,13 @@ from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.expected_device_change import mark_expected_device_change
 from app.gotailwind_device_manager import GotailwindDeviceManager
+from app.manual_device_off_store import note_manual_power_change
 from app.rule_engine import DeviceUnresponsiveError
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
 from app.vizio_device_manager import VizioDeviceManager
 
 _DEFAULT_SONOS_FAVORITE_INDEX = 0
+_MANUAL_POWER_STATES = frozenset({"off", "on"})
 
 
 @dataclass(frozen=True)
@@ -64,8 +67,17 @@ async def flip_ui_device(
             status_code=HTTPStatus.CONFLICT,
             detail=str(exc),
         ) from exc
+    device = _build_device_view(state, family, device_id)
+    if family is DeviceFamilyId.KASA and device.state in _MANUAL_POWER_STATES:
+        await asyncio.to_thread(
+            note_manual_power_change,
+            state.cache_path,
+            family,
+            device.mac_address,
+            is_on=device.state == "on",
+        )
     return UiDeviceFlipResult(
-        device=_build_device_view(state, family, device_id),
+        device=device,
         device_label=label,
         log_detail=log_detail,
     )

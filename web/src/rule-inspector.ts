@@ -4,6 +4,7 @@ import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
   formatDeviceActionPhrase,
+  formatDeviceNotManuallyOffWithinCondition,
   formatDeviceStateCondition,
   formatGeofenceAwayDwellLabel,
   formatGeofenceDwellLabel,
@@ -65,6 +66,8 @@ function appendConditionTree(
       || condition.type === RuleConditionType.DevicesAnyInStateForS
     ) {
       item.textContent = formatDeviceStateCondition(condition, context);
+    } else if (condition.type === RuleConditionType.DeviceNotManuallyOffWithin) {
+      item.textContent = formatDeviceNotManuallyOffWithinCondition(condition, context);
     } else {
       const timing = formatTimingCondition(condition);
       item.textContent = timing ?? condition.type;

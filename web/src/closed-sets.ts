@@ -193,6 +193,7 @@ export const RuleConditionType = {
   BeforeSunset: "before_sunset",
   Daylight: "daylight",
   DaysOfWeek: "days_of_week",
+  DeviceNotManuallyOffWithin: "device_not_manually_off_within",
   DevicesAllInState: "devices_all_in_state",
   DevicesAnyInState: "devices_any_in_state",
   DevicesAnyInStateForS: "devices_any_in_state_for_s",

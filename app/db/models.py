@@ -49,6 +49,17 @@ class DeviceDisplayName(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class DeviceManualOff(Base):
+    """When a person last turned a device off through the UI or CLI (not a rule)."""
+
+    __tablename__ = "device_manual_off"
+
+    family_id: Mapped[str] = mapped_column(String, primary_key=True)
+    device_id: Mapped[str] = mapped_column(String, primary_key=True)
+    last_manual_off_at: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class Ep1KnownDevice(Base):
     """Cached Everything Presence One (ESPHome) endpoints."""
 

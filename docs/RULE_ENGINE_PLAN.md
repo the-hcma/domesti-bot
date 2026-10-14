@@ -6,9 +6,7 @@ This document describes how to evolve domesti-bot from its **partially implement
 >
 > When **Kristen arrives at** or **leaves** the **west-point** geofence, email **github@hcma.info** (no device actions).
 
-See **`automation-rules.json.example`** at the repo root (copy to
-**`$XDG_CONFIG_HOME/domesti-bot/automation-rules.json`**, usually
-`~/.config/domesti-bot/automation-rules.json`).
+See **`automation-rules.json.example`** at the repo root (copy to **`$XDG_CONFIG_HOME/domesti-bot/automation-rules.json`**, usually `~/.config/domesti-bot/automation-rules.json`).
 
 The rule engine UI lives on the **desktop web surface only** (☰ menu, viewport wider than the compact/mobile breakpoint). Mobile/PWA users keep the tile dashboard; they do not get rule editing in v1.
 
@@ -1382,6 +1380,24 @@ A rule may combine bool conditions and `ep1_reading_compare` (including on the s
 
 **Motivating rule** (`daylight-dark-house-lights-on` in `automation-rules.json.example`): `triggers: ["device_state"]` + `daylight` + `ep1_reading_compare` — no `*/5` cron, no hand-rolled schedule. For evening clock windows, pair the same reading compare with a top-level `local_time_window` instead of `daylight` (prefer window eligibility over `schedule_cron`).
 
+#### Design: stay out of the way after a manual off — `device_not_manually_off_within`
+
+```json
+{
+  "type": "device_not_manually_off_within",
+  "device": { "family_id": "kasa", "device_id": "<mac>", "display_name": "Master bedroom light" },
+  "window_s": 3600
+}
+```
+
+Met unless a person turned the device off through domesti-bot (the web UI or the CLI/REPL) less than `window_s` seconds ago. Put it next to a rule that turns a light on so the rule does not fight someone who just switched the light off.
+
+- **What counts:** a turn-off issued from the UI (per-tile toggle) or the CLI/REPL. The time is stored in the `device_manual_off` SQLite table, so a restart inside the window does not forget it. A second manual off restarts the window; a manual turn-on clears it.
+- **What does not count:** rule actions, the per-family and global bulk "turn off everything" buttons, and changes made outside domesti-bot (a wall switch, the vendor app). domesti-bot does not watch for those.
+- **Family:** Kasa only for now, since that is the only family whose UI and CLI turn-offs are recorded. Other families are rejected at validation.
+- **Status text:** "Master bedroom light was turned off by hand 22 min ago; waiting 38 min more".
+- **Wakes:** it is an instant gate, so it adds no wake of its own. A `scheduled` rule picks the light up on its next tick after the window ends; an edge-triggered rule that was blocked does not retry by itself.
+
 #### Design: device-state conditions
 
 ```json
@@ -1580,8 +1596,7 @@ Recommend landing **C1 → C2 → C3** as a small stack; C4 can ship with C3 or 
 1. Operator creates geofence `house` (41.194072, -73.888325, 250 m) in the Automations hub. operators sync users `henrique`, `kristen` via `POST /v1/rules/users/sync` (or operator clicks **Sync from my-tracks**).
 2. Operator sets `DOMESTI_BOT_USERS_SYNC_URL`, `DOMESTI_BOT_PRESENCE_WEBHOOK_URL`, and `DOMESTI_BOT_API_KEY` on my-tracks; enables both relays.
 3. Operator creates rule “Welcome home — lights + garage” with conditions (both inside `house`, after sunset) and actions (two Kasa hosts, one Tailwind door).
-4. Kristen’s phone reports GPS → OwnTracks → MQTT → my-tracks saves `Location` → POST webhook:
-   `{"user_id":"kristen","lat":41.1941,"lon":-73.8884,"timestamp":"2026-06-09T00:15:00Z","source":"my-tracks"}`
+4. Kristen’s phone reports GPS → OwnTracks → MQTT → my-tracks saves `Location` → POST webhook: `{"user_id":"kristen","lat":41.1941,"lon":-73.8884,"timestamp":"2026-06-09T00:15:00Z","source":"my-tracks"}`
 5. At 8 PM (after sunset), Henrique’s location update also lands inside the fence → domesti-bot evaluator sees both inside → edge false→true → Kasa `turn_on` ×2, Tailwind `open` ×1 → log `[rules] fired arrive-home-lights`.
 6. Both remain home for hours — my-tracks keeps relaying fixes, but domesti-bot **does not re-fire** (edge semantics + cooldown).
 7. Desktop Status tab shows last fire time and current user positions.

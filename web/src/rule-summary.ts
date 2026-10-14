@@ -309,6 +309,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case RuleConditionType.UsersMinDistanceFromHomeM:
     case RuleConditionType.UsersOutsideGeofence:
     case RuleConditionType.UsersOutsideGeofenceForS:
+    case RuleConditionType.DeviceNotManuallyOffWithin:
     case RuleConditionType.DevicesAllInState:
     case RuleConditionType.DevicesAnyInState:
     case RuleConditionType.DevicesAnyInStateForS:
@@ -370,6 +371,19 @@ export function formatDeviceStateCondition(
   }
   const need = formatDwellDuration(condition.min_duration_s);
   return `Any of ${joined} ${condition.state} for ${need}+`;
+}
+
+export function formatDeviceNotManuallyOffWithinCondition(
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.DeviceNotManuallyOffWithin }>,
+  context: RuleSummaryContext,
+): string {
+  const label = resolveDeviceLabel(
+    condition.device.family_id,
+    condition.device.device_id,
+    context,
+    condition.device.display_name,
+  );
+  return `${label} not turned off by hand in the last ${formatDwellDuration(condition.window_s)}`;
 }
 
 export function formatEp1ReadingCompareCondition(
@@ -462,6 +476,10 @@ export function summarizeRule(
       || condition.type === RuleConditionType.DevicesAnyInStateForS
     ) {
       devices.push(formatDeviceStateCondition(condition, context));
+      return;
+    }
+    if (condition.type === RuleConditionType.DeviceNotManuallyOffWithin) {
+      devices.push(formatDeviceNotManuallyOffWithinCondition(condition, context));
       return;
     }
     if (condition.type === RuleConditionType.Ep1ReadingCompare) {
