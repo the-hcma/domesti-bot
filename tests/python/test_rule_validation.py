@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.api.schemas import (
     AfterSunsetCondition,
+    DeviceNotManuallyOffWithinCondition,
     DevicesAnyInStateCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
@@ -37,6 +38,37 @@ from app.rule_validation import (
     rule_references_user_id,
     validate_rule,
 )
+
+
+def _manual_off_rule(
+    *,
+    triggers: list[RuleTrigger],
+    schedule_cron: str | None = None,
+) -> RuleOut:
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[
+                DeviceNotManuallyOffWithinCondition(
+                    type="device_not_manually_off_within",
+                    device=RuleConditionDeviceRefOut(
+                        device_id="Basement lamp",
+                        family_id=DeviceFamilyId.KASA,
+                    ),
+                    window_s=3600,
+                ),
+            ],
+        ),
+        cooldown_s=60,
+        device_actions=[],
+        enabled=True,
+        id="manual-off-only",
+        label="Manual off only",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        schedule_cron=schedule_cron,
+        triggers=triggers,
+    )
 
 
 def _arrival_rule() -> RuleOut:
@@ -446,6 +478,30 @@ def test_rule_out_requires_device_ref_for_device_state_trigger() -> None:
             notify_on_fire=False,
             triggers=[RuleTrigger.DEVICE_STATE],
         )
+
+
+def test_rule_out_rejects_device_state_trigger_watching_only_manual_off_condition() -> None:
+    with pytest.raises(ValidationError, match="device_state rules must reference"):
+        _manual_off_rule(triggers=[RuleTrigger.DEVICE_STATE])
+
+
+def test_validate_rule_flags_unknown_device_in_manual_off_condition() -> None:
+    rule = _manual_off_rule(triggers=[RuleTrigger.SCHEDULED], schedule_cron="0 22 * * *")
+    ctx = RuleValidationContext(
+        device_state=MagicMock(),
+        geofence_ids=frozenset(),
+        roster_name_hint_lookup={},
+        roster_user_id_lookup={},
+        smtp_configured=True,
+    )
+    with patch(
+        "app.rule_validation.resolve_kasa_host_by_label",
+        return_value=None,
+    ):
+        issues = validate_rule(rule, ctx)
+    assert len(issues) == 1
+    assert issues[0].kind == "unknown_device"
+    assert 'Unknown kasa device "Basement lamp"' in issues[0].detail
 
 
 def test_rule_out_requires_dwell_condition_for_dwell_satisfied_trigger() -> None:
