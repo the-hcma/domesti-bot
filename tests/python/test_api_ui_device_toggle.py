@@ -484,7 +484,7 @@ def test_post_kasa_set_power_records_manual_off_and_on_clears_it(tmp_path: Path)
 
     off = client.post("/v1/ui/kasa/devices/10.0.0.1/toggle", json={"on": False})
     assert off.status_code == HTTPStatus.OK
-    assert (DeviceFamilyId.KASA, "10.0.0.1") in list_manual_device_off_at(cache)
+    assert (DeviceFamilyId.KASA, "aa:bb:cc:dd:ee:ff") in list_manual_device_off_at(cache)
 
     on = client.post("/v1/ui/kasa/devices/10.0.0.1/toggle", json={"on": True})
     assert on.status_code == HTTPStatus.OK

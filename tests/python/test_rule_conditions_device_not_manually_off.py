@@ -16,9 +16,17 @@ from app.api.schemas import (
     SettingsLocationOut,
 )
 from app.device_enums import DeviceFamilyId, RuleTrigger
-from app.rule_conditions import RuleEvaluationContext, compute_rules_sun_out, evaluate_rule
+from app.rule_conditions import (
+    NOT_MANUALLY_OFF_ELAPSED_DETAIL,
+    NOT_MANUALLY_OFF_NEVER_DETAIL,
+    NOT_MANUALLY_OFF_WAITING_DETAIL,
+    RuleEvaluationContext,
+    compute_rules_sun_out,
+    evaluate_rule,
+)
 from app.rule_validation import build_roster_user_id_lookup
 
+_LABEL = "Master bedroom light (02:00:00:00:00:08)"
 _MAC = "02:00:00:00:00:08"
 _NOW = datetime(2026, 10, 14, 19, 0, tzinfo=ZoneInfo("America/New_York"))
 _SETTINGS = SettingsLocationOut(
@@ -32,22 +40,27 @@ _SETTINGS = SettingsLocationOut(
 def test_condition_met_when_device_was_never_turned_off_by_hand() -> None:
     result = evaluate_rule(_rule(), _ctx())
     assert result.all_met is True
-    assert "has not been turned off by hand" in result.conditions[0].detail
+    assert result.conditions[0].detail == NOT_MANUALLY_OFF_NEVER_DETAIL.format(device=_LABEL)
 
 
 def test_condition_blocks_inside_window_and_reports_time_left() -> None:
     result = evaluate_rule(_rule(window_s=3600), _ctx(off_ago_s=22 * 60))
     assert result.all_met is False
-    detail = result.conditions[0].detail
-    assert "Master bedroom light" in detail
-    assert "turned off by hand 22 min ago" in detail
-    assert "waiting 38 min more" in detail
+    assert result.conditions[0].detail == NOT_MANUALLY_OFF_WAITING_DETAIL.format(
+        device=_LABEL,
+        elapsed="22 min",
+        remaining="38 min",
+    )
 
 
 def test_condition_met_once_window_has_elapsed() -> None:
     result = evaluate_rule(_rule(window_s=3600), _ctx(off_ago_s=3600))
     assert result.all_met is True
-    assert "more than 60 min" in result.conditions[0].detail
+    assert result.conditions[0].detail == NOT_MANUALLY_OFF_ELAPSED_DETAIL.format(
+        device=_LABEL,
+        elapsed="60 min",
+        window="60 min",
+    )
 
 
 def test_condition_ignores_manual_off_of_another_device() -> None:

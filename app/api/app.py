@@ -756,7 +756,7 @@ def create_app(args: Any) -> FastAPI:
             note_manual_power_change,
             state.cache_path,
             DeviceFamilyId.KASA,
-            kd.identifier,
+            kd.mac_address,
             is_on=body.on,
         )
         return UIDeviceActionOut(

@@ -1396,7 +1396,7 @@ Met unless a person turned the device off through domesti-bot (the web UI or the
 - **What does not count:** rule actions, the per-family and global bulk "turn off everything" buttons, and changes made outside domesti-bot (a wall switch, the vendor app). domesti-bot does not watch for those.
 - **Family:** Kasa only for now, since that is the only family whose UI and CLI turn-offs are recorded. Other families are rejected at validation.
 - **Status text:** "Master bedroom light was turned off by hand 22 min ago; waiting 38 min more".
-- **Wakes:** it is an instant gate, so it adds no wake of its own. A `scheduled` rule picks the light up on its next tick after the window ends; an edge-triggered rule that was blocked does not retry by itself.
+- **No wake at the end of the window, on purpose:** it is an instant gate and adds no wake of its own. A rule blocked by it is simply not re-checked when the window ends, so "stay out of the way" lasts until the rule's next real trigger: the next cron time of a `scheduled` rule, the next edge of an `edge_true` rule, the next dwell of a `dwell_satisfied` rule. Re-checking at `last_manual_off_at + window_s` would turn the light back on an hour after someone switched it off, which is the surprise this condition exists to prevent.
 
 #### Design: device-state conditions
 

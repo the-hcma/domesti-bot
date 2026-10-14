@@ -73,6 +73,9 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 MINUTES_PER_DAY = 24 * 60
+NOT_MANUALLY_OFF_ELAPSED_DETAIL = "{device} was turned off by hand {elapsed} ago (more than {window})"
+NOT_MANUALLY_OFF_NEVER_DETAIL = "{device} has not been turned off by hand"
+NOT_MANUALLY_OFF_WAITING_DETAIL = "{device} was turned off by hand {elapsed} ago; waiting {remaining} more"
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 _DAY_NAMES = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
 LOCATION_HISTORY_WALKBACK_MAX_S = 600.0
@@ -1116,21 +1119,6 @@ def _evaluate_days_of_week(
     )
 
 
-def _evaluate_devices_all_in_state(
-    condition: DevicesAllInStateCondition,
-    rule: RuleOut,
-    ctx: RuleEvaluationContext,
-) -> RuleConditionStatusOut:
-    del rule  # unused; signature matches sibling evaluators
-    return _evaluate_devices_in_state(
-        condition,
-        devices=condition.devices,
-        state=condition.state,
-        ctx=ctx,
-        require_all=True,
-    )
-
-
 def _evaluate_device_not_manually_off_within(
     condition: DeviceNotManuallyOffWithinCondition,
     rule: RuleOut,
@@ -1153,7 +1141,7 @@ def _evaluate_device_not_manually_off_within(
     if off_at is None:
         return RuleConditionStatusOut(
             condition=condition,
-            detail=f"{device_label} has not been turned off by hand",
+            detail=NOT_MANUALLY_OFF_NEVER_DETAIL.format(device=device_label),
             label=label,
             met=True,
         )
@@ -1161,9 +1149,10 @@ def _evaluate_device_not_manually_off_within(
     if elapsed_s >= condition.window_s:
         return RuleConditionStatusOut(
             condition=condition,
-            detail=(
-                f"{device_label} was turned off by hand {_format_dwell_elapsed_s(elapsed_s)} ago "
-                f"(more than {window_label})"
+            detail=NOT_MANUALLY_OFF_ELAPSED_DETAIL.format(
+                device=device_label,
+                elapsed=_format_dwell_elapsed_s(elapsed_s),
+                window=window_label,
             ),
             label=label,
             met=True,
@@ -1171,12 +1160,28 @@ def _evaluate_device_not_manually_off_within(
     remaining_s = condition.window_s - elapsed_s
     return RuleConditionStatusOut(
         condition=condition,
-        detail=(
-            f"{device_label} was turned off by hand {_format_dwell_elapsed_s(elapsed_s)} ago; "
-            f"waiting {_format_dwell_elapsed_s(remaining_s)} more"
+        detail=NOT_MANUALLY_OFF_WAITING_DETAIL.format(
+            device=device_label,
+            elapsed=_format_dwell_elapsed_s(elapsed_s),
+            remaining=_format_dwell_elapsed_s(remaining_s),
         ),
         label=label,
         met=False,
+    )
+
+
+def _evaluate_devices_all_in_state(
+    condition: DevicesAllInStateCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    del rule  # unused; signature matches sibling evaluators
+    return _evaluate_devices_in_state(
+        condition,
+        devices=condition.devices,
+        state=condition.state,
+        ctx=ctx,
+        require_all=True,
     )
 
 

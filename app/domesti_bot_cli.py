@@ -1679,7 +1679,7 @@ async def _repl_cmd_dispatch_switch(
                 note_manual_power_change,
                 cache_path,
                 DeviceFamilyId.KASA,
-                hit.identifier,
+                hit.mac_address,
                 is_on=cmd == "turn-on",
             )
     elif backend == "androidtv" and androidtv_mgr is not None:

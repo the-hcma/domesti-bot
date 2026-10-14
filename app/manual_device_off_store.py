@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DeviceManualOff
 from app.db.session import discovery_session, discovery_write
+from app.device_display import format_device_display
 from app.device_enums import DeviceFamilyId
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,11 +66,24 @@ def note_manual_power_change(
     *,
     is_on: bool,
 ) -> None:
-    """Apply a person's power change: an off is recorded, an on clears the record."""
-    if is_on:
-        clear_manual_device_off(path, family_id, device_id)
-    else:
-        record_manual_device_off(path, family_id, device_id)
+    """Apply a person's power change: an off is recorded, an on clears the record.
+
+    Best effort: the device has already switched by the time this runs, so a
+    storage failure is logged and swallowed rather than reported as a failed
+    action. The cost is only that a rule may not hold off after this change.
+    """
+    try:
+        if is_on:
+            clear_manual_device_off(path, family_id, device_id)
+        else:
+            record_manual_device_off(path, family_id, device_id)
+    except Exception:
+        _LOGGER.warning(
+            "Could not store manual power change for %s (is_on=%s); rules will not hold off for it",
+            format_device_display(device_id.strip(), None),
+            is_on,
+            exc_info=True,
+        )
 
 
 def record_manual_device_off(

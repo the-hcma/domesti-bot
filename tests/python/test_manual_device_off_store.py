@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from app.device_enums import DeviceFamilyId
 from app.manual_device_off_store import (
@@ -58,3 +61,13 @@ def test_store_functions_ignore_missing_path_and_blank_device_id(tmp_path: Path)
     path = tmp_path / "cache.sqlite"
     record_manual_device_off(path, DeviceFamilyId.KASA, "  ", now=1000.0)
     assert list_manual_device_off_at(path) == {}
+
+
+def test_note_manual_power_change_swallows_storage_failure_and_logs_warning(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    unusable_path = tmp_path  # a directory, so SQLite cannot open it as a database
+    with caplog.at_level(logging.WARNING, logger="app.manual_device_off_store"):
+        note_manual_power_change(unusable_path, DeviceFamilyId.KASA, _MAC, is_on=False)
+    assert any(_MAC in record.getMessage() for record in caplog.records)

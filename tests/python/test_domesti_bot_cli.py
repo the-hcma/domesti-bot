@@ -741,6 +741,7 @@ _LIGHT_MAC = "02:00:00:00:00:08"
 def _kasa_mgr_with_light() -> KasaDeviceManager:
     light = MagicMock()
     light.identifier = _LIGHT_MAC
+    light.mac_address = _LIGHT_MAC
     light.preferred_label = "Master bedroom light"
     kasa_mgr = MagicMock(spec=KasaDeviceManager)
     kasa_mgr.switches = (light,)

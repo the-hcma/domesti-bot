@@ -15,7 +15,7 @@ from app.api.ui_state import (
     build_tailwind_device_view,
     build_vizio_device_view,
 )
-from app.device_enums import DeviceFamilyId
+from app.device_enums import DeviceConditionState, DeviceFamilyId
 from app.device_manager import NotInitializedError
 from app.domesti_bot_cli import DeviceManagersState
 from app.expected_device_change import mark_expected_device_change
@@ -26,7 +26,7 @@ from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavaila
 from app.vizio_device_manager import VizioDeviceManager
 
 _DEFAULT_SONOS_FAVORITE_INDEX = 0
-_MANUAL_POWER_STATES = frozenset({"off", "on"})
+_MANUAL_POWER_STATES = frozenset({DeviceConditionState.OFF, DeviceConditionState.ON})
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ async def flip_ui_device(
             state.cache_path,
             family,
             device.mac_address,
-            is_on=device.state == "on",
+            is_on=device.state == DeviceConditionState.ON,
         )
     return UiDeviceFlipResult(
         device=device,
