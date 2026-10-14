@@ -22,6 +22,7 @@ from app.rule_notification import (
     RULE_FIRE_JUST_FIRED_TEMPLATE,
     RULE_FIRE_NOTICED_TEMPLATE,
     RULE_FIRE_REACTION_TEMPLATE,
+    RULE_FIRE_SUN_TIMING_HEADING,
     RULE_FIRE_TIMELINE_HEADING,
     RULE_FIRE_TIMING_HEADING,
     build_rule_notification_bodies,
@@ -461,3 +462,32 @@ def test_build_rule_notification_bodies_falls_back_without_public_base_url(
     assert "View live status:" not in plain
     assert "href=" not in html
     assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in plain
+
+
+def test_build_rule_notification_bodies_includes_sun_timing_section(tmp_path: Path) -> None:
+    lines = (
+        "Sunset today is at 6:32 PM. The evening window opens at 6:07 PM (25 minutes before sunset)"
+        " and runs until midnight.",
+    )
+    plain, html = build_rule_notification_bodies(
+        _sample_rule(),
+        cache_path=tmp_path / "cache.sqlite",
+        fire_at=_COMPLETED_AT,
+        noticed_at=_NOTICED_AT,
+        sun_timing_lines=lines,
+    )
+    assert f"{RULE_FIRE_SUN_TIMING_HEADING}:\n- {lines[0]}" in plain
+    assert plain.index(RULE_FIRE_TIMING_HEADING) < plain.index(RULE_FIRE_SUN_TIMING_HEADING)
+    assert f"<strong>{RULE_FIRE_SUN_TIMING_HEADING}</strong>" in html
+    assert f"<li>{lines[0]}</li>" in html
+
+
+def test_build_rule_notification_bodies_omits_sun_timing_section_without_lines(tmp_path: Path) -> None:
+    plain, html = build_rule_notification_bodies(
+        _sample_rule(),
+        cache_path=tmp_path / "cache.sqlite",
+        fire_at=_COMPLETED_AT,
+        noticed_at=_NOTICED_AT,
+    )
+    assert RULE_FIRE_SUN_TIMING_HEADING not in plain
+    assert RULE_FIRE_SUN_TIMING_HEADING not in html

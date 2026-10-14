@@ -32,6 +32,11 @@ from app.api.schemas import (
     UsersOutsideGeofenceForSCondition,
     normalized_rule_notification_emails,
 )
+from app.astronomical_phrasing import (
+    SunTimingNote,
+    describe_rule_sun_timing,
+    rule_has_astronomical_condition,
+)
 from app.astronomical_schedule import (
     astronomical_repeat_cron,
     materialize_astronomical_cron,
@@ -1321,6 +1326,8 @@ class RuleEvaluator:
         deferred_enqueued = False
         fire_at = self._now_fn()
         noticed_epoch = fire_at if noticed_at is None else noticed_at
+        sun_timing_notes = _sun_timing_notes_for_rule(rule, at_epoch=fire_at)
+        sun_timing_lines = tuple(note.sentence for note in sun_timing_notes)
         if device_state is None:
             if immediate or delayed:
                 errors.append("Device discovery still in progress; actions skipped")
@@ -1357,6 +1364,7 @@ class RuleEvaluator:
                         notification_detail=notification_detail,
                         outcomes=dispatch_result.action_outcomes,
                         rule_id=rule.id,
+                        sun_timing=sun_timing_lines,
                         trigger_device_display=trigger_device_display,
                     )
                     performed_side_effect = True
@@ -1371,6 +1379,7 @@ class RuleEvaluator:
                         noticed_at=noticed_epoch,
                         notification_detail=notification_detail,
                         rule=rule,
+                        sun_timing_lines=sun_timing_lines,
                         trigger_device_display=trigger_device_display,
                     )
                     performed_side_effect = True
@@ -1418,6 +1427,8 @@ class RuleEvaluator:
             trigger_device_display=trigger_device_display,
         )
         timing_suffix = f" timing={timing_for_log!r}" if timing_for_log is not None else ""
+        if sun_timing_notes:
+            timing_suffix += f" sun={'; '.join(note.compact for note in sun_timing_notes)!r}"
         _LOGGER.info(
             "[rules] fired rule_id=%s user_ids=%s source=%s transitions=%s conditions=%s "
             "actions=%d email=%s duration_ms=%.0f%s%s%s",
@@ -1520,6 +1531,7 @@ class RuleEvaluator:
                     notification_detail=pending.notification_detail,
                     rule=rule,
                     sequence_completed=True,
+                    sun_timing_lines=pending.sun_timing,
                     trigger_device_display=pending.trigger_device_display,
                 )
             except RuleActionDispatchError as exc:
@@ -1539,6 +1551,7 @@ class RuleEvaluator:
                     notification_detail=pending.notification_detail,
                     outcomes=pending.outcomes,
                     rule_id=pending.rule_id,
+                    sun_timing=pending.sun_timing,
                     trigger_device_display=pending.trigger_device_display,
                 )
                 continue
@@ -4147,6 +4160,21 @@ def _scheduled_rule_user_ids_for_log(
         return ",".join(presence_ids)
     referenced = sorted(collect_rule_user_ids(rule))
     return ",".join(referenced)
+
+
+def _sun_timing_notes_for_rule(rule: RuleOut, *, at_epoch: float) -> tuple[SunTimingNote, ...]:
+    """Describe the rule's sunrise/sunset windows for ``at_epoch``; empty when it has none."""
+    if not rule_has_astronomical_condition(rule):
+        return ()
+    try:
+        settings = load_settings_location()
+        tz = ZoneInfo(settings.timezone)
+        sun = compute_rules_sun_out(settings, now=datetime.fromtimestamp(at_epoch, tz=tz))
+        return describe_rule_sun_timing(rule, sun=sun, timezone=tz)
+    except Exception:
+        # The wording is cosmetic: a bad settings file, timezone or polar day must never abort a fire.
+        _LOGGER.warning("[rules] sun timing text unavailable rule_id=%s", rule.id, exc_info=True)
+        return ()
 
 
 def _user_triggered_geofence_edge(

@@ -258,6 +258,7 @@ async def test_fired_log_includes_user_transitions_and_conditions(
         await evaluator.on_location_update("henrique")
 
     fired = _info_messages_matching(info_mock, "fired rule_id=arrive-home")
+    assert all(" sun=" not in message for message in fired)
     assert fired
     message = fired[0]
     assert "user_ids=henrique" in message
