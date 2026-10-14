@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.api.schemas import RuleConditionsOut, RuleDeviceActionOut, RuleOut, UsersInsideGeofenceCondition
+from app.astronomical_phrasing import SunTimingNote
 from app.deferred_device_action_store import list_deferred_device_actions
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
@@ -974,7 +975,12 @@ async def test_notify_on_fire_orphan_pending_flushes_after_restart(
     )
     evaluator.start_periodic_tick()
     try:
-        with patch("app.rule_evaluator.send_rule_notification_email", send_mock):
+        sun_note = SunTimingNote(compact="evening window", sentence="Sunset today is at 6:32 PM.")
+        sun_notes_mock = MagicMock(return_value=(sun_note,))
+        with (
+            patch("app.rule_evaluator.send_rule_notification_email", send_mock),
+            patch("app.rule_evaluator._sun_timing_notes_for_rule", sun_notes_mock),
+        ):
             evaluator._deferred_device_actions_wake.set()
             await _await_send_count(send_mock, 1)
             kwargs = send_mock.call_args.kwargs
@@ -983,6 +989,8 @@ async def test_notify_on_fire_orphan_pending_flushes_after_restart(
             assert kwargs["device_state_changed_at"] == 1_700_000_040.0
             assert kwargs["noticed_at"] == 1_700_000_050.0
             assert kwargs["fire_source"] == "dwell_satisfied"
+            assert kwargs["sun_timing_lines"] == ("Sunset today is at 6:32 PM.",)
+            assert sun_notes_mock.call_args.kwargs["at_epoch"] == 1_700_000_060.0
             assert list_pending_fire_notifications(db) == []
     finally:
         await evaluator.close()

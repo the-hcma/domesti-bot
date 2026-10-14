@@ -1364,7 +1364,6 @@ class RuleEvaluator:
                         notification_detail=notification_detail,
                         outcomes=dispatch_result.action_outcomes,
                         rule_id=rule.id,
-                        sun_timing=sun_timing_lines,
                         trigger_device_display=trigger_device_display,
                     )
                     performed_side_effect = True
@@ -1531,7 +1530,9 @@ class RuleEvaluator:
                     notification_detail=pending.notification_detail,
                     rule=rule,
                     sequence_completed=True,
-                    sun_timing_lines=pending.sun_timing,
+                    sun_timing_lines=tuple(
+                        note.sentence for note in _sun_timing_notes_for_rule(rule, at_epoch=pending.fire_at)
+                    ),
                     trigger_device_display=pending.trigger_device_display,
                 )
             except RuleActionDispatchError as exc:
@@ -1551,7 +1552,6 @@ class RuleEvaluator:
                     notification_detail=pending.notification_detail,
                     outcomes=pending.outcomes,
                     rule_id=pending.rule_id,
-                    sun_timing=pending.sun_timing,
                     trigger_device_display=pending.trigger_device_display,
                 )
                 continue
