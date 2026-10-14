@@ -75,6 +75,7 @@ _LOGGER = logging.getLogger(__name__)
 MINUTES_PER_DAY = 24 * 60
 NOT_MANUALLY_OFF_ELAPSED_DETAIL = "{device} was turned off by hand {elapsed} ago (more than {window})"
 NOT_MANUALLY_OFF_NEVER_DETAIL = "{device} has not been turned off by hand"
+NOT_MANUALLY_OFF_UNRESOLVED_DETAIL = "{device} not found"
 NOT_MANUALLY_OFF_WAITING_DETAIL = "{device} was turned off by hand {elapsed} ago; waiting {remaining} more"
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 _DAY_NAMES = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
@@ -1128,15 +1129,28 @@ def _evaluate_device_not_manually_off_within(
     device_label = _device_condition_display_label(ctx, condition.device)
     window_label = _format_dwell_need_s(condition.window_s)
     label = f"Not turned off by hand in the last {window_label}"
-    backend_id = condition.device.device_id.strip()
-    if ctx.device_state is not None:
-        resolved = resolve_device_ref_to_backend_id(
-            ctx.device_state,
-            family_id=condition.device.family_id,
-            device_ref=backend_id,
+    if ctx.device_state is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="discovery not ready",
+            label=label,
+            met=False,
         )
-        if resolved is not None:
-            backend_id = resolved
+    backend_id = resolve_device_ref_to_backend_id(
+        ctx.device_state,
+        family_id=condition.device.family_id,
+        device_ref=condition.device.device_id.strip(),
+    )
+    if backend_id is None:
+        # Fail closed: a stale or misspelled reference must not read as "never
+        # turned off", or a rule whose action still reaches the light could
+        # turn it on inside the window.
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=NOT_MANUALLY_OFF_UNRESOLVED_DETAIL.format(device=device_label),
+            label=label,
+            met=False,
+        )
     off_at = ctx.device_manual_off_at.get((condition.device.family_id, backend_id))
     if off_at is None:
         return RuleConditionStatusOut(

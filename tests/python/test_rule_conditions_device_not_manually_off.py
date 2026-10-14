@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 from datetime import datetime
+from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -16,9 +18,12 @@ from app.api.schemas import (
     SettingsLocationOut,
 )
 from app.device_enums import DeviceFamilyId, RuleTrigger
+from app.domesti_bot_cli import DeviceManagersState
+from app.kasa_device_manager import KasaDeviceManager
 from app.rule_conditions import (
     NOT_MANUALLY_OFF_ELAPSED_DETAIL,
     NOT_MANUALLY_OFF_NEVER_DETAIL,
+    NOT_MANUALLY_OFF_UNRESOLVED_DETAIL,
     NOT_MANUALLY_OFF_WAITING_DETAIL,
     RuleEvaluationContext,
     compute_rules_sun_out,
@@ -87,10 +92,31 @@ def test_condition_rejects_non_positive_window() -> None:
         )
 
 
+def test_condition_fails_closed_when_device_reference_does_not_resolve() -> None:
+    ctx = _ctx(state=_state_with_light(mac="02:00:00:00:00:77"))
+    result = evaluate_rule(_rule(), ctx)
+    assert result.all_met is False
+    assert result.conditions[0].detail == NOT_MANUALLY_OFF_UNRESOLVED_DETAIL.format(device=_LABEL)
+
+
+def test_condition_unmet_while_discovery_is_not_ready() -> None:
+    result = evaluate_rule(_rule(), _ctx(discovery_ready=False))
+    assert result.all_met is False
+    assert result.conditions[0].detail == "discovery not ready"
+
+
+def test_condition_resolves_a_label_reference_to_the_recorded_mac() -> None:
+    rule = _rule(device_id="Master bedroom light")
+    ctx = _ctx(off_ago_s=60)
+    assert evaluate_rule(rule, ctx).all_met is False
+
+
 def _ctx(
     *,
     off_ago_s: float | None = None,
     off_device_id: str = _MAC,
+    discovery_ready: bool = True,
+    state: DeviceManagersState | None = None,
 ) -> RuleEvaluationContext:
     user_display_names = {"henrique": "Henrique"}
     manual_off: dict[tuple[DeviceFamilyId, str], float] = {}
@@ -105,24 +131,25 @@ def _ctx(
         user_display_names=user_display_names,
         user_locations={},
         device_manual_off_at=manual_off,
+        device_state=(state or _state_with_light()) if discovery_ready else None,
     )
 
 
-def _ref() -> RuleConditionDeviceRefOut:
+def _ref(device_id: str = _MAC) -> RuleConditionDeviceRefOut:
     return RuleConditionDeviceRefOut(
-        device_id=_MAC,
+        device_id=device_id,
         display_name="Master bedroom light",
         family_id=DeviceFamilyId.KASA,
     )
 
 
-def _rule(*, window_s: int = 3600) -> RuleOut:
+def _rule(*, device_id: str = _MAC, window_s: int = 3600) -> RuleOut:
     return RuleOut(
         conditions=RuleConditionsOut(
             all=[
                 DeviceNotManuallyOffWithinCondition(
                     type="device_not_manually_off_within",
-                    device=_ref(),
+                    device=_ref(device_id),
                     window_s=window_s,
                 ),
             ],
@@ -137,4 +164,25 @@ def _rule(*, window_s: int = 3600) -> RuleOut:
         notify_on_fire=False,
         triggers=[RuleTrigger.SCHEDULED],
         schedule_cron="0 19 * * *",
+    )
+
+
+def _state_with_light(*, mac: str = _MAC) -> DeviceManagersState:
+    light = MagicMock()
+    light.identifier = mac
+    light.mac_address = mac
+    light.host = "192.0.2.8"
+    light.preferred_label = "Master bedroom light"
+    kasa_mgr = MagicMock(spec=KasaDeviceManager)
+    kasa_mgr.switches = (light,)
+    kasa_mgr.get_device_by_alias.return_value = None
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        args=argparse.Namespace(),
+        cache_path=None,
+        ep1_mgr=None,
+        kasa_mgr=kasa_mgr,
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        vizio_mgr=None,
     )
