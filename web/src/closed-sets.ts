@@ -199,6 +199,7 @@ export const RuleConditionType = {
   DevicesAnyInStateForS: "devices_any_in_state_for_s",
   Ep1ReadingCompare: "ep1_reading_compare",
   LocalTimeWindow: "local_time_window",
+  UsersArrivedTogether: "users_arrived_together",
   UsersInsideGeofence: "users_inside_geofence",
   UsersInsideGeofenceForS: "users_inside_geofence_for_s",
   UsersMinDistanceFromHomeM: "users_min_distance_from_home_m",

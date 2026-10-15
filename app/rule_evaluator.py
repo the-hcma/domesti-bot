@@ -26,6 +26,7 @@ from app.api.schemas import (
     RuleOut,
     SettingsLocationOut,
     UserLocationOut,
+    UsersArrivedTogetherCondition,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
@@ -3591,7 +3592,7 @@ def _condition_geofence_edge_intents(
     user_id: str,
     transitions: dict[str, GeofenceTransition],
 ) -> list[tuple[str, DeferredGeofenceEvent]]:
-    if isinstance(condition, UsersInsideGeofenceCondition):
+    if isinstance(condition, UsersArrivedTogetherCondition | UsersInsideGeofenceCondition):
         if not rule_references_user_id(condition.user_ids, user_id):
             return []
         transition = transitions.get(condition.geofence_id)
@@ -3640,7 +3641,7 @@ def _condition_triggered_geofence_edge(
     user_id: str,
     transitions: dict[str, GeofenceTransition],
 ) -> bool:
-    if isinstance(condition, UsersInsideGeofenceCondition):
+    if isinstance(condition, UsersArrivedTogetherCondition | UsersInsideGeofenceCondition):
         if not rule_references_user_id(condition.user_ids, user_id):
             return False
         transition = transitions.get(condition.geofence_id)
@@ -3728,7 +3729,7 @@ def _format_rule_conditions_for_log(
             and RuleTrigger.EDGE_TRUE in rule.triggers
             and isinstance(
                 row.condition,
-                (UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
+                (UsersArrivedTogetherCondition, UsersInsideGeofenceCondition, UsersOutsideGeofenceCondition),
             )
         ):
             parts.append(f"{row.label}: {row.detail}")
