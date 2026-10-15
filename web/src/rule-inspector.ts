@@ -216,6 +216,9 @@ export function mountRuleInspectorPanel(
   if (rule.notify_on_fire && rule.notification_emails.length > 0) {
     appendDefinitionRow(meta, "Email on fire", rule.notification_emails.join(", "));
   }
+  if (rule.dry_run === true) {
+    appendDefinitionRow(meta, "Dry run", "Emails what it would do; changes no device");
+  }
 
   const summaryHost = document.createElement("div");
   appendRuleSummaryBody(summaryHost, summarizeRule(rule, context));

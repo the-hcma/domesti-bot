@@ -2069,6 +2069,14 @@ class RuleOut(BaseModel):
     conditions: RuleConditionsOut
     cooldown_s: int
     device_actions: list[RuleDeviceActionOut]
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "When true, the rule evaluates and fires as usual but runs no device "
+            "action: the notification email lists what it would have done. "
+            "Requires ``notify_on_fire`` so the dry run is visible."
+        ),
+    )
     enabled: bool
     fire_once_per_local_day: bool = Field(
         default=False,
@@ -2133,6 +2141,18 @@ class RuleOut(BaseModel):
                 "Expected triggers list, got legacy trigger field",
             )
         return data
+
+    @model_validator(mode="after")
+    def _require_notification_for_dry_run(self) -> Self:
+        if self.dry_run and not self.notify_on_fire:
+            raise ValueError(
+                "Expected notify_on_fire true for a dry_run rule (the email is the only output), got false",
+            )
+        if self.dry_run and not any(email.strip() for email in self.notification_emails):
+            raise ValueError(
+                "Expected at least one notification_emails recipient for a dry_run rule, got none",
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_trigger_fields(self) -> Self:

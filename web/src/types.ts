@@ -638,6 +638,8 @@ interface RuleOutShared {
   notification_emails: string[];
   conditions: RuleConditionsOut;
   device_actions: RuleDeviceActionOut[];
+  /** Fire as usual but run no device action; the email lists what it would have done. */
+  dry_run?: boolean;
   /** 5-field cron (minute hour day month weekday); home timezone from settings. */
   schedule_cron: string | null;
   triggers: RuleTrigger[];

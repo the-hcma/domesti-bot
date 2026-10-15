@@ -820,6 +820,12 @@ class RulesHubController {
     const notifyCb = document.createElement("input");
     notifyCb.type = "checkbox";
     notifyCb.checked = existing?.notify_on_fire ?? false;
+    if (existing?.dry_run === true) {
+      // The email is a dry-run rule's only output, so it cannot be switched off here.
+      notifyCb.checked = true;
+      notifyCb.disabled = true;
+      notifyCb.title = "A dry-run rule must send email: the email is its only output.";
+    }
     notifyRow.append(
       notifyCb,
       document.createTextNode(" Send email when this rule fires"),
@@ -989,6 +995,8 @@ class RulesHubController {
             : [],
           conditions: { all: conditions },
           device_actions,
+          // The editor has no dry-run control; keep it so editing never turns a dry run live.
+          ...(existing?.dry_run === true ? { dry_run: true } : {}),
         };
         await this.dataSource.saveRule(rule);
         editor.remove();
