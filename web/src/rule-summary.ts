@@ -255,6 +255,9 @@ export function formatGeofenceDwellLabel(
   const where = geofenceLabel(condition.geofence_id, context);
   const who = joinNames(names);
   const needLabel = formatDwellNeed(condition.min_inside_s);
+  if (condition.max_inside_s != null) {
+    return `${who} inside ${where} for ${needLabel} to ${formatDwellNeed(condition.max_inside_s)}`;
+  }
   return `${who} inside ${where} for ${needLabel}+`;
 }
 

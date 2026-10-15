@@ -1851,6 +1851,10 @@ def _evaluate_users_inside_geofence_for_s(
         if inside_since is not None:
             inside_s = now_epoch - inside_since
             elapsed_label = _format_dwell_elapsed_s(inside_s)
+            if _past_arrival_window(condition, inside_s):
+                presence_lines.append(_past_arrival_window_line(condition, name, elapsed_label))
+                unmet = True
+                continue
             accurate_inside = _accurate_inside_from_location(
                 effective,
                 geofence,
@@ -1910,6 +1914,10 @@ def _evaluate_users_inside_geofence_for_s(
             continue
         inside_s = now_epoch - inside_since
         elapsed_label = _format_dwell_elapsed_s(inside_s)
+        if _past_arrival_window(condition, inside_s):
+            presence_lines.append(_past_arrival_window_line(condition, name, elapsed_label))
+            unmet = True
+            continue
         if used_wifi:
             presence_lines.append(
                 f"{name} inside {elapsed_label} via WiFi home presence (need {need_label})",
@@ -2184,6 +2192,16 @@ def _format_dwell_duration_s(total_s: float | int) -> str:
     if seconds == 0:
         return f"{minutes} min"
     return f"{minutes} min {seconds} sec"
+
+
+def _past_arrival_window(condition: UsersInsideGeofenceForSCondition, inside_s: float) -> bool:
+    """True when ``max_inside_s`` is set and the user has been inside longer than that."""
+    return condition.max_inside_s is not None and inside_s > condition.max_inside_s
+
+
+def _past_arrival_window_line(condition: UsersInsideGeofenceForSCondition, name: str, elapsed_label: str) -> str:
+    assert condition.max_inside_s is not None
+    return f"{name} inside {elapsed_label}, past the {_format_dwell_need_s(condition.max_inside_s)} arrival window"
 
 
 def _format_dwell_elapsed_s(elapsed_s: float) -> str:
@@ -2618,6 +2636,8 @@ def _roster_user_ids_satisfying_users_inside_geofence_for_s(
             inside_since = max(inside_since, eligible_since)
         if inside_since is not None:
             inside_s = now_epoch - inside_since
+            if _past_arrival_window(condition, inside_s):
+                continue
             if inside_s >= condition.min_inside_s:
                 accurate_inside = _accurate_inside_from_location(
                     effective,
@@ -2643,7 +2663,9 @@ def _roster_user_ids_satisfying_users_inside_geofence_for_s(
             continue
         if inside_since is None:
             continue
-        if now_epoch - inside_since < condition.min_inside_s:
+        if now_epoch - inside_since < condition.min_inside_s or _past_arrival_window(
+            condition, now_epoch - inside_since
+        ):
             continue
         satisfied.add(roster_user_id)
     return satisfied

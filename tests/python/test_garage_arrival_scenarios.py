@@ -40,11 +40,21 @@ class _Door:
 class _Rig:
     """An evaluator loaded with the example garage arrival rules, enabled, and two closed doors."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        only: tuple[str, ...] = (_TOGETHER, _HENRIQUE_ALONE, _KRISTEN_ALONE),
+    ) -> None:
         monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(_EXAMPLE))
         example = load_automation_rules_bundle()
-        rules = [rule.model_copy(update={"enabled": True}) for rule in example.rules if rule.id.startswith("garage-")]
-        assert sorted(rule.id for rule in rules) == sorted([_TOGETHER, _HENRIQUE_ALONE, _KRISTEN_ALONE])
+        rules = [
+            rule.model_copy(update={"enabled": True})
+            for rule in example.rules
+            if rule.id.startswith("garage-") and rule.id in only
+        ]
+        assert sorted(rule.id for rule in rules) == sorted(only)
         bundle = tmp_path / "rules.json"
         bundle.write_text(
             json.dumps(
@@ -223,5 +233,70 @@ async def test_second_person_arriving_after_the_first_already_got_a_door_opens_n
         await rig.ping("kristen", after_s=70.0)
         await rig.ping("henrique", after_s=10.0)
         assert [rule_id for rule_id, _line in rig.opened] == [_HENRIQUE_ALONE]
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
+async def test_together_rule_alone_still_fires_without_any_dwell_rule(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrival times are only recorded for rules that need them; this one must not
+    # depend on a dwell rule being loaded alongside it.
+    rig = _Rig(tmp_path, monkeypatch, only=(_TOGETHER,))
+    try:
+        await rig.arrive("henrique", after_s=0.0)
+        await rig.arrive("kristen", after_s=30.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
+async def test_staying_home_after_the_other_person_leaves_does_not_open_a_door(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch)
+    try:
+        await rig.arrive("henrique", after_s=0.0)
+        await rig.arrive("kristen", after_s=30.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+        await rig.report("henrique", _OUTSIDE, after_s=120.0)
+        await rig.ping("kristen", after_s=600.0)
+        await rig.ping("kristen", after_s=600.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
+async def test_someone_home_for_a_while_does_not_open_a_door_when_the_other_is_away(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch)
+    try:
+        await rig.arrive("kristen", after_s=0.0)
+        await rig.ping("kristen", after_s=70.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_KRISTEN_ALONE]
+        await rig.ping("kristen", after_s=2 * 3600.0)
+        await rig.ping("kristen", after_s=600.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_KRISTEN_ALONE]
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
+async def test_a_report_that_comes_after_the_arrival_window_opens_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch)
+    try:
+        await rig.arrive("henrique", after_s=0.0)
+        await rig.ping("henrique", after_s=400.0)
+        assert rig.opened == []
     finally:
         await rig.close()

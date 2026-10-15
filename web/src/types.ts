@@ -530,6 +530,8 @@ export type RuleConditionOut =
   | {
       type: typeof RuleConditionType.UsersInsideGeofenceForS;
       geofence_id: string;
+      /** Optional upper bound: unmet once a user has been inside longer than this. */
+      max_inside_s?: number | null;
       user_ids: string[];
       min_inside_s: number;
     }
