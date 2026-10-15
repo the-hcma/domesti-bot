@@ -11,6 +11,7 @@ from app.api.schemas import (
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
+    DevicesAnyTransitionedToStateCondition,
     Ep1ReadingCompareCondition,
     RuleConditionDeviceRefOut,
     RuleConditionOut,
@@ -151,7 +152,8 @@ def rule_watches_backend_device_bool_state(
     """Return whether ``backend_device_id`` is watched via bool device-state conditions.
 
     Matches ``devices_all_in_state`` / ``devices_any_in_state`` /
-    ``devices_any_in_state_for_s`` only — not ``ep1_reading_compare``.
+    ``devices_any_in_state_for_s`` / ``devices_any_transitioned_to_state``
+    only — not ``ep1_reading_compare``.
     """
     for ref_family, ref_device in _collect_rule_bool_state_device_refs(rule):
         if ref_family != family_id:
@@ -623,6 +625,7 @@ def _iter_device_state_condition_checks(
                 DevicesAllInStateCondition,
                 DevicesAnyInStateCondition,
                 DevicesAnyInStateForSCondition,
+                DevicesAnyTransitionedToStateCondition,
             ),
         ):
             found.append((condition.devices, condition.state))
@@ -722,7 +725,10 @@ def _walk_bool_state_device_refs(
 ) -> None:
     if isinstance(
         condition,
-        DevicesAllInStateCondition | DevicesAnyInStateCondition | DevicesAnyInStateForSCondition,
+        DevicesAllInStateCondition
+        | DevicesAnyInStateCondition
+        | DevicesAnyInStateForSCondition
+        | DevicesAnyTransitionedToStateCondition,
     ):
         for ref in condition.devices:
             refs.add((ref.family_id, ref.device_id))
@@ -742,7 +748,10 @@ def _walk_device_refs(
 ) -> None:
     if isinstance(
         condition,
-        DevicesAllInStateCondition | DevicesAnyInStateCondition | DevicesAnyInStateForSCondition,
+        DevicesAllInStateCondition
+        | DevicesAnyInStateCondition
+        | DevicesAnyInStateForSCondition
+        | DevicesAnyTransitionedToStateCondition,
     ):
         for ref in condition.devices:
             refs.add((ref.family_id, ref.device_id))

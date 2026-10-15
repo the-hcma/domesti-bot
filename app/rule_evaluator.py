@@ -72,7 +72,7 @@ from app.device_enums import (
     RuleEvaluationCause,
     RuleTrigger,
 )
-from app.device_rule_wake import format_bool_state_label
+from app.device_rule_wake import DeviceBoolTransition, format_bool_state_label
 from app.domesti_bot_cli import DeviceManagersState
 from app.dwell_watch_index import (
     DeviceDwellWatch,
@@ -314,6 +314,9 @@ class RuleEvaluator:
         self._next_sun_check_at: float | None = None
         self._in_flight_device_state_change_keys: set[tuple[DeviceFamilyId, str, Ep1ReadingMetric | None]] = set()
         self._pending_device_state_change_keys: set[tuple[DeviceFamilyId, str, Ep1ReadingMetric | None]] = set()
+        # Latest bool transition per device awaiting its coalesced evaluation;
+        # a newer transition replaces an older one that was never evaluated.
+        self._pending_device_bool_transitions: dict[tuple[DeviceFamilyId, str], DeviceBoolTransition] = {}
         self._process_lock = asyncio.Lock()
         self._rule_state: dict[str, _RuleRuntimeState] = {}
         self._location_request_coordinator = LocationRequestCoordinator(
@@ -470,7 +473,14 @@ class RuleEvaluator:
         device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
+        """Evaluate ``device_state`` rules watching ``device_id``.
+
+        ``transition`` is the bool change that caused this wake, when there was
+        one (not for first-sample seeds or reading wakes); only
+        ``devices_any_transitioned_to_state`` conditions read it.
+        """
         if self._cache_path is None:
             return
         trimmed = device_id.strip()
@@ -481,6 +491,7 @@ class RuleEvaluator:
                 family_id,
                 trimmed,
                 reading_metric=reading_metric,
+                transition=transition,
             )
 
     def schedule_device_state_change(
@@ -489,6 +500,7 @@ class RuleEvaluator:
         device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
         try:
             asyncio.get_running_loop()
@@ -507,6 +519,7 @@ class RuleEvaluator:
                     family_id,
                     device_id,
                     reading_metric,
+                    transition,
                 )
             except RuntimeError:
                 _LOGGER.warning(
@@ -515,7 +528,7 @@ class RuleEvaluator:
                     device_id,
                 )
             return
-        self._schedule_device_state_change_task(family_id, device_id, reading_metric)
+        self._schedule_device_state_change_task(family_id, device_id, reading_metric, transition)
 
     def start_periodic_tick(self) -> None:
         if self._tick_task is not None:
@@ -2196,8 +2209,12 @@ class RuleEvaluator:
         family_id: DeviceFamilyId,
         device_id: str,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
         key = (family_id, device_id, reading_metric)
+        transition_key = (family_id, device_id)
+        if transition is not None and reading_metric is None:
+            self._pending_device_bool_transitions[transition_key] = transition
         self._pending_device_state_change_keys.add(key)
         if key in self._in_flight_device_state_change_keys:
             return
@@ -2208,10 +2225,16 @@ class RuleEvaluator:
             try:
                 while not self._stop.is_set():
                     self._pending_device_state_change_keys.discard(key)
+                    pending_transition = (
+                        self._pending_device_bool_transitions.pop(transition_key, None)
+                        if reading_metric is None
+                        else None
+                    )
                     await self.on_device_state_change(
                         family_id,
                         device_id,
                         reading_metric=reading_metric,
+                        transition=pending_transition,
                     )
                     if key not in self._pending_device_state_change_keys:
                         return
@@ -2219,6 +2242,8 @@ class RuleEvaluator:
                 self._in_flight_device_state_change_keys.discard(key)
                 if self._stop.is_set():
                     self._pending_device_state_change_keys.discard(key)
+                    if reading_metric is None:
+                        self._pending_device_bool_transitions.pop(transition_key, None)
                 elif key in self._pending_device_state_change_keys:
                     self._schedule_device_state_change_task(
                         family_id,
@@ -2497,6 +2522,7 @@ class RuleEvaluator:
         device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
         cache_path = self._cache_path
         if cache_path is None:
@@ -2511,8 +2537,13 @@ class RuleEvaluator:
             now_epoch=now_epoch,
             ctx=ctx,
         )
+        if transition is not None and (
+            reading_metric is not None or transition.family_id != family_id or transition.device_id.strip() != device_id
+        ):
+            transition = None
         evaluation_ctx = replace(
             ctx,
+            device_transition=transition,
             triggered_by=RuleEvaluationCause.DEVICE_STATE,
         )
         device_state = self._device_state_getter()

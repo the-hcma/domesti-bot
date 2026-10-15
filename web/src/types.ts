@@ -608,6 +608,12 @@ export type RuleConditionOut =
       state: DeviceConditionState;
     }
   | {
+      /** Edge-only: met on the ``device_state`` pass caused by a listed device changing into ``state``. */
+      type: typeof RuleConditionType.DevicesAnyTransitionedToState;
+      devices: RuleConditionDeviceRefOut[];
+      state: DeviceConditionState;
+    }
+  | {
       type: typeof RuleConditionType.Ep1ReadingCompare;
       comparison: Ep1ReadingComparison;
       device: RuleConditionDeviceRefOut;

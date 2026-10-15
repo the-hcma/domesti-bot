@@ -28,6 +28,7 @@ from app.api.schemas import (
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
+    DevicesAnyTransitionedToStateCondition,
     Ep1ReadingCompareCondition,
     GeofenceOut,
     LocalTimeWindowCondition,
@@ -55,6 +56,7 @@ from app.device_enums import (
     RuleEvaluationCause,
     RuleTrigger,
 )
+from app.device_rule_wake import DeviceBoolTransition, format_bool_state_label
 from app.home_location import try_resolve_home_location
 from app.rule_actions import (
     cached_ep1_is_occupied,
@@ -73,6 +75,12 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+DEVICE_TRANSITION_LABEL = "Any device changes to {state}"
+DEVICE_TRANSITION_MET_DETAIL = "{device} changed from {previous} to {current}"
+DEVICE_TRANSITION_OTHER_DETAIL = "{device} changed from {previous} to {current}, not to {state}"
+DEVICE_TRANSITION_WAITING_DETAIL = (
+    "Waiting for {devices} to change to {state} (checked each time the device state is polled)"
+)
 MINUTES_PER_DAY = 24 * 60
 NOT_MANUALLY_OFF_ELAPSED_DETAIL = "{device} was turned off by hand {elapsed} ago (more than {window})"
 NOT_MANUALLY_OFF_NEVER_DETAIL = "{device} has not been turned off by hand"
@@ -114,6 +122,9 @@ class RuleEvaluationContext:
         default_factory=dict,
     )
     device_state: DeviceManagersState | None = None
+    # The bool change that woke this ``device_state`` pass, if any; only
+    # ``devices_any_transitioned_to_state`` reads it.
+    device_transition: DeviceBoolTransition | None = None
     geofence_inside_since: dict[tuple[str, str], float] = field(default_factory=dict)
     geofence_outside_since: dict[tuple[str, str], float] = field(default_factory=dict)
     geofence_presence_episode: dict[tuple[str, str], int] = field(default_factory=dict)
@@ -892,6 +903,30 @@ def _device_condition_open_labels(
     return open_labels, closed_labels, missing_labels
 
 
+def _device_ref_matching_transition(
+    devices: list[RuleConditionDeviceRefOut],
+    transition: DeviceBoolTransition,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionDeviceRefOut | None:
+    """Return the listed device ``transition`` belongs to, matching on backend id."""
+    for ref in devices:
+        if ref.family_id != transition.family_id:
+            continue
+        reference = ref.device_id.strip()
+        if reference == transition.device_id:
+            return ref
+        if ctx.device_state is None:
+            continue
+        resolved = resolve_device_ref_to_backend_id(
+            ctx.device_state,
+            family_id=ref.family_id,
+            device_ref=reference,
+        )
+        if resolved == transition.device_id:
+            return ref
+    return None
+
+
 def _effective_location_for_rule(
     latest: UserLocationOut | None,
     history: tuple[UserLocationOut, ...] | list[UserLocationOut],
@@ -1138,6 +1173,8 @@ def _evaluate_condition(
         return _evaluate_devices_any_in_state(condition, rule, ctx)
     if isinstance(condition, DevicesAnyInStateForSCondition):
         return _evaluate_devices_any_in_state_for_s(condition, rule, ctx)
+    if isinstance(condition, DevicesAnyTransitionedToStateCondition):
+        return _evaluate_devices_any_transitioned_to_state(condition, rule, ctx)
     if isinstance(condition, Ep1ReadingCompareCondition):
         return _evaluate_ep1_reading_compare(condition, rule, ctx)
     if isinstance(condition, LocalTimeWindowCondition):
@@ -1367,6 +1404,50 @@ def _evaluate_devices_any_in_state_for_s(
         if missing_labels:
             parts.append(f"not found: {', '.join(missing_labels)}")
         detail = "; ".join(parts) if parts else f"No device {condition.state.value}"
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=label,
+        met=met,
+    )
+
+
+def _evaluate_devices_any_transitioned_to_state(
+    condition: DevicesAnyTransitionedToStateCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    del rule  # unused; signature matches sibling evaluators
+    state = condition.state
+    label = DEVICE_TRANSITION_LABEL.format(state=state.value)
+    transition = ctx.device_transition
+    ref = (
+        None
+        if transition is None or ctx.triggered_by != RuleEvaluationCause.DEVICE_STATE
+        else _device_ref_matching_transition(condition.devices, transition, ctx)
+    )
+    if transition is None or ref is None:
+        devices_label = ", ".join(_device_condition_display_label(ctx, entry) for entry in condition.devices)
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=DEVICE_TRANSITION_WAITING_DETAIL.format(devices=devices_label, state=state.value),
+            label=label,
+            met=False,
+        )
+    desired = state.desired_bool()
+    met = (
+        state.supported_by_family(ref.family_id)
+        and transition.current is not None
+        and transition.current == desired
+        and transition.previous != desired
+    )
+    template = DEVICE_TRANSITION_MET_DETAIL if met else DEVICE_TRANSITION_OTHER_DETAIL
+    detail = template.format(
+        current=format_bool_state_label(transition.family_id, transition.current),
+        device=_device_condition_display_label(ctx, ref),
+        previous=format_bool_state_label(transition.family_id, transition.previous),
+        state=state.value,
+    )
     return RuleConditionStatusOut(
         condition=condition,
         detail=detail,
@@ -2517,6 +2598,7 @@ def _presence_user_ids_for_condition(
             DevicesAllInStateCondition,
             DevicesAnyInStateCondition,
             DevicesAnyInStateForSCondition,
+            DevicesAnyTransitionedToStateCondition,
             Ep1ReadingCompareCondition,
             LocalTimeWindowCondition,
         ),

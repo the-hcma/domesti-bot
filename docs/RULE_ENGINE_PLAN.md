@@ -1362,7 +1362,7 @@ Authoritative subscribe contract for **reading-kind** wakes (numeric sensor samp
 
 | Wake source | Matched rules |
 | --- | --- |
-| Bool transition (occupancy / switch / door / …) | Enabled `device_state` rules that watch the device via matching **bool** conditions (`devices_all/any_in_state`, `devices_any_in_state_for_s`) — including mixed rules that also have `ep1_reading_compare` |
+| Bool transition (occupancy / switch / door / …) | Enabled `device_state` rules that watch the device via matching **bool** conditions (`devices_all/any_in_state`, `devices_any_in_state_for_s`, `devices_any_transitioned_to_state`) — including mixed rules that also have `ep1_reading_compare` |
 | EP1 reading push (`illuminance` / `temperature` / `humidity`) | Enabled `device_state` rules with `ep1_reading_compare` on that device **and** the same `metric` |
 
 **`ignore_expected_device_changes` (opt-in, default false; #694):** when true, a **bool** `device_state` wake skips fire if `is_expected_device_change(family, device)` is live for the waking device (same store vacation anomaly uses for UI/rule actions). Reading-kind wakes are unaffected. Existing rules keep prior behavior until they set the flag.
@@ -1424,6 +1424,25 @@ Met unless a person turned the device off through domesti-bot (the web UI or the
 Reads **cached** state from `DeviceStateWatcher` / manager objects — Kasa `is_on`, Sonos `is_playing`, Vizio `ui_power_state()` — same source as the tile UI, not a live LAN round-trip on every tick. If `device_state` is `None` (discovery incomplete), condition is **unmet** with detail `discovery not ready`.
 
 **Shipped families (bool device-state predicates):** Kasa, Sonos, Vizio, EP1 occupancy, and Tailwind open/closed. Google Cast is not a device-state predicate (validation fails for `androidtv`).
+
+#### Design: react to a device turning on — `devices_any_transitioned_to_state` (#848)
+
+```json
+{
+  "type": "devices_any_transitioned_to_state",
+  "devices": [{ "family_id": "kasa", "device_id": "<mac>", "display_name": "Basement bottom of stairs" }],
+  "state": "on"
+}
+```
+
+Met only on the `device_state` pass caused by a listed device changing **into** `state` from the opposite state (off → on, closed → open, clear → occupied, paused → playing). Motivating rule: a basement light is switched on by its own presence sensor, which domesti-bot cannot read, so the only signal is the light's power state; when it turns on between 06:30 and 09:30, turn on the lamp and LEDs too. Pair it with a top-level `local_time_window` and `turn_on` actions.
+
+- **Where the change comes from:** the family's polling watcher calls `DeviceRuleWakeNotifier.note_bool_transition`; a real prior ≠ current change reaches the runtime as a `DeviceBoolTransition`, which `RuleEvaluator.schedule_device_state_change(..., transition=...)` keeps per device until its (coalesced) evaluation runs and puts on `RuleEvaluationContext.device_transition`. A newer change for the same device replaces one that was not evaluated yet.
+- **What never satisfies it:** the first reading after a restart (seed wake), a change from or to an unknown reading, reading wakes, scheduled / eligibility / dwell passes, and the Status tab (which shows "Waiting for … to change to on").
+- **Re-fire:** every new off → on change inside the window fires again (subject to `cooldown_s` and `fire_once_per_local_day`). A light the sensor switches off after vacancy and back on at the next detection fires each time.
+- **Rule shape (validation):** at most one such condition, at the top level of `conditions.all`, and `triggers` must be exactly `["device_state"]`. These rules get no window-open eligibility wake: a light already on when the window opens must not fire.
+- **`ignore_expected_device_changes`:** set it to true so a turn-on that domesti-bot itself caused (UI toggle, another rule) does not cascade; sensor and wall-switch changes are never "expected" and still fire.
+- **Latency and missed pulses:** detection lags the physical change by up to one poll interval (`DOMESTI_STATE_POLL_INTERVAL_S`, 10 s by default) plus the device refresh time. A device that turns on and back off between two polls is never seen. Correlate `[device] state-transition` with `[rules] fired` to measure the lag (#699).
 
 #### Example bundle rule (target shape)
 

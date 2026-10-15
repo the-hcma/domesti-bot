@@ -67,6 +67,7 @@ function appendConditionTree(
       condition.type === RuleConditionType.DevicesAllInState
       || condition.type === RuleConditionType.DevicesAnyInState
       || condition.type === RuleConditionType.DevicesAnyInStateForS
+      || condition.type === RuleConditionType.DevicesAnyTransitionedToState
     ) {
       item.textContent = formatDeviceStateCondition(condition, context);
     } else if (condition.type === RuleConditionType.DeviceNotManuallyOffWithin) {

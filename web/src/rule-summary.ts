@@ -329,6 +329,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case RuleConditionType.DevicesAllInState:
     case RuleConditionType.DevicesAnyInState:
     case RuleConditionType.DevicesAnyInStateForS:
+    case RuleConditionType.DevicesAnyTransitionedToState:
     case RuleConditionType.Ep1ReadingCompare:
       return null;
     case RuleConditionType.All:
@@ -365,7 +366,8 @@ export function formatDeviceStateCondition(
       type:
         | typeof RuleConditionType.DevicesAllInState
         | typeof RuleConditionType.DevicesAnyInState
-        | typeof RuleConditionType.DevicesAnyInStateForS;
+        | typeof RuleConditionType.DevicesAnyInStateForS
+        | typeof RuleConditionType.DevicesAnyTransitionedToState;
     }
   >,
   context: RuleSummaryContext,
@@ -384,6 +386,10 @@ export function formatDeviceStateCondition(
   }
   if (condition.type === RuleConditionType.DevicesAllInState) {
     return `All of ${joined} are ${condition.state}`;
+  }
+  if (condition.type === RuleConditionType.DevicesAnyTransitionedToState) {
+    const who = labels.length > 1 ? `any of ${joined}` : joined;
+    return `When ${who} changes to ${condition.state}`;
   }
   const need = formatDwellDuration(condition.min_duration_s);
   return `Any of ${joined} ${condition.state} for ${need}+`;
@@ -494,6 +500,7 @@ export function summarizeRule(
       condition.type === RuleConditionType.DevicesAllInState
       || condition.type === RuleConditionType.DevicesAnyInState
       || condition.type === RuleConditionType.DevicesAnyInStateForS
+      || condition.type === RuleConditionType.DevicesAnyTransitionedToState
     ) {
       devices.push(formatDeviceStateCondition(condition, context));
       return;

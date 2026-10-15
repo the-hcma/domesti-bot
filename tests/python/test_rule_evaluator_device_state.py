@@ -21,6 +21,7 @@ from app.api.schemas import (
     UsersOutsideGeofenceForSCondition,
 )
 from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1ReadingMetric, RuleTrigger
+from app.device_rule_wake import DeviceBoolTransition
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1DeviceManager
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -626,8 +627,9 @@ async def test_schedule_device_state_change_coalesces_in_flight_wakes(
         device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
-        del reading_metric
+        del reading_metric, transition
         calls.append((family_id, device_id))
         entered.set()
         await release.wait()
@@ -673,9 +675,10 @@ async def test_schedule_device_state_change_invokes_real_handler(
         device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
         calls.append((family_id, device_id))
-        await real(family_id, device_id, reading_metric=reading_metric)
+        await real(family_id, device_id, reading_metric=reading_metric, transition=transition)
 
     evaluator.on_device_state_change = _wrap  # type: ignore[method-assign]
     family_id = DeviceFamilyId.EP1
@@ -712,8 +715,9 @@ async def test_schedule_device_state_change_releases_key_when_handler_raises(
         _device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
-        del reading_metric
+        del reading_metric, transition
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -760,8 +764,9 @@ async def test_schedule_device_state_change_reschedules_after_raise_with_pending
         _device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
-        del reading_metric
+        del reading_metric, transition
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -808,8 +813,9 @@ async def test_schedule_device_state_change_skips_requeue_after_close(
         device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
-        del reading_metric
+        del reading_metric, transition
         calls.append((family_id, device_id))
         entered.set()
         await release.wait()

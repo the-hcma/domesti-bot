@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1ReadingMetric
 
@@ -22,6 +23,21 @@ DEVICE_STATE_TRANSITION_LOG = "[device] state-transition family_id=%s device_id=
 DEVICE_BOOL_METRIC_NAME = "bool"
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DeviceBoolTransition:
+    """One observed ``previous`` → ``current`` natural-bool change for a device.
+
+    ``device_id`` is the watcher's backend identifier (the same id passed to
+    ``note_bool_transition``). ``current`` is ``None`` when the new reading is
+    unknown.
+    """
+
+    current: bool | None
+    device_id: str
+    family_id: DeviceFamilyId
+    previous: bool
 
 
 class DeviceRuleWakeNotifier:

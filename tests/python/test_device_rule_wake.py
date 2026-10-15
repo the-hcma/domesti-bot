@@ -207,6 +207,7 @@ def test_runtime_reading_update_schedules_rule_evaluation_not_vacation(
         DeviceFamilyId.EP1,
         "aa:bb:cc:dd:ee:01",
         reading_metric=Ep1ReadingMetric.ILLUMINANCE_LX,
+        transition=None,
     )
     holder.schedule_vacation_anomaly_alert.assert_not_called()
 
