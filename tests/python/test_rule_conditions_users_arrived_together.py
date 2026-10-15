@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import (
+    AnyConditionsCondition,
     GeofenceOut,
     RuleConditionsOut,
     RuleOut,
@@ -193,6 +194,20 @@ def test_presence_users_are_both_users_only_while_they_arrived_together() -> Non
 def test_condition_needs_at_least_two_users() -> None:
     with pytest.raises(ValidationError):
         UsersArrivedTogetherCondition(type="users_arrived_together", geofence_id="house", user_ids=["henrique"])
+
+
+@pytest.mark.parametrize("user_ids", [["henrique", "henrique"], ["henrique", " HENRIQUE "]])
+def test_condition_rejects_the_same_user_listed_twice(user_ids: list[str]) -> None:
+    with pytest.raises(ValidationError, match="Expected 2 distinct user_ids"):
+        UsersArrivedTogetherCondition(type="users_arrived_together", geofence_id="house", user_ids=user_ids)
+
+
+def test_arrived_together_inside_an_any_group_still_lets_an_edge_rule_fire() -> None:
+    rule = _rule().model_copy(
+        update={"conditions": RuleConditionsOut(all=[AnyConditionsCondition(type="any", conditions=[_condition()])])},
+    )
+    assert evaluate_rule(rule, _ctx(henrique_gap_s=10.0)).all_met is True
+    assert evaluate_rule(rule, _ctx(henrique_gap_s=90.0)).all_met is False
 
 
 @pytest.mark.parametrize("max_gap_s", [0, 3601])

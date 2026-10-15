@@ -489,7 +489,6 @@ def _conditions_are_presence_only(
         isinstance(
             condition,
             (
-                UsersArrivedTogetherCondition,
                 UsersInsideGeofenceCondition,
                 UsersInsideGeofenceForSCondition,
                 UsersOutsideGeofenceCondition,

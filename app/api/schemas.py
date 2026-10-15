@@ -1928,6 +1928,16 @@ class UsersArrivedTogetherCondition(BaseModel):
     max_gap_s: int = Field(default=60, ge=1, le=3600)
     user_ids: list[str] = Field(min_length=2)
 
+    @field_validator("user_ids")
+    @classmethod
+    def _require_distinct_user_ids(cls, value: list[str]) -> list[str]:
+        distinct = {user_id.strip().lower() for user_id in value}
+        if len(distinct) != len(value):
+            raise ValueError(
+                f"Expected {len(value)} distinct user_ids (ignoring case and surrounding spaces), got {len(distinct)}",
+            )
+        return value
+
 
 class UsersInsideGeofenceCondition(BaseModel):
     type: Literal["users_inside_geofence"]
