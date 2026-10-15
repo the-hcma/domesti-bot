@@ -174,6 +174,9 @@ RULE_DWELL_STREAK_LOG = "[rules] dwell-streak family_id=%s device_id=%s state=%s
 RULE_DWELL_STREAK_RESET_LOG = "[rules] dwell-streak-reset family_id=%s device_id=%s prior_state=%s reason=%s"
 # Skip reason logged when only a device_not_manually_off_within hold blocks a rule.
 RULE_SKIP_REASON_MANUAL_OFF_HOLD = "held_off_manual_off"
+# Minimum gap before retrying a held-off notice whose send failed, so an SMTP
+# outage does not stall evaluation with a blocked send on every trigger.
+_HELD_OFF_RETRY_AFTER_S = 300.0
 _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
 _GEO_INSIDE_STATE_RECONCILE_S = 600.0
 _GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
@@ -289,6 +292,7 @@ class RuleEvaluator:
         # rule id -> the manual-off timestamps already mailed as a hold, so one
         # episode sends one notice however many triggers it blocks.
         self._held_off_notified_episode: dict[str, tuple[float, ...]] = {}
+        self._held_off_send_failed_at: dict[str, float] = {}
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_geo_outside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_inside_since: dict[tuple[str, str], float] = {}
@@ -3198,6 +3202,10 @@ class RuleEvaluator:
         episode = tuple(sorted(hold.off_at for hold in holds))
         if self._held_off_notified_episode.get(rule.id) == episode:
             return
+        now = self._now_fn()
+        failed_at = self._held_off_send_failed_at.get(rule.id)
+        if failed_at is not None and now - failed_at < _HELD_OFF_RETRY_AFTER_S:
+            return
         try:
             await asyncio.to_thread(
                 send_rule_held_off_email,
@@ -3206,9 +3214,12 @@ class RuleEvaluator:
                 rule=rule,
                 trigger=_held_off_trigger_text(fire_source, log_user_ids),
             )
-        except RuleActionDispatchError as exc:
-            _LOGGER.warning("[rules] held-off notice failed rule_id=%s: %s", rule.id, exc)
+        except Exception:
+            # Best effort: a notice problem must never abort evaluating the other rules.
+            _LOGGER.warning("[rules] held-off notice failed rule_id=%s", rule.id, exc_info=True)
+            self._held_off_send_failed_at[rule.id] = now
             return
+        self._held_off_send_failed_at.pop(rule.id, None)
         self._held_off_notified_episode[rule.id] = episode
         _LOGGER.info("[rules] held-off notice sent rule_id=%s source=%s", rule.id, fire_source)
 
@@ -3761,22 +3772,6 @@ def _notification_detail_from_evaluation(
     return None
 
 
-def _held_off_trigger_text(fire_source: RuleFireSource, log_user_ids: str) -> str:
-    """Return plain words for what triggered a rule that a manual-off hold stopped."""
-    match fire_source:
-        case "device_state":
-            return "a device changed state"
-        case "dwell_satisfied":
-            return "a dwell time was reached"
-        case "eligibility":
-            return "its time window opened"
-        case "scheduled":
-            return "its schedule"
-        case "deferred" | "immediate":
-            users = log_user_ids.strip()
-            return f"a person arriving or leaving ({users})" if users else "a person arriving or leaving"
-
-
 def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
     unmet = [f"{row.label} ({row.detail})" for row in evaluation.conditions if not row.met]
     return "; ".join(unmet) if unmet else "none"
@@ -3831,6 +3826,22 @@ def _geofence_record_to_out(record: GeofenceRecord) -> GeofenceOut:
         owntracks_rid=record.owntracks_rid,
         radius_m=record.radius_m,
     )
+
+
+def _held_off_trigger_text(fire_source: RuleFireSource, log_user_ids: str) -> str:
+    """Return plain words for what triggered a rule that a manual-off hold stopped."""
+    match fire_source:
+        case "device_state":
+            return "a device changed state"
+        case "dwell_satisfied":
+            return "a dwell time was reached"
+        case "eligibility":
+            return "its time window opened"
+        case "scheduled":
+            return "its schedule"
+        case "deferred" | "immediate":
+            users = log_user_ids.strip()
+            return f"a person arriving or leaving ({users})" if users else "a person arriving or leaving"
 
 
 def _home_wifi_for_user(

@@ -311,6 +311,7 @@ async def test_failed_notice_is_retried_on_the_next_trigger(
 ) -> None:
     rig = _Rig(tmp_path, monkeypatch, rule=_edge_rule())
     send_mock = MagicMock(side_effect=[RuleActionDispatchError("SMTP is not configured"), None])
+    # Each leave() advances the clock past the retry cooldown.
     try:
         with patch("app.rule_evaluator.send_rule_held_off_email", send_mock):
             record_manual_device_off(rig.db, DeviceFamilyId.KASA, _MAC, now=rig.clock["now"] - 600.0)
@@ -542,3 +543,42 @@ def _write_bundle(path: Path, *rules: RuleOut) -> None:
         "rules": [rule.model_dump(mode="json") for rule in rules],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_unexpected_error_while_sending_a_notice_does_not_break_evaluation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_edge_rule())
+    send_mock = MagicMock(side_effect=ValueError("boom"))
+    try:
+        with patch("app.rule_evaluator.send_rule_held_off_email", send_mock):
+            record_manual_device_off(rig.db, DeviceFamilyId.KASA, _MAC, now=rig.clock["now"] - 600.0)
+            await rig.enter()
+            assert send_mock.call_count == 1
+            assert rig.device.calls == []
+    finally:
+        await rig.evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_notice_is_not_retried_inside_the_cooldown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_edge_rule())
+    send_mock = MagicMock(side_effect=RuleActionDispatchError("SMTP is not configured"))
+    try:
+        with patch("app.rule_evaluator.send_rule_held_off_email", send_mock):
+            record_manual_device_off(rig.db, DeviceFamilyId.KASA, _MAC, now=rig.clock["now"] - 600.0)
+            await rig.enter()
+            await rig.evaluator._notify_rule_held_off(
+                _edge_rule(),
+                fire_source="immediate",
+                holds=(ManualOffHold(detail="x", device_label="y", off_at=1.0, window_label="60 min"),),
+                log_user_ids="henrique",
+            )
+            assert send_mock.call_count == 1
+    finally:
+        await rig.evaluator.close()
