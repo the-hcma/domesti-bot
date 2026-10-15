@@ -453,13 +453,32 @@ export function formatDeviceActionPhrase(
   }
 }
 
+/** One line for an ``any`` group of timing-only children ("…, or …"), else null. */
+export function formatAnyTimingAlternatives(
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.Any }>,
+): string | null {
+  const lines: string[] = [];
+  for (const child of condition.conditions) {
+    const line = formatTimingCondition(child);
+    if (line === null) {
+      return null;
+    }
+    lines.push(lines.length === 0 ? line : line.charAt(0).toLowerCase() + line.slice(1));
+  }
+  return lines.length === 0 ? null : lines.join(", or ");
+}
+
+/** ``visit`` returns true when it summarized a group itself, so its children are skipped. */
 function walkRuleConditions(
   conditions: readonly RuleConditionOut[],
-  visit: (condition: RuleConditionOut) => void,
+  visit: (condition: RuleConditionOut) => boolean,
 ): void {
   for (const condition of conditions) {
-    visit(condition);
-    if (condition.type === RuleConditionType.All || condition.type === RuleConditionType.Any) {
+    const handled = visit(condition);
+    if (
+      !handled
+      && (condition.type === RuleConditionType.All || condition.type === RuleConditionType.Any)
+    ) {
       walkRuleConditions(condition.conditions, visit);
     }
   }
@@ -473,17 +492,25 @@ export function summarizeRule(
   const timing: string[] = [];
   const devices: string[] = [];
   walkRuleConditions(rule.conditions.all, (condition) => {
+    if (condition.type === RuleConditionType.Any) {
+      const alternatives = formatAnyTimingAlternatives(condition);
+      if (alternatives === null) {
+        return false;
+      }
+      timing.push(alternatives);
+      return true;
+    }
     if (condition.type === RuleConditionType.UsersInsideGeofenceForS) {
       presence.push(formatGeofenceDwellLabel(condition, context));
-      return;
+      return false;
     }
     if (condition.type === RuleConditionType.UsersOutsideGeofenceForS) {
       presence.push(formatGeofenceAwayDwellLabel(condition, context));
-      return;
+      return false;
     }
     if (condition.type === RuleConditionType.UsersMinDistanceFromHomeM) {
       presence.push(formatMinDistanceFromHomeLabel(condition, context));
-      return;
+      return false;
     }
     if (condition.type === RuleConditionType.UsersArrivedTogether) {
       presence.push(formatArrivedTogetherLabel(condition, context));
@@ -494,7 +521,7 @@ export function summarizeRule(
       || condition.type === RuleConditionType.UsersOutsideGeofence
     ) {
       presence.push(formatPresenceEventLabel(condition, context));
-      return;
+      return false;
     }
     if (
       condition.type === RuleConditionType.DevicesAllInState
@@ -503,20 +530,21 @@ export function summarizeRule(
       || condition.type === RuleConditionType.DevicesAnyTransitionedToState
     ) {
       devices.push(formatDeviceStateCondition(condition, context));
-      return;
+      return false;
     }
     if (condition.type === RuleConditionType.DeviceNotManuallyOffWithin) {
       devices.push(formatDeviceNotManuallyOffWithinCondition(condition, context));
-      return;
+      return false;
     }
     if (condition.type === RuleConditionType.Ep1ReadingCompare) {
       devices.push(formatEp1ReadingCompareCondition(condition, context));
-      return;
+      return false;
     }
     const timingLine = formatTimingCondition(condition);
     if (timingLine !== null) {
       timing.push(timingLine);
     }
+    return false;
   });
   const actions = rule.device_actions.map((entry) => {
     const label = resolveDeviceLabel(
