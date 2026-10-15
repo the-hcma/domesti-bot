@@ -205,3 +205,12 @@ def test_condition_round_trips_through_the_rule_model_with_a_default_gap() -> No
     condition = rule.conditions.all[0]
     assert isinstance(condition, UsersArrivedTogetherCondition)
     assert condition.max_gap_s == 60
+
+
+def test_edge_rule_does_not_fire_for_a_user_arriving_alone() -> None:
+    # An edge rule treats plain geofence rows as the trigger itself, but this row
+    # is a real check on the other user, so it still blocks the fire.
+    alone = _ctx(henrique_gap_s=10.0, user_locations={"henrique": _inside(), "kristen": _outside()})
+    assert evaluate_rule(_rule(), alone).all_met is False
+    assert evaluate_rule(_rule(), _ctx(henrique_gap_s=10.0)).all_met is True
+    assert evaluate_rule(_rule(), _ctx(henrique_gap_s=90.0)).all_met is False

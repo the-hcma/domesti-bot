@@ -532,7 +532,6 @@ def _counts_for_steady_armed_state(condition: RuleConditionOut) -> bool:
     if isinstance(
         condition,
         (
-            UsersArrivedTogetherCondition,
             UsersInsideGeofenceCondition,
             UsersInsideGeofenceForSCondition,
             UsersOutsideGeofenceCondition,
