@@ -15,6 +15,8 @@ import pytest
 
 from app.api.schemas import (
     AfterLocalTimeCondition,
+    AllConditionsCondition,
+    AnyConditionsCondition,
     DeviceNotManuallyOffWithinCondition,
     RuleConditionDeviceRefOut,
     RuleConditionsOut,
@@ -39,6 +41,11 @@ from app.rule_conditions import (
     manual_off_holds,
 )
 from app.rule_evaluator import RULE_SKIP_REASON_MANUAL_OFF_HOLD, RuleEvaluator
+from app.rule_held_off_notice_store import (
+    get_held_off_notified_off_at,
+    prune_held_off_notices,
+    record_held_off_notified,
+)
 from app.rule_notification import (
     RULE_HELD_OFF_HEADING,
     RULE_HELD_OFF_HOLD_TEMPLATE,
@@ -231,7 +238,7 @@ async def test_edge_rule_held_off_sends_one_notice_per_manual_off_episode(
             assert send_mock.call_count == 1
             kwargs = send_mock.call_args.kwargs
             assert kwargs["rule"].id == "master-bedroom-light-on"
-            assert kwargs["trigger"] == "a person arriving or leaving (henrique)"
+            assert kwargs["trigger"] == "a person arriving or leaving (Test)"
             assert len(kwargs["holds"]) == 1
             skipped = [r.getMessage() for r in caplog.records if "[rules] skipped" in r.getMessage()]
             assert any(
@@ -351,9 +358,14 @@ class _Rig:
             cache_path=self.db,
             args=argparse.Namespace(),
         )
+        self._state = state
+        self.restart()
+
+    def restart(self) -> None:
+        """Start a fresh evaluator on the same database, as after a process restart."""
         self.evaluator = RuleEvaluator(
             cache_path=self.db,
-            device_state_getter=lambda: state,
+            device_state_getter=lambda: self._state,
             now_fn=lambda: self.clock["now"],
         )
         self.evaluator.start_periodic_tick()
@@ -467,7 +479,7 @@ def _hold_condition(device_id: str = _MAC) -> DeviceNotManuallyOffWithinConditio
 def _rule(
     *,
     device_id: str = _MAC,
-    extra: UsersInsideGeofenceCondition | None = None,
+    extra: UsersInsideGeofenceCondition | AllConditionsCondition | AnyConditionsCondition | None = None,
 ) -> RuleOut:
     conditions: list[object] = [_hold_condition(device_id)]
     if extra is not None:
@@ -578,7 +590,99 @@ async def test_failed_notice_is_not_retried_inside_the_cooldown(
                 fire_source="immediate",
                 holds=(ManualOffHold(detail="x", device_label="y", off_at=1.0, window_label="60 min"),),
                 log_user_ids="henrique",
+                user_display_names={"henrique": "Henrique"},
             )
             assert send_mock.call_count == 1
+    finally:
+        await rig.evaluator.close()
+
+
+def test_manual_off_holds_looks_inside_an_all_group() -> None:
+    rule = _rule(extra=AllConditionsCondition(type="all", conditions=[_hold_condition()]))
+    ctx = _ctx(off_ago_s=60)
+    assert len(manual_off_holds(rule, evaluate_rule(rule, ctx), ctx)) == 2
+
+
+def test_manual_off_holds_looks_inside_an_any_group_of_holds() -> None:
+    rule = _rule(extra=AnyConditionsCondition(type="any", conditions=[_hold_condition()]))
+    ctx = _ctx(off_ago_s=60)
+    assert len(manual_off_holds(rule, evaluate_rule(rule, ctx), ctx)) == 2
+
+
+def test_manual_off_holds_is_empty_for_an_any_group_with_another_unmet_branch() -> None:
+    other = AfterLocalTimeCondition(type="after_local_time", time_hhmm="23:59")
+    rule = _rule(extra=AnyConditionsCondition(type="any", conditions=[_hold_condition(), other]))
+    ctx = _ctx(off_ago_s=60)
+    assert manual_off_holds(rule, evaluate_rule(rule, ctx), ctx) == ()
+
+
+def test_held_off_notice_store_records_reads_and_prunes_by_rule(tmp_path: Path) -> None:
+    db = tmp_path / "discovery.sqlite"
+    assert get_held_off_notified_off_at(db, "kept") is None
+    record_held_off_notified(db, "kept", 10.0)
+    record_held_off_notified(db, "kept", 20.0)
+    record_held_off_notified(db, "removed", 5.0)
+    assert get_held_off_notified_off_at(db, "kept") == 20.0
+    prune_held_off_notices(db, {"kept"})
+    assert get_held_off_notified_off_at(db, "removed") is None
+    assert get_held_off_notified_off_at(db, "kept") == 20.0
+
+
+@pytest.mark.asyncio
+async def test_notice_is_not_repeated_by_a_restarted_evaluator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_edge_rule())
+    send_mock = MagicMock(return_value=None)
+    try:
+        with patch("app.rule_evaluator.send_rule_held_off_email", send_mock):
+            record_manual_device_off(rig.db, DeviceFamilyId.KASA, _MAC, now=rig.clock["now"] - 600.0)
+            await rig.enter()
+            assert send_mock.call_count == 1
+            await rig.evaluator.close()
+            rig.restart()
+            await rig.leave()
+            await rig.enter()
+            assert send_mock.call_count == 1
+    finally:
+        await rig.evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_notice_prunes_rows_of_rules_that_no_longer_exist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_edge_rule())
+    record_held_off_notified(rig.db, "deleted-rule", 1.0)
+    send_mock = MagicMock(return_value=None)
+    try:
+        with patch("app.rule_evaluator.send_rule_held_off_email", send_mock):
+            record_manual_device_off(rig.db, DeviceFamilyId.KASA, _MAC, now=rig.clock["now"] - 600.0)
+            await rig.enter()
+        assert get_held_off_notified_off_at(rig.db, "deleted-rule") is None
+        assert get_held_off_notified_off_at(rig.db, "master-bedroom-light-on") is not None
+    finally:
+        await rig.evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_scheduled_rule_held_off_sends_a_notice_naming_its_schedule(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_rule())
+    send_mock = MagicMock(return_value=None)
+    try:
+        with patch("app.rule_evaluator.send_rule_held_off_email", send_mock):
+            record_manual_device_off(rig.db, DeviceFamilyId.KASA, _MAC, now=rig.clock["now"] - 600.0)
+            await rig.evaluator._evaluate_scheduled_rules()
+            runtime = rig.evaluator._rule_state["master-bedroom-light-on"]
+            runtime.next_evaluate_at = rig.clock["now"] - 1.0
+            await rig.evaluator._evaluate_scheduled_rules()
+            assert send_mock.call_count == 1
+            assert send_mock.call_args.kwargs["trigger"] == "its schedule"
+            assert rig.device.calls == []
     finally:
         await rig.evaluator.close()

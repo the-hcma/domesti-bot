@@ -244,25 +244,10 @@ def manual_off_holds(
     for row in evaluation.conditions:
         if row.met or (edge_pass and not _counts_for_steady_armed_state(row.condition)):
             continue
-        condition = row.condition
-        if not isinstance(condition, DeviceNotManuallyOffWithinCondition) or ctx.device_state is None:
+        row_holds = _holds_blocking_condition(row.condition, rule, ctx)
+        if not row_holds:
             return ()
-        backend_id = resolve_device_ref_to_backend_id(
-            ctx.device_state,
-            family_id=condition.device.family_id,
-            device_ref=condition.device.device_id.strip(),
-        )
-        off_at = None if backend_id is None else ctx.device_manual_off_at.get((condition.device.family_id, backend_id))
-        if off_at is None:
-            return ()
-        holds.append(
-            ManualOffHold(
-                detail=row.detail,
-                device_label=_device_condition_display_label(ctx, condition.device),
-                off_at=off_at,
-                window_label=_format_dwell_need_s(condition.window_s),
-            )
-        )
+        holds.extend(row_holds)
     return tuple(holds)
 
 
@@ -438,6 +423,52 @@ def users_min_distance_from_home_met(
         if distance_m < min_distance_m:
             return False
     return True
+
+
+def _holds_blocking_condition(
+    condition: RuleConditionOut,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> tuple[ManualOffHold, ...] | None:
+    """Return the manual-off holds that are the only reason ``condition`` is unmet.
+
+    ``None`` when something else also blocks it, or a hold has no recorded
+    turn-off. Looks inside ``all`` (every unmet child must be a hold) and
+    ``any`` (no child may be met, and every child must be a hold).
+    """
+    if isinstance(condition, DeviceNotManuallyOffWithinCondition):
+        if ctx.device_state is None:
+            return None
+        backend_id = resolve_device_ref_to_backend_id(
+            ctx.device_state,
+            family_id=condition.device.family_id,
+            device_ref=condition.device.device_id.strip(),
+        )
+        off_at = None if backend_id is None else ctx.device_manual_off_at.get((condition.device.family_id, backend_id))
+        if off_at is None:
+            return None
+        return (
+            ManualOffHold(
+                detail=_evaluate_condition(condition, rule, ctx).detail,
+                device_label=_device_condition_display_label(ctx, condition.device),
+                off_at=off_at,
+                window_label=_format_dwell_need_s(condition.window_s),
+            ),
+        )
+    if isinstance(condition, (AllConditionsCondition, AnyConditionsCondition)):
+        is_any = isinstance(condition, AnyConditionsCondition)
+        holds: list[ManualOffHold] = []
+        for child in condition.conditions:
+            if _evaluate_condition(child, rule, ctx).met:
+                if is_any:
+                    return None
+                continue
+            child_holds = _holds_blocking_condition(child, rule, ctx)
+            if not child_holds:
+                return None
+            holds.extend(child_holds)
+        return tuple(holds) or None
+    return None
 
 
 def _coerce_now(now: datetime | None, tz: ZoneInfo) -> datetime:

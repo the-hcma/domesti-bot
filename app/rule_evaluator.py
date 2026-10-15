@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -150,6 +150,11 @@ from app.rule_conditions import (
     rule_eligible_since,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
+from app.rule_held_off_notice_store import (
+    get_held_off_notified_off_at,
+    prune_held_off_notices,
+    record_held_off_notified,
+)
 from app.rule_notification import format_rule_fire_timing_for_log
 from app.rule_validation import (
     build_roster_user_id_lookup,
@@ -289,9 +294,8 @@ class RuleEvaluator:
             float,
         ] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
-        # rule id -> the manual-off timestamps already mailed as a hold, so one
-        # episode sends one notice however many triggers it blocks.
-        self._held_off_notified_episode: dict[str, tuple[float, ...]] = {}
+        # rule id -> when a failed held-off notice was last attempted (retry cooldown);
+        # which episodes were already mailed is persisted in ``rule_held_off_notice``.
         self._held_off_send_failed_at: dict[str, float] = {}
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_geo_outside_streak_since: dict[tuple[str, str], float] = {}
@@ -3195,12 +3199,22 @@ class RuleEvaluator:
         fire_source: RuleFireSource,
         holds: tuple[ManualOffHold, ...],
         log_user_ids: str,
+        user_display_names: Mapping[str, str],
     ) -> None:
         """Email the rule's recipients once per manual-off episode that it was held off."""
         if not rule.notify_on_fire or self._cache_path is None:
             return
-        episode = tuple(sorted(hold.off_at for hold in holds))
-        if self._held_off_notified_episode.get(rule.id) == episode:
+        newest_off_at = max(hold.off_at for hold in holds)
+        try:
+            await asyncio.to_thread(
+                prune_held_off_notices,
+                self._cache_path,
+                {known.id for known in list_automation_rules()},
+            )
+        except Exception:
+            _LOGGER.warning("[rules] could not prune held-off notice rows", exc_info=True)
+        notified_off_at = await asyncio.to_thread(get_held_off_notified_off_at, self._cache_path, rule.id)
+        if notified_off_at is not None and notified_off_at >= newest_off_at:
             return
         now = self._now_fn()
         failed_at = self._held_off_send_failed_at.get(rule.id)
@@ -3212,7 +3226,7 @@ class RuleEvaluator:
                 self._cache_path,
                 holds=holds,
                 rule=rule,
-                trigger=_held_off_trigger_text(fire_source, log_user_ids),
+                trigger=_held_off_trigger_text(fire_source, log_user_ids, user_display_names),
             )
         except Exception:
             # Best effort: a notice problem must never abort evaluating the other rules.
@@ -3220,7 +3234,10 @@ class RuleEvaluator:
             self._held_off_send_failed_at[rule.id] = now
             return
         self._held_off_send_failed_at.pop(rule.id, None)
-        self._held_off_notified_episode[rule.id] = episode
+        try:
+            await asyncio.to_thread(record_held_off_notified, self._cache_path, rule.id, newest_off_at)
+        except Exception:
+            _LOGGER.warning("[rules] could not record held-off notice rule_id=%s", rule.id, exc_info=True)
         _LOGGER.info("[rules] held-off notice sent rule_id=%s source=%s", rule.id, fire_source)
 
     async def _skip_rule_conditions_not_met(
@@ -3246,6 +3263,7 @@ class RuleEvaluator:
                 fire_source=fire_source,
                 holds=holds,
                 log_user_ids=log_user_ids,
+                user_display_names=ctx.user_display_names,
             )
 
     def _skip_if_daily_cap(
@@ -3828,7 +3846,11 @@ def _geofence_record_to_out(record: GeofenceRecord) -> GeofenceOut:
     )
 
 
-def _held_off_trigger_text(fire_source: RuleFireSource, log_user_ids: str) -> str:
+def _held_off_trigger_text(
+    fire_source: RuleFireSource,
+    log_user_ids: str,
+    user_display_names: Mapping[str, str],
+) -> str:
     """Return plain words for what triggered a rule that a manual-off hold stopped."""
     match fire_source:
         case "device_state":
@@ -3840,8 +3862,12 @@ def _held_off_trigger_text(fire_source: RuleFireSource, log_user_ids: str) -> st
         case "scheduled":
             return "its schedule"
         case "deferred" | "immediate":
-            users = log_user_ids.strip()
-            return f"a person arriving or leaving ({users})" if users else "a person arriving or leaving"
+            names = ", ".join(
+                user_display_names.get(user_id, user_id)
+                for user_id in (part.strip() for part in log_user_ids.split(","))
+                if user_id
+            )
+            return f"a person arriving or leaving ({names})" if names else "a person arriving or leaving"
 
 
 def _home_wifi_for_user(

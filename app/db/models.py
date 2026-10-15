@@ -189,6 +189,16 @@ class RulePendingFireNotification(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class RuleHeldOffNotice(Base):
+    """The newest manual turn-off a rule's "held off" notice was already sent for."""
+
+    __tablename__ = "rule_held_off_notice"
+
+    rule_id: Mapped[str] = mapped_column(String, primary_key=True)
+    notified_off_at: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class RuleUser(Base):
     __tablename__ = "rule_users"
 
