@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import (
+    AfterLocalTimeCondition,
     GeofenceOut,
     RuleConditionsOut,
     RuleOut,
@@ -117,6 +118,20 @@ def test_inside_for_less_than_the_minimum_is_not_met() -> None:
 def test_presence_users_drop_out_once_past_the_window() -> None:
     assert presence_user_ids_for_rule(_rule(max_inside_s=300), _ctx(inside_for_s=120.0)) == ("kristen",)
     assert presence_user_ids_for_rule(_rule(max_inside_s=300), _ctx(inside_for_s=400.0)) == ()
+
+
+def test_the_window_counts_from_the_real_arrival_not_from_when_a_time_gate_opened() -> None:
+    # A gate that opened two minutes ago moves the dwell clock forward for the
+    # minimum, but someone who arrived hours ago is still not a fresh arrival.
+    gated = _rule(max_inside_s=300)
+    gated.conditions.all.insert(0, AfterLocalTimeCondition(type="after_local_time", time_hhmm="18:58"))
+    ctx = _ctx(inside_for_s=4 * 3600.0)
+    result = evaluate_rule(gated, ctx)
+    assert result.conditions[1].met is False
+    assert result.conditions[1].detail == "Kristen inside 240 min, past the 5 min arrival window"
+    assert presence_user_ids_for_rule(gated, ctx) == ()
+    fresh = evaluate_rule(gated, _ctx(inside_for_s=120.0))
+    assert fresh.conditions[1].met is True
 
 
 @pytest.mark.parametrize("max_inside_s", [0, 30, 60])

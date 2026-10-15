@@ -294,6 +294,25 @@ async def test_one_person_leaving_soon_after_a_joint_arrival_opens_no_second_doo
 
 
 @pytest.mark.asyncio
+async def test_leaving_at_the_moment_of_a_joint_arrival_opens_no_second_door_at_the_window_edge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch)
+    try:
+        await rig.arrive("henrique", after_s=0.0)
+        await rig.arrive("kristen", after_s=30.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+        await rig.report("henrique", _OUTSIDE, after_s=0.0)
+        # Exactly 300 s on: Kristen has been inside for the whole window and Henrique
+        # outside for just as long, so a 300 s "outside" threshold would open her door.
+        await rig.ping("kristen", after_s=300.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
 async def test_a_report_that_comes_after_the_arrival_window_opens_nothing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
