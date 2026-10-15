@@ -3,6 +3,7 @@
 import {
   appendRuleSummaryBody,
   buildRuleSummaryContext,
+  formatArrivedTogetherLabel,
   formatDeviceActionPhrase,
   formatDeviceNotManuallyOffWithinCondition,
   formatDeviceStateCondition,
@@ -55,6 +56,8 @@ function appendConditionTree(
       item.textContent = formatGeofenceAwayDwellLabel(condition, context);
     } else if (condition.type === RuleConditionType.UsersMinDistanceFromHomeM) {
       item.textContent = formatMinDistanceFromHomeLabel(condition, context);
+    } else if (condition.type === RuleConditionType.UsersArrivedTogether) {
+      item.textContent = formatArrivedTogetherLabel(condition, context);
     } else if (
       condition.type === RuleConditionType.UsersInsideGeofence
       || condition.type === RuleConditionType.UsersOutsideGeofence

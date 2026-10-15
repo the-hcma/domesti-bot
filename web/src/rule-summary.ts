@@ -49,7 +49,8 @@ export function referencesGeofenceId(
   geofenceId: string,
 ): boolean {
   if (
-    condition.type === RuleConditionType.UsersInsideGeofence
+    condition.type === RuleConditionType.UsersArrivedTogether
+    || condition.type === RuleConditionType.UsersInsideGeofence
     || condition.type === RuleConditionType.UsersInsideGeofenceForS
     || condition.type === RuleConditionType.UsersOutsideGeofence
     || condition.type === RuleConditionType.UsersOutsideGeofenceForS
@@ -125,7 +126,8 @@ export function collectUserIdsFromConditions(
   const ids = new Set<string>();
   const walk = (condition: RuleConditionOut): void => {
     if (
-      condition.type === RuleConditionType.UsersInsideGeofence
+      condition.type === RuleConditionType.UsersArrivedTogether
+      || condition.type === RuleConditionType.UsersInsideGeofence
       || condition.type === RuleConditionType.UsersInsideGeofenceForS
       || condition.type === RuleConditionType.UsersMinDistanceFromHomeM
       || condition.type === RuleConditionType.UsersOutsideGeofence
@@ -277,6 +279,16 @@ export function formatMinDistanceFromHomeLabel(
   return `${who} ≥ ${needLabel} from home`;
 }
 
+export function formatArrivedTogetherLabel(
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.UsersArrivedTogether }>,
+  context: RuleSummaryContext,
+): string {
+  const who = joinNames(userDisplayNames(condition.user_ids, context));
+  const where = geofenceLabel(condition.geofence_id, context);
+  const gap = formatDwellDuration(condition.max_gap_s ?? 60);
+  return `${who} arrive at ${where} within ${gap} of each other`;
+}
+
 export function formatPresenceEventLabel(
   condition: Extract<
     RuleConditionOut,
@@ -304,6 +316,7 @@ function formatSunOffsetPhrase(offsetMinutes: number, anchor: "sunrise" | "sunse
 
 export function formatTimingCondition(condition: RuleConditionOut): string | null {
   switch (condition.type) {
+    case RuleConditionType.UsersArrivedTogether:
     case RuleConditionType.UsersInsideGeofence:
     case RuleConditionType.UsersInsideGeofenceForS:
     case RuleConditionType.UsersMinDistanceFromHomeM:
@@ -461,6 +474,10 @@ export function summarizeRule(
     }
     if (condition.type === RuleConditionType.UsersMinDistanceFromHomeM) {
       presence.push(formatMinDistanceFromHomeLabel(condition, context));
+      return;
+    }
+    if (condition.type === RuleConditionType.UsersArrivedTogether) {
+      presence.push(formatArrivedTogetherLabel(condition, context));
       return;
     }
     if (

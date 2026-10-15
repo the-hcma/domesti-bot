@@ -585,9 +585,26 @@ class RulesHubController {
     whoField.className = "rules-editor-fieldset rules-editor-subfieldset";
     const whoLegend = document.createElement("legend");
     whoField.append(whoLegend);
+    const existingArrivedTogether = existing?.conditions.all.find(
+      (c): c is Extract<RuleConditionOut, { type: typeof RuleConditionType.UsersArrivedTogether }> =>
+        c.type === RuleConditionType.UsersArrivedTogether,
+    );
+    const existingLocationCondition = existing?.conditions.all.find(
+      (
+        c,
+      ): c is Extract<
+        RuleConditionOut,
+        {
+          type:
+            | typeof RuleConditionType.UsersArrivedTogether
+            | typeof RuleConditionType.UsersInsideGeofence;
+        }
+      > =>
+        c.type === RuleConditionType.UsersArrivedTogether ||
+        c.type === RuleConditionType.UsersInsideGeofence,
+    );
     const selectedUsers = new Set<string>(
-      existing?.conditions.all.find((c) => c.type === RuleConditionType.UsersInsideGeofence)
-        ?.user_ids ?? ["henrique", "kristen"],
+      existingLocationCondition?.user_ids ?? ["henrique", "kristen"],
     );
     const syncWhoLegend = (): void => {
       const names = users
@@ -635,9 +652,7 @@ class RulesHubController {
       opt.textContent = g.label;
       whereSelect.append(opt);
     }
-    const existingGeofence =
-      existing?.conditions.all.find((c) => c.type === RuleConditionType.UsersInsideGeofence)
-        ?.geofence_id ?? "house";
+    const existingGeofence = existingLocationCondition?.geofence_id ?? "house";
     whereSelect.value = existingGeofence;
     whereSelect.addEventListener("change", () => {
       syncWhoLegend();
@@ -884,12 +899,22 @@ class RulesHubController {
           showErrorToast("Select at least one user.");
           return;
         }
+        if (existingArrivedTogether !== undefined && userIds.length < 2) {
+          showErrorToast("Select at least two users: this rule fires only when they arrive together.");
+          return;
+        }
         const conditions: RuleOut["conditions"]["all"] = [
-          {
-            type: RuleConditionType.UsersInsideGeofence,
-            geofence_id: whereSelect.value,
-            user_ids: userIds,
-          },
+          existingArrivedTogether === undefined
+            ? {
+                type: RuleConditionType.UsersInsideGeofence,
+                geofence_id: whereSelect.value,
+                user_ids: userIds,
+              }
+            : {
+                ...existingArrivedTogether,
+                geofence_id: whereSelect.value,
+                user_ids: userIds,
+              },
         ];
         if (sunsetCb.checked) {
           conditions.push({

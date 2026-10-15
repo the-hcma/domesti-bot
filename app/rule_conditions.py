@@ -38,6 +38,7 @@ from app.api.schemas import (
     RulesSunOut,
     SettingsLocationOut,
     UserLocationOut,
+    UsersArrivedTogetherCondition,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersMinDistanceFromHomeMCondition,
@@ -585,6 +586,7 @@ _ANY_GROUP_SAFE_TO_EVALUATE_TYPES: tuple[type[RuleConditionOut], ...] = (
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     Ep1ReadingCompareCondition,
+    UsersArrivedTogetherCondition,
     UsersInsideGeofenceCondition,
     UsersMinDistanceFromHomeMCondition,
     UsersOutsideGeofenceCondition,
@@ -1140,6 +1142,8 @@ def _evaluate_condition(
         return _evaluate_ep1_reading_compare(condition, rule, ctx)
     if isinstance(condition, LocalTimeWindowCondition):
         return _evaluate_local_time_window(condition, rule, ctx)
+    if isinstance(condition, UsersArrivedTogetherCondition):
+        return _evaluate_users_arrived_together(condition, rule, ctx)
     if isinstance(condition, UsersInsideGeofenceCondition):
         return _evaluate_users_geofence(condition, rule, ctx, want_inside=True)
     if isinstance(condition, UsersInsideGeofenceForSCondition):
@@ -1535,6 +1539,140 @@ def _evaluate_local_time_window(
         label=f"Clock window {window_label}",
         met=met_value,
     )
+
+
+@dataclass(frozen=True)
+class _ArrivalRow:
+    """One listed user's standing for ``users_arrived_together``."""
+
+    inside_since: float | None
+    name: str
+    problem: str | None
+    roster_user_id: str | None
+
+
+def _arrival_rows(
+    condition: UsersArrivedTogetherCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+    geofence: GeofenceOut,
+) -> list[_ArrivalRow]:
+    """Per listed user: do they count as inside, and since when (``problem`` says why not)."""
+    min_accuracy_m = rule.min_location_accuracy_m
+    rows: list[_ArrivalRow] = []
+    for rule_user_id in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(rule_user_id)
+        if roster_user_id is None:
+            rows.append(
+                _ArrivalRow(
+                    inside_since=None,
+                    name=rule_user_id,
+                    problem=f'"{rule_user_id}": not in user roster (sync users from My Tracks)',
+                    roster_user_id=None,
+                ),
+            )
+            continue
+        name = _user_display_name(ctx, roster_user_id)
+        location = ctx.user_locations.get(roster_user_id)
+        if location is None:
+            rows.append(
+                _ArrivalRow(
+                    inside_since=None, name=name, problem=f"{name}: no location yet", roster_user_id=roster_user_id
+                ),
+            )
+            continue
+        if not _location_usable_for_rule(location, min_accuracy_m):
+            # Unlike the plain geofence conditions, an arrival time must not come
+            # from the home-WiFi exception that accepts a low-accuracy fix.
+            rows.append(
+                _ArrivalRow(
+                    inside_since=None,
+                    name=name,
+                    problem=f"{name}: location ignored (low accuracy)",
+                    roster_user_id=roster_user_id,
+                ),
+            )
+            continue
+        effective = _resolved_location_for_geofence_rule(
+            location,
+            ctx.user_location_history.get(roster_user_id, ()),
+            geofence_id=condition.geofence_id,
+            min_accuracy_m=min_accuracy_m,
+            now_epoch=ctx.now.timestamp(),
+            ctx=ctx,
+            roster_user_id=roster_user_id,
+        )
+        counts_inside, _used_wifi = _user_counts_inside_geofence_for_rule(
+            effective or location,
+            geofence,
+            condition.geofence_id,
+            min_accuracy_m,
+            ctx,
+            roster_user_id,
+        )
+        if not counts_inside:
+            rows.append(
+                _ArrivalRow(
+                    inside_since=None,
+                    name=name,
+                    problem=f"{name}: not inside {geofence.label}",
+                    roster_user_id=roster_user_id,
+                ),
+            )
+            continue
+        inside_since = ctx.geofence_inside_since.get((roster_user_id, condition.geofence_id))
+        if inside_since is None:
+            rows.append(
+                _ArrivalRow(
+                    inside_since=None,
+                    name=name,
+                    problem=f"{name}: arrival time at {geofence.label} unknown",
+                    roster_user_id=roster_user_id,
+                ),
+            )
+            continue
+        rows.append(
+            _ArrivalRow(inside_since=inside_since, name=name, problem=None, roster_user_id=roster_user_id),
+        )
+    return rows
+
+
+def _arrival_gap_s(rows: list[_ArrivalRow]) -> float:
+    """Spread between the earliest and latest arrival among rows that have one."""
+    times = [row.inside_since for row in rows if row.inside_since is not None]
+    return max(times) - min(times) if times else 0.0
+
+
+def _evaluate_users_arrived_together(
+    condition: UsersArrivedTogetherCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    limit_label = _format_dwell_need_s(condition.max_gap_s)
+    if geofence is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=f'Unknown geofence "{condition.geofence_id}"',
+            label="Arrived together",
+            met=False,
+        )
+    rows = _arrival_rows(condition, rule, ctx, geofence)
+    who = _join_names([row.name for row in rows])
+    label = f"Arrived at {geofence.label} within {limit_label} of each other ({who})"
+    problems = [row.problem for row in rows if row.problem is not None]
+    if problems:
+        return RuleConditionStatusOut(condition=condition, detail="; ".join(problems), label=label, met=False)
+    gap_s = _arrival_gap_s(rows)
+    gap_label = _format_dwell_elapsed_s(gap_s)
+    if gap_s <= condition.max_gap_s:
+        detail = f"{who} arrived at {geofence.label} {gap_label} apart (limit {limit_label})"
+        return RuleConditionStatusOut(condition=condition, detail=detail, label=label, met=True)
+    detail = f"{who} arrived at {geofence.label} {gap_label} apart, more than the {limit_label} limit"
+    return RuleConditionStatusOut(condition=condition, detail=detail, label=label, met=False)
 
 
 def _evaluate_users_geofence(
@@ -2284,6 +2422,12 @@ def _presence_user_ids_for_condition(
             if child_ids:
                 ids.update(child_ids)
         return ids
+    if isinstance(condition, UsersArrivedTogetherCondition):
+        return _roster_user_ids_satisfying_users_arrived_together(
+            condition,
+            rule,
+            ctx,
+        )
     if isinstance(condition, UsersInsideGeofenceCondition):
         return _roster_user_ids_satisfying_users_inside_geofence(
             condition,
@@ -2372,6 +2516,23 @@ def _resolved_location_for_geofence_rule(
         now_epoch=now_epoch,
         walkback_max_s=ctx.walkback_max_s,
     )
+
+
+def _roster_user_ids_satisfying_users_arrived_together(
+    condition: UsersArrivedTogetherCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> set[str]:
+    geofence = next(
+        (row for row in ctx.geofences if row.geofence_id == condition.geofence_id),
+        None,
+    )
+    if geofence is None:
+        return set()
+    rows = _arrival_rows(condition, rule, ctx, geofence)
+    if any(row.problem is not None for row in rows) or _arrival_gap_s(rows) > condition.max_gap_s:
+        return set()
+    return {row.roster_user_id for row in rows if row.roster_user_id is not None}
 
 
 def _roster_user_ids_satisfying_users_inside_geofence(

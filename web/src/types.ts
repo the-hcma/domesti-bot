@@ -516,6 +516,13 @@ export interface RuleDeviceActionOut {
 
 export type RuleConditionOut =
   | {
+      type: typeof RuleConditionType.UsersArrivedTogether;
+      geofence_id: string;
+      /** Largest allowed spread between the users' arrival times (default 60). */
+      max_gap_s?: number;
+      user_ids: string[];
+    }
+  | {
       type: typeof RuleConditionType.UsersInsideGeofence;
       geofence_id: string;
       user_ids: string[];

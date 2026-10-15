@@ -1915,6 +1915,30 @@ class LocalTimeWindowCondition(BaseModel):
         return f"{hour:02d}:{minute:02d}"
 
 
+class UsersArrivedTogetherCondition(BaseModel):
+    """True when every listed user is inside the geofence and they entered within ``max_gap_s`` of each other.
+
+    "Entered" is each user's recorded inside-since time for the geofence, so
+    someone who has been home for hours never counts as arriving together with
+    a person who has just walked in.
+    """
+
+    type: Literal["users_arrived_together"]
+    geofence_id: str
+    max_gap_s: int = Field(default=60, ge=1, le=3600)
+    user_ids: list[str] = Field(min_length=2)
+
+    @field_validator("user_ids")
+    @classmethod
+    def _require_distinct_user_ids(cls, value: list[str]) -> list[str]:
+        distinct = {user_id.strip().lower() for user_id in value}
+        if len(distinct) != len(value):
+            raise ValueError(
+                f"Expected {len(value)} distinct user_ids (ignoring case and surrounding spaces), got {len(distinct)}",
+            )
+        return value
+
+
 class UsersInsideGeofenceCondition(BaseModel):
     type: Literal["users_inside_geofence"]
     geofence_id: str
@@ -1995,6 +2019,7 @@ RuleConditionOut = Annotated[
     | DevicesAnyInStateForSCondition
     | Ep1ReadingCompareCondition
     | LocalTimeWindowCondition
+    | UsersArrivedTogetherCondition
     | UsersInsideGeofenceCondition
     | UsersInsideGeofenceForSCondition
     | UsersMinDistanceFromHomeMCondition

@@ -17,6 +17,7 @@ from app.api.schemas import (
     RuleDeviceActionOut,
     RuleOut,
     RuleReferenceIssueOut,
+    UsersArrivedTogetherCondition,
     UsersInsideGeofenceCondition,
     UsersInsideGeofenceForSCondition,
     UsersMinDistanceFromHomeMCondition,
@@ -762,6 +763,7 @@ def _walk_geofence_ids(condition: RuleConditionOut, ids: set[str]) -> None:
     if isinstance(
         condition,
         (
+            UsersArrivedTogetherCondition,
             UsersInsideGeofenceCondition,
             UsersInsideGeofenceForSCondition,
             UsersOutsideGeofenceCondition,
@@ -783,6 +785,7 @@ def _walk_user_ids(condition: RuleConditionOut, ids: set[str]) -> None:
     if isinstance(
         condition,
         (
+            UsersArrivedTogetherCondition,
             UsersInsideGeofenceCondition,
             UsersInsideGeofenceForSCondition,
             UsersMinDistanceFromHomeMCondition,
