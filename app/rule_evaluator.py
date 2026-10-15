@@ -1457,6 +1457,8 @@ class RuleEvaluator:
         timing_suffix = f" timing={timing_for_log!r}" if timing_for_log is not None else ""
         if sun_timing_notes:
             timing_suffix += f" sun={'; '.join(note.compact for note in sun_timing_notes)!r}"
+        if rule.dry_run:
+            timing_suffix += " dry_run=True"
         _LOGGER.info(
             "[rules] fired rule_id=%s user_ids=%s source=%s transitions=%s conditions=%s "
             "actions=%d email=%s duration_ms=%.0f%s%s%s",
@@ -1686,7 +1688,7 @@ class RuleEvaluator:
         stale_rule_ids = {
             entry.rule_id
             for entry in self._deferred_device_actions
-            if (rule := rules_by_id.get(entry.rule_id)) is None or not rule.enabled
+            if (rule := rules_by_id.get(entry.rule_id)) is None or not rule.enabled or rule.dry_run
         }
         for rule_id in stale_rule_ids:
             self._cancel_deferred_device_actions_for_rule(rule_id)
@@ -2035,8 +2037,8 @@ class RuleEvaluator:
         """Reload persisted delayed device actions so they survive a restart.
 
         Rows whose ``due_at`` already elapsed while the process was down are
-        dispatched promptly on the first drain; stale rows for disabled/removed
-        rules are pruned before their first dispatch.
+        dispatched promptly on the first drain; stale rows for disabled, removed
+        or dry-run rules are pruned before their first dispatch.
         """
         cache_path = self._cache_path
         if cache_path is None:

@@ -820,6 +820,12 @@ class RulesHubController {
     const notifyCb = document.createElement("input");
     notifyCb.type = "checkbox";
     notifyCb.checked = existing?.notify_on_fire ?? false;
+    if (existing?.dry_run === true) {
+      // The email is a dry-run rule's only output, so it cannot be switched off here.
+      notifyCb.checked = true;
+      notifyCb.disabled = true;
+      notifyCb.title = "A dry-run rule must send email: the email is its only output.";
+    }
     notifyRow.append(
       notifyCb,
       document.createTextNode(" Send email when this rule fires"),

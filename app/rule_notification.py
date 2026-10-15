@@ -11,6 +11,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from app.api.schemas import RuleDeviceActionOut, RuleOut
+from app.astronomical_phrasing import format_duration_minutes
 from app.automation_rules_loader import AutomationRulesLoadError, load_settings_location
 from app.device_display import format_device_display
 from app.outbound_email import (
@@ -67,6 +68,7 @@ RULE_HELD_OFF_NEXT_NOTE = (
 )
 RULE_HELD_OFF_SUBJECT_TEMPLATE = "domesti-bot rule held off: {label}"
 RULE_HELD_OFF_TRIGGER_TEMPLATE = "Triggered by: {trigger}"
+_SECONDS_PER_MINUTE = 60
 
 
 def build_rule_held_off_bodies(
@@ -378,7 +380,12 @@ def format_dry_run_action_line(action: RuleDeviceActionOut, *, device_display: s
     verb = action.action.display_label().capitalize()
     family = action.family_id.display_name()
     delay_s = action.delay_s or 0
-    suffix = f", after {delay_s} s" if delay_s > 0 else ""
+    if delay_s <= 0:
+        suffix = ""
+    elif delay_s % _SECONDS_PER_MINUTE == 0:
+        suffix = f", after {format_duration_minutes(delay_s // _SECONDS_PER_MINUTE)}"
+    else:
+        suffix = f", after {delay_s} seconds"
     return f"{verb} {device_display} ({family}){suffix}"
 
 
