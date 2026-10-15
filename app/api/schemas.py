@@ -1803,6 +1803,29 @@ class RuleConditionDeviceRefOut(BaseModel):
     family_id: DeviceFamilyId
 
 
+class DeviceNotManuallyOffWithinCondition(BaseModel):
+    """True unless a person turned the device off through the UI or CLI in the last ``window_s``.
+
+    Only turn-offs issued by a person through domesti-bot count; rule actions,
+    bulk "turn everything off" and changes made outside domesti-bot (wall
+    switch, vendor app) do not. Kasa only for now: that is the only family
+    whose UI and CLI turn-offs are recorded.
+    """
+
+    type: Literal["device_not_manually_off_within"]
+    device: RuleConditionDeviceRefOut
+    window_s: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _require_kasa_device_family(self) -> Self:
+        if self.device.family_id != DeviceFamilyId.KASA:
+            raise ValueError(
+                f"Expected device.family_id {DeviceFamilyId.KASA.value!r} for "
+                f"device_not_manually_off_within, got {self.device.family_id.value!r}"
+            )
+        return self
+
+
 class DevicesAllInStateCondition(BaseModel):
     """True when every listed device currently matches ``state``."""
 
@@ -1966,6 +1989,7 @@ RuleConditionOut = Annotated[
     | BeforeSunsetCondition
     | DaylightCondition
     | DaysOfWeekCondition
+    | DeviceNotManuallyOffWithinCondition
     | DevicesAllInStateCondition
     | DevicesAnyInStateCondition
     | DevicesAnyInStateForSCondition

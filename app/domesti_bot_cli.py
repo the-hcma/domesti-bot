@@ -105,6 +105,7 @@ from app.device_completion import (
     device_completion_alias,
 )
 from app.device_display import format_device_display
+from app.device_enums import DeviceFamilyId
 from app.device_label_conflicts import clear_device_label_conflicts, drain_device_label_conflicts
 from app.device_manager import NotInitializedError
 from app.ep1_credentials import resolve_ep1_noise_psk
@@ -119,6 +120,7 @@ from app.ep1_device_manager import (
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_credentials import resolve_kasa_credentials
 from app.kasa_device_manager import KasaDeviceManager
+from app.manual_device_off_store import note_manual_power_change
 from app.sonos_device_manager import SonosDeviceManager
 from app.tailwind_credentials import resolve_tailwind_token
 from app.vizio_device_manager import (
@@ -1645,6 +1647,7 @@ async def _repl_cmd_dispatch_switch(
     *,
     kasa_mgr: KasaDeviceManager,
     androidtv_mgr: AndroidTvDeviceManager | None,
+    cache_path: Path | None,
     theme: _Theme,
 ) -> None:
     triples_sw = _collect_switch_triples(kasa_mgr, androidtv_mgr)
@@ -1671,6 +1674,14 @@ async def _repl_cmd_dispatch_switch(
             await kasa_mgr.turn_on(api_id)
         else:
             await kasa_mgr.turn_off(api_id)
+        if hit is not None:
+            await asyncio.to_thread(
+                note_manual_power_change,
+                cache_path,
+                DeviceFamilyId.KASA,
+                hit.mac_address,
+                is_on=cmd == "turn-on",
+            )
     elif backend == "androidtv" and androidtv_mgr is not None:
         hit = androidtv_mgr.get_device_by_alias(api_id)
         if hit is not None:
@@ -2412,6 +2423,7 @@ async def dispatch_repl_action(
                 arg,
                 kasa_mgr=kasa_mgr,
                 androidtv_mgr=androidtv_mgr,
+                cache_path=cache_path,
                 theme=theme,
             )
         elif cmd == "open-door":

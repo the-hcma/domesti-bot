@@ -49,6 +49,7 @@ from app.local_time_schedule import (
     uses_after_local_time_eligibility_wake,
     uses_local_time_window_eligibility_wake,
 )
+from app.manual_device_off_store import list_manual_device_off_at
 from app.presence_store import (
     list_user_locations,
 )
@@ -126,6 +127,7 @@ def build_rules_status(
     eval_ctx = RuleEvaluationContext(
         device_bool_since=(evaluator.device_bool_since_snapshot() if evaluator is not None else {}),
         device_bool_value=(evaluator.device_bool_value_snapshot() if evaluator is not None else {}),
+        device_manual_off_at=list_manual_device_off_at(cache_path),
         device_state=device_state,
         geofence_inside_since=inside_since,
         geofence_outside_since=outside_since,

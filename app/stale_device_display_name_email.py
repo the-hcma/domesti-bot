@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
+    DeviceNotManuallyOffWithinCondition,
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
@@ -396,7 +397,7 @@ def _iter_condition_display_snapshots(
                 stored = (ref.display_name or "").strip()
                 if stored:
                     found.append((ref.family_id, ref.device_id.strip(), stored))
-        elif isinstance(condition, Ep1ReadingCompareCondition):
+        elif isinstance(condition, DeviceNotManuallyOffWithinCondition | Ep1ReadingCompareCondition):
             stored = (condition.device.display_name or "").strip()
             if stored:
                 found.append(

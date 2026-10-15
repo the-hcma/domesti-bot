@@ -95,6 +95,7 @@ from app.domesti_bot_cli import (
 from app.ep1_device_manager import DEFAULT_EP1_ZEROCONF_TIMEOUT_S
 from app.expected_device_change import mark_expected_device_change
 from app.logging_config import TRACE_LEVEL
+from app.manual_device_off_store import note_manual_power_change
 from app.mytracks_pairing_flow import DISCARDED_PAIRING_MESSAGE, reconcile_with_stored_credentials
 from app.mytracks_service import normalize_mytracks_base_url
 from app.mytracks_store import load_mytracks_config, mark_mytracks_paired, set_last_pair_error
@@ -751,6 +752,13 @@ def create_app(args: Any) -> FastAPI:
                 status_code=HTTPStatus.CONFLICT,
                 detail=str(exc),
             ) from exc
+        await asyncio.to_thread(
+            note_manual_power_change,
+            state.cache_path,
+            DeviceFamilyId.KASA,
+            kd.mac_address,
+            is_on=body.on,
+        )
         return UIDeviceActionOut(
             device=build_kasa_device_view(state.kasa_mgr, host=device_id, cache_path=state.cache_path)
         )

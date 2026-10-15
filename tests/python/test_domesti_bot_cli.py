@@ -7,7 +7,7 @@ import json
 from contextlib import suppress
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from prompt_toolkit.formatted_text import to_plain_text
@@ -15,6 +15,7 @@ from prompt_toolkit.formatted_text import to_plain_text
 from app.androidtv_device_manager import AndroidTvDeviceManager
 from app.device_completion import CompletionAlias
 from app.device_display import format_device_display
+from app.device_enums import DeviceFamilyId
 from app.domesti_bot_cli import (
     _COMMAND_HELP_LINES,
     _FAMILY_BOOT_LABEL,
@@ -36,6 +37,7 @@ from app.domesti_bot_cli import (
     _parse_completion_alias_list,
     _parse_completion_buffer,
     _print_family_parallel_line,
+    _repl_cmd_dispatch_switch,
     _repl_cmd_setup_secrets,
     _ReplCompleter,
     _resolve_cli_target,
@@ -46,6 +48,7 @@ from app.domesti_bot_cli import (
     split_invocation,
 )
 from app.kasa_device_manager import KasaDeviceManager
+from app.manual_device_off_store import list_manual_device_off_at, record_manual_device_off
 from app.sonos_device_manager import SonosDeviceManager
 
 
@@ -695,3 +698,54 @@ async def test_async_main_requests_kasa_vendor_alias_sync() -> None:
         await _async_main(args)
     assert seen.get("sync_kasa_vendor_aliases") is True
     assert seen.get("exit_if_empty") is False
+
+
+@pytest.mark.asyncio
+async def test_repl_kasa_turn_off_records_manual_off(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    kasa_mgr = _kasa_mgr_with_light()
+
+    await _repl_cmd_dispatch_switch(
+        "turn-off",
+        _LIGHT_MAC,
+        kasa_mgr=kasa_mgr,
+        androidtv_mgr=None,
+        cache_path=cache,
+        theme=_Theme(enabled=False),
+    )
+
+    assert (DeviceFamilyId.KASA, _LIGHT_MAC) in list_manual_device_off_at(cache)
+
+
+@pytest.mark.asyncio
+async def test_repl_kasa_turn_on_clears_manual_off(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    record_manual_device_off(cache, DeviceFamilyId.KASA, _LIGHT_MAC, now=1000.0)
+    kasa_mgr = _kasa_mgr_with_light()
+
+    await _repl_cmd_dispatch_switch(
+        "turn-on",
+        _LIGHT_MAC,
+        kasa_mgr=kasa_mgr,
+        androidtv_mgr=None,
+        cache_path=cache,
+        theme=_Theme(enabled=False),
+    )
+
+    assert list_manual_device_off_at(cache) == {}
+
+
+_LIGHT_MAC = "02:00:00:00:00:08"
+
+
+def _kasa_mgr_with_light() -> KasaDeviceManager:
+    light = MagicMock()
+    light.identifier = _LIGHT_MAC
+    light.mac_address = _LIGHT_MAC
+    light.preferred_label = "Master bedroom light"
+    kasa_mgr = MagicMock(spec=KasaDeviceManager)
+    kasa_mgr.switches = (light,)
+    kasa_mgr.get_device_by_alias.return_value = light
+    kasa_mgr.turn_on = AsyncMock()
+    kasa_mgr.turn_off = AsyncMock()
+    return kasa_mgr

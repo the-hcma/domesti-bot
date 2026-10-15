@@ -24,6 +24,7 @@ from app.api.schemas import (
     BeforeSunsetCondition,
     DaylightCondition,
     DaysOfWeekCondition,
+    DeviceNotManuallyOffWithinCondition,
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
@@ -72,6 +73,10 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 MINUTES_PER_DAY = 24 * 60
+NOT_MANUALLY_OFF_ELAPSED_DETAIL = "{device} was turned off by hand {elapsed} ago (more than {window})"
+NOT_MANUALLY_OFF_NEVER_DETAIL = "{device} has not been turned off by hand"
+NOT_MANUALLY_OFF_UNRESOLVED_DETAIL = "{device} not found"
+NOT_MANUALLY_OFF_WAITING_DETAIL = "{device} was turned off by hand {elapsed} ago; waiting {remaining} more"
 _HHMM_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
 _DAY_NAMES = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
 LOCATION_HISTORY_WALKBACK_MAX_S = 600.0
@@ -92,6 +97,9 @@ class RuleEvaluationContext:
         default_factory=dict,
     )
     device_bool_value: dict[tuple[DeviceFamilyId, str], bool] = field(
+        default_factory=dict,
+    )
+    device_manual_off_at: dict[tuple[DeviceFamilyId, str], float] = field(
         default_factory=dict,
     )
     device_state: DeviceManagersState | None = None
@@ -492,6 +500,7 @@ def _accurate_inside_from_location(
 _ANY_GROUP_SAFE_TO_EVALUATE_TYPES: tuple[type[RuleConditionOut], ...] = (
     DaylightCondition,
     DaysOfWeekCondition,
+    DeviceNotManuallyOffWithinCondition,
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     Ep1ReadingCompareCondition,
@@ -1038,6 +1047,8 @@ def _evaluate_condition(
         return _evaluate_daylight(condition, rule, ctx)
     if isinstance(condition, DaysOfWeekCondition):
         return _evaluate_days_of_week(condition, rule, ctx)
+    if isinstance(condition, DeviceNotManuallyOffWithinCondition):
+        return _evaluate_device_not_manually_off_within(condition, rule, ctx)
     if isinstance(condition, DevicesAllInStateCondition):
         return _evaluate_devices_all_in_state(condition, rule, ctx)
     if isinstance(condition, DevicesAnyInStateCondition):
@@ -1106,6 +1117,70 @@ def _evaluate_days_of_week(
         detail=detail,
         label="Days of week",
         met=met,
+    )
+
+
+def _evaluate_device_not_manually_off_within(
+    condition: DeviceNotManuallyOffWithinCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    del rule  # unused; signature matches sibling evaluators
+    device_label = _device_condition_display_label(ctx, condition.device)
+    window_label = _format_dwell_need_s(condition.window_s)
+    label = f"Not turned off by hand in the last {window_label}"
+    if ctx.device_state is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail="discovery not ready",
+            label=label,
+            met=False,
+        )
+    backend_id = resolve_device_ref_to_backend_id(
+        ctx.device_state,
+        family_id=condition.device.family_id,
+        device_ref=condition.device.device_id.strip(),
+    )
+    if backend_id is None:
+        # Fail closed: a stale or misspelled reference must not read as "never
+        # turned off", or a rule whose action still reaches the light could
+        # turn it on inside the window.
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=NOT_MANUALLY_OFF_UNRESOLVED_DETAIL.format(device=device_label),
+            label=label,
+            met=False,
+        )
+    off_at = ctx.device_manual_off_at.get((condition.device.family_id, backend_id))
+    if off_at is None:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=NOT_MANUALLY_OFF_NEVER_DETAIL.format(device=device_label),
+            label=label,
+            met=True,
+        )
+    elapsed_s = max(0.0, ctx.now.timestamp() - off_at)
+    if elapsed_s >= condition.window_s:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=NOT_MANUALLY_OFF_ELAPSED_DETAIL.format(
+                device=device_label,
+                elapsed=_format_dwell_elapsed_s(elapsed_s),
+                window=window_label,
+            ),
+            label=label,
+            met=True,
+        )
+    remaining_s = condition.window_s - elapsed_s
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=NOT_MANUALLY_OFF_WAITING_DETAIL.format(
+            device=device_label,
+            elapsed=_format_dwell_elapsed_s(elapsed_s),
+            remaining=_format_dwell_elapsed_s(remaining_s),
+        ),
+        label=label,
+        met=False,
     )
 
 
@@ -2168,6 +2243,7 @@ def _presence_user_ids_for_condition(
             BeforeSunsetCondition,
             DaylightCondition,
             DaysOfWeekCondition,
+            DeviceNotManuallyOffWithinCondition,
             DevicesAllInStateCondition,
             DevicesAnyInStateCondition,
             DevicesAnyInStateForSCondition,

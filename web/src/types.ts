@@ -578,6 +578,11 @@ export type RuleConditionOut =
       days: number[];
     }
   | {
+      type: typeof RuleConditionType.DeviceNotManuallyOffWithin;
+      device: RuleConditionDeviceRefOut;
+      window_s: number;
+    }
+  | {
       type: typeof RuleConditionType.DevicesAllInState;
       devices: RuleConditionDeviceRefOut[];
       state: DeviceConditionState;

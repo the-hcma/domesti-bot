@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from app.api.schemas import (
     AllConditionsCondition,
     AnyConditionsCondition,
+    DeviceNotManuallyOffWithinCondition,
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
@@ -596,6 +597,19 @@ def _collect_rule_bool_state_device_refs(
     return refs
 
 
+def _iter_device_not_manually_off_device_refs(
+    conditions: list[RuleConditionOut],
+) -> list[RuleConditionDeviceRefOut]:
+    """Collect device refs from ``device_not_manually_off_within`` conditions (including nested)."""
+    found: list[RuleConditionDeviceRefOut] = []
+    for condition in conditions:
+        if isinstance(condition, DeviceNotManuallyOffWithinCondition):
+            found.append(condition.device)
+        elif isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            found.extend(_iter_device_not_manually_off_device_refs(condition.conditions))
+    return found
+
+
 def _iter_device_state_condition_checks(
     conditions: list[RuleConditionOut],
 ) -> list[tuple[list[RuleConditionDeviceRefOut], DeviceConditionState]]:
@@ -679,7 +693,10 @@ def _validate_device_conditions(
                     context_label="conditions",
                 ),
             )
-    for ref in _iter_ep1_reading_compare_device_refs(rule.conditions.all):
+    for ref in [
+        *_iter_device_not_manually_off_device_refs(rule.conditions.all),
+        *_iter_ep1_reading_compare_device_refs(rule.conditions.all),
+    ]:
         stored = (ref.display_name or "").strip()
         key = (ref.family_id, ref.device_id.strip(), stored)
         if key in seen:
