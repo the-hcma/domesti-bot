@@ -182,6 +182,8 @@ RULE_SKIP_REASON_MANUAL_OFF_HOLD = "held_off_manual_off"
 # Minimum gap before retrying a held-off notice whose send failed, so an SMTP
 # outage does not stall evaluation with a blocked send on every trigger.
 _HELD_OFF_RETRY_AFTER_S = 300.0
+# Rows of deleted rules are pruned at most this often.
+_HELD_OFF_PRUNE_EVERY_S = 3600.0
 _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
 _GEO_INSIDE_STATE_RECONCILE_S = 600.0
 _GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
@@ -296,6 +298,7 @@ class RuleEvaluator:
         self._event_loop: asyncio.AbstractEventLoop | None = None
         # rule id -> when a failed held-off notice was last attempted (retry cooldown);
         # which episodes were already mailed is persisted in ``rule_held_off_notice``.
+        self._held_off_last_pruned_at: float | None = None
         self._held_off_send_failed_at: dict[str, float] = {}
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_geo_outside_streak_since: dict[tuple[str, str], float] = {}
@@ -3205,18 +3208,24 @@ class RuleEvaluator:
         if not rule.notify_on_fire or self._cache_path is None:
             return
         newest_off_at = max(hold.off_at for hold in holds)
+        now = self._now_fn()
+        if self._held_off_last_pruned_at is None or now - self._held_off_last_pruned_at >= _HELD_OFF_PRUNE_EVERY_S:
+            self._held_off_last_pruned_at = now
+            try:
+                await asyncio.to_thread(
+                    prune_held_off_notices,
+                    self._cache_path,
+                    {known.id for known in list_automation_rules()},
+                )
+            except Exception:
+                _LOGGER.warning("[rules] could not prune held-off notice rows", exc_info=True)
         try:
-            await asyncio.to_thread(
-                prune_held_off_notices,
-                self._cache_path,
-                {known.id for known in list_automation_rules()},
-            )
+            notified_off_at = await asyncio.to_thread(get_held_off_notified_off_at, self._cache_path, rule.id)
         except Exception:
-            _LOGGER.warning("[rules] could not prune held-off notice rows", exc_info=True)
-        notified_off_at = await asyncio.to_thread(get_held_off_notified_off_at, self._cache_path, rule.id)
+            _LOGGER.warning("[rules] could not read held-off notice rule_id=%s", rule.id, exc_info=True)
+            return
         if notified_off_at is not None and notified_off_at >= newest_off_at:
             return
-        now = self._now_fn()
         failed_at = self._held_off_send_failed_at.get(rule.id)
         if failed_at is not None and now - failed_at < _HELD_OFF_RETRY_AFTER_S:
             return

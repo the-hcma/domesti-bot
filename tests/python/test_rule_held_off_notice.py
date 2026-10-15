@@ -686,3 +686,23 @@ async def test_scheduled_rule_held_off_sends_a_notice_naming_its_schedule(
             assert rig.device.calls == []
     finally:
         await rig.evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_unreadable_notice_store_does_not_break_evaluation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_edge_rule())
+    send_mock = MagicMock(return_value=None)
+    try:
+        with (
+            patch("app.rule_evaluator.send_rule_held_off_email", send_mock),
+            patch("app.rule_evaluator.get_held_off_notified_off_at", side_effect=OSError("database is locked")),
+        ):
+            record_manual_device_off(rig.db, DeviceFamilyId.KASA, _MAC, now=rig.clock["now"] - 600.0)
+            await rig.enter()
+            assert send_mock.call_count == 0
+            assert rig.device.calls == []
+    finally:
+        await rig.evaluator.close()
