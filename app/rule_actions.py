@@ -6,7 +6,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from kasa.exceptions import _ConnectionError
 
@@ -39,10 +39,17 @@ from app.outbound_email import (
 )
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_engine import DeviceUnresponsiveError, expected_state_for_action_type
-from app.rule_notification import build_rule_notification_bodies
+from app.rule_notification import (
+    RULE_HELD_OFF_SUBJECT_TEMPLATE,
+    build_rule_held_off_bodies,
+    build_rule_notification_bodies,
+)
 from app.smtp_service import SmtpDeliveryResult
 from app.sonos_device_manager import SonosDeviceManager, SonosTransitionUnavailableError
 from app.vizio_device_manager import VizioDeviceManager
+
+if TYPE_CHECKING:
+    from app.rule_conditions import ManualOffHold
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -101,6 +108,54 @@ class RuleNotificationEmailOutcome:
         delivery: SmtpDeliveryResult | None = None,
     ) -> RuleNotificationEmailOutcome:
         return cls(kind="sent", recipients=tuple(recipients), delivery=delivery)
+
+
+def _deliver_rule_email(
+    cache_path: Path,
+    *,
+    html_body: str,
+    plain_body: str,
+    rule: RuleOut,
+    subject: str,
+) -> RuleNotificationEmailOutcome:
+    """Send one rule mail to the rule's ``notification_emails`` over the configured SMTP."""
+    recipients = normalized_rule_notification_emails(rule)
+    if not recipients:
+        _LOGGER.error(
+            "[rules] rule_id=%s notify_on_fire enabled but notification_emails is empty",
+            rule.id,
+        )
+        raise RuleActionDispatchError(f"Rule {rule.id!r} has notify_on_fire but no notification_emails")
+    params = load_outbound_smtp_params(cache_path)
+    if params is None:
+        raise RuleActionDispatchError("SMTP is not configured; cannot send rule notification email")
+    message = build_outbound_message(
+        from_address=params.from_address,
+        html_body=html_body,
+        plain_body=plain_body,
+        subject=subject,
+        to_addresses=recipients,
+    )
+    try:
+        delivery = deliver_outbound_email(params, message)
+    except Exception as exc:
+        friendly = record_outbound_smtp_failure(exc, host=params.host)
+        _LOGGER.error(
+            "[rules] notification email failed for rule_id=%s recipient_count=%d host=%s:%s: %s",
+            rule.id,
+            len(recipients),
+            params.host,
+            params.port,
+            friendly,
+        )
+        raise RuleActionDispatchError(friendly) from exc
+    clear_outbound_smtp_failure()
+    _LOGGER.info(
+        "[rules] notification email sent for rule_id=%s %s",
+        rule.id,
+        delivery.format_for_log(redact_recipients=True),
+    )
+    return RuleNotificationEmailOutcome.sent_to(recipients, delivery=delivery)
 
 
 def _device_action_failure_is_probable(
@@ -757,6 +812,31 @@ def resolve_vizio_identifier_by_label(
     return None
 
 
+def send_rule_held_off_email(
+    cache_path: Path,
+    *,
+    holds: tuple[ManualOffHold, ...],
+    rule: RuleOut,
+    trigger: str,
+) -> RuleNotificationEmailOutcome:
+    """Tell the rule's recipients it was held off by a manual turn-off (needs ``notify_on_fire``)."""
+    if not rule.notify_on_fire:
+        return RuleNotificationEmailOutcome.disabled()
+    plain_body, html_body = build_rule_held_off_bodies(
+        rule,
+        cache_path=cache_path,
+        holds=holds,
+        trigger=trigger,
+    )
+    return _deliver_rule_email(
+        cache_path,
+        html_body=html_body,
+        plain_body=plain_body,
+        rule=rule,
+        subject=RULE_HELD_OFF_SUBJECT_TEMPLATE.format(label=rule.label),
+    )
+
+
 def send_rule_notification_email(
     cache_path: Path,
     *,
@@ -775,16 +855,6 @@ def send_rule_notification_email(
     """Send the rule notification email when ``notify_on_fire`` is enabled."""
     if not rule.notify_on_fire:
         return RuleNotificationEmailOutcome.disabled()
-    recipients = normalized_rule_notification_emails(rule)
-    if not recipients:
-        _LOGGER.error(
-            "[rules] rule_id=%s notify_on_fire enabled but notification_emails is empty",
-            rule.id,
-        )
-        raise RuleActionDispatchError(f"Rule {rule.id!r} has notify_on_fire but no notification_emails")
-    params = load_outbound_smtp_params(cache_path)
-    if params is None:
-        raise RuleActionDispatchError("SMTP is not configured; cannot send rule notification email")
     subject = (
         f"domesti-bot rule completed: {rule.label}" if sequence_completed else f"domesti-bot rule fired: {rule.label}"
     )
@@ -802,33 +872,13 @@ def send_rule_notification_email(
         sun_timing_lines=sun_timing_lines,
         trigger_device_display=trigger_device_display,
     )
-    message = build_outbound_message(
-        from_address=params.from_address,
+    return _deliver_rule_email(
+        cache_path,
         html_body=html_body,
         plain_body=plain_body,
+        rule=rule,
         subject=subject,
-        to_addresses=recipients,
     )
-    try:
-        delivery = deliver_outbound_email(params, message)
-    except Exception as exc:
-        friendly = record_outbound_smtp_failure(exc, host=params.host)
-        _LOGGER.error(
-            "[rules] notification email failed for rule_id=%s recipient_count=%d host=%s:%s: %s",
-            rule.id,
-            len(recipients),
-            params.host,
-            params.port,
-            friendly,
-        )
-        raise RuleActionDispatchError(friendly) from exc
-    clear_outbound_smtp_failure()
-    _LOGGER.info(
-        "[rules] notification email sent for rule_id=%s %s",
-        rule.id,
-        delivery.format_for_log(redact_recipients=True),
-    )
-    return RuleNotificationEmailOutcome.sent_to(recipients, delivery=delivery)
 
 
 def snapshot_device_action_state(

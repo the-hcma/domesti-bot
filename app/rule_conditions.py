@@ -83,6 +83,16 @@ LOCATION_HISTORY_WALKBACK_MAX_S = 600.0
 
 
 @dataclass(frozen=True)
+class ManualOffHold:
+    """A ``device_not_manually_off_within`` condition that is holding a rule off."""
+
+    detail: str
+    device_label: str
+    off_at: float
+    window_label: str
+
+
+@dataclass(frozen=True)
 class RuleEvaluationContext:
     """Inputs required to evaluate one rule's conditions."""
 
@@ -214,6 +224,46 @@ def evaluate_rule_conditions_met(
 ) -> bool:
     """Return whether every top-level condition is currently met."""
     return evaluate_rule(rule, ctx).all_met
+
+
+def manual_off_holds(
+    rule: RuleOut,
+    evaluation: RuleEvaluationResult,
+    ctx: RuleEvaluationContext,
+) -> tuple[ManualOffHold, ...]:
+    """Return the manual-off holds when they are the only thing keeping a rule from firing.
+
+    Empty when every condition is met, when any other condition is also unmet
+    (the rule would not have fired anyway), or when a hold cannot be tied to a
+    recorded turn-off (an unresolved device reference). An edge-triggered rule's
+    geofence rows describe the event that triggered it and are never "met", so
+    they do not count as blockers.
+    """
+    edge_pass = RuleTrigger.EDGE_TRUE in rule.triggers and ctx.triggered_by == RuleEvaluationCause.EDGE
+    holds: list[ManualOffHold] = []
+    for row in evaluation.conditions:
+        if row.met or (edge_pass and not _counts_for_steady_armed_state(row.condition)):
+            continue
+        condition = row.condition
+        if not isinstance(condition, DeviceNotManuallyOffWithinCondition) or ctx.device_state is None:
+            return ()
+        backend_id = resolve_device_ref_to_backend_id(
+            ctx.device_state,
+            family_id=condition.device.family_id,
+            device_ref=condition.device.device_id.strip(),
+        )
+        off_at = None if backend_id is None else ctx.device_manual_off_at.get((condition.device.family_id, backend_id))
+        if off_at is None:
+            return ()
+        holds.append(
+            ManualOffHold(
+                detail=row.detail,
+                device_label=_device_condition_display_label(ctx, condition.device),
+                off_at=off_at,
+                window_label=_format_dwell_need_s(condition.window_s),
+            )
+        )
+    return tuple(holds)
 
 
 def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | None:
