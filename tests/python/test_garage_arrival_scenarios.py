@@ -272,18 +272,23 @@ async def test_staying_home_after_the_other_person_leaves_does_not_open_a_door(
 
 
 @pytest.mark.asyncio
-async def test_someone_home_for_a_while_does_not_open_a_door_when_the_other_is_away(
+@pytest.mark.parametrize("leaver", ["henrique", "kristen"])
+async def test_one_person_leaving_soon_after_a_joint_arrival_opens_no_second_door(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    leaver: str,
 ) -> None:
     rig = _Rig(tmp_path, monkeypatch)
+    stayer = "kristen" if leaver == "henrique" else "henrique"
     try:
-        await rig.arrive("kristen", after_s=0.0)
-        await rig.ping("kristen", after_s=70.0)
-        assert [rule_id for rule_id, _line in rig.opened] == [_KRISTEN_ALONE]
-        await rig.ping("kristen", after_s=2 * 3600.0)
-        await rig.ping("kristen", after_s=600.0)
-        assert [rule_id for rule_id, _line in rig.opened] == [_KRISTEN_ALONE]
+        await rig.arrive("henrique", after_s=0.0)
+        await rig.arrive("kristen", after_s=30.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+        await rig.report(leaver, _OUTSIDE, after_s=70.0)
+        # The one who stayed reports again well inside their 60 to 300 s window.
+        await rig.ping(stayer, after_s=50.0)
+        await rig.ping(stayer, after_s=60.0)
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
     finally:
         await rig.close()
 

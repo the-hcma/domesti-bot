@@ -99,6 +99,13 @@ def test_inside_longer_than_the_window_is_not_met_and_says_why() -> None:
     assert row.detail == "Kristen inside 6 min 40 sec, past the 5 min arrival window"
 
 
+def test_status_label_shows_the_window_when_one_is_set() -> None:
+    bounded = evaluate_rule(_rule(max_inside_s=300), _ctx(inside_for_s=120.0)).conditions[0]
+    unbounded = evaluate_rule(_rule(max_inside_s=None), _ctx(inside_for_s=120.0)).conditions[0]
+    assert bounded.label == "Inside House 1 min to 5 min (Kristen)"
+    assert unbounded.label == "Inside House 1 min+ (Kristen)"
+
+
 def test_inside_for_hours_without_a_window_is_still_met() -> None:
     assert evaluate_rule(_rule(max_inside_s=None), _ctx(inside_for_s=4 * 3600.0)).conditions[0].met is True
 

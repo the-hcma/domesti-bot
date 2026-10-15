@@ -1937,7 +1937,10 @@ def _evaluate_users_inside_geofence_for_s(
             continue
         selected_names.append(_user_display_name(ctx, roster_user_id))
     who = _join_names(selected_names)
-    label = f"Inside {fence_label} {need_label}+ ({who})"
+    if condition.max_inside_s is None:
+        label = f"Inside {fence_label} {need_label}+ ({who})"
+    else:
+        label = f"Inside {fence_label} {need_label} to {_format_dwell_need_s(condition.max_inside_s)} ({who})"
     if unmet:
         detail = "; ".join(presence_lines)
         met = False
@@ -2194,16 +2197,6 @@ def _format_dwell_duration_s(total_s: float | int) -> str:
     return f"{minutes} min {seconds} sec"
 
 
-def _past_arrival_window(condition: UsersInsideGeofenceForSCondition, inside_s: float) -> bool:
-    """True when ``max_inside_s`` is set and the user has been inside longer than that."""
-    return condition.max_inside_s is not None and inside_s > condition.max_inside_s
-
-
-def _past_arrival_window_line(condition: UsersInsideGeofenceForSCondition, name: str, elapsed_label: str) -> str:
-    assert condition.max_inside_s is not None
-    return f"{name} inside {elapsed_label}, past the {_format_dwell_need_s(condition.max_inside_s)} arrival window"
-
-
 def _format_dwell_elapsed_s(elapsed_s: float) -> str:
     return _format_dwell_duration_s(elapsed_s)
 
@@ -2421,6 +2414,16 @@ def _parse_hhmm(hhmm: str) -> int | None:
     if hour < 0 or hour > 23 or minute < 0 or minute > 59:
         return None
     return hour * 60 + minute
+
+
+def _past_arrival_window(condition: UsersInsideGeofenceForSCondition, inside_s: float) -> bool:
+    """True when ``max_inside_s`` is set and the user has been inside longer than that."""
+    return condition.max_inside_s is not None and inside_s > condition.max_inside_s
+
+
+def _past_arrival_window_line(condition: UsersInsideGeofenceForSCondition, name: str, elapsed_label: str) -> str:
+    assert condition.max_inside_s is not None
+    return f"{name} inside {elapsed_label}, past the {_format_dwell_need_s(condition.max_inside_s)} arrival window"
 
 
 def _presence_user_ids_for_condition(
