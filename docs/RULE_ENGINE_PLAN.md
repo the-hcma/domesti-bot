@@ -1366,6 +1366,8 @@ Authoritative subscribe contract for **reading-kind** wakes (numeric sensor samp
 
 **`ignore_expected_device_changes` (opt-in, default false; #694):** when true, a **bool** `device_state` wake skips fire if `is_expected_device_change(family, device)` is live for the waking device (same store vacation anomaly uses for UI/rule actions). Reading-kind wakes are unaffected. Existing rules keep prior behavior until they set the flag.
 
+**`dry_run` (opt-in, default false):** a rule with `dry_run: true` evaluates and fires exactly as it would live (same conditions, cooldown, daily cap and held-off handling) but runs no device action and enqueues no delayed one. It requires `notify_on_fire`, because the email is the only output: the subject is "domesti-bot rule fired (dry run): <label>", the body says no device was changed and lists what it would have done (for example "Open Kristen's side (Tailwind)", with the delay for delayed actions), and the footer is `Sent by: domesti-bot · Rule <rule-id> (dry run)`. Use it to watch a new rule on real events before letting it act; remove the flag to go live. The Automations editor keeps the flag when a dry-run rule is saved, and the inspector shows it.
+
 **Detection → action lag from INFO logs (#699):**
 
 1. `[device] state-transition family_id=… device_id=… metric=bool prior=… current=…` — true prior≠current bool flips on the wake notifier (all families that call `note_bool_transition`; first-sample seeds are silent; numeric reading wakes are not logged at INFO to avoid illuminance floods).

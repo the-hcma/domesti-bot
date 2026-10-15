@@ -989,6 +989,8 @@ class RulesHubController {
             : [],
           conditions: { all: conditions },
           device_actions,
+          // The editor has no dry-run control; keep it so editing never turns a dry run live.
+          ...(existing?.dry_run === true ? { dry_run: true } : {}),
         };
         await this.dataSource.saveRule(rule);
         editor.remove();

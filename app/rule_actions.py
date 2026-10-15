@@ -40,6 +40,7 @@ from app.outbound_email import (
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_engine import DeviceUnresponsiveError, expected_state_for_action_type
 from app.rule_notification import (
+    RULE_FIRE_DRY_RUN_SUBJECT_TEMPLATE,
     RULE_HELD_OFF_SUBJECT_TEMPLATE,
     build_rule_held_off_bodies,
     build_rule_notification_bodies,
@@ -843,6 +844,7 @@ def send_rule_notification_email(
     cancelled_remaining: bool = False,
     device_action_outcomes: tuple[RuleDeviceActionOutcome, ...] = (),
     device_state_changed_at: float | None = None,
+    dry_run: bool = False,
     fire_at: float | None = None,
     fire_source: str | None = None,
     noticed_at: float | None = None,
@@ -851,19 +853,24 @@ def send_rule_notification_email(
     sequence_completed: bool = False,
     sun_timing_lines: tuple[str, ...] = (),
     trigger_device_display: str | None = None,
+    would_do_lines: tuple[str, ...] = (),
 ) -> RuleNotificationEmailOutcome:
     """Send the rule notification email when ``notify_on_fire`` is enabled."""
     if not rule.notify_on_fire:
         return RuleNotificationEmailOutcome.disabled()
-    subject = (
-        f"domesti-bot rule completed: {rule.label}" if sequence_completed else f"domesti-bot rule fired: {rule.label}"
-    )
+    if dry_run:
+        subject = RULE_FIRE_DRY_RUN_SUBJECT_TEMPLATE.format(label=rule.label)
+    elif sequence_completed:
+        subject = f"domesti-bot rule completed: {rule.label}"
+    else:
+        subject = f"domesti-bot rule fired: {rule.label}"
     plain_body, html_body = build_rule_notification_bodies(
         rule,
         cache_path=cache_path,
         cancelled_remaining=cancelled_remaining,
         device_action_outcomes=device_action_outcomes,
         device_state_changed_at=device_state_changed_at,
+        dry_run=dry_run,
         fire_at=fire_at,
         fire_source=fire_source,
         noticed_at=noticed_at,
@@ -871,6 +878,7 @@ def send_rule_notification_email(
         sequence_completed=sequence_completed,
         sun_timing_lines=sun_timing_lines,
         trigger_device_display=trigger_device_display,
+        would_do_lines=would_do_lines,
     )
     return _deliver_rule_email(
         cache_path,

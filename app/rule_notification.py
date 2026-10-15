@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from app.api.schemas import RuleOut
+from app.api.schemas import RuleDeviceActionOut, RuleOut
 from app.automation_rules_loader import AutomationRulesLoadError, load_settings_location
 from app.device_display import format_device_display
 from app.outbound_email import (
@@ -42,6 +42,11 @@ RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE = (
 )
 RULE_FIRE_DEVICE_STATE_CHANGED_TEMPLATE = "Device state changed: {when}"
 RULE_FIRE_DEVICE_TEMPLATE = "Device: {device}"
+RULE_FIRE_DRY_RUN_HEADING = "Would have done"
+RULE_FIRE_DRY_RUN_INTRO_TEMPLATE = (
+    'The automation rule "{label}" ({rule_id}) fired in dry-run mode. No device was changed.'
+)
+RULE_FIRE_DRY_RUN_SUBJECT_TEMPLATE = "domesti-bot rule fired (dry run): {label}"
 RULE_FIRE_FIRED_TEMPLATE = "Fired: {when}"
 RULE_FIRE_JUST_FIRED_TEMPLATE = 'The automation rule "{label}" ({rule_id}) just fired.'
 RULE_FIRE_NOTICED_TEMPLATE = "Noticed: {when} ({source})"
@@ -122,6 +127,7 @@ def build_rule_notification_bodies(
     cancelled_remaining: bool = False,
     device_action_outcomes: tuple[RuleDeviceActionOutcome, ...] = (),
     device_state_changed_at: float | None = None,
+    dry_run: bool = False,
     fire_at: float | None = None,
     fire_source: str | None = None,
     noticed_at: float | None = None,
@@ -129,15 +135,17 @@ def build_rule_notification_bodies(
     sequence_completed: bool = False,
     sun_timing_lines: tuple[str, ...] = (),
     trigger_device_display: str | None = None,
+    would_do_lines: tuple[str, ...] = (),
 ) -> tuple[str, str]:
     """Return ``(plain_text, html)`` bodies for a rule fire notification."""
     status_url = rule_automation_status_url(cache_path, rule.id)
     device_summary = summarize_device_action_outcomes(device_action_outcomes)
-    intro = (
-        RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE.format(label=rule.label, rule_id=rule.id)
-        if sequence_completed
-        else RULE_FIRE_JUST_FIRED_TEMPLATE.format(label=rule.label, rule_id=rule.id)
-    )
+    if dry_run:
+        intro = RULE_FIRE_DRY_RUN_INTRO_TEMPLATE.format(label=rule.label, rule_id=rule.id)
+    elif sequence_completed:
+        intro = RULE_FIRE_COMPLETED_SEQUENCE_TEMPLATE.format(label=rule.label, rule_id=rule.id)
+    else:
+        intro = RULE_FIRE_JUST_FIRED_TEMPLATE.format(label=rule.label, rule_id=rule.id)
     plain_parts = [intro, ""]
     if notification_detail:
         plain_parts.extend([notification_detail, ""])
@@ -155,6 +163,10 @@ def build_rule_notification_bodies(
     if sun_timing_lines:
         plain_parts.append(f"{RULE_FIRE_SUN_TIMING_HEADING}:")
         plain_parts.extend(f"- {line}" for line in sun_timing_lines)
+        plain_parts.append("")
+    if would_do_lines:
+        plain_parts.append(f"{RULE_FIRE_DRY_RUN_HEADING}:")
+        plain_parts.extend(f"- {line}" for line in would_do_lines)
         plain_parts.append("")
     if device_summary.changed_lines or device_summary.no_change_message is not None:
         plain_parts.append(f"{RULE_FIRE_TIMELINE_HEADING}:")
@@ -192,6 +204,12 @@ def build_rule_notification_bodies(
         for line in sun_timing_lines:
             html_parts.append(f"<li>{escape(line, quote=False)}</li>")
         html_parts.append("</ul>")
+    if would_do_lines:
+        html_parts.append(f"<p><strong>{escape(RULE_FIRE_DRY_RUN_HEADING, quote=False)}</strong></p>")
+        html_parts.append("<ul>")
+        for line in would_do_lines:
+            html_parts.append(f"<li>{escape(line, quote=False)}</li>")
+        html_parts.append("</ul>")
     if device_summary.changed_lines or device_summary.no_change_message is not None:
         html_parts.append(f"<p><strong>{escape(RULE_FIRE_TIMELINE_HEADING, quote=False)}</strong></p>")
         if device_summary.changed_lines:
@@ -223,7 +241,7 @@ def build_rule_notification_bodies(
     append_provenance_footer(
         plain_parts,
         html_parts,
-        provenance=rule_fire_provenance_footer(rule.id),
+        provenance=rule_fire_provenance_footer(rule.id, dry_run=dry_run),
     )
     return "\n".join(plain_parts) + "\n", "".join(html_parts)
 
@@ -353,6 +371,15 @@ def format_devices_already_in_desired_state_message(
     )
     joined = ", ".join(labels)
     return f"All devices already in their desired ({joined}) state."
+
+
+def format_dry_run_action_line(action: RuleDeviceActionOut, *, device_display: str) -> str:
+    """Return one "would have done" line, e.g. ``Open Kristen's side (Tailwind)``."""
+    verb = action.action.display_label().capitalize()
+    family = action.family_id.display_name()
+    delay_s = action.delay_s or 0
+    suffix = f", after {delay_s} s" if delay_s > 0 else ""
+    return f"{verb} {device_display} ({family}){suffix}"
 
 
 def rule_automation_status_url(cache_path: Path | None, rule_id: str) -> str | None:

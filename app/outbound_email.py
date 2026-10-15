@@ -139,12 +139,12 @@ def record_outbound_smtp_failure(exc: Exception, *, host: str) -> str:
     return friendly
 
 
-def rule_fire_provenance_footer(rule_id: str) -> str:
-    """Provenance for a rule ``notify_on_fire`` notification."""
+def rule_fire_provenance_footer(rule_id: str, *, dry_run: bool = False) -> str:
+    """Provenance for a rule ``notify_on_fire`` notification (``dry_run`` = nothing was changed)."""
     cleaned = rule_id.strip()
     if cleaned == "":
         raise ValueError("Expected non-empty rule_id for rule-fire provenance")
-    return provenance_footer(subsystem=f"Rule {cleaned}", trigger="automation")
+    return provenance_footer(subsystem=f"Rule {cleaned}", trigger="dry run" if dry_run else "automation")
 
 
 def rule_held_off_provenance_footer(rule_id: str) -> str:

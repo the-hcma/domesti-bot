@@ -155,7 +155,7 @@ from app.rule_held_off_notice_store import (
     prune_held_off_notices,
     record_held_off_notified,
 )
-from app.rule_notification import format_rule_fire_timing_for_log
+from app.rule_notification import format_dry_run_action_line, format_rule_fire_timing_for_log
 from app.rule_validation import (
     build_roster_user_id_lookup,
     collect_rule_user_ids,
@@ -1343,8 +1343,12 @@ class RuleEvaluator:
         email_outcome: RuleNotificationEmailOutcome | None = None
         email_error: str | None = None
         immediate, delayed = partition_device_actions_by_delay(rule.device_actions)
-        performed_side_effect = not rule.device_actions and not rule.notify_on_fire
         device_state = self._device_state_getter()
+        would_do_lines: tuple[str, ...] = ()
+        if rule.dry_run:
+            would_do_lines = _dry_run_action_lines(rule, device_state)
+            immediate, delayed = [], []
+        performed_side_effect = not rule.device_actions and not rule.notify_on_fire
         dispatch_result = RuleDeviceDispatchResult.empty()
         deferred_enqueued = False
         fire_at = self._now_fn()
@@ -1396,6 +1400,7 @@ class RuleEvaluator:
                         self._cache_path,
                         device_action_outcomes=dispatch_result.action_outcomes,
                         device_state_changed_at=device_state_changed_at,
+                        dry_run=rule.dry_run,
                         fire_at=fire_at,
                         fire_source=fire_source,
                         noticed_at=noticed_epoch,
@@ -1403,6 +1408,7 @@ class RuleEvaluator:
                         rule=rule,
                         sun_timing_lines=sun_timing_lines,
                         trigger_device_display=trigger_device_display,
+                        would_do_lines=would_do_lines,
                     )
                     performed_side_effect = True
             except RuleActionDispatchError as exc:
@@ -3671,6 +3677,24 @@ def _deferred_state_matches(
     if event == "entered":
         return geofence_id in inside_ids
     return geofence_id not in inside_ids
+
+
+def _dry_run_action_lines(rule: RuleOut, device_state: DeviceManagersState | None) -> tuple[str, ...]:
+    """Describe each configured action as the email's "would have done" lines."""
+    lines: list[str] = []
+    for action in rule.device_actions:
+        preferred_label = (
+            None
+            if device_state is None
+            else lookup_preferred_label(
+                device_state,
+                family_id=action.family_id,
+                device_id=action.device_id,
+            )
+        )
+        device_display = format_device_display(action.device_id, preferred_label or action.display_name)
+        lines.append(format_dry_run_action_line(action, device_display=device_display))
+    return tuple(lines)
 
 
 def _format_geofence_transitions_for_log(
