@@ -23,6 +23,7 @@ from app.rule_conditions import (
     evaluate_rule,
     presence_user_ids_for_rule,
 )
+from app.rule_evaluator import _geofence_dwell_accuracy_limit_m, _max_dwell_min_inside_s
 from app.rule_validation import build_roster_user_id_lookup
 
 _TZ = ZoneInfo("America/New_York")
@@ -214,3 +215,12 @@ def test_edge_rule_does_not_fire_for_a_user_arriving_alone() -> None:
     assert evaluate_rule(_rule(), alone).all_met is False
     assert evaluate_rule(_rule(), _ctx(henrique_gap_s=10.0)).all_met is True
     assert evaluate_rule(_rule(), _ctx(henrique_gap_s=90.0)).all_met is False
+
+
+def test_a_lone_arrived_together_rule_turns_on_arrival_time_tracking() -> None:
+    # Arrival times are only recorded while some enabled rule needs them, so this
+    # rule must not depend on a dwell rule happening to exist.
+    rule = _rule()
+    assert _geofence_dwell_accuracy_limit_m([rule]) == rule.min_location_accuracy_m
+    assert _geofence_dwell_accuracy_limit_m([rule.model_copy(update={"enabled": False})]) is None
+    assert _max_dwell_min_inside_s([_rule(max_gap_s=240)]) == 240.0

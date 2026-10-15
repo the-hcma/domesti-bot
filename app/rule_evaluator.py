@@ -3636,6 +3636,14 @@ def _condition_has_dwell(condition: RuleConditionOut) -> bool:
     return False
 
 
+def _condition_tracks_arrival_times(condition: RuleConditionOut) -> bool:
+    if isinstance(condition, UsersArrivedTogetherCondition):
+        return True
+    if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+        return any(_condition_tracks_arrival_times(child) for child in condition.conditions)
+    return False
+
+
 def _condition_triggered_geofence_edge(
     condition: RuleConditionOut,
     user_id: str,
@@ -3835,8 +3843,16 @@ def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
 
 
 def _geofence_dwell_accuracy_limit_m(rules: list[RuleOut]) -> int | None:
-    """Return the strictest accuracy limit among enabled rules with dwell conditions."""
-    limits = [rule.min_location_accuracy_m for rule in rules if rule.enabled and _rule_has_dwell_condition(rule)]
+    """Return the strictest accuracy limit among enabled rules that need arrival times.
+
+    Dwell conditions and ``users_arrived_together`` both read the recorded
+    inside-since times, so either one turns tracking on.
+    """
+    limits = [
+        rule.min_location_accuracy_m
+        for rule in rules
+        if rule.enabled and (_rule_has_dwell_condition(rule) or _rule_tracks_arrival_times(rule))
+    ]
     if not limits:
         return None
     return min(limits)
@@ -3963,7 +3979,9 @@ def _max_dwell_min_inside_s_from_conditions(
     """Return the largest ``min_inside_s`` nested under ``conditions``."""
     max_s = 0.0
     for condition in conditions:
-        if isinstance(
+        if isinstance(condition, UsersArrivedTogetherCondition):
+            max_s = max(max_s, float(condition.max_gap_s))
+        elif isinstance(
             condition,
             UsersInsideGeofenceForSCondition | UsersOutsideGeofenceForSCondition,
         ):
@@ -4300,6 +4318,10 @@ def _log_rule_skipped(
 
 def _rule_has_dwell_condition(rule: RuleOut) -> bool:
     return any(_condition_has_dwell(condition) for condition in rule.conditions.all)
+
+
+def _rule_tracks_arrival_times(rule: RuleOut) -> bool:
+    return any(_condition_tracks_arrival_times(condition) for condition in rule.conditions.all)
 
 
 def _rule_uses_scheduled_evaluation_tick(rule: RuleOut) -> bool:
