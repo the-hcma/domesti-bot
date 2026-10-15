@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -129,10 +129,12 @@ from app.rule_actions import (
     dispatch_rule_device_actions,
     lookup_preferred_label,
     partition_device_actions_by_delay,
+    send_rule_held_off_email,
     send_rule_notification_email,
 )
 from app.rule_conditions import (
     LOCATION_HISTORY_WALKBACK_MAX_S,
+    ManualOffHold,
     RuleEvaluationContext,
     RuleEvaluationResult,
     _evaluate_condition,
@@ -142,11 +144,17 @@ from app.rule_conditions import (
     dwell_episode_blocks_fire,
     evaluate_rule,
     iter_dwell_for_s_conditions,
+    manual_off_holds,
     natural_bool_for_device_family,
     presence_user_ids_for_rule,
     rule_eligible_since,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
+from app.rule_held_off_notice_store import (
+    get_held_off_notified_off_at,
+    prune_held_off_notices,
+    record_held_off_notified,
+)
 from app.rule_notification import format_rule_fire_timing_for_log
 from app.rule_validation import (
     build_roster_user_id_lookup,
@@ -169,6 +177,13 @@ _LOGGER = logging.getLogger(__name__)
 # Public dwell-streak log contracts (asserted by hermetic tests).
 RULE_DWELL_STREAK_LOG = "[rules] dwell-streak family_id=%s device_id=%s state=%s since=%s"
 RULE_DWELL_STREAK_RESET_LOG = "[rules] dwell-streak-reset family_id=%s device_id=%s prior_state=%s reason=%s"
+# Skip reason logged when only a device_not_manually_off_within hold blocks a rule.
+RULE_SKIP_REASON_MANUAL_OFF_HOLD = "held_off_manual_off"
+# Minimum gap before retrying a held-off notice whose send failed, so an SMTP
+# outage does not stall evaluation with a blocked send on every trigger.
+_HELD_OFF_RETRY_AFTER_S = 300.0
+# Rows of deleted rules are pruned at most this often.
+_HELD_OFF_PRUNE_EVERY_S = 3600.0
 _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
 _GEO_INSIDE_STATE_RECONCILE_S = 600.0
 _GEO_OUTSIDE_STATE_RECONCILE_S = 600.0
@@ -281,6 +296,10 @@ class RuleEvaluator:
             float,
         ] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
+        # rule id -> when a failed held-off notice was last attempted (retry cooldown);
+        # which episodes were already mailed is persisted in ``rule_held_off_notice``.
+        self._held_off_last_pruned_at: float | None = None
+        self._held_off_send_failed_at: dict[str, float] = {}
         self._geofence_geo_inside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_geo_outside_streak_since: dict[tuple[str, str], float] = {}
         self._geofence_inside_since: dict[tuple[str, str], float] = {}
@@ -1020,11 +1039,12 @@ class RuleEvaluator:
                         detail=f"remaining_s={max(0.0, remaining_s):.0f}",
                     )
             else:
-                _log_rule_skipped(
-                    rule.id,
-                    log_user_ids,
-                    reason="conditions_not_met",
-                    detail=_format_unmet_conditions_for_log(evaluation),
+                await self._skip_rule_conditions_not_met(
+                    rule,
+                    ctx=evaluation_ctx,
+                    evaluation=evaluation,
+                    fire_source=fire_source,
+                    log_user_ids=log_user_ids,
                 )
             self._advance_scheduled_evaluate_time(
                 rule,
@@ -1067,11 +1087,12 @@ class RuleEvaluator:
                 continue
             evaluation = evaluate_rule(rule, ctx)
             if not evaluation.all_met:
-                _log_rule_skipped(
-                    rule.id,
-                    user_id,
-                    reason="conditions_not_met",
-                    detail=_format_unmet_conditions_for_log(evaluation),
+                await self._skip_rule_conditions_not_met(
+                    rule,
+                    ctx=ctx,
+                    evaluation=evaluation,
+                    fire_source="deferred",
+                    log_user_ids=user_id,
                 )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -1930,11 +1951,12 @@ class RuleEvaluator:
                 continue
             evaluation = evaluate_rule(rule, ctx)
             if not evaluation.all_met:
-                _log_rule_skipped(
-                    rule.id,
-                    user_id,
-                    reason="conditions_not_met",
-                    detail=_format_unmet_conditions_for_log(evaluation),
+                await self._skip_rule_conditions_not_met(
+                    rule,
+                    ctx=ctx,
+                    evaluation=evaluation,
+                    fire_source="immediate",
+                    log_user_ids=user_id,
                 )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -2539,11 +2561,12 @@ class RuleEvaluator:
                     evaluation.all_met,
                 )
                 if not evaluation.all_met:
-                    _log_rule_skipped(
-                        rule.id,
-                        log_user_ids,
-                        reason="conditions_not_met",
-                        detail=_format_unmet_conditions_for_log(evaluation),
+                    await self._skip_rule_conditions_not_met(
+                        rule,
+                        ctx=evaluation_ctx,
+                        evaluation=evaluation,
+                        fire_source="device_state",
+                        log_user_ids=log_user_ids,
                     )
                     continue
                 runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -2631,11 +2654,12 @@ class RuleEvaluator:
                 evaluation.all_met,
             )
             if not evaluation.all_met:
-                _log_rule_skipped(
-                    rule.id,
-                    log_user_ids,
-                    reason="conditions_not_met",
-                    detail=_format_unmet_conditions_for_log(evaluation),
+                await self._skip_rule_conditions_not_met(
+                    rule,
+                    ctx=evaluation_ctx,
+                    evaluation=evaluation,
+                    fire_source="dwell_satisfied",
+                    log_user_ids=log_user_ids,
                 )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -3170,6 +3194,86 @@ class RuleEvaluator:
                     if runtime.last_fired_at >= streak_start:
                         episode = self._geofence_presence_episode.get(key, 0)
                         consumed[(rule.id, roster_user_id, condition.geofence_id)] = episode
+
+    async def _notify_rule_held_off(
+        self,
+        rule: RuleOut,
+        *,
+        fire_source: RuleFireSource,
+        holds: tuple[ManualOffHold, ...],
+        log_user_ids: str,
+        user_display_names: Mapping[str, str],
+    ) -> None:
+        """Email the rule's recipients once per manual-off episode that it was held off."""
+        if not rule.notify_on_fire or self._cache_path is None:
+            return
+        newest_off_at = max(hold.off_at for hold in holds)
+        now = self._now_fn()
+        if self._held_off_last_pruned_at is None or now - self._held_off_last_pruned_at >= _HELD_OFF_PRUNE_EVERY_S:
+            self._held_off_last_pruned_at = now
+            try:
+                await asyncio.to_thread(
+                    prune_held_off_notices,
+                    self._cache_path,
+                    {known.id for known in list_automation_rules()},
+                )
+            except Exception:
+                _LOGGER.warning("[rules] could not prune held-off notice rows", exc_info=True)
+        try:
+            notified_off_at = await asyncio.to_thread(get_held_off_notified_off_at, self._cache_path, rule.id)
+        except Exception:
+            _LOGGER.warning("[rules] could not read held-off notice rule_id=%s", rule.id, exc_info=True)
+            return
+        if notified_off_at is not None and notified_off_at >= newest_off_at:
+            return
+        failed_at = self._held_off_send_failed_at.get(rule.id)
+        if failed_at is not None and now - failed_at < _HELD_OFF_RETRY_AFTER_S:
+            return
+        try:
+            await asyncio.to_thread(
+                send_rule_held_off_email,
+                self._cache_path,
+                holds=holds,
+                rule=rule,
+                trigger=_held_off_trigger_text(fire_source, log_user_ids, user_display_names),
+            )
+        except Exception:
+            # Best effort: a notice problem must never abort evaluating the other rules.
+            _LOGGER.warning("[rules] held-off notice failed rule_id=%s", rule.id, exc_info=True)
+            self._held_off_send_failed_at[rule.id] = now
+            return
+        self._held_off_send_failed_at.pop(rule.id, None)
+        try:
+            await asyncio.to_thread(record_held_off_notified, self._cache_path, rule.id, newest_off_at)
+        except Exception:
+            _LOGGER.warning("[rules] could not record held-off notice rule_id=%s", rule.id, exc_info=True)
+        _LOGGER.info("[rules] held-off notice sent rule_id=%s source=%s", rule.id, fire_source)
+
+    async def _skip_rule_conditions_not_met(
+        self,
+        rule: RuleOut,
+        *,
+        ctx: RuleEvaluationContext,
+        evaluation: RuleEvaluationResult,
+        fire_source: RuleFireSource,
+        log_user_ids: str,
+    ) -> None:
+        """Log why a triggered rule did not fire and, when only a manual-off hold blocks it, say so by email."""
+        holds = manual_off_holds(rule, evaluation, ctx)
+        _log_rule_skipped(
+            rule.id,
+            log_user_ids,
+            reason=RULE_SKIP_REASON_MANUAL_OFF_HOLD if holds else "conditions_not_met",
+            detail=_format_unmet_conditions_for_log(evaluation),
+        )
+        if holds:
+            await self._notify_rule_held_off(
+                rule,
+                fire_source=fire_source,
+                holds=holds,
+                log_user_ids=log_user_ids,
+                user_display_names=ctx.user_display_names,
+            )
 
     def _skip_if_daily_cap(
         self,
@@ -3749,6 +3853,30 @@ def _geofence_record_to_out(record: GeofenceRecord) -> GeofenceOut:
         owntracks_rid=record.owntracks_rid,
         radius_m=record.radius_m,
     )
+
+
+def _held_off_trigger_text(
+    fire_source: RuleFireSource,
+    log_user_ids: str,
+    user_display_names: Mapping[str, str],
+) -> str:
+    """Return plain words for what triggered a rule that a manual-off hold stopped."""
+    match fire_source:
+        case "device_state":
+            return "a device changed state"
+        case "dwell_satisfied":
+            return "a dwell time was reached"
+        case "eligibility":
+            return "its time window opened"
+        case "scheduled":
+            return "its schedule"
+        case "deferred" | "immediate":
+            names = ", ".join(
+                user_display_names.get(user_id, user_id)
+                for user_id in (part.strip() for part in log_user_ids.split(","))
+                if user_id
+            )
+            return f"a person arriving or leaving ({names})" if names else "a person arriving or leaving"
 
 
 def _home_wifi_for_user(

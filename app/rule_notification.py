@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -16,10 +17,14 @@ from app.outbound_email import (
     append_provenance_footer,
     domesti_public_base_url,
     rule_fire_provenance_footer,
+    rule_held_off_provenance_footer,
     with_instance_hash,
 )
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_engine import expected_state_for_action_type
+
+if TYPE_CHECKING:
+    from app.rule_conditions import ManualOffHold
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,70 @@ RULE_FIRE_REACTION_TEMPLATE = "Reaction: {duration}"
 RULE_FIRE_SUN_TIMING_HEADING = "Sun timing"
 RULE_FIRE_TIMELINE_HEADING = "Timeline"
 RULE_FIRE_TIMING_HEADING = "Timing"
+RULE_HELD_OFF_HEADING = "Held off by a manual turn-off"
+RULE_HELD_OFF_HOLD_TEMPLATE = (
+    "{detail}. It was turned off at {when}, and this rule stays out of the way for {window} after that."
+)
+RULE_HELD_OFF_INTRO_TEMPLATE = (
+    'The automation rule "{label}" ({rule_id}) did not run '
+    "because a device it controls was turned off by hand recently."
+)
+RULE_HELD_OFF_NEXT_NOTE = (
+    "The rule does not retry when the hold ends; it acts again the next time it is triggered. No device was changed."
+)
+RULE_HELD_OFF_SUBJECT_TEMPLATE = "domesti-bot rule held off: {label}"
+RULE_HELD_OFF_TRIGGER_TEMPLATE = "Triggered by: {trigger}"
+
+
+def build_rule_held_off_bodies(
+    rule: RuleOut,
+    *,
+    cache_path: Path | None,
+    holds: tuple[ManualOffHold, ...],
+    trigger: str,
+) -> tuple[str, str]:
+    """Return ``(plain_text, html)`` bodies for a rule held off by a manual turn-off."""
+    status_url = rule_automation_status_url(cache_path, rule.id)
+    intro = RULE_HELD_OFF_INTRO_TEMPLATE.format(label=rule.label, rule_id=rule.id)
+    trigger_line = RULE_HELD_OFF_TRIGGER_TEMPLATE.format(trigger=trigger)
+    hold_lines = tuple(
+        RULE_HELD_OFF_HOLD_TEMPLATE.format(
+            detail=hold.detail,
+            when=format_completed_at_local(hold.off_at),
+            window=hold.window_label,
+        )
+        for hold in holds
+    )
+    plain_parts = [intro, "", trigger_line, "", f"{RULE_HELD_OFF_HEADING}:"]
+    plain_parts.extend(f"- {line}" for line in hold_lines)
+    plain_parts.extend(["", RULE_HELD_OFF_NEXT_NOTE, ""])
+    html_parts = [
+        f"<p>{escape(intro, quote=False)}</p>",
+        f"<p>{escape(trigger_line, quote=False)}</p>",
+        f"<p><strong>{escape(RULE_HELD_OFF_HEADING, quote=False)}</strong></p>",
+        "<ul>",
+    ]
+    html_parts.extend(f"<li>{escape(line, quote=False)}</li>" for line in hold_lines)
+    html_parts.extend(["</ul>", f"<p>{escape(RULE_HELD_OFF_NEXT_NOTE, quote=False)}</p>"])
+    if status_url is not None:
+        plain_parts.append(f"View live status: {status_url}")
+        safe_url = escape(status_url, quote=True)
+        safe_label = escape(rule.label, quote=False)
+        html_parts.append(f'<p><a href="{safe_url}">View live status for {safe_label}</a></p>')
+    else:
+        plain_parts.append("Open Automations → Status in domesti-bot for live condition details.")
+        html_parts.append("<p>Open Automations → Status in domesti-bot for live condition details.</p>")
+    instance_url = domesti_public_base_url(cache_path)
+    if instance_url is not None:
+        plain_parts.append(f"Instance: {instance_url}")
+        safe_instance = escape(instance_url, quote=True)
+        html_parts.append(f'<p>Instance: <a href="{safe_instance}">{safe_instance}</a></p>')
+    append_provenance_footer(
+        plain_parts,
+        html_parts,
+        provenance=rule_held_off_provenance_footer(rule.id),
+    )
+    return "\n".join(plain_parts) + "\n", "".join(html_parts)
 
 
 def build_rule_notification_bodies(

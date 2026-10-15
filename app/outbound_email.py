@@ -147,6 +147,14 @@ def rule_fire_provenance_footer(rule_id: str) -> str:
     return provenance_footer(subsystem=f"Rule {cleaned}", trigger="automation")
 
 
+def rule_held_off_provenance_footer(rule_id: str) -> str:
+    """Provenance for a notice that a rule was held off by a manual turn-off."""
+    cleaned = rule_id.strip()
+    if cleaned == "":
+        raise ValueError("Expected non-empty rule_id for rule held-off provenance")
+    return provenance_footer(subsystem=f"Rule {cleaned}", trigger="suppressed")
+
+
 def send_test_email(
     params: SmtpConnectionParams,
     *,

@@ -83,6 +83,16 @@ LOCATION_HISTORY_WALKBACK_MAX_S = 600.0
 
 
 @dataclass(frozen=True)
+class ManualOffHold:
+    """A ``device_not_manually_off_within`` condition that is holding a rule off."""
+
+    detail: str
+    device_label: str
+    off_at: float
+    window_label: str
+
+
+@dataclass(frozen=True)
 class RuleEvaluationContext:
     """Inputs required to evaluate one rule's conditions."""
 
@@ -214,6 +224,31 @@ def evaluate_rule_conditions_met(
 ) -> bool:
     """Return whether every top-level condition is currently met."""
     return evaluate_rule(rule, ctx).all_met
+
+
+def manual_off_holds(
+    rule: RuleOut,
+    evaluation: RuleEvaluationResult,
+    ctx: RuleEvaluationContext,
+) -> tuple[ManualOffHold, ...]:
+    """Return the manual-off holds when they are the only thing keeping a rule from firing.
+
+    Empty when every condition is met, when any other condition is also unmet
+    (the rule would not have fired anyway), or when a hold cannot be tied to a
+    recorded turn-off (an unresolved device reference). An edge-triggered rule's
+    geofence rows describe the event that triggered it and are never "met", so
+    they do not count as blockers.
+    """
+    edge_pass = RuleTrigger.EDGE_TRUE in rule.triggers and ctx.triggered_by == RuleEvaluationCause.EDGE
+    holds: list[ManualOffHold] = []
+    for row in evaluation.conditions:
+        if row.met or (edge_pass and not _counts_for_steady_armed_state(row.condition)):
+            continue
+        row_holds = _holds_blocking_condition(row.condition, rule, ctx)
+        if not row_holds:
+            return ()
+        holds.extend(row_holds)
+    return tuple(holds)
 
 
 def rule_eligible_since(rule: RuleOut, ctx: RuleEvaluationContext) -> float | None:
@@ -388,6 +423,52 @@ def users_min_distance_from_home_met(
         if distance_m < min_distance_m:
             return False
     return True
+
+
+def _holds_blocking_condition(
+    condition: RuleConditionOut,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> tuple[ManualOffHold, ...] | None:
+    """Return the manual-off holds that are the only reason ``condition`` is unmet.
+
+    ``None`` when something else also blocks it, or a hold has no recorded
+    turn-off. Looks inside ``all`` (every unmet child must be a hold) and
+    ``any`` (no child may be met, and every child must be a hold).
+    """
+    if isinstance(condition, DeviceNotManuallyOffWithinCondition):
+        if ctx.device_state is None:
+            return None
+        backend_id = resolve_device_ref_to_backend_id(
+            ctx.device_state,
+            family_id=condition.device.family_id,
+            device_ref=condition.device.device_id.strip(),
+        )
+        off_at = None if backend_id is None else ctx.device_manual_off_at.get((condition.device.family_id, backend_id))
+        if off_at is None:
+            return None
+        return (
+            ManualOffHold(
+                detail=_evaluate_condition(condition, rule, ctx).detail,
+                device_label=_device_condition_display_label(ctx, condition.device),
+                off_at=off_at,
+                window_label=_format_dwell_need_s(condition.window_s),
+            ),
+        )
+    if isinstance(condition, (AllConditionsCondition, AnyConditionsCondition)):
+        is_any = isinstance(condition, AnyConditionsCondition)
+        holds: list[ManualOffHold] = []
+        for child in condition.conditions:
+            if _evaluate_condition(child, rule, ctx).met:
+                if is_any:
+                    return None
+                continue
+            child_holds = _holds_blocking_condition(child, rule, ctx)
+            if not child_holds:
+                return None
+            holds.extend(child_holds)
+        return tuple(holds) or None
+    return None
 
 
 def _coerce_now(now: datetime | None, tz: ZoneInfo) -> datetime:
