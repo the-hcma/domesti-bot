@@ -180,6 +180,17 @@ def test_not_together_when_a_users_arrival_time_is_unknown() -> None:
     assert row.detail == "Henrique: arrival time at House unknown"
 
 
+def test_home_wifi_does_not_rescue_a_low_accuracy_fix() -> None:
+    # The plain geofence conditions accept a poor fix on the home WiFi; an arrival
+    # time must come from a trustworthy fix, so this one stays unmet.
+    on_wifi = _inside(accuracy_m=500).model_copy(update={"connection_type": "w", "wifi_ssid": "HomeNet"})
+    ctx = _ctx(henrique_gap_s=10.0, user_locations={"henrique": on_wifi, "kristen": _inside()})
+    ctx.user_home_wifi_ssid["henrique"] = "HomeNet"
+    row = evaluate_rule(_rule(), ctx).conditions[0]
+    assert row.met is False
+    assert row.detail == "Henrique: location ignored (low accuracy)"
+
+
 def test_unknown_geofence_is_never_together() -> None:
     row = evaluate_rule(_rule(), _ctx(henrique_gap_s=10.0, geofences=())).conditions[0]
     assert row.met is False

@@ -899,6 +899,10 @@ class RulesHubController {
           showErrorToast("Select at least one user.");
           return;
         }
+        if (existingArrivedTogether !== undefined && userIds.length < 2) {
+          showErrorToast("Select at least two users: this rule fires only when they arrive together.");
+          return;
+        }
         const conditions: RuleOut["conditions"]["all"] = [
           existingArrivedTogether === undefined
             ? {

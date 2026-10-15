@@ -1581,6 +1581,18 @@ def _arrival_rows(
                 ),
             )
             continue
+        if not _location_usable_for_rule(location, min_accuracy_m):
+            # Unlike the plain geofence conditions, an arrival time must not come
+            # from the home-WiFi exception that accepts a low-accuracy fix.
+            rows.append(
+                _ArrivalRow(
+                    inside_since=None,
+                    name=name,
+                    problem=f"{name}: location ignored (low accuracy)",
+                    roster_user_id=roster_user_id,
+                ),
+            )
+            continue
         effective = _resolved_location_for_geofence_rule(
             location,
             ctx.user_location_history.get(roster_user_id, ()),
@@ -1599,13 +1611,13 @@ def _arrival_rows(
             roster_user_id,
         )
         if not counts_inside:
-            reason = (
-                "location ignored (low accuracy)"
-                if not _location_usable_for_rule(location, min_accuracy_m)
-                else f"not inside {geofence.label}"
-            )
             rows.append(
-                _ArrivalRow(inside_since=None, name=name, problem=f"{name}: {reason}", roster_user_id=roster_user_id),
+                _ArrivalRow(
+                    inside_since=None,
+                    name=name,
+                    problem=f"{name}: not inside {geofence.label}",
+                    roster_user_id=roster_user_id,
+                ),
             )
             continue
         inside_since = ctx.geofence_inside_since.get((roster_user_id, condition.geofence_id))
