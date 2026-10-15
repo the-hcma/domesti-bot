@@ -24,7 +24,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     bundle = load_automation_rules_bundle()
     assert bundle.version == 1
-    assert len(bundle.rules) == 13
+    assert len(bundle.rules) == 16
     assert bundle.rules[0].id == "evening-arrival-home-lights"
     lights_off = next(rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home")
     assert lights_off.triggers == ["edge_true"]
@@ -33,6 +33,13 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     assert interior.fire_once_per_local_day is True
     assert interior.triggers == ["edge_true", "scheduled"]
     assert interior.schedule_cron is None
+    garage_rules = [rule for rule in bundle.rules if rule.id.startswith("garage-arrival-")]
+    assert len(garage_rules) == 3
+    assert all(rule.dry_run and not rule.enabled for rule in garage_rules)
+    assert all(
+        [action.action for action in rule.device_actions] == ["open"] and len(rule.device_actions) == 1
+        for rule in garage_rules
+    )
     ep1_alert = next(rule for rule in bundle.rules if rule.id == "office-ep1-occupied-alert")
     assert ep1_alert.enabled is False
     assert ep1_alert.device_actions == []
@@ -80,6 +87,9 @@ def test_list_automation_rules_returns_all_rules(
         "evening-arrival-home-lights",
         "evening-interior-lights-on-anyone-home",
         "evening-lights-off-both-home",
+        "garage-arrival-alone-open-henriques-side",
+        "garage-arrival-alone-open-kristens-side",
+        "garage-arrival-together-open-kristens-side",
         "hdhomerun-nightly-power-cycle",
         "kristen-west-point-arrive",
         "kristen-west-point-leave",

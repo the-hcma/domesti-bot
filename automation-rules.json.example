@@ -21,7 +21,8 @@
     "Rule 9 (office-ep1-hot-alert, enabled false) shows ep1_reading_compare: when office temperature is above 24°C, email operator@example.com (JSON-authored; no Automations UI editor yet).",
     "Rule 10 (daylight-dark-house-lights-on, enabled false; #554 / #670 / #672) uses triggers [device_state] only: EP1 illuminance entity pushes re-evaluate via device_state (reading-kind filtered — lux wakes do not re-eval occupancy-only rules). The general #670 reading-wake contract is EP1-only for numeric streams; other families use bool wakes only. Pair with local_time_window for evening windows: the evaluator materializes an eligibility wake at window open (no hand-rolled 0 21 schedule_cron). Daytime variants may use daylight instead of a clock window. When a window-placed EP1 reports illuminance_lx below 80 lx (tune from the EP1 header / Status reading — cloudy daytime can be darker than clear evenings), and Henrique OR Kristen is inside house, and any listed interior light is still off, turn those lights on. The EP1 is a whole-house ambient probe (near a window), not per-room pairing — the action list can be any lights. JSON-authored; no Automations UI editor for ep1_reading_compare yet.",
     "Optional device_actions.delay_s (int seconds, 0\u201386400): omit or 0 = run on rule fire; >0 schedules that action for fire_time + delay_s. Pending delayed actions are persisted in SQLite (rule_deferred_device_actions) and reloaded on startup, so a follow-up still runs after a process restart during the delay window; they are cancelled if the rule is deleted or disabled before the delay elapses. When notify_on_fire is set and any delay_s > 0 actions are enqueued, the fire email is deferred until every delayed step for that fire finishes (or the remaining steps are cancelled); the email includes a timeline of each step with home-timezone timestamps (settings_location.timezone, including the zone abbreviation such as EDT). Pending deferred emails are stored in rule_pending_fire_notifications. cooldown / fire_once_per_local_day still apply to the rule fire, not each delayed step.",
-    "Rule 11 (hdhomerun-nightly-power-cycle, enabled false in the example) shows a sequenced Kasa power cycle: turn_off at 4am cron, then turn_on after delay_s=60. With notify_on_fire true, the operator email waits until the turn_on completes and lists both steps in the timeline."
+    "Rule 11 (hdhomerun-nightly-power-cycle, enabled false in the example) shows a sequenced Kasa power cycle: turn_off at 4am cron, then turn_on after delay_s=60. With notify_on_fire true, the operator email waits until the turn_on completes and lists both steps in the timeline.",
+    "Rules 12 to 14 (garage-arrival-*, enabled false and dry_run true in the example) open the garage door on the side of the car being driven when Henrique and/or Kristen arrive: if both enter the house geofence within 60 s of each other (users_arrived_together) Kristen is assumed to be driving and her door opens; otherwise whoever has been inside for 60 s while the other is still outside gets their own door. Exactly one rule can fire per arrival. The alone rules are dwell_satisfied, so they act on the first location update after the 60 s. A phone with no recent location counts as outside, so the heuristic can pick the wrong side; with dry_run true the email only says which door it would open and nothing moves. Remove dry_run once the emails have been right for a few arrivals. Each rule opens a door only when it is closed."
   ],
   "settings_location": {
     "lat": 41.194072,
@@ -768,6 +769,173 @@
           "display_name": "HDHomeRun tuner",
           "action": "turn_on",
           "delay_s": 60
+        }
+      ]
+    },
+    {
+      "id": "garage-arrival-together-open-kristens-side",
+      "label": "Arrive together: open Kristen's garage door",
+      "triggers": [
+        "edge_true"
+      ],
+      "enabled": false,
+      "dry_run": true,
+      "cooldown_s": 600,
+      "min_location_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_emails": [
+        "operator@example.com"
+      ],
+      "conditions": {
+        "all": [
+          {
+            "type": "users_inside_geofence",
+            "geofence_id": "house",
+            "user_ids": [
+              "henrique"
+            ]
+          },
+          {
+            "type": "users_inside_geofence",
+            "geofence_id": "house",
+            "user_ids": [
+              "kristen"
+            ]
+          },
+          {
+            "type": "users_arrived_together",
+            "geofence_id": "house",
+            "user_ids": [
+              "henrique",
+              "kristen"
+            ],
+            "max_gap_s": 60
+          },
+          {
+            "type": "devices_all_in_state",
+            "state": "closed",
+            "devices": [
+              {
+                "family_id": "tailwind",
+                "device_id": "02:00:00:00:03:01:right",
+                "display_name": "Main garage right"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "tailwind",
+          "device_id": "02:00:00:00:03:01:right",
+          "display_name": "Main garage right",
+          "action": "open"
+        }
+      ]
+    },
+    {
+      "id": "garage-arrival-alone-open-henriques-side",
+      "label": "Henrique arrives alone: open Henrique's garage door",
+      "triggers": [
+        "dwell_satisfied"
+      ],
+      "enabled": false,
+      "dry_run": true,
+      "cooldown_s": 600,
+      "min_location_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_emails": [
+        "operator@example.com"
+      ],
+      "conditions": {
+        "all": [
+          {
+            "type": "users_inside_geofence_for_s",
+            "geofence_id": "house",
+            "user_ids": [
+              "henrique"
+            ],
+            "min_inside_s": 60
+          },
+          {
+            "type": "users_outside_geofence",
+            "geofence_id": "house",
+            "user_ids": [
+              "kristen"
+            ]
+          },
+          {
+            "type": "devices_all_in_state",
+            "state": "closed",
+            "devices": [
+              {
+                "family_id": "tailwind",
+                "device_id": "02:00:00:00:03:01:left",
+                "display_name": "Main garage left"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "tailwind",
+          "device_id": "02:00:00:00:03:01:left",
+          "display_name": "Main garage left",
+          "action": "open"
+        }
+      ]
+    },
+    {
+      "id": "garage-arrival-alone-open-kristens-side",
+      "label": "Kristen arrives alone: open Kristen's garage door",
+      "triggers": [
+        "dwell_satisfied"
+      ],
+      "enabled": false,
+      "dry_run": true,
+      "cooldown_s": 600,
+      "min_location_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_emails": [
+        "operator@example.com"
+      ],
+      "conditions": {
+        "all": [
+          {
+            "type": "users_inside_geofence_for_s",
+            "geofence_id": "house",
+            "user_ids": [
+              "kristen"
+            ],
+            "min_inside_s": 60
+          },
+          {
+            "type": "users_outside_geofence",
+            "geofence_id": "house",
+            "user_ids": [
+              "henrique"
+            ]
+          },
+          {
+            "type": "devices_all_in_state",
+            "state": "closed",
+            "devices": [
+              {
+                "family_id": "tailwind",
+                "device_id": "02:00:00:00:03:01:right",
+                "display_name": "Main garage right"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "tailwind",
+          "device_id": "02:00:00:00:03:01:right",
+          "display_name": "Main garage right",
+          "action": "open"
         }
       ]
     }
