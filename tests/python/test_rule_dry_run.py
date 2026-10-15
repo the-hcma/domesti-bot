@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import time
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -193,6 +195,13 @@ def _rule(*, dry_run: bool, notify: bool = True) -> RuleOut:
     )
 
 
+@pytest.mark.parametrize("emails", [[], ["", "   "]])
+def test_dry_run_requires_a_notification_recipient(emails: list[str]) -> None:
+    data = _rule(dry_run=False).model_dump(mode="json") | {"dry_run": True, "notification_emails": emails}
+    with pytest.raises(ValidationError, match="Expected at least one notification_emails recipient"):
+        RuleOut.model_validate(data)
+
+
 def test_dry_run_requires_notify_on_fire() -> None:
     with pytest.raises(ValidationError, match="Expected notify_on_fire true for a dry_run rule"):
         _rule(dry_run=True, notify=False)
@@ -345,5 +354,38 @@ async def test_flipping_a_rule_to_dry_run_drops_its_queued_delayed_actions(
         with patch("app.rule_evaluator.list_automation_rules", return_value=[dry]):
             rig.evaluator._prune_stale_deferred_device_actions()
         assert rig.evaluator._deferred_device_actions == []
+    finally:
+        await rig.evaluator.close()
+
+
+@pytest.mark.asyncio
+async def test_a_rule_flipped_to_dry_run_during_the_mail_flush_does_not_move_the_device(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = _rule(dry_run=False)
+    dry = live.model_copy(update={"dry_run": True})
+    rig = _Rig(tmp_path, monkeypatch, rule=live)
+    current = [live]
+
+    async def _flush_that_flips_the_rule() -> None:
+        current[0] = dry
+
+    send_mock = MagicMock(return_value=RuleNotificationEmailOutcome.disabled())
+    try:
+        with patch("app.rule_evaluator.send_rule_notification_email", send_mock):
+            await rig.enter()
+        assert rig.device.calls == ["on"]
+        with (
+            patch("app.rule_evaluator.list_automation_rules", side_effect=lambda: list(current)),
+            patch.object(rig.evaluator, "_flush_ready_pending_fire_notifications", _flush_that_flips_the_rule),
+        ):
+            rig.clock["now"] += 700.0
+            rig.evaluator._deferred_device_actions_wake.set()
+            deadline = time.monotonic() + 10.0
+            while rig.evaluator._deferred_device_actions and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+        assert rig.evaluator._deferred_device_actions == []
+        assert rig.device.calls == ["on"]
     finally:
         await rig.evaluator.close()

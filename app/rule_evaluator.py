@@ -1182,6 +1182,9 @@ class RuleEvaluator:
             async with self._process_lock:
                 self._prune_stale_deferred_device_actions()
                 await self._flush_ready_pending_fire_notifications()
+                # The flush awaits mail delivery; re-check the rules so one that
+                # turned dry run (or was disabled) meanwhile does not act.
+                self._prune_stale_deferred_device_actions()
                 now = self._now_fn()
                 due = [entry for entry in self._deferred_device_actions if entry.due_at <= now]
                 remaining = [entry for entry in self._deferred_device_actions if entry.due_at > now]

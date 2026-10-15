@@ -2148,6 +2148,10 @@ class RuleOut(BaseModel):
             raise ValueError(
                 "Expected notify_on_fire true for a dry_run rule (the email is the only output), got false",
             )
+        if self.dry_run and not any(email.strip() for email in self.notification_emails):
+            raise ValueError(
+                "Expected at least one notification_emails recipient for a dry_run rule, got none",
+            )
         return self
 
     @model_validator(mode="after")
