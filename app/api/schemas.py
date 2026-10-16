@@ -2004,6 +2004,41 @@ class UsersOutsideGeofenceForSCondition(BaseModel):
     user_ids: list[str] = Field(min_length=1)
 
 
+class UsersTogetherCondition(BaseModel):
+    """Confidence that the listed users have been travelling together (``app.users_together``).
+
+    The users' recent tracks are interpolated to common instants and compared
+    over the last 1, 5 and 10 minutes. With ``expected`` true the condition is
+    met when the confidence and the last minute both reach ``min_confidence``;
+    with ``expected`` false it is met when both are at most ``1 - min_confidence``
+    (clearly apart). In between, and whenever there is too little good data, it
+    is unmet either way, so a rule never acts on a guess.
+    """
+
+    type: Literal["users_together"]
+    expected: bool = True
+    far_m: float = Field(default=150.0, gt=0)
+    min_confidence: float = Field(default=0.8, ge=0.5, le=1.0)
+    near_m: float = Field(default=30.0, ge=0)
+    user_ids: list[str] = Field(min_length=2)
+
+    @field_validator("user_ids")
+    @classmethod
+    def _require_distinct_user_ids(cls, value: list[str]) -> list[str]:
+        distinct = {user_id.strip().lower() for user_id in value}
+        if len(distinct) != len(value):
+            raise ValueError(
+                f"Expected {len(value)} distinct user_ids (ignoring case and surrounding spaces), got {len(distinct)}",
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _require_far_beyond_near(self) -> Self:
+        if self.far_m <= self.near_m:
+            raise ValueError(f"Expected near_m < far_m, got near_m={self.near_m} far_m={self.far_m}")
+        return self
+
+
 _LEGACY_DEVICE_CONDITION_TYPE_TO_IN_STATE: dict[str, tuple[str, DeviceConditionState]] = {
     "devices_all_on": ("devices_all_in_state", DeviceConditionState.ON),
     "devices_any_off": ("devices_any_in_state", DeviceConditionState.OFF),
@@ -2056,7 +2091,8 @@ RuleConditionOut = Annotated[
     | UsersInsideGeofenceForSCondition
     | UsersMinDistanceFromHomeMCondition
     | UsersOutsideGeofenceCondition
-    | UsersOutsideGeofenceForSCondition,
+    | UsersOutsideGeofenceForSCondition
+    | UsersTogetherCondition,
     Field(discriminator="type"),
 ]
 

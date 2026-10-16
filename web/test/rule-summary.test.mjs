@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatAnyTimingAlternatives } from "../.test-build/rule-summary.mjs";
+import { formatAnyTimingAlternatives, formatTogetherLabel } from "../.test-build/rule-summary.mjs";
 
 const window = (start, end) => ({ type: "local_time_window", start_hhmm: start, end_hhmm: end });
 
@@ -24,5 +24,35 @@ describe("formatAnyTimingAlternatives", () => {
 
   it("gives up on an empty group", () => {
     assert.equal(formatAnyTimingAlternatives({ type: "any", conditions: [] }), null);
+  });
+});
+
+describe("formatTogetherLabel", () => {
+  const context = {
+    deviceLabelByKey: new Map(),
+    geofenceLabelById: new Map(),
+    userDisplayNameById: new Map([
+      ["user-a", "User A"],
+      ["user-b", "User B"],
+    ]),
+  };
+  const condition = (extra = {}) => ({ type: "users_together", user_ids: ["user-a", "user-b"], ...extra });
+
+  it("names the users and the default confidence", () => {
+    assert.equal(formatTogetherLabel(condition(), context), "User A and User B travelling together (confidence at least 80%)");
+  });
+
+  it("uses the configured confidence", () => {
+    assert.equal(
+      formatTogetherLabel(condition({ min_confidence: 0.9 }), context),
+      "User A and User B travelling together (confidence at least 90%)",
+    );
+  });
+
+  it("describes the apart form with the complementary ceiling", () => {
+    assert.equal(
+      formatTogetherLabel(condition({ expected: false }), context),
+      "User A and User B not travelling together (confidence at most 20%)",
+    );
   });
 });

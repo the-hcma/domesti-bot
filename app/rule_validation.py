@@ -24,6 +24,7 @@ from app.api.schemas import (
     UsersMinDistanceFromHomeMCondition,
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
+    UsersTogetherCondition,
     normalized_rule_notification_emails,
 )
 from app.device_enums import (
@@ -800,6 +801,7 @@ def _walk_user_ids(condition: RuleConditionOut, ids: set[str]) -> None:
             UsersMinDistanceFromHomeMCondition,
             UsersOutsideGeofenceCondition,
             UsersOutsideGeofenceForSCondition,
+            UsersTogetherCondition,
         ),
     ):
         ids.update(user_id.strip() for user_id in condition.user_ids if user_id.strip())
