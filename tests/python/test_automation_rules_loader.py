@@ -24,7 +24,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     bundle = load_automation_rules_bundle()
     assert bundle.version == 1
-    assert len(bundle.rules) == 16
+    assert len(bundle.rules) == 17
     assert bundle.rules[0].id == "evening-arrival-home-lights"
     lights_off = next(rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home")
     assert lights_off.triggers == ["edge_true"]
@@ -71,6 +71,13 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     power_cycle = next(rule for rule in bundle.rules if rule.id == "hdhomerun-nightly-power-cycle")
     assert power_cycle.enabled is False
     assert power_cycle.device_actions[1].delay_s == 60
+    stairs = next(rule for rule in bundle.rules if rule.id == "basement-stairs-companions")
+    assert stairs.enabled is False
+    assert stairs.triggers == ["device_state"]
+    assert stairs.ignore_expected_device_changes is True
+    assert stairs.conditions.all[0].type == "devices_any_transitioned_to_state"
+    assert stairs.conditions.all[1].type == "local_time_window"
+    assert [action.action for action in stairs.device_actions] == ["turn_on", "turn_on"]
     assert automation_rules_source() == "operator"
 
 
@@ -84,6 +91,7 @@ def test_list_automation_rules_returns_all_rules(
     assert {rule.id for rule in rules} == {
         "away-garage-open-alert",
         "away-shutdown-everyone-outside-20m",
+        "basement-stairs-companions",
         "daylight-dark-house-lights-on",
         "daylight-master-bedroom-fan-on-alert",
         "evening-arrival-home-lights",
