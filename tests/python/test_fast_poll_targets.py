@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
-from datetime import datetime
+import inspect
+import json
+import logging
+import re
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
 
+import app.api.app as api_app_module
 from app.api.schemas import (
     AnyConditionsCondition,
     DevicesAnyInStateCondition,
@@ -20,8 +27,10 @@ from app.api.schemas import (
     RuleConditionsOut,
     RuleOut,
 )
+from app.automation_rules_loader import load_automation_rules_bundle
 from app.device_enums import DeviceConditionState, DeviceFamilyId, RuleTrigger
-from app.device_state_watcher import KasaPollingWatcher
+from app.device_state_watcher import KasaPollingWatcher, build_default_watchers
+from app.domesti_bot_cli import DeviceManagersState
 from app.fast_poll_targets import (
     FAST_POLL_INTERVAL_S,
     FastPollTargetsReader,
@@ -29,6 +38,7 @@ from app.fast_poll_targets import (
     fast_poll_targets_at,
 )
 from app.kasa_device_manager import KasaDeviceManager
+from app.server_runtime import DomestiServerRuntime
 
 _STAIRS_MAC = "5c:e9:31:60:c5:01"
 _OTHER_MAC = "5c:e9:31:60:c5:02"
@@ -158,24 +168,73 @@ def test_device_references_are_compared_as_normalized_macs() -> None:
     assert fast_poll_device_key("  192.0.2.7 ") == "192.0.2.7"
 
 
-def test_reader_follows_the_rules_and_keeps_the_last_answer_when_they_fail_to_load() -> None:
-    reader = FastPollTargetsReader(now_fn=lambda: _at(7, 0))
-    settings = MagicMock(timezone="America/New_York")
-    with (
-        patch("app.fast_poll_targets.list_automation_rules", return_value=[_window_rule()]),
-        patch("app.fast_poll_targets.load_settings_location", return_value=settings),
-    ):
+def _write_bundle(path: Path, rules: list[RuleOut]) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "device_id_resolution": "mac",
+                "settings_location": {
+                    "home_label": "Home",
+                    "lat": 41.194072,
+                    "lon": -73.8883254,
+                    "timezone": "America/New_York",
+                },
+                "rules": [rule.model_dump(mode="json") for rule in rules],
+            },
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_reader_uses_the_settings_timezone_not_utc(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bundle = tmp_path / "rules.json"
+    _write_bundle(bundle, [_window_rule()])
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    # 12:00 UTC is 08:00 in New York in October, inside 06:30-09:30; the UTC hour (12) is not.
+    inside = FastPollTargetsReader(now_fn=lambda: datetime(2026, 10, 15, 12, 0, tzinfo=UTC))
+    outside = FastPollTargetsReader(now_fn=lambda: datetime(2026, 10, 15, 8, 0, tzinfo=UTC))
+    assert inside() == _STAIRS
+    assert outside() == frozenset()
+
+
+def test_reader_parses_the_file_once_and_again_only_when_it_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    _write_bundle(bundle, [_window_rule()])
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    reader = FastPollTargetsReader(now_fn=lambda: datetime(2026, 10, 15, 12, 0, tzinfo=UTC))
+    with patch("app.fast_poll_targets.load_automation_rules_bundle", wraps=load_automation_rules_bundle) as loader:
         assert reader() == _STAIRS
-    with (
-        patch("app.fast_poll_targets.list_automation_rules", side_effect=ValueError("bad rules file")),
-        patch("app.fast_poll_targets.load_settings_location", return_value=settings),
-    ):
         assert reader() == _STAIRS
-    with (
-        patch("app.fast_poll_targets.list_automation_rules", return_value=[]),
-        patch("app.fast_poll_targets.load_settings_location", return_value=settings),
-    ):
+        assert loader.call_count == 1
+        _write_bundle(bundle, [_window_rule(enabled=False)])
         assert reader() == frozenset()
+        assert loader.call_count == 2
+
+
+def test_reader_keeps_the_last_answer_while_the_file_is_broken_and_recovers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    _write_bundle(bundle, [_window_rule()])
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    reader = FastPollTargetsReader(now_fn=lambda: datetime(2026, 10, 15, 12, 0, tzinfo=UTC))
+    assert reader() == _STAIRS
+    bundle.write_text("{not json", encoding="utf-8")
+    with caplog.at_level(logging.INFO, logger="app.fast_poll_targets"):
+        assert reader() == _STAIRS
+        assert reader() == _STAIRS
+        _write_bundle(bundle, [_window_rule(enabled=False)])
+        assert reader() == frozenset()
+    failures = [record for record in caplog.records if record.levelno == logging.ERROR]
+    recoveries = [record for record in caplog.records if "resumed" in record.getMessage()]
+    assert len(failures) == 1
+    assert len(recoveries) == 1
 
 
 class _FakeTime:
@@ -290,3 +349,83 @@ async def test_a_global_interval_below_the_fast_one_is_left_alone() -> None:
 
     assert fake.sleeps == [2.0, 2.0, 2.0]
     assert _polled(mgr).count("192.0.2.8") == 3
+
+
+@pytest.mark.asyncio
+async def test_a_provider_that_raises_never_stops_the_kasa_watcher(caplog: pytest.LogCaptureFixture) -> None:
+    mgr = _kasa_mgr()
+    fake = _FakeTime(stop_after_sleeps=3)
+
+    def _broken() -> frozenset[tuple[DeviceFamilyId, str]]:
+        raise RuntimeError("provider blew up")
+
+    watcher = KasaPollingWatcher(
+        mgr,
+        clock=fake.clock,
+        fast_poll_targets=_broken,
+        interval_s=10.0,
+        sleep=fake.sleep,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="app.device_state_watcher"):
+        await asyncio.wait_for(watcher.run(stop=asyncio.Event()), timeout=5.0)
+
+    assert fake.sleeps == [10.0, 10.0, 10.0]
+    assert _polled(mgr).count("192.0.2.7") == 3
+    assert len([record for record in caplog.records if "fast-poll targets unavailable" in record.getMessage()]) == 1
+
+
+def _device_state(kasa_mgr: KasaDeviceManager) -> DeviceManagersState:
+    return DeviceManagersState(
+        androidtv_mgr=None,
+        args=argparse.Namespace(),
+        cache_path=Path("unused.sqlite"),
+        ep1_mgr=None,
+        kasa_mgr=kasa_mgr,
+        sonos_mgr=None,
+        tailwind_mgr=None,
+        vizio_mgr=None,
+    )
+
+
+def test_build_default_watchers_hands_the_provider_to_the_kasa_watcher() -> None:
+    def provider() -> frozenset[tuple[DeviceFamilyId, str]]:
+        return _STAIRS
+
+    watchers = build_default_watchers(_device_state(_kasa_mgr()), fast_poll_targets=provider, interval_s=10.0)
+
+    kasa = next(watcher for watcher in watchers if isinstance(watcher, KasaPollingWatcher))
+    assert kasa._fast_poll_targets is provider
+
+
+def test_the_runtime_builds_a_provider_that_reads_the_rules_file() -> None:
+    assert isinstance(DomestiServerRuntime().build_fast_poll_targets_provider(), FastPollTargetsReader)
+
+
+@pytest.mark.asyncio
+async def test_a_hot_reload_restarts_the_watchers_with_the_provider() -> None:
+    runtime = DomestiServerRuntime()
+    runtime.device_state = _device_state(_kasa_mgr())
+
+    async def _idle(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    with (
+        patch("app.server_runtime.build_default_watchers", return_value=[]) as build,
+        patch("app.server_runtime.run_device_state_watchers", new=_idle),
+    ):
+        await runtime.restart_device_state_watchers()
+        assert runtime.watcher_task is not None
+        await runtime.watcher_task
+
+    assert isinstance(build.call_args.kwargs["fast_poll_targets"], FastPollTargetsReader)
+
+
+def test_the_http_lifespan_passes_the_provider_when_it_builds_the_watchers() -> None:
+    # The lifespan builds the watchers inside a closure that a unit test cannot reach without
+    # a full discovery run, so pin the call itself: dropping the argument would silently
+    # turn the feature off.
+    source = inspect.getsource(api_app_module.create_app)
+    call = re.search(r"build_default_watchers\((.*?)\n\s*\)\n", source, re.DOTALL)
+    assert call is not None
+    assert "fast_poll_targets=runtime.build_fast_poll_targets_provider()" in call.group(1)

@@ -55,7 +55,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
 from app.fast_poll_targets import FAST_POLL_INTERVAL_S, FastPollTargets, FastPollTargetsProvider
 from app.gotailwind_device_manager import GotailwindDeviceManager
-from app.kasa_device_manager import KasaDeviceManager
+from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
 
@@ -244,12 +244,13 @@ class KasaPollingWatcher(DeviceStateWatcher):
         self._interval_s = interval_s
         self._mgr = mgr
         self._sleep = sleep if sleep is not None else _sleep_unless_stopped
+        self._targets_failed = False
         self._wake_notifier = wake_notifier
 
     async def run(self, *, stop: asyncio.Event) -> None:
         last_full_at: float | None = None
         while not stop.is_set():
-            targets = self._current_targets()
+            targets = await self._current_targets()
             now = self._clock()
             if last_full_at is None or now - last_full_at >= self._interval_s:
                 await self._refresh_once(stop=stop)
@@ -260,10 +261,19 @@ class KasaPollingWatcher(DeviceStateWatcher):
             wait_s = min(self._fast_interval_s, until_full_s) if targets else until_full_s
             await self._sleep(stop, wait_s)
 
-    def _current_targets(self) -> FastPollTargets:
+    async def _current_targets(self) -> FastPollTargets:
+        """The devices to poll fast now; any failure means "none", never a dead watcher."""
         if self._fast_poll_targets is None:
             return frozenset()
-        return self._fast_poll_targets()
+        try:
+            targets = await asyncio.to_thread(self._fast_poll_targets)
+        except Exception:
+            if not self._targets_failed:
+                _LOGGER.exception("[state-watcher] fast-poll targets unavailable; using the global interval")
+            self._targets_failed = True
+            return frozenset()
+        self._targets_failed = False
+        return targets
 
     async def _refresh_once(self, *, stop: asyncio.Event, only: FastPollTargets | None = None) -> None:
         refreshes: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = []
@@ -496,7 +506,7 @@ class VizioPollingWatcher(DeviceStateWatcher):
                 pass
 
 
-def _is_fast_poll_target(device: Any, targets: FastPollTargets) -> bool:
+def _is_fast_poll_target(device: KasaDevice, targets: FastPollTargets) -> bool:
     """Whether a Kasa device is one of the ``(family, device)`` pairs to poll fast right now."""
     keys = {device.identifier}
     mac = try_normalize_mac(device.mac_address or "")

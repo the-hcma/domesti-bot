@@ -25,7 +25,7 @@ from app.api.schemas import (
     RuleOut,
     rule_has_device_transition_condition,
 )
-from app.automation_rules_loader import list_automation_rules, load_settings_location
+from app.automation_rules_loader import automation_rules_json_path, load_automation_rules_bundle
 from app.device_enums import DeviceFamilyId
 from app.device_mac import try_normalize_mac
 from app.local_time_schedule import is_local_time_window_open
@@ -39,31 +39,50 @@ FastPollTargetsProvider = Callable[[], FastPollTargets]
 
 
 class FastPollTargetsReader:
-    """Re-read the rules on every call and return the devices to poll fast right now.
+    """Return the devices to poll fast right now, from the rules file on disk.
 
-    A rules file that fails to load keeps the last good answer and is logged
-    once until it loads again, so a typo never switches the fast polling off
-    (or on) by accident.
+    The rules file is parsed once and again only when its modification time or
+    size changes, so a call is a ``stat`` plus the time-window check, not a full
+    parse of every rule. A rules file that fails to load keeps the last good
+    answer and is logged once until it loads again, so a typo never switches the
+    fast polling off (or on) by accident. Meant to be called from a worker
+    thread (the first parse after an edit takes tens of milliseconds).
     """
 
     def __init__(self, *, now_fn: Callable[[], datetime] | None = None) -> None:
+        self._cache_key: tuple[str, int, int] | None = None
         self._last_good: FastPollTargets = frozenset()
         self._load_failed = False
         self._now_fn = now_fn
+        self._rules: list[RuleOut] = []
+        self._timezone: ZoneInfo | None = None
 
     def __call__(self) -> FastPollTargets:
         try:
-            rules = list_automation_rules()
-            timezone = ZoneInfo(load_settings_location().timezone)
+            rules, timezone = self._rules_and_timezone()
+            now = self._now_fn() if self._now_fn is not None else datetime.now(timezone)
+            targets = fast_poll_targets_at(rules, now=now.astimezone(timezone))
         except Exception:
             if not self._load_failed:
                 _LOGGER.exception("[state-watcher] fast-poll targets unchanged: rules failed to load")
             self._load_failed = True
             return self._last_good
+        if self._load_failed:
+            _LOGGER.info("[state-watcher] fast-poll targets resumed: rules loaded again")
         self._load_failed = False
-        now = self._now_fn() if self._now_fn is not None else datetime.now(timezone)
-        self._last_good = fast_poll_targets_at(rules, now=now.astimezone(timezone))
-        return self._last_good
+        self._last_good = targets
+        return targets
+
+    def _rules_and_timezone(self) -> tuple[list[RuleOut], ZoneInfo]:
+        path = automation_rules_json_path()
+        stat = path.stat()
+        cache_key = (str(path), stat.st_mtime_ns, stat.st_size)
+        if cache_key != self._cache_key or self._timezone is None:
+            bundle = load_automation_rules_bundle(path=path)
+            self._rules = bundle.rules
+            self._timezone = ZoneInfo(bundle.settings_location.timezone)
+            self._cache_key = cache_key
+        return self._rules, self._timezone
 
 
 def fast_poll_targets_at(rules: Iterable[RuleOut], *, now: datetime) -> FastPollTargets:
