@@ -35,6 +35,8 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     assert interior.schedule_cron is None
     garage_rules = [rule for rule in bundle.rules if rule.id.startswith("garage-arrival-")]
     assert len(garage_rules) == 3
+    alone = [rule for rule in garage_rules if "-alone-" in rule.id]
+    assert [getattr(rule.conditions.all[0], "max_inside_s", None) for rule in alone] == [300, 300]
     assert all(rule.dry_run and not rule.enabled for rule in garage_rules)
     assert all(
         [action.action for action in rule.device_actions] == ["open"] and len(rule.device_actions) == 1

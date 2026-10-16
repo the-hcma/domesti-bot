@@ -1946,10 +1946,25 @@ class UsersInsideGeofenceCondition(BaseModel):
 
 
 class UsersInsideGeofenceForSCondition(BaseModel):
+    """True once every listed user has been inside for ``min_inside_s`` (and, if set, no longer than ``max_inside_s``).
+
+    ``max_inside_s`` bounds the window so that a rule meant for a fresh arrival
+    cannot fire for someone who has been inside for hours.
+    """
+
     type: Literal["users_inside_geofence_for_s"]
     geofence_id: str
+    max_inside_s: int | None = Field(default=None, ge=1)
     min_inside_s: int = Field(ge=1)
     user_ids: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _require_window_longer_than_minimum(self) -> Self:
+        if self.max_inside_s is not None and self.max_inside_s <= self.min_inside_s:
+            raise ValueError(
+                f"Expected max_inside_s greater than min_inside_s ({self.min_inside_s}), got {self.max_inside_s}",
+            )
+        return self
 
 
 class UsersMinDistanceFromHomeMCondition(BaseModel):
