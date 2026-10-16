@@ -2251,9 +2251,9 @@ class RuleOut(BaseModel):
                 condition.type in ("after_sunset", "before_sunrise", "before_sunset")
                 for condition in self.conditions.all
             )
-            has_local_time_window = any(
-                isinstance(condition, LocalTimeWindowCondition) for condition in self.conditions.all
-            )
+            # Walk the whole tree so a transition rule's permitted ``any`` of
+            # windows still conflicts with a top-level sun anchor.
+            has_local_time_window = _condition_tree_contains_local_time_window(self.conditions.all)
             if (has_device_state or has_dwell_satisfied) and has_astronomical and has_local_time_window:
                 raise ValueError(
                     "Expected at most one eligibility window "

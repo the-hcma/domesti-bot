@@ -409,6 +409,17 @@ def test_transition_rule_still_rejects_a_sun_anchor_next_to_a_window() -> None:
         )
 
 
+def test_transition_rule_rejects_a_sun_anchor_next_to_any_of_windows() -> None:
+    with pytest.raises(ValidationError, match="at most one eligibility window"):
+        _transition_rule(
+            conditions=[
+                _transition_condition(),
+                AfterSunsetCondition(type="after_sunset", offset_minutes=0, window_end="midnight"),
+                _morning_or_evening(),
+            ],
+        )
+
+
 def test_level_device_state_rule_still_rejects_nested_windows() -> None:
     with pytest.raises(ValidationError, match="nested under all/any"):
         _transition_rule(
