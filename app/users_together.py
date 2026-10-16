@@ -30,9 +30,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-_EARTH_RADIUS_M: Final[float] = 6_371_000.0
-_TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
-
 
 @dataclass(frozen=True, slots=True)
 class WindowSpec:
@@ -66,16 +63,32 @@ class TogetherParams:
     def __post_init__(self) -> None:
         if not self.windows:
             raise ValueError("Expected at least one window, got none")
-        if self.step_s <= 0:
-            raise ValueError(f"Expected step_s greater than 0, got {self.step_s}")
-        if self.near_m < 0 or self.far_m <= self.near_m:
+        positives = {
+            "accuracy_limit_m": self.accuracy_limit_m,
+            "freshness_s": self.freshness_s,
+            "max_gap_s": self.max_gap_s,
+            "max_speed_mps": self.max_speed_mps,
+            "step_s": self.step_s,
+        }
+        for name, value in positives.items():
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"Expected {name} to be a finite number greater than 0, got {value}")
+        if (
+            not (math.isfinite(self.near_m) and math.isfinite(self.far_m))
+            or self.near_m < 0
+            or self.far_m <= self.near_m
+        ):
             raise ValueError(f"Expected 0 <= near_m < far_m, got near_m={self.near_m} far_m={self.far_m}")
         if not 0.0 <= self.coverage_floor <= 1.0:
             raise ValueError(f"Expected coverage_floor in [0, 1], got {self.coverage_floor}")
         lengths = [window.length_s for window in self.windows]
-        if lengths != sorted(lengths) or lengths[0] <= 0:
+        if not all(math.isfinite(length) for length in lengths) or lengths != sorted(lengths) or lengths[0] <= 0:
             raise ValueError(f"Expected positive window lengths in ascending order, got {lengths}")
-        if any(window.weight <= 0 for window in self.windows):
+        for length in lengths:
+            steps = length / self.step_s
+            if abs(steps - round(steps)) > 1e-9:
+                raise ValueError(f"Expected window lengths that are multiples of step_s={self.step_s}, got {length}")
+        if not all(math.isfinite(window.weight) and window.weight > 0 for window in self.windows):
             raise ValueError(f"Expected positive window weights, got {[w.weight for w in self.windows]}")
 
 
@@ -103,10 +116,17 @@ class TogetherEstimate:
 
     ``confidence`` is ``None`` when the estimate is unknown; ``unknown_reason``
     then says why and ``unknown_track`` (0 or 1) which track it concerns, when
-    one track is to blame.
+    one track is to blame (``windows`` is empty for ``NO_GOOD_FIXES`` and
+    ``STALE_FIX``).
+
+    The windows end at the ``anchor``, the latest instant both users are covered,
+    which can be up to ``freshness_s`` before ``now``: ``anchor_lag_s`` says how
+    far, and ``distance_now_m`` is the distance at the anchor (``None`` when
+    the instant has a gap for one user), not at ``now``.
     """
 
     anchor: float | None
+    anchor_lag_s: float | None
     confidence: float | None
     distance_now_m: float | None
     dropped_quality: tuple[int, int]
@@ -122,11 +142,24 @@ class TogetherEstimate:
     def known(self) -> bool:
         return self.confidence is not None
 
+    def is_apart(self, min_confidence: float) -> bool | None:
+        """``None`` when unknown; otherwise whether the confidence and the shortest window are both clearly low.
+
+        "Clearly" is symmetric with :meth:`is_together`: at most ``1 - min_confidence``.
+        Between the two thresholds the users are neither together nor apart, so a
+        rule that needs either answer does not act on a guess.
+        """
+        if self.confidence is None or self.recent_closeness is None:
+            return None
+        ceiling = 1.0 - min_confidence + _COMPARE_TOLERANCE
+        return self.confidence <= ceiling and self.recent_closeness <= ceiling
+
     def is_together(self, min_confidence: float) -> bool | None:
         """``None`` when unknown; otherwise whether the confidence and the shortest window both reach the minimum."""
         if self.confidence is None or self.recent_closeness is None:
             return None
-        return self.confidence >= min_confidence and self.recent_closeness >= min_confidence
+        floor = min_confidence - _COMPARE_TOLERANCE
+        return self.confidence >= floor and self.recent_closeness >= floor
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,18 +199,28 @@ class WindowEstimate:
 def clean_track(fixes: Sequence[TrackFix], *, params: TogetherParams) -> CleanTrack:
     """Drop low-quality fixes and return the rest oldest first.
 
-    A fix is dropped for missing or poor accuracy, a non-finite value, or an
-    impossible speed (a spike: both neighbors imply more than ``max_speed_mps``,
-    or the one neighbor of an end fix does).
+    A fix is dropped for missing or poor accuracy, a non-finite or out-of-range
+    value, a time shared with a more accurate fix, or an impossible speed (a
+    spike: both neighbors imply more than ``max_speed_mps``, or the one neighbor
+    of an end fix does). Quality is checked before sorting, so a bad timestamp
+    can never disturb the order. Speed ignores the distance the two fixes' own
+    accuracy circles could explain and counts at least one second between fixes.
+    A cluster of two or more consecutive bad fixes is not detected as a spike; the
+    accuracy filter is the primary protection.
     """
     dropped_quality = 0
-    kept: list[TrackFix] = []
-    for fix in sorted(fixes, key=lambda item: item.at):
-        if not _is_good_quality(fix, params):
+    usable: list[TrackFix] = []
+    for fix in fixes:
+        if _is_good_quality(fix, params):
+            usable.append(fix)
+        else:
             dropped_quality += 1
-            continue
+    kept: list[TrackFix] = []
+    for fix in sorted(usable, key=lambda item: item.at):
         if kept and kept[-1].at == fix.at:
             dropped_quality += 1
+            if (fix.accuracy_m or 0.0) < (kept[-1].accuracy_m or 0.0):
+                kept[-1] = fix
             continue
         kept.append(fix)
     before_spikes = len(kept)
@@ -211,6 +254,7 @@ def estimate_together(
     def unknown(reason: UnknownReason, track: int | None, windows: tuple[WindowEstimate, ...] = ()) -> TogetherEstimate:
         return TogetherEstimate(
             anchor=None,
+            anchor_lag_s=None,
             confidence=None,
             distance_now_m=None,
             dropped_quality=dropped_quality,
@@ -234,7 +278,7 @@ def estimate_together(
     fixes_a, fixes_b = cleaned[0].fixes, cleaned[1].fixes
     anchor = min(now, fixes_a[-1].at, fixes_b[-1].at)
     horizon_s = settings.windows[-1].length_s
-    steps = int(horizon_s // settings.step_s) + 1
+    steps = round(horizon_s / settings.step_s) + 1
     instants = [anchor - index * settings.step_s for index in range(steps)]
     closeness_at: list[float | None] = []
     distance_now_m: float | None = None
@@ -258,6 +302,7 @@ def estimate_together(
     confidence = sum(window.weight * (window.closeness or 0.0) for window in known) / total_weight
     return TogetherEstimate(
         anchor=anchor,
+        anchor_lag_s=max(0.0, now - anchor),
         confidence=min(1.0, max(0.0, confidence)),
         distance_now_m=distance_now_m,
         dropped_quality=dropped_quality,
@@ -297,7 +342,7 @@ def interpolate_position(
     return InterpolatedPosition(
         accuracy_m=max(before.accuracy_m or 0.0, after.accuracy_m or 0.0),
         lat=before.lat + (after.lat - before.lat) * fraction,
-        lon=before.lon + (after.lon - before.lon) * fraction,
+        lon=_wrap_degrees(before.lon + _wrap_degrees(after.lon - before.lon) * fraction),
     )
 
 
@@ -309,13 +354,19 @@ def pair_closeness(
 ) -> tuple[float, float]:
     """Return ``(distance_m, closeness)``: 1.0 within ``near_m`` plus both accuracies, 0.0 from ``far_m``."""
     distance_m = _haversine_m(position_a.lat, position_a.lon, position_b.lat, position_b.lon)
-    near_m = params.near_m + position_a.accuracy_m + position_b.accuracy_m
-    far_m = max(params.far_m, near_m + 1.0)
+    slack_m = position_a.accuracy_m + position_b.accuracy_m
+    near_m = params.near_m + slack_m
+    far_m = params.far_m + slack_m
     if distance_m <= near_m:
         return distance_m, 1.0
     if distance_m >= far_m:
         return distance_m, 0.0
     return distance_m, (far_m - distance_m) / (far_m - near_m)
+
+
+_COMPARE_TOLERANCE: Final[float] = 1e-9
+_EARTH_RADIUS_M: Final[float] = 6_371_000.0
+_TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -329,20 +380,30 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def _is_good_quality(fix: TrackFix, params: TogetherParams) -> bool:
     if not all(math.isfinite(value) for value in (fix.at, fix.lat, fix.lon)):
         return False
+    if not (-90.0 <= fix.lat <= 90.0 and -180.0 <= fix.lon <= 180.0):
+        return False
     if fix.accuracy_m is None or not math.isfinite(fix.accuracy_m):
         return False
     return 0.0 <= fix.accuracy_m <= params.accuracy_limit_m
 
 
 def _speed_mps(first: TrackFix, second: TrackFix) -> float:
-    return _haversine_m(first.lat, first.lon, second.lat, second.lon) / (second.at - first.at)
+    """Speed implied by two fixes, after discounting the distance their accuracy circles explain."""
+    distance_m = _haversine_m(first.lat, first.lon, second.lat, second.lon)
+    explained_m = (first.accuracy_m or 0.0) + (second.accuracy_m or 0.0)
+    return max(0.0, distance_m - explained_m) / max(second.at - first.at, 1.0)
 
 
 def _together_for_s(closeness_at: Sequence[float | None], params: TogetherParams) -> float:
-    """Seconds back from the anchor to the instant before the first one that is clearly apart."""
+    """Seconds back from the anchor over which every sampled instant is known and not clearly apart.
+
+    The run stops at the first instant that is clearly apart (closeness below 0.5)
+    or unknown, so missing data never extends it. It is capped by the longest
+    window; a value equal to that cap means "at least this long".
+    """
     reach = 0
     for index, closeness in enumerate(closeness_at):
-        if closeness is not None and closeness < _TOGETHER_RUN_CLOSENESS:
+        if closeness is None or closeness < _TOGETHER_RUN_CLOSENESS:
             break
         reach = index
     return reach * params.step_s
@@ -353,7 +414,7 @@ def _window_estimate(
     closeness_at: Sequence[float | None],
     params: TogetherParams,
 ) -> WindowEstimate:
-    total = int(spec.length_s // params.step_s) + 1
+    total = round(spec.length_s / params.step_s) + 1
     values = [value for value in closeness_at[:total] if value is not None]
     coverage = len(values) / total
     known = bool(values) and coverage >= params.coverage_floor
@@ -392,3 +453,8 @@ def _without_interior_spikes(fixes: list[TrackFix], max_speed_mps: float) -> lis
                 changed = True
                 break
     return kept
+
+
+def _wrap_degrees(value: float) -> float:
+    """Wrap an angle in degrees into ``[-180, 180)`` so interpolation never goes the long way round."""
+    return ((value + 180.0) % 360.0) - 180.0

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import math
 import random
+from typing import Any
 
 import pytest
 
 from app.users_together import (
     InterpolatedPosition,
+    TogetherEstimate,
     TogetherParams,
     TrackFix,
     UnknownReason,
@@ -43,8 +45,14 @@ def _times(*, every_s: float, last_at: float, span_s: float = 700.0) -> list[flo
     return [last_at - index * every_s for index in range(count, -1, -1)]
 
 
-def _track(times: list[float], **kwargs: float | None) -> list[TrackFix]:
-    return [_fix(at, **kwargs) for at in times]  # type: ignore[arg-type]
+def _track(
+    times: list[float],
+    *,
+    accuracy_m: float | None = 5.0,
+    lateral_m: float = 0.0,
+    speed_mps: float = 20.0,
+) -> list[TrackFix]:
+    return [_fix(at, accuracy_m=accuracy_m, lateral_m=lateral_m, speed_mps=speed_mps) for at in times]
 
 
 def _phone_a() -> list[TrackFix]:
@@ -204,8 +212,8 @@ def test_a_steady_separation_gives_the_same_closeness_in_every_window() -> None:
 
     estimate = estimate_together(_phone_a(), phone_b, now=_NOW)
 
-    # near = 30 m + 5 m + 5 m, far = 150 m: (150 - 100) / (150 - 40)
-    assert estimate.confidence == pytest.approx(50 / 110, abs=0.01)
+    # near = 30 + 5 + 5 = 40 m and far = 150 + 5 + 5 = 160 m: (160 - 100) / (160 - 40)
+    assert estimate.confidence == pytest.approx(0.5, abs=0.01)
     assert estimate.distance_now_m == pytest.approx(100.0, abs=0.5)
     assert estimate.is_together(0.8) is False
 
@@ -335,7 +343,7 @@ def test_pair_closeness_is_full_within_the_near_zone_and_zero_past_far() -> None
         return InterpolatedPosition(accuracy_m=5.0, lat=_LAT0 + distance_m / _M_PER_DEG, lon=_LON0)
 
     assert pair_closeness(here, at(40.0), params=params)[1] == 1.0
-    assert pair_closeness(here, at(160.0), params=params)[1] == 0.0
+    assert pair_closeness(here, at(180.0), params=params)[1] == 0.0
     assert pair_closeness(here, at(400.0), params=params)[1] == 0.0
     midpoint = pair_closeness(here, at(95.0), params=params)[1]
     assert 0.4 < midpoint < 0.6
@@ -345,13 +353,200 @@ def test_pair_closeness_is_full_within_the_near_zone_and_zero_past_far() -> None
     ("kwargs", "message"),
     [
         ({"windows": ()}, "at least one window"),
-        ({"step_s": 0.0}, "step_s greater than 0"),
+        ({"step_s": 0.0}, "step_s to be a finite number"),
         ({"near_m": 50.0, "far_m": 50.0}, "near_m < far_m"),
         ({"coverage_floor": 1.5}, "coverage_floor in"),
         ({"windows": (WindowSpec(300.0, 0.5), WindowSpec(60.0, 0.5))}, "ascending order"),
         ({"windows": (WindowSpec(60.0, 0.0),)}, "positive window weights"),
+        ({"windows": (WindowSpec(60.0, math.nan),)}, "positive window weights"),
+        ({"windows": (WindowSpec(65.0, 1.0),)}, "multiples of step_s"),
+        ({"windows": (WindowSpec(0.0, 1.0),)}, "positive window lengths"),
+        ({"step_s": math.nan}, "step_s to be a finite number"),
+        ({"near_m": -1.0}, "near_m < far_m"),
+        ({"max_gap_s": -5.0}, "max_gap_s to be a finite number"),
     ],
 )
-def test_parameters_are_validated(kwargs: dict[str, object], message: str) -> None:
+def test_parameters_are_validated(kwargs: dict[str, Any], message: str) -> None:
     with pytest.raises(ValueError, match=message):
-        TogetherParams(**kwargs)  # type: ignore[arg-type]
+        TogetherParams(**kwargs)
+
+
+def test_together_for_s_does_not_count_missing_history_as_togetherness() -> None:
+    short_a = _track(_times(every_s=10.0, last_at=_NOW, span_s=70.0))
+    short_b = _track(_times(every_s=10.0, last_at=_NOW, span_s=70.0), lateral_m=3.0)
+
+    estimate = estimate_together(short_a, short_b, now=_NOW)
+
+    assert [window.known for window in estimate.windows] == [True, False, False]
+    assert estimate.together_for_s is not None and estimate.together_for_s <= 70.0
+
+
+def test_together_for_s_stops_at_a_hole_in_the_data() -> None:
+    recent = _times(every_s=10.0, last_at=_NOW, span_s=30.0)
+    old = _times(every_s=10.0, last_at=_NOW - 400.0, span_s=300.0)
+    phone_a = _track([*old, *recent])
+    phone_b = _track([*old, *recent], lateral_m=3.0)
+
+    estimate = estimate_together(phone_a, phone_b, now=_NOW)
+
+    assert estimate.together_for_s is not None and estimate.together_for_s <= 30.0
+
+
+def test_together_for_s_is_zero_when_apart_now() -> None:
+    phone_b = _track(_times(every_s=10.0, last_at=_NOW), lateral_m=400.0)
+
+    assert estimate_together(_phone_a(), phone_b, now=_NOW).together_for_s == 0.0
+
+
+def test_a_nan_timestamp_cannot_disturb_the_order_of_the_other_fixes() -> None:
+    times = [_NOW - 10.0 * index for index in range(10, 0, -1)]
+    fixes = [*_track(times), TrackFix(accuracy_m=5.0, at=math.nan, lat=_LAT0, lon=_LON0)]
+    random.Random(11).shuffle(fixes)
+
+    cleaned = clean_track(fixes, params=TogetherParams())
+
+    assert [fix.at for fix in cleaned.fixes] == times
+    assert cleaned.dropped_quality == 1
+
+
+def test_clean_track_keeps_the_more_accurate_of_two_fixes_at_the_same_time() -> None:
+    sloppy = _fix(_NOW - 10.0, accuracy_m=40.0)
+    precise = _fix(_NOW - 10.0, accuracy_m=4.0)
+
+    cleaned = clean_track([sloppy, precise, _fix(_NOW)], params=TogetherParams())
+
+    assert [fix.accuracy_m for fix in cleaned.fixes] == [4.0, 5.0]
+    assert cleaned.dropped_quality == 1
+
+
+def test_clean_track_drops_out_of_range_coordinates() -> None:
+    off_the_map = TrackFix(accuracy_m=5.0, at=_NOW - 10.0, lat=200.0, lon=_LON0)
+
+    cleaned = clean_track([off_the_map, _fix(_NOW)], params=TogetherParams())
+
+    assert len(cleaned.fixes) == 1
+    assert cleaned.dropped_quality == 1
+
+
+def test_two_fixes_a_millisecond_apart_are_not_a_spike_even_when_exact() -> None:
+    # Zero accuracy removes the accuracy discount, so only the one-second floor on the time gap protects this.
+    lead = _track([_NOW - 30.0, _NOW - 20.0, _NOW - 10.0], accuracy_m=0.0)
+    last = TrackFix(accuracy_m=0.0, at=_NOW - 0.001, lat=lead[-1].lat + 100.0 / _M_PER_DEG, lon=_LON0)
+    newest = TrackFix(accuracy_m=0.0, at=_NOW, lat=last.lat + 3.0 / _M_PER_DEG, lon=_LON0)
+
+    assert len(clean_track([*lead, last, newest], params=TogetherParams()).fixes) == 5
+
+
+def test_a_jump_inside_the_two_accuracy_circles_is_not_a_spike() -> None:
+    # 140 m in one second is 140 m/s, but two fixes with 50 m accuracy explain up to 100 m of it (40 m/s).
+    lead = _track([_NOW - 30.0, _NOW - 20.0, _NOW - 10.0], accuracy_m=50.0)
+    before = TrackFix(accuracy_m=50.0, at=_NOW - 1.0, lat=lead[-1].lat, lon=_LON0)
+    newest = TrackFix(accuracy_m=50.0, at=_NOW, lat=before.lat + 140.0 / _M_PER_DEG, lon=_LON0)
+
+    assert len(clean_track([*lead, before, newest], params=TogetherParams()).fixes) == 5
+    unexplained = TrackFix(accuracy_m=1.0, at=_NOW, lat=before.lat + 140.0 / _M_PER_DEG, lon=_LON0)
+    assert len(clean_track([*lead, before, unexplained], params=TogetherParams()).fixes) == 4
+
+
+def test_a_cluster_of_two_consecutive_bad_fixes_is_a_known_limitation() -> None:
+    # Documented in clean_track: only a single spike is detected; the accuracy filter is the main protection.
+    good = _track([_NOW - 60.0 + 10.0 * index for index in range(5)])
+    far_a = TrackFix(accuracy_m=5.0, at=_NOW - 5.0, lat=_LAT0 + 1.0, lon=_LON0)
+    far_b = TrackFix(accuracy_m=5.0, at=_NOW, lat=_LAT0 + 1.0, lon=_LON0)
+
+    cleaned = clean_track([*good, far_a, far_b], params=TogetherParams())
+
+    assert cleaned.dropped_speed == 0
+    assert len(cleaned.fixes) == 7
+
+
+def test_interpolation_does_not_go_the_long_way_round_the_antimeridian() -> None:
+    track = [
+        TrackFix(accuracy_m=5.0, at=_NOW - 10.0, lat=0.0, lon=179.9995),
+        TrackFix(accuracy_m=5.0, at=_NOW, lat=0.0, lon=-179.9995),
+    ]
+
+    middle = interpolate_position(track, _NOW - 5.0, max_gap_s=45.0)
+
+    assert middle is not None and abs(middle.lon) == pytest.approx(180.0, abs=0.001)
+
+
+def test_the_anchor_lag_is_exposed_when_one_phone_reported_a_while_ago() -> None:
+    fresh = estimate_together(_phone_a(), _track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), now=_NOW)
+    lagging_b = _track(_times(every_s=10.0, last_at=_NOW - 40.0), lateral_m=3.0)
+    lagging = estimate_together(_phone_a(), lagging_b, now=_NOW)
+
+    assert fresh.anchor_lag_s == 0.0
+    assert lagging.known
+    assert lagging.anchor_lag_s == pytest.approx(40.0)
+    assert lagging.anchor == pytest.approx(_NOW - 40.0)
+
+
+def test_freshness_is_inclusive_at_the_limit_and_stale_just_past_it() -> None:
+    at_limit = _track(_times(every_s=10.0, last_at=_NOW - 45.0), lateral_m=3.0)
+    past_limit = _track(_times(every_s=10.0, last_at=_NOW - 46.0), lateral_m=3.0)
+
+    assert estimate_together(_phone_a(), at_limit, now=_NOW).known
+    assert estimate_together(_phone_a(), past_limit, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_the_window_instant_counts_are_pinned() -> None:
+    estimate = estimate_together(_phone_a(), _track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), now=_NOW)
+
+    assert [(window.total, window.usable) for window in estimate.windows] == [(7, 7), (31, 31), (61, 61)]
+
+
+def test_coverage_is_known_at_four_of_seven_instants_and_unknown_at_three() -> None:
+    four = _track([_NOW - 30.0, _NOW], lateral_m=3.0)
+    three = _track([_NOW - 20.0, _NOW], lateral_m=3.0)
+
+    known = estimate_together(_phone_a(), four, now=_NOW)
+    unknown = estimate_together(_phone_a(), three, now=_NOW)
+
+    assert known.known and known.windows[0].usable == 4
+    assert unknown.unknown_reason is UnknownReason.TOO_LITTLE_COVERAGE and unknown.windows[0].usable == 3
+
+
+def test_the_ramp_between_near_and_far_keeps_its_width_when_the_accuracies_are_large() -> None:
+    params = TogetherParams(near_m=30.0, far_m=150.0)
+    here = InterpolatedPosition(accuracy_m=50.0, lat=_LAT0, lon=_LON0)
+
+    def at(distance_m: float) -> InterpolatedPosition:
+        return InterpolatedPosition(accuracy_m=50.0, lat=_LAT0 + distance_m / _M_PER_DEG, lon=_LON0)
+
+    # near = 130 m, far = 250 m: 190 m is the middle of the ramp, not a cliff.
+    assert pair_closeness(here, at(125.0), params=params)[1] == 1.0
+    assert 0.4 < pair_closeness(here, at(190.0), params=params)[1] < 0.6
+    assert pair_closeness(here, at(260.0), params=params)[1] == 0.0
+
+
+def _estimate(confidence: float | None, recent: float | None) -> TogetherEstimate:
+    return TogetherEstimate(
+        anchor=_NOW,
+        anchor_lag_s=0.0,
+        confidence=confidence,
+        distance_now_m=None,
+        dropped_quality=(0, 0),
+        dropped_speed=(0, 0),
+        newest_fix_age_s=(0.0, 0.0),
+        recent_closeness=recent,
+        together_for_s=None,
+        unknown_reason=None,
+        unknown_track=None,
+        windows=(),
+    )
+
+
+def test_is_together_needs_both_the_confidence_and_the_last_minute_at_the_minimum() -> None:
+    assert _estimate(0.8, 0.8).is_together(0.8) is True
+    assert _estimate(0.9, 0.79).is_together(0.8) is False
+    assert _estimate(0.79, 0.9).is_together(0.8) is False
+    assert _estimate(None, None).is_together(0.8) is None
+
+
+def test_is_apart_is_symmetric_and_leaves_a_dead_zone_in_between() -> None:
+    assert _estimate(0.2, 0.2).is_apart(0.8) is True
+    assert _estimate(0.2, 0.3).is_apart(0.8) is False
+    assert _estimate(0.5, 0.5).is_apart(0.8) is False
+    assert _estimate(0.5, 0.5).is_together(0.8) is False
+    assert _estimate(None, None).is_apart(0.8) is None
