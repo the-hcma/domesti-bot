@@ -42,17 +42,20 @@ import contextlib
 import errno
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable, Coroutine, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
 from typing import Any, Final
 
 from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1EntityRole, Ep1ReadingMetric
+from app.device_mac import try_normalize_mac
 from app.device_manager import NotInitializedError
 from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
+from app.fast_poll_targets import FAST_POLL_INTERVAL_S, FastPollTargets, FastPollTargetsProvider
 from app.gotailwind_device_manager import GotailwindDeviceManager
-from app.kasa_device_manager import KasaDeviceManager
+from app.kasa_device_manager import KasaDevice, KasaDeviceManager
 from app.sonos_device_manager import SonosDeviceManager
 from app.vizio_device_manager import VizioDeviceManager
 
@@ -217,20 +220,64 @@ class KasaPollingWatcher(DeviceStateWatcher):
     ``_kDevice.update()`` and syncs the device's power flag. That's the
     same code path the per-device ``is_on`` HTTP route uses, so there's
     only one place to maintain.
+
+    Every device is read each ``interval_s``. Devices that a turn-on rule is
+    watching inside its time window (``fast_poll_targets``) are read every
+    ``fast_interval_s`` as well, so that rule reacts sooner. The provider is
+    consulted every ``fast_interval_s``; with no such device the devices are
+    still read only every ``interval_s``.
     """
 
     def __init__(
         self,
         mgr: KasaDeviceManager,
         *,
-        wake_notifier: DeviceRuleWakeNotifier | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        fast_interval_s: float = FAST_POLL_INTERVAL_S,
+        fast_poll_targets: FastPollTargetsProvider | None = None,
         interval_s: float = DEFAULT_POLL_INTERVAL_S,
+        sleep: Callable[[asyncio.Event, float], Awaitable[None]] | None = None,
+        wake_notifier: DeviceRuleWakeNotifier | None = None,
     ) -> None:
-        self._wake_notifier = wake_notifier
-        self._mgr = mgr
+        self._clock = clock
+        self._fast_interval_s = fast_interval_s
+        self._fast_poll_targets = fast_poll_targets
         self._interval_s = interval_s
+        self._mgr = mgr
+        self._sleep = sleep if sleep is not None else _sleep_unless_stopped
+        self._targets_failed = False
+        self._wake_notifier = wake_notifier
 
-    async def _refresh_once(self, *, stop: asyncio.Event) -> None:
+    async def run(self, *, stop: asyncio.Event) -> None:
+        last_full_at: float | None = None
+        while not stop.is_set():
+            targets = await self._current_targets()
+            now = self._clock()
+            if last_full_at is None or now - last_full_at >= self._interval_s:
+                await self._refresh_once(stop=stop)
+                last_full_at = self._clock()
+            elif targets:
+                await self._refresh_once(stop=stop, only=targets)
+            # Wake at the fast interval even with nothing to poll fast, so a window that
+            # opens mid-sleep is noticed within one fast tick; full refreshes stay on interval_s.
+            until_full_s = max(0.0, last_full_at + self._interval_s - self._clock())
+            await self._sleep(stop, min(self._fast_interval_s, until_full_s))
+
+    async def _current_targets(self) -> FastPollTargets:
+        """The devices to poll fast now; any failure means "none", never a dead watcher."""
+        if self._fast_poll_targets is None:
+            return frozenset()
+        try:
+            targets = await asyncio.to_thread(self._fast_poll_targets)
+        except Exception:
+            if not self._targets_failed:
+                _LOGGER.exception("[state-watcher] fast-poll targets unavailable; using the global interval")
+            self._targets_failed = True
+            return frozenset()
+        self._targets_failed = False
+        return targets
+
+    async def _refresh_once(self, *, stop: asyncio.Event, only: FastPollTargets | None = None) -> None:
         refreshes: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = []
         try:
             switches = self._mgr.switches
@@ -239,6 +286,8 @@ class KasaPollingWatcher(DeviceStateWatcher):
             # Skip this cycle so the shared watcher task keeps running.
             return
         for kd in switches:
+            if only is not None and not _is_fast_poll_target(kd, only):
+                continue
             task_name = f"state-watcher-{DeviceFamilyId.KASA.value}-{kd.identifier}"
 
             async def _refresh_switch(device: Any = kd) -> None:
@@ -267,14 +316,6 @@ class KasaPollingWatcher(DeviceStateWatcher):
 
             refreshes.append((task_name, _refresh_switch))
         await _refresh_all_devices_concurrently(stop=stop, device_refreshes=refreshes)
-
-    async def run(self, *, stop: asyncio.Event) -> None:
-        while not stop.is_set():
-            await self._refresh_once(stop=stop)
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=self._interval_s)
-            except asyncio.TimeoutError:
-                pass
 
 
 class SonosPollingWatcher(DeviceStateWatcher):
@@ -467,6 +508,15 @@ class VizioPollingWatcher(DeviceStateWatcher):
                 pass
 
 
+def _is_fast_poll_target(device: KasaDevice, targets: FastPollTargets) -> bool:
+    """Whether a Kasa device is one of the ``(family, device)`` pairs to poll fast right now."""
+    keys = {device.identifier}
+    mac = try_normalize_mac(device.mac_address or "")
+    if mac is not None:
+        keys.add(mac)
+    return any((DeviceFamilyId.KASA, key) in targets for key in keys)
+
+
 def _is_transient_connect_failure(exc: BaseException) -> bool:
     os_error = _root_os_error(exc)
     if os_error is None:
@@ -528,9 +578,16 @@ def _root_os_error(exc: BaseException) -> OSError | None:
     return fallback
 
 
+async def _sleep_unless_stopped(stop: asyncio.Event, delay_s: float) -> None:
+    """Wait ``delay_s`` seconds, or until ``stop`` is set."""
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(stop.wait(), timeout=delay_s)
+
+
 def build_default_watchers(
     state: DeviceManagersState,
     *,
+    fast_poll_targets: FastPollTargetsProvider | None = None,
     wake_notifier: DeviceRuleWakeNotifier | None = None,
     interval_s: float,
 ) -> list[DeviceStateWatcher]:
@@ -544,6 +601,7 @@ def build_default_watchers(
     watchers: list[DeviceStateWatcher] = [
         KasaPollingWatcher(
             state.kasa_mgr,
+            fast_poll_targets=fast_poll_targets,
             wake_notifier=wake_notifier,
             interval_s=interval_s,
         ),

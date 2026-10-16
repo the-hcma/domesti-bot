@@ -439,6 +439,7 @@ def create_app(args: Any) -> FastAPI:
                 return
             watchers = build_default_watchers(
                 state,
+                fast_poll_targets=runtime.build_fast_poll_targets_provider(),
                 wake_notifier=runtime.build_device_rule_wake_notifier(),
                 interval_s=poll_interval_s,
             )
