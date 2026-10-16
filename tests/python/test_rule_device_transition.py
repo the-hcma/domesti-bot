@@ -20,7 +20,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import (
+    AfterSunsetCondition,
     AnyConditionsCondition,
+    DevicesAnyInStateCondition,
     DevicesAnyTransitionedToStateCondition,
     LocalTimeWindowCondition,
     RuleConditionDeviceRefOut,
@@ -378,6 +380,139 @@ async def test_watcher_transition_reaches_rule_through_runtime_and_schedule(
     assert lamp.calls == ["on"]
 
 
+def test_transition_rule_accepts_any_of_two_windows() -> None:
+    rule = _two_window_rule()
+    assert rule_has_device_transition_condition(rule)
+    assert not uses_local_time_window_eligibility_wake(rule)
+
+
+def test_transition_rule_still_rejects_two_top_level_windows() -> None:
+    # Top-level windows are AND-ed, so two disjoint ones could never be met.
+    with pytest.raises(ValidationError, match="at most one top-level local_time_window"):
+        _transition_rule(
+            conditions=[
+                _transition_condition(),
+                LocalTimeWindowCondition(type="local_time_window", start_hhmm="06:30", end_hhmm="09:30"),
+                LocalTimeWindowCondition(type="local_time_window", start_hhmm="19:00", end_hhmm="22:00"),
+            ],
+        )
+
+
+def test_transition_rule_still_rejects_a_sun_anchor_next_to_a_window() -> None:
+    with pytest.raises(ValidationError, match="at most one eligibility window"):
+        _transition_rule(
+            conditions=[
+                _transition_condition(),
+                AfterSunsetCondition(type="after_sunset", offset_minutes=0, window_end="midnight"),
+                LocalTimeWindowCondition(type="local_time_window", start_hhmm="19:00", end_hhmm="22:00"),
+            ],
+        )
+
+
+def test_transition_rule_rejects_a_sun_anchor_next_to_any_of_windows() -> None:
+    with pytest.raises(ValidationError, match="at most one eligibility window"):
+        _transition_rule(
+            conditions=[
+                _transition_condition(),
+                AfterSunsetCondition(type="after_sunset", offset_minutes=0, window_end="midnight"),
+                _morning_or_evening(),
+            ],
+        )
+
+
+def test_level_device_state_rule_still_rejects_nested_windows() -> None:
+    with pytest.raises(ValidationError, match="nested under all/any"):
+        _transition_rule(
+            conditions=[
+                DevicesAnyInStateCondition(
+                    type="devices_any_in_state",
+                    devices=_transition_condition().devices,
+                    state=DeviceConditionState.ON,
+                ),
+                _morning_or_evening(),
+            ],
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("hour", "minute", "fires"),
+    [
+        (6, 29, False),
+        (6, 30, True),
+        (9, 29, True),
+        (9, 30, False),
+        (12, 0, False),
+        (19, 0, True),
+        (21, 59, True),
+        (22, 0, False),
+    ],
+)
+async def test_two_window_rule_fires_only_inside_either_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hour: int,
+    minute: int,
+    fires: bool,
+) -> None:
+    lamp = _FakeKasa(_LAMP_MAC, "Basement lamp")
+    evaluator = _evaluator(
+        tmp_path,
+        monkeypatch,
+        _kasa_state(_stairs(is_on=True), lamp),
+        at=_local(hour, minute),
+        rule=_two_window_rule(),
+    )
+
+    with _patched_email() as send_mock:
+        await evaluator.on_device_state_change(
+            DeviceFamilyId.KASA,
+            _STAIRS_MAC,
+            transition=_transition(previous=False, current=True),
+        )
+
+    assert send_mock.call_count == (1 if fires else 0)
+    assert lamp.calls == (["on"] if fires else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("hour", "minute", "fires"),
+    [(21, 59, False), (22, 0, True), (23, 59, True), (0, 0, True), (1, 59, True), (2, 0, False), (6, 30, True)],
+)
+async def test_a_window_crossing_midnight_works_inside_an_any_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hour: int,
+    minute: int,
+    fires: bool,
+) -> None:
+    night_or_morning = AnyConditionsCondition(
+        type="any",
+        conditions=[
+            LocalTimeWindowCondition(type="local_time_window", start_hhmm="22:00", end_hhmm="02:00"),
+            LocalTimeWindowCondition(type="local_time_window", start_hhmm="06:30", end_hhmm="09:30"),
+        ],
+    )
+    lamp = _FakeKasa(_LAMP_MAC, "Basement lamp")
+    evaluator = _evaluator(
+        tmp_path,
+        monkeypatch,
+        _kasa_state(_stairs(is_on=True), lamp),
+        at=_local(hour, minute),
+        rule=_transition_rule(conditions=[_transition_condition(), night_or_morning]),
+    )
+
+    with _patched_email() as send_mock:
+        await evaluator.on_device_state_change(
+            DeviceFamilyId.KASA,
+            _STAIRS_MAC,
+            transition=_transition(previous=False, current=True),
+        )
+
+    assert send_mock.call_count == (1 if fires else 0)
+
+
 @pytest.mark.asyncio
 async def test_transition_arriving_during_in_flight_eval_is_delivered_next(
     tmp_path: Path,
@@ -454,9 +589,10 @@ def _evaluator(
     *,
     at: float | None = None,
     clock: dict[str, float] | None = None,
+    rule: RuleOut | None = None,
 ) -> RuleEvaluator:
     bundle = tmp_path / "rules.json"
-    _write_bundle(bundle, _transition_rule())
+    _write_bundle(bundle, rule if rule is not None else _transition_rule())
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
     times = clock if clock is not None else {"now": at if at is not None else _local(7, 0)}
     return RuleEvaluator(
@@ -488,6 +624,16 @@ def _kasa_state(*devices: _FakeKasa) -> DeviceManagersState:
 
 def _local(hour: int, minute: int) -> float:
     return datetime(2026, 10, 15, hour, minute, tzinfo=_NY).timestamp()
+
+
+def _morning_or_evening() -> AnyConditionsCondition:
+    return AnyConditionsCondition(
+        type="any",
+        conditions=[
+            LocalTimeWindowCondition(type="local_time_window", start_hhmm="06:30", end_hhmm="09:30"),
+            LocalTimeWindowCondition(type="local_time_window", start_hhmm="19:00", end_hhmm="22:00"),
+        ],
+    )
 
 
 def _patched_email() -> Any:
@@ -563,6 +709,10 @@ def _transition_rule(
         schedule_cron=schedule_cron,
         triggers=triggers if triggers is not None else [RuleTrigger.DEVICE_STATE],
     )
+
+
+def _two_window_rule() -> RuleOut:
+    return _transition_rule(conditions=[_transition_condition(), _morning_or_evening()])
 
 
 async def _wait_until_idle(evaluator: RuleEvaluator) -> None:

@@ -76,7 +76,11 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     assert stairs.triggers == ["device_state"]
     assert stairs.ignore_expected_device_changes is True
     assert stairs.conditions.all[0].type == "devices_any_transitioned_to_state"
-    assert stairs.conditions.all[1].type == "local_time_window"
+    assert stairs.conditions.all[1].type == "any"
+    assert [child.type for child in stairs.conditions.all[1].conditions] == [
+        "local_time_window",
+        "local_time_window",
+    ]
     assert [action.action for action in stairs.device_actions] == ["turn_on", "turn_on"]
     assert automation_rules_source() == "operator"
 
