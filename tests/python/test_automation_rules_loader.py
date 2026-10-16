@@ -24,7 +24,7 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(example))
     bundle = load_automation_rules_bundle()
     assert bundle.version == 1
-    assert len(bundle.rules) == 16
+    assert len(bundle.rules) == 17
     assert bundle.rules[0].id == "evening-arrival-home-lights"
     lights_off = next(rule for rule in bundle.rules if rule.id == "evening-lights-off-both-home")
     assert lights_off.triggers == ["edge_true"]
@@ -71,6 +71,13 @@ def test_load_example_bundle_from_repo(tmp_path: Path, monkeypatch: pytest.Monke
     power_cycle = next(rule for rule in bundle.rules if rule.id == "hdhomerun-nightly-power-cycle")
     assert power_cycle.enabled is False
     assert power_cycle.device_actions[1].delay_s == 60
+    stairs = next(rule for rule in bundle.rules if rule.id == "basement-stairs-companions")
+    assert stairs.enabled is False
+    assert stairs.triggers == ["device_state"]
+    assert stairs.ignore_expected_device_changes is True
+    assert stairs.conditions.all[0].type == "devices_any_transitioned_to_state"
+    assert stairs.conditions.all[1].type == "local_time_window"
+    assert [action.action for action in stairs.device_actions] == ["turn_on", "turn_on"]
     assert automation_rules_source() == "operator"
 
 
@@ -84,6 +91,7 @@ def test_list_automation_rules_returns_all_rules(
     assert {rule.id for rule in rules} == {
         "away-garage-open-alert",
         "away-shutdown-everyone-outside-20m",
+        "basement-stairs-companions",
         "daylight-dark-house-lights-on",
         "daylight-master-bedroom-fan-on-alert",
         "evening-arrival-home-lights",
@@ -203,3 +211,86 @@ def test_automation_rules_paths_prefer_xdg_operator_file(
     assert automation_rules_operator_json_path() == operator.resolve()
     assert automation_rules_source() == "operator"
     assert load_automation_rules_bundle().version == 1
+
+
+def test_bundle_loads_a_device_turn_on_rule_written_as_plain_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rule = {
+        "id": "basement-stairs-companions",
+        "label": "Basement stairs companions",
+        "enabled": True,
+        "triggers": ["device_state"],
+        "cooldown_s": 0,
+        "min_location_accuracy_m": 50,
+        "ignore_expected_device_changes": True,
+        "notify_on_fire": True,
+        "notification_emails": ["ops@example.com"],
+        "conditions": {
+            "all": [
+                {
+                    "type": "devices_any_transitioned_to_state",
+                    "state": "on",
+                    "devices": [
+                        {"family_id": "kasa", "device_id": "02:00:00:00:00:09", "display_name": "Stairs light"},
+                    ],
+                },
+                {"type": "local_time_window", "start_hhmm": "06:30", "end_hhmm": "09:30"},
+            ],
+        },
+        "device_actions": [
+            {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:0a",
+                "display_name": "Basement lamp",
+                "action": "turn_on",
+            },
+        ],
+    }
+    bundle_path = tmp_path / "rules.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "device_id_resolution": "mac",
+                "settings_location": {
+                    "home_label": "Home",
+                    "lat": 41.194072,
+                    "lon": -73.8883254,
+                    "timezone": "America/New_York",
+                },
+                "rules": [rule],
+            },
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle_path))
+    loaded = load_automation_rules_bundle().rules[0]
+    assert [condition.type for condition in loaded.conditions.all] == [
+        "devices_any_transitioned_to_state",
+        "local_time_window",
+    ]
+    assert loaded.ignore_expected_device_changes is True
+    assert [action.action for action in loaded.device_actions] == ["turn_on"]
+
+
+def test_example_bundle_gives_every_placeholder_device_id_one_display_name() -> None:
+    # A reused placeholder id makes a copied rule act on, or warn about, the wrong device.
+    example = Path(__file__).resolve().parents[2] / "automation-rules.json.example"
+    names_by_device_id: dict[str, set[str]] = {}
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            device_id, display_name = node.get("device_id"), node.get("display_name")
+            if isinstance(device_id, str) and isinstance(display_name, str):
+                names_by_device_id.setdefault(device_id, set()).add(display_name)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(json.loads(example.read_text(encoding="utf-8")))
+    shared = {device_id: sorted(names) for device_id, names in names_by_device_id.items() if len(names) > 1}
+    assert shared == {}

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.device_enums import DeviceFamilyId, Ep1ReadingMetric
-from app.device_rule_wake import DeviceRuleWakeNotifier
+from app.device_rule_wake import DeviceBoolTransition, DeviceRuleWakeNotifier
 from app.device_state_watcher import (
     build_default_watchers,
     poll_interval_from_env,
@@ -139,6 +139,7 @@ class DomestiServerRuntime:
         device_id: str,
         *,
         reading_metric: Ep1ReadingMetric | None = None,
+        transition: DeviceBoolTransition | None = None,
     ) -> None:
         evaluator = self.rule_evaluator
         if evaluator is not None:
@@ -146,6 +147,7 @@ class DomestiServerRuntime:
                 family_id,
                 device_id,
                 reading_metric=reading_metric,
+                transition=transition,
             )
 
     def schedule_vacation_anomaly_alert(
@@ -311,7 +313,16 @@ class DomestiServerRuntime:
         previous: bool,
         current: bool | None,
     ) -> None:
-        self.schedule_rule_device_state_evaluation(family_id, device_id)
+        self.schedule_rule_device_state_evaluation(
+            family_id,
+            device_id,
+            transition=DeviceBoolTransition(
+                current=current,
+                device_id=device_id,
+                family_id=family_id,
+                previous=previous,
+            ),
+        )
         self.schedule_vacation_anomaly_alert(
             family_id,
             device_id,

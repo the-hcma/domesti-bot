@@ -18,6 +18,7 @@ from app.api.schemas import (
     DevicesAllInStateCondition,
     DevicesAnyInStateCondition,
     DevicesAnyInStateForSCondition,
+    DevicesAnyTransitionedToStateCondition,
     Ep1ReadingCompareCondition,
     RuleConditionOut,
     RuleOut,
@@ -391,6 +392,7 @@ def _iter_condition_display_snapshots(
                 DevicesAllInStateCondition,
                 DevicesAnyInStateCondition,
                 DevicesAnyInStateForSCondition,
+                DevicesAnyTransitionedToStateCondition,
             ),
         ):
             for ref in condition.devices:

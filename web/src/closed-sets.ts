@@ -197,6 +197,7 @@ export const RuleConditionType = {
   DevicesAllInState: "devices_all_in_state",
   DevicesAnyInState: "devices_any_in_state",
   DevicesAnyInStateForS: "devices_any_in_state_for_s",
+  DevicesAnyTransitionedToState: "devices_any_transitioned_to_state",
   Ep1ReadingCompare: "ep1_reading_compare",
   LocalTimeWindow: "local_time_window",
   UsersArrivedTogether: "users_arrived_together",

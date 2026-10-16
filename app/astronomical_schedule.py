@@ -14,6 +14,7 @@ from app.api.schemas import (
     RuleOut,
     RulesSunOut,
     SettingsLocationOut,
+    rule_has_device_transition_condition,
 )
 from app.cron_schedule import (
     next_windowed_repeat_evaluate_at,
@@ -104,7 +105,7 @@ def uses_astronomical_eligibility_wake(rule: RuleOut) -> bool:
     once when that instant is due. Co-equal with ``dwell_satisfied`` and
     ``device_state`` wake-ups — not a cron poll.
     """
-    if RuleTrigger.SCHEDULED in rule.triggers:
+    if RuleTrigger.SCHEDULED in rule.triggers or rule_has_device_transition_condition(rule):
         return False
     if extract_astronomical_anchor(rule) is None:
         return False

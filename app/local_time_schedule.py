@@ -5,7 +5,12 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
-from app.api.schemas import AfterLocalTimeCondition, LocalTimeWindowCondition, RuleOut
+from app.api.schemas import (
+    AfterLocalTimeCondition,
+    LocalTimeWindowCondition,
+    RuleOut,
+    rule_has_device_transition_condition,
+)
 from app.astronomical_schedule import cron_expression_for_local_datetime
 from app.device_enums import RuleTrigger
 
@@ -142,7 +147,7 @@ def uses_after_local_time_eligibility_wake(rule: RuleOut) -> bool:
     is still evaluated correctly by ``evaluate_rule``, it just does not arm a
     second wake.
     """
-    if RuleTrigger.SCHEDULED in rule.triggers:
+    if RuleTrigger.SCHEDULED in rule.triggers or rule_has_device_transition_condition(rule):
         return False
     if extract_top_level_after_local_time(rule) is None:
         return False
@@ -164,7 +169,7 @@ def uses_local_time_window_eligibility_wake(rule: RuleOut) -> bool:
     when that instant is due. Co-equal with ``dwell_satisfied`` and
     ``device_state`` wake-ups — not a hand-rolled clock cron.
     """
-    if RuleTrigger.SCHEDULED in rule.triggers:
+    if RuleTrigger.SCHEDULED in rule.triggers or rule_has_device_transition_condition(rule):
         return False
     if extract_top_level_local_time_window(rule) is None:
         return False

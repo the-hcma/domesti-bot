@@ -1851,6 +1851,22 @@ class DevicesAnyInStateForSCondition(BaseModel):
     state: DeviceConditionState
 
 
+class DevicesAnyTransitionedToStateCondition(BaseModel):
+    """True only while handling a listed device's change into ``state``.
+
+    Edge-only: met when a ``device_state`` pass was woken by one of ``devices``
+    moving from the opposite state into ``state`` (for example off → on, as
+    observed by the device's polling watcher). The first reading after a
+    restart, a change from or to an unknown reading, and scheduled or
+    window-open passes never satisfy it. A rule carrying it must use only the
+    ``device_state`` trigger and keep it at the top level of ``conditions.all``.
+    """
+
+    type: Literal["devices_any_transitioned_to_state"]
+    devices: list[RuleConditionDeviceRefOut] = Field(min_length=1)
+    state: DeviceConditionState
+
+
 class Ep1ReadingCompareCondition(BaseModel):
     """True when one EP1 metric is above or below ``threshold`` (instant).
 
@@ -2032,6 +2048,7 @@ RuleConditionOut = Annotated[
     | DevicesAllInStateCondition
     | DevicesAnyInStateCondition
     | DevicesAnyInStateForSCondition
+    | DevicesAnyTransitionedToStateCondition
     | Ep1ReadingCompareCondition
     | LocalTimeWindowCondition
     | UsersArrivedTogetherCondition
@@ -2209,6 +2226,7 @@ class RuleOut(BaseModel):
         has_edge_true = RuleTrigger.EDGE_TRUE in trigger_set
         has_scheduled = RuleTrigger.SCHEDULED in trigger_set
         cron = (self.schedule_cron or "").strip()
+        _reject_invalid_device_transition_conditions(self)
         if has_device_state and not collect_rule_device_refs(self):
             raise ValueError("device_state rules must reference at least one device in conditions")
         if has_dwell_satisfied and not (
@@ -2280,6 +2298,16 @@ class RuleOut(BaseModel):
         )
 
 
+def _condition_tree_contains_device_transition(conditions: list[RuleConditionOut]) -> bool:
+    for condition in conditions:
+        if isinstance(condition, DevicesAnyTransitionedToStateCondition):
+            return True
+        if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            if _condition_tree_contains_device_transition(condition.conditions):
+                return True
+    return False
+
+
 def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut]) -> bool:
     for condition in conditions:
         if isinstance(condition, LocalTimeWindowCondition):
@@ -2288,6 +2316,31 @@ def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut
             if _condition_tree_contains_local_time_window(condition.conditions):
                 return True
     return False
+
+
+def _reject_invalid_device_transition_conditions(rule: RuleOut) -> None:
+    """Keep ``devices_any_transitioned_to_state`` on edge-only ``device_state`` rules."""
+    for condition in rule.conditions.all:
+        if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            if _condition_tree_contains_device_transition(condition.conditions):
+                raise ValueError(
+                    "Expected devices_any_transitioned_to_state at top-level conditions.all, got nested under all/any"
+                )
+    top_level = sum(
+        1 for condition in rule.conditions.all if isinstance(condition, DevicesAnyTransitionedToStateCondition)
+    )
+    if top_level == 0:
+        return
+    if top_level > 1:
+        raise ValueError(
+            f"Expected at most one devices_any_transitioned_to_state condition, got {top_level}",
+        )
+    if set(rule.triggers) != {RuleTrigger.DEVICE_STATE}:
+        trigger_values = ", ".join(sorted(trigger.value for trigger in set(rule.triggers)))
+        raise ValueError(
+            "Expected only the device_state trigger on a rule with devices_any_transitioned_to_state, "
+            f"got {trigger_values}"
+        )
 
 
 def _reject_multiple_top_level_local_time_windows_for_eligibility(rule: RuleOut) -> None:
@@ -2325,6 +2378,15 @@ def normalized_rule_notification_emails(rule: RuleOut) -> list[str]:
         seen.add(email)
         recipients.append(email)
     return recipients
+
+
+def rule_has_device_transition_condition(rule: RuleOut) -> bool:
+    """Return whether ``rule`` fires on a device changing state, not on a steady state.
+
+    Such rules need no window-open (eligibility) wake: the transition condition
+    is false on every pass that a device change did not cause.
+    """
+    return any(isinstance(condition, DevicesAnyTransitionedToStateCondition) for condition in rule.conditions.all)
 
 
 class RuleReferenceIssueOut(BaseModel):
