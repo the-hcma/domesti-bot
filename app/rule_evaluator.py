@@ -153,6 +153,7 @@ from app.rule_conditions import (
     presence_user_ids_for_rule,
     rule_eligible_since,
     users_together_pairs,
+    users_together_roster_pairs,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
 from app.rule_held_off_notice_store import (
@@ -276,10 +277,10 @@ class RuleEvaluator:
         ] = {}
         # Delayed device_actions queue; mirrored to SQLite so it survives restart.
         self._deferred_device_actions: list[_DeferredDeviceAction] = []
-        # Which pairs of users are currently travelling together (breadcrumbs for auditing).
-        self._together_tracker = TogetherTracker()
         self._deferred_device_actions_task: asyncio.Task[None] | None = None
         self._deferred_device_actions_wake = asyncio.Event()
+        # Which pairs of users are currently travelling together (breadcrumbs for auditing).
+        self._together_tracker = TogetherTracker()
         # Natural bool streak per backend device (on/open/playing vs off/closed/paused).
         self._device_bool_since: dict[tuple[DeviceFamilyId, str], float] = {}
         self._device_bool_value: dict[tuple[DeviceFamilyId, str], bool] = {}
@@ -1717,43 +1718,6 @@ class RuleEvaluator:
         for rule_id in stale_rule_ids:
             self._cancel_deferred_device_actions_for_rule(rule_id)
 
-    def _track_togetherness(
-        self,
-        user_id: str,
-        rules: list[RuleOut],
-        ctx: RuleEvaluationContext,
-    ) -> None:
-        """Log when a pair tracked by a ``users_together`` condition begins or stops travelling together.
-
-        Only pairs that an enabled rule references are estimated, and only when
-        one of the two users just reported. Failures are logged and never reach
-        the rule processing that called this.
-        """
-        try:
-            readings: dict[TogetherKey, tuple[TogetherPair, set[str]]] = {}
-            for rule in rules:
-                if not rule.enabled:
-                    continue
-                for condition in iter_users_together_conditions(rule.conditions.all):
-                    for pair in users_together_pairs(condition, rule, ctx):
-                        first, second = sorted(pair.roster_user_ids)
-                        key: TogetherKey = ((first, second), condition.min_confidence)
-                        if key not in readings:
-                            readings[key] = (pair, set())
-                        readings[key][1].add(rule.id)
-            for key, (pair, rule_ids) in readings.items():
-                if user_id not in pair.roster_user_ids:
-                    continue
-                event = self._together_tracker.observe(key, pair.estimate)
-                if event is not None:
-                    _LOGGER.info(
-                        "%s",
-                        format_together_event(event, names=" and ".join(pair.names), rule_ids=rule_ids),
-                    )
-            self._together_tracker.retain(readings)
-        except Exception:
-            _LOGGER.exception("[rules] together tracking failed")
-
     async def _tick_vacation_mode(
         self,
         ctx: RuleEvaluationContext,
@@ -1783,6 +1747,42 @@ class RuleEvaluator:
             )
         except Exception:
             _LOGGER.exception("[vacation] latch tick failed")
+
+    def _track_togetherness(
+        self,
+        user_id: str,
+        rules: list[RuleOut],
+        ctx: RuleEvaluationContext,
+    ) -> None:
+        """Log when a pair tracked by a ``users_together`` condition begins or stops travelling together.
+
+        Only pairs that an enabled rule references and that include the user who
+        just reported are estimated. Failures are logged and never reach the
+        rule processing that called this.
+        """
+        try:
+            readings: dict[TogetherKey, tuple[TogetherPair, set[str]]] = {}
+            tracked: set[TogetherKey] = set()
+            for rule in rules:
+                if not rule.enabled:
+                    continue
+                for condition in iter_users_together_conditions(rule.conditions.all):
+                    for first, second in users_together_roster_pairs(condition, ctx):
+                        tracked.add(_together_key(rule, condition, first, second))
+                    for pair in users_together_pairs(condition, rule, ctx, reporting_user_id=user_id):
+                        first, second = pair.roster_user_ids
+                        key = _together_key(rule, condition, first, second)
+                        if key not in readings:
+                            readings[key] = (pair, set())
+                        readings[key][1].add(rule.id)
+            for key, (pair, rule_ids) in readings.items():
+                event = self._together_tracker.observe(key, pair.estimate)
+                if event is not None:
+                    names = " and ".join(name for _, name in sorted(zip(pair.roster_user_ids, pair.names, strict=True)))
+                    _LOGGER.info("%s", format_together_event(event, names=names, rule_ids=rule_ids))
+            self._together_tracker.retain(tracked)
+        except Exception:
+            _LOGGER.exception("[rules] together tracking failed")
 
     def _persist_rule_schedule_state(self, rule_id: str) -> None:
         cache_path = self._cache_path
@@ -4437,6 +4437,18 @@ def _sun_timing_notes_for_rule(rule: RuleOut, *, at_epoch: float) -> tuple[SunTi
         # The wording is cosmetic: a bad settings file, timezone or polar day must never abort a fire.
         _LOGGER.warning("[rules] sun timing text unavailable rule_id=%s", rule.id, exc_info=True)
         return ()
+
+
+def _together_key(rule: RuleOut, condition: UsersTogetherCondition, first: str, second: str) -> TogetherKey:
+    """The tracker key for a pair as one rule's condition judges it."""
+    low, high = sorted((first, second))
+    return TogetherKey(
+        accuracy_limit_m=float(rule.min_location_accuracy_m),
+        far_m=condition.far_m,
+        min_confidence=condition.min_confidence,
+        near_m=condition.near_m,
+        users=(low, high),
+    )
 
 
 def _user_triggered_geofence_edge(

@@ -18,7 +18,7 @@ from app.users_together import TogetherEstimate, TrackFix, estimate_together
 _M_PER_DEG = 2 * math.pi * 6_371_000.0 / 360.0
 _LAT0 = 41.0
 _LON0 = -73.9
-_KEY: TogetherKey = (("user-a", "user-b"), 0.8)
+_KEY = TogetherKey(accuracy_limit_m=50.0, far_m=150.0, min_confidence=0.8, near_m=30.0, users=("user-a", "user-b"))
 _START = 1_000_000.0
 
 
@@ -74,7 +74,8 @@ def test_the_begin_event_says_when_the_evidence_starts_and_when_it_is_capped_by_
     assert event.horizon_capped is False
     assert event.since == pytest.approx(apart_before, abs=30.0)
     capped = TogetherTracker().observe(_KEY, _estimate(_START + 700.0))
-    assert isinstance(capped, TogetherBegan) and capped.horizon_capped is True
+    assert isinstance(capped, TogetherBegan)
+    assert capped.horizon_capped is True
 
 
 def test_a_pair_first_seen_apart_and_later_together_is_not_reported_as_already_in_progress() -> None:
@@ -151,7 +152,7 @@ def test_forgetting_a_pair_makes_the_next_sighting_a_first_sight_again() -> None
 
 def test_a_pair_judged_by_two_thresholds_is_tracked_independently() -> None:
     tracker = TogetherTracker()
-    strict: TogetherKey = (("user-a", "user-b"), 0.99)
+    strict = _KEY._replace(min_confidence=0.99)
     steady = _estimate(_START + 700.0, apart_before=_START + 10_000.0, lateral_m=60.0)
 
     assert isinstance(tracker.observe(_KEY, steady), TogetherBegan)
@@ -167,14 +168,16 @@ def test_the_log_lines_carry_the_values_an_operator_tunes_from() -> None:
     assert began_line.startswith("[rules] together began users=user-a,user-b names='User A and User B' since=")
     for fragment in ("confidence=1.00", "closeness_1m=1.00", "closeness_5m=1.00", "closeness_10m=1.00"):
         assert fragment in began_line
-    assert "min_confidence=0.80 first_sight=true horizon_capped=true rules=a-rule,z-rule" in began_line
+    assert (
+        "min_confidence=0.80 near_m=30 far_m=150 first_sight=true horizon_capped=true rules=a-rule,z-rule" in began_line
+    )
 
     ended = tracker.observe(_KEY, _estimate(_START + 780.0, apart_after=_START + 700.0))
     assert isinstance(ended, TogetherEnded)
     ended_line = format_together_event(ended, names="User A and User B", rule_ids=["a-rule"])
     assert " detected=" in ended_line
     assert "[rules] together ended users=user-a,user-b" in ended_line
-    assert "reason=clearly_apart rules=a-rule" in ended_line
+    assert "near_m=30 far_m=150 reason=clearly_apart rules=a-rule" in ended_line
     assert "unknown_evaluations=0" in ended_line
 
 
@@ -186,3 +189,15 @@ def test_first_sight_means_the_first_time_the_pair_could_be_evaluated_not_the_fi
 
     assert isinstance(began, TogetherBegan)
     assert began.first_sight is True
+
+
+def test_a_pair_judged_with_other_distances_is_tracked_independently() -> None:
+    tracker = TogetherTracker()
+    wide = _KEY._replace(far_m=400.0, near_m=120.0)
+
+    assert isinstance(tracker.observe(_KEY, _estimate(_START + 700.0)), TogetherBegan)
+    assert isinstance(tracker.observe(wide, _estimate(_START + 700.0)), TogetherBegan)
+    ended = tracker.observe(_KEY, _estimate(_START + 780.0, apart_after=_START + 700.0))
+    assert isinstance(ended, TogetherEnded)
+    assert ended.near_m == 30.0
+    assert tracker.observe(wide, _estimate(_START + 710.0)) is None

@@ -23,12 +23,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from app.location_report import location_epoch_to_iso_z
 from app.users_together import TogetherEstimate
-
-TogetherKey = tuple[tuple[str, str], float]
-"""A tracked pair (sorted user ids) and the ``min_confidence`` it is judged by."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,9 +36,11 @@ class TogetherBegan:
     closeness: tuple[float | None, ...]
     confidence: float
     distance_m: float | None
+    far_m: float
     first_sight: bool
     horizon_capped: bool
     min_confidence: float
+    near_m: float
     newest_fix_age_s: tuple[float | None, float | None]
     since: float
     users: tuple[str, str]
@@ -56,14 +56,26 @@ class TogetherEnded:
     distance_m: float | None
     duration_s: float
     ended_at: float
+    far_m: float
     low: float
     min_confidence: float
+    near_m: float
     peak: float
     unknown_evaluations: int
     users: tuple[str, str]
 
 
 TogetherEvent = TogetherBegan | TogetherEnded
+
+
+class TogetherKey(NamedTuple):
+    """A tracked pair and everything that changes its estimate, so two rules that judge it differently stay apart."""
+
+    accuracy_limit_m: float
+    far_m: float
+    min_confidence: float
+    near_m: float
+    users: tuple[str, str]
 
 
 class TogetherTracker:
@@ -79,7 +91,7 @@ class TogetherTracker:
         estimate: TogetherEstimate,
     ) -> TogetherEvent | None:
         """Update the pair's state with ``estimate`` and return the event it caused, if any."""
-        users, min_confidence = key
+        users, min_confidence = key.users, key.min_confidence
         episode = self._episodes.get(key)
         if estimate.confidence is None or estimate.anchor is None:
             if episode is not None:
@@ -90,7 +102,7 @@ class TogetherTracker:
         if episode is not None:
             episode.peak = max(episode.peak, estimate.confidence)
             episode.low = min(episode.low, estimate.confidence)
-            if estimate.is_recently_apart(min_confidence):
+            if estimate.is_recently_apart(min_confidence) is True:
                 del self._episodes[key]
                 ended_at = max(episode.began_at, estimate.anchor - (estimate.apart_for_s or 0.0))
                 return TogetherEnded(
@@ -100,8 +112,10 @@ class TogetherTracker:
                     distance_m=estimate.distance_now_m,
                     duration_s=ended_at - episode.began_at,
                     ended_at=ended_at,
+                    far_m=key.far_m,
                     low=episode.low,
                     min_confidence=min_confidence,
+                    near_m=key.near_m,
                     peak=episode.peak,
                     unknown_evaluations=episode.unknown_evaluations,
                     users=users,
@@ -122,9 +136,11 @@ class TogetherTracker:
             closeness=tuple(window.closeness for window in estimate.windows),
             confidence=estimate.confidence,
             distance_m=estimate.distance_now_m,
+            far_m=key.far_m,
             first_sight=first_sight,
             horizon_capped=bool(horizon_s) and together_for_s >= horizon_s,
             min_confidence=min_confidence,
+            near_m=key.near_m,
             newest_fix_age_s=estimate.newest_fix_age_s,
             since=since,
             users=users,
@@ -156,7 +172,8 @@ def format_together_event(
         return (
             f"[rules] together began users={users} names={names!r} since={location_epoch_to_iso_z(event.since)} "
             f"confidence={event.confidence:.2f} {windows} distance_m={distance} fix_ages={ages} "
-            f"min_confidence={event.min_confidence:.2f} first_sight={str(event.first_sight).lower()} "
+            f"min_confidence={event.min_confidence:.2f} near_m={event.near_m:g} far_m={event.far_m:g} "
+            f"first_sight={str(event.first_sight).lower()} "
             f"horizon_capped={str(event.horizon_capped).lower()} rules={rules}"
         )
     return (
@@ -165,7 +182,8 @@ def format_together_event(
         f"duration_s={event.duration_s:.0f} "
         f"peak={event.peak:.2f} low={event.low:.2f} unknown_evaluations={event.unknown_evaluations} "
         f"confidence={event.confidence:.2f} distance_m={distance} "
-        f"min_confidence={event.min_confidence:.2f} reason=clearly_apart rules={rules}"
+        f"min_confidence={event.min_confidence:.2f} near_m={event.near_m:g} far_m={event.far_m:g} "
+        f"reason=clearly_apart rules={rules}"
     )
 
 

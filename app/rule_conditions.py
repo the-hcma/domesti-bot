@@ -3076,8 +3076,36 @@ def _together_pairs(
     condition: UsersTogetherCondition,
     rule: RuleOut,
     ctx: RuleEvaluationContext,
+    *,
+    reporting_user_id: str | None = None,
 ) -> tuple[list[TogetherPair], list[str]]:
-    """The estimate for every pair of listed users, plus the references that are not in the roster."""
+    """The estimate for every pair of listed users, plus the references that are not in the roster.
+
+    With ``reporting_user_id`` only the pairs that include that user are estimated.
+    """
+    roster_pairs, missing = _together_roster_pairs(condition, ctx)
+    if missing:
+        return [], missing
+    params = _together_params(condition, rule)
+    now = ctx.now.timestamp()
+    wanted = [pair for pair in roster_pairs if reporting_user_id is None or reporting_user_id in pair]
+    tracks = {roster_user_id: _track_for_user(ctx, roster_user_id) for pair in wanted for roster_user_id in pair}
+    pairs = [
+        TogetherPair(
+            estimate=estimate_together(tracks[first], tracks[second], now=now, params=params),
+            names=(_user_display_name(ctx, first), _user_display_name(ctx, second)),
+            roster_user_ids=(first, second),
+        )
+        for first, second in wanted
+    ]
+    return pairs, []
+
+
+def _together_roster_pairs(
+    condition: UsersTogetherCondition,
+    ctx: RuleEvaluationContext,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Every pair of the condition's roster users, plus the references that are not in the roster."""
     missing: list[str] = []
     roster_user_ids: list[str] = []
     for reference in condition.user_ids:
@@ -3088,18 +3116,7 @@ def _together_pairs(
             roster_user_ids.append(roster_user_id)
     if missing:
         return [], missing
-    params = _together_params(condition, rule)
-    now = ctx.now.timestamp()
-    tracks = {roster_user_id: _track_for_user(ctx, roster_user_id) for roster_user_id in roster_user_ids}
-    pairs = [
-        TogetherPair(
-            estimate=estimate_together(tracks[first], tracks[second], now=now, params=params),
-            names=(_user_display_name(ctx, first), _user_display_name(ctx, second)),
-            roster_user_ids=(first, second),
-        )
-        for first, second in itertools.combinations(roster_user_ids, 2)
-    ]
-    return pairs, []
+    return list(itertools.combinations(roster_user_ids, 2)), []
 
 
 def _together_params(condition: UsersTogetherCondition, rule: RuleOut) -> TogetherParams:
@@ -3239,9 +3256,23 @@ def users_together_pairs(
     condition: UsersTogetherCondition,
     rule: RuleOut,
     ctx: RuleEvaluationContext,
+    *,
+    reporting_user_id: str | None = None,
 ) -> list[TogetherPair]:
-    """The togetherness estimate for every pair of the condition's users (empty when a user is not in the roster)."""
-    pairs, missing = _together_pairs(condition, rule, ctx)
+    """The togetherness estimate for every pair of the condition's users (empty when a user is not in the roster).
+
+    With ``reporting_user_id`` only the pairs that include that user are estimated.
+    """
+    pairs, missing = _together_pairs(condition, rule, ctx, reporting_user_id=reporting_user_id)
+    return [] if missing else pairs
+
+
+def users_together_roster_pairs(
+    condition: UsersTogetherCondition,
+    ctx: RuleEvaluationContext,
+) -> list[tuple[str, str]]:
+    """The roster user pairs of the condition, without estimating them (empty when a user is not in the roster)."""
+    pairs, missing = _together_roster_pairs(condition, ctx)
     return [] if missing else pairs
 
 

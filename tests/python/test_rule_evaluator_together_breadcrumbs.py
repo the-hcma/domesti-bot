@@ -7,9 +7,11 @@ import logging
 import math
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from app import rule_conditions, rule_evaluator
 from app.api.schemas import RuleConditionsOut, RuleOut, UsersTogetherCondition
 from app.device_enums import RuleTrigger
 from app.location_history_retention import default_location_history_retention
@@ -23,11 +25,9 @@ _LAT0 = 41.0
 _LON0 = -73.9
 
 
-def _rule(*, enabled: bool = True) -> RuleOut:
+def _rule(*, enabled: bool = True, user_ids: tuple[str, ...] = ("user-a", "user-b")) -> RuleOut:
     return RuleOut(
-        conditions=RuleConditionsOut(
-            all=[UsersTogetherCondition(type="users_together", user_ids=["user-a", "user-b"])]
-        ),
+        conditions=RuleConditionsOut(all=[UsersTogetherCondition(type="users_together", user_ids=list(user_ids))]),
         cooldown_s=0,
         device_actions=[],
         enabled=enabled,
@@ -75,7 +75,7 @@ class _Rig:
                     tracking_device_label="Phone",
                     enabled=True,
                 )
-                for user_id in ("user-a", "user-b")
+                for user_id in ("user-a", "user-b", "user-c")
             ],
         )
         self.evaluator = RuleEvaluator(
@@ -167,3 +167,60 @@ async def test_a_disabled_rule_tracks_nothing(
 
     assert _lines(caplog, "began") == []
     assert _lines(caplog, "ended") == []
+
+
+@pytest.mark.asyncio
+async def test_names_follow_the_order_of_the_user_ids_in_the_line(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_rule(user_ids=("user-b", "user-a")))
+    with caplog.at_level(logging.INFO, logger="app.rule_evaluator"):
+        await rig.drive(until_s=400.0, split_at_s=None)
+
+    (began,) = _lines(caplog, "began")
+    assert "users=user-a,user-b names='USER-A and USER-B'" in began
+
+
+@pytest.mark.asyncio
+async def test_a_report_from_a_user_outside_the_pair_estimates_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_rule())
+    with caplog.at_level(logging.INFO, logger="app.rule_evaluator"):
+        await rig.drive(until_s=400.0, split_at_s=None)
+        calls: list[Any] = []
+        original = rule_conditions.estimate_together
+
+        def counting(*args: Any, **kwargs: Any) -> Any:
+            calls.append(args)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(rule_conditions, "estimate_together", counting)
+        await rig.report("user-c", _T0 + 410.0, lateral_m=900.0)
+        assert calls == []
+        await rig.report("user-a", _T0 + 420.0, lateral_m=0.0)
+
+    assert len(calls) >= 1
+    assert len(_lines(caplog, "began")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failure_while_tracking_is_logged_and_does_not_stop_the_rule_processing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_rule())
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Expected a pair, got nothing")
+
+    monkeypatch.setattr(rule_evaluator, "users_together_pairs", boom)
+    with caplog.at_level(logging.INFO, logger="app.rule_evaluator"):
+        await rig.report("user-a", _T0 + 10.0, lateral_m=0.0)
+
+    assert any("[rules] together tracking failed" in record.getMessage() for record in caplog.records)
