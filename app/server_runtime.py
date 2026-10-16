@@ -18,6 +18,7 @@ from app.device_state_watcher import (
     run_device_state_watchers,
 )
 from app.domesti_bot_cli import DeviceManagersState
+from app.fast_poll_targets import FastPollTargetsProvider, FastPollTargetsReader
 from app.rule_actions import lookup_preferred_label
 from app.rule_evaluator import RuleEvaluator
 from app.sensor_collection import run_sensor_collection_sampler
@@ -127,6 +128,10 @@ class DomestiServerRuntime:
             on_bool_seed=self._on_device_bool_seed,
             on_reading=self._on_device_reading_update,
         )
+
+    def build_fast_poll_targets_provider(self) -> FastPollTargetsProvider:
+        """Devices a turn-on rule watches inside its time window, re-read from the rules each call."""
+        return FastPollTargetsReader()
 
     def schedule_rule_location_evaluation(self, user_id: str) -> None:
         evaluator = self.rule_evaluator
@@ -249,6 +254,7 @@ class DomestiServerRuntime:
         self.watcher_stop = asyncio.Event()
         watchers = build_default_watchers(
             state,
+            fast_poll_targets=self.build_fast_poll_targets_provider(),
             wake_notifier=self.build_device_rule_wake_notifier(),
             interval_s=poll_interval_s,
         )
