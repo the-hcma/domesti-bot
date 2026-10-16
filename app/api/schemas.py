@@ -2240,11 +2240,12 @@ class RuleOut(BaseModel):
             raise ValueError("schedule_cron is only allowed when triggers includes scheduled")
         if not has_scheduled:
             self.schedule_cron = None
-            if rule_has_device_transition_condition(self):
-                # Edge-only rules have no eligibility wake, so several windows
-                # (top-level or under all/any) carry no scheduling ambiguity.
-                return self
-            _reject_nested_local_time_windows(self.conditions.all)
+            if not rule_has_device_transition_condition(self):
+                # An edge-only transition rule has no eligibility wake (see
+                # uses_local_time_window_eligibility_wake), so an ``any`` of
+                # windows is allowed there for "this window or that one". Top-level
+                # windows are still AND-ed, so two of them stay rejected below.
+                _reject_nested_local_time_windows(self.conditions.all)
             _reject_multiple_top_level_local_time_windows_for_eligibility(self)
             has_astronomical = any(
                 condition.type in ("after_sunset", "before_sunrise", "before_sunset")

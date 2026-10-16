@@ -20,6 +20,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import (
+    AfterSunsetCondition,
     AnyConditionsCondition,
     DevicesAnyInStateCondition,
     DevicesAnyTransitionedToStateCondition,
@@ -385,6 +386,29 @@ def test_transition_rule_accepts_any_of_two_windows() -> None:
     assert not uses_local_time_window_eligibility_wake(rule)
 
 
+def test_transition_rule_still_rejects_two_top_level_windows() -> None:
+    # Top-level windows are AND-ed, so two disjoint ones could never be met.
+    with pytest.raises(ValidationError, match="at most one top-level local_time_window"):
+        _transition_rule(
+            conditions=[
+                _transition_condition(),
+                LocalTimeWindowCondition(type="local_time_window", start_hhmm="06:30", end_hhmm="09:30"),
+                LocalTimeWindowCondition(type="local_time_window", start_hhmm="19:00", end_hhmm="22:00"),
+            ],
+        )
+
+
+def test_transition_rule_still_rejects_a_sun_anchor_next_to_a_window() -> None:
+    with pytest.raises(ValidationError, match="at most one eligibility window"):
+        _transition_rule(
+            conditions=[
+                _transition_condition(),
+                AfterSunsetCondition(type="after_sunset", offset_minutes=0, window_end="midnight"),
+                LocalTimeWindowCondition(type="local_time_window", start_hhmm="19:00", end_hhmm="22:00"),
+            ],
+        )
+
+
 def test_level_device_state_rule_still_rejects_nested_windows() -> None:
     with pytest.raises(ValidationError, match="nested under all/any"):
         _transition_rule(
@@ -438,6 +462,44 @@ async def test_two_window_rule_fires_only_inside_either_window(
 
     assert send_mock.call_count == (1 if fires else 0)
     assert lamp.calls == (["on"] if fires else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("hour", "minute", "fires"),
+    [(21, 59, False), (22, 0, True), (23, 59, True), (0, 0, True), (1, 59, True), (2, 0, False), (6, 30, True)],
+)
+async def test_a_window_crossing_midnight_works_inside_an_any_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hour: int,
+    minute: int,
+    fires: bool,
+) -> None:
+    night_or_morning = AnyConditionsCondition(
+        type="any",
+        conditions=[
+            LocalTimeWindowCondition(type="local_time_window", start_hhmm="22:00", end_hhmm="02:00"),
+            LocalTimeWindowCondition(type="local_time_window", start_hhmm="06:30", end_hhmm="09:30"),
+        ],
+    )
+    lamp = _FakeKasa(_LAMP_MAC, "Basement lamp")
+    evaluator = _evaluator(
+        tmp_path,
+        monkeypatch,
+        _kasa_state(_stairs(is_on=True), lamp),
+        at=_local(hour, minute),
+        rule=_transition_rule(conditions=[_transition_condition(), night_or_morning]),
+    )
+
+    with _patched_email() as send_mock:
+        await evaluator.on_device_state_change(
+            DeviceFamilyId.KASA,
+            _STAIRS_MAC,
+            transition=_transition(previous=False, current=True),
+        )
+
+    assert send_mock.call_count == (1 if fires else 0)
 
 
 @pytest.mark.asyncio
