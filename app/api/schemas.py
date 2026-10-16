@@ -2017,9 +2017,9 @@ class UsersTogetherCondition(BaseModel):
 
     type: Literal["users_together"]
     expected: bool = True
-    far_m: float = Field(default=150.0, gt=0)
-    min_confidence: float = Field(default=0.8, ge=0.5, le=1.0)
-    near_m: float = Field(default=30.0, ge=0)
+    far_m: float = Field(default=150.0, gt=0, le=10_000, allow_inf_nan=False)
+    min_confidence: float = Field(default=0.8, gt=0.5, le=1.0, allow_inf_nan=False)
+    near_m: float = Field(default=30.0, ge=0, le=10_000, allow_inf_nan=False)
     user_ids: list[str] = Field(min_length=2)
 
     @field_validator("user_ids")

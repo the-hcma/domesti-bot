@@ -293,18 +293,6 @@ export function formatArrivedTogetherLabel(
   return `${who} arrive at ${where} within ${gap} of each other`;
 }
 
-export function formatTogetherLabel(
-  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.UsersTogether }>,
-  context: RuleSummaryContext,
-): string {
-  const who = joinNames(userDisplayNames(condition.user_ids, context));
-  const wanted = condition.min_confidence ?? 0.8;
-  if (condition.expected === false) {
-    return `${who} not travelling together (confidence at most ${Math.round((1 - wanted) * 100)}%)`;
-  }
-  return `${who} travelling together (confidence at least ${Math.round(wanted * 100)}%)`;
-}
-
 export function formatPresenceEventLabel(
   condition: Extract<
     RuleConditionOut,
@@ -328,6 +316,18 @@ function formatSunOffsetPhrase(offsetMinutes: number, anchor: "sunrise" | "sunse
   const minutes = Math.abs(offsetMinutes);
   const unit = minutes === 1 ? "minute" : "minutes";
   return offsetMinutes > 0 ? `${minutes} ${unit} after ${anchor}` : `${minutes} ${unit} before ${anchor}`;
+}
+
+export function formatTogetherLabel(
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.UsersTogether }>,
+  context: RuleSummaryContext,
+): string {
+  const who = joinNames(userDisplayNames(condition.user_ids, context));
+  const wanted = condition.min_confidence ?? 0.8;
+  if (condition.expected === false) {
+    return `${who} not travelling together (confidence at most ${Math.round((1 - wanted) * 100)}%)`;
+  }
+  return `${who} travelling together (confidence at least ${Math.round(wanted * 100)}%)`;
 }
 
 export function formatTimingCondition(condition: RuleConditionOut): string | null {

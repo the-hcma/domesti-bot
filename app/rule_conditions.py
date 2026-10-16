@@ -3023,8 +3023,7 @@ def _together_detail(condition: UsersTogetherCondition, pair: _TogetherPair, rul
         track = estimate.unknown_track if estimate.unknown_track is not None else 0
         if estimate.unknown_reason is UnknownReason.NO_GOOD_FIXES:
             reason = (
-                f"{pair.names[track]} has no usable location fix "
-                f"({params.accuracy_limit_m:g} m accuracy or better needed)"
+                f"{pair.names[track]} has no fix with a reported accuracy of {params.accuracy_limit_m:g} m or better"
             )
         elif estimate.unknown_reason is UnknownReason.STALE_FIX:
             age = estimate.newest_fix_age_s[track] or 0.0
@@ -3033,7 +3032,9 @@ def _together_detail(condition: UsersTogetherCondition, pair: _TogetherPair, rul
                 f"(at most {_format_dwell_duration_s(params.freshness_s)} allowed)"
             )
         else:
-            reason = "too few usable fixes in the last minute to compare them"
+            recent = estimate.windows[0] if estimate.windows else None
+            counts = f" ({recent.usable} of {recent.total} instants)" if recent is not None else ""
+            reason = f"too few usable fixes in the last minute to compare them{counts}"
         return f"{who}: unknown, {reason}"
     windows = ", ".join(
         f"{_format_dwell_duration_s(window.length_s)} "
@@ -3042,7 +3043,9 @@ def _together_detail(condition: UsersTogetherCondition, pair: _TogetherPair, rul
     )
     parts = [f"{who}: confidence {estimate.confidence or 0.0:.2f} ({windows})"]
     if estimate.distance_now_m is not None:
-        parts.append(f"{_format_distance_m(estimate.distance_now_m)} apart at the latest shared fix")
+        lag = estimate.anchor_lag_s or 0.0
+        when = f" ({_format_dwell_elapsed_s(lag)} ago)" if lag >= 5.0 else ""
+        parts.append(f"{_format_distance_m(estimate.distance_now_m)} apart at the latest shared fix{when}")
     ages = [age for age in estimate.newest_fix_age_s if age is not None]
     if len(ages) == 2:
         parts.append(f"newest fixes {_format_dwell_elapsed_s(ages[0])} and {_format_dwell_elapsed_s(ages[1])} old")
@@ -3053,6 +3056,8 @@ def _together_detail(condition: UsersTogetherCondition, pair: _TogetherPair, rul
         parts.append(f"needs {condition.min_confidence:.2f}")
     else:
         parts.append(f"apart needs at most {1.0 - condition.min_confidence:.2f}")
+    if estimate.is_together(condition.min_confidence) is False and estimate.is_apart(condition.min_confidence) is False:
+        parts.append("in between, so neither together nor apart")
     return ", ".join(parts)
 
 

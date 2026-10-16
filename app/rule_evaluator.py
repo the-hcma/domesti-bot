@@ -31,6 +31,7 @@ from app.api.schemas import (
     UsersInsideGeofenceForSCondition,
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
+    UsersTogetherCondition,
     normalized_rule_notification_emails,
 )
 from app.astronomical_phrasing import (
@@ -3763,6 +3764,10 @@ def _format_rule_conditions_for_log(
 ) -> str:
     parts: list[str] = []
     for row in evaluation.conditions:
+        if isinstance(row.condition, UsersTogetherCondition):
+            # The confidence and window values are what the thresholds get tuned from.
+            parts.append(f"{row.label}={'met' if row.met else 'unmet'} ({row.detail})")
+            continue
         if (
             fire_source not in ("device_state", "dwell_satisfied", "eligibility", "scheduled")
             and RuleTrigger.EDGE_TRUE in rule.triggers

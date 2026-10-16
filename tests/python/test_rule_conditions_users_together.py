@@ -26,6 +26,7 @@ from app.rule_conditions import (
     evaluate_rule,
     presence_user_ids_for_rule,
 )
+from app.rule_evaluator import _format_rule_conditions_for_log
 from app.rule_validation import build_roster_user_id_lookup, collect_rule_user_ids
 
 _NOW = 1_800_000_000.0
@@ -139,8 +140,7 @@ def test_two_users_travelling_together_meet_the_condition_and_the_status_shows_t
 
     assert row.met is True
     assert row.label == "Travelling together (USER-A and USER-B)"
-    assert "confidence 0.9" in row.detail or "confidence 1.00" in row.detail
-    assert "1 min 1.00" in row.detail
+    assert "confidence 1.00 (1 min 1.00, 5 min 1.00, 10 min 1.00)" in row.detail
     assert "apart at the latest shared fix" in row.detail
     assert "newest fixes" in row.detail
     assert "needs 0.80" in row.detail
@@ -183,7 +183,7 @@ def test_a_user_without_any_location_makes_the_condition_unmet_in_both_forms() -
     for expected in (True, False):
         row = _row(_rule(expected=expected), ctx)
         assert row.met is False
-        assert "USER-B has no usable location fix (50 m accuracy or better needed)" in row.detail
+        assert "USER-B has no fix with a reported accuracy of 50 m or better" in row.detail
 
 
 def test_a_stale_second_phone_is_reported_with_its_age() -> None:
@@ -205,7 +205,7 @@ def test_too_little_data_in_the_last_minute_is_unknown_not_apart() -> None:
     for expected in (True, False):
         row = _row(_rule(expected=expected), ctx)
         assert row.met is False
-        assert "too few usable fixes in the last minute" in row.detail
+        assert "too few usable fixes in the last minute to compare them (" in row.detail
 
 
 def test_the_rules_accuracy_limit_decides_which_fixes_are_usable() -> None:
@@ -217,19 +217,31 @@ def test_the_rules_accuracy_limit_decides_which_fixes_are_usable() -> None:
     assert _row(_rule(min_location_accuracy_m=50), _ctx(histories)).met is True
     strict = _row(_rule(min_location_accuracy_m=10), _ctx(histories))
     assert strict.met is False
-    assert "10 m accuracy or better needed" in strict.detail
+    assert "reported accuracy of 10 m or better" in strict.detail
 
 
-def test_a_poor_fix_on_the_home_wifi_is_not_used() -> None:
-    wifi_user_b = _history(
-        every_s=19.0, last_at=_NOW - 3.0, accuracy_m=80, connection_type="w", wifi_ssid="HomeNet", lateral_m=3.0
-    )
-    ctx = _ctx({"user-a": _history(), "user-b": wifi_user_b}, home_ssid={"user-b": "HomeNet"})
+def test_the_home_wifi_exception_does_not_rescue_a_poor_fix_but_a_good_fix_on_it_counts() -> None:
+    def user_b(accuracy_m: int) -> dict[str, list[UserLocationOut]]:
+        return {
+            "user-a": _history(),
+            "user-b": _history(
+                every_s=19.0,
+                last_at=_NOW - 3.0,
+                accuracy_m=accuracy_m,
+                connection_type="w",
+                wifi_ssid="HomeNet",
+                lateral_m=3.0,
+            ),
+        }
 
-    row = _row(_rule(), ctx)
+    home: dict[str, str | None] = {"user-b": "HomeNet"}
 
-    assert row.met is False
-    assert "has no usable location fix" in row.detail
+    poor = _row(_rule(), _ctx(user_b(80), home_ssid=home))
+    good = _row(_rule(), _ctx(user_b(8), home_ssid=home))
+
+    assert poor.met is False
+    assert "has no fix with a reported accuracy of 50 m or better" in poor.detail
+    assert good.met is True
 
 
 def test_a_missing_accuracy_counts_as_low_quality() -> None:
@@ -295,6 +307,12 @@ def test_the_schema_defaults_and_round_trip() -> None:
     [
         {"user_ids": ["user-a"]},
         {"user_ids": ["user-a", " USER-A "]},
+        {"user_ids": ["user-a", "user-b"], "min_confidence": 0.5},
+        {"user_ids": ["user-a", "user-b"], "min_confidence": math.nan},
+        {"user_ids": ["user-a", "user-b"], "far_m": math.inf},
+        {"user_ids": ["user-a", "user-b"], "far_m": math.nan},
+        {"user_ids": ["user-a", "user-b"], "far_m": 150_000.0},
+        {"user_ids": ["user-a", "user-b"], "near_m": math.inf},
         {"user_ids": ["user-a", "user-b"], "min_confidence": 0.4},
         {"user_ids": ["user-a", "user-b"], "min_confidence": 1.1},
         {"user_ids": ["user-a", "user-b"], "near_m": 100.0, "far_m": 100.0},
@@ -304,3 +322,99 @@ def test_the_schema_defaults_and_round_trip() -> None:
 def test_the_schema_rejects_bad_shapes(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         UsersTogetherCondition(type="users_together", **kwargs)
+
+
+def _dead_zone_ctx() -> RuleEvaluationContext:
+    return _ctx(_pair(b_every_s=10.0, b_last_at=_NOW, lateral_m=100.0))
+
+
+def test_the_status_says_when_the_users_are_in_between() -> None:
+    assert "in between, so neither together nor apart" in _row(_rule(), _dead_zone_ctx()).detail
+    assert "in between" not in _row(_rule(), _ctx(_pair())).detail
+
+
+def test_the_status_mentions_how_long_ago_the_shared_fix_was_when_a_phone_lags() -> None:
+    detail = _row(_rule(), _ctx(_pair(b_last_at=_NOW - 40.0))).detail
+
+    assert "apart at the latest shared fix (40 sec ago)" in detail
+
+
+def test_with_the_history_the_evaluator_really_loads_the_longest_window_is_thinner_but_known() -> None:
+    # The evaluator reads 600 s of history; with the other phone 40 s behind, the oldest instants lack an earlier fix.
+    histories = {
+        "user-a": _history(span_s=600.0),
+        "user-b": _history(every_s=10.0, last_at=_NOW - 40.0, span_s=560.0, lateral_m=3.0),
+    }
+
+    row = _row(_rule(), _ctx(histories))
+
+    assert row.met is True
+    assert "10 min 1.00" in row.detail
+
+
+def test_a_fix_time_that_cannot_be_parsed_falls_back_to_the_report_time_and_an_unusable_row_is_skipped() -> None:
+    def broken_fix_time(location: UserLocationOut) -> UserLocationOut:
+        return location.model_copy(update={"fix_at": "not-a-time"})
+
+    def broken_both(location: UserLocationOut) -> UserLocationOut:
+        return location.model_copy(update={"fix_at": "not-a-time", "reported_at": "also-not-a-time"})
+
+    base = _pair()
+    fallback = {"user-a": base["user-a"], "user-b": [broken_fix_time(row) for row in base["user-b"]]}
+    unusable = {"user-a": base["user-a"], "user-b": [broken_both(row) for row in base["user-b"]]}
+
+    assert _row(_rule(), _ctx(fallback)).met is True
+    skipped = _row(_rule(), _ctx(unusable))
+    assert skipped.met is False
+    assert "USER-B has no fix with a reported accuracy" in skipped.detail
+
+
+def test_the_apart_form_and_three_users_give_the_expected_presence_users() -> None:
+    assert presence_user_ids_for_rule(_rule(expected=False), _ctx(_pair(lateral_m=400.0))) == ("user-a", "user-b")
+    assert presence_user_ids_for_rule(_rule(expected=False), _ctx(_pair())) == ()
+    third = {**_pair(), "user-c": _history(every_s=15.0, last_at=_NOW - 2.0, lateral_m=5.0)}
+    assert presence_user_ids_for_rule(_rule(user_ids=["user-a", "user-b", "user-c"]), _ctx(third)) == (
+        "user-a",
+        "user-b",
+        "user-c",
+    )
+
+
+def test_an_unknown_pair_next_to_a_clearly_failing_pair_is_still_unmet() -> None:
+    histories = {**_pair(lateral_m=400.0), "user-c": []}
+
+    for expected in (True, False):
+        rule = _rule(user_ids=["user-a", "user-b", "user-c"], expected=expected)
+        assert _row(rule, _ctx(histories)).met is False
+
+
+def test_inside_an_any_group_an_unknown_condition_does_not_satisfy_the_group_but_a_met_sibling_does() -> None:
+    unknown_together = UsersTogetherCondition(type="users_together", user_ids=["user-a", "user-b"])
+    sibling = UsersTogetherCondition(type="users_together", user_ids=["user-a", "user-c"])
+    histories = {**_pair(), "user-c": _history(every_s=15.0, last_at=_NOW - 2.0, lateral_m=5.0)}
+    stale_b = {**histories, "user-b": _history(every_s=19.0, last_at=_NOW - 120.0, lateral_m=3.0)}
+    rule = _rule(AnyConditionsCondition(type="any", conditions=[unknown_together, sibling]))
+
+    assert evaluate_rule(rule, _ctx(stale_b)).all_met is True
+    assert evaluate_rule(rule, _ctx({**stale_b, "user-c": []})).all_met is False
+
+
+def test_the_latest_fix_is_counted_once_even_when_the_history_already_holds_it() -> None:
+    histories = _pair()
+    estimate_detail = _row(_rule(), _ctx(histories)).detail
+
+    assert "low-quality" not in estimate_detail
+    only_latest = {"user-a": histories["user-a"][:1], "user-b": histories["user-b"][:1]}
+    assert (
+        "too few usable fixes in the last minute to compare them (0 of 7 instants)"
+        in _row(_rule(), _ctx(only_latest)).detail
+    )
+
+
+def test_the_fired_log_line_carries_the_confidence_detail() -> None:
+    rule = _rule()
+    evaluation = evaluate_rule(rule, _ctx(_pair()))
+
+    logged = _format_rule_conditions_for_log(rule, evaluation, fire_source="immediate")
+
+    assert logged.startswith("Travelling together (USER-A and USER-B)=met (USER-A and USER-B: confidence 1.00")
