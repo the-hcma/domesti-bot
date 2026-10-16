@@ -139,6 +139,7 @@ from app.rule_conditions import (
     ManualOffHold,
     RuleEvaluationContext,
     RuleEvaluationResult,
+    TogetherPair,
     _evaluate_condition,
     compute_rules_sun_out,
     consume_scheduled_dwell_episodes_for_fire,
@@ -146,10 +147,12 @@ from app.rule_conditions import (
     dwell_episode_blocks_fire,
     evaluate_rule,
     iter_dwell_for_s_conditions,
+    iter_users_together_conditions,
     manual_off_holds,
     natural_bool_for_device_family,
     presence_user_ids_for_rule,
     rule_eligible_since,
+    users_together_pairs,
 )
 from app.rule_fire_state_store import list_rule_fire_states, upsert_rule_fire_state
 from app.rule_held_off_notice_store import (
@@ -168,6 +171,7 @@ from app.rule_validation import (
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.stale_device_display_name_email import maybe_send_stale_display_name_digest
+from app.together_tracker import TogetherKey, TogetherTracker, format_together_event
 from app.vacation_mode import tick_vacation_mode
 from app.wifi_home_presence import (
     history_row_geofence_inside,
@@ -272,6 +276,8 @@ class RuleEvaluator:
         ] = {}
         # Delayed device_actions queue; mirrored to SQLite so it survives restart.
         self._deferred_device_actions: list[_DeferredDeviceAction] = []
+        # Which pairs of users are currently travelling together (breadcrumbs for auditing).
+        self._together_tracker = TogetherTracker()
         self._deferred_device_actions_task: asyncio.Task[None] | None = None
         self._deferred_device_actions_wake = asyncio.Event()
         # Natural bool streak per backend device (on/open/playing vs off/closed/paused).
@@ -1711,6 +1717,43 @@ class RuleEvaluator:
         for rule_id in stale_rule_ids:
             self._cancel_deferred_device_actions_for_rule(rule_id)
 
+    def _track_togetherness(
+        self,
+        user_id: str,
+        rules: list[RuleOut],
+        ctx: RuleEvaluationContext,
+    ) -> None:
+        """Log when a pair tracked by a ``users_together`` condition begins or stops travelling together.
+
+        Only pairs that an enabled rule references are estimated, and only when
+        one of the two users just reported. Failures are logged and never reach
+        the rule processing that called this.
+        """
+        try:
+            readings: dict[TogetherKey, tuple[TogetherPair, set[str]]] = {}
+            for rule in rules:
+                if not rule.enabled:
+                    continue
+                for condition in iter_users_together_conditions(rule.conditions.all):
+                    for pair in users_together_pairs(condition, rule, ctx):
+                        first, second = sorted(pair.roster_user_ids)
+                        key: TogetherKey = ((first, second), condition.min_confidence)
+                        if key not in readings:
+                            readings[key] = (pair, set())
+                        readings[key][1].add(rule.id)
+            for key, (pair, rule_ids) in readings.items():
+                if user_id not in pair.roster_user_ids:
+                    continue
+                event = self._together_tracker.observe(key, pair.estimate)
+                if event is not None:
+                    _LOGGER.info(
+                        "%s",
+                        format_together_event(event, names=" and ".join(pair.names), rule_ids=rule_ids),
+                    )
+            self._together_tracker.retain(readings)
+        except Exception:
+            _LOGGER.exception("[rules] together tracking failed")
+
     async def _tick_vacation_mode(
         self,
         ctx: RuleEvaluationContext,
@@ -1916,6 +1959,7 @@ class RuleEvaluator:
         ctx = await self._build_evaluation_context(
             now=datetime.fromtimestamp(self._now_fn(), tz=UTC),
         )
+        self._track_togetherness(user_id, rules, ctx)
         deferred_fired_rule_ids = await self._attempt_deferred_accuracy_edge_fires(
             user_id=user_id,
             location=location,
