@@ -487,7 +487,7 @@ export function summarizeRule(
     }
     if (condition.type === RuleConditionType.UsersArrivedTogether) {
       presence.push(formatArrivedTogetherLabel(condition, context));
-      return;
+      return false;
     }
     if (
       condition.type === RuleConditionType.UsersInsideGeofence
