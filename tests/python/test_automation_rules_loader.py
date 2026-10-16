@@ -273,3 +273,24 @@ def test_bundle_loads_a_device_turn_on_rule_written_as_plain_json(
     ]
     assert loaded.ignore_expected_device_changes is True
     assert [action.action for action in loaded.device_actions] == ["turn_on"]
+
+
+def test_example_bundle_gives_every_placeholder_device_id_one_display_name() -> None:
+    # A reused placeholder id makes a copied rule act on, or warn about, the wrong device.
+    example = Path(__file__).resolve().parents[2] / "automation-rules.json.example"
+    names_by_device_id: dict[str, set[str]] = {}
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            device_id, display_name = node.get("device_id"), node.get("display_name")
+            if isinstance(device_id, str) and isinstance(display_name, str):
+                names_by_device_id.setdefault(device_id, set()).add(display_name)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(json.loads(example.read_text(encoding="utf-8")))
+    shared = {device_id: sorted(names) for device_id, names in names_by_device_id.items() if len(names) > 1}
+    assert shared == {}

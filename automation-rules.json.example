@@ -964,7 +964,7 @@
             "devices": [
               {
                 "family_id": "kasa",
-                "device_id": "02:00:00:00:00:08",
+                "device_id": "02:00:00:00:00:09",
                 "display_name": "Basement bottom of stairs"
               }
             ]
