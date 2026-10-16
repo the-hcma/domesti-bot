@@ -43,15 +43,16 @@ class FastPollTargetsReader:
 
     The rules file is parsed once and again only when its modification time or
     size changes, so a call is a ``stat`` plus the time-window check, not a full
-    parse of every rule. A rules file that fails to load keeps the last good
-    answer and is logged once until it loads again, so a typo never switches the
-    fast polling off (or on) by accident. Meant to be called from a worker
-    thread (the first parse after an edit takes tens of milliseconds).
+    parse of every rule. When the file fails to load, the last rules that did
+    load stay in use and their windows are still checked against the current
+    time on every call, so a typo neither pins the fast polling on after its
+    window closes nor keeps it off after the window opens. The failure is logged
+    once until the file loads again. Meant to be called from a worker thread
+    (the first parse after an edit takes tens of milliseconds).
     """
 
     def __init__(self, *, now_fn: Callable[[], datetime] | None = None) -> None:
         self._cache_key: tuple[str, int, int] | None = None
-        self._last_good: FastPollTargets = frozenset()
         self._load_failed = False
         self._now_fn = now_fn
         self._rules: list[RuleOut] = []
@@ -60,18 +61,21 @@ class FastPollTargetsReader:
     def __call__(self) -> FastPollTargets:
         try:
             rules, timezone = self._rules_and_timezone()
-            now = self._now_fn() if self._now_fn is not None else datetime.now(timezone)
-            targets = fast_poll_targets_at(rules, now=now.astimezone(timezone))
         except Exception:
             if not self._load_failed:
-                _LOGGER.exception("[state-watcher] fast-poll targets unchanged: rules failed to load")
+                _LOGGER.exception(
+                    "[state-watcher] fast-poll targets: rules failed to load, keeping the last good rules"
+                )
             self._load_failed = True
-            return self._last_good
-        if self._load_failed:
-            _LOGGER.info("[state-watcher] fast-poll targets resumed: rules loaded again")
-        self._load_failed = False
-        self._last_good = targets
-        return targets
+            if self._timezone is None:
+                return frozenset()
+            rules, timezone = self._rules, self._timezone
+        else:
+            if self._load_failed:
+                _LOGGER.info("[state-watcher] fast-poll targets resumed: rules loaded again")
+            self._load_failed = False
+        now = self._now_fn() if self._now_fn is not None else datetime.now(timezone)
+        return fast_poll_targets_at(rules, now=now.astimezone(timezone))
 
     def _rules_and_timezone(self) -> tuple[list[RuleOut], ZoneInfo]:
         path = automation_rules_json_path()
@@ -79,8 +83,9 @@ class FastPollTargetsReader:
         cache_key = (str(path), stat.st_mtime_ns, stat.st_size)
         if cache_key != self._cache_key or self._timezone is None:
             bundle = load_automation_rules_bundle(path=path)
+            timezone = ZoneInfo(bundle.settings_location.timezone)
             self._rules = bundle.rules
-            self._timezone = ZoneInfo(bundle.settings_location.timezone)
+            self._timezone = timezone
             self._cache_key = cache_key
         return self._rules, self._timezone
 

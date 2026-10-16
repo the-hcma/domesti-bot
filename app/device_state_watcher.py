@@ -223,8 +223,9 @@ class KasaPollingWatcher(DeviceStateWatcher):
 
     Every device is read each ``interval_s``. Devices that a turn-on rule is
     watching inside its time window (``fast_poll_targets``) are read every
-    ``fast_interval_s`` as well, so that rule reacts sooner. With no such
-    device the cadence is exactly ``interval_s``.
+    ``fast_interval_s`` as well, so that rule reacts sooner. The provider is
+    consulted every ``fast_interval_s``; with no such device the devices are
+    still read only every ``interval_s``.
     """
 
     def __init__(
@@ -257,9 +258,10 @@ class KasaPollingWatcher(DeviceStateWatcher):
                 last_full_at = self._clock()
             elif targets:
                 await self._refresh_once(stop=stop, only=targets)
+            # Wake at the fast interval even with nothing to poll fast, so a window that
+            # opens mid-sleep is noticed within one fast tick; full refreshes stay on interval_s.
             until_full_s = max(0.0, last_full_at + self._interval_s - self._clock())
-            wait_s = min(self._fast_interval_s, until_full_s) if targets else until_full_s
-            await self._sleep(stop, wait_s)
+            await self._sleep(stop, min(self._fast_interval_s, until_full_s))
 
     async def _current_targets(self) -> FastPollTargets:
         """The devices to poll fast now; any failure means "none", never a dead watcher."""

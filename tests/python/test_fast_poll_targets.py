@@ -215,7 +215,7 @@ def test_reader_parses_the_file_once_and_again_only_when_it_changes(
         assert loader.call_count == 2
 
 
-def test_reader_keeps_the_last_answer_while_the_file_is_broken_and_recovers(
+def test_reader_keeps_checking_the_last_good_rules_against_the_clock_while_the_file_is_broken(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -223,11 +223,16 @@ def test_reader_keeps_the_last_answer_while_the_file_is_broken_and_recovers(
     bundle = tmp_path / "rules.json"
     _write_bundle(bundle, [_window_rule()])
     monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
-    reader = FastPollTargetsReader(now_fn=lambda: datetime(2026, 10, 15, 12, 0, tzinfo=UTC))
+    # 12:00, 14:00 and 12:30 UTC are 08:00, 10:00 and 08:30 in New York: inside, past and inside the window.
+    clock = {"now": datetime(2026, 10, 15, 12, 0, tzinfo=UTC)}
+    reader = FastPollTargetsReader(now_fn=lambda: clock["now"])
     assert reader() == _STAIRS
     bundle.write_text("{not json", encoding="utf-8")
     with caplog.at_level(logging.INFO, logger="app.fast_poll_targets"):
         assert reader() == _STAIRS
+        clock["now"] = datetime(2026, 10, 15, 14, 0, tzinfo=UTC)
+        assert reader() == frozenset()
+        clock["now"] = datetime(2026, 10, 15, 12, 30, tzinfo=UTC)
         assert reader() == _STAIRS
         _write_bundle(bundle, [_window_rule(enabled=False)])
         assert reader() == frozenset()
@@ -235,6 +240,16 @@ def test_reader_keeps_the_last_answer_while_the_file_is_broken_and_recovers(
     recoveries = [record for record in caplog.records if "resumed" in record.getMessage()]
     assert len(failures) == 1
     assert len(recoveries) == 1
+
+
+def test_reader_that_never_loaded_the_rules_polls_nothing_fast(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    bundle.write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+    assert FastPollTargetsReader(now_fn=lambda: datetime(2026, 10, 15, 12, 0, tzinfo=UTC))() == frozenset()
 
 
 class _FakeTime:
@@ -296,7 +311,7 @@ async def test_the_watched_device_is_polled_every_five_seconds_and_the_rest_ever
 @pytest.mark.asyncio
 async def test_without_a_watched_device_every_device_is_polled_only_on_the_global_interval() -> None:
     mgr = _kasa_mgr()
-    fake = _FakeTime(stop_after_sleeps=3)
+    fake = _FakeTime(stop_after_sleeps=5)
     watcher = KasaPollingWatcher(
         mgr,
         clock=fake.clock,
@@ -307,7 +322,8 @@ async def test_without_a_watched_device_every_device_is_polled_only_on_the_globa
 
     await asyncio.wait_for(watcher.run(stop=asyncio.Event()), timeout=5.0)
 
-    assert fake.sleeps == [10.0, 10.0, 10.0]
+    # The provider is consulted every 5 s, but the devices are read only at 0, 10 and 20 s.
+    assert fake.sleeps == [5.0] * 5
     assert _polled(mgr).count("192.0.2.7") == 3
     assert _polled(mgr).count("192.0.2.8") == 3
 
@@ -327,10 +343,11 @@ async def test_the_fast_cadence_starts_and_stops_with_the_window() -> None:
 
     await asyncio.wait_for(watcher.run(stop=asyncio.Event()), timeout=5.0)
 
-    # t=0 full (no window yet, so wait 10); t=10 full (window open, wait 5); t=15 fast; t=20 full (window closed).
-    assert fake.sleeps == [10.0, 5.0, 5.0, 10.0]
-    assert _polled(mgr).count("192.0.2.7") == 4
-    assert _polled(mgr).count("192.0.2.8") == 3
+    # t=0 full (no window yet); t=5 the window has opened, so only the watched light is read;
+    # t=10 full; t=15 the window has closed and nothing is read.
+    assert fake.sleeps == [5.0, 5.0, 5.0, 5.0]
+    assert _polled(mgr).count("192.0.2.7") == 3
+    assert _polled(mgr).count("192.0.2.8") == 2
 
 
 @pytest.mark.asyncio
@@ -370,8 +387,8 @@ async def test_a_provider_that_raises_never_stops_the_kasa_watcher(caplog: pytes
     with caplog.at_level(logging.ERROR, logger="app.device_state_watcher"):
         await asyncio.wait_for(watcher.run(stop=asyncio.Event()), timeout=5.0)
 
-    assert fake.sleeps == [10.0, 10.0, 10.0]
-    assert _polled(mgr).count("192.0.2.7") == 3
+    assert fake.sleeps == [5.0, 5.0, 5.0]
+    assert _polled(mgr).count("192.0.2.7") == 2
     assert len([record for record in caplog.records if "fast-poll targets unavailable" in record.getMessage()]) == 1
 
 
