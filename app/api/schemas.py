@@ -2298,22 +2298,22 @@ class RuleOut(BaseModel):
         )
 
 
-def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut]) -> bool:
-    for condition in conditions:
-        if isinstance(condition, LocalTimeWindowCondition):
-            return True
-        if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
-            if _condition_tree_contains_local_time_window(condition.conditions):
-                return True
-    return False
-
-
 def _condition_tree_contains_device_transition(conditions: list[RuleConditionOut]) -> bool:
     for condition in conditions:
         if isinstance(condition, DevicesAnyTransitionedToStateCondition):
             return True
         if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
             if _condition_tree_contains_device_transition(condition.conditions):
+                return True
+    return False
+
+
+def _condition_tree_contains_local_time_window(conditions: list[RuleConditionOut]) -> bool:
+    for condition in conditions:
+        if isinstance(condition, LocalTimeWindowCondition):
+            return True
+        if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            if _condition_tree_contains_local_time_window(condition.conditions):
                 return True
     return False
 

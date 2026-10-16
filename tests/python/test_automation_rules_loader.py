@@ -203,3 +203,65 @@ def test_automation_rules_paths_prefer_xdg_operator_file(
     assert automation_rules_operator_json_path() == operator.resolve()
     assert automation_rules_source() == "operator"
     assert load_automation_rules_bundle().version == 1
+
+
+def test_bundle_loads_a_device_turn_on_rule_written_as_plain_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rule = {
+        "id": "basement-stairs-companions",
+        "label": "Basement stairs companions",
+        "enabled": True,
+        "triggers": ["device_state"],
+        "cooldown_s": 0,
+        "min_location_accuracy_m": 50,
+        "ignore_expected_device_changes": True,
+        "notify_on_fire": True,
+        "notification_emails": ["ops@example.com"],
+        "conditions": {
+            "all": [
+                {
+                    "type": "devices_any_transitioned_to_state",
+                    "state": "on",
+                    "devices": [
+                        {"family_id": "kasa", "device_id": "02:00:00:00:00:09", "display_name": "Stairs light"},
+                    ],
+                },
+                {"type": "local_time_window", "start_hhmm": "06:30", "end_hhmm": "09:30"},
+            ],
+        },
+        "device_actions": [
+            {
+                "family_id": "kasa",
+                "device_id": "02:00:00:00:00:0a",
+                "display_name": "Basement lamp",
+                "action": "turn_on",
+            },
+        ],
+    }
+    bundle_path = tmp_path / "rules.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "device_id_resolution": "mac",
+                "settings_location": {
+                    "home_label": "Home",
+                    "lat": 41.194072,
+                    "lon": -73.8883254,
+                    "timezone": "America/New_York",
+                },
+                "rules": [rule],
+            },
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle_path))
+    loaded = load_automation_rules_bundle().rules[0]
+    assert [condition.type for condition in loaded.conditions.all] == [
+        "devices_any_transitioned_to_state",
+        "local_time_window",
+    ]
+    assert loaded.ignore_expected_device_changes is True
+    assert [action.action for action in loaded.device_actions] == ["turn_on"]
