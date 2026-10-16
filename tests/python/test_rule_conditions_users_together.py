@@ -197,6 +197,17 @@ def test_a_stale_second_phone_is_reported_with_its_age() -> None:
     assert "at most 45 sec allowed" in row.detail
 
 
+def test_a_fix_dated_in_the_future_is_ignored() -> None:
+    histories = _pair()
+    histories["user-b"] = [*histories["user-b"], _location(_NOW + 30.0, lateral_m=600.0)]
+    ctx = _ctx(histories)
+
+    row = _row(_rule(), ctx)
+
+    assert ", 3 m apart at the latest shared fix" in row.detail
+    assert "low-quality" not in row.detail
+
+
 def test_too_little_data_in_the_last_minute_is_unknown_not_apart() -> None:
     ctx = _ctx(
         {"user-a": _history(), "user-b": [_location(_NOW - 3.0, lateral_m=3.0), _location(_NOW - 100.0, lateral_m=3.0)]}

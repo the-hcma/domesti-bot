@@ -3122,10 +3122,12 @@ def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[Tra
     latest = ctx.user_locations.get(roster_user_id)
     if latest is not None and all(row.fix_at != latest.fix_at for row in locations):
         locations.append(latest)
+    now_epoch = ctx.now.timestamp()
     fixes: list[TrackFix] = []
     for location in locations:
         measured_at = _location_fix_at_epoch(location)
-        if measured_at is None:
+        # A fix dated after now (a phone clock running ahead) is no measurement of the present.
+        if measured_at is None or measured_at > now_epoch:
             continue
         fixes.append(
             TrackFix(
