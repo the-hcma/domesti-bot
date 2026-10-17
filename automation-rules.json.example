@@ -945,6 +945,165 @@
       ]
     }    ,
     {
+      "id": "garage-entry-together-open-kristens-side",
+      "label": "Entering together: open Kristen's garage door at the entry",
+      "triggers": [
+        "edge_true"
+      ],
+      "enabled": false,
+      "dry_run": true,
+      "cooldown_s": 600,
+      "min_location_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_emails": [
+        "operator@example.com"
+      ],
+      "conditions": {
+        "all": [
+          {
+            "type": "users_inside_geofence",
+            "geofence_id": "house",
+            "user_ids": [
+              "henrique"
+            ]
+          },
+          {
+            "type": "users_together",
+            "user_ids": [
+              "henrique",
+              "kristen"
+            ],
+            "expected": true
+          },
+          {
+            "type": "devices_all_in_state",
+            "state": "closed",
+            "devices": [
+              {
+                "family_id": "tailwind",
+                "device_id": "02:00:00:00:03:01:right",
+                "display_name": "Main garage right"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "tailwind",
+          "device_id": "02:00:00:00:03:01:right",
+          "display_name": "Main garage right",
+          "action": "open"
+        }
+      ]
+    },
+    {
+      "id": "garage-entry-alone-open-henriques-side",
+      "label": "Henrique enters alone: open Henrique's garage door at the entry",
+      "triggers": [
+        "edge_true"
+      ],
+      "enabled": false,
+      "dry_run": true,
+      "cooldown_s": 600,
+      "min_location_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_emails": [
+        "operator@example.com"
+      ],
+      "conditions": {
+        "all": [
+          {
+            "type": "users_inside_geofence",
+            "geofence_id": "house",
+            "user_ids": [
+              "henrique"
+            ]
+          },
+          {
+            "type": "users_together",
+            "user_ids": [
+              "henrique",
+              "kristen"
+            ],
+            "expected": false
+          },
+          {
+            "type": "devices_all_in_state",
+            "state": "closed",
+            "devices": [
+              {
+                "family_id": "tailwind",
+                "device_id": "02:00:00:00:03:01:left",
+                "display_name": "Main garage left"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "tailwind",
+          "device_id": "02:00:00:00:03:01:left",
+          "display_name": "Main garage left",
+          "action": "open"
+        }
+      ]
+    },
+    {
+      "id": "garage-entry-alone-open-kristens-side",
+      "label": "Kristen enters alone: open Kristen's garage door at the entry",
+      "triggers": [
+        "edge_true"
+      ],
+      "enabled": false,
+      "dry_run": true,
+      "cooldown_s": 600,
+      "min_location_accuracy_m": 50,
+      "notify_on_fire": true,
+      "notification_emails": [
+        "operator@example.com"
+      ],
+      "conditions": {
+        "all": [
+          {
+            "type": "users_inside_geofence",
+            "geofence_id": "house",
+            "user_ids": [
+              "kristen"
+            ]
+          },
+          {
+            "type": "users_together",
+            "user_ids": [
+              "henrique",
+              "kristen"
+            ],
+            "expected": false
+          },
+          {
+            "type": "devices_all_in_state",
+            "state": "closed",
+            "devices": [
+              {
+                "family_id": "tailwind",
+                "device_id": "02:00:00:00:03:01:right",
+                "display_name": "Main garage right"
+              }
+            ]
+          }
+        ]
+      },
+      "device_actions": [
+        {
+          "family_id": "tailwind",
+          "device_id": "02:00:00:00:03:01:right",
+          "display_name": "Main garage right",
+          "action": "open"
+        }
+      ]
+    },
+    {
       "id": "basement-stairs-companions",
       "label": "Basement stairs on: turn on lamp and LEDs (morning or evening)",
       "enabled": false,
