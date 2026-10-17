@@ -12,6 +12,7 @@ import {
   formatMinDistanceFromHomeLabel,
   formatPresenceEventLabel,
   formatTimingCondition,
+  formatTogetherLabel,
   resolveDeviceLabel,
   summarizeRule,
   type RuleSummaryContext,
@@ -58,6 +59,8 @@ function appendConditionTree(
       item.textContent = formatMinDistanceFromHomeLabel(condition, context);
     } else if (condition.type === RuleConditionType.UsersArrivedTogether) {
       item.textContent = formatArrivedTogetherLabel(condition, context);
+    } else if (condition.type === RuleConditionType.UsersTogether) {
+      item.textContent = formatTogetherLabel(condition, context);
     } else if (
       condition.type === RuleConditionType.UsersInsideGeofence
       || condition.type === RuleConditionType.UsersOutsideGeofence

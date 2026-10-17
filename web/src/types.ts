@@ -552,6 +552,18 @@ export type RuleConditionOut =
       min_outside_s: number;
     }
   | {
+      type: typeof RuleConditionType.UsersTogether;
+      /** True (default) wants the users together; false wants them clearly apart. */
+      expected?: boolean;
+      /** Distance at which the closeness reaches zero, beyond the accuracies (default 150). */
+      far_m?: number;
+      /** Confidence the users must reach (default 0.8); "apart" needs at most 1 minus this. */
+      min_confidence?: number;
+      /** Distance within which the users count as together, plus the accuracies (default 30). */
+      near_m?: number;
+      user_ids: string[];
+    }
+  | {
       type: typeof RuleConditionType.AfterSunset;
       offset_minutes: number;
       /** Default ``midnight`` — evening window ends at local midnight. */

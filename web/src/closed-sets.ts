@@ -206,6 +206,7 @@ export const RuleConditionType = {
   UsersMinDistanceFromHomeM: "users_min_distance_from_home_m",
   UsersOutsideGeofence: "users_outside_geofence",
   UsersOutsideGeofenceForS: "users_outside_geofence_for_s",
+  UsersTogether: "users_together",
 } as const;
 export type RuleConditionType =
   (typeof RuleConditionType)[keyof typeof RuleConditionType];

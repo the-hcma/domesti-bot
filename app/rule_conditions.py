@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 import re
@@ -45,6 +46,7 @@ from app.api.schemas import (
     UsersMinDistanceFromHomeMCondition,
     UsersOutsideGeofenceCondition,
     UsersOutsideGeofenceForSCondition,
+    UsersTogetherCondition,
 )
 from app.astronomical_phrasing import anchor_clause, parse_local_iso, unreachable_window_reason
 from app.automation_rules_loader import load_settings_location
@@ -68,6 +70,13 @@ from app.rule_actions import (
     lookup_preferred_label,
 )
 from app.rule_validation import resolve_device_ref_to_backend_id, resolve_roster_user_id
+from app.users_together import (
+    TogetherEstimate,
+    TogetherParams,
+    TrackFix,
+    UnknownReason,
+    estimate_together,
+)
 from app.wifi_home_presence import wifi_home_presence_applies
 
 if TYPE_CHECKING:
@@ -601,6 +610,7 @@ _ANY_GROUP_SAFE_TO_EVALUATE_TYPES: tuple[type[RuleConditionOut], ...] = (
     UsersInsideGeofenceCondition,
     UsersMinDistanceFromHomeMCondition,
     UsersOutsideGeofenceCondition,
+    UsersTogetherCondition,
 )
 
 _ANY_GROUP_TEMPORAL_GATE_TYPES: tuple[type[RuleConditionOut], ...] = (
@@ -1191,6 +1201,8 @@ def _evaluate_condition(
         return _evaluate_users_geofence(condition, rule, ctx, want_inside=False)
     if isinstance(condition, UsersOutsideGeofenceForSCondition):
         return _evaluate_users_outside_geofence_for_s(condition, rule, ctx)
+    if isinstance(condition, UsersTogetherCondition):
+        return _evaluate_users_together(condition, rule, ctx)
     return RuleConditionStatusOut(
         condition=condition,
         detail="Unsupported condition type for status display",
@@ -1630,6 +1642,15 @@ class _ArrivalRow:
     name: str
     problem: str | None
     roster_user_id: str | None
+
+
+@dataclass(frozen=True)
+class _TogetherPair:
+    """One pair of listed users and the estimate of how likely they travel together."""
+
+    estimate: TogetherEstimate
+    names: tuple[str, str]
+    roster_user_ids: tuple[str, str]
 
 
 def _arrival_rows(
@@ -2265,6 +2286,37 @@ def _evaluate_users_outside_geofence_for_s(
     )
 
 
+def _evaluate_users_together(
+    condition: UsersTogetherCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> RuleConditionStatusOut:
+    pairs, missing = _together_pairs(condition, rule, ctx)
+    label_names = [
+        _user_display_name(ctx, roster_user_id) if (roster_user_id := ctx.resolve_user_id(reference)) else reference
+        for reference in condition.user_ids
+    ]
+    who = _join_names(label_names)
+    label = f"Travelling together ({who})" if condition.expected else f"Not travelling together ({who})"
+    if missing:
+        detail = "; ".join(f'"{reference}": not in user roster (sync users from My Tracks)' for reference in missing)
+        return RuleConditionStatusOut(condition=condition, detail=detail, label=label, met=False)
+    if not pairs:
+        return RuleConditionStatusOut(
+            condition=condition,
+            detail=f"{who}: need at least two different users in the roster",
+            label=label,
+            met=False,
+        )
+    detail = "; ".join(_together_detail(condition, pair, rule) for pair in pairs)
+    return RuleConditionStatusOut(
+        condition=condition,
+        detail=detail,
+        label=label,
+        met=_together_verdict(condition, pairs) is True,
+    )
+
+
 def _format_distance_m(distance_m: float) -> str:
     if distance_m >= 1000.0:
         km = distance_m / 1000.0
@@ -2322,6 +2374,16 @@ def _format_iso_local_time(iso: str, tz: ZoneInfo) -> str:
 
 def _format_window_display(start_hhmm: str, end_hhmm: str) -> str:
     return f"{_format_hhmm_display(start_hhmm)} – {_format_hhmm_display(end_hhmm)}"
+
+
+def _location_fix_at_epoch(location: UserLocationOut) -> float | None:
+    """When the position was measured (falling back to when it was reported), or ``None`` if unparsable."""
+    for raw in (location.fix_at, location.reported_at):
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+    return None
 
 
 def _location_reported_at_epoch(location: UserLocationOut) -> float:
@@ -2604,6 +2666,8 @@ def _presence_user_ids_for_condition(
         ),
     ):
         return set()
+    if isinstance(condition, UsersTogetherCondition):
+        return _roster_user_ids_satisfying_users_together(condition, rule, ctx)
     # Non-presence leaves contribute no roster ids. Prefer empty over assert so a
     # newly added RuleConditionOut variant cannot crash scheduled-tick logging.
     _LOGGER.warning(
@@ -2938,6 +3002,142 @@ def _roster_user_ids_satisfying_users_outside_geofence_for_s(
             continue
         satisfied.add(roster_user_id)
     return satisfied
+
+
+def _roster_user_ids_satisfying_users_together(
+    condition: UsersTogetherCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> set[str]:
+    pairs, missing = _together_pairs(condition, rule, ctx)
+    if missing or _together_verdict(condition, pairs) is not True:
+        return set()
+    return {roster_user_id for pair in pairs for roster_user_id in pair.roster_user_ids}
+
+
+def _together_detail(condition: UsersTogetherCondition, pair: _TogetherPair, rule: RuleOut) -> str:
+    estimate = pair.estimate
+    who = _join_names(list(pair.names))
+    params = _together_params(condition, rule)
+    if not estimate.known:
+        track = estimate.unknown_track if estimate.unknown_track is not None else 0
+        if estimate.unknown_reason is UnknownReason.NO_GOOD_FIXES:
+            reason = (
+                f"{pair.names[track]} has no fix with a reported accuracy of {params.accuracy_limit_m:g} m or better"
+            )
+        elif estimate.unknown_reason is UnknownReason.STALE_FIX:
+            age = estimate.newest_fix_age_s[track] or 0.0
+            reason = (
+                f"{pair.names[track]}'s newest usable fix is {_format_dwell_elapsed_s(age)} old "
+                f"(at most {_format_dwell_duration_s(params.freshness_s)} allowed)"
+            )
+        else:
+            recent = estimate.windows[0] if estimate.windows else None
+            counts = f" ({recent.usable} of {recent.total} instants)" if recent is not None else ""
+            reason = f"too few usable fixes in the last minute to compare them{counts}"
+        return f"{who}: unknown, {reason}"
+    windows = ", ".join(
+        f"{_format_dwell_duration_s(window.length_s)} "
+        f"{'n/a' if window.closeness is None else f'{window.closeness:.2f}'}"
+        for window in estimate.windows
+    )
+    parts = [f"{who}: confidence {estimate.confidence or 0.0:.2f} ({windows})"]
+    if estimate.distance_now_m is not None:
+        lag = estimate.anchor_lag_s or 0.0
+        when = f" ({_format_dwell_elapsed_s(lag)} ago)" if lag >= 5.0 else ""
+        parts.append(f"{_format_distance_m(estimate.distance_now_m)} apart at the latest shared fix{when}")
+    ages = [age for age in estimate.newest_fix_age_s if age is not None]
+    if len(ages) == 2:
+        parts.append(f"newest fixes {_format_dwell_elapsed_s(ages[0])} and {_format_dwell_elapsed_s(ages[1])} old")
+    dropped = sum(estimate.dropped_quality) + sum(estimate.dropped_speed)
+    if dropped:
+        parts.append(f"{dropped} low-quality fix{'es' if dropped != 1 else ''} ignored")
+    if condition.expected:
+        parts.append(f"needs {condition.min_confidence:.2f}")
+    else:
+        parts.append(f"apart needs at most {1.0 - condition.min_confidence:.2f}")
+    if estimate.is_together(condition.min_confidence) is False and estimate.is_apart(condition.min_confidence) is False:
+        parts.append("in between, so neither together nor apart")
+    return ", ".join(parts)
+
+
+def _together_pairs(
+    condition: UsersTogetherCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> tuple[list[_TogetherPair], list[str]]:
+    """The estimate for every pair of listed users, plus the references that are not in the roster."""
+    missing: list[str] = []
+    roster_user_ids: list[str] = []
+    for reference in condition.user_ids:
+        roster_user_id = ctx.resolve_user_id(reference)
+        if roster_user_id is None:
+            missing.append(reference)
+        elif roster_user_id not in roster_user_ids:
+            roster_user_ids.append(roster_user_id)
+    if missing:
+        return [], missing
+    params = _together_params(condition, rule)
+    now = ctx.now.timestamp()
+    tracks = {roster_user_id: _track_for_user(ctx, roster_user_id) for roster_user_id in roster_user_ids}
+    pairs = [
+        _TogetherPair(
+            estimate=estimate_together(tracks[first], tracks[second], now=now, params=params),
+            names=(_user_display_name(ctx, first), _user_display_name(ctx, second)),
+            roster_user_ids=(first, second),
+        )
+        for first, second in itertools.combinations(roster_user_ids, 2)
+    ]
+    return pairs, []
+
+
+def _together_params(condition: UsersTogetherCondition, rule: RuleOut) -> TogetherParams:
+    return TogetherParams(
+        accuracy_limit_m=float(rule.min_location_accuracy_m),
+        far_m=condition.far_m,
+        near_m=condition.near_m,
+    )
+
+
+def _together_verdict(condition: UsersTogetherCondition, pairs: list[_TogetherPair]) -> bool | None:
+    """Whether every pair satisfies the condition: ``None`` when it cannot be told, ``False`` when any pair does not."""
+    answers = [
+        pair.estimate.is_together(condition.min_confidence)
+        if condition.expected
+        else pair.estimate.is_apart(condition.min_confidence)
+        for pair in pairs
+    ]
+    if not answers or all(answer is None for answer in answers):
+        return None
+    if any(answer is False for answer in answers):
+        return False
+    if any(answer is None for answer in answers):
+        return None
+    return True
+
+
+def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[TrackFix]:
+    """The user's stored history plus the latest fix as a track of measured positions."""
+    locations = list(ctx.user_location_history.get(roster_user_id, ()))
+    latest = ctx.user_locations.get(roster_user_id)
+    if latest is not None and all(row.fix_at != latest.fix_at for row in locations):
+        locations.append(latest)
+    now_epoch = ctx.now.timestamp()
+    fixes: list[TrackFix] = []
+    for location in locations:
+        measured_at = _location_fix_at_epoch(location)
+        # A fix dated after now (a phone clock running ahead) is no measurement of the present.
+        if measured_at is None or measured_at > now_epoch:
+            continue
+        fixes.append(
+            TrackFix(
+                accuracy_m=None if location.accuracy_m is None else float(location.accuracy_m),
+                at=measured_at,
+                lat=location.lat,
+                lon=location.lon,
+            ),
+        )
+    return fixes
 
 
 def _user_counts_inside_geofence_for_rule(

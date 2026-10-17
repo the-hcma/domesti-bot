@@ -132,6 +132,7 @@ export function collectUserIdsFromConditions(
       || condition.type === RuleConditionType.UsersMinDistanceFromHomeM
       || condition.type === RuleConditionType.UsersOutsideGeofence
       || condition.type === RuleConditionType.UsersOutsideGeofenceForS
+      || condition.type === RuleConditionType.UsersTogether
     ) {
       for (const userId of condition.user_ids) {
         ids.add(userId);
@@ -317,6 +318,18 @@ function formatSunOffsetPhrase(offsetMinutes: number, anchor: "sunrise" | "sunse
   return offsetMinutes > 0 ? `${minutes} ${unit} after ${anchor}` : `${minutes} ${unit} before ${anchor}`;
 }
 
+export function formatTogetherLabel(
+  condition: Extract<RuleConditionOut, { type: typeof RuleConditionType.UsersTogether }>,
+  context: RuleSummaryContext,
+): string {
+  const who = joinNames(userDisplayNames(condition.user_ids, context));
+  const wanted = condition.min_confidence ?? 0.8;
+  if (condition.expected === false) {
+    return `${who} not travelling together (confidence at most ${Math.round((1 - wanted) * 100)}%)`;
+  }
+  return `${who} travelling together (confidence at least ${Math.round(wanted * 100)}%)`;
+}
+
 export function formatTimingCondition(condition: RuleConditionOut): string | null {
   switch (condition.type) {
     case RuleConditionType.UsersArrivedTogether:
@@ -325,6 +338,7 @@ export function formatTimingCondition(condition: RuleConditionOut): string | nul
     case RuleConditionType.UsersMinDistanceFromHomeM:
     case RuleConditionType.UsersOutsideGeofence:
     case RuleConditionType.UsersOutsideGeofenceForS:
+    case RuleConditionType.UsersTogether:
     case RuleConditionType.DeviceNotManuallyOffWithin:
     case RuleConditionType.DevicesAllInState:
     case RuleConditionType.DevicesAnyInState:
@@ -514,6 +528,10 @@ export function summarizeRule(
     }
     if (condition.type === RuleConditionType.UsersArrivedTogether) {
       presence.push(formatArrivedTogetherLabel(condition, context));
+      return false;
+    }
+    if (condition.type === RuleConditionType.UsersTogether) {
+      presence.push(formatTogetherLabel(condition, context));
       return false;
     }
     if (
