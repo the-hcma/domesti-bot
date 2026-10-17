@@ -3862,51 +3862,37 @@ def _format_trigger_device_display(
     return format_device_display(trimmed, preferred_label)
 
 
-def _notification_detail_from_condition(
+def _notification_details_from_condition(
     condition: RuleConditionOut,
     rule: RuleOut,
     ctx: RuleEvaluationContext,
-) -> str | None:
+) -> list[str]:
+    """The status lines of the met conditions whose facts belong in the fire email."""
     if (
         isinstance(
             condition,
             (DevicesAllInStateCondition, DevicesAnyInStateCondition),
         )
         and condition.state == DeviceConditionState.OPEN
-    ):
+    ) or isinstance(condition, Ep1ReadingCompareCondition | UsersArrivedTogetherCondition | UsersTogetherCondition):
         row = _evaluate_condition(condition, rule, ctx)
-        if row.met:
-            return row.detail
-        return None
-    if isinstance(condition, Ep1ReadingCompareCondition):
-        row = _evaluate_condition(condition, rule, ctx)
-        if row.met:
-            return row.detail
-        return None
-    if isinstance(condition, AllConditionsCondition):
-        for child in condition.conditions:
-            detail = _notification_detail_from_condition(child, rule, ctx)
-            if detail is not None:
-                return detail
-        return None
-    if isinstance(condition, AnyConditionsCondition):
-        for child in condition.conditions:
-            detail = _notification_detail_from_condition(child, rule, ctx)
-            if detail is not None:
-                return detail
-        return None
-    return None
+        return [row.detail] if row.met else []
+    if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+        return [
+            line for child in condition.conditions for line in _notification_details_from_condition(child, rule, ctx)
+        ]
+    return []
 
 
 def _notification_detail_from_evaluation(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> str | None:
-    for condition in rule.conditions.all:
-        detail = _notification_detail_from_condition(condition, rule, ctx)
-        if detail is not None:
-            return detail
-    return None
+    """The facts behind a decision, one line per condition that has some, or ``None``."""
+    lines = [
+        line for condition in rule.conditions.all for line in _notification_details_from_condition(condition, rule, ctx)
+    ]
+    return "\n".join(lines) if lines else None
 
 
 def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:

@@ -124,6 +124,7 @@ class _Rig:
         )
         self.opened: list[tuple[str, str]] = []
         self.opened_at: list[float] = []
+        self.details: list[str | None] = []
         self._send = MagicMock(side_effect=self._record, return_value=RuleNotificationEmailOutcome.disabled())
         self._patch = patch("app.rule_evaluator.send_rule_notification_email", self._send)
         self._patch.start()
@@ -134,6 +135,7 @@ class _Rig:
         lines = cast(tuple[str, ...], kwargs["would_do_lines"])
         self.opened.extend((rule.id, line) for line in lines)
         self.opened_at.extend(self.clock["now"] for _ in lines)
+        self.details.append(cast(str | None, kwargs["notification_detail"]))
         return RuleNotificationEmailOutcome.disabled()
 
     async def close(self) -> None:
@@ -203,6 +205,10 @@ async def test_two_phones_in_one_car_open_kristens_side_once_at_the_geofence(
         )
         assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
         assert rig.opened[0][1].startswith("Open Main garage right")
+        (detail,) = rig.details
+        assert detail is not None
+        assert detail.startswith("Henrique and Kristen: confidence ")
+        assert " m apart at the latest shared fix" in detail
         crossing = arrives_at - 250.0 / _SPEED_MPS
         assert crossing <= rig.opened_at[0] <= crossing + _REPORT_EVERY_S + 2.0
     finally:
