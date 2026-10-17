@@ -388,7 +388,12 @@ _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
 
 def _apart_for_s(closeness_at: Sequence[float | None], params: TogetherParams) -> float:
-    """Seconds back from the anchor over which every sampled instant is known and clearly not together."""
+    """Seconds back from the anchor over which every sampled instant is known and below half closeness.
+
+    Half closeness is the middle of the near-to-far ramp and does not depend on a rule's ``min_confidence``,
+    mirroring the "together" run: it dates when a separation began, while whether the pair counts as apart
+    is decided separately by ``is_recently_apart``. The result is a lower bound, in whole steps.
+    """
     reach = 0
     for index, closeness in enumerate(closeness_at):
         if closeness is None or closeness >= _TOGETHER_RUN_CLOSENESS:
