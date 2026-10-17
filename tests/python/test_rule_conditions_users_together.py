@@ -26,7 +26,7 @@ from app.rule_conditions import (
     evaluate_rule,
     presence_user_ids_for_rule,
 )
-from app.rule_evaluator import _format_rule_conditions_for_log
+from app.rule_evaluator import _format_rule_conditions_for_log, _togetherness_detail_lines
 from app.rule_validation import build_roster_user_id_lookup, collect_rule_user_ids
 
 _NOW = 1_800_000_000.0
@@ -429,3 +429,30 @@ def test_the_fired_log_line_carries_the_confidence_detail() -> None:
     logged = _format_rule_conditions_for_log(rule, evaluation, fire_source="immediate")
 
     assert logged.startswith("Travelling together (USER-A and USER-B)=met (USER-A and USER-B: confidence 1.00")
+
+
+def test_the_fire_email_carries_the_togetherness_facts_when_the_condition_is_met() -> None:
+    (detail,) = _togetherness_detail_lines(evaluate_rule(_rule(), _ctx(_pair())))
+
+    assert detail.startswith("USER-A and USER-B: confidence 1.00")
+    assert "3 m apart at the latest shared fix" in detail
+    assert "needs 0.80" in detail
+
+
+def test_the_fire_email_carries_the_apart_facts_for_an_apart_rule() -> None:
+    (detail,) = _togetherness_detail_lines(evaluate_rule(_rule(expected=False), _ctx(_pair(lateral_m=400.0))))
+
+    assert detail.startswith("USER-A and USER-B: confidence 0.0")
+    assert "m apart at the latest shared fix" in detail
+
+
+def test_the_fire_email_has_no_togetherness_facts_when_the_condition_is_unmet() -> None:
+    assert _togetherness_detail_lines(evaluate_rule(_rule(), _ctx(_pair(lateral_m=400.0)))) == []
+
+
+def test_the_togetherness_facts_come_from_the_evaluation_that_made_the_decision() -> None:
+    decided = evaluate_rule(_rule(), _ctx(_pair()))
+    later = evaluate_rule(_rule(), _ctx(_pair(lateral_m=400.0)))
+
+    assert _togetherness_detail_lines(decided) != []
+    assert _togetherness_detail_lines(later) == []

@@ -24,7 +24,11 @@ from app.rule_conditions import (
     evaluate_rule,
     presence_user_ids_for_rule,
 )
-from app.rule_evaluator import _geofence_dwell_accuracy_limit_m, _max_dwell_min_inside_s
+from app.rule_evaluator import (
+    _geofence_dwell_accuracy_limit_m,
+    _max_dwell_min_inside_s,
+    _togetherness_detail_lines,
+)
 from app.rule_validation import build_roster_user_id_lookup
 
 _TZ = ZoneInfo("America/New_York")
@@ -407,3 +411,10 @@ def test_a_delayed_upload_measured_before_the_history_window_is_not_an_arrival()
     row = evaluate_rule(_rule(), ctx).conditions[0]
     assert row.met is False
     assert "arrival at House not seen" in row.detail
+
+
+def test_the_fire_email_carries_the_observed_arrival_gap() -> None:
+    assert _togetherness_detail_lines(evaluate_rule(_rule(), _ctx(henrique_gap_s=30.0))) == [
+        "Henrique and Kristen arrived at House 30 sec apart (limit 1 min)"
+    ]
+    assert _togetherness_detail_lines(evaluate_rule(_rule(), _ctx(henrique_gap_s=90.0))) == []

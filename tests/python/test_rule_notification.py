@@ -386,6 +386,23 @@ def test_build_rule_notification_bodies_includes_device_states_and_link(
     assert "Sent by: domesti-bot · Rule away-shutdown (automation)" in html
 
 
+def test_build_rule_notification_bodies_keeps_every_detail_line_and_escapes_the_html(
+    tmp_path: Path,
+) -> None:
+    detail = "A and B: confidence 0.97 (1 min 0.99), 2 m apart\nA & B arrived at <House> 30 sec apart (limit 1 min)"
+    plain, html = build_rule_notification_bodies(
+        _sample_rule(),
+        cache_path=tmp_path / "cache.sqlite",
+        dry_run=True,
+        notification_detail=detail,
+    )
+    assert detail in plain
+    assert (
+        "<p>A and B: confidence 0.97 (1 min 0.99), 2 m apart<br>"
+        "A &amp; B arrived at &lt;House&gt; 30 sec apart (limit 1 min)</p>"
+    ) in html
+
+
 def test_build_rule_notification_bodies_sequence_completed_includes_cancelled_note(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
