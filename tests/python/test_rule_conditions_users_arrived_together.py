@@ -96,18 +96,41 @@ def _outside() -> UserLocationOut:
     )
 
 
+def _fix(at: float, *, inside: bool, accuracy_m: int = 20) -> UserLocationOut:
+    """A fix taken at ``at`` inside the geofence, or about 400 km away from it."""
+    stamp = datetime.fromtimestamp(at, tz=ZoneInfo("UTC")).isoformat().replace("+00:00", "Z")
+    return UserLocationOut(
+        accuracy_m=accuracy_m,
+        lat=41.1941 if inside else 44.0,
+        lon=-73.8883 if inside else -73.0,
+        fix_at=stamp,
+        reported_at=stamp,
+        source="owntracks",
+    )
+
+
+def _arrival_history(arrived_at: float, *, accuracy_m: int = 20) -> tuple[UserLocationOut, ...]:
+    """Newest first: outside a second before ``arrived_at``, inside from then until now."""
+    now = _NOW.timestamp()
+    inside = [_fix(at, inside=True, accuracy_m=accuracy_m) for at in (now, (arrived_at + now) / 2, arrived_at)]
+    return (*inside, _fix(arrived_at - 1.0, inside=False))
+
+
 def _ctx(
     *,
     henrique_gap_s: float | None,
     kristen_since: float | None = None,
     geofences: tuple[GeofenceOut, ...] | None = None,
     user_locations: dict[str, UserLocationOut] | None = None,
+    histories: dict[str, tuple[UserLocationOut, ...]] | None = None,
 ) -> RuleEvaluationContext:
     """Kristen arrived at ``kristen_since`` (default 5 min ago); Henrique ``henrique_gap_s`` after her."""
     kristen_at = _NOW.timestamp() - 300.0 if kristen_since is None else kristen_since
-    inside_since: dict[tuple[str, str], float] = {("kristen", "house"): kristen_at}
+    built: dict[str, tuple[UserLocationOut, ...]] = {"kristen": _arrival_history(kristen_at)}
     if henrique_gap_s is not None:
-        inside_since[("henrique", "house")] = kristen_at + henrique_gap_s
+        built["henrique"] = _arrival_history(kristen_at + henrique_gap_s)
+    else:
+        built["henrique"] = (_fix(_NOW.timestamp(), inside=True),)
     names = {"henrique": "Henrique", "kristen": "Kristen"}
     return RuleEvaluationContext(
         geofences=(_geofence(),) if geofences is None else geofences,
@@ -117,7 +140,7 @@ def _ctx(
         timezone=_TZ,
         user_display_names=names,
         user_locations=({"henrique": _inside(), "kristen": _inside()} if user_locations is None else user_locations),
-        geofence_inside_since=inside_since,
+        user_location_history=built if histories is None else histories,
     )
 
 
@@ -140,9 +163,10 @@ def test_entering_a_little_past_the_limit_is_not_together() -> None:
 
 
 def test_someone_home_for_hours_is_not_together_with_a_new_arrival() -> None:
-    row = evaluate_rule(_rule(), _ctx(henrique_gap_s=4 * 3600.0)).conditions[0]
+    # Their history holds no fix outside the geofence, so no arrival was seen.
+    row = evaluate_rule(_rule(), _ctx(henrique_gap_s=None)).conditions[0]
     assert row.met is False
-    assert "apart, more than the 1 min limit" in row.detail
+    assert "Henrique: arrival at House not seen" in row.detail
 
 
 def test_order_of_arrival_does_not_matter() -> None:
@@ -177,7 +201,9 @@ def test_not_together_when_a_location_is_too_inaccurate_to_trust() -> None:
 def test_not_together_when_a_users_arrival_time_is_unknown() -> None:
     row = evaluate_rule(_rule(), _ctx(henrique_gap_s=None)).conditions[0]
     assert row.met is False
-    assert row.detail == "Henrique: arrival time at House unknown"
+    assert row.detail == (
+        "Henrique: arrival at House not seen (no accurate fix outside it before the inside ones in the last 10 min)"
+    )
 
 
 def test_home_wifi_does_not_rescue_a_low_accuracy_fix() -> None:
@@ -243,10 +269,82 @@ def test_edge_rule_does_not_fire_for_a_user_arriving_alone() -> None:
     assert evaluate_rule(_rule(), _ctx(henrique_gap_s=90.0)).all_met is False
 
 
-def test_a_lone_arrived_together_rule_turns_on_arrival_time_tracking() -> None:
-    # Arrival times are only recorded while some enabled rule needs them, so this
-    # rule must not depend on a dwell rule happening to exist.
+def test_a_lone_arrived_together_rule_does_not_turn_on_dwell_arrival_tracking() -> None:
+    # It reads each user's stored fixes at its own accuracy limit, not the shared inside-since map.
     rule = _rule()
-    assert _geofence_dwell_accuracy_limit_m([rule]) == rule.min_location_accuracy_m
-    assert _geofence_dwell_accuracy_limit_m([rule.model_copy(update={"enabled": False})]) is None
+    assert _geofence_dwell_accuracy_limit_m([rule]) is None
     assert _max_dwell_min_inside_s([_rule(max_gap_s=240)]) == 240.0
+
+
+def test_each_rule_judges_arrivals_by_its_own_accuracy_limit() -> None:
+    now = _NOW.timestamp()
+    kristen = (
+        _fix(now, inside=True, accuracy_m=5),
+        _fix(now - 250.0, inside=True, accuracy_m=5),
+        _fix(now - 300.0, inside=True, accuracy_m=30),
+        _fix(now - 301.0, inside=False, accuracy_m=5),
+    )
+    henrique = (
+        _fix(now, inside=True, accuracy_m=5),
+        _fix(now - 100.0, inside=True, accuracy_m=5),
+        _fix(now - 280.0, inside=True, accuracy_m=30),
+        _fix(now - 290.0, inside=False, accuracy_m=5),
+    )
+    ctx = _ctx(
+        henrique_gap_s=0.0,
+        user_locations={
+            "henrique": _fix(now, inside=True, accuracy_m=5),
+            "kristen": _fix(now, inside=True, accuracy_m=5),
+        },
+        histories={"henrique": henrique, "kristen": kristen},
+    )
+    loose = _rule().model_copy(update={"min_location_accuracy_m": 50})
+    strict = _rule().model_copy(update={"min_location_accuracy_m": 10})
+
+    assert evaluate_rule(loose, ctx).conditions[0].detail == (
+        "Henrique and Kristen arrived at House 20 sec apart (limit 1 min)"
+    )
+    assert evaluate_rule(strict, ctx).conditions[0].detail == (
+        "Henrique and Kristen arrived at House 2 min 30 sec apart, more than the 1 min limit"
+    )
+
+
+def test_a_poor_fix_outside_does_not_count_as_an_observed_entry() -> None:
+    now = _NOW.timestamp()
+    henrique = (
+        _fix(now, inside=True),
+        _fix(now - 200.0, inside=True),
+        _fix(now - 201.0, inside=False, accuracy_m=500),
+    )
+    ctx = _ctx(henrique_gap_s=0.0, histories={"kristen": _arrival_history(now - 200.0), "henrique": henrique})
+    row = evaluate_rule(_rule(), ctx).conditions[0]
+    assert row.met is False
+    assert "Henrique: arrival at House not seen" in row.detail
+
+
+def test_the_last_entry_counts_when_a_user_left_and_came_back() -> None:
+    now = _NOW.timestamp()
+    henrique = (
+        _fix(now, inside=True),
+        _fix(now - 30.0, inside=True),
+        _fix(now - 31.0, inside=False),
+        _fix(now - 200.0, inside=True),
+        _fix(now - 201.0, inside=False),
+    )
+    ctx = _ctx(henrique_gap_s=0.0, histories={"kristen": _arrival_history(now - 20.0), "henrique": henrique})
+    row = evaluate_rule(_rule(), ctx).conditions[0]
+    assert row.met is True
+    assert row.detail == "Henrique and Kristen arrived at House 10 sec apart (limit 1 min)"
+
+
+def test_a_fix_dated_in_the_future_is_not_an_arrival() -> None:
+    now = _NOW.timestamp()
+    kristen = (_fix(now + 60.0, inside=True), _fix(now, inside=False), _fix(now - 100.0, inside=False))
+    ctx = _ctx(
+        henrique_gap_s=0.0,
+        user_locations={"henrique": _inside(), "kristen": _inside()},
+        histories={"kristen": kristen, "henrique": _arrival_history(now - 100.0)},
+    )
+    row = evaluate_rule(_rule(), ctx).conditions[0]
+    assert row.met is False
+    assert "Kristen: arrival at House not seen" in row.detail

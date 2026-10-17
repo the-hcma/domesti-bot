@@ -1722,13 +1722,17 @@ def _arrival_rows(
                 ),
             )
             continue
-        inside_since = ctx.geofence_inside_since.get((roster_user_id, condition.geofence_id))
+        inside_since = _observed_arrival_at(ctx, roster_user_id, geofence, min_accuracy_m)
         if inside_since is None:
+            seen = _format_dwell_duration_s(ctx.walkback_max_s)
             rows.append(
                 _ArrivalRow(
                     inside_since=None,
                     name=name,
-                    problem=f"{name}: arrival time at {geofence.label} unknown",
+                    problem=(
+                        f"{name}: arrival at {geofence.label} not seen "
+                        f"(no accurate fix outside it before the inside ones in the last {seen})"
+                    ),
                     roster_user_id=roster_user_id,
                 ),
             )
@@ -2577,6 +2581,45 @@ def _parse_hhmm(hhmm: str) -> int | None:
     if hour < 0 or hour > 23 or minute < 0 or minute > 59:
         return None
     return hour * 60 + minute
+
+
+def _observed_arrival_at(
+    ctx: RuleEvaluationContext,
+    roster_user_id: str,
+    geofence: GeofenceOut,
+    min_accuracy_m: int,
+) -> float | None:
+    """When the user's current stay inside the geofence began, if that entry was actually seen.
+
+    Read from the stored fixes that are accurate enough for the rule (so each
+    rule judges arrivals by its own accuracy limit), an arrival is the first
+    fix of the run of inside fixes that ends now, and it counts only when an
+    accurate fix outside the geofence came right before that run. A history
+    that starts inside leaves the arrival unknown: the person may have been
+    home for hours, and the oldest retained fix says nothing about when they
+    arrived. Fixes dated after the evaluation time are ignored.
+    """
+    now_epoch = ctx.now.timestamp()
+    rows = list(ctx.user_location_history.get(roster_user_id, ()))
+    latest = ctx.user_locations.get(roster_user_id)
+    if latest is not None and all(row.fix_at != latest.fix_at for row in rows):
+        rows.append(latest)
+    fixes: list[tuple[float, bool]] = []
+    for row in rows:
+        measured_at = _location_fix_at_epoch(row)
+        if measured_at is None or measured_at > now_epoch or not _location_usable_for_rule(row, min_accuracy_m):
+            continue
+        distance_m = _haversine_m(row.lat, row.lon, geofence.center_lat, geofence.center_lon)
+        fixes.append((measured_at, distance_m <= geofence.radius_m))
+    fixes.sort()
+    index = len(fixes) - 1
+    if index < 0 or not fixes[index][1]:
+        return None
+    while index >= 0 and fixes[index][1]:
+        index -= 1
+    if index < 0:
+        return None
+    return fixes[index + 1][0]
 
 
 def _past_arrival_window(condition: UsersInsideGeofenceForSCondition, inside_s: float) -> bool:
