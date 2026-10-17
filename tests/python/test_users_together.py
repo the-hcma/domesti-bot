@@ -524,6 +524,7 @@ def _estimate(confidence: float | None, recent: float | None) -> TogetherEstimat
     return TogetherEstimate(
         anchor=_NOW,
         anchor_lag_s=0.0,
+        apart_for_s=None,
         confidence=confidence,
         distance_now_m=None,
         dropped_quality=(0, 0),
@@ -550,3 +551,27 @@ def test_is_apart_is_symmetric_and_leaves_a_dead_zone_in_between() -> None:
     assert _estimate(0.5, 0.5).is_apart(0.8) is False
     assert _estimate(0.5, 0.5).is_together(0.8) is False
     assert _estimate(None, None).is_apart(0.8) is None
+
+
+def test_is_recently_apart_looks_only_at_the_last_minute() -> None:
+    assert _estimate(0.6, 0.2).is_recently_apart(0.8) is True
+    assert _estimate(0.1, 0.3).is_recently_apart(0.8) is False
+    assert _estimate(None, None).is_recently_apart(0.8) is None
+
+
+def test_apart_for_s_counts_back_over_known_clearly_apart_instants_only() -> None:
+    now_apart = estimate_together(
+        _phone_a(),
+        [_fix(at, lateral_m=3.0 if at < _NOW - 100.0 else 400.0) for at in _times(every_s=10.0, last_at=_NOW)],
+        now=_NOW,
+    )
+    together_now = estimate_together(_phone_a(), _track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), now=_NOW)
+    short = estimate_together(
+        _track(_times(every_s=10.0, last_at=_NOW, span_s=70.0)),
+        _track(_times(every_s=10.0, last_at=_NOW, span_s=70.0), lateral_m=400.0),
+        now=_NOW,
+    )
+
+    assert now_apart.apart_for_s is not None and 80.0 <= now_apart.apart_for_s <= 110.0
+    assert together_now.apart_for_s == 0.0
+    assert short.apart_for_s is not None and short.apart_for_s <= 70.0

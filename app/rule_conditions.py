@@ -165,6 +165,15 @@ class RuleEvaluationResult:
     conditions: list[RuleConditionStatusOut]
 
 
+@dataclass(frozen=True)
+class TogetherPair:
+    """One pair of listed users and the estimate of how likely they travel together."""
+
+    estimate: TogetherEstimate
+    names: tuple[str, str]
+    roster_user_ids: tuple[str, str]
+
+
 def compute_rules_sun_out(
     settings: SettingsLocationOut,
     *,
@@ -1644,15 +1653,6 @@ class _ArrivalRow:
     roster_user_id: str | None
 
 
-@dataclass(frozen=True)
-class _TogetherPair:
-    """One pair of listed users and the estimate of how likely they travel together."""
-
-    estimate: TogetherEstimate
-    names: tuple[str, str]
-    roster_user_ids: tuple[str, str]
-
-
 def _arrival_rows(
     condition: UsersArrivedTogetherCondition,
     rule: RuleOut,
@@ -2481,6 +2481,17 @@ def iter_dwell_for_s_conditions(
     return found
 
 
+def iter_users_together_conditions(conditions: list[RuleConditionOut]) -> list[UsersTogetherCondition]:
+    """Every ``users_together`` condition nested anywhere under ``conditions``."""
+    found: list[UsersTogetherCondition] = []
+    for condition in conditions:
+        if isinstance(condition, UsersTogetherCondition):
+            found.append(condition)
+        elif isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
+            found.extend(iter_users_together_conditions(condition.conditions))
+    return found
+
+
 def natural_bool_for_device_family(
     ctx: RuleEvaluationContext,
     *,
@@ -3015,7 +3026,7 @@ def _roster_user_ids_satisfying_users_together(
     return {roster_user_id for pair in pairs for roster_user_id in pair.roster_user_ids}
 
 
-def _together_detail(condition: UsersTogetherCondition, pair: _TogetherPair, rule: RuleOut) -> str:
+def _together_detail(condition: UsersTogetherCondition, pair: TogetherPair, rule: RuleOut) -> str:
     estimate = pair.estimate
     who = _join_names(list(pair.names))
     params = _together_params(condition, rule)
@@ -3065,8 +3076,36 @@ def _together_pairs(
     condition: UsersTogetherCondition,
     rule: RuleOut,
     ctx: RuleEvaluationContext,
-) -> tuple[list[_TogetherPair], list[str]]:
-    """The estimate for every pair of listed users, plus the references that are not in the roster."""
+    *,
+    reporting_user_id: str | None = None,
+) -> tuple[list[TogetherPair], list[str]]:
+    """The estimate for every pair of listed users, plus the references that are not in the roster.
+
+    With ``reporting_user_id`` only the pairs that include that user are estimated.
+    """
+    roster_pairs, missing = _together_roster_pairs(condition, ctx)
+    if missing:
+        return [], missing
+    params = _together_params(condition, rule)
+    now = ctx.now.timestamp()
+    wanted = [pair for pair in roster_pairs if reporting_user_id is None or reporting_user_id in pair]
+    tracks = {roster_user_id: _track_for_user(ctx, roster_user_id) for pair in wanted for roster_user_id in pair}
+    pairs = [
+        TogetherPair(
+            estimate=estimate_together(tracks[first], tracks[second], now=now, params=params),
+            names=(_user_display_name(ctx, first), _user_display_name(ctx, second)),
+            roster_user_ids=(first, second),
+        )
+        for first, second in wanted
+    ]
+    return pairs, []
+
+
+def _together_roster_pairs(
+    condition: UsersTogetherCondition,
+    ctx: RuleEvaluationContext,
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Every pair of the condition's roster users, plus the references that are not in the roster."""
     missing: list[str] = []
     roster_user_ids: list[str] = []
     for reference in condition.user_ids:
@@ -3077,18 +3116,7 @@ def _together_pairs(
             roster_user_ids.append(roster_user_id)
     if missing:
         return [], missing
-    params = _together_params(condition, rule)
-    now = ctx.now.timestamp()
-    tracks = {roster_user_id: _track_for_user(ctx, roster_user_id) for roster_user_id in roster_user_ids}
-    pairs = [
-        _TogetherPair(
-            estimate=estimate_together(tracks[first], tracks[second], now=now, params=params),
-            names=(_user_display_name(ctx, first), _user_display_name(ctx, second)),
-            roster_user_ids=(first, second),
-        )
-        for first, second in itertools.combinations(roster_user_ids, 2)
-    ]
-    return pairs, []
+    return list(itertools.combinations(roster_user_ids, 2)), []
 
 
 def _together_params(condition: UsersTogetherCondition, rule: RuleOut) -> TogetherParams:
@@ -3099,7 +3127,7 @@ def _together_params(condition: UsersTogetherCondition, rule: RuleOut) -> Togeth
     )
 
 
-def _together_verdict(condition: UsersTogetherCondition, pairs: list[_TogetherPair]) -> bool | None:
+def _together_verdict(condition: UsersTogetherCondition, pairs: list[TogetherPair]) -> bool | None:
     """Whether every pair satisfies the condition: ``None`` when it cannot be told, ``False`` when any pair does not."""
     answers = [
         pair.estimate.is_together(condition.min_confidence)
@@ -3222,6 +3250,30 @@ def _wifi_home_presence_applies_for_location(
 
 def _to_iso_z(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def users_together_pairs(
+    condition: UsersTogetherCondition,
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+    *,
+    reporting_user_id: str | None = None,
+) -> list[TogetherPair]:
+    """The togetherness estimate for every pair of the condition's users (empty when a user is not in the roster).
+
+    With ``reporting_user_id`` only the pairs that include that user are estimated.
+    """
+    pairs, missing = _together_pairs(condition, rule, ctx, reporting_user_id=reporting_user_id)
+    return [] if missing else pairs
+
+
+def users_together_roster_pairs(
+    condition: UsersTogetherCondition,
+    ctx: RuleEvaluationContext,
+) -> list[tuple[str, str]]:
+    """The roster user pairs of the condition, without estimating them (empty when a user is not in the roster)."""
+    pairs, missing = _together_roster_pairs(condition, ctx)
+    return [] if missing else pairs
 
 
 def presence_user_ids_for_rule(

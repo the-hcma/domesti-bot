@@ -119,6 +119,10 @@ class TogetherEstimate:
     one track is to blame (``windows`` is empty for ``NO_GOOD_FIXES`` and
     ``STALE_FIX``).
 
+    ``together_for_s`` and ``apart_for_s`` are how far back from the anchor the
+    instants stay known and together (closeness of at least 0.5), or known and
+    apart (below 0.5); unknown instants end either run.
+
     The windows end at the ``anchor``, the latest instant both users are covered,
     which can be up to ``freshness_s`` before ``now``: ``anchor_lag_s`` says how
     far, and ``distance_now_m`` is the distance at the anchor (``None`` when
@@ -127,6 +131,7 @@ class TogetherEstimate:
 
     anchor: float | None
     anchor_lag_s: float | None
+    apart_for_s: float | None
     confidence: float | None
     distance_now_m: float | None
     dropped_quality: tuple[int, int]
@@ -153,6 +158,17 @@ class TogetherEstimate:
             return None
         ceiling = 1.0 - min_confidence + _COMPARE_TOLERANCE
         return self.confidence <= ceiling and self.recent_closeness <= ceiling
+
+    def is_recently_apart(self, min_confidence: float) -> bool | None:
+        """``None`` when unknown; otherwise whether the last minute alone is clearly apart.
+
+        Unlike :meth:`is_apart` this ignores the 5 and 10 minute windows, which stay
+        high for minutes after a real separation. It answers "are they apart now?",
+        which is what ending a together episode needs.
+        """
+        if self.recent_closeness is None:
+            return None
+        return self.recent_closeness <= 1.0 - min_confidence + _COMPARE_TOLERANCE
 
     def is_together(self, min_confidence: float) -> bool | None:
         """``None`` when unknown; otherwise whether the confidence and the shortest window both reach the minimum."""
@@ -255,6 +271,7 @@ def estimate_together(
         return TogetherEstimate(
             anchor=None,
             anchor_lag_s=None,
+            apart_for_s=None,
             confidence=None,
             distance_now_m=None,
             dropped_quality=dropped_quality,
@@ -303,6 +320,7 @@ def estimate_together(
     return TogetherEstimate(
         anchor=anchor,
         anchor_lag_s=max(0.0, now - anchor),
+        apart_for_s=_apart_for_s(closeness_at, settings),
         confidence=min(1.0, max(0.0, confidence)),
         distance_now_m=distance_now_m,
         dropped_quality=dropped_quality,
@@ -367,6 +385,21 @@ def pair_closeness(
 _COMPARE_TOLERANCE: Final[float] = 1e-9
 _EARTH_RADIUS_M: Final[float] = 6_371_000.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
+
+
+def _apart_for_s(closeness_at: Sequence[float | None], params: TogetherParams) -> float:
+    """Seconds back from the anchor over which every sampled instant is known and below half closeness.
+
+    Half closeness is the middle of the near-to-far ramp and does not depend on a rule's ``min_confidence``,
+    mirroring the "together" run: it dates when a separation began, while whether the pair counts as apart
+    is decided separately by ``is_recently_apart``. The result is a lower bound, in whole steps.
+    """
+    reach = 0
+    for index, closeness in enumerate(closeness_at):
+        if closeness is None or closeness >= _TOGETHER_RUN_CLOSENESS:
+            break
+        reach = index
+    return reach * params.step_s
 
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
