@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.api.schemas import RuleOut
 from app.automation_rules_loader import load_automation_rules_bundle
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
@@ -22,13 +23,14 @@ from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
 _EXAMPLE = Path(__file__).resolve().parents[2] / "automation-rules.json.example"
-_TOGETHER = "garage-entry-together-open-kristens-side"
 _HENRIQUE_ALONE = "garage-entry-alone-open-henriques-side"
-_KRISTEN_ALONE = "garage-entry-alone-open-kristens-side"
 _HOME = (41.194072, -73.888325)
+_KRISTEN_ALONE = "garage-entry-alone-open-kristens-side"
 _M_PER_DEG = 2 * math.pi * 6_371_000.0 / 360.0
+_REPORT_EVERY_S = 10.0
 _SPEED_MPS = 20.0
 _T0 = 1_700_000_000.0
+_TOGETHER = "garage-entry-together-open-kristens-side"
 
 
 class _Door:
@@ -38,14 +40,6 @@ class _Door:
         self.door_key = identifier
         self.preferred_label = label
         self.is_open = False
-
-
-def _car(at: float, *, arrives_at: float, lateral_m: float = 0.0) -> tuple[float, float]:
-    """A car driving north toward the house at 20 m/s, reaching its center at ``arrives_at``."""
-    south_m = max(0.0, _SPEED_MPS * (arrives_at - at))
-    lat = _HOME[0] - south_m / _M_PER_DEG
-    lon = _HOME[1] + lateral_m / (_M_PER_DEG * math.cos(math.radians(_HOME[0])))
-    return lat, lon
 
 
 class _Rig:
@@ -135,10 +129,10 @@ class _Rig:
         self._patch.start()
 
     def _record(self, *_args: object, **kwargs: object) -> RuleNotificationEmailOutcome:
-        rule = kwargs["rule"]
+        rule = cast(RuleOut, kwargs["rule"])
         assert kwargs["dry_run"] is True
         lines = cast(tuple[str, ...], kwargs["would_do_lines"])
-        self.opened.extend((getattr(rule, "id"), line) for line in lines)
+        self.opened.extend((rule.id, line) for line in lines)
         self.opened_at.extend(self.clock["now"] for _ in lines)
         return RuleNotificationEmailOutcome.disabled()
 
@@ -184,6 +178,14 @@ def _approach(
     ]
 
 
+def _car(at: float, *, arrives_at: float, lateral_m: float = 0.0) -> tuple[float, float]:
+    """A car driving north toward the house at 20 m/s, reaching its center at ``arrives_at``."""
+    south_m = max(0.0, _SPEED_MPS * (arrives_at - at))
+    lat = _HOME[0] - south_m / _M_PER_DEG
+    lon = _HOME[1] + lateral_m / (_M_PER_DEG * math.cos(math.radians(_HOME[0])))
+    return lat, lon
+
+
 @pytest.mark.asyncio
 async def test_two_phones_in_one_car_open_kristens_side_once_at_the_geofence(
     tmp_path: Path,
@@ -194,13 +196,15 @@ async def test_two_phones_in_one_car_open_kristens_side_once_at_the_geofence(
     until = arrives_at + 120.0
     try:
         await rig.drive(
-            _approach("henrique", arrives_at=arrives_at, every_s=10.0, offset_s=0.0, lateral_m=0.0, until=until)
+            _approach(
+                "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
+            )
             + _approach("kristen", arrives_at=arrives_at, every_s=19.0, offset_s=3.0, lateral_m=3.0, until=until),
         )
         assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
         assert rig.opened[0][1].startswith("Open Main garage right")
         crossing = arrives_at - 250.0 / _SPEED_MPS
-        assert crossing <= rig.opened_at[0] <= crossing + 12.0
+        assert crossing <= rig.opened_at[0] <= crossing + _REPORT_EVERY_S + 2.0
     finally:
         await rig.close()
 
@@ -237,7 +241,9 @@ async def test_henrique_arriving_alone_opens_his_side_when_kristen_is_already_ho
     try:
         await rig.drive(
             [(_T0 + 30.0 * index, "kristen", at_home) for index in range(int((until - _T0) // 30.0) + 1)]
-            + _approach("henrique", arrives_at=arrives_at, every_s=10.0, offset_s=0.0, lateral_m=0.0, until=until),
+            + _approach(
+                "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
+            ),
         )
         assert [rule_id for rule_id, _line in rig.opened] == [_HENRIQUE_ALONE]
         assert rig.opened[0][1].startswith("Open Main garage left")
@@ -255,8 +261,55 @@ async def test_a_passenger_phone_that_went_quiet_leaves_the_entry_undecided_and_
     until = arrives_at + 120.0
     try:
         await rig.drive(
-            _approach("henrique", arrives_at=arrives_at, every_s=10.0, offset_s=0.0, lateral_m=0.0, until=until)
+            _approach(
+                "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
+            )
             + _approach("kristen", arrives_at=arrives_at, every_s=19.0, offset_s=3.0, lateral_m=3.0, until=_T0 + 600.0),
+        )
+        assert rig.opened == []
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
+async def test_a_slow_driver_phone_delays_the_together_rule_to_the_drivers_own_entry_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The together rule listens only to one user's entry, so it waits for that phone's first inside fix."""
+    rig = _Rig(tmp_path, monkeypatch)
+    arrives_at = _T0 + 700.0
+    until = arrives_at + 120.0
+    crossing = arrives_at - 250.0 / _SPEED_MPS
+    try:
+        await rig.drive(
+            _approach("henrique", arrives_at=arrives_at, every_s=30.0, offset_s=0.0, lateral_m=0.0, until=until)
+            + _approach(
+                "kristen", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=1.0, lateral_m=3.0, until=until
+            ),
+        )
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+        assert crossing < rig.opened_at[0] <= crossing + 30.0
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
+async def test_a_home_phone_with_no_recent_fix_leaves_an_arrival_alone_undecided_and_opens_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Known gap: a phone that stopped reporting cannot be told apart from one in the car, so nothing opens."""
+    rig = _Rig(tmp_path, monkeypatch)
+    arrives_at = _T0 + 700.0
+    until = arrives_at + 120.0
+    at_home = _car(_T0, arrives_at=_T0, lateral_m=20.0)
+    try:
+        await rig.drive(
+            [(_T0, "kristen", at_home)]
+            + _approach(
+                "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
+            ),
         )
         assert rig.opened == []
     finally:
