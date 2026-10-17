@@ -1402,10 +1402,15 @@ class RuleEvaluator:
                 ctx = await self._build_evaluation_context(
                     now=datetime.fromtimestamp(self._now_fn(), tz=UTC),
                 )
-                notification_detail = _notification_detail_from_evaluation(
-                    rule,
-                    ctx,
-                )
+                detail_lines = [
+                    line
+                    for line in (
+                        _notification_detail_from_evaluation(rule, ctx),
+                        *_togetherness_detail_lines(evaluation),
+                    )
+                    if line
+                ]
+                notification_detail = "\n".join(detail_lines) or None
                 if deferred_enqueued:
                     insert_pending_fire_notification(
                         self._cache_path,
@@ -3862,37 +3867,51 @@ def _format_trigger_device_display(
     return format_device_display(trimmed, preferred_label)
 
 
-def _notification_details_from_condition(
+def _notification_detail_from_condition(
     condition: RuleConditionOut,
     rule: RuleOut,
     ctx: RuleEvaluationContext,
-) -> list[str]:
-    """The status lines of the met conditions whose facts belong in the fire email."""
+) -> str | None:
     if (
         isinstance(
             condition,
             (DevicesAllInStateCondition, DevicesAnyInStateCondition),
         )
         and condition.state == DeviceConditionState.OPEN
-    ) or isinstance(condition, Ep1ReadingCompareCondition | UsersArrivedTogetherCondition | UsersTogetherCondition):
+    ):
         row = _evaluate_condition(condition, rule, ctx)
-        return [row.detail] if row.met else []
-    if isinstance(condition, AllConditionsCondition | AnyConditionsCondition):
-        return [
-            line for child in condition.conditions for line in _notification_details_from_condition(child, rule, ctx)
-        ]
-    return []
+        if row.met:
+            return row.detail
+        return None
+    if isinstance(condition, Ep1ReadingCompareCondition):
+        row = _evaluate_condition(condition, rule, ctx)
+        if row.met:
+            return row.detail
+        return None
+    if isinstance(condition, AllConditionsCondition):
+        for child in condition.conditions:
+            detail = _notification_detail_from_condition(child, rule, ctx)
+            if detail is not None:
+                return detail
+        return None
+    if isinstance(condition, AnyConditionsCondition):
+        for child in condition.conditions:
+            detail = _notification_detail_from_condition(child, rule, ctx)
+            if detail is not None:
+                return detail
+        return None
+    return None
 
 
 def _notification_detail_from_evaluation(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> str | None:
-    """The facts behind a decision, one line per condition that has some, or ``None``."""
-    lines = [
-        line for condition in rule.conditions.all for line in _notification_details_from_condition(condition, rule, ctx)
-    ]
-    return "\n".join(lines) if lines else None
+    for condition in rule.conditions.all:
+        detail = _notification_detail_from_condition(condition, rule, ctx)
+        if detail is not None:
+            return detail
+    return None
 
 
 def _format_unmet_conditions_for_log(evaluation: RuleEvaluationResult) -> str:
@@ -4419,6 +4438,20 @@ def _together_key(rule: RuleOut, condition: UsersTogetherCondition, first: str, 
         near_m=condition.near_m,
         users=(low, high),
     )
+
+
+def _togetherness_detail_lines(evaluation: RuleEvaluationResult) -> list[str]:
+    """The status lines of the met togetherness conditions, as the decision saw them.
+
+    Read from the rows of the evaluation that made the rule fire, not from a
+    later evaluation, so the email shows the values the decision was based on.
+    Only top-level conditions are covered.
+    """
+    return [
+        row.detail
+        for row in evaluation.conditions
+        if row.met and isinstance(row.condition, UsersArrivedTogetherCondition | UsersTogetherCondition)
+    ]
 
 
 def _user_triggered_geofence_edge(
