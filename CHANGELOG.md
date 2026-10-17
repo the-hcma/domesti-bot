@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.1.0](https://github.com/the-hcma/domesti-bot/compare/domesti-bot-v2.0.0...domesti-bot-v2.1.0) (2026-10-17)
+
+
+### Features
+
+* add device_not_manually_off_within rule condition ([#835](https://github.com/the-hcma/domesti-bot/issues/835)) ([#836](https://github.com/the-hcma/domesti-bot/issues/836)) ([9da4c15](https://github.com/the-hcma/domesti-bot/commit/9da4c15474f41b1db9e6e69bc76e8761d675559e))
+* add dry_run mode for rules that emails what they would do ([#840](https://github.com/the-hcma/domesti-bot/issues/840)) ([#841](https://github.com/the-hcma/domesti-bot/issues/841)) ([9b0f9e0](https://github.com/the-hcma/domesti-bot/commit/9b0f9e0842d41753122a4390097e26d103491f79))
+* add max_inside_s window to users_inside_geofence_for_s and bound the garage alone rules ([#833](https://github.com/the-hcma/domesti-bot/issues/833)) ([#845](https://github.com/the-hcma/domesti-bot/issues/845)) ([cea9ee7](https://github.com/the-hcma/domesti-bot/commit/cea9ee7cd9c2a6370f1e38e8403c4a539de50a5d))
+* add sample garage arrival rules that pick the door to open ([#833](https://github.com/the-hcma/domesti-bot/issues/833)) ([#844](https://github.com/the-hcma/domesti-bot/issues/844)) ([dd54a8e](https://github.com/the-hcma/domesti-bot/commit/dd54a8e34f361c0107eafed89335949f86e544dc))
+* add users_arrived_together rule condition ([#834](https://github.com/the-hcma/domesti-bot/issues/834)) ([#842](https://github.com/the-hcma/domesti-bot/issues/842)) ([f1a1b02](https://github.com/the-hcma/domesti-bot/commit/f1a1b02ebae3ac214be712996a169e036a79293d))
+* add users_together rule condition scored from interpolated tracks ([#856](https://github.com/the-hcma/domesti-bot/issues/856)) ([#858](https://github.com/the-hcma/domesti-bot/issues/858)) ([bca4373](https://github.com/the-hcma/domesti-bot/commit/bca43735404d0fdb560c55115b1f3a5b102a1bbf))
+* email the reason when a rule is held off by a manual turn-off ([#838](https://github.com/the-hcma/domesti-bot/issues/838)) ([#839](https://github.com/the-hcma/domesti-bot/issues/839)) ([c6c907f](https://github.com/the-hcma/domesti-bot/commit/c6c907f3ffb5042213c8ac77e51e7466efdd9691))
+* include the togetherness facts in the rule fire email ([#865](https://github.com/the-hcma/domesti-bot/issues/865)) ([abcef31](https://github.com/the-hcma/domesti-bot/commit/abcef31edd4dd73f8495b90b04d9dd1111d413aa))
+* log when users begin and stop travelling together ([#860](https://github.com/the-hcma/domesti-bot/issues/860)) ([#861](https://github.com/the-hcma/domesti-bot/issues/861)) ([928496d](https://github.com/the-hcma/domesti-bot/commit/928496d4f425ed588c5a77e32a297e80c4285536))
+* poll devices watched by turn-on rules every 5 s while their time window is open ([#854](https://github.com/the-hcma/domesti-bot/issues/854)) ([#855](https://github.com/the-hcma/domesti-bot/issues/855)) ([2709bcd](https://github.com/the-hcma/domesti-bot/commit/2709bcd6507c9b88ee3c0d5aae6c272a126d3353))
+* **rules:** add devices_any_transitioned_to_state edge condition ([#850](https://github.com/the-hcma/domesti-bot/issues/850)) ([0e4743e](https://github.com/the-hcma/domesti-bot/commit/0e4743ea06566aede1178ad0bec381e8a17071e1))
+* **rules:** allow several time windows on device transition rules ([#851](https://github.com/the-hcma/domesti-bot/issues/851)) ([f0d0812](https://github.com/the-hcma/domesti-bot/commit/f0d0812d47c05ea25b6d86b48268befaf6982912))
+* sample garage entry rules that open a door at the geofence crossing ([#856](https://github.com/the-hcma/domesti-bot/issues/856)) ([#862](https://github.com/the-hcma/domesti-bot/issues/862)) ([1caa263](https://github.com/the-hcma/domesti-bot/commit/1caa263e1f45d91806761968d5aaff19dd98fca3))
+* score whether two users travel together from interpolated tracks ([#856](https://github.com/the-hcma/domesti-bot/issues/856)) ([#857](https://github.com/the-hcma/domesti-bot/issues/857)) ([e2eeead](https://github.com/the-hcma/domesti-bot/commit/e2eeead9abbcb6bc088b4d46a90182fd08c222d2))
+* spell out sunrise/sunset times and offsets in rule emails, logs and status text ([#830](https://github.com/the-hcma/domesti-bot/issues/830)) ([577b0ef](https://github.com/the-hcma/domesti-bot/commit/577b0eff724e1b3e21b070ca115fb0f54ab51428))
+
+
+### Bug Fixes
+
+* read arrivals for users_arrived_together from observed entries at the rule's own accuracy limit ([#847](https://github.com/the-hcma/domesti-bot/issues/847)) ([#863](https://github.com/the-hcma/domesti-bot/issues/863)) ([b1e9376](https://github.com/the-hcma/domesti-bot/commit/b1e93769b7428b2a83cb3c18f34c14c80b29c5d4))
+
 ## [2.0.0](https://github.com/the-hcma/domesti-bot/compare/domesti-bot-v1.15.0...domesti-bot-v2.0.0) (2026-10-11)
 
 
