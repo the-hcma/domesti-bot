@@ -397,3 +397,13 @@ def test_a_fix_whose_accuracy_circle_straddles_the_edge_is_not_an_exit() -> None
 def test_presence_users_are_empty_while_an_arrival_is_unseen() -> None:
     assert presence_user_ids_for_rule(_rule(), _ctx(henrique_gap_s=None)) == ()
     assert presence_user_ids_for_rule(_rule(), _ctx(henrique_gap_s=10.0)) == ("henrique", "kristen")
+
+
+def test_a_delayed_upload_measured_before_the_history_window_is_not_an_arrival() -> None:
+    now = _NOW.timestamp()
+    # Retained because it was reported recently, but measured eleven minutes ago.
+    henrique = (_fix(now, inside=True), _fix(now - 650.0, inside=True), _fix(now - 660.0, inside=False))
+    ctx = _ctx(henrique_gap_s=0.0, histories={"kristen": _arrival_history(now - 650.0), "henrique": henrique})
+    row = evaluate_rule(_rule(), ctx).conditions[0]
+    assert row.met is False
+    assert "arrival at House not seen" in row.detail

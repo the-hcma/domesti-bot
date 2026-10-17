@@ -2590,7 +2590,9 @@ def _observed_arrival_at(
     nor outside, so jitter at the edge does not look like leaving and coming
     back. Fixes dated after the evaluation time are ignored, fixes are ordered
     by when they were measured, and at an exact tie the outside fix is taken as
-    the later one, which never invents an arrival.
+    the later one, which never invents an arrival. The history window applies to
+    when a fix was measured, not when it was reported, so a delayed upload cannot
+    establish an arrival from older evidence.
     """
     now_epoch = ctx.now.timestamp()
     rows = list(ctx.user_location_history.get(roster_user_id, ()))
@@ -2602,7 +2604,12 @@ def _observed_arrival_at(
     fixes: list[tuple[float, bool]] = []
     for row in rows:
         measured_at = _location_fix_at_epoch(row)
-        if measured_at is None or measured_at > now_epoch or not _location_usable_for_rule(row, min_accuracy_m):
+        if (
+            measured_at is None
+            or measured_at > now_epoch
+            or measured_at < now_epoch - ctx.walkback_max_s
+            or not _location_usable_for_rule(row, min_accuracy_m)
+        ):
             continue
         distance_m = _haversine_m(row.lat, row.lon, geofence.center_lat, geofence.center_lon)
         if distance_m <= geofence.radius_m:
