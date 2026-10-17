@@ -1722,13 +1722,17 @@ def _arrival_rows(
                 ),
             )
             continue
-        inside_since = ctx.geofence_inside_since.get((roster_user_id, condition.geofence_id))
+        inside_since = _observed_arrival_at(ctx, roster_user_id, geofence, min_accuracy_m)
         if inside_since is None:
+            seen = _format_dwell_duration_s(ctx.walkback_max_s)
             rows.append(
                 _ArrivalRow(
                     inside_since=None,
                     name=name,
-                    problem=f"{name}: arrival time at {geofence.label} unknown",
+                    problem=(
+                        f"{name}: arrival at {geofence.label} not seen "
+                        f"(no accurate fix outside it before the inside ones in the last {seen})"
+                    ),
                     roster_user_id=roster_user_id,
                 ),
             )
@@ -2566,6 +2570,61 @@ def _log_wifi_home_presence_overrode_low_accuracy(
         accuracy_m,
         threshold_m,
     )
+
+
+def _observed_arrival_at(
+    ctx: RuleEvaluationContext,
+    roster_user_id: str,
+    geofence: GeofenceOut,
+    min_accuracy_m: int,
+) -> float | None:
+    """When the user's current stay inside the geofence began, if that entry was actually seen.
+
+    Read from the stored fixes that are accurate enough for the rule (so each
+    rule judges arrivals by its own accuracy limit), an arrival is the first
+    fix of the run of inside fixes that ends now, and it counts only when an
+    accurate fix outside the geofence came right before that run. A history
+    that starts inside leaves the arrival unknown: the person may have been
+    home for hours, and the oldest retained fix says nothing about when they
+    arrived. A fix whose accuracy circle straddles the edge is neither inside
+    nor outside, so jitter at the edge does not look like leaving and coming
+    back. Fixes dated after the evaluation time are ignored, fixes are ordered
+    by when they were measured, and at an exact tie the outside fix is taken as
+    the later one, which never invents an arrival. The history window applies to
+    when a fix was measured, not when it was reported, so a delayed upload cannot
+    establish an arrival from older evidence.
+    """
+    now_epoch = ctx.now.timestamp()
+    rows = list(ctx.user_location_history.get(roster_user_id, ()))
+    latest = ctx.user_locations.get(roster_user_id)
+    if latest is not None and all(
+        (row.fix_at, row.lat, row.lon) != (latest.fix_at, latest.lat, latest.lon) for row in rows
+    ):
+        rows.append(latest)
+    fixes: list[tuple[float, bool]] = []
+    for row in rows:
+        measured_at = _location_fix_at_epoch(row)
+        if (
+            measured_at is None
+            or measured_at > now_epoch
+            or measured_at < now_epoch - ctx.walkback_max_s
+            or not _location_usable_for_rule(row, min_accuracy_m)
+        ):
+            continue
+        distance_m = _haversine_m(row.lat, row.lon, geofence.center_lat, geofence.center_lon)
+        if distance_m <= geofence.radius_m:
+            fixes.append((measured_at, True))
+        elif distance_m - (row.accuracy_m or 0) > geofence.radius_m:
+            fixes.append((measured_at, False))
+    fixes.sort(key=lambda fix: (fix[0], not fix[1]))
+    index = len(fixes) - 1
+    if index < 0 or not fixes[index][1]:
+        return None
+    while index >= 0 and fixes[index][1]:
+        index -= 1
+    if index < 0:
+        return None
+    return fixes[index + 1][0]
 
 
 def _parse_hhmm(hhmm: str) -> int | None:
