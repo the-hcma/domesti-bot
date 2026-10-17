@@ -324,3 +324,19 @@ async def test_a_report_that_comes_after_the_arrival_window_opens_nothing(
         assert rig.opened == []
     finally:
         await rig.close()
+
+
+@pytest.mark.asyncio
+async def test_an_arrival_whose_outside_report_is_older_than_the_history_window_opens_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both phones last reported outside about 18 minutes before entering, beyond the 10 minute history read."""
+    rig = _Rig(tmp_path, monkeypatch, only=(_TOGETHER,))
+    try:
+        await rig.arrive("henrique", after_s=700.0)
+        await rig.arrive("kristen", after_s=10.0)
+        await rig.ping("henrique", after_s=40.0)
+        assert rig.opened == []
+    finally:
+        await rig.close()

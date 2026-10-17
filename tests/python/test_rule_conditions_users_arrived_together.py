@@ -163,8 +163,11 @@ def test_entering_a_little_past_the_limit_is_not_together() -> None:
 
 
 def test_someone_home_for_hours_is_not_together_with_a_new_arrival() -> None:
-    # Their history holds no fix outside the geofence, so no arrival was seen.
-    row = evaluate_rule(_rule(), _ctx(henrique_gap_s=None)).conditions[0]
+    # Nine minutes of inside fixes and none outside: no arrival was seen.
+    now = _NOW.timestamp()
+    home = tuple(_fix(now - 60.0 * minute, inside=True) for minute in range(10))
+    ctx = _ctx(henrique_gap_s=10.0, histories={"kristen": _arrival_history(now - 300.0), "henrique": home})
+    row = evaluate_rule(_rule(), ctx).conditions[0]
     assert row.met is False
     assert "Henrique: arrival at House not seen" in row.detail
 
@@ -348,3 +351,49 @@ def test_a_fix_dated_in_the_future_is_not_an_arrival() -> None:
     row = evaluate_rule(_rule(), ctx).conditions[0]
     assert row.met is False
     assert "Kristen: arrival at House not seen" in row.detail
+
+
+def test_a_fix_without_an_accuracy_still_counts_when_the_rule_allows_it() -> None:
+    now = _NOW.timestamp()
+    inside = _fix(now - 200.0, inside=True).model_copy(update={"accuracy_m": None})
+    outside = _fix(now - 201.0, inside=False).model_copy(update={"accuracy_m": None})
+    latest = _fix(now, inside=True).model_copy(update={"accuracy_m": None})
+    ctx = _ctx(
+        henrique_gap_s=0.0,
+        user_locations={"henrique": latest, "kristen": _inside()},
+        histories={"kristen": _arrival_history(now - 200.0), "henrique": (latest, inside, outside)},
+    )
+    assert evaluate_rule(_rule(), ctx).conditions[0].met is True
+
+
+def test_at_an_exact_tie_the_outside_fix_is_taken_as_the_later_one() -> None:
+    now = _NOW.timestamp()
+    # The newest instant has both an inside and an outside fix: never invent an arrival from it.
+    henrique = (_fix(now, inside=False), _fix(now, inside=True), _fix(now - 100.0, inside=False))
+    ctx = _ctx(henrique_gap_s=0.0, histories={"kristen": _arrival_history(now - 100.0), "henrique": henrique})
+    row = evaluate_rule(_rule(), ctx).conditions[0]
+    assert row.met is False
+    assert "Henrique: arrival at House not seen" in row.detail
+
+
+def test_a_fix_whose_accuracy_circle_straddles_the_edge_is_not_an_exit() -> None:
+    now = _NOW.timestamp()
+    # About 252 m from the center with a 50 m accuracy circle: outside by geometry, but not clearly.
+    edge = UserLocationOut(
+        accuracy_m=50,
+        lat=41.194072 + 252.0 / 111_194.9,
+        lon=-73.888325,
+        fix_at=_fix(now - 100.0, inside=True).fix_at,
+        reported_at=_fix(now - 100.0, inside=True).reported_at,
+        source="owntracks",
+    )
+    henrique = (_fix(now, inside=True), _fix(now - 50.0, inside=True), edge, _fix(now - 150.0, inside=True))
+    ctx = _ctx(henrique_gap_s=0.0, histories={"kristen": _arrival_history(now - 20.0), "henrique": henrique})
+    row = evaluate_rule(_rule(), ctx).conditions[0]
+    assert row.met is False
+    assert "Henrique: arrival at House not seen" in row.detail
+
+
+def test_presence_users_are_empty_while_an_arrival_is_unseen() -> None:
+    assert presence_user_ids_for_rule(_rule(), _ctx(henrique_gap_s=None)) == ()
+    assert presence_user_ids_for_rule(_rule(), _ctx(henrique_gap_s=10.0)) == ("henrique", "kristen")
