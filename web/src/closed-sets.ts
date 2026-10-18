@@ -49,6 +49,14 @@ export const ConfirmButtonVariant = {
 export type ConfirmButtonVariant =
   (typeof ConfirmButtonVariant)[keyof typeof ConfirmButtonVariant];
 
+/** ``UIPresenceNoticeOut.kind`` (mirrors ``DevicePresenceKind``). */
+export const PresenceNoticeKind = {
+  Disappeared: "disappeared",
+  Reappeared: "reappeared",
+} as const;
+export type PresenceNoticeKind =
+  (typeof PresenceNoticeKind)[keyof typeof PresenceNoticeKind];
+
 /** Compact / comfortable landing layout (``#app[data-layout]``). */
 export const DataLayout = {
   Comfortable: "comfortable",
