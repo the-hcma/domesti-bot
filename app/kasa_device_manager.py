@@ -413,6 +413,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self._query_timeout = query_timeout
         self._discovery_cache_path = Path(discovery_cache_path).expanduser().resolve() if discovery_cache_path else None
         self._force_discovery = force_discovery
+        # True while :meth:`rediscover` is replacing the roster; recovery stands down meanwhile.
+        self._roster_replacing = False
         # Set by :meth:`_fetch_impl` to ``"cache"`` (every saved config
         # reconnected without falling back to UDP) or ``"discovery"`` (full
         # ``Discover.discover`` broadcast sweep). ``None`` before first fetch.
@@ -1270,14 +1272,21 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         )
         if dev is None:
             return None
-        ingested, _auth_failure = await self._try_ingest_with_credentials(
-            dev,
-            qtimeout,
-            credentials=None,
-            log_failure=False,
-            quiet_anonymous_auth=True,
-        )
-        kd = _make_kasa_device(ingested, cached_mac=mac) if ingested is not None else None
+        try:
+            ingested, _auth_failure = await self._try_ingest_with_credentials(
+                dev,
+                qtimeout,
+                credentials=None,
+                log_failure=False,
+                quiet_anonymous_auth=True,
+            )
+        except BaseException:
+            # Includes the attempt timeout's cancellation: never leak a half-open session.
+            with contextlib.suppress(Exception):
+                await dev.disconnect()
+            raise
+        # No cached MAC here: the plug must prove its identity (vendor MAC, else ARP).
+        kd = _make_kasa_device(ingested) if ingested is not None else None
         if kd is None or kd.mac_address != mac:
             with contextlib.suppress(Exception):
                 await dev.disconnect()
@@ -1484,7 +1493,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         """
 
         current = self._device_name_to_device
-        if current is None:
+        if current is None or self._roster_replacing:
             return ()
         stubs = {kd.mac_address: kd for kd in self.switches if kd.kasa_protocol_device() is None}
         if not stubs or self._discovery_cache_path is None:
@@ -1513,7 +1522,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             recovered.update(swept)
         if not recovered:
             return ()
-        if self._device_name_to_device is not current:
+        if self._device_name_to_device is not current or self._roster_replacing:
             await self._disconnect_device_map({kd.host: kd for kd in recovered.values()})
             return ()
         devices_by_host: dict[str, KasaDevice] = {}
@@ -1521,6 +1530,13 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             replacement = recovered.get(kd.mac_address) if kd.kasa_protocol_device() is None else None
             kept = replacement or kd
             devices_by_host[kept.host] = kept
+        for mac, kd in recovered.items():
+            # The KLAP flag is tracked by host: follow a plug that came back at a new address.
+            old_host = stubs[mac].host
+            if kd.host != old_host and old_host in self._hosts_requiring_klap_auth:
+                self._hosts_requiring_klap_auth.discard(old_host)
+                self._hosts_requiring_klap_auth.add(kd.host)
+                self._skipped_klap_auth_configs.pop(old_host, None)
         self._finalize_kasa_lookup(devices_by_host)
         self._persist_discovery_cache(self._device_name_to_device or {})
         for mac, kd in recovered.items():
@@ -1542,16 +1558,20 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         an empty device map until process restart.
         """
 
-        await self.disconnect(clear_map=False)
+        self._roster_replacing = True
         try:
-            await self._fetch_impl(force_discovery=True)
-        except Exception as udp_exc:
+            await self.disconnect(clear_map=False)
             try:
-                await self._fetch_impl(force_discovery=False)
-            except Exception:
-                self._device_name_to_device = None
-                raise udp_exc from None
-            raise udp_exc
+                await self._fetch_impl(force_discovery=True)
+            except Exception as udp_exc:
+                try:
+                    await self._fetch_impl(force_discovery=False)
+                except Exception:
+                    self._device_name_to_device = None
+                    raise udp_exc from None
+                raise udp_exc
+        finally:
+            self._roster_replacing = False
 
     async def reload_from_cache(self) -> bool:
         """Replace the in-memory switch map from SQLite only (never UDP).

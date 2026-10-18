@@ -6,6 +6,7 @@ Recovery reconnects it on its own once it answers again.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -170,3 +171,92 @@ async def test_recover_unresponsive_discards_result_when_map_was_replaced_meanwh
 @pytest.mark.asyncio
 async def test_recover_unresponsive_returns_nothing_before_first_fetch() -> None:
     assert await KasaDeviceManager().recover_unresponsive() == ()
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_stands_down_while_rediscover_is_replacing_the_roster(tmp_path: Path) -> None:
+    mgr = await _manager_with_unplugged_fan(tmp_path / "cached.sqlite")
+    fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
+    sweep_started = asyncio.Event()
+    release_sweep = asyncio.Event()
+    connect = AsyncMock(return_value=fan)
+
+    async def _slow_sweep(*_args: object, **_kwargs: object) -> dict[str, object]:
+        sweep_started.set()
+        await asyncio.wait_for(release_sweep.wait(), timeout=10)
+        return {}
+
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(side_effect=_slow_sweep)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", connect),
+    ):
+        rediscovering = asyncio.create_task(mgr.rediscover())
+        await asyncio.wait_for(sweep_started.wait(), timeout=10)
+        recovered = await mgr.recover_unresponsive()
+        release_sweep.set()
+        await rediscovering
+    assert recovered == ()
+    connect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_discards_results_when_a_rediscover_starts_mid_flight(tmp_path: Path) -> None:
+    mgr = await _manager_with_unplugged_fan(tmp_path / "cached.sqlite")
+    fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
+
+    async def _connect_while_rediscover_starts(*_args: object, **_kwargs: object) -> MagicMock:
+        mgr._roster_replacing = True
+        return fan
+
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch(
+            "app.kasa_device_manager._connect_from_saved_config",
+            AsyncMock(side_effect=_connect_while_rediscover_starts),
+        ),
+    ):
+        recovered = await mgr.recover_unresponsive()
+    assert recovered == ()
+    assert [s.unresponsive for s in mgr.switches] == [True]
+    fan.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_moves_the_klap_flag_to_the_new_address(tmp_path: Path) -> None:
+    db = tmp_path / "cached.sqlite"
+    device_discovery_store.save_configs(db, [("192.168.1.50", "Master bedroom fan", _PLUG_CFG, True, _FAN_MAC)])
+    mgr = KasaDeviceManager(discovery_cache_path=db, username="owner@example.com", password="pw-for-test")
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.fetch()
+    moved = _answering_device(host="192.168.1.77", mac=_FAN_MAC, alias="Master bedroom fan")
+
+    async def _connect(cfg: DeviceConfig, **_kw: object) -> MagicMock | None:
+        return moved if cfg.host == "192.168.1.77" else None
+
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.77"),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(side_effect=_connect)),
+    ):
+        assert await mgr.recover_unresponsive() == (_FAN_MAC,)
+    assert mgr.hosts_requiring_klap_auth == ("192.168.1.77",)
+    assert [(row[0], row[3]) for row in device_discovery_store.load_cached_configs(db)] == [("192.168.1.77", True)]
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_closes_the_session_when_reading_the_plug_fails(tmp_path: Path) -> None:
+    mgr = await _manager_with_unplugged_fan(tmp_path / "cached.sqlite")
+    half_dead = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=half_dead)),
+        patch.object(mgr, "_try_ingest_with_credentials", AsyncMock(side_effect=TimeoutError("stuck"))),
+    ):
+        assert await mgr.recover_unresponsive() == ()
+    half_dead.disconnect.assert_awaited()
+    assert [s.unresponsive for s in mgr.switches] == [True]
