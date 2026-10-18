@@ -751,14 +751,15 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         its tile or its cache row. When another device now owns that address the cache
         (keyed by host) cannot hold both, so the missing plug is logged and dropped.
         ``occupied_hosts`` are addresses that answered discovery but whose device could not
-        be read (for example a KLAP handshake failure): they count as owned too.
+        be read (for example a KLAP handshake failure): they count as owned too, unless ARP
+        shows this very MAC there.
         """
 
         if self._discovery_cache_path is None:
             return
         qtimeout = self._query_timeout if self._query_timeout is not None else DeviceConfig.DEFAULT_TIMEOUT
         seen_macs = {kd.mac_address for kd in devices_by_host.values() if kd.mac_address}
-        seen_hosts = set(devices_by_host) | set(occupied_hosts)
+        seen_hosts = set(devices_by_host)
         cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
         for host, alias, cfg_dict, requires_klap_auth, cached_mac in cached:
             mac = try_normalize_mac(cached_mac or "")
@@ -766,7 +767,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 continue
             on_lan = await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host)
             arp_ip = (await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) if on_lan else None) or host
-            if arp_ip in seen_hosts:
+            # An address that answered discovery but could not be read is another device's
+            # unless ARP puts this very MAC there (a KLAP plug we cannot authenticate to).
+            taken_by_unread_device = arp_ip in occupied_hosts and not on_lan
+            if arp_ip in seen_hosts or taken_by_unread_device:
                 if not on_lan:
                     _LOGGER.warning(
                         "Kasa: %s is not answering and its address %s now belongs to another device; "

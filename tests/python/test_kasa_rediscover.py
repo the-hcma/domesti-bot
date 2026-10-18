@@ -290,6 +290,32 @@ async def test_rediscover_does_not_stub_offline_plug_at_address_of_a_discovered_
 
 
 @pytest.mark.asyncio
+async def test_rediscover_keeps_arp_verified_plug_whose_ingest_failed_at_its_own_address(tmp_path) -> None:
+    """A KLAP plug that answers discovery but cannot be read is still that plug: keep its tile."""
+
+    db = tmp_path / "cached.sqlite"
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Master bedroom fan", _XOR_PLUG_CFG, True, "aa:bb:cc:dd:ee:01")],
+    )
+    answering = MagicMock()
+    answering.host = "192.168.1.50"
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={answering.host: answering}),
+        ),
+        patch.object(mgr, "_ingest_discovered_device", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=True),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.50"),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.rediscover()
+    assert [(s.mac_address, s.unresponsive) for s in mgr.switches] == [("aa:bb:cc:dd:ee:01", True)]
+
+
+@pytest.mark.asyncio
 async def test_rediscover_keeps_cached_mac_when_udp_finds_other_mac_at_old_host(tmp_path) -> None:
     db = tmp_path / "cached.sqlite"
     cfg = {
