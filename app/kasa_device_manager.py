@@ -983,8 +983,15 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
     async def _connect_devices_from_cache(
         self,
         cached: list[tuple[str, str | None, dict[str, Any], bool, str | None]],
+        *,
+        keep_offline: bool = False,
     ) -> dict[str, KasaDevice] | None:
         """Reconnect every saved config without UDP.
+
+        ``keep_offline=True`` keeps a plug that answers neither the protocol nor ARP as an
+        unresponsive tile instead of returning ``None``. Cache-first startup leaves it off, so
+        a dead host still triggers its one sweep; :meth:`reload_from_cache` turns it on, since
+        it never sweeps and the CLI keeps such rows in the cache (domesti-bot#867).
 
         Returns a host→device map on success (including an empty map when every
         row was a skipped KLAP host). Returns ``None`` when a non-auth failure
@@ -1062,6 +1069,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     alias=_alias,
                     cached_mac=cached_mac,
                     host=host,
+                    keep_offline=keep_offline,
                 ):
                     continue
                 for kd in devices_by_host.values():
@@ -1403,7 +1411,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self._last_skipped_auth_hosts = []
         self._skipped_klap_auth_configs = {}
 
-        from_cache = await self._connect_devices_from_cache(cached)
+        from_cache = await self._connect_devices_from_cache(cached, keep_offline=True)
         if from_cache is None:
             self._hosts_requiring_klap_auth = previous_klap
             self._last_skipped_auth_hosts = previous_skipped

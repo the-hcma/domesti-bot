@@ -309,3 +309,41 @@ async def test_force_discovery_persist_preserves_klap_skipped_mac(tmp_path) -> N
 
     cached = device_discovery_store.load_cached_configs(db)
     assert cached == [("192.168.1.20", "Tapo", klap_cfg, True, klap_mac)]
+
+
+@pytest.mark.asyncio
+async def test_reload_from_cache_keeps_an_offline_cached_plug_as_unresponsive_tile(tmp_path) -> None:
+    """The CLI keeps an unplugged plug's row (domesti-bot#867), so the HTTP process must load it, not fail the sync."""
+
+    db = tmp_path / "cached.sqlite"
+    cfg_a = _xor_cfg("192.168.1.10")
+    cfg_b = _xor_cfg("192.168.1.20")
+    desk_mac = "aa:bb:cc:dd:ee:10"
+    fan_mac = "aa:bb:cc:dd:ee:20"
+    device_discovery_store.save_configs(db, [("192.168.1.10", "Desk", cfg_a, False, desk_mac)])
+    mock_a = _mock_device("192.168.1.10", "Desk", cfg_a)
+    mock_a.mac = desk_mac
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=mock_a)):
+        await mgr.fetch()
+
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.10", "Desk", cfg_a, False, desk_mac),
+            ("192.168.1.20", "Master bedroom fan", cfg_b, False, fan_mac),
+        ],
+    )
+
+    async def _connect(cfg: DeviceConfig, **_kw: object) -> MagicMock | None:
+        return mock_a if cfg.host == "192.168.1.10" else None
+
+    mock_discover = AsyncMock(return_value={})
+    with (
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(side_effect=_connect)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager.Discover.discover", mock_discover),
+    ):
+        assert await mgr.reload_from_cache() is True
+    mock_discover.assert_not_awaited()
+    assert {(s.mac_address, s.unresponsive) for s in mgr.switches} == {(desk_mac, False), (fan_mac, True)}
