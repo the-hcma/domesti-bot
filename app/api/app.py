@@ -809,10 +809,12 @@ def create_app(args: Any) -> FastAPI:
         # The operator confirmed cleaning up after a device that stopped responding: drop it
         # from the live roster and the discovery cache (names and preferences are kept).
         notice = _presence_notice_of_kind(notice_id, DevicePresenceKind.DISAPPEARED)
-        device_presence_store.forget(notice.family_id, notice.device_id)
         forgotten = notice.family_id == DeviceFamilyId.KASA.value and await state.kasa_mgr.forget_device(
             notice.device_id
         )
+        # Clear the notice only once the manager has finished (or no longer knows the device),
+        # so a failed forget leaves it on screen to be retried.
+        device_presence_store.forget(notice.family_id, notice.device_id)
         if not forgotten:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,

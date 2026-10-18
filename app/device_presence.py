@@ -78,6 +78,12 @@ class DevicePresenceStore:
                     return updated
             return None
 
+    def missing_device_ids(self, family_id: str) -> set[str]:
+        """Ids of the devices of ``family_id`` currently reported missing (any decision)."""
+
+        with self._lock:
+            return {device_id for family, device_id in self._missing if family == family_id}
+
     def note_disappeared(
         self,
         *,

@@ -247,3 +247,61 @@ async def test_forgotten_plug_that_goes_missing_again_later_is_not_suppressed(tm
     assert store.get(notice.notice_id) is None
     assert store.note_disappeared(device_id=_FAN_MAC, family_id="kasa", host=None, label="Fan") is not None
     assert DevicePresenceDecision.PENDING == store.notices()[0].decision
+
+
+@pytest.mark.asyncio
+async def test_plug_revived_by_a_control_action_still_announces_its_return(tmp_path: Path) -> None:
+    """turn_on clears the flag itself; the next good poll must still close the notice."""
+
+    store = DevicePresenceStore()
+    dev = _device()
+    dev.turn_on = AsyncMock()
+    mgr = await _live_manager(tmp_path / "c.sqlite", store, dev)
+    dev.update.side_effect = TimeoutError("no answer")
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS):
+        with pytest.raises(TimeoutError):
+            await mgr.is_on(_FAN_MAC)
+    assert [n.kind for n in store.notices()] == [DevicePresenceKind.DISAPPEARED]
+    dev.update.side_effect = None
+    await mgr.switches[0].turn_on()
+    assert mgr.switches[0].unresponsive is False
+    await mgr.is_on(_FAN_MAC)
+    assert [n.kind for n in store.notices()] == [DevicePresenceKind.REAPPEARED]
+
+
+@pytest.mark.asyncio
+async def test_rediscover_resets_the_failed_poll_count_of_a_healthy_plug(tmp_path: Path) -> None:
+    store = DevicePresenceStore()
+    dev = _device()
+    mgr = await _live_manager(tmp_path / "c.sqlite", store, dev)
+    dev.update.side_effect = TimeoutError("no answer")
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS - 1):
+        with pytest.raises(TimeoutError):
+            await mgr.is_on(_FAN_MAC)
+    dev.update.side_effect = None
+    with patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={dev.host: dev})):
+        await mgr.rediscover()
+    dev.update.side_effect = TimeoutError("no answer")
+    with pytest.raises(TimeoutError):
+        await mgr.is_on(_FAN_MAC)
+    assert mgr.switches[0].unresponsive is False
+    assert store.notices() == ()
+
+
+@pytest.mark.asyncio
+async def test_notice_is_cleared_when_the_missing_plug_leaves_the_roster_another_way(tmp_path: Path) -> None:
+    """Dropped by an address collision (not by Forget): its banner must not linger."""
+
+    store = DevicePresenceStore()
+    mgr = await _unplugged_manager(tmp_path / "c.sqlite", store)
+    assert [n.device_id for n in store.notices()] == [_FAN_MAC]
+    occupant = _device(mac=_LAMP_MAC, alias="Lamp")
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={occupant.host: occupant})),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.rediscover()
+    assert [s.mac_address for s in mgr.switches] == [_LAMP_MAC]
+    assert store.notices() == ()

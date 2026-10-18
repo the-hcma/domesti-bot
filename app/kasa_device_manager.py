@@ -87,7 +87,8 @@ from app.device_presence import DevicePresenceStore, device_presence_store
 from app.rule_engine import DeviceUnresponsiveError, SwitchDevice
 
 # Consecutive failed state polls after which a live plug is treated as unresponsive: three
-# polls at the default ten-second cadence ride out a Wi-Fi blip without hiding a real outage.
+# polls (30 s at the default cadence, 15 s for a fast-polled plug) ride out a Wi-Fi blip
+# without hiding a real outage.
 UNRESPONSIVE_AFTER_FAILED_POLLS = 3
 
 _LOGGER = logging.getLogger(__name__)
@@ -619,19 +620,6 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         if notice is not None:
             _LOGGER.warning("Kasa: %s stopped responding", format_device_display(kd.mac_address, kd.preferred_label))
 
-    def _record_failed_poll(self, kd: KasaDevice) -> None:
-        failures = self._failed_polls.get(kd.mac_address, 0) + 1
-        self._failed_polls[kd.mac_address] = failures
-        if failures >= UNRESPONSIVE_AFTER_FAILED_POLLS and not kd.unresponsive:
-            kd.set_unresponsive(True)
-            self._announce_unresponsive(kd)
-
-    def _record_successful_poll(self, kd: KasaDevice) -> None:
-        self._failed_polls.pop(kd.mac_address, None)
-        if kd.unresponsive:
-            kd.set_unresponsive(False)
-            self._announce_responsive(kd)
-
     async def _keep_arp_visible_cached_switch(
         self,
         devices_by_host: dict[str, KasaDevice],
@@ -832,6 +820,20 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             if kd is not None:
                 return kd
         return None
+
+    def _record_failed_poll(self, kd: KasaDevice) -> None:
+        failures = self._failed_polls.get(kd.mac_address, 0) + 1
+        self._failed_polls[kd.mac_address] = failures
+        if failures >= UNRESPONSIVE_AFTER_FAILED_POLLS and not kd.unresponsive:
+            kd.set_unresponsive(True)
+            self._announce_unresponsive(kd)
+
+    def _record_successful_poll(self, kd: KasaDevice) -> None:
+        self._failed_polls.pop(kd.mac_address, None)
+        # A control action (turn_on/turn_off) clears the flag itself, so announce the return
+        # even when the flag is already down; this is a no-op unless a notice is open.
+        kd.set_unresponsive(False)
+        self._announce_responsive(kd)
 
     async def _recover_stub(
         self,
@@ -1536,6 +1538,15 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             devices=[(kd.mac_address, kd.preferred_label) for kd in uniq],
         )
         self._device_name_to_device = self._expand_kasa_lookup(uniq)
+        macs = {kd.mac_address for kd in uniq}
+        # A fresh roster starts the failed-poll count over for healthy plugs and forgets plugs that left.
+        self._failed_polls = {
+            mac: count
+            for mac, count in self._failed_polls.items()
+            if mac in macs and any(kd.mac_address == mac and kd.unresponsive for kd in uniq)
+        }
+        for mac in self._presence.missing_device_ids(DeviceFamilyId.KASA.value) - macs:
+            self._presence.forget(DeviceFamilyId.KASA.value, mac)
         for kd in uniq:
             if kd.unresponsive:
                 self._announce_unresponsive(kd)
@@ -1577,11 +1588,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self._hosts_requiring_klap_auth.discard(host)
         self._skipped_klap_auth_configs.pop(host, None)
         self._failed_polls.pop(wanted, None)
-        await self._disconnect_device_map({host: target})
         devices_by_host = {kd.host: kd for kd in uniq if kd is not target}
+        # Write the new roster before any await so a concurrent rediscover keeps its result.
         self._finalize_kasa_lookup(devices_by_host)
         self._persist_discovery_cache(self._device_name_to_device or {})
         self._presence.forget(DeviceFamilyId.KASA.value, wanted)
+        await self._disconnect_device_map({host: target})
         _LOGGER.info("Kasa: forgot %s (%s)", format_device_display(wanted, target.preferred_label), host)
         return True
 

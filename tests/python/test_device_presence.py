@@ -104,3 +104,13 @@ def test_notices_are_ordered_oldest_first() -> None:
     store.note_disappeared(device_id="aa:bb:cc:dd:ee:02", family_id="kasa", host=None, label="Second", now=2000.0)
     store.note_disappeared(device_id="aa:bb:cc:dd:ee:01", family_id="kasa", host=None, label="First", now=1000.0)
     assert [n.label for n in store.notices(now=2001.0)] == ["First", "Second"]
+
+
+def test_missing_device_ids_lists_only_missing_devices_of_that_family_whatever_the_decision() -> None:
+    store = DevicePresenceStore()
+    notice_id = _disappear(store)
+    store.note_disappeared(device_id="aa:bb:cc:dd:ee:02", family_id="sonos", host=None, label="Kitchen")
+    store.keep_checking(notice_id)
+    assert store.missing_device_ids("kasa") == {_MAC}
+    store.note_reappeared(device_id=_MAC, family_id="kasa", host=None, label="Fan")
+    assert store.missing_device_ids("kasa") == set()

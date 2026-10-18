@@ -138,3 +138,13 @@ def test_dismiss_refuses_a_disappeared_notice() -> None:
     client, _kasa = _client()
     notice_id = _missing_fan()
     assert client.post(f"/v1/ui/presence/{notice_id}/dismiss").status_code == HTTPStatus.CONFLICT
+
+
+def test_forget_that_fails_in_the_manager_keeps_the_notice() -> None:
+    client, kasa = _client()
+    client = TestClient(client.app, raise_server_exceptions=False)
+    kasa.forget_device = AsyncMock(side_effect=RuntimeError("database is locked"))
+    notice_id = _missing_fan()
+    response = client.post(f"/v1/ui/presence/{notice_id}/forget")
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert [n["notice_id"] for n in client.get("/v1/ui/state").json()["presence_notices"]] == [notice_id]
