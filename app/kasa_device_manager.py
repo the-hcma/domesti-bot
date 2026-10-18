@@ -579,8 +579,13 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         alias: str | None,
         cached_mac: str | None,
         host: str,
+        keep_offline: bool = False,
     ) -> bool:
         """Keep a protocol-silent cached MAC as an unresponsive tile when ARP still sees it.
+
+        ``keep_offline=True`` also keeps it at its cached address when ARP does not see it
+        either: KLAP rows are skipped without a full sweep, so this is their only chance to
+        stay on the dashboard while the plug is powered off (domesti-bot#867).
 
         Returns True when the host was retained (or already present under the ARP IP).
         """
@@ -588,9 +593,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         mac = try_normalize_mac(cached_mac or "")
         if mac is None:
             return False
-        if not await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host):
+        on_lan = await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host)
+        if not on_lan and not keep_offline:
             return False
-        arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) or host
+        arp_ip = (await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) if on_lan else None) or host
         if arp_ip in devices_by_host:
             return True
         devices_by_host[arp_ip] = KasaDevice(
@@ -601,8 +607,9 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             mac_address=mac,
         )
         _LOGGER.info(
-            "Kasa: %s is on the LAN (ARP) but not answering the protocol; keeping as unresponsive",
+            "Kasa: %s is %s but not answering the protocol; keeping as unresponsive",
             format_device_display(mac, alias),
+            "on the LAN (ARP)" if on_lan else "not on the LAN (powered off?)",
         )
         return True
 
@@ -733,6 +740,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
     async def _retain_cached_switches(
         self,
         devices_by_host: dict[str, KasaDevice],
+        *,
+        occupied_hosts: frozenset[str] = frozenset(),
     ) -> None:
         """Keep every cached MAC the sweep missed, as an unresponsive tile when nothing answers.
 
@@ -741,13 +750,15 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         or Wi-Fi) is kept at its cached address: switching a plug off must not remove
         its tile or its cache row. When another device now owns that address the cache
         (keyed by host) cannot hold both, so the missing plug is logged and dropped.
+        ``occupied_hosts`` are addresses that answered discovery but whose device could not
+        be read (for example a KLAP handshake failure): they count as owned too.
         """
 
         if self._discovery_cache_path is None:
             return
         qtimeout = self._query_timeout if self._query_timeout is not None else DeviceConfig.DEFAULT_TIMEOUT
         seen_macs = {kd.mac_address for kd in devices_by_host.values() if kd.mac_address}
-        seen_hosts = set(devices_by_host)
+        seen_hosts = set(devices_by_host) | set(occupied_hosts)
         cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
         for host, alias, cfg_dict, requires_klap_auth, cached_mac in cached:
             mac = try_normalize_mac(cached_mac or "")
@@ -1003,6 +1014,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     alias=_alias,
                     cached_mac=cached_mac,
                     host=host,
+                    keep_offline=True,
                 )
                 continue
             cfg = DeviceConfig.from_dict(cfg_dict)
@@ -1038,6 +1050,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                         alias=_alias,
                         cached_mac=cached_mac,
                         host=host,
+                        keep_offline=True,
                     )
                     continue
                 if await self._keep_arp_visible_cached_switch(
@@ -1223,7 +1236,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         else:
             _LOGGER.info("Kasa: discovered %d device(s)", discovered_count)
 
-        await self._retain_cached_switches(devices_by_host)
+        await self._retain_cached_switches(
+            devices_by_host,
+            occupied_hosts=frozenset(
+                {*devices, *((discovered.host or "").strip() for discovered in devices.values())} - {""}
+            ),
+        )
 
         self._finalize_kasa_lookup(devices_by_host)
         self._persist_discovery_cache(

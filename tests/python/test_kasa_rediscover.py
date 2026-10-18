@@ -219,6 +219,77 @@ async def test_rediscover_drops_unplugged_cached_switch_whose_address_now_belong
 
 
 @pytest.mark.asyncio
+async def test_fetch_cache_keeps_offline_klap_plug_without_credentials_as_unresponsive(tmp_path) -> None:
+    """A powered-off KLAP plug keeps its tile on cache-first startup, not only its cache row."""
+
+    db = tmp_path / "cached.sqlite"
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Master bedroom fan", _XOR_PLUG_CFG, True, "aa:bb:cc:dd:ee:01")],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})) as discover,
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.fetch()
+    discover.assert_not_awaited()
+    assert mgr.last_discovery_source == "cache"
+    assert [(s.mac_address, s.unresponsive) for s in mgr.switches] == [("aa:bb:cc:dd:ee:01", True)]
+    assert [(row[0], row[3]) for row in device_discovery_store.load_cached_configs(db)] == [("192.168.1.50", True)]
+
+
+@pytest.mark.asyncio
+async def test_fetch_cache_keeps_offline_klap_plug_whose_handshake_fails_with_credentials(tmp_path) -> None:
+    db = tmp_path / "cached.sqlite"
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Master bedroom fan", _XOR_PLUG_CFG, True, "aa:bb:cc:dd:ee:01")],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db, username="owner@example.com", password="pw-for-test")
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.fetch()
+    assert mgr.last_discovery_source == "cache"
+    assert [(s.mac_address, s.unresponsive) for s in mgr.switches] == [("aa:bb:cc:dd:ee:01", True)]
+
+
+@pytest.mark.asyncio
+async def test_rediscover_does_not_stub_offline_plug_at_address_of_a_discovered_device_that_failed_ingest(
+    tmp_path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A device that answered discovery owns its address even when its update failed."""
+
+    db = tmp_path / "cached.sqlite"
+    device_discovery_store.save_configs(
+        db,
+        [("192.168.1.50", "Master bedroom fan", _XOR_PLUG_CFG, False, "aa:bb:cc:dd:ee:01")],
+    )
+    occupant = MagicMock()
+    occupant.host = "192.168.1.50"
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        caplog.at_level(logging.WARNING, logger="app.kasa_device_manager"),
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={occupant.host: occupant}),
+        ),
+        patch.object(mgr, "_ingest_discovered_device", AsyncMock(return_value=None)),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.rediscover()
+    assert mgr.switches == ()
+    assert any("aa:bb:cc:dd:ee:01" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.asyncio
 async def test_rediscover_keeps_cached_mac_when_udp_finds_other_mac_at_old_host(tmp_path) -> None:
     db = tmp_path / "cached.sqlite"
     cfg = {
