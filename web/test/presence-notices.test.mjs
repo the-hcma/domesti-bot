@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { presenceForgetConfirmMessage, unseenPresenceNotices } from "../.test-build/presence-notices.mjs";
+import { presenceForgetConfirmMessage, presenceToastFor, unseenPresenceNotices } from "../.test-build/presence-notices.mjs";
 
 const notice = (id) => ({
   device_id: "5c:e9:31:60:c5:bd",
@@ -33,5 +33,36 @@ describe("presenceForgetConfirmMessage", () => {
     const message = presenceForgetConfirmMessage("Master bedroom fan");
     assert.match(message, /Master bedroom fan/);
     assert.match(message, /name and settings are kept/);
+  });
+});
+
+describe("presenceToastFor", () => {
+  const returned = (id, label) => ({ ...notice(id), kind: "reappeared", label, message: `${label} is responding again.` });
+  const missing = (id, label) => ({ ...notice(id), label, message: `${label} stopped responding.` });
+
+  it("returns nothing when no notice is new", () => {
+    assert.equal(presenceToastFor([]), null);
+  });
+
+  it("shows the notice text for a single missing device as an error", () => {
+    assert.deepEqual(presenceToastFor([missing("a", "Fan")]), { message: "Fan stopped responding.", variant: "error" });
+  });
+
+  it("summarizes several missing devices in one error toast", () => {
+    const toast = presenceToastFor([missing("a", "Fan"), missing("b", "Lamp")]);
+    assert.equal(toast.variant, "error");
+    assert.equal(toast.message, "2 devices stopped responding: Fan, Lamp.");
+  });
+
+  it("lets missing devices win over returned ones", () => {
+    assert.equal(presenceToastFor([returned("a", "Fan"), missing("b", "Lamp")]).variant, "error");
+  });
+
+  it("shows returned devices as a success toast, summarized when several", () => {
+    assert.deepEqual(presenceToastFor([returned("a", "Fan")]), { message: "Fan is responding again.", variant: "success" });
+    assert.equal(
+      presenceToastFor([returned("a", "Fan"), returned("b", "Lamp")]).message,
+      "2 devices are responding again: Fan, Lamp.",
+    );
   });
 });

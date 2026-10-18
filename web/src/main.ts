@@ -15,6 +15,7 @@ import {
 import {
   createPresenceNoticeStack,
   presenceForgetConfirmMessage,
+  presenceToastFor,
   unseenPresenceNotices,
 } from "./presence-notices.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
@@ -25,8 +26,8 @@ import {
   ConfirmButtonVariant,
   DataLayout,
   DeviceFamilyId,
-  PresenceNoticeKind,
   ThemePreference,
+  ToastVariant,
   TileTone,
   UIDeviceKind,
   UIDeviceState,
@@ -173,6 +174,10 @@ class DomestiBotController {
   // etc.). Confirmed predictions (poll state == predicted state)
   // delete themselves; expired predictions release their hold.
   private pendingPredictions: Map<string, PendingPrediction> = new Map();
+  /** Presence notice ids already rendered with a live-region role (announced to screen readers once). */
+  private announcedPresenceNoticeIds: Set<string> = new Set();
+  /** Presence notices whose action is running: hidden meanwhile so clicks and polls cannot repeat it. */
+  private presenceActionsInFlight: Set<string> = new Set();
   /** Presence notice ids already shown, so a toast fires only for ones that appear later. */
   private seenPresenceNoticeIds: Set<string> = new Set();
   private presenceBaselineTaken = false;
@@ -556,12 +561,14 @@ class DomestiBotController {
       this.presenceBaselineTaken = true;
       return;
     }
-    for (const notice of fresh) {
-      if (notice.kind === PresenceNoticeKind.Reappeared) {
-        showSuccessToast(notice.message);
-      } else {
-        showErrorToast(notice.message);
-      }
+    const toast = presenceToastFor(fresh);
+    if (toast === null) {
+      return;
+    }
+    if (toast.variant === ToastVariant.Error) {
+      showErrorToast(toast.message);
+    } else {
+      showSuccessToast(toast.message);
     }
   }
 
@@ -595,18 +602,37 @@ class DomestiBotController {
     action: () => Promise<unknown>,
     successMessage: string,
   ): Promise<void> {
+    const noticeId = notice.notice_id;
+    if (this.presenceActionsInFlight.has(noticeId)) {
+      return;
+    }
+    this.presenceActionsInFlight.add(noticeId);
+    this.render();
+    let handled = false;
     try {
       await action();
-      this.removePresenceNotice(notice.notice_id);
+      handled = true;
       showSuccessToast(successMessage);
     } catch (err) {
-      showErrorToast(
-        err instanceof HttpError
-          ? err.detail
-          : `Could not update ${notice.label}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      if (err instanceof HttpError && err.status === 404) {
+        // Already handled elsewhere (another tab, or the device came back): nothing left to do.
+        handled = true;
+      } else {
+        showErrorToast(
+          err instanceof HttpError
+            ? err.detail
+            : `Could not update ${notice.label}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (handled) {
+      this.removePresenceNotice(noticeId);
     }
     await this.refresh();
+    this.presenceActionsInFlight.delete(noticeId);
+    if (!handled) {
+      this.render();
+    }
   }
 
   private async onPresenceForget(notice: UIPresenceNoticeOut): Promise<void> {
@@ -1031,7 +1057,10 @@ class DomestiBotController {
   private renderPresenceNotices(
     notices: readonly UIPresenceNoticeOut[] | undefined,
   ): void {
-    const stack = createPresenceNoticeStack(notices ?? [], {
+    const visible = (notices ?? []).filter(
+      (notice) => !this.presenceActionsInFlight.has(notice.notice_id),
+    );
+    const stack = createPresenceNoticeStack(visible, {
       onDismiss: (notice) => {
         void this.onPresenceNoticeAction(
           notice,
@@ -1049,9 +1078,12 @@ class DomestiBotController {
           `Will keep checking for ${notice.label}.`,
         );
       },
-    });
+    }, this.announcedPresenceNoticeIds);
     if (stack !== null) {
       this.root.prepend(stack);
+      for (const notice of visible) {
+        this.announcedPresenceNoticeIds.add(notice.notice_id);
+      }
     }
   }
 

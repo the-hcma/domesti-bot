@@ -2,12 +2,17 @@
 // Rendered above the tile grid; the server owns the notice list (``presence_notices`` in
 // ``GET /v1/ui/state``) and the three actions (see ``app/device_presence.py``).
 
-import { PresenceNoticeKind, type UIPresenceNoticeOut } from "./types.js";
+import { PresenceNoticeKind, ToastVariant, type UIPresenceNoticeOut } from "./types.js";
 
 export interface PresenceNoticeHandlers {
   onDismiss(notice: UIPresenceNoticeOut): void;
   onForget(notice: UIPresenceNoticeOut): void;
   onKeepChecking(notice: UIPresenceNoticeOut): void;
+}
+
+export interface PresenceToast {
+  message: string;
+  variant: ToastVariant;
 }
 
 /** Confirmation text shown before a device is forgotten. */
@@ -16,6 +21,33 @@ export function presenceForgetConfirmMessage(label: string): string {
     `Forget ${label}? It will be removed from the dashboard and from the saved device list. ` +
     "Its name and settings are kept if it is added back later."
   );
+}
+
+/**
+ * One toast for the notices that just appeared (toasts show one at a time, so a router reboot that
+ * drops many plugs must not bury all but the last). Devices that went missing win over ones that returned.
+ */
+export function presenceToastFor(fresh: readonly UIPresenceNoticeOut[]): PresenceToast | null {
+  const missing = fresh.filter((notice) => notice.kind === PresenceNoticeKind.Disappeared);
+  if (missing.length > 0) {
+    return {
+      message:
+        missing.length === 1
+          ? (missing[0]?.message ?? "")
+          : `${missing.length} devices stopped responding: ${missing.map((notice) => notice.label).join(", ")}.`,
+      variant: ToastVariant.Error,
+    };
+  }
+  if (fresh.length > 0) {
+    return {
+      message:
+        fresh.length === 1
+          ? (fresh[0]?.message ?? "")
+          : `${fresh.length} devices are responding again: ${fresh.map((notice) => notice.label).join(", ")}.`,
+      variant: ToastVariant.Success,
+    };
+  }
+  return null;
 }
 
 /** Notices whose ids are not in ``seen``, in the order given. */
@@ -35,10 +67,15 @@ function noticeButton(label: string, onClick: () => void): HTMLButtonElement {
   return button;
 }
 
-/** One banner per notice; ``null`` when there is nothing to show. */
+/**
+ * One banner per notice; ``null`` when there is nothing to show. The dashboard is rebuilt on every
+ * poll, so only a notice not yet in ``announced`` gets a live-region role: screen readers hear it
+ * once instead of again every few seconds.
+ */
 export function createPresenceNoticeStack(
   notices: readonly UIPresenceNoticeOut[],
   handlers: PresenceNoticeHandlers,
+  announced: ReadonlySet<string> = new Set(),
 ): HTMLElement | null {
   if (notices.length === 0) {
     return null;
@@ -49,7 +86,9 @@ export function createPresenceNoticeStack(
     const banner = document.createElement("aside");
     const returned = notice.kind === PresenceNoticeKind.Reappeared;
     banner.className = `presence-notice ${returned ? "presence-notice-returned" : "presence-notice-missing"}`;
-    banner.setAttribute("role", returned ? "status" : "alert");
+    if (!announced.has(notice.notice_id)) {
+      banner.setAttribute("role", returned ? "status" : "alert");
+    }
     banner.dataset["noticeId"] = notice.notice_id;
 
     const text = document.createElement("p");
