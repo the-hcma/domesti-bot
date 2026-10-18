@@ -46,6 +46,7 @@ from app.api.schemas import (
     UIPowerSetIn,
     UIPreferenceIn,
     UIPreferenceOut,
+    UIPresenceActionOut,
     UISonosSetIn,
     UIStateOut,
 )
@@ -74,7 +75,8 @@ from app.api.webhooks_routes import router as webhooks_router
 from app.build_info import get_build_info
 from app.db.secrets import load_mytracks_admin_password_from_db
 from app.device_completion import CompletionAlias
-from app.device_enums import DeviceFamilyId, UiActionType
+from app.device_enums import DeviceFamilyId, DevicePresenceKind, UiActionType
+from app.device_presence import DevicePresenceNotice, device_presence_store
 from app.device_state_watcher import (
     build_default_watchers,
     poll_interval_from_env,
@@ -762,6 +764,94 @@ def create_app(args: Any) -> FastAPI:
         )
         return UIDeviceActionOut(
             device=build_kasa_device_view(state.kasa_mgr, host=device_id, cache_path=state.cache_path)
+        )
+
+    def _presence_notice_of_kind(notice_id: str, kind: DevicePresenceKind) -> DevicePresenceNotice:
+        notice = device_presence_store.get(notice_id)
+        if notice is None:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Unknown presence notice: {notice_id}",
+            )
+        if notice.kind != kind:
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail=f"Expected a {kind.value} notice, got {notice.kind.value}",
+            )
+        return notice
+
+    @app.post(
+        "/v1/ui/presence/{notice_id}/dismiss",
+        dependencies=[Depends(require_scope("control"))],
+    )
+    async def dismiss_presence_notice(notice_id: str, request: Request) -> UIPresenceActionOut:
+        notice = _presence_notice_of_kind(notice_id, DevicePresenceKind.REAPPEARED)
+        device_presence_store.dismiss(notice_id)
+        log_ui_action(
+            request,
+            action=UiActionType.DISMISS_NOTICE,
+            family_id=notice.family_id,
+            device_id=notice.device_id,
+            device_label=notice.label,
+        )
+        return UIPresenceActionOut(
+            device_id=notice.device_id,
+            family_id=notice.family_id,
+            label=notice.label,
+            notice_id=notice_id,
+        )
+
+    @app.post(
+        "/v1/ui/presence/{notice_id}/forget",
+        dependencies=[Depends(require_scope("control"))],
+    )
+    async def forget_presence_device(notice_id: str, request: Request, state: DeviceState) -> UIPresenceActionOut:
+        # The operator confirmed cleaning up after a device that stopped responding: drop it
+        # from the live roster and the discovery cache (names and preferences are kept).
+        notice = _presence_notice_of_kind(notice_id, DevicePresenceKind.DISAPPEARED)
+        device_presence_store.forget(notice.family_id, notice.device_id)
+        forgotten = notice.family_id == DeviceFamilyId.KASA.value and await state.kasa_mgr.forget_device(
+            notice.device_id
+        )
+        if not forgotten:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail=f"Unknown {notice.family_id} device: {notice.device_id}",
+            )
+        log_ui_action(
+            request,
+            action=UiActionType.FORGET_DEVICE,
+            family_id=notice.family_id,
+            device_id=notice.device_id,
+            device_label=notice.label,
+        )
+        return UIPresenceActionOut(
+            device_id=notice.device_id,
+            family_id=notice.family_id,
+            label=notice.label,
+            notice_id=notice_id,
+        )
+
+    @app.post(
+        "/v1/ui/presence/{notice_id}/keep-checking",
+        dependencies=[Depends(require_scope("control"))],
+    )
+    async def keep_checking_presence_device(notice_id: str, request: Request) -> UIPresenceActionOut:
+        # The outage may be transient: hide the notice and let the recovery watcher keep trying.
+        notice = _presence_notice_of_kind(notice_id, DevicePresenceKind.DISAPPEARED)
+        device_presence_store.keep_checking(notice_id)
+        log_ui_action(
+            request,
+            action=UiActionType.KEEP_CHECKING,
+            family_id=notice.family_id,
+            device_id=notice.device_id,
+            device_label=notice.label,
+        )
+        return UIPresenceActionOut(
+            device_id=notice.device_id,
+            family_id=notice.family_id,
+            label=notice.label,
+            notice_id=notice_id,
         )
 
     @app.put(

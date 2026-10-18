@@ -603,7 +603,7 @@ def test_ui_state_out_is_a_pydantic_model_with_expected_fields() -> None:
     field names verbatim."""
 
     fields = UIStateOut.model_fields
-    assert set(fields.keys()) == {"families", "operator_alert"}
+    assert set(fields.keys()) == {"families", "operator_alert", "presence_notices"}
     family_fields = UIFamilyOut.model_fields
     assert set(family_fields.keys()) == {"id", "label", "color", "devices"}
     device_fields = UIDeviceOut.model_fields

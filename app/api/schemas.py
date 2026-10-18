@@ -16,6 +16,7 @@ from app.cron_schedule import validate_schedule_cron_expression
 from app.device_enums import (
     DeviceConditionState,
     DeviceFamilyId,
+    DevicePresenceKind,
     Ep1BluetoothProxyState,
     Ep1CalibrationOffsetKind,
     Ep1OccupancyTuningKind,
@@ -321,6 +322,28 @@ class UIOperatorAlertOut(BaseModel):
     )
 
 
+class UIPresenceNoticeOut(BaseModel):
+    """A device that stopped responding (asks what to do) or that answers again."""
+
+    device_id: str = Field(..., description="Normalized MAC address of the device.")
+    family_id: str = Field(..., description="Device family, e.g. ``kasa``.")
+    host: str | None = Field(default=None, description="Last known LAN address, when there is one.")
+    kind: DevicePresenceKind = Field(..., description="``disappeared`` asks for a decision; ``reappeared`` informs.")
+    label: str = Field(..., description="Human-facing device name.")
+    message: str = Field(..., description="Human-readable notice text.")
+    notice_id: str = Field(..., description="Opaque id used by the ``/v1/ui/presence`` actions.")
+    recorded_at: float = Field(..., description="Unix epoch seconds when the notice was raised.")
+
+
+class UIPresenceActionOut(BaseModel):
+    """Echo of a ``/v1/ui/presence`` action."""
+
+    device_id: str
+    family_id: str
+    label: str
+    notice_id: str
+
+
 class UIStateOut(BaseModel):
     """Top-level payload for ``GET /v1/ui/state``.
 
@@ -333,6 +356,10 @@ class UIStateOut(BaseModel):
     operator_alert: UIOperatorAlertOut | None = Field(
         default=None,
         description="Persistent operator alert (e.g. SMTP notification failure).",
+    )
+    presence_notices: list[UIPresenceNoticeOut] = Field(
+        default_factory=list,
+        description="Devices that stopped responding (awaiting a decision) or answer again, oldest first.",
     )
 
 
