@@ -440,27 +440,16 @@ async def test_maybe_sync_skips_retry_after_failed_fingerprint(
         ],
     )
 
-    async def _connect_fail(cfg: Any, *, credentials: Any, timeout: Any) -> MagicMock | None:
-        del credentials, timeout
-        if cfg.host == "192.168.1.10":
-            return _mock_device("192.168.1.10", "Desk", cfg_a)
-        return None
-
     runtime.reset()
-    with (
-        patch(
-            "app.kasa_device_manager._connect_from_saved_config",
-            AsyncMock(side_effect=_connect_fail),
-        ),
-        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
-    ):
+    # A reload that cannot finish (the manager keeps its prior map and reports False) is
+    # remembered by fingerprint and not retried until the cache changes again.
+    with patch.object(mgr, "reload_from_cache", AsyncMock(return_value=False)) as reload:
         first = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
-        with patch.object(mgr, "reload_from_cache", AsyncMock()) as reload:
-            second = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
+        second = await maybe_sync_discovery_cache(_state(mgr, cache_path=db))
 
     assert first is False
     assert second is False
-    reload.assert_not_awaited()
+    reload.assert_awaited_once()
     assert runtime.discovery_cache_sync_failed[DeviceFamilyId.KASA.value] == frozenset({_MAC_10, _MAC_14})
 
 
