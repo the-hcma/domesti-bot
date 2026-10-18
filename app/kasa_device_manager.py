@@ -730,11 +730,18 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         rows.sort(key=lambda r: r[0])
         device_discovery_store.save_configs(self._discovery_cache_path, rows)
 
-    async def _retain_arp_visible_cached_switches(
+    async def _retain_cached_switches(
         self,
         devices_by_host: dict[str, KasaDevice],
     ) -> None:
-        """Keep cached MACs that still answer ARP even when UDP discovery missed them."""
+        """Keep every cached MAC the sweep missed, as an unresponsive tile when nothing answers.
+
+        A cached MAC that still answers ARP is reconnected at its ARP address when
+        possible. A MAC that answers neither the protocol nor ARP (the plug lost power
+        or Wi-Fi) is kept at its cached address: switching a plug off must not remove
+        its tile or its cache row. When another device now owns that address the cache
+        (keyed by host) cannot hold both, so the missing plug is logged and dropped.
+        """
 
         if self._discovery_cache_path is None:
             return
@@ -746,29 +753,36 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             mac = try_normalize_mac(cached_mac or "")
             if mac is None or mac in seen_macs:
                 continue
-            if not await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host):
-                continue
-            arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) or host
+            on_lan = await asyncio.to_thread(mac_alive_on_lan, mac=mac, host=host)
+            arp_ip = (await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac) if on_lan else None) or host
             if arp_ip in seen_hosts:
+                if not on_lan:
+                    _LOGGER.warning(
+                        "Kasa: %s is not answering and its address %s now belongs to another device; "
+                        "cannot keep it in the discovery cache",
+                        format_device_display(mac, alias),
+                        arp_ip,
+                    )
                 continue
-            creds = self._discovery_credentials if requires_klap_auth else None
-            cfg = DeviceConfig.from_dict(cfg_dict)
-            if arp_ip != host:
-                cfg = replace(cfg, host=arp_ip)
-            dev = await _connect_from_saved_config(
-                cfg,
-                credentials=creds,
-                timeout=qtimeout,
-            )
-            if dev is not None:
-                kd = _make_kasa_device(dev, cached_mac=mac)
-                if kd is not None:
-                    devices_by_host[dev.host] = kd
-                    seen_macs.add(mac)
-                    seen_hosts.add(dev.host)
-                    continue
-                with contextlib.suppress(Exception):
-                    await dev.disconnect()
+            if on_lan:
+                creds = self._discovery_credentials if requires_klap_auth else None
+                cfg = DeviceConfig.from_dict(cfg_dict)
+                if arp_ip != host:
+                    cfg = replace(cfg, host=arp_ip)
+                dev = await _connect_from_saved_config(
+                    cfg,
+                    credentials=creds,
+                    timeout=qtimeout,
+                )
+                if dev is not None:
+                    kd = _make_kasa_device(dev, cached_mac=mac)
+                    if kd is not None:
+                        devices_by_host[dev.host] = kd
+                        seen_macs.add(mac)
+                        seen_hosts.add(dev.host)
+                        continue
+                    with contextlib.suppress(Exception):
+                        await dev.disconnect()
             stub = KasaDevice(
                 mac,
                 None,
@@ -779,10 +793,16 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             devices_by_host[arp_ip] = stub
             seen_macs.add(mac)
             seen_hosts.add(arp_ip)
-            _LOGGER.info(
-                "Kasa: %s is on the LAN (ARP) but not answering discovery; keeping as unresponsive",
-                format_device_display(mac, alias),
-            )
+            if on_lan:
+                _LOGGER.info(
+                    "Kasa: %s is on the LAN (ARP) but not answering discovery; keeping as unresponsive",
+                    format_device_display(mac, alias),
+                )
+            else:
+                _LOGGER.info(
+                    "Kasa: %s is not answering discovery or ARP (powered off?); keeping as unresponsive",
+                    format_device_display(mac, alias),
+                )
 
     async def _try_ingest_with_credentials(
         self,
@@ -1203,7 +1223,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         else:
             _LOGGER.info("Kasa: discovered %d device(s)", discovered_count)
 
-        await self._retain_arp_visible_cached_switches(devices_by_host)
+        await self._retain_cached_switches(devices_by_host)
 
         self._finalize_kasa_lookup(devices_by_host)
         self._persist_discovery_cache(
