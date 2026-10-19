@@ -260,3 +260,55 @@ def test_database_writes_run_off_the_calling_thread_and_in_order(tmp_path: Path)
         store.flush()
     assert writer_threads and caller not in writer_threads
     assert list_keep_checking(path) == {}
+
+
+def test_a_superseded_attach_finishing_late_does_not_publish_its_stale_result(tmp_path: Path) -> None:
+    """A cancelled startup's worker can outlive it; its result must not overwrite the next attach."""
+
+    old_path = tmp_path / "old.sqlite"
+    new_path = tmp_path / "new.sqlite"
+    record_keep_checking(old_path, "kasa", _MAC)
+    store = DevicePresenceStore()
+    old_read_started = threading.Event()
+    release_old_read = threading.Event()
+    real_list = list_keep_checking
+
+    def _slow_for_old_path(path: Path | None) -> dict[tuple[str, str], float]:
+        if path == old_path:
+            old_read_started.set()
+            assert release_old_read.wait(timeout=10)
+        return real_list(path)
+
+    with patch("app.device_presence.list_keep_checking", side_effect=_slow_for_old_path):
+        stale = threading.Thread(target=store.attach, args=(old_path,))
+        stale.start()
+        assert old_read_started.wait(timeout=10)
+        store.attach(new_path)  # the next lifespan attaches while the first read is still blocked
+        release_old_read.set()
+        stale.join(timeout=10)
+    assert store.database_path == new_path
+    # The stale worker's stored answer must not leak into the new state.
+    assert store.note_disappeared(device_id=_MAC, family_id="kasa", host=None, label="Fan") is not None
+    assert store.notices() != ()
+
+
+def test_a_cleared_store_ignores_an_attach_that_finishes_afterwards(tmp_path: Path) -> None:
+    path = tmp_path / "cache.sqlite"
+    store = DevicePresenceStore()
+    read_started = threading.Event()
+    release_read = threading.Event()
+    real_list = list_keep_checking
+
+    def _slow(path_: Path | None) -> dict[tuple[str, str], float]:
+        read_started.set()
+        assert release_read.wait(timeout=10)
+        return real_list(path_)
+
+    with patch("app.device_presence.list_keep_checking", side_effect=_slow):
+        worker = threading.Thread(target=store.attach, args=(path,))
+        worker.start()
+        assert read_started.wait(timeout=10)
+        store.clear()
+        release_read.set()
+        worker.join(timeout=10)
+    assert store.database_path is None

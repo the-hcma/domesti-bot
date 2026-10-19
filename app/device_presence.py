@@ -59,6 +59,9 @@ class DevicePresenceStore:
     """Tracks missing devices and the notices the web UI shows for them."""
 
     def __init__(self) -> None:
+        # Bumped by every attach() and clear(): an attach whose database read finishes after a newer
+        # one (a cancelled startup whose worker outlived it) must not publish its stale result.
+        self._attach_generation = 0
         self._database_path: Path | None = None
         self._keep_checking: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()
@@ -69,6 +72,9 @@ class DevicePresenceStore:
     def attach(self, path: Path | None) -> None:
         """Keep "keep checking" answers in the discovery database at ``path`` (``None`` detaches)."""
 
+        with self._lock:
+            self._attach_generation += 1
+            generation = self._attach_generation
         stored: dict[tuple[str, str], float] = {}
         if path is not None:
             try:
@@ -76,11 +82,14 @@ class DevicePresenceStore:
             except Exception:
                 _LOGGER.warning("Could not read stored keep-checking answers; asking again", exc_info=True)
         with self._lock:
+            if generation != self._attach_generation:
+                return
             self._database_path = path
             self._keep_checking = stored
 
     def clear(self) -> None:
         with self._lock:
+            self._attach_generation += 1
             self._database_path = None
             self._keep_checking.clear()
             self._missing.clear()
