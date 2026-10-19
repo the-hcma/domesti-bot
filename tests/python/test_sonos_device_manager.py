@@ -405,6 +405,51 @@ async def test_rediscover_keeps_an_unplugged_cached_speaker_after_it_was_live(tm
 
 
 @pytest.mark.asyncio
+async def test_retained_speaker_keeps_its_cached_mac_when_another_speaker_took_its_address(tmp_path: Path) -> None:
+    """A row whose id carries no MAC must not adopt the MAC of whatever now answers at its old address."""
+
+    db = tmp_path / "sonos.sqlite"
+    legacy = ("LEGACY-UID-1", "192.168.1.10", "Living Room", "dd:dd:dd:dd:dd:dd")
+    device_discovery_store.save_sonos_zones(db, [legacy])
+    mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db, force_discovery=True)
+    with (
+        patch("app.sonos_device_manager.soco_discover", return_value=set()),
+        patch("app.sonos_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        # Another speaker now answers ARP at the old address.
+        patch("app.sonos_device_manager.lookup_mac_via_arp", return_value="ee:ee:ee:ee:ee:ee"),
+        patch("app.sonos_device_manager.SoCo", return_value=_zone(legacy[0], legacy[1], "Living Room")),
+    ):
+        await mgr.fetch()
+    assert [(p.mac_address, p.unresponsive) for p in mgr.players] == [("dd:dd:dd:dd:dd:dd", True)]
+    assert device_discovery_store.load_sonos_zones(db) == [legacy]
+
+
+@pytest.mark.asyncio
+async def test_a_shared_room_name_resolves_to_the_live_speaker_not_the_retained_one(tmp_path: Path) -> None:
+    """A replaced speaker usually keeps its room name: pausing "Living Room" must reach the live one."""
+
+    db = tmp_path / "sonos.sqlite"
+    old = ("RINCON_DDDDDDDDDDDD01400", "192.168.1.10", "Living Room", "dd:dd:dd:dd:dd:dd")
+    device_discovery_store.save_sonos_zones(db, [old])
+    replacement = _zone("RINCON_EEEEEEEEEEEE01400", "192.168.1.11", "Living Room")
+    mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db, force_discovery=True)
+    with (
+        patch("app.sonos_device_manager.soco_discover", return_value={replacement}),
+        patch("app.sonos_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.sonos_device_manager.SoCo", return_value=_zone(old[0], old[1], "Living Room")),
+    ):
+        await mgr.fetch()
+    by_label = mgr.get_device_by_alias("Living Room")
+    assert by_label is not None
+    assert (by_label.mac_address, by_label.unresponsive) == ("ee:ee:ee:ee:ee:ee", False)
+    # Both speakers stay reachable by their own MAC.
+    retained = mgr.get_device_by_alias("dd:dd:dd:dd:dd:dd")
+    assert retained is not None and retained.unresponsive is True
+
+
+@pytest.mark.asyncio
 async def test_fetch_persists_cache_after_udp_discovery(tmp_path: Path) -> None:
     """A successful UDP sweep must write the cache so the next start can skip it."""
 

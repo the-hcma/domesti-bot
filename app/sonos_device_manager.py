@@ -285,7 +285,11 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 alias_map[sd.mac_address] = sd
             label = sd.preferred_label
             if label != sd.identifier:
-                alias_map[label] = sd
+                holder = alias_map.get(label)
+                # A retained (unresponsive) speaker never takes a room name from a live one: a replaced
+                # speaker usually keeps its name, and "pause Living Room" must reach the live speaker.
+                if not (holder is not None and not holder.unresponsive and sd.unresponsive):
+                    alias_map[label] = sd
         return alias_map
 
     def _finalize(self, devices: list[SonosSpeakerDevice]) -> None:
@@ -352,7 +356,8 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             arp_ip = (await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) if on_lan else None) or host
             label = (zone_name or "").strip() or mac_n
             zone = SoCo(arp_ip)
-            sd = self._speaker_device(uid, zone, display_name=label)
+            # The cached MAC wins over an ARP lookup at the old address, which may now be another speaker's.
+            sd = self._speaker_device(uid, zone, display_name=label, cached_mac=mac_n)
             if sd is None:
                 sd = SonosSpeakerDevice(
                     mac_n,
