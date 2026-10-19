@@ -33,11 +33,14 @@ from app.api.schemas import (
     UIFamilyOut,
     UIOccupancyReadingsOut,
     UIOperatorAlertOut,
+    UIPresenceNoticeOut,
     UISonosStreamFavoriteOut,
     UIStateOut,
 )
-from app.device_enums import DeviceConditionState, DeviceFamilyId
+from app.device_display import format_device_display
+from app.device_enums import DeviceConditionState, DeviceFamilyId, DevicePresenceKind
 from app.device_manager import NotInitializedError
+from app.device_presence import DevicePresenceNotice, device_presence_store
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
 from app.ep1_header_freshness import ep1_is_responding
@@ -419,6 +422,24 @@ def _kasa_devices(
     return out
 
 
+def _presence_notice_out(notice: DevicePresenceNotice) -> UIPresenceNoticeOut:
+    shown = format_device_display(notice.device_id, notice.label)
+    if notice.kind == DevicePresenceKind.DISAPPEARED:
+        message = f"{shown} stopped responding. It may be unplugged or have lost its network connection."
+    else:
+        message = f"{shown} is responding again."
+    return UIPresenceNoticeOut(
+        device_id=notice.device_id,
+        family_id=notice.family_id,
+        host=notice.host,
+        kind=notice.kind,
+        label=notice.label,
+        message=message,
+        notice_id=notice.notice_id,
+        recorded_at=notice.recorded_at,
+    )
+
+
 def _sonos_devices(
     mgr: SonosDeviceManager,
     excluded: set[str],
@@ -771,7 +792,11 @@ def build_ui_state(
             reason_code=smtp_alert.reason_code,
             recorded_at=smtp_alert.recorded_at,
         )
-    return UIStateOut(families=families, operator_alert=operator_alert)
+    return UIStateOut(
+        families=families,
+        operator_alert=operator_alert,
+        presence_notices=[_presence_notice_out(n) for n in device_presence_store.notices()],
+    )
 
 
 async def bulk_close_tailwind_apply(

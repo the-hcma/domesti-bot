@@ -174,6 +174,28 @@ async def test_recover_unresponsive_returns_nothing_before_first_fetch() -> None
 
 
 @pytest.mark.asyncio
+async def test_recover_unresponsive_does_not_overwrite_a_map_installed_while_closing_sessions(tmp_path: Path) -> None:
+    """The new map is written before any await, so a rediscover that lands later keeps its result."""
+
+    mgr = await _manager_with_unplugged_fan(tmp_path / "cached.sqlite")
+    fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
+    newer_map: dict[str, object] = {}
+    real_disconnect = mgr._disconnect_device_map
+
+    async def _disconnect_then_install_newer_map(alias_map: object) -> None:
+        mgr._device_name_to_device = newer_map  # type: ignore[assignment]
+        await real_disconnect(alias_map)  # type: ignore[arg-type]
+
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=fan)),
+        patch.object(mgr, "_disconnect_device_map", AsyncMock(side_effect=_disconnect_then_install_newer_map)),
+    ):
+        await mgr.recover_unresponsive()
+    assert mgr._device_name_to_device is newer_map
+
+
+@pytest.mark.asyncio
 async def test_recover_unresponsive_stands_down_while_rediscover_is_replacing_the_roster(tmp_path: Path) -> None:
     mgr = await _manager_with_unplugged_fan(tmp_path / "cached.sqlite")
     fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")

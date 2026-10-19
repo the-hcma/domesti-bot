@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from app.device_presence import device_presence_store
+
 
 def _hermetic_arp_mac(host: str) -> str:
     """Deterministic MAC derived from an IPv4 host for hermetic discovery tests."""
@@ -12,6 +14,12 @@ def _hermetic_arp_mac(host: str) -> str:
         a, b, c, d = (int(part) for part in parts)
         return f"aa:bb:{a:02x}:{b:02x}:{c:02x}:{d:02x}"
     return "aa:bb:cc:dd:ee:ff"
+
+
+@pytest.fixture(autouse=True)
+def _reset_device_presence_store() -> None:
+    """Keep presence notices from one test out of the next (the store is process-wide)."""
+    device_presence_store.clear()
 
 
 @pytest.fixture(autouse=True)

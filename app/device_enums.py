@@ -91,6 +91,20 @@ class DeviceIdResolution(StrEnum):
 EP1_DISPLAY_NAME = "Everything Presence One"
 
 
+class DevicePresenceDecision(StrEnum):
+    """What the operator chose for a device that stopped responding."""
+
+    KEEP_CHECKING = "keep_checking"
+    PENDING = "pending"
+
+
+class DevicePresenceKind(StrEnum):
+    """Why a device presence notice is shown in the web UI."""
+
+    DISAPPEARED = "disappeared"
+    REAPPEARED = "reappeared"
+
+
 class Ep1BluetoothProxyState(StrEnum):
     """ESPHome ``bluetooth_proxy`` select options (wire values match firmware)."""
 
@@ -323,6 +337,9 @@ class UiActionType(StrEnum):
     BULK_OFF = "bulk_off"
     CLOSE = "close"
     CLOSE_ALL = "close_all"
+    DISMISS_NOTICE = "dismiss_notice"
+    FORGET_DEVICE = "forget_device"
+    KEEP_CHECKING = "keep_checking"
     OPEN = "open"
     PAUSE_ALL = "pause_all"
     TOGGLE = "toggle"
