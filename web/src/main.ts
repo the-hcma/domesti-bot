@@ -12,14 +12,23 @@ import {
   ep1HeaderOccupancyGlyphFromUiState,
   ep1HeaderStatusFromUiState,
 } from "./ep1-header-status.js";
+import {
+  createPresenceNoticeStack,
+  presenceForgetConfirmMessage,
+  presenceToastFor,
+  unseenPresenceNotices,
+  withoutPresenceNotices,
+} from "./presence-notices.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
 import {
   BulkOffScope,
   CompactIconKey,
+  ConfirmButtonVariant,
   DataLayout,
   DeviceFamilyId,
   ThemePreference,
+  ToastVariant,
   TileTone,
   UIDeviceKind,
   UIDeviceState,
@@ -29,9 +38,11 @@ import {
   type UIFamilyOut,
   type UIOccupancyReadingsOut,
   type UIOperatorAlertOut,
+  type UIPresenceNoticeOut,
   type UIStateOut,
 } from "./types.js";
 import {
+  confirmAction,
   showErrorToast,
   showInfoToast,
   showSuccessToast,
@@ -164,6 +175,15 @@ class DomestiBotController {
   // etc.). Confirmed predictions (poll state == predicted state)
   // delete themselves; expired predictions release their hold.
   private pendingPredictions: Map<string, PendingPrediction> = new Map();
+  /** Presence notice ids already rendered with a live-region role (announced to screen readers once). */
+  private announcedPresenceNoticeIds: Set<string> = new Set();
+  /** Presence notices whose action succeeded: hidden for good, even if a poll that started earlier still lists them. */
+  private handledPresenceNoticeIds: Set<string> = new Set();
+  /** Presence notices whose action is running: hidden meanwhile so clicks and polls cannot repeat it. */
+  private presenceActionsInFlight: Set<string> = new Set();
+  /** Presence notice ids already shown, so a toast fires only for ones that appear later. */
+  private seenPresenceNoticeIds: Set<string> = new Set();
+  private presenceBaselineTaken = false;
   private meta: MetaOut | null = null;
 
   constructor(root: HTMLElement) {
@@ -194,6 +214,7 @@ class DomestiBotController {
       try {
         this.state = await api.fetchState();
         this.markBackendReadyFromState();
+        this.announceNewPresenceNotices(this.state);
         this.applyPendingPredictionsTo(this.state);
         warmCompactTileIcons(this.state);
         this.render();
@@ -531,6 +552,29 @@ class DomestiBotController {
     });
   }
 
+  private announceNewPresenceNotices(state: UIStateOut): void {
+    // The banner can be scrolled out of view (phones), so a notice that appears while the page
+    // is open also gets a toast. Notices already present on first load stay silent.
+    const notices = state.presence_notices ?? [];
+    const fresh = unseenPresenceNotices(notices, this.seenPresenceNoticeIds);
+    for (const notice of notices) {
+      this.seenPresenceNoticeIds.add(notice.notice_id);
+    }
+    if (!this.presenceBaselineTaken) {
+      this.presenceBaselineTaken = true;
+      return;
+    }
+    const toast = presenceToastFor(fresh);
+    if (toast === null) {
+      return;
+    }
+    if (toast.variant === ToastVariant.Error) {
+      showErrorToast(toast.message);
+    } else {
+      showSuccessToast(toast.message);
+    }
+  }
+
   private onSpeakerTileActionFailure(
     device: UIDeviceOut,
     err: unknown,
@@ -553,6 +597,63 @@ class DomestiBotController {
       nextState,
       () => api.toggleDevice(device.family_id, device.id),
       onFailure,
+    );
+  }
+
+  private async onPresenceNoticeAction(
+    notice: UIPresenceNoticeOut,
+    action: () => Promise<unknown>,
+    successMessage: string,
+  ): Promise<void> {
+    const noticeId = notice.notice_id;
+    if (this.presenceActionsInFlight.has(noticeId)) {
+      return;
+    }
+    this.presenceActionsInFlight.add(noticeId);
+    this.render();
+    let handled = false;
+    try {
+      await action();
+      handled = true;
+      showSuccessToast(successMessage);
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 404) {
+        // Already handled elsewhere (another tab, or the device came back): nothing left to do.
+        handled = true;
+      } else {
+        showErrorToast(
+          err instanceof HttpError
+            ? err.detail
+            : `Could not update ${notice.label}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (handled) {
+      this.handledPresenceNoticeIds.add(noticeId);
+      this.removePresenceNotice(noticeId);
+    }
+    await this.refresh();
+    this.presenceActionsInFlight.delete(noticeId);
+    if (!handled) {
+      this.render();
+    }
+  }
+
+  private async onPresenceForget(notice: UIPresenceNoticeOut): Promise<void> {
+    const confirmed = await confirmAction({
+      cancelLabel: "Keep it",
+      confirmLabel: "Forget",
+      message: presenceForgetConfirmMessage(notice.label),
+      title: "Forget device?",
+      variant: ConfirmButtonVariant.Danger,
+    });
+    if (!confirmed) {
+      return;
+    }
+    await this.onPresenceNoticeAction(
+      notice,
+      () => api.forgetPresenceDevice(notice.notice_id),
+      `Forgot ${notice.label}.`,
     );
   }
 
@@ -710,6 +811,7 @@ class DomestiBotController {
       const state = await api.fetchState();
       this.markBackendReadyFromState();
       this.state = state;
+      this.announceNewPresenceNotices(state);
       this.applyPendingPredictionsTo(this.state);
       warmCompactTileIcons(this.state);
       this.render();
@@ -778,6 +880,7 @@ class DomestiBotController {
     this.root.replaceChildren();
     this.root.dataset["connected"] = this.connected ? "true" : "false";
     this.root.dataset["layout"] = isMobileFormFactor() ? DataLayout.Compact : DataLayout.Comfortable;
+    this.renderPresenceNotices(state.presence_notices);
     this.renderOperatorAlert(state.operator_alert);
     if (state.families.length > 0) {
       const header = document.createElement("header");
@@ -942,6 +1045,52 @@ class DomestiBotController {
     label.textContent = message;
     row.append(spinner, label);
     this.root.append(row);
+  }
+
+  private removePresenceNotice(noticeId: string): void {
+    const state = this.state;
+    if (state?.presence_notices === undefined) {
+      return;
+    }
+    state.presence_notices = state.presence_notices.filter(
+      (notice) => notice.notice_id !== noticeId,
+    );
+    this.render();
+  }
+
+  private renderPresenceNotices(
+    notices: readonly UIPresenceNoticeOut[] | undefined,
+  ): void {
+    const visible = withoutPresenceNotices(
+      notices ?? [],
+      this.presenceActionsInFlight,
+      this.handledPresenceNoticeIds,
+    );
+    const stack = createPresenceNoticeStack(visible, {
+      onDismiss: (notice) => {
+        void this.onPresenceNoticeAction(
+          notice,
+          () => api.dismissPresenceNotice(notice.notice_id),
+          `Dismissed the notice for ${notice.label}.`,
+        );
+      },
+      onForget: (notice) => {
+        void this.onPresenceForget(notice);
+      },
+      onKeepChecking: (notice) => {
+        void this.onPresenceNoticeAction(
+          notice,
+          () => api.keepCheckingPresenceDevice(notice.notice_id),
+          `Will keep checking for ${notice.label}.`,
+        );
+      },
+    }, this.announcedPresenceNoticeIds);
+    if (stack !== null) {
+      this.root.prepend(stack);
+      for (const notice of visible) {
+        this.announcedPresenceNoticeIds.add(notice.notice_id);
+      }
+    }
   }
 
   private renderOperatorAlert(alert: UIOperatorAlertOut | null | undefined): void {

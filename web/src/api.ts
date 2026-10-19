@@ -92,6 +92,7 @@ import type {
   VizioTvSettingsOut,
   UIBulkActionOut,
   UIDeviceActionOut,
+  UIPresenceActionOut,
   UIGlobalBulkActionOut,
   UIPreferenceOut,
   UIStateOut,
@@ -278,6 +279,27 @@ export const api = {
     return callNoContent(
       "DELETE",
       `/v1/rules/geofences/${encodeURIComponent(geofenceId)}`,
+    );
+  },
+  dismissPresenceNotice(noticeId: string): Promise<UIPresenceActionOut> {
+    return call<UIPresenceActionOut>(
+      "POST",
+      `/v1/ui/presence/${encodeURIComponent(noticeId)}/dismiss`,
+      {},
+    );
+  },
+  forgetPresenceDevice(noticeId: string): Promise<UIPresenceActionOut> {
+    return call<UIPresenceActionOut>(
+      "POST",
+      `/v1/ui/presence/${encodeURIComponent(noticeId)}/forget`,
+      {},
+    );
+  },
+  keepCheckingPresenceDevice(noticeId: string): Promise<UIPresenceActionOut> {
+    return call<UIPresenceActionOut>(
+      "POST",
+      `/v1/ui/presence/${encodeURIComponent(noticeId)}/keep-checking`,
+      {},
     );
   },
   fetchHealth(): Promise<HealthOut> {

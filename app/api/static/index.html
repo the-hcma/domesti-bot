@@ -271,6 +271,23 @@
       cursor: pointer; opacity: 0.85; }
     .operator-alert-dismiss:hover, .operator-alert-dismiss:focus-visible {
       opacity: 1; outline: 1px solid currentColor; }
+    /* Device presence notices — a device stopped responding (red, asks
+       "keep checking" or "forget it") or answers again (green, dismissible).
+       Same placement and tone rules as the operator alert above. */
+    .presence-notices { display: flex; flex-direction: column; gap: 8px;
+      margin-bottom: 12px; }
+    .presence-notice { color: white; padding: 10px 14px; border-radius: 6px;
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+    .presence-notice-missing { background: var(--danger); }
+    .presence-notice-returned { background: var(--accent); }
+    /* A global ``p`` rule sets the muted color, so the message must inherit white explicitly. */
+    .presence-notice-message { flex: 1 1 16em; line-height: 1.4; margin: 0; color: inherit; }
+    .presence-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .presence-notice-btn { background: transparent; color: inherit;
+      border: 1px solid currentColor; border-radius: 6px; padding: 4px 10px;
+      font: inherit; cursor: pointer; }
+    .presence-notice-btn:hover, .presence-notice-btn:focus-visible {
+      background: rgba(255, 255, 255, 0.2); outline: none; }
     /* Recoverable per-action toast — surfaces server-side hints like
        a Sonos 409 ("queue is empty, pick something to play first").
        Pinned to the viewport (NOT to ``#app``) so the background poll's

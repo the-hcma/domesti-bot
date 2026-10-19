@@ -15,6 +15,7 @@ import {
   type Ep1ReadingMetric,
   type KasaCredentialsSource,
   type KasaPirRange,
+  type PresenceNoticeKind,
   type RuleActionType,
   type RuleReferenceIssueKind,
   type RuleTrigger,
@@ -138,9 +139,28 @@ export interface UIOperatorAlertOut {
   recorded_at: number;
 }
 
+export interface UIPresenceActionOut {
+  device_id: string;
+  family_id: string;
+  label: string;
+  notice_id: string;
+}
+
+export interface UIPresenceNoticeOut {
+  device_id: string;
+  family_id: string;
+  host: string | null;
+  kind: PresenceNoticeKind;
+  label: string;
+  message: string;
+  notice_id: string;
+  recorded_at: number;
+}
+
 export interface UIStateOut {
   families: UIFamilyOut[];
   operator_alert?: UIOperatorAlertOut | null;
+  presence_notices?: UIPresenceNoticeOut[];
 }
 
 export interface UIBulkActionOut {
