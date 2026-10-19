@@ -207,7 +207,7 @@ async def test_recover_unresponsive_discards_results_when_a_rediscover_starts_mi
     fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
 
     async def _connect_while_rediscover_starts(*_args: object, **_kwargs: object) -> MagicMock:
-        mgr._roster_replacing = True
+        mgr._roster_replacements += 1
         return fan
 
     with (
@@ -260,3 +260,84 @@ async def test_recover_unresponsive_closes_the_session_when_reading_the_plug_fai
         assert await mgr.recover_unresponsive() == ()
     half_dead.disconnect.assert_awaited()
     assert [s.unresponsive for s in mgr.switches] == [True]
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_stands_down_while_reload_from_cache_is_replacing_the_roster(tmp_path: Path) -> None:
+    db = tmp_path / "cached.sqlite"
+    mgr = await _manager_with_unplugged_fan(db)
+    fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
+    recovered_meanwhile: list[tuple[str, ...]] = []
+    real_connect = mgr._connect_devices_from_cache
+
+    async def _connect_and_try_recovery(*args: object, **kwargs: object) -> object:
+        # Runs inside reload_from_cache's await: the recovery watcher could fire right now.
+        recovered_meanwhile.append(await mgr.recover_unresponsive())
+        return await real_connect(*args, **kwargs)  # type: ignore[arg-type]
+
+    with (
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=fan)),
+        patch.object(mgr, "_connect_devices_from_cache", AsyncMock(side_effect=_connect_and_try_recovery)),
+    ):
+        await mgr.reload_from_cache()
+    assert recovered_meanwhile == [()]
+
+
+@pytest.mark.asyncio
+async def test_overlapping_roster_replacements_keep_recovery_off_until_both_finish(tmp_path: Path) -> None:
+    mgr = await _manager_with_unplugged_fan(tmp_path / "cached.sqlite")
+    with mgr._replacing_roster():
+        with mgr._replacing_roster():
+            pass
+        # The inner operation finished; the outer one is still replacing the roster.
+        assert await mgr.recover_unresponsive() == ()
+    fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=fan)),
+    ):
+        assert await mgr.recover_unresponsive() == (_FAN_MAC,)
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_never_overwrites_another_stub_at_the_recovered_address(tmp_path: Path) -> None:
+    db = tmp_path / "cached.sqlite"
+    other_cfg = {**_PLUG_CFG, "host": "192.168.1.60"}
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.50", "Master bedroom fan", _PLUG_CFG, False, _FAN_MAC),
+            ("192.168.1.60", "Visitor lamp", other_cfg, False, "aa:bb:cc:dd:ee:02"),
+        ],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.fetch()
+    assert sorted(s.mac_address for s in mgr.switches) == [_FAN_MAC, "aa:bb:cc:dd:ee:02"]
+    # The fan comes back, but at the address the other (still silent) stub holds.
+    fan = _answering_device(host="192.168.1.60", mac=_FAN_MAC, alias="Master bedroom fan")
+
+    async def _connect(cfg: DeviceConfig, **_kw: object) -> MagicMock | None:
+        return fan if cfg.host == "192.168.1.60" else None
+
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.60"),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(side_effect=_connect)),
+    ):
+        recovered = await mgr.recover_unresponsive()
+    assert recovered == ()
+    assert sorted((s.mac_address, s.host, s.unresponsive) for s in mgr.switches) == [
+        (_FAN_MAC, "192.168.1.50", True),
+        ("aa:bb:cc:dd:ee:02", "192.168.1.60", True),
+    ]
+    assert sorted(str(row[4]) for row in device_discovery_store.load_cached_configs(db)) == [
+        _FAN_MAC,
+        "aa:bb:cc:dd:ee:02",
+    ]
+    fan.disconnect.assert_awaited()

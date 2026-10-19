@@ -56,6 +56,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -413,8 +414,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self._query_timeout = query_timeout
         self._discovery_cache_path = Path(discovery_cache_path).expanduser().resolve() if discovery_cache_path else None
         self._force_discovery = force_discovery
-        # True while :meth:`rediscover` is replacing the roster; recovery stands down meanwhile.
-        self._roster_replacing = False
+        # Number of roster replacements in flight (:meth:`rediscover`, :meth:`reload_from_cache`);
+        # recovery stands down while it is above zero. A count, not a flag, so overlapping
+        # operations cannot clear each other's guard.
+        self._roster_replacements = 0
         # Set by :meth:`_fetch_impl` to ``"cache"`` (every saved config
         # reconnected without falling back to UDP) or ``"discovery"`` (full
         # ``Discover.discover`` broadcast sweep). ``None`` before first fetch.
@@ -786,6 +789,64 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             if kd is not None:
                 return kd
         return None
+
+    async def _reload_from_cache_unguarded(self) -> bool:
+        if self._discovery_cache_path is None:
+            _LOGGER.debug("Kasa reload_from_cache: no discovery cache path")
+            return False
+        if self._device_name_to_device is None:
+            _LOGGER.debug("Kasa reload_from_cache: manager not initialized")
+            return False
+        cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
+        if not cached:
+            previous_map = self._device_name_to_device
+            self._hosts_requiring_klap_auth = set()
+            self._last_skipped_auth_hosts = []
+            self._skipped_klap_auth_configs = {}
+            self._finalize_kasa_lookup({})
+            self._last_discovery_source = "cache"
+            await self._disconnect_device_map(previous_map)
+            _LOGGER.info("Kasa reload_from_cache: empty cache; cleared device map")
+            return True
+
+        previous_map = self._device_name_to_device
+        previous_klap = set(self._hosts_requiring_klap_auth)
+        previous_skipped = list(self._last_skipped_auth_hosts)
+        previous_skipped_cfgs = dict(self._skipped_klap_auth_configs)
+
+        # Clear before reconnect so hosts dropped from SQLite do not keep a
+        # stale KLAP-auth marker (``_connect_devices_from_cache`` only
+        # add/discards rows present in ``cached``).
+        self._hosts_requiring_klap_auth = set()
+        self._last_skipped_auth_hosts = []
+        self._skipped_klap_auth_configs = {}
+
+        from_cache = await self._connect_devices_from_cache(cached, keep_offline=True)
+        if from_cache is None:
+            self._hosts_requiring_klap_auth = previous_klap
+            self._last_skipped_auth_hosts = previous_skipped
+            self._skipped_klap_auth_configs = previous_skipped_cfgs
+            _LOGGER.warning("Kasa reload_from_cache: reconnect failed; keeping prior device map")
+            return False
+
+        self._finalize_kasa_lookup(from_cache)
+        self._last_discovery_source = "cache"
+        await self._disconnect_device_map(previous_map)
+        _LOGGER.info(
+            "Kasa reload_from_cache: replaced device map from cache (%d switch(es))",
+            len(self.switches),
+        )
+        return True
+
+    @contextlib.contextmanager
+    def _replacing_roster(self) -> Iterator[None]:
+        """Mark a roster replacement in flight so the recovery watcher stands down (nesting-safe)."""
+
+        self._roster_replacements += 1
+        try:
+            yield
+        finally:
+            self._roster_replacements -= 1
 
     async def _retain_cached_switches(
         self,
@@ -1493,7 +1554,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         """
 
         current = self._device_name_to_device
-        if current is None or self._roster_replacing:
+        if current is None or self._roster_replacements > 0:
             return ()
         stubs = {kd.mac_address: kd for kd in self.switches if kd.kasa_protocol_device() is None}
         if not stubs or self._discovery_cache_path is None:
@@ -1522,30 +1583,49 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             recovered.update(swept)
         if not recovered:
             return ()
-        if self._device_name_to_device is not current or self._roster_replacing:
+        if self._device_name_to_device is not current or self._roster_replacements > 0:
             await self._disconnect_device_map({kd.host: kd for kd in recovered.values()})
             return ()
         devices_by_host: dict[str, KasaDevice] = {}
+        candidates: list[KasaDevice] = []
         for kd in {id(kd): kd for kd in current.values()}.values():
-            replacement = recovered.get(kd.mac_address) if kd.kasa_protocol_device() is None else None
-            kept = replacement or kd
-            devices_by_host[kept.host] = kept
-        for mac, kd in recovered.items():
+            devices_by_host[kd.host] = kd
+            if kd.kasa_protocol_device() is None and kd.mac_address in recovered:
+                candidates.append(kd)
+        unused = dict(recovered)
+        for stub in candidates:
+            new = recovered[stub.mac_address]
+            if new.host != stub.host and new.host in devices_by_host:
+                # The recovered address is held by another tile (the cache is keyed by host, so
+                # both cannot stay). Never drop a tile: leave this plug unresponsive and retry later.
+                _LOGGER.warning(
+                    "Kasa: %s answers at %s, which another tile holds; leaving it unresponsive",
+                    format_device_display(stub.mac_address, stub.preferred_label),
+                    new.host,
+                )
+                continue
+            del devices_by_host[stub.host]
+            devices_by_host[new.host] = new
+            del unused[stub.mac_address]
+        restored = tuple(sorted(set(recovered) - set(unused)))
+        for mac in restored:
             # The KLAP flag is tracked by host: follow a plug that came back at a new address.
             old_host = stubs[mac].host
-            if kd.host != old_host and old_host in self._hosts_requiring_klap_auth:
+            if recovered[mac].host != old_host and old_host in self._hosts_requiring_klap_auth:
                 self._hosts_requiring_klap_auth.discard(old_host)
-                self._hosts_requiring_klap_auth.add(kd.host)
+                self._hosts_requiring_klap_auth.add(recovered[mac].host)
                 self._skipped_klap_auth_configs.pop(old_host, None)
-        self._finalize_kasa_lookup(devices_by_host)
-        self._persist_discovery_cache(self._device_name_to_device or {})
-        for mac, kd in recovered.items():
+        if restored:
+            self._finalize_kasa_lookup(devices_by_host)
+            self._persist_discovery_cache(self._device_name_to_device or {})
+        await self._disconnect_device_map({kd.host: kd for kd in unused.values()})
+        for mac in restored:
             _LOGGER.info(
                 "Kasa: %s is answering again at %s; restored from unresponsive",
-                format_device_display(mac, kd.preferred_label),
-                kd.host,
+                format_device_display(mac, recovered[mac].preferred_label),
+                recovered[mac].host,
             )
-        return tuple(sorted(recovered))
+        return restored
 
     async def rediscover(self) -> None:
         """Drop connections and repopulate switches via UDP discovery (ignore SQLite cache reads).
@@ -1558,8 +1638,7 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         an empty device map until process restart.
         """
 
-        self._roster_replacing = True
-        try:
+        with self._replacing_roster():
             await self.disconnect(clear_map=False)
             try:
                 await self._fetch_impl(force_discovery=True)
@@ -1570,8 +1649,6 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     self._device_name_to_device = None
                     raise udp_exc from None
                 raise udp_exc
-        finally:
-            self._roster_replacing = False
 
     async def reload_from_cache(self) -> bool:
         """Replace the in-memory switch map from SQLite only (never UDP).
@@ -1587,52 +1664,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         in-memory map and returns ``True``.
         """
 
-        if self._discovery_cache_path is None:
-            _LOGGER.debug("Kasa reload_from_cache: no discovery cache path")
-            return False
-        if self._device_name_to_device is None:
-            _LOGGER.debug("Kasa reload_from_cache: manager not initialized")
-            return False
-        cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
-        if not cached:
-            previous_map = self._device_name_to_device
-            self._hosts_requiring_klap_auth = set()
-            self._last_skipped_auth_hosts = []
-            self._skipped_klap_auth_configs = {}
-            self._finalize_kasa_lookup({})
-            self._last_discovery_source = "cache"
-            await self._disconnect_device_map(previous_map)
-            _LOGGER.info("Kasa reload_from_cache: empty cache; cleared device map")
-            return True
-
-        previous_map = self._device_name_to_device
-        previous_klap = set(self._hosts_requiring_klap_auth)
-        previous_skipped = list(self._last_skipped_auth_hosts)
-        previous_skipped_cfgs = dict(self._skipped_klap_auth_configs)
-
-        # Clear before reconnect so hosts dropped from SQLite do not keep a
-        # stale KLAP-auth marker (``_connect_devices_from_cache`` only
-        # add/discards rows present in ``cached``).
-        self._hosts_requiring_klap_auth = set()
-        self._last_skipped_auth_hosts = []
-        self._skipped_klap_auth_configs = {}
-
-        from_cache = await self._connect_devices_from_cache(cached, keep_offline=True)
-        if from_cache is None:
-            self._hosts_requiring_klap_auth = previous_klap
-            self._last_skipped_auth_hosts = previous_skipped
-            self._skipped_klap_auth_configs = previous_skipped_cfgs
-            _LOGGER.warning("Kasa reload_from_cache: reconnect failed; keeping prior device map")
-            return False
-
-        self._finalize_kasa_lookup(from_cache)
-        self._last_discovery_source = "cache"
-        await self._disconnect_device_map(previous_map)
-        _LOGGER.info(
-            "Kasa reload_from_cache: replaced device map from cache (%d switch(es))",
-            len(self.switches),
-        )
-        return True
+        with self._replacing_roster():
+            return await self._reload_from_cache_unguarded()
 
     def set_credentials(
         self,
