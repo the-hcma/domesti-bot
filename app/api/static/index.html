@@ -24,6 +24,10 @@
       --bulk: #c2410c;
       --bulk-fg: #ffffff;
       --danger: #b3261e;
+      /* Solid fills that carry white text (banners). Unlike --danger / --accent, which are brightened in
+         dark mode for use as text and accents, these stay the same in both themes: white on them is 4.5:1 or better. */
+      --danger-solid: #b3261e;
+      --accent-solid: #2e7d32;
       --card: #ffffff;
       --card-elev: #fafbfc;
       --bg: #f6f7f9;
@@ -262,10 +266,11 @@
        process-local warnings. Lives inside ``#app`` (unlike the action
        toast) so it scrolls with the dashboard. Dismissal is remembered
        in ``localStorage`` keyed by reason_code + recorded_at. */
-    .operator-alert-banner { background: var(--danger); color: white;
+    .operator-alert-banner { background: var(--danger-solid); color: white;
       padding: 10px 14px; border-radius: 6px; margin-bottom: 12px;
       display: flex; align-items: flex-start; gap: 12px; }
-    .operator-alert-message { flex: 1; line-height: 1.4; margin: 0; }
+    /* A global ``p`` rule sets the muted color, so the message must inherit the banner's white explicitly. */
+    .operator-alert-message { flex: 1; line-height: 1.4; margin: 0; color: inherit; }
     .operator-alert-dismiss { background: transparent; color: inherit;
       border: 0; font-size: 18px; line-height: 1; padding: 0 4px;
       cursor: pointer; opacity: 0.85; }
@@ -278,16 +283,18 @@
       margin-bottom: 12px; }
     .presence-notice { color: white; padding: 10px 14px; border-radius: 6px;
       display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
-    .presence-notice-missing { background: var(--danger); }
-    .presence-notice-returned { background: var(--accent); }
+    .presence-notice-missing { background: var(--danger-solid); }
+    .presence-notice-returned { background: var(--accent-solid); }
     /* A global ``p`` rule sets the muted color, so the message must inherit white explicitly. */
     .presence-notice-message { flex: 1 1 16em; line-height: 1.4; margin: 0; color: inherit; }
     .presence-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .presence-notice-btn { background: transparent; color: inherit;
       border: 1px solid currentColor; border-radius: 6px; padding: 4px 10px;
       font: inherit; cursor: pointer; }
+    /* Darken, never lighten: a white tint under white text drops the green notice to 3.5:1. */
     .presence-notice-btn:hover, .presence-notice-btn:focus-visible {
-      background: rgba(255, 255, 255, 0.2); outline: none; }
+      background: rgba(0, 0, 0, 0.25); }
+    .presence-notice-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
     /* Recoverable per-action toast — surfaces server-side hints like
        a Sonos 409 ("queue is empty, pick something to play first").
        Pinned to the viewport (NOT to ``#app``) so the background poll's
