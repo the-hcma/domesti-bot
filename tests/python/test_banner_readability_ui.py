@@ -38,21 +38,43 @@ _GOTO_TIMEOUT_MS = 30_000
 _MIN_CONTRAST_RATIO = 4.5
 
 
-def _contrast_ratio(foreground: str, background: str) -> float:
-    """WCAG contrast ratio between two computed ``rgb()`` / ``rgba()`` colors."""
+def _channels(color: str) -> tuple[float, float, float, float]:
+    """``(r, g, b, alpha)`` of a computed ``rgb()`` / ``rgba()`` color."""
 
-    def _luminance(color: str) -> float:
-        channels = [int(part) for part in re.findall(r"\d+", color)[:3]]
-        linear = [(c / 255) / 12.92 if c / 255 <= 0.03928 else (((c / 255) + 0.055) / 1.055) ** 2.4 for c in channels]
+    numbers = [float(part) for part in re.findall(r"[\d.]+", color)]
+    assert len(numbers) in (3, 4), f"Expected an rgb() or rgba() color, got {color!r}"
+    return numbers[0], numbers[1], numbers[2], numbers[3] if len(numbers) == 4 else 1.0
+
+
+def _contrast_ratio(foreground: str, background: str) -> float:
+    """WCAG contrast ratio of ``foreground`` over an opaque ``background`` (alpha is composited)."""
+
+    def _luminance(rgb: tuple[float, float, float]) -> float:
+        linear = [(c / 255) / 12.92 if c / 255 <= 0.04045 else (((c / 255) + 0.055) / 1.055) ** 2.4 for c in rgb]
         return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
 
-    lighter, darker = sorted((_luminance(foreground), _luminance(background)), reverse=True)
+    back_r, back_g, back_b, back_alpha = _channels(background)
+    assert back_alpha == 1.0, f"Expected an opaque background, got {background!r}"
+    fore_r, fore_g, fore_b, fore_alpha = _channels(foreground)
+    blended = (
+        fore_r * fore_alpha + back_r * (1 - fore_alpha),
+        fore_g * fore_alpha + back_g * (1 - fore_alpha),
+        fore_b * fore_alpha + back_b * (1 - fore_alpha),
+    )
+    lighter, darker = sorted((_luminance(blended), _luminance((back_r, back_g, back_b))), reverse=True)
     return (lighter + 0.05) / (darker + 0.05)
 
 
 def test_contrast_ratio_matches_known_wcag_values() -> None:
     assert _contrast_ratio("rgb(0, 0, 0)", "rgb(255, 255, 255)") == pytest.approx(21.0)
     assert _contrast_ratio("rgb(255, 255, 255)", "rgb(255, 255, 255)") == pytest.approx(1.0)
+
+
+def test_contrast_ratio_composites_a_translucent_foreground_and_rejects_a_translucent_background() -> None:
+    # 50% white over black is mid grey (127.5): the ratio sits between black-on-black and white-on-black.
+    assert 1.0 < _contrast_ratio("rgba(255, 255, 255, 0.5)", "rgb(0, 0, 0)") < 21.0
+    with pytest.raises(AssertionError, match="opaque background"):
+        _contrast_ratio("rgb(255, 255, 255)", "rgba(0, 0, 0, 0)")
 
 
 @pytest.fixture(scope="module")
@@ -112,15 +134,33 @@ def smtp_alert() -> Iterator[None]:
     operator_alert_store.clear_smtp_notification_failure()
 
 
+def _new_context(browser: Any, *, os_scheme: str, stored_theme: str | None) -> Any:
+    """A browser context whose OS color scheme is ``os_scheme`` and whose saved page theme is ``stored_theme``.
+
+    A saved theme sets ``data-theme`` on the page (``html[data-theme=...]`` rules); without one the page follows
+    the OS scheme (``html:not([data-theme])`` rules). Both paths must stay readable.
+    """
+
+    context = browser.new_context(viewport={"width": 1280, "height": 800}, color_scheme=os_scheme)
+    if stored_theme is not None:
+        context.add_init_script(f"window.localStorage.setItem('domesti-color-theme', '{stored_theme}')")
+    return context
+
+
+# (OS scheme, saved theme): the OS scheme alone, and a saved theme that disagrees with it.
+_THEME_CASES = [("light", None), ("dark", None), ("dark", "light"), ("light", "dark")]
+
+
 @pytest.mark.browser
-@pytest.mark.parametrize("scheme", ["light", "dark"])
+@pytest.mark.parametrize(("scheme", "stored_theme"), _THEME_CASES)
 def test_operator_alert_message_is_readable_in_both_color_schemes(
     chromium_browser: Any,
     landing_base_url: str,
     smtp_alert: None,
     scheme: str,
+    stored_theme: str | None,
 ) -> None:
-    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800}, color_scheme=scheme)
+    context = _new_context(chromium_browser, os_scheme=scheme, stored_theme=stored_theme)
     page = context.new_page()
     try:
         page.goto(landing_base_url, wait_until="networkidle", timeout=_GOTO_TIMEOUT_MS)
@@ -133,19 +173,69 @@ def test_operator_alert_message_is_readable_in_both_color_schemes(
         background = banner.evaluate("el => getComputedStyle(el).backgroundColor")
         shot_dir = os.environ.get("DOMESTI_ALERT_UI_SCREENSHOT_DIR")
         if shot_dir:
-            page.screenshot(path=str(Path(shot_dir) / f"operator-alert-{scheme}.png"))
+            page.screenshot(path=str(Path(shot_dir) / f"operator-alert-{scheme}-{stored_theme or 'os'}.png"))
         # The message must not fall back to the muted paragraph color: it is the banner's own color.
-        assert message_color == banner_color, f"message {message_color} != banner {banner_color} ({scheme})"
+        label = f"{scheme}, saved theme {stored_theme}"
+        assert message_color == banner_color, f"message {message_color} != banner {banner_color} ({label})"
         ratio = _contrast_ratio(message_color, background)
-        assert ratio >= _MIN_CONTRAST_RATIO, f"contrast {ratio:.2f}:1 of {message_color} on {background} ({scheme})"
+        assert ratio >= _MIN_CONTRAST_RATIO, f"contrast {ratio:.2f}:1 of {message_color} on {background} ({label})"
     finally:
         context.close()
 
 
 @pytest.mark.browser
-@pytest.mark.parametrize("scheme", ["light", "dark"])
+@pytest.mark.parametrize(("scheme", "stored_theme"), _THEME_CASES)
 @pytest.mark.parametrize("kind", ["missing", "returned"])
 def test_presence_notice_message_and_buttons_are_readable_in_both_color_schemes(
+    chromium_browser: Any,
+    landing_base_url: str,
+    scheme: str,
+    stored_theme: str | None,
+    kind: str,
+) -> None:
+    mac = "5c:e9:31:60:c5:bd"
+    device_presence_store.note_disappeared(device_id=mac, family_id="kasa", host=None, label="Master bedroom fan")
+    if kind == "returned":
+        device_presence_store.note_reappeared(device_id=mac, family_id="kasa", host=None, label="Master bedroom fan")
+    context = _new_context(chromium_browser, os_scheme=scheme, stored_theme=stored_theme)
+    page = context.new_page()
+    label = f"{kind}, {scheme}, saved theme {stored_theme}"
+    try:
+        page.goto(landing_base_url, wait_until="networkidle", timeout=_GOTO_TIMEOUT_MS)
+        banner = page.locator(f".presence-notice-{kind}").first
+        banner.wait_for(timeout=_BOOT_TIMEOUT_MS)
+        background = banner.evaluate("el => getComputedStyle(el).backgroundColor")
+        banner_color = banner.evaluate("el => getComputedStyle(el).color")
+        message = banner.locator(".presence-notice-message")
+        assert message.evaluate("el => getComputedStyle(el).color") == banner_color, label
+        for part in (message, banner.locator("button").first):
+            color = part.evaluate("el => getComputedStyle(el).color")
+            ratio = _contrast_ratio(color, background)
+            assert ratio >= _MIN_CONTRAST_RATIO, f"contrast {ratio:.2f}:1 of {color} on {background} ({label})"
+        shot_dir = os.environ.get("DOMESTI_ALERT_UI_SCREENSHOT_DIR")
+        if shot_dir:
+            page.screenshot(path=str(Path(shot_dir) / f"presence-{kind}-{scheme}-{stored_theme or 'os'}.png"))
+    finally:
+        context.close()
+
+
+def _button_surface(button: Any, banner_background: str) -> str:
+    """The opaque color a button's own background paints over the banner (its translucent fill composited)."""
+
+    fill = button.evaluate("el => getComputedStyle(el).backgroundColor")
+    red, green, blue, alpha = _channels(fill)
+    back_r, back_g, back_b, _ = _channels(banner_background)
+    return (
+        f"rgb({red * alpha + back_r * (1 - alpha):.0f}, "
+        f"{green * alpha + back_g * (1 - alpha):.0f}, "
+        f"{blue * alpha + back_b * (1 - alpha):.0f})"
+    )
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+@pytest.mark.parametrize("kind", ["missing", "returned"])
+def test_presence_notice_button_stays_readable_on_hover_and_keyboard_focus(
     chromium_browser: Any,
     landing_base_url: str,
     scheme: str,
@@ -155,19 +245,30 @@ def test_presence_notice_message_and_buttons_are_readable_in_both_color_schemes(
     device_presence_store.note_disappeared(device_id=mac, family_id="kasa", host=None, label="Master bedroom fan")
     if kind == "returned":
         device_presence_store.note_reappeared(device_id=mac, family_id="kasa", host=None, label="Master bedroom fan")
-    context = chromium_browser.new_context(viewport={"width": 1280, "height": 800}, color_scheme=scheme)
+    context = _new_context(chromium_browser, os_scheme=scheme, stored_theme=None)
     page = context.new_page()
     try:
         page.goto(landing_base_url, wait_until="networkidle", timeout=_GOTO_TIMEOUT_MS)
         banner = page.locator(f".presence-notice-{kind}").first
         banner.wait_for(timeout=_BOOT_TIMEOUT_MS)
-        background = banner.evaluate("el => getComputedStyle(el).backgroundColor")
-        for part in (banner.locator(".presence-notice-message"), banner.locator("button").first):
-            color = part.evaluate("el => getComputedStyle(el).color")
-            ratio = _contrast_ratio(color, background)
-            assert ratio >= _MIN_CONTRAST_RATIO, f"contrast {ratio:.2f}:1 of {color} on {background} ({kind}, {scheme})"
-        shot_dir = os.environ.get("DOMESTI_ALERT_UI_SCREENSHOT_DIR")
-        if shot_dir:
-            page.screenshot(path=str(Path(shot_dir) / f"presence-{kind}-{scheme}.png"))
+        banner_background = banner.evaluate("el => getComputedStyle(el).backgroundColor")
+        button = banner.locator("button").first
+
+        button.hover()
+        color = button.evaluate("el => getComputedStyle(el).color")
+        ratio = _contrast_ratio(color, _button_surface(button, banner_background))
+        assert ratio >= _MIN_CONTRAST_RATIO, f"hover contrast {ratio:.2f}:1 ({kind}, {scheme})"
+
+        page.mouse.move(0, 0)
+        for _ in range(40):  # Tab until the button has keyboard focus (condition-based, bounded)
+            page.keyboard.press("Tab")
+            if button.evaluate("el => el === document.activeElement"):
+                break
+        assert button.evaluate("el => el === document.activeElement"), "could not reach the button by keyboard"
+        assert button.evaluate("el => el.matches(':focus-visible')")
+        ratio = _contrast_ratio(color, _button_surface(button, banner_background))
+        assert ratio >= _MIN_CONTRAST_RATIO, f"focus contrast {ratio:.2f}:1 ({kind}, {scheme})"
+        # The tinted background is not the only focus cue: there is a visible outline too.
+        assert button.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
     finally:
         context.close()

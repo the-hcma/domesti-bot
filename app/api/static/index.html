@@ -291,8 +291,10 @@
     .presence-notice-btn { background: transparent; color: inherit;
       border: 1px solid currentColor; border-radius: 6px; padding: 4px 10px;
       font: inherit; cursor: pointer; }
+    /* Darken, never lighten: a white tint under white text drops the green notice to 3.5:1. */
     .presence-notice-btn:hover, .presence-notice-btn:focus-visible {
-      background: rgba(255, 255, 255, 0.2); outline: none; }
+      background: rgba(0, 0, 0, 0.25); }
+    .presence-notice-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
     /* Recoverable per-action toast — surfaces server-side hints like
        a Sonos 409 ("queue is empty, pick something to play first").
        Pinned to the viewport (NOT to ``#app``) so the background poll's
