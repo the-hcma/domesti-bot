@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import time
 from http import HTTPStatus
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +16,7 @@ from app.api.app import create_app
 from app.device_display import format_device_display
 from app.device_enums import DevicePresenceDecision, DevicePresenceKind
 from app.device_presence import device_presence_store
+from app.device_presence_decision_store import list_keep_checking, record_keep_checking
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.server_runtime import runtime
@@ -148,3 +153,35 @@ def test_forget_that_fails_in_the_manager_keeps_the_notice() -> None:
     response = client.post(f"/v1/ui/presence/{notice_id}/forget")
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
     assert [n["notice_id"] for n in client.get("/v1/ui/state").json()["presence_notices"]] == [notice_id]
+
+
+def test_lifespan_attaches_the_presence_store_to_the_discovery_database_before_discovery(tmp_path: Path) -> None:
+    cache_path = tmp_path / "discovery.sqlite"
+    record_keep_checking(cache_path, "kasa", _MAC)
+    attached_when_discovery_starts: list[Path | None] = []
+
+    async def _bootstrap(*_args: Any, **_kwargs: Any) -> Any:
+        attached_when_discovery_starts.append(device_presence_store.database_path)
+        while True:
+            await asyncio.sleep(1.0)
+
+    app = create_app(argparse.Namespace(discovery_cache=str(cache_path)))
+    with patch("app.api.app.bootstrap_device_managers", _bootstrap), TestClient(app) as client:
+        assert client.get("/health").status_code == HTTPStatus.OK
+        deadline = time.monotonic() + 10.0
+        while not attached_when_discovery_starts and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert attached_when_discovery_starts == [cache_path.resolve()]
+        # The stored answer was loaded: the same plug going missing now stays hidden.
+        notice = device_presence_store.note_disappeared(device_id=_MAC, family_id="kasa", host=None, label=_LABEL)
+        assert notice is not None and notice.decision == DevicePresenceDecision.KEEP_CHECKING
+
+
+def test_keep_checking_is_stored_in_the_discovery_database(tmp_path: Path) -> None:
+    cache_path = tmp_path / "discovery.sqlite"
+    client, _kasa = _client()
+    device_presence_store.attach(cache_path)
+    notice_id = _missing_fan()
+    response = client.post(f"/v1/ui/presence/{notice_id}/keep-checking")
+    assert response.status_code == HTTPStatus.OK
+    assert set(list_keep_checking(cache_path)) == {("kasa", _MAC)}

@@ -11,6 +11,7 @@ from kasa.deviceconfig import DeviceConfig
 from app import device_discovery_store
 from app.device_enums import DevicePresenceDecision, DevicePresenceKind
 from app.device_presence import DevicePresenceStore
+from app.device_presence_decision_store import list_keep_checking
 from app.kasa_device_manager import UNRESPONSIVE_AFTER_FAILED_POLLS, KasaDeviceManager
 
 _FAN_MAC = "aa:bb:cc:dd:ee:01"
@@ -305,3 +306,41 @@ async def test_notice_is_cleared_when_the_missing_plug_leaves_the_roster_another
         await mgr.rediscover()
     assert [s.mac_address for s in mgr.switches] == [_LAMP_MAC]
     assert store.notices() == ()
+
+
+@pytest.mark.asyncio
+async def test_keep_checking_answer_survives_a_restart_and_clears_when_the_plug_returns(tmp_path: Path) -> None:
+    """A still-missing plug stays quiet after a restart; its return is announced and ends the answer."""
+
+    db = tmp_path / "c.sqlite"
+    first_run = DevicePresenceStore()
+    first_run.attach(db)
+    await _unplugged_manager(db, first_run)
+    first_run.keep_checking(first_run.notices()[0].notice_id)
+    assert list_keep_checking(db) != {}
+
+    restarted = DevicePresenceStore()  # a new process: empty memory, same database
+    restarted.attach(db)
+    mgr = await _unplugged_manager(db, restarted)
+    assert restarted.notices() == ()
+    assert [s.unresponsive for s in mgr.switches] == [True]
+
+    fan = _device()
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=fan)),
+    ):
+        assert await mgr.recover_unresponsive() == (_FAN_MAC,)
+    assert [n.kind for n in restarted.notices()] == [DevicePresenceKind.REAPPEARED]
+    assert list_keep_checking(db) == {}
+
+
+@pytest.mark.asyncio
+async def test_forgetting_a_plug_removes_its_stored_keep_checking_answer(tmp_path: Path) -> None:
+    db = tmp_path / "c.sqlite"
+    store = DevicePresenceStore()
+    store.attach(db)
+    mgr = await _unplugged_manager(db, store)
+    store.keep_checking(store.notices()[0].notice_id)
+    assert await mgr.forget_device(_FAN_MAC) is True
+    assert list_keep_checking(db) == {}

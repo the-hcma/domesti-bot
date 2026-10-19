@@ -397,6 +397,8 @@ def create_app(args: Any) -> FastAPI:
         # ``/favicon.ico``) remain responsive throughout.
         theme = _Theme(enabled=False)
         runtime.begin_lifespan()
+        # Load the stored "keep checking" answers before discovery announces any missing device.
+        await asyncio.to_thread(device_presence_store.attach, runtime.discovery_cache_path())
         watcher_stop = runtime.watcher_stop
         assert watcher_stop is not None
 

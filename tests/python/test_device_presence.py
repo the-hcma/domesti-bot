@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 from app.device_enums import DevicePresenceDecision, DevicePresenceKind
-from app.device_presence import REAPPEARED_NOTICE_TTL_S, DevicePresenceStore
+from app.device_presence import KEEP_CHECKING_TTL_S, REAPPEARED_NOTICE_TTL_S, DevicePresenceStore
+from app.device_presence_decision_store import list_keep_checking
 
 _MAC = "5c:e9:31:60:c5:bd"
 
@@ -114,3 +118,88 @@ def test_missing_device_ids_lists_only_missing_devices_of_that_family_whatever_t
     assert store.missing_device_ids("kasa") == {_MAC}
     store.note_reappeared(device_id=_MAC, family_id="kasa", host=None, label="Fan")
     assert store.missing_device_ids("kasa") == set()
+
+
+def _attached(path: Path) -> DevicePresenceStore:
+    store = DevicePresenceStore()
+    store.attach(path)
+    return store
+
+
+def test_keep_checking_survives_a_restart_and_keeps_the_notice_hidden(tmp_path: Path) -> None:
+    path = tmp_path / "cache.sqlite"
+    before = _attached(path)
+    notice_id = _disappear(before)
+    before.keep_checking(notice_id, now=1500.0)
+
+    after = _attached(path)  # a restarted process: same file, empty memory
+    notice = after.note_disappeared(device_id=_MAC, family_id="kasa", host=None, label="Fan", now=2000.0)
+    assert notice is not None and notice.decision == DevicePresenceDecision.KEEP_CHECKING
+    assert after.notices(now=2001.0) == ()
+
+
+def test_a_device_that_returns_after_a_restart_announces_the_return_and_clears_the_decision(tmp_path: Path) -> None:
+    path = tmp_path / "cache.sqlite"
+    before = _attached(path)
+    before.keep_checking(_disappear(before), now=1500.0)
+
+    after = _attached(path)
+    back = after.note_reappeared(device_id=_MAC, family_id="kasa", host=None, label="Fan", now=2000.0)
+    assert back is not None
+    assert list_keep_checking(path) == {}
+    # The next outage is a new question, not a silently remembered answer.
+    later = after.note_disappeared(device_id=_MAC, family_id="kasa", host=None, label="Fan", now=3000.0)
+    assert later is not None and later.decision == DevicePresenceDecision.PENDING
+
+
+def test_forget_removes_the_persisted_decision(tmp_path: Path) -> None:
+    path = tmp_path / "cache.sqlite"
+    store = _attached(path)
+    store.keep_checking(_disappear(store), now=1500.0)
+    store.forget("kasa", _MAC)
+    assert list_keep_checking(path) == {}
+    assert _attached(path).note_disappeared(device_id=_MAC, family_id="kasa", host=None, label="Fan") is not None
+
+
+def test_an_old_keep_checking_decision_is_asked_again(tmp_path: Path) -> None:
+    path = tmp_path / "cache.sqlite"
+    store = _attached(path)
+    store.keep_checking(_disappear(store, now=1000.0), now=1000.0)
+    assert store.notices(now=1000.0 + KEEP_CHECKING_TTL_S - 1) == ()
+    (asked_again,) = store.notices(now=1000.0 + KEEP_CHECKING_TTL_S + 1)
+    assert asked_again.decision == DevicePresenceDecision.PENDING
+    assert list_keep_checking(path) == {}
+
+
+def test_a_decision_older_than_the_limit_is_not_restored_after_a_restart(tmp_path: Path) -> None:
+    path = tmp_path / "cache.sqlite"
+    before = _attached(path)
+    before.keep_checking(_disappear(before, now=1000.0), now=1000.0)
+    after = _attached(path)
+    notice = after.note_disappeared(
+        device_id=_MAC, family_id="kasa", host=None, label="Fan", now=1000.0 + KEEP_CHECKING_TTL_S + 1
+    )
+    assert notice is not None and notice.decision == DevicePresenceDecision.PENDING
+
+
+def test_a_decision_for_a_device_that_left_the_roster_is_listed_so_it_can_be_cleaned_up(tmp_path: Path) -> None:
+    path = tmp_path / "cache.sqlite"
+    before = _attached(path)
+    before.keep_checking(_disappear(before), now=1500.0)
+    after = _attached(path)
+    assert after.missing_device_ids("kasa") == {_MAC}
+
+
+def test_clear_detaches_the_database(tmp_path: Path) -> None:
+    store = _attached(tmp_path / "cache.sqlite")
+    store.clear()
+    assert store.database_path is None
+
+
+def test_a_storage_failure_does_not_stop_the_decision_taking_effect(tmp_path: Path) -> None:
+    store = DevicePresenceStore()
+    store.attach(tmp_path / "missing-dir" / "nested" / "cache.sqlite")
+    with patch("app.device_presence.record_keep_checking", side_effect=OSError("disk full")):
+        updated = store.keep_checking(_disappear(store), now=1500.0)
+    assert updated is not None and updated.decision == DevicePresenceDecision.KEEP_CHECKING
+    assert store.notices(now=1501.0) == ()
