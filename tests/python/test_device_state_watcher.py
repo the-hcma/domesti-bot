@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+from collections.abc import Awaitable, Callable
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -35,6 +36,7 @@ from app.device_state_watcher import (
     DeviceStateWatcher,
     Ep1SubscriptionWatcher,
     KasaPollingWatcher,
+    KasaRecoveryWatcher,
     SonosPollingWatcher,
     TailwindPollingWatcher,
     VizioPollingWatcher,
@@ -543,8 +545,9 @@ def test_build_default_watchers_omits_optional_when_managers_are_none() -> None:
     state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
-    assert len(watchers) == 1
+    assert len(watchers) == 2
     assert isinstance(watchers[0], KasaPollingWatcher)
+    assert isinstance(watchers[1], KasaRecoveryWatcher)
 
 
 def test_build_default_watchers_includes_every_configured_backend() -> None:
@@ -560,11 +563,12 @@ def test_build_default_watchers_includes_every_configured_backend() -> None:
     state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
-    assert len(watchers) == 4
+    assert len(watchers) == 5
     assert isinstance(watchers[0], KasaPollingWatcher)
-    assert isinstance(watchers[1], Ep1SubscriptionWatcher)
-    assert isinstance(watchers[2], SonosPollingWatcher)
-    assert isinstance(watchers[3], TailwindPollingWatcher)
+    assert isinstance(watchers[1], KasaRecoveryWatcher)
+    assert isinstance(watchers[2], Ep1SubscriptionWatcher)
+    assert isinstance(watchers[3], SonosPollingWatcher)
+    assert isinstance(watchers[4], TailwindPollingWatcher)
 
 
 def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> None:
@@ -578,8 +582,64 @@ def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> N
     state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
-    assert len(watchers) == 2
-    assert isinstance(watchers[1], SonosPollingWatcher)
+    assert len(watchers) == 3
+    assert isinstance(watchers[2], SonosPollingWatcher)
+
+
+def _fake_kasa_recovery_mgr() -> MagicMock:
+    mgr = MagicMock(spec=KasaDeviceManager)
+    mgr.recover_unresponsive = AsyncMock(return_value=())
+    return mgr
+
+
+def _sleep_then_stop_after(stop_after: int) -> Callable[[asyncio.Event, float], Awaitable[None]]:
+    """Return a sleep stand-in that never waits and sets ``stop`` on its ``stop_after``-th call."""
+
+    calls = 0
+
+    async def _sleep(stop: asyncio.Event, delay_s: float) -> None:
+        nonlocal calls
+        del delay_s
+        calls += 1
+        if calls >= stop_after:
+            stop.set()
+
+    return _sleep
+
+
+@pytest.mark.asyncio
+async def test_kasa_recovery_watcher_sweeps_every_nth_cycle() -> None:
+    mgr = _fake_kasa_recovery_mgr()
+    watcher = KasaRecoveryWatcher(mgr, sleep=_sleep_then_stop_after(4), sweep_every=3)
+    await watcher.run(stop=asyncio.Event())
+    # Sleeps 1-3 are followed by a cycle; the fourth sleep sets stop, so no fourth cycle runs.
+    assert [call.kwargs for call in mgr.recover_unresponsive.await_args_list] == [
+        {"sweep": False},
+        {"sweep": False},
+        {"sweep": True},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_kasa_recovery_watcher_survives_a_failed_cycle() -> None:
+    mgr = _fake_kasa_recovery_mgr()
+    mgr.recover_unresponsive = AsyncMock(side_effect=[RuntimeError("lan down"), ("aa:bb:cc:dd:ee:01",)])
+    watcher = KasaRecoveryWatcher(mgr, sleep=_sleep_then_stop_after(3))
+    await watcher.run(stop=asyncio.Event())
+    assert mgr.recover_unresponsive.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_kasa_recovery_watcher_waits_one_interval_before_first_cycle() -> None:
+    mgr = _fake_kasa_recovery_mgr()
+    watcher = KasaRecoveryWatcher(mgr, sleep=_sleep_then_stop_after(1))
+    await watcher.run(stop=asyncio.Event())
+    mgr.recover_unresponsive.assert_not_awaited()
+
+
+def test_kasa_recovery_watcher_rejects_non_positive_sweep_every() -> None:
+    with pytest.raises(ValueError, match="Expected sweep_every >= 1, got 0"):
+        KasaRecoveryWatcher(_fake_kasa_recovery_mgr(), sweep_every=0)
 
 
 def test_poll_interval_from_env_defaults_when_unset(

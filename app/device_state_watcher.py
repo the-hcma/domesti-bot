@@ -75,6 +75,15 @@ _VIZIO_WATCHER_REFRESH_TIMEOUT_S = 5.0
 # hammering the hardware.
 DEFAULT_POLL_INTERVAL_S: float = 10.0
 
+# How often unresponsive Kasa tiles are retried (domesti-bot#867). A plug that lost power
+# is usually back within minutes; a powered-off plug costs one short connect attempt per
+# cycle, so five minutes keeps the LAN quiet while a replugged device returns promptly.
+KASA_RECOVERY_INTERVAL_S: float = 300.0
+
+# Every Nth recovery cycle also runs one UDP sweep, to find a plug whose address changed
+# while it was off and that ARP does not know yet. With the default interval: every 30 min.
+KASA_RECOVERY_SWEEP_EVERY: int = 6
+
 # Minimum interval we'll accept from the env var. Below this we'd be
 # DOS-ing the LAN — 1 Hz is already plenty for a hobbyist setup.
 _MIN_POLL_INTERVAL_S: float = 1.0
@@ -316,6 +325,47 @@ class KasaPollingWatcher(DeviceStateWatcher):
 
             refreshes.append((task_name, _refresh_switch))
         await _refresh_all_devices_concurrently(stop=stop, device_refreshes=refreshes)
+
+
+class KasaRecoveryWatcher(DeviceStateWatcher):
+    """Bring unresponsive Kasa tiles back by themselves once their plug answers again.
+
+    Every ``interval_s`` it asks :meth:`KasaDeviceManager.recover_unresponsive` to retry
+    the protocol-silent tiles (a plug that lost power is kept as one, domesti-bot#867);
+    every ``sweep_every``-th cycle the retry also runs one UDP sweep. With no such tile
+    a cycle does nothing. It waits one interval before the first cycle, since discovery
+    just ran, and never lets one failed cycle stop the loop.
+    """
+
+    def __init__(
+        self,
+        mgr: KasaDeviceManager,
+        *,
+        interval_s: float = KASA_RECOVERY_INTERVAL_S,
+        sleep: Callable[[asyncio.Event, float], Awaitable[None]] | None = None,
+        sweep_every: int = KASA_RECOVERY_SWEEP_EVERY,
+    ) -> None:
+        if sweep_every < 1:
+            raise ValueError(f"Expected sweep_every >= 1, got {sweep_every}")
+        self._interval_s = interval_s
+        self._mgr = mgr
+        self._sleep = sleep if sleep is not None else _sleep_unless_stopped
+        self._sweep_every = sweep_every
+
+    async def run(self, *, stop: asyncio.Event) -> None:
+        cycle = 0
+        while not stop.is_set():
+            await self._sleep(stop, self._interval_s)
+            if stop.is_set():
+                return
+            cycle += 1
+            try:
+                await _await_with_stop(
+                    stop,
+                    lambda sweep=(cycle % self._sweep_every == 0): self._mgr.recover_unresponsive(sweep=sweep),
+                )
+            except Exception:
+                _LOGGER.exception("[state-watcher kasa] recovery cycle failed; will retry")
 
 
 class SonosPollingWatcher(DeviceStateWatcher):
@@ -605,6 +655,7 @@ def build_default_watchers(
             wake_notifier=wake_notifier,
             interval_s=interval_s,
         ),
+        KasaRecoveryWatcher(state.kasa_mgr),
     ]
     if state.ep1_mgr is not None:
         watchers.append(

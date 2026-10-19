@@ -56,6 +56,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -84,6 +85,11 @@ from app.device_manager import AlreadyInitializedError, NotInitializedError, Swi
 from app.rule_engine import DeviceUnresponsiveError, SwitchDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+# Upper bounds for one recovery attempt per plug and for one recovery UDP sweep, so a
+# half-dead device or a quiet LAN can never wedge the recovery watcher.
+_RECOVERY_ATTEMPT_TIMEOUT_S = 30.0
+_RECOVERY_SWEEP_TIMEOUT_S = 60.0
 
 
 def _klap_auth_recovery_hint(
@@ -219,8 +225,13 @@ async def _connect_from_saved_config(
     credentials: Credentials | None,
     timeout: int,
     raise_auth_failure: bool = False,
+    log_failure: bool = True,
 ) -> KDevice | None:
     """Connect using a stored ``DeviceConfig``, mirroring discovery recovery paths.
+
+    ``log_failure=False`` demotes the "skipped device" WARNINGs to DEBUG for callers
+    that retry on a timer (:meth:`KasaDeviceManager.recover_unresponsive`), so a plug
+    that stays powered off does not log a warning every cycle.
 
     Cache reconnect (``raise_auth_failure=False``) treats any
     :class:`~kasa.exceptions.KasaException` as a per-host skip so one flaky
@@ -257,7 +268,8 @@ async def _connect_from_saved_config(
                     auth_exc = last_exc if isinstance(last_exc, AuthenticationError) else exc
                     raise AuthenticationError(f"KLAP authentication failed for {cfg.host}") from auth_exc
                 raise last_exc
-            _LOGGER.warning(
+            _LOGGER.log(
+                logging.WARNING if log_failure else logging.DEBUG,
                 "Kasa: skipped device at %s (%s)%s",
                 cfg.host,
                 type(last_exc).__name__,
@@ -271,7 +283,8 @@ async def _connect_from_saved_config(
                 credentials=credentials,
             )
         except Exception as ex:
-            _LOGGER.warning(
+            _LOGGER.log(
+                logging.WARNING if log_failure else logging.DEBUG,
                 "Kasa: skipped device at %s (%s); recovery failed (%s)%s",
                 cfg.host,
                 type(last_exc).__name__,
@@ -401,6 +414,10 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self._query_timeout = query_timeout
         self._discovery_cache_path = Path(discovery_cache_path).expanduser().resolve() if discovery_cache_path else None
         self._force_discovery = force_discovery
+        # Number of roster replacements in flight (:meth:`rediscover`, :meth:`reload_from_cache`);
+        # recovery stands down while it is above zero. A count, not a flag, so overlapping
+        # operations cannot clear each other's guard.
+        self._roster_replacements = 0
         # Set by :meth:`_fetch_impl` to ``"cache"`` (every saved config
         # reconnected without falling back to UDP) or ``"discovery"`` (full
         # ``Discover.discover`` broadcast sweep). ``None`` before first fetch.
@@ -737,6 +754,114 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         rows.sort(key=lambda r: r[0])
         device_discovery_store.save_configs(self._discovery_cache_path, rows)
 
+    async def _reconnect_unresponsive(
+        self,
+        stub: KasaDevice,
+        cached: tuple[str, dict[str, Any], bool] | None,
+        qtimeout: int,
+    ) -> KasaDevice | None:
+        """Try the stub's last address, then the ARP address, for one plug; ``None`` when silent."""
+
+        if cached is None:
+            return None
+        cached_host, cfg_dict, requires_klap_auth = cached
+        creds = self._discovery_credentials if requires_klap_auth else None
+        if requires_klap_auth and creds is None:
+            return None
+        mac = stub.mac_address
+        arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac)
+        hosts = list(dict.fromkeys(h for h in (stub.host or cached_host, arp_ip) if h))
+        for host in hosts:
+            try:
+                kd = await asyncio.wait_for(
+                    self._connect_unresponsive_at(
+                        host,
+                        cfg_dict,
+                        mac=mac,
+                        credentials=creds,
+                        qtimeout=qtimeout,
+                    ),
+                    timeout=_RECOVERY_ATTEMPT_TIMEOUT_S,
+                )
+            except Exception:
+                _LOGGER.debug("Kasa: recovery attempt for %s at %s failed", mac, host, exc_info=True)
+                continue
+            if kd is not None:
+                return kd
+        return None
+
+    async def _recover_stub(
+        self,
+        mac: str,
+        stub: KasaDevice,
+        cached: tuple[str, dict[str, Any], bool] | None,
+        qtimeout: int,
+        recovered: dict[str, KasaDevice],
+    ) -> None:
+        """Retry one unresponsive plug and record its live session in ``recovered`` at once."""
+
+        kd = await self._reconnect_unresponsive(stub, cached, qtimeout)
+        if kd is not None:
+            recovered[mac] = kd
+
+    async def _reload_from_cache_unguarded(self) -> bool:
+        if self._discovery_cache_path is None:
+            _LOGGER.debug("Kasa reload_from_cache: no discovery cache path")
+            return False
+        if self._device_name_to_device is None:
+            _LOGGER.debug("Kasa reload_from_cache: manager not initialized")
+            return False
+        cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
+        if not cached:
+            previous_map = self._device_name_to_device
+            self._hosts_requiring_klap_auth = set()
+            self._last_skipped_auth_hosts = []
+            self._skipped_klap_auth_configs = {}
+            self._finalize_kasa_lookup({})
+            self._last_discovery_source = "cache"
+            await self._disconnect_device_map(previous_map)
+            _LOGGER.info("Kasa reload_from_cache: empty cache; cleared device map")
+            return True
+
+        previous_map = self._device_name_to_device
+        previous_klap = set(self._hosts_requiring_klap_auth)
+        previous_skipped = list(self._last_skipped_auth_hosts)
+        previous_skipped_cfgs = dict(self._skipped_klap_auth_configs)
+
+        # Clear before reconnect so hosts dropped from SQLite do not keep a
+        # stale KLAP-auth marker (``_connect_devices_from_cache`` only
+        # add/discards rows present in ``cached``).
+        self._hosts_requiring_klap_auth = set()
+        self._last_skipped_auth_hosts = []
+        self._skipped_klap_auth_configs = {}
+
+        from_cache = await self._connect_devices_from_cache(cached, keep_offline=True)
+        if from_cache is None:
+            self._hosts_requiring_klap_auth = previous_klap
+            self._last_skipped_auth_hosts = previous_skipped
+            self._skipped_klap_auth_configs = previous_skipped_cfgs
+            _LOGGER.warning("Kasa reload_from_cache: reconnect failed; keeping prior device map")
+            return False
+
+        self._finalize_kasa_lookup(from_cache)
+        self._last_discovery_source = "cache"
+        await self._disconnect_device_map(previous_map)
+        _LOGGER.info(
+            "Kasa reload_from_cache: replaced device map from cache (%d switch(es))",
+            len(self.switches),
+        )
+        return True
+
+    @contextlib.contextmanager
+    def _replacing_roster(self) -> Iterator[None]:
+        """Mark a roster replacement in flight so the recovery watcher stands down (nesting-safe)."""
+
+        self._roster_replacements += 1
+        try:
+            yield
+        finally:
+            self._roster_replacements -= 1
+
     async def _retain_cached_switches(
         self,
         devices_by_host: dict[str, KasaDevice],
@@ -818,6 +943,51 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     "Kasa: %s is not answering discovery or ARP (powered off?); keeping as unresponsive",
                     format_device_display(mac, alias),
                 )
+
+    async def _sweep_for_unresponsive(
+        self,
+        macs: set[str],
+        *,
+        found: dict[str, KasaDevice],
+        live_hosts: set[str],
+        qtimeout: int,
+    ) -> None:
+        """One UDP sweep that keeps only the plugs in ``macs`` (their address may have changed).
+
+        Matches are added to ``found`` as they are read, so the caller can close them if it is cancelled.
+        """
+
+        discover_kw: dict[str, Any] = {"discovery_timeout": self._discovery_timeout, "timeout": qtimeout}
+        if self._discovery_target is not None:
+            discover_kw["target"] = self._discovery_target
+        try:
+            devices = await asyncio.wait_for(Discover.discover(**discover_kw), timeout=_RECOVERY_SWEEP_TIMEOUT_S)
+        except Exception:
+            _LOGGER.debug("Kasa: recovery sweep failed", exc_info=True)
+            return
+        for host, discovered in devices.items():
+            if host in live_hosts:
+                continue
+            try:
+                finalized = await asyncio.wait_for(
+                    self._ingest_discovered_device(discovered, qtimeout),
+                    timeout=_RECOVERY_ATTEMPT_TIMEOUT_S,
+                )
+            except BaseException as exc:
+                # A timeout or a cancelled cycle can leave the half-read plug's session open.
+                with contextlib.suppress(Exception):
+                    await discovered.disconnect()
+                if not isinstance(exc, Exception):
+                    raise
+                _LOGGER.debug("Kasa: recovery sweep could not read %s", host, exc_info=True)
+                continue
+            kd = _make_kasa_device(finalized) if finalized is not None else None
+            if kd is not None and kd.mac_address in macs and kd.mac_address not in found:
+                found[kd.mac_address] = kd
+                continue
+            if finalized is not None:
+                with contextlib.suppress(Exception):
+                    await finalized.disconnect()
 
     async def _try_ingest_with_credentials(
         self,
@@ -1164,6 +1334,50 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             return None
         return devices_by_host
 
+    async def _connect_unresponsive_at(
+        self,
+        host: str,
+        cfg_dict: dict[str, Any],
+        *,
+        mac: str,
+        credentials: Credentials | None,
+        qtimeout: int,
+    ) -> KasaDevice | None:
+        """Connect to ``host`` and return a live device only when it is the plug with ``mac``."""
+
+        cfg = replace(DeviceConfig.from_dict(cfg_dict), host=host)
+        dev = await _connect_from_saved_config(
+            cfg,
+            credentials=credentials,
+            timeout=qtimeout,
+            log_failure=False,
+        )
+        if dev is None:
+            return None
+        try:
+            ingested, _auth_failure = await self._try_ingest_with_credentials(
+                dev,
+                qtimeout,
+                credentials=None,
+                log_failure=False,
+                quiet_anonymous_auth=True,
+            )
+        except BaseException:
+            # Includes the attempt timeout's cancellation: never leak a half-open session.
+            with contextlib.suppress(Exception):
+                await dev.disconnect()
+            raise
+        # No cached MAC here: the plug must prove its identity (vendor MAC, else ARP).
+        kd = _make_kasa_device(ingested) if ingested is not None else None
+        if kd is None or kd.mac_address != mac:
+            with contextlib.suppress(Exception):
+                await dev.disconnect()
+            if ingested is not None and ingested is not dev:
+                with contextlib.suppress(Exception):
+                    await ingested.disconnect()
+            return None
+        return kd
+
     async def _disconnect_device_map(
         self,
         alias_map: dict[str, KasaDevice] | None,
@@ -1345,6 +1559,101 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
 
         return self._last_discovery_source
 
+    async def recover_unresponsive(self, *, sweep: bool = False) -> tuple[str, ...]:
+        """Reconnect unresponsive tiles whose plug answers again; return the recovered MACs.
+
+        A plug that lost power stays in the manager as a protocol-silent stub
+        (domesti-bot#867). Each stub is retried at its last known address and at the
+        address ARP reports for its MAC; a plug that answers replaces its stub, and the
+        discovery cache is rewritten with its current address. A plug that still does not
+        answer is left exactly as it was. With ``sweep=True`` one UDP sweep also looks
+        for stubs whose address changed and that ARP does not know yet.
+
+        The result is dropped (and the new sessions closed) when a concurrent
+        :meth:`rediscover` replaced the device map meanwhile: that sweep's view wins.
+        Failures are logged at DEBUG; the caller decides how often to retry.
+        """
+
+        current = self._device_name_to_device
+        if current is None or self._roster_replacements > 0:
+            return ()
+        stubs = {kd.mac_address: kd for kd in self.switches if kd.kasa_protocol_device() is None}
+        if not stubs or self._discovery_cache_path is None:
+            return ()
+        cached_by_mac = {
+            mac: (host, cfg_dict, requires_klap_auth)
+            for host, _alias, cfg_dict, requires_klap_auth, cached_mac in device_discovery_store.load_cached_configs(
+                self._discovery_cache_path
+            )
+            if (mac := try_normalize_mac(cached_mac or "")) is not None
+        }
+        qtimeout = self._query_timeout if self._query_timeout is not None else DeviceConfig.DEFAULT_TIMEOUT
+        # Sessions are collected into ``recovered`` as each attempt finishes, so a cycle cancelled
+        # by the watcher (shutdown, a credentials save) can close every one it already opened.
+        recovered: dict[str, KasaDevice] = {}
+        try:
+            await asyncio.gather(
+                *(
+                    self._recover_stub(mac, stub, cached_by_mac.get(mac), qtimeout, recovered)
+                    for mac, stub in stubs.items()
+                )
+            )
+            if sweep and len(recovered) < len(stubs):
+                await self._sweep_for_unresponsive(
+                    {mac for mac in stubs if mac not in recovered},
+                    found=recovered,
+                    live_hosts={kd.host for kd in current.values() if kd.kasa_protocol_device() is not None},
+                    qtimeout=qtimeout,
+                )
+        except BaseException:
+            await self._disconnect_device_map({kd.host: kd for kd in recovered.values()})
+            raise
+        if not recovered:
+            return ()
+        if self._device_name_to_device is not current or self._roster_replacements > 0:
+            await self._disconnect_device_map({kd.host: kd for kd in recovered.values()})
+            return ()
+        devices_by_host: dict[str, KasaDevice] = {}
+        candidates: list[KasaDevice] = []
+        for kd in {id(kd): kd for kd in current.values()}.values():
+            devices_by_host[kd.host] = kd
+            if kd.kasa_protocol_device() is None and kd.mac_address in recovered:
+                candidates.append(kd)
+        unused = dict(recovered)
+        for stub in candidates:
+            new = recovered[stub.mac_address]
+            if new.host != stub.host and new.host in devices_by_host:
+                # The recovered address is held by another tile (the cache is keyed by host, so
+                # both cannot stay). Never drop a tile: leave this plug unresponsive and retry later.
+                _LOGGER.warning(
+                    "Kasa: %s answers at %s, which another tile holds; leaving it unresponsive",
+                    format_device_display(stub.mac_address, stub.preferred_label),
+                    new.host,
+                )
+                continue
+            del devices_by_host[stub.host]
+            devices_by_host[new.host] = new
+            del unused[stub.mac_address]
+        restored = tuple(sorted(set(recovered) - set(unused)))
+        for mac in restored:
+            # The KLAP flag is tracked by host: follow a plug that came back at a new address.
+            old_host = stubs[mac].host
+            if recovered[mac].host != old_host and old_host in self._hosts_requiring_klap_auth:
+                self._hosts_requiring_klap_auth.discard(old_host)
+                self._hosts_requiring_klap_auth.add(recovered[mac].host)
+                self._skipped_klap_auth_configs.pop(old_host, None)
+        if restored:
+            self._finalize_kasa_lookup(devices_by_host)
+            self._persist_discovery_cache(self._device_name_to_device or {})
+        await self._disconnect_device_map({kd.host: kd for kd in unused.values()})
+        for mac in restored:
+            _LOGGER.info(
+                "Kasa: %s is answering again at %s; restored from unresponsive",
+                format_device_display(mac, recovered[mac].preferred_label),
+                recovered[mac].host,
+            )
+        return restored
+
     async def rediscover(self) -> None:
         """Drop connections and repopulate switches via UDP discovery (ignore SQLite cache reads).
 
@@ -1356,16 +1665,17 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         an empty device map until process restart.
         """
 
-        await self.disconnect(clear_map=False)
-        try:
-            await self._fetch_impl(force_discovery=True)
-        except Exception as udp_exc:
+        with self._replacing_roster():
+            await self.disconnect(clear_map=False)
             try:
-                await self._fetch_impl(force_discovery=False)
-            except Exception:
-                self._device_name_to_device = None
-                raise udp_exc from None
-            raise udp_exc
+                await self._fetch_impl(force_discovery=True)
+            except Exception as udp_exc:
+                try:
+                    await self._fetch_impl(force_discovery=False)
+                except Exception:
+                    self._device_name_to_device = None
+                    raise udp_exc from None
+                raise udp_exc
 
     async def reload_from_cache(self) -> bool:
         """Replace the in-memory switch map from SQLite only (never UDP).
@@ -1381,52 +1691,8 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         in-memory map and returns ``True``.
         """
 
-        if self._discovery_cache_path is None:
-            _LOGGER.debug("Kasa reload_from_cache: no discovery cache path")
-            return False
-        if self._device_name_to_device is None:
-            _LOGGER.debug("Kasa reload_from_cache: manager not initialized")
-            return False
-        cached = device_discovery_store.load_cached_configs(self._discovery_cache_path)
-        if not cached:
-            previous_map = self._device_name_to_device
-            self._hosts_requiring_klap_auth = set()
-            self._last_skipped_auth_hosts = []
-            self._skipped_klap_auth_configs = {}
-            self._finalize_kasa_lookup({})
-            self._last_discovery_source = "cache"
-            await self._disconnect_device_map(previous_map)
-            _LOGGER.info("Kasa reload_from_cache: empty cache; cleared device map")
-            return True
-
-        previous_map = self._device_name_to_device
-        previous_klap = set(self._hosts_requiring_klap_auth)
-        previous_skipped = list(self._last_skipped_auth_hosts)
-        previous_skipped_cfgs = dict(self._skipped_klap_auth_configs)
-
-        # Clear before reconnect so hosts dropped from SQLite do not keep a
-        # stale KLAP-auth marker (``_connect_devices_from_cache`` only
-        # add/discards rows present in ``cached``).
-        self._hosts_requiring_klap_auth = set()
-        self._last_skipped_auth_hosts = []
-        self._skipped_klap_auth_configs = {}
-
-        from_cache = await self._connect_devices_from_cache(cached, keep_offline=True)
-        if from_cache is None:
-            self._hosts_requiring_klap_auth = previous_klap
-            self._last_skipped_auth_hosts = previous_skipped
-            self._skipped_klap_auth_configs = previous_skipped_cfgs
-            _LOGGER.warning("Kasa reload_from_cache: reconnect failed; keeping prior device map")
-            return False
-
-        self._finalize_kasa_lookup(from_cache)
-        self._last_discovery_source = "cache"
-        await self._disconnect_device_map(previous_map)
-        _LOGGER.info(
-            "Kasa reload_from_cache: replaced device map from cache (%d switch(es))",
-            len(self.switches),
-        )
-        return True
+        with self._replacing_roster():
+            return await self._reload_from_cache_unguarded()
 
     def set_credentials(
         self,
