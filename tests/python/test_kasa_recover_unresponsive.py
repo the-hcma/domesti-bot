@@ -456,3 +456,29 @@ async def test_cancelled_sweep_closes_plugs_it_already_matched(tmp_path: Path) -
         with pytest.raises(asyncio.CancelledError):
             await recovery
     moved_fan.disconnect.assert_awaited()
+    stuck.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sweep_closes_a_discovered_plug_whose_read_times_out_and_still_finds_the_next(tmp_path: Path) -> None:
+    mgr = await _manager_with_two_unplugged_plugs(tmp_path / "cached.sqlite")
+    half_dead = _answering_device(host="192.168.1.98", mac="aa:bb:cc:dd:ee:77", alias="Half-dead plug")
+    moved_fan = _answering_device(host="192.168.1.99", mac=_FAN_MAC, alias="Master bedroom fan")
+
+    async def _ingest(discovered: MagicMock, _qtimeout: int, **_kw: object) -> MagicMock:
+        if discovered is half_dead:
+            raise TimeoutError("update timed out")
+        return discovered
+
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={half_dead.host: half_dead, moved_fan.host: moved_fan}),
+        ),
+        patch.object(mgr, "_ingest_discovered_device", AsyncMock(side_effect=_ingest)),
+    ):
+        recovered = await mgr.recover_unresponsive(sweep=True)
+    assert recovered == (_FAN_MAC,)
+    half_dead.disconnect.assert_awaited()

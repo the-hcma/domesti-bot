@@ -973,7 +973,12 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                     self._ingest_discovered_device(discovered, qtimeout),
                     timeout=_RECOVERY_ATTEMPT_TIMEOUT_S,
                 )
-            except Exception:
+            except BaseException as exc:
+                # A timeout or a cancelled cycle can leave the half-read plug's session open.
+                with contextlib.suppress(Exception):
+                    await discovered.disconnect()
+                if not isinstance(exc, Exception):
+                    raise
                 _LOGGER.debug("Kasa: recovery sweep could not read %s", host, exc_info=True)
                 continue
             kd = _make_kasa_device(finalized) if finalized is not None else None
