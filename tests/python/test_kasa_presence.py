@@ -317,6 +317,7 @@ async def test_keep_checking_answer_survives_a_restart_and_clears_when_the_plug_
     first_run.attach(db)
     await _unplugged_manager(db, first_run)
     first_run.keep_checking(first_run.notices()[0].notice_id)
+    first_run.flush()
     assert list_keep_checking(db) != {}
 
     restarted = DevicePresenceStore()  # a new process: empty memory, same database
@@ -332,6 +333,7 @@ async def test_keep_checking_answer_survives_a_restart_and_clears_when_the_plug_
     ):
         assert await mgr.recover_unresponsive() == (_FAN_MAC,)
     assert [n.kind for n in restarted.notices()] == [DevicePresenceKind.REAPPEARED]
+    restarted.flush()
     assert list_keep_checking(db) == {}
 
 
@@ -343,4 +345,5 @@ async def test_forgetting_a_plug_removes_its_stored_keep_checking_answer(tmp_pat
     mgr = await _unplugged_manager(db, store)
     store.keep_checking(store.notices()[0].notice_id)
     assert await mgr.forget_device(_FAN_MAC) is True
+    store.flush()
     assert list_keep_checking(db) == {}

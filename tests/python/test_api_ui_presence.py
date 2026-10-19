@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import threading
 import time
 from http import HTTPStatus
 from pathlib import Path
@@ -184,4 +185,47 @@ def test_keep_checking_is_stored_in_the_discovery_database(tmp_path: Path) -> No
     notice_id = _missing_fan()
     response = client.post(f"/v1/ui/presence/{notice_id}/keep-checking")
     assert response.status_code == HTTPStatus.OK
+    device_presence_store.flush()
+    assert set(list_keep_checking(cache_path)) == {("kasa", _MAC)}
+
+
+def test_a_slow_discovery_database_does_not_delay_http_startup(tmp_path: Path) -> None:
+    """Attaching the store happens in the discovery task, so a locked database cannot stall /health."""
+
+    release_attach = threading.Event()
+
+    def _slow_attach(_path: Path | None) -> None:
+        release_attach.wait(timeout=10)
+
+    async def _bootstrap(*_args: Any, **_kwargs: Any) -> Any:
+        while True:
+            await asyncio.sleep(1.0)
+
+    app = create_app(argparse.Namespace(discovery_cache=str(tmp_path / "discovery.sqlite")))
+    with (
+        patch("app.api.app.bootstrap_device_managers", _bootstrap),
+        patch.object(device_presence_store, "attach", _slow_attach),
+    ):
+        started = time.perf_counter()
+        with TestClient(app) as client:
+            assert time.perf_counter() - started < 5.0
+            assert client.get("/health").status_code == HTTPStatus.OK
+            release_attach.set()
+
+
+def test_shutdown_flushes_a_keep_checking_answer_that_was_still_queued(tmp_path: Path) -> None:
+    cache_path = tmp_path / "discovery.sqlite"
+    attached = threading.Event()
+
+    async def _bootstrap(*_args: Any, **_kwargs: Any) -> Any:
+        attached.set()
+        while True:
+            await asyncio.sleep(1.0)
+
+    app = create_app(argparse.Namespace(discovery_cache=str(cache_path)))
+    with patch("app.api.app.bootstrap_device_managers", _bootstrap), TestClient(app) as client:
+        assert client.get("/health").status_code == HTTPStatus.OK
+        assert attached.wait(timeout=10)
+        device_presence_store.keep_checking(_missing_fan())
+    # The writer queue was drained on the way out, so the answer is in the database.
     assert set(list_keep_checking(cache_path)) == {("kasa", _MAC)}

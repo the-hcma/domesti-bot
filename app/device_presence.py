@@ -8,6 +8,10 @@ Notices live in memory. The one answer worth keeping across a restart, "keep che
 stored in the discovery database once the store is attached to it (:meth:`DevicePresenceStore.attach`),
 so a plug that is still missing after a restart stays quiet instead of asking again. The answer
 expires after :data:`KEEP_CHECKING_TTL_S`, so a retired plug is eventually asked about again.
+
+Database writes never run on the caller's thread (callers include async request handlers and the
+event loop): they are queued to one writer thread, so they keep their order, and :meth:`flush`
+waits for the queue (tests, shutdown).
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ import logging
 import secrets
 import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -58,6 +64,7 @@ class DevicePresenceStore:
         self._lock = threading.Lock()
         self._missing: dict[tuple[str, str], DevicePresenceNotice] = {}
         self._reappeared: dict[str, DevicePresenceNotice] = {}
+        self._writer: ThreadPoolExecutor | None = None
 
     def attach(self, path: Path | None) -> None:
         """Keep "keep checking" answers in the discovery database at ``path`` (``None`` detaches)."""
@@ -89,15 +96,23 @@ class DevicePresenceStore:
         with self._lock:
             return self._reappeared.pop(notice_id, None)
 
+    def flush(self, *, timeout_s: float = 10.0) -> None:
+        """Wait until every queued database write has run (tests and shutdown)."""
+
+        with self._lock:
+            writer = self._writer
+        if writer is not None:
+            writer.submit(lambda: None).result(timeout=timeout_s)
+
     def forget(self, family_id: str, device_id: str) -> None:
         """Stop tracking a device (the operator forgot it, or it is gone for good)."""
 
         key = (family_id, device_id)
         with self._lock:
             self._missing.pop(key, None)
-            decided = self._keep_checking.pop(key, None)
-        if decided is not None:
-            self._clear_stored(key)
+            self._keep_checking.pop(key, None)
+        # Even when no answer was loaded: the first read may have failed while the row exists.
+        self._clear_stored(key)
 
     def get(self, notice_id: str) -> DevicePresenceNotice | None:
         with self._lock:
@@ -208,7 +223,7 @@ class DevicePresenceStore:
             while len(self._reappeared) > _MAX_REAPPEARED_NOTICES:
                 oldest = min(self._reappeared.values(), key=lambda n: n.recorded_at)
                 del self._reappeared[oldest.notice_id]
-        if decided is not None:
+        if was_missing is not None or decided is not None:
             self._clear_stored(key)
         return notice
 
@@ -239,27 +254,38 @@ class DevicePresenceStore:
         return tuple(sorted(shown, key=lambda n: (n.recorded_at, n.notice_id)))
 
     def _clear_stored(self, key: tuple[str, str]) -> None:
-        """Best effort: a storage failure must not stop the in-memory state from changing."""
-
-        try:
-            clear_keep_checking(self._database_path, *key)
-        except Exception:
-            _LOGGER.warning(
-                "Could not clear the stored keep-checking answer for %s",
-                format_device_display(key[1], None),
-                exc_info=True,
+        with self._lock:
+            path = self._database_path
+        if path is not None:
+            self._queue_write(
+                lambda: clear_keep_checking(path, *key),
+                f"Could not clear the stored keep-checking answer for {format_device_display(key[1], None)}",
             )
 
-    def _store(self, key: tuple[str, str], decided_at: float) -> None:
-        """Best effort: the answer takes effect now even if it cannot be stored for the next start."""
+    def _queue_write(self, write: Callable[[], None], failure: str) -> None:
+        """Run ``write`` on the writer thread, in submission order; a failure is logged, never raised."""
 
+        with self._lock:
+            if self._writer is None:
+                self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="presence-store")
+            writer = self._writer
+        writer.submit(self._run_write, write, failure)
+
+    @staticmethod
+    def _run_write(write: Callable[[], None], failure: str) -> None:
         try:
-            record_keep_checking(self._database_path, *key, now=decided_at)
+            write()
         except Exception:
-            _LOGGER.warning(
-                "Could not store the keep-checking answer for %s; it will be asked again after a restart",
-                format_device_display(key[1], None),
-                exc_info=True,
+            _LOGGER.warning("%s", failure, exc_info=True)
+
+    def _store(self, key: tuple[str, str], decided_at: float) -> None:
+        with self._lock:
+            path = self._database_path
+        if path is not None:
+            self._queue_write(
+                lambda: record_keep_checking(path, *key, now=decided_at),
+                f"Could not store the keep-checking answer for {format_device_display(key[1], None)}; "
+                "it will be asked again after a restart",
             )
 
 
