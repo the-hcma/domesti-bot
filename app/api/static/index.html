@@ -280,7 +280,8 @@
       display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
     .presence-notice-missing { background: var(--danger); }
     .presence-notice-returned { background: var(--accent); }
-    .presence-notice-message { flex: 1 1 16em; line-height: 1.4; margin: 0; }
+    /* A global ``p`` rule sets the muted color, so the message must inherit white explicitly. */
+    .presence-notice-message { flex: 1 1 16em; line-height: 1.4; margin: 0; color: inherit; }
     .presence-notice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .presence-notice-btn { background: transparent; color: inherit;
       border: 1px solid currentColor; border-radius: 6px; padding: 4px 10px;
