@@ -404,6 +404,9 @@ def create_app(args: Any) -> FastAPI:
             generation = runtime.lifespan_generation
             started = time.monotonic()
             _LOGGER.info("[startup] device discovery beginning in background")
+            # Load the stored "keep checking" answers before discovery announces any missing
+            # device. This waits on the database, so it belongs here, not before the lifespan yields.
+            await asyncio.to_thread(device_presence_store.attach, runtime.discovery_cache_path())
             try:
                 state = await bootstrap_device_managers(args, theme=theme, log_progress=True)
             except asyncio.CancelledError:
@@ -510,6 +513,11 @@ def create_app(args: Any) -> FastAPI:
             if state is not None:
                 _LOGGER.info("[shutdown] disconnecting device managers")
                 await shutdown_device_managers(state)
+            # Queued presence-store writes (a last "keep checking" click) must reach the database.
+            try:
+                await asyncio.to_thread(device_presence_store.flush)
+            except Exception:
+                _LOGGER.warning("[shutdown] could not flush queued presence writes", exc_info=True)
             _LOGGER.info(
                 "[shutdown] complete in %.3fs",
                 time.monotonic() - shutdown_started,

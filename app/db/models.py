@@ -60,6 +60,17 @@ class DeviceManualOff(Base):
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class DevicePresenceKeepChecking(Base):
+    """A device the operator chose to keep checking for after it stopped responding (domesti-bot#874)."""
+
+    __tablename__ = "device_presence_keep_checking"
+
+    family_id: Mapped[str] = mapped_column(String, primary_key=True)
+    device_id: Mapped[str] = mapped_column(String, primary_key=True)
+    decided_at: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class Ep1KnownDevice(Base):
     """Cached Everything Presence One (ESPHome) endpoints."""
 
