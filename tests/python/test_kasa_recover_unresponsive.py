@@ -341,3 +341,118 @@ async def test_recover_unresponsive_never_overwrites_another_stub_at_the_recover
         "aa:bb:cc:dd:ee:02",
     ]
     fan.disconnect.assert_awaited()
+
+
+async def _manager_with_two_unplugged_plugs(db: Path) -> KasaDeviceManager:
+    lamp_cfg = {**_PLUG_CFG, "host": "192.168.1.60"}
+    device_discovery_store.save_configs(
+        db,
+        [
+            ("192.168.1.50", "Master bedroom fan", _PLUG_CFG, False, _FAN_MAC),
+            ("192.168.1.60", "Visitor lamp", lamp_cfg, False, "aa:bb:cc:dd:ee:02"),
+        ],
+    )
+    mgr = KasaDeviceManager(discovery_cache_path=db)
+    with (
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(return_value={})),
+        patch("app.kasa_device_manager.mac_alive_on_lan", return_value=False),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+    ):
+        await mgr.fetch()
+    assert len(mgr.switches) == 2
+    return mgr
+
+
+@pytest.mark.asyncio
+async def test_cancelled_recovery_closes_sessions_collected_before_a_slow_attempt_finished(tmp_path: Path) -> None:
+    """Shutdown or a credentials save cancels a cycle; plugs already reconnected must not leak a session."""
+
+    mgr = await _manager_with_two_unplugged_plugs(tmp_path / "cached.sqlite")
+    fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
+    fan_attempt_returned = asyncio.Event()
+    lamp_attempt_blocked = asyncio.Event()
+    real_reconnect = mgr._reconnect_unresponsive
+
+    async def _reconnect_and_signal(stub: object, cached: object, qtimeout: int) -> object:
+        kd = await real_reconnect(stub, cached, qtimeout)  # type: ignore[arg-type]
+        if getattr(stub, "mac_address", None) == _FAN_MAC:
+            fan_attempt_returned.set()
+        return kd
+
+    async def _connect(cfg: DeviceConfig, **_kw: object) -> MagicMock | None:
+        if cfg.host == "192.168.1.50":
+            return fan
+        await asyncio.wait_for(fan_attempt_returned.wait(), timeout=10)
+        lamp_attempt_blocked.set()
+        await asyncio.sleep(3600)  # a half-dead plug: only cancellation ends this
+        return None
+
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(side_effect=_connect)),
+        patch.object(mgr, "_reconnect_unresponsive", AsyncMock(side_effect=_reconnect_and_signal)),
+    ):
+        recovery = asyncio.create_task(mgr.recover_unresponsive())
+        await asyncio.wait_for(lamp_attempt_blocked.wait(), timeout=10)
+        recovery.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await recovery
+    fan.disconnect.assert_awaited()
+    assert [s.unresponsive for s in mgr.switches] == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_recovery_closes_sessions_when_cancelled_during_the_sweep(tmp_path: Path) -> None:
+    mgr = await _manager_with_two_unplugged_plugs(tmp_path / "cached.sqlite")
+    fan = _answering_device(host="192.168.1.50", mac=_FAN_MAC, alias="Master bedroom fan")
+    sweep_started = asyncio.Event()
+
+    async def _connect(cfg: DeviceConfig, **_kw: object) -> MagicMock | None:
+        return fan if cfg.host == "192.168.1.50" else None
+
+    async def _slow_sweep(*_args: object, **_kwargs: object) -> dict[str, object]:
+        sweep_started.set()
+        await asyncio.sleep(3600)
+        return {}
+
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(side_effect=_connect)),
+        patch("app.kasa_device_manager.Discover.discover", AsyncMock(side_effect=_slow_sweep)),
+    ):
+        recovery = asyncio.create_task(mgr.recover_unresponsive(sweep=True))
+        await asyncio.wait_for(sweep_started.wait(), timeout=10)
+        recovery.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await recovery
+    fan.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_sweep_closes_plugs_it_already_matched(tmp_path: Path) -> None:
+    mgr = await _manager_with_two_unplugged_plugs(tmp_path / "cached.sqlite")
+    moved_fan = _answering_device(host="192.168.1.99", mac=_FAN_MAC, alias="Master bedroom fan")
+    stuck = _answering_device(host="192.168.1.98", mac="aa:bb:cc:dd:ee:77", alias="Unrelated plug")
+    second_read_started = asyncio.Event()
+
+    async def _ingest(discovered: MagicMock, _qtimeout: int, **_kw: object) -> MagicMock:
+        if discovered is stuck:
+            second_read_started.set()
+            await asyncio.sleep(3600)
+        return discovered
+
+    with (
+        patch("app.kasa_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.kasa_device_manager._connect_from_saved_config", AsyncMock(return_value=None)),
+        patch(
+            "app.kasa_device_manager.Discover.discover",
+            AsyncMock(return_value={moved_fan.host: moved_fan, stuck.host: stuck}),
+        ),
+        patch.object(mgr, "_ingest_discovered_device", AsyncMock(side_effect=_ingest)),
+    ):
+        recovery = asyncio.create_task(mgr.recover_unresponsive(sweep=True))
+        await asyncio.wait_for(second_read_started.wait(), timeout=10)
+        recovery.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await recovery
+    moved_fan.disconnect.assert_awaited()

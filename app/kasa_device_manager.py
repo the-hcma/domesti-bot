@@ -790,6 +790,20 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
                 return kd
         return None
 
+    async def _recover_stub(
+        self,
+        mac: str,
+        stub: KasaDevice,
+        cached: tuple[str, dict[str, Any], bool] | None,
+        qtimeout: int,
+        recovered: dict[str, KasaDevice],
+    ) -> None:
+        """Retry one unresponsive plug and record its live session in ``recovered`` at once."""
+
+        kd = await self._reconnect_unresponsive(stub, cached, qtimeout)
+        if kd is not None:
+            recovered[mac] = kd
+
     async def _reload_from_cache_unguarded(self) -> bool:
         if self._discovery_cache_path is None:
             _LOGGER.debug("Kasa reload_from_cache: no discovery cache path")
@@ -934,20 +948,23 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
         self,
         macs: set[str],
         *,
+        found: dict[str, KasaDevice],
         live_hosts: set[str],
         qtimeout: int,
-    ) -> dict[str, KasaDevice]:
-        """One UDP sweep that keeps only the plugs in ``macs`` (their address may have changed)."""
+    ) -> None:
+        """One UDP sweep that keeps only the plugs in ``macs`` (their address may have changed).
+
+        Matches are added to ``found`` as they are read, so the caller can close them if it is cancelled.
+        """
 
         discover_kw: dict[str, Any] = {"discovery_timeout": self._discovery_timeout, "timeout": qtimeout}
         if self._discovery_target is not None:
             discover_kw["target"] = self._discovery_target
-        found: dict[str, KasaDevice] = {}
         try:
             devices = await asyncio.wait_for(Discover.discover(**discover_kw), timeout=_RECOVERY_SWEEP_TIMEOUT_S)
         except Exception:
             _LOGGER.debug("Kasa: recovery sweep failed", exc_info=True)
-            return found
+            return
         for host, discovered in devices.items():
             if host in live_hosts:
                 continue
@@ -966,7 +983,6 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             if finalized is not None:
                 with contextlib.suppress(Exception):
                     await finalized.disconnect()
-        return found
 
     async def _try_ingest_with_credentials(
         self,
@@ -1567,20 +1583,26 @@ class KasaDeviceManager(SwitchDeviceManager[KasaDevice]):
             if (mac := try_normalize_mac(cached_mac or "")) is not None
         }
         qtimeout = self._query_timeout if self._query_timeout is not None else DeviceConfig.DEFAULT_TIMEOUT
+        # Sessions are collected into ``recovered`` as each attempt finishes, so a cycle cancelled
+        # by the watcher (shutdown, a credentials save) can close every one it already opened.
         recovered: dict[str, KasaDevice] = {}
-        attempts = await asyncio.gather(
-            *(self._reconnect_unresponsive(stub, cached_by_mac.get(mac), qtimeout) for mac, stub in stubs.items())
-        )
-        for mac, kd in zip(stubs, attempts, strict=True):
-            if kd is not None:
-                recovered[mac] = kd
-        if sweep and len(recovered) < len(stubs):
-            swept = await self._sweep_for_unresponsive(
-                {mac for mac in stubs if mac not in recovered},
-                live_hosts={kd.host for kd in current.values() if kd.kasa_protocol_device() is not None},
-                qtimeout=qtimeout,
+        try:
+            await asyncio.gather(
+                *(
+                    self._recover_stub(mac, stub, cached_by_mac.get(mac), qtimeout, recovered)
+                    for mac, stub in stubs.items()
+                )
             )
-            recovered.update(swept)
+            if sweep and len(recovered) < len(stubs):
+                await self._sweep_for_unresponsive(
+                    {mac for mac in stubs if mac not in recovered},
+                    found=recovered,
+                    live_hosts={kd.host for kd in current.values() if kd.kasa_protocol_device() is not None},
+                    qtimeout=qtimeout,
+                )
+        except BaseException:
+            await self._disconnect_device_map({kd.host: kd for kd in recovered.values()})
+            raise
         if not recovered:
             return ()
         if self._device_name_to_device is not current or self._roster_replacements > 0:
