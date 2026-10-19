@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Generic, Self, TypeVar
+from typing import Generic, Protocol, Self, TypeVar, runtime_checkable
 
 from app.rule_engine import Device, DoorDevice, SpeakerDevice, SwitchDevice
 
@@ -25,6 +25,24 @@ D = TypeVar("D", bound=Device)
 DoorT = TypeVar("DoorT", bound=DoorDevice)
 SpeakerT = TypeVar("SpeakerT", bound=SpeakerDevice)
 SwitchT = TypeVar("SwitchT", bound=SwitchDevice)
+
+
+@runtime_checkable
+class ForgettableDeviceManager(Protocol):
+    """A manager that can drop one device from its roster and from the discovery cache (domesti-bot#876)."""
+
+    async def forget_device(self, mac: str) -> bool:
+        """Forget the device with ``mac``; ``False`` when it is not known."""
+        ...
+
+
+@runtime_checkable
+class RecoverableDeviceManager(Protocol):
+    """A manager that can bring its unresponsive devices back once they answer again (domesti-bot#876)."""
+
+    async def recover_unresponsive(self, *, sweep: bool = False) -> tuple[str, ...]:
+        """Retry the unresponsive devices; return the MACs that came back."""
+        ...
 
 
 class DeviceManager(ABC, Generic[D]):

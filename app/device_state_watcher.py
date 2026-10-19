@@ -49,7 +49,7 @@ from typing import Any, Final
 
 from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1EntityRole, Ep1ReadingMetric
 from app.device_mac import try_normalize_mac
-from app.device_manager import NotInitializedError
+from app.device_manager import NotInitializedError, RecoverableDeviceManager
 from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.domesti_bot_cli import DeviceManagersState
 from app.ep1_device_manager import Ep1Device, Ep1DeviceManager
@@ -75,14 +75,14 @@ _VIZIO_WATCHER_REFRESH_TIMEOUT_S = 5.0
 # hammering the hardware.
 DEFAULT_POLL_INTERVAL_S: float = 10.0
 
-# How often unresponsive Kasa tiles are retried (domesti-bot#867). A plug that lost power
-# is usually back within minutes; a powered-off plug costs one short connect attempt per
-# cycle, so five minutes keeps the LAN quiet while a replugged device returns promptly.
-KASA_RECOVERY_INTERVAL_S: float = 300.0
+# How often unresponsive devices are retried (domesti-bot#867, #876). A device that lost power is usually
+# back within minutes; a powered-off one costs one short connect attempt per cycle, so five minutes keeps
+# the LAN quiet while a replugged device returns promptly.
+RECOVERY_INTERVAL_S: float = 300.0
 
-# Every Nth recovery cycle also runs one UDP sweep, to find a plug whose address changed
-# while it was off and that ARP does not know yet. With the default interval: every 30 min.
-KASA_RECOVERY_SWEEP_EVERY: int = 6
+# Every Nth recovery cycle also runs one LAN sweep, to find a device whose address changed while it was off
+# and that ARP does not know yet. With the default interval: every 30 min.
+RECOVERY_SWEEP_EVERY: int = 6
 
 # Minimum interval we'll accept from the env var. Below this we'd be
 # DOS-ing the LAN — 1 Hz is already plenty for a hobbyist setup.
@@ -327,47 +327,6 @@ class KasaPollingWatcher(DeviceStateWatcher):
         await _refresh_all_devices_concurrently(stop=stop, device_refreshes=refreshes)
 
 
-class KasaRecoveryWatcher(DeviceStateWatcher):
-    """Bring unresponsive Kasa tiles back by themselves once their plug answers again.
-
-    Every ``interval_s`` it asks :meth:`KasaDeviceManager.recover_unresponsive` to retry
-    the protocol-silent tiles (a plug that lost power is kept as one, domesti-bot#867);
-    every ``sweep_every``-th cycle the retry also runs one UDP sweep. With no such tile
-    a cycle does nothing. It waits one interval before the first cycle, since discovery
-    just ran, and never lets one failed cycle stop the loop.
-    """
-
-    def __init__(
-        self,
-        mgr: KasaDeviceManager,
-        *,
-        interval_s: float = KASA_RECOVERY_INTERVAL_S,
-        sleep: Callable[[asyncio.Event, float], Awaitable[None]] | None = None,
-        sweep_every: int = KASA_RECOVERY_SWEEP_EVERY,
-    ) -> None:
-        if sweep_every < 1:
-            raise ValueError(f"Expected sweep_every >= 1, got {sweep_every}")
-        self._interval_s = interval_s
-        self._mgr = mgr
-        self._sleep = sleep if sleep is not None else _sleep_unless_stopped
-        self._sweep_every = sweep_every
-
-    async def run(self, *, stop: asyncio.Event) -> None:
-        cycle = 0
-        while not stop.is_set():
-            await self._sleep(stop, self._interval_s)
-            if stop.is_set():
-                return
-            cycle += 1
-            try:
-                await _await_with_stop(
-                    stop,
-                    lambda sweep=(cycle % self._sweep_every == 0): self._mgr.recover_unresponsive(sweep=sweep),
-                )
-            except Exception:
-                _LOGGER.exception("[state-watcher kasa] recovery cycle failed; will retry")
-
-
 class SonosPollingWatcher(DeviceStateWatcher):
     """Periodically re-read every Sonos speaker's playback state.
 
@@ -497,6 +456,61 @@ class TailwindPollingWatcher(DeviceStateWatcher):
 # and ``system/context_change``. Add hermetic tests with a mock WS server plus
 # a hardware smoke on a real TV; keep this poller as fallback when registration
 # fails (soundbars, older SoCs).
+class UnresponsiveRecoveryWatcher(DeviceStateWatcher):
+    """Bring a family's unresponsive devices back by themselves once they answer again.
+
+    Every ``interval_s`` it asks the manager's ``recover_unresponsive`` to retry the devices that stopped
+    answering (a device that lost power is kept as an unresponsive tile, domesti-bot#867); every
+    ``sweep_every``-th cycle the retry also runs one LAN sweep. With no such device a cycle does nothing. It
+    waits one interval before the first cycle, since discovery just ran, and never lets one failed cycle
+    stop the loop. One watcher runs per family; ``family`` only names it in the log.
+    """
+
+    def __init__(
+        self,
+        mgr: RecoverableDeviceManager,
+        *,
+        family: DeviceFamilyId,
+        interval_s: float = RECOVERY_INTERVAL_S,
+        sleep: Callable[[asyncio.Event, float], Awaitable[None]] | None = None,
+        sweep_every: int = RECOVERY_SWEEP_EVERY,
+    ) -> None:
+        if sweep_every < 1:
+            raise ValueError(f"Expected sweep_every >= 1, got {sweep_every}")
+        self._family = family
+        self._interval_s = interval_s
+        self._mgr = mgr
+        self._sleep = sleep if sleep is not None else _sleep_unless_stopped
+        self._sweep_every = sweep_every
+
+    @property
+    def family(self) -> DeviceFamilyId:
+        return self._family
+
+    @property
+    def interval_s(self) -> float:
+        return self._interval_s
+
+    async def run(self, *, stop: asyncio.Event) -> None:
+        cycle = 0
+        while not stop.is_set():
+            await self._sleep(stop, self._interval_s)
+            if stop.is_set():
+                return
+            cycle += 1
+            try:
+                await _await_with_stop(
+                    stop,
+                    lambda sweep=(cycle % self._sweep_every == 0): self._mgr.recover_unresponsive(sweep=sweep),
+                )
+            except Exception:
+                _LOGGER.exception("[state-watcher %s] recovery cycle failed; will retry", self._family.value)
+
+    @property
+    def sweep_every(self) -> int:
+        return self._sweep_every
+
+
 class VizioPollingWatcher(DeviceStateWatcher):
     """Periodically re-read every Vizio TV's cached power state."""
 
@@ -655,7 +669,7 @@ def build_default_watchers(
             wake_notifier=wake_notifier,
             interval_s=interval_s,
         ),
-        KasaRecoveryWatcher(state.kasa_mgr),
+        UnresponsiveRecoveryWatcher(state.kasa_mgr, family=DeviceFamilyId.KASA),
     ]
     if state.ep1_mgr is not None:
         watchers.append(
