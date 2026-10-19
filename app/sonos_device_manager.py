@@ -333,8 +333,13 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 )
         device_discovery_store.save_sonos_zones(self._discovery_cache_path, rows)
 
-    async def _retain_arp_visible_cached_zones(self, devices: list[SonosSpeakerDevice]) -> None:
-        """Keep cached speaker MACs that still answer ARP when SSDP missed them."""
+    async def _retain_cached_zones(self, devices: list[SonosSpeakerDevice]) -> None:
+        """Keep every cached speaker the sweep missed as an unresponsive tile (domesti-bot#876).
+
+        A speaker that still answers ARP is kept at its ARP address. One that answers nothing
+        (unplugged, or off the network) is kept at its cached address: switching a speaker off
+        must not remove its tile or its cache row, so the sweep never rewrites the cache without it.
+        """
 
         if self._discovery_cache_path is None:
             return
@@ -343,9 +348,8 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             mac_n = try_normalize_mac(mac or "") or mac_from_sonos_rincon(uid)
             if mac_n is None or mac_n in seen:
                 continue
-            if not await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host):
-                continue
-            arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) or host
+            on_lan = await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host)
+            arp_ip = (await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) if on_lan else None) or host
             label = (zone_name or "").strip() or mac_n
             zone = SoCo(arp_ip)
             sd = self._speaker_device(uid, zone, display_name=label)
@@ -362,8 +366,9 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             devices.append(sd)
             seen.add(mac_n)
             _LOGGER.info(
-                "Sonos: %s is on the LAN (ARP) but UPnP is silent; keeping as unresponsive",
+                "Sonos: %s is %s but UPnP is silent; keeping as unresponsive",
                 format_device_display(sd.identifier, sd.preferred_label),
+                "on the LAN (ARP)" if on_lan else "not on the LAN (powered off?)",
             )
 
     async def _prime_playback_states(self, devices: list[SonosSpeakerDevice]) -> None:
@@ -493,8 +498,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             if sd is None:
                 continue
             devices.append(sd)
-        if self._force_discovery:
-            await self._retain_arp_visible_cached_zones(devices)
+        await self._retain_cached_zones(devices)
         self._finalize(devices)
         self._persist_cache(devices)
         self._last_discovery_source = "discovery"
