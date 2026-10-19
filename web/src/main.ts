@@ -17,6 +17,7 @@ import {
   presenceForgetConfirmMessage,
   presenceToastFor,
   unseenPresenceNotices,
+  withoutPresenceNotices,
 } from "./presence-notices.js";
 import { openAutomationsHubDialog, parseAutomationsDeepLink } from "./rules-dialog.js";
 import { openSettingsHubDialog } from "./settings-hub-dialog.js";
@@ -176,6 +177,8 @@ class DomestiBotController {
   private pendingPredictions: Map<string, PendingPrediction> = new Map();
   /** Presence notice ids already rendered with a live-region role (announced to screen readers once). */
   private announcedPresenceNoticeIds: Set<string> = new Set();
+  /** Presence notices whose action succeeded: hidden for good, even if a poll that started earlier still lists them. */
+  private handledPresenceNoticeIds: Set<string> = new Set();
   /** Presence notices whose action is running: hidden meanwhile so clicks and polls cannot repeat it. */
   private presenceActionsInFlight: Set<string> = new Set();
   /** Presence notice ids already shown, so a toast fires only for ones that appear later. */
@@ -626,6 +629,7 @@ class DomestiBotController {
       }
     }
     if (handled) {
+      this.handledPresenceNoticeIds.add(noticeId);
       this.removePresenceNotice(noticeId);
     }
     await this.refresh();
@@ -1057,8 +1061,10 @@ class DomestiBotController {
   private renderPresenceNotices(
     notices: readonly UIPresenceNoticeOut[] | undefined,
   ): void {
-    const visible = (notices ?? []).filter(
-      (notice) => !this.presenceActionsInFlight.has(notice.notice_id),
+    const visible = withoutPresenceNotices(
+      notices ?? [],
+      this.presenceActionsInFlight,
+      this.handledPresenceNoticeIds,
     );
     const stack = createPresenceNoticeStack(visible, {
       onDismiss: (notice) => {

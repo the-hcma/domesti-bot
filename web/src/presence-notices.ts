@@ -50,6 +50,18 @@ export function presenceToastFor(fresh: readonly UIPresenceNoticeOut[]): Presenc
   return null;
 }
 
+/**
+ * The notices that are not hidden by any of the given id sets. Notice ids are unique and never
+ * reused, so a handled id can stay hidden for good: a poll that started before the action finished
+ * may still carry the notice, and must not bring its banner back.
+ */
+export function withoutPresenceNotices(
+  notices: readonly UIPresenceNoticeOut[],
+  ...hiddenIdSets: ReadonlyArray<ReadonlySet<string>>
+): UIPresenceNoticeOut[] {
+  return notices.filter((notice) => !hiddenIdSets.some((ids) => ids.has(notice.notice_id)));
+}
+
 /** Notices whose ids are not in ``seen``, in the order given. */
 export function unseenPresenceNotices(
   notices: readonly UIPresenceNoticeOut[],

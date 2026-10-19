@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { presenceForgetConfirmMessage, presenceToastFor, unseenPresenceNotices } from "../.test-build/presence-notices.mjs";
+import {
+  presenceForgetConfirmMessage,
+  presenceToastFor,
+  unseenPresenceNotices,
+  withoutPresenceNotices,
+} from "../.test-build/presence-notices.mjs";
 
 const notice = (id) => ({
   device_id: "5c:e9:31:60:c5:bd",
@@ -64,5 +69,28 @@ describe("presenceToastFor", () => {
       presenceToastFor([returned("a", "Fan"), returned("b", "Lamp")]).message,
       "2 devices are responding again: Fan, Lamp.",
     );
+  });
+});
+
+describe("withoutPresenceNotices", () => {
+  it("drops notices whose ids are in any of the hidden sets, keeping order", () => {
+    const notices = [notice("a"), notice("b"), notice("c")];
+    assert.deepEqual(
+      withoutPresenceNotices(notices, new Set(["a"]), new Set(["c"])).map((n) => n.notice_id),
+      ["b"],
+    );
+  });
+
+  it("keeps a handled notice hidden when a stale poll brings it back", () => {
+    const handled = new Set(["a"]);
+    const stalePoll = [notice("a"), notice("b")];
+    assert.deepEqual(
+      withoutPresenceNotices(stalePoll, new Set(), handled).map((n) => n.notice_id),
+      ["b"],
+    );
+  });
+
+  it("returns every notice when nothing is hidden", () => {
+    assert.equal(withoutPresenceNotices([notice("a")], new Set()).length, 1);
   });
 });
