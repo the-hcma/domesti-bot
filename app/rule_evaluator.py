@@ -173,6 +173,7 @@ from app.rule_validation import (
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.stale_device_display_name_email import maybe_send_stale_display_name_digest
 from app.together_tracker import TogetherKey, TogetherTracker, format_together_event
+from app.users_together import UnknownReason
 from app.vacation_mode import tick_vacation_mode
 from app.wifi_home_presence import (
     history_row_geofence_inside,
@@ -4561,16 +4562,22 @@ def _unknown_together_peer_ids(
     ctx: RuleEvaluationContext,
     user_id: str,
 ) -> set[str]:
-    """Roster ids (other than ``user_id``) in a ``users_together`` pair whose verdict is unknown.
+    """Roster ids (other than ``user_id``) whose missing data makes a ``users_together`` verdict unknown.
 
-    A verdict is unknown when the estimate cannot be made at all (a peer has no
-    usable fix, the newest usable fix is too old, or too few instants can be
-    compared) — as opposed to known-together or known-apart, which settle the
-    condition either way and must not defer the edge.
+    Only the missing-data unknowns qualify: the peer has no usable fix at all,
+    or its newest usable fix is older than the estimator's freshness window.
+    Those resolve when the peer's phone reports again. The other unknowns do
+    not: a known-but-in-between confidence settles nothing yet but is real
+    evidence, and too-little-coverage with both phones actively reporting
+    (e.g. tracks that just started) must not replay an edge later — a user who
+    was already inside when reporting began would otherwise open a door once
+    the pair became comparable, long after any arrival.
     """
     peer_ids: set[str] = set()
     for condition in iter_users_together_conditions(rule.conditions.all):
         for pair in users_together_pairs(condition, rule, ctx):
+            if pair.estimate.unknown_reason not in (UnknownReason.NO_GOOD_FIXES, UnknownReason.STALE_FIX):
+                continue
             verdict = (
                 pair.estimate.is_together(condition.min_confidence)
                 if condition.expected
