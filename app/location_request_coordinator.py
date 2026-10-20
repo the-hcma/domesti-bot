@@ -324,7 +324,11 @@ class LocationRequestCoordinator:
         if not require_edge_rules and trimmed not in _monitored_user_ids():
             return None
         location = context.location
-        if _user_confidently_inside_via_home_wifi(cache_path, trimmed, location):
+        # A togetherness request is the exception to the home-Wi-Fi skip:
+        # Wi-Fi proves the peer is home, but the togetherness estimate needs a
+        # fresh GPS fix from that peer, so being confidently inside is exactly
+        # the case where a fresh fix resolves the unknown verdict.
+        if reason != "togetherness_unknown" and _user_confidently_inside_via_home_wifi(cache_path, trimmed, location):
             if log_skips:
                 _LOGGER.debug(
                     "location request skipped user=%s reason=wifi_home_ssid",

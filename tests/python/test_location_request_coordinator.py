@@ -409,6 +409,52 @@ async def test_coordinator_skips_when_wifi_home_ssid_matches(
 
 
 @pytest.mark.asyncio
+async def test_togetherness_unknown_request_bypasses_wifi_home_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_edge_rule(bundle)
+    _seed_db(db, home_wifi_ssid="HomeNet")
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    now = 1_700_000_000.0
+    location = UserLocationRecord(
+        user_id="henrique",
+        lat=41.194085,
+        lon=-73.888365,
+        accuracy_m=130,
+        fix_at=now + 10.0,
+        reported_at=now + 10.0,
+        source="test",
+        connection_type="w",
+        wifi_ssid="HomeNet",
+        wifi_bssid="11:22:33:44:55:66",
+    )
+    coordinator = LocationRequestCoordinator(cache_path=db, now_fn=lambda: now + 10.0)
+    request_mock = AsyncMock(return_value=RequestLocationResult(status="accepted"))
+    with patch(
+        "app.location_request_coordinator.request_user_location",
+        request_mock,
+    ):
+        await coordinator._maybe_request_async(
+            "henrique",
+            context=LocationRequestContext(
+                deferred_edges=(),
+                location=location,
+                now=now + 10.0,
+            ),
+            geofence_id="house",
+            reason="togetherness_unknown",
+            rule_id="arrive-home",
+        )
+    request_mock.assert_awaited_once()
+    assert request_mock.await_args is not None
+    assert request_mock.await_args.kwargs["reason"] == "togetherness_unknown"
+
+
+@pytest.mark.asyncio
 async def test_deferred_edge_trigger_respects_grace_fraction(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
