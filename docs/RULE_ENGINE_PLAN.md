@@ -371,6 +371,8 @@ Store per-rule state: `last_condition_value: bool` (reserved — not used yet), 
 
 **Unknown-togetherness edge grace** (same `accuracy_edge_grace_s`): when a geofence edge evaluation fails only because a `users_together` verdict is *unknown for missing peer data* — a peer in the pair has no usable fix, or the peer's newest usable fix is older than the estimator's freshness window — the evaluator registers the same kind of deferred edge (log `reason=togetherness_unknown`) instead of dropping the edge, and asks the stale peer for a fresh location (location-request reason `togetherness_unknown`). The deferred edge is retried on a location update from **any** user the rule references, not just the edge's owner, and fires only if every condition is met before the grace expires, so an edge that resolves to genuinely unmet never acts. A *known* verdict (together or apart) settles the condition immediately and never defers. Field case, 2026-10-19: Henrique arrived home while Kristen's newest usable fix was 1 min 56 s old, so the "not travelling together" garage dry-run rule was skipped unknown and never retried; that skip is what this grace closes.
 
+**Persisted evaluation outcome**: every recorded fire, conditions-not-met skip, daily-cap skip and deferred-edge registration also writes `last_evaluated_at`, `last_outcome` (`fired` / `skipped` / `deferred`), `last_skip_reason` and `last_skip_detail` (capped at 1000 characters) to `automation_rule_state`, exposed as `last_evaluated_at` / `last_outcome` / `last_skip_reason` / `last_skip_detail` on each rule in `GET /v1/rules/status`. This survives log rotation, which otherwise erases the `[rules] fired` / `[rules] skipped` evidence within hours.
+
 ---
 
 ## my-tracks integration (primary caller)
