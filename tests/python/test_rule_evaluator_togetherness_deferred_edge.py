@@ -32,7 +32,7 @@ from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
 from app.presence_store import UserLocationRecord, upsert_user_location
-from app.rule_evaluator import RuleEvaluator
+from app.rule_evaluator import RuleEvaluator, _DeferredAccuracyEdge
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
 _T0 = 1_700_000_000.0
@@ -291,6 +291,65 @@ async def test_deferred_edge_cancelled_when_pair_arrives_together_then_separates
     await rig.report("kristen", 470.0, north_m=-600.0)
     await rig.report("kristen", 490.0, north_m=-800.0)
     await rig.report("henrique", 495.0, north_m=10.0)
+
+    assert rig.device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_accuracy_deferred_edge_cancelled_when_pair_arrives_together_then_separates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An edge deferred for accuracy must also die once togetherness is known unmet.
+
+    Staged by registering the accuracy-deferred edge directly (the pattern
+    ``test_rule_evaluator_accuracy_edge_grace`` uses): with one rule, the
+    geofence-edge accuracy limit equals the rule limit, so no live fix can
+    land in the band that defers for accuracy.
+    """
+    rig = _Rig(tmp_path, monkeypatch)
+    # Henrique and Kristen travel home on the same track, reporting together.
+    await rig.report("kristen", 0.0, north_m=800.0)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 120.0, north_m=650.0)
+    await rig.report("henrique", 120.0, north_m=650.0)
+    await rig.report("kristen", 240.0, north_m=450.0)
+    await rig.report("henrique", 240.0, north_m=450.0)
+    await rig.report("kristen", 330.0, north_m=300.0)
+    await rig.report("henrique", 330.0, north_m=300.0)
+    await rig.report("kristen", 360.0, north_m=100.0)
+    await rig.report("henrique", 360.0, north_m=100.0)
+    await rig.report("kristen", 380.0, north_m=15.0)
+    await rig.report("henrique", 380.0, north_m=10.0)
+    await rig.report("kristen", 400.0, north_m=15.0)
+    await rig.report("henrique", 400.0, north_m=10.0)
+    assert rig.device.calls == []
+
+    arrived_at = _T0 + 400.0
+    rig.evaluator._deferred_accuracy_edges[("henrique-enters-alone", "henrique", "house", "entered")] = (
+        _DeferredAccuracyEdge(
+            event="entered",
+            expires_at=arrived_at + 120.0,
+            geofence_id="house",
+            observed_at=arrived_at,
+            reason="location_accuracy",
+            rule_id="henrique-enters-alone",
+            user_id="henrique",
+        )
+    )
+
+    # The next report retries the edge: the verdict is known and unmet, so
+    # the edge is cancelled even though accuracy deferred it.
+    await rig.report("henrique", 420.0, north_m=10.0)
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+
+    # Kristen then drives away inside what would have been the grace window:
+    # the pair is now known apart, but the cancelled edge must not fire.
+    await rig.report("kristen", 450.0, north_m=-300.0)
+    await rig.report("henrique", 460.0, north_m=10.0)
+    await rig.report("kristen", 480.0, north_m=-600.0)
+    await rig.report("kristen", 500.0, north_m=-800.0)
+    await rig.report("henrique", 510.0, north_m=10.0)
 
     assert rig.device.calls == []
 

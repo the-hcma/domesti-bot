@@ -1153,17 +1153,29 @@ class RuleEvaluator:
                     fire_source="deferred",
                     log_user_ids=owner_id,
                 )
-                if deferred.reason == "togetherness_unknown" and _togetherness_estimates_known(rule, ctx):
-                    # The peer data this edge was waiting for has arrived and
-                    # the verdict is known but unmet (e.g. they arrived
-                    # together): the arrival is settled, so the edge must not
-                    # survive to fire on a later separation.
+                if _togetherness_known_unmet(rule, ctx):
+                    # The togetherness verdict is known and fails the
+                    # condition (e.g. they arrived together when this rule
+                    # wants a solo arrival): the arrival is settled, so the
+                    # edge must not survive to fire on a later separation —
+                    # whichever reason deferred it.
                     self._deferred_accuracy_edges.pop(key, None)
                     _log_deferred_edge_cancelled(
                         rule_id=deferred.rule_id,
                         user_id=owner_id,
                         geofence_id=deferred.geofence_id,
                         event=deferred.event,
+                    )
+                else:
+                    # Still waiting on peer data (or on an unrelated
+                    # condition): nudge any peer whose missing fix leaves the
+                    # verdict unknown, whatever deferred this edge.
+                    self._request_unknown_together_peers(
+                        rule,
+                        ctx,
+                        owner_id,
+                        geofence_id=deferred.geofence_id,
+                        now=now,
                     )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -1295,25 +1307,7 @@ class RuleEvaluator:
             location=location,
             reason="togetherness_unknown",
         )
-        if self._cache_path is None:
-            return
-        locations = list_user_locations(self._cache_path)
-        for peer_id in sorted(peer_ids):
-            peer_location = locations.get(peer_id)
-            if peer_location is None:
-                continue
-            self._location_request_coordinator.schedule_request_with_reason(
-                peer_id,
-                reason="togetherness_unknown",
-                context=LocationRequestContext(
-                    deferred_edges=(),
-                    location=peer_location,
-                    now=now,
-                ),
-                geofence_id=intents[0][0],
-                require_edge_rules=True,
-                rule_id=rule.id,
-            )
+        self._request_unknown_together_peers(rule, ctx, user_id, geofence_id=intents[0][0], now=now)
 
     async def _deferred_device_actions_loop(self) -> None:
         while not self._stop.is_set():
@@ -2341,6 +2335,36 @@ class RuleEvaluator:
                     timezone,
                     due_if_matching=True,
                 )
+
+    def _request_unknown_together_peers(
+        self,
+        rule: RuleOut,
+        ctx: RuleEvaluationContext,
+        user_id: str,
+        *,
+        geofence_id: str,
+        now: float,
+    ) -> None:
+        """Ask each peer whose missing data leaves a ``users_together`` verdict unknown for a fresh fix."""
+        if self._cache_path is None:
+            return
+        locations = list_user_locations(self._cache_path)
+        for peer_id in sorted(_unknown_together_peer_ids(rule, ctx, user_id)):
+            peer_location = locations.get(peer_id)
+            if peer_location is None:
+                continue
+            self._location_request_coordinator.schedule_request_with_reason(
+                peer_id,
+                reason="togetherness_unknown",
+                context=LocationRequestContext(
+                    deferred_edges=(),
+                    location=peer_location,
+                    now=now,
+                ),
+                geofence_id=geofence_id,
+                require_edge_rules=True,
+                rule_id=rule.id,
+            )
 
     def _resolve_schedule_cron(
         self,
@@ -4580,18 +4604,23 @@ def _togetherness_detail_lines(evaluation: RuleEvaluationResult) -> list[str]:
     ]
 
 
-def _togetherness_estimates_known(
+def _togetherness_known_unmet(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> bool:
-    """Whether every ``users_together`` pair in ``rule`` currently has a known estimate."""
-    seen_pair = False
+    """Whether some ``users_together`` pair has a known verdict that fails its condition."""
     for condition in iter_users_together_conditions(rule.conditions.all):
         for pair in users_together_pairs(condition, rule, ctx):
-            seen_pair = True
             if not pair.estimate.known:
-                return False
-    return seen_pair
+                continue
+            verdict = (
+                pair.estimate.is_together(condition.min_confidence)
+                if condition.expected
+                else pair.estimate.is_apart(condition.min_confidence)
+            )
+            if verdict is False:
+                return True
+    return False
 
 
 def _unknown_together_peer_ids(
