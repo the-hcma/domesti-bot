@@ -1149,6 +1149,18 @@ class RuleEvaluator:
                     fire_source="deferred",
                     log_user_ids=owner_id,
                 )
+                if deferred.reason == "togetherness_unknown" and _togetherness_estimates_known(rule, ctx):
+                    # The peer data this edge was waiting for has arrived and
+                    # the verdict is known but unmet (e.g. they arrived
+                    # together): the arrival is settled, so the edge must not
+                    # survive to fire on a later separation.
+                    self._deferred_accuracy_edges.pop(key, None)
+                    _log_deferred_edge_cancelled(
+                        rule_id=deferred.rule_id,
+                        user_id=owner_id,
+                        geofence_id=deferred.geofence_id,
+                        event=deferred.event,
+                    )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
             if self._skip_if_daily_cap(
@@ -4568,6 +4580,20 @@ def _togetherness_detail_lines(evaluation: RuleEvaluationResult) -> list[str]:
         for row in evaluation.conditions
         if row.met and isinstance(row.condition, UsersArrivedTogetherCondition | UsersTogetherCondition)
     ]
+
+
+def _togetherness_estimates_known(
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+) -> bool:
+    """Whether every ``users_together`` pair in ``rule`` currently has a known estimate."""
+    seen_pair = False
+    for condition in iter_users_together_conditions(rule.conditions.all):
+        for pair in users_together_pairs(condition, rule, ctx):
+            seen_pair = True
+            if not pair.estimate.known:
+                return False
+    return seen_pair
 
 
 def _unknown_together_peer_ids(

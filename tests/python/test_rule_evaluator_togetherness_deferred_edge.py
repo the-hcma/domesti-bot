@@ -264,6 +264,38 @@ async def test_deferred_edge_fires_when_peer_reports_fresh_fixes(
 
 
 @pytest.mark.asyncio
+async def test_deferred_edge_cancelled_when_pair_arrives_together_then_separates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch)
+    await _drive_to_stale_peer_arrival(rig)
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") != ()
+
+    # Kristen's phone wakes next to Henrique at home: the pair is known
+    # together, so the alone-entry arrival is settled and the edge is dropped.
+    await rig.report("kristen", 380.0, north_m=15.0)
+    await rig.report("henrique", 385.0, north_m=10.0)
+    await rig.report("kristen", 390.0, north_m=15.0)
+    await rig.report("kristen", 400.0, north_m=15.0)
+    await rig.report("henrique", 405.0, north_m=10.0)
+    await rig.report("kristen", 410.0, north_m=15.0)
+    await rig.report("henrique", 415.0, north_m=10.0)
+    await rig.report("kristen", 420.0, north_m=15.0)
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+
+    # Kristen then drives away inside what would have been the grace window:
+    # the pair is now known apart, but the cancelled edge must not fire.
+    await rig.report("kristen", 450.0, north_m=-300.0)
+    await rig.report("henrique", 460.0, north_m=10.0)
+    await rig.report("kristen", 470.0, north_m=-600.0)
+    await rig.report("kristen", 490.0, north_m=-800.0)
+    await rig.report("henrique", 495.0, north_m=10.0)
+
+    assert rig.device.calls == []
+
+
+@pytest.mark.asyncio
 async def test_deferred_edge_expires_when_peer_stays_silent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
