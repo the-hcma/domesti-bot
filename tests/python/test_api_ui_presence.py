@@ -229,3 +229,32 @@ def test_shutdown_flushes_a_keep_checking_answer_that_was_still_queued(tmp_path:
         device_presence_store.keep_checking(_missing_fan())
     # The writer queue was drained on the way out, so the answer is in the database.
     assert set(list_keep_checking(cache_path)) == {("kasa", _MAC)}
+
+
+def test_forget_for_a_family_whose_manager_cannot_forget_yet_is_409_and_keeps_the_notice() -> None:
+    client, kasa = _client()
+    notice = device_presence_store.note_disappeared(
+        device_id="RINCON_AAAAAAAAAAAA01400", family_id="sonos", host=None, label="Living Room"
+    )
+    assert notice is not None
+    response = client.post(f"/v1/ui/presence/{notice.notice_id}/forget")
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert "sonos" in response.json()["detail"]
+    kasa.forget_device.assert_not_awaited()
+    assert [n["notice_id"] for n in client.get("/v1/ui/state").json()["presence_notices"]] == [notice.notice_id]
+
+
+def test_forget_is_dispatched_to_the_manager_of_the_notices_family() -> None:
+    client, kasa = _client()
+    sonos = MagicMock()
+    sonos.forget_device = AsyncMock(return_value=True)
+    runtime.device_state = runtime.device_state._replace(sonos_mgr=sonos)  # type: ignore[union-attr]
+    notice = device_presence_store.note_disappeared(
+        device_id="aa:aa:aa:aa:aa:aa", family_id="sonos", host=None, label="Living Room"
+    )
+    assert notice is not None
+    response = client.post(f"/v1/ui/presence/{notice.notice_id}/forget")
+    assert response.status_code == HTTPStatus.OK
+    sonos.forget_device.assert_awaited_once_with("aa:aa:aa:aa:aa:aa")
+    kasa.forget_device.assert_not_awaited()
+    assert client.get("/v1/ui/state").json()["presence_notices"] == []

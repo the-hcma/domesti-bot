@@ -76,6 +76,7 @@ from app.build_info import get_build_info
 from app.db.secrets import load_mytracks_admin_password_from_db
 from app.device_completion import CompletionAlias
 from app.device_enums import DeviceFamilyId, DevicePresenceKind, UiActionType
+from app.device_manager import ForgettableDeviceManager
 from app.device_presence import DevicePresenceNotice, device_presence_store
 from app.device_state_watcher import (
     build_default_watchers,
@@ -375,6 +376,17 @@ def _device_state(request: Request) -> DeviceManagersState:
         detail="Device discovery still in progress; check /health and retry shortly",
         headers={"Retry-After": "2"},
     )
+
+
+def _forgettable_manager(state: DeviceManagersState, family_id: str) -> ForgettableDeviceManager | None:
+    """The manager of ``family_id`` when it can forget a device, else ``None`` (not supported for that family yet)."""
+    managers: dict[str, object | None] = {
+        DeviceFamilyId.EP1.value: state.ep1_mgr,
+        DeviceFamilyId.KASA.value: state.kasa_mgr,
+        DeviceFamilyId.SONOS.value: state.sonos_mgr,
+    }
+    manager = managers.get(family_id)
+    return manager if isinstance(manager, ForgettableDeviceManager) else None
 
 
 DeviceState = Annotated[DeviceManagersState, Depends(_device_state)]
@@ -817,9 +829,13 @@ def create_app(args: Any) -> FastAPI:
         # The operator confirmed cleaning up after a device that stopped responding: drop it
         # from the live roster and the discovery cache (names and preferences are kept).
         notice = _presence_notice_of_kind(notice_id, DevicePresenceKind.DISAPPEARED)
-        forgotten = notice.family_id == DeviceFamilyId.KASA.value and await state.kasa_mgr.forget_device(
-            notice.device_id
-        )
+        manager = _forgettable_manager(state, notice.family_id)
+        if manager is None:
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail=f"Expected a family that can forget devices, got {notice.family_id}",
+            )
+        forgotten = await manager.forget_device(notice.device_id)
         # Clear the notice only once the manager has finished (or no longer knows the device),
         # so a failed forget leaves it on screen to be retried.
         device_presence_store.forget(notice.family_id, notice.device_id)

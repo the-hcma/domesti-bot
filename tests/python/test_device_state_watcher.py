@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import logging
 from collections.abc import Awaitable, Callable
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
@@ -33,12 +34,14 @@ from app.device_manager import NotInitializedError
 from app.device_rule_wake import DeviceRuleWakeNotifier
 from app.device_state_watcher import (
     DEFAULT_POLL_INTERVAL_S,
+    RECOVERY_INTERVAL_S,
+    RECOVERY_SWEEP_EVERY,
     DeviceStateWatcher,
     Ep1SubscriptionWatcher,
     KasaPollingWatcher,
-    KasaRecoveryWatcher,
     SonosPollingWatcher,
     TailwindPollingWatcher,
+    UnresponsiveRecoveryWatcher,
     VizioPollingWatcher,
     _refresh_all_devices_concurrently,
     build_default_watchers,
@@ -547,7 +550,8 @@ def test_build_default_watchers_omits_optional_when_managers_are_none() -> None:
     watchers = build_default_watchers(state, interval_s=5.0)
     assert len(watchers) == 2
     assert isinstance(watchers[0], KasaPollingWatcher)
-    assert isinstance(watchers[1], KasaRecoveryWatcher)
+    assert isinstance(watchers[1], UnresponsiveRecoveryWatcher)
+    assert watchers[1].family == DeviceFamilyId.KASA
 
 
 def test_build_default_watchers_includes_every_configured_backend() -> None:
@@ -565,7 +569,8 @@ def test_build_default_watchers_includes_every_configured_backend() -> None:
     watchers = build_default_watchers(state, interval_s=5.0)
     assert len(watchers) == 5
     assert isinstance(watchers[0], KasaPollingWatcher)
-    assert isinstance(watchers[1], KasaRecoveryWatcher)
+    assert isinstance(watchers[1], UnresponsiveRecoveryWatcher)
+    assert watchers[1].family == DeviceFamilyId.KASA
     assert isinstance(watchers[2], Ep1SubscriptionWatcher)
     assert isinstance(watchers[3], SonosPollingWatcher)
     assert isinstance(watchers[4], TailwindPollingWatcher)
@@ -608,9 +613,11 @@ def _sleep_then_stop_after(stop_after: int) -> Callable[[asyncio.Event, float], 
 
 
 @pytest.mark.asyncio
-async def test_kasa_recovery_watcher_sweeps_every_nth_cycle() -> None:
+async def test_recovery_watcher_sweeps_every_nth_cycle() -> None:
     mgr = _fake_kasa_recovery_mgr()
-    watcher = KasaRecoveryWatcher(mgr, sleep=_sleep_then_stop_after(4), sweep_every=3)
+    watcher = UnresponsiveRecoveryWatcher(
+        mgr, family=DeviceFamilyId.KASA, sleep=_sleep_then_stop_after(4), sweep_every=3
+    )
     await watcher.run(stop=asyncio.Event())
     # Sleeps 1-3 are followed by a cycle; the fourth sleep sets stop, so no fourth cycle runs.
     assert [call.kwargs for call in mgr.recover_unresponsive.await_args_list] == [
@@ -621,25 +628,42 @@ async def test_kasa_recovery_watcher_sweeps_every_nth_cycle() -> None:
 
 
 @pytest.mark.asyncio
-async def test_kasa_recovery_watcher_survives_a_failed_cycle() -> None:
+async def test_recovery_watcher_survives_a_failed_cycle() -> None:
     mgr = _fake_kasa_recovery_mgr()
     mgr.recover_unresponsive = AsyncMock(side_effect=[RuntimeError("lan down"), ("aa:bb:cc:dd:ee:01",)])
-    watcher = KasaRecoveryWatcher(mgr, sleep=_sleep_then_stop_after(3))
+    watcher = UnresponsiveRecoveryWatcher(mgr, family=DeviceFamilyId.KASA, sleep=_sleep_then_stop_after(3))
     await watcher.run(stop=asyncio.Event())
     assert mgr.recover_unresponsive.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_kasa_recovery_watcher_waits_one_interval_before_first_cycle() -> None:
+async def test_recovery_watcher_waits_one_interval_before_first_cycle() -> None:
     mgr = _fake_kasa_recovery_mgr()
-    watcher = KasaRecoveryWatcher(mgr, sleep=_sleep_then_stop_after(1))
+    watcher = UnresponsiveRecoveryWatcher(mgr, family=DeviceFamilyId.KASA, sleep=_sleep_then_stop_after(1))
     await watcher.run(stop=asyncio.Event())
     mgr.recover_unresponsive.assert_not_awaited()
 
 
-def test_kasa_recovery_watcher_rejects_non_positive_sweep_every() -> None:
+def test_recovery_watcher_rejects_non_positive_sweep_every() -> None:
     with pytest.raises(ValueError, match="Expected sweep_every >= 1, got 0"):
-        KasaRecoveryWatcher(_fake_kasa_recovery_mgr(), sweep_every=0)
+        UnresponsiveRecoveryWatcher(_fake_kasa_recovery_mgr(), family=DeviceFamilyId.KASA, sweep_every=0)
+
+
+@pytest.mark.asyncio
+async def test_recovery_watcher_runs_for_any_family_and_names_it_in_its_log(caplog: pytest.LogCaptureFixture) -> None:
+    mgr = _fake_kasa_recovery_mgr()
+    mgr.recover_unresponsive = AsyncMock(side_effect=[RuntimeError("lan down"), ()])
+    watcher = UnresponsiveRecoveryWatcher(mgr, family=DeviceFamilyId.SONOS, sleep=_sleep_then_stop_after(3))
+    with caplog.at_level(logging.ERROR, logger="app.device_state_watcher"):
+        await watcher.run(stop=asyncio.Event())
+    assert mgr.recover_unresponsive.await_count == 2
+    assert any("[state-watcher sonos] recovery cycle failed" in record.getMessage() for record in caplog.records)
+
+
+def test_recovery_defaults_are_family_neutral() -> None:
+    assert (RECOVERY_INTERVAL_S, RECOVERY_SWEEP_EVERY) == (300.0, 6)
+    watcher = UnresponsiveRecoveryWatcher(_fake_kasa_recovery_mgr(), family=DeviceFamilyId.EP1)
+    assert (watcher.interval_s, watcher.sweep_every) == (RECOVERY_INTERVAL_S, RECOVERY_SWEEP_EVERY)
 
 
 def test_poll_interval_from_env_defaults_when_unset(
