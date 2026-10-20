@@ -140,6 +140,7 @@ from app.rule_conditions import (
     RuleEvaluationContext,
     RuleEvaluationResult,
     TogetherPair,
+    _counts_for_steady_armed_state,
     _evaluate_condition,
     compute_rules_sun_out,
     consume_scheduled_dwell_episodes_for_fire,
@@ -1234,6 +1235,7 @@ class RuleEvaluator:
         self,
         *,
         ctx: RuleEvaluationContext,
+        evaluation: RuleEvaluationResult,
         expired_keys: set[tuple[str, str, str, str]],
         location: UserLocationRecord,
         now: float,
@@ -1243,11 +1245,21 @@ class RuleEvaluator:
     ) -> None:
         """Defer an edge whose only blocker may be a stale peer fix, and ask the peer for a fresh one.
 
-        The edge is re-evaluated when either user reports (see
+        Only a top-level ``users_together`` row may be the unmet condition:
+        when anything else also fails (the door is already open, a time window
+        is closed), a fresh peer fix cannot make the rule fire, so there is
+        nothing to wait for and no reason to wake the peer's phone. The edge is
+        re-evaluated when either user reports (see
         :meth:`_attempt_deferred_accuracy_edge_fires`); it fires only if every
-        condition is met before the grace expires, so deferring an edge that
-        later turns out to be genuinely unmet is harmless.
+        condition is met before the grace expires.
         """
+        if any(
+            not row.met
+            and not isinstance(row.condition, UsersTogetherCondition)
+            and _counts_for_steady_armed_state(row.condition)
+            for row in evaluation.conditions
+        ):
+            return
         grace_s = _accuracy_edge_grace_s(rule)
         if grace_s is None:
             return
@@ -2127,6 +2139,7 @@ class RuleEvaluator:
                 )
                 self._defer_edge_for_unknown_togetherness(
                     ctx=ctx,
+                    evaluation=evaluation,
                     expired_keys=expired_deferred_keys,
                     location=location,
                     now=now,

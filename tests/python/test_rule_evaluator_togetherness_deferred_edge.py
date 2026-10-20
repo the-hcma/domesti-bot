@@ -61,7 +61,7 @@ def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
     return cast(KasaDeviceManager, mgr)
 
 
-def _rule() -> RuleOut:
+def _rule(*, extra_conditions: tuple = ()) -> RuleOut:
     return RuleOut(
         accuracy_edge_grace_s=120,
         conditions=RuleConditionsOut(
@@ -79,6 +79,7 @@ def _rule() -> RuleOut:
                     near_m=30.0,
                     user_ids=["henrique", "kristen"],
                 ),
+                *extra_conditions,
             ],
         ),
         cooldown_s=0,
@@ -102,7 +103,7 @@ def _rule() -> RuleOut:
 class _Rig:
     """Two users, one geofence and the alone-entry rule, on a simulated clock."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, rule: RuleOut | None = None) -> None:
         bundle = tmp_path / "rules.json"
         payload = {
             "version": 1,
@@ -113,7 +114,7 @@ class _Rig:
                 "timezone": "America/New_York",
                 "home_label": "Home",
             },
-            "rules": [_rule().model_dump(mode="json")],
+            "rules": [(rule or _rule()).model_dump(mode="json")],
         }
         bundle.write_text(json.dumps(payload), encoding="utf-8")
         monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
@@ -217,6 +218,25 @@ async def test_unknown_togetherness_defers_edge_and_requests_peer_location(
     assert requests[0].args[0] == "kristen"
     assert requests[0].kwargs["reason"] == "togetherness_unknown"
     assert requests[0].kwargs["rule_id"] == "henrique-enters-alone"
+
+
+@pytest.mark.asyncio
+async def test_no_deferral_when_another_condition_also_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.schemas import AfterLocalTimeCondition
+
+    # 21:00 local has not happened yet at the simulated arrival (17:13 EST), so
+    # a fresh peer fix could never make this rule fire: do not defer the edge
+    # and do not wake Kristen's phone.
+    rule = _rule(extra_conditions=(AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),))
+    rig = _Rig(tmp_path, monkeypatch, rule=rule)
+    await _drive_to_stale_peer_arrival(rig)
+
+    assert rig.device.calls == []
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
 
 
 @pytest.mark.asyncio
