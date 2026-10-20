@@ -39,7 +39,7 @@ from app.automation_rules_loader import (
     load_settings_location,
 )
 from app.cron_schedule import fired_on_same_local_calendar_day
-from app.device_enums import RuleEvaluationCause, RuleTrigger
+from app.device_enums import RuleEvaluationCause, RuleEvaluationOutcome, RuleTrigger
 from app.device_state_watcher import poll_interval_from_env
 from app.local_time_schedule import (
     after_local_time_start_datetime,
@@ -74,6 +74,8 @@ from app.wifi_home_presence import (
     effective_geofence_ids_containing_location,
     geofence_presence_accuracy_limit_m,
 )
+
+_RULE_EVALUATION_OUTCOME_VALUES = frozenset(member.value for member in RuleEvaluationOutcome)
 
 
 def build_rules_validation(
@@ -293,7 +295,11 @@ def build_rules_status(
                 last_fired_at=(
                     _epoch_to_iso_z(fire_state.last_fired_at) if fire_state.last_fired_at is not None else None
                 ),
-                last_outcome=fire_state.last_outcome,
+                last_outcome=(
+                    RuleEvaluationOutcome(fire_state.last_outcome)
+                    if fire_state.last_outcome in _RULE_EVALUATION_OUTCOME_VALUES
+                    else None
+                ),
                 last_skip_detail=fire_state.last_skip_detail,
                 last_skip_reason=fire_state.last_skip_reason,
                 next_evaluate_at=next_evaluate_at,
