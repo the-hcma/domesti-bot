@@ -235,6 +235,14 @@ class RuleEvaluationCause(StrEnum):
     SCHEDULED = "scheduled"
 
 
+class RuleEvaluationOutcome(StrEnum):
+    """Persisted outcome of a rule's most recent recorded evaluation."""
+
+    DEFERRED = "deferred"
+    FIRED = "fired"
+    SKIPPED = "skipped"
+
+
 class RuleReferenceIssueKind(StrEnum):
     """Broken / warning reference kinds from rule validation (API ``kind``)."""
 

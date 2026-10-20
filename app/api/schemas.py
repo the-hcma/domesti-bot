@@ -24,6 +24,7 @@ from app.device_enums import (
     Ep1ReadingMetric,
     KasaPirRange,
     RuleDeviceActionType,
+    RuleEvaluationOutcome,
     RuleReferenceIssueKind,
     RuleTrigger,
     SensorChartWindow,
@@ -2474,7 +2475,11 @@ class RuleStatusSummaryOut(BaseModel):
     id: str
     label: str
     last_error: str | None = None
+    last_evaluated_at: str | None = None
     last_fired_at: str | None = None
+    last_outcome: RuleEvaluationOutcome | None = None
+    last_skip_detail: str | None = None
+    last_skip_reason: str | None = None
     next_evaluate_at: str | None = None
     reference_issues: list[RuleReferenceIssueOut] = Field(default_factory=list)
     scheduled_detail: str | None = None

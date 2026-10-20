@@ -39,7 +39,7 @@ from app.automation_rules_loader import (
     load_settings_location,
 )
 from app.cron_schedule import fired_on_same_local_calendar_day
-from app.device_enums import RuleEvaluationCause, RuleTrigger
+from app.device_enums import RuleEvaluationCause, RuleEvaluationOutcome, RuleTrigger
 from app.device_state_watcher import poll_interval_from_env
 from app.local_time_schedule import (
     after_local_time_start_datetime,
@@ -59,6 +59,7 @@ from app.rule_conditions import (
     evaluate_rule,
 )
 from app.rule_evaluator import RuleEvaluator, RuleEvaluatorFireState
+from app.rule_fire_state_store import RuleFireStateRecord, list_rule_fire_states
 from app.rule_validation import (
     RosterUserRow,
     RuleValidationContext,
@@ -73,6 +74,8 @@ from app.wifi_home_presence import (
     effective_geofence_ids_containing_location,
     geofence_presence_accuracy_limit_m,
 )
+
+_RULE_EVALUATION_OUTCOME_VALUES = frozenset(member.value for member in RuleEvaluationOutcome)
 
 
 def build_rules_validation(
@@ -149,6 +152,7 @@ def build_rules_status(
     )
 
     rules = list_automation_rules()
+    persisted_fire_states = list_rule_fire_states(cache_path) if evaluator is None and cache_path is not None else {}
     rule_rows: list[RuleStatusSummaryOut] = []
     for rule in rules:
         rule_ctx = eval_ctx
@@ -158,7 +162,12 @@ def build_rules_status(
                 triggered_by=RuleEvaluationCause.SCHEDULED,
             )
         evaluation = evaluate_rule(rule, rule_ctx)
-        fire_state = _fire_state_for_rule(evaluator, rule.id)
+        fire_state = _fire_state_for_rule(
+            evaluator,
+            rule.id,
+            cache_path=cache_path,
+            persisted_record=persisted_fire_states.get(rule.id),
+        )
         next_evaluate_at: str | None = None
         scheduled_detail: str | None = None
         if (
@@ -286,9 +295,19 @@ def build_rules_status(
                 id=rule.id,
                 label=rule.label,
                 last_error=fire_state.last_error,
+                last_evaluated_at=(
+                    _epoch_to_iso_z(fire_state.last_evaluated_at) if fire_state.last_evaluated_at is not None else None
+                ),
                 last_fired_at=(
                     _epoch_to_iso_z(fire_state.last_fired_at) if fire_state.last_fired_at is not None else None
                 ),
+                last_outcome=(
+                    RuleEvaluationOutcome(fire_state.last_outcome)
+                    if fire_state.last_outcome in _RULE_EVALUATION_OUTCOME_VALUES
+                    else None
+                ),
+                last_skip_detail=fire_state.last_skip_detail,
+                last_skip_reason=fire_state.last_skip_reason,
                 next_evaluate_at=next_evaluate_at,
                 reference_issues=validate_rule(rule, validation_ctx),
                 scheduled_detail=scheduled_detail,
@@ -356,10 +375,26 @@ def _epoch_to_iso_z(epoch: float) -> str:
 def _fire_state_for_rule(
     evaluator: RuleEvaluator | None,
     rule_id: str,
+    *,
+    cache_path: Path | None = None,
+    persisted_record: RuleFireStateRecord | None = None,
 ) -> RuleEvaluatorFireState:
-    if evaluator is None:
-        return RuleEvaluatorFireState()
-    return evaluator.fire_state_for_rule(rule_id)
+    if evaluator is not None:
+        return evaluator.fire_state_for_rule(rule_id)
+    if cache_path is not None:
+        record = persisted_record if persisted_record is not None else list_rule_fire_states(cache_path).get(rule_id)
+        if record is not None:
+            return RuleEvaluatorFireState(
+                effective_schedule_cron=record.effective_schedule_cron,
+                last_error=record.last_error,
+                last_evaluated_at=record.last_evaluated_at,
+                last_fired_at=record.last_fired_at,
+                last_outcome=record.last_outcome,
+                last_skip_detail=record.last_skip_detail,
+                last_skip_reason=record.last_skip_reason,
+                next_evaluate_at=record.next_evaluate_at,
+            )
+    return RuleEvaluatorFireState()
 
 
 def _format_astronomical_anchor_label(anchor_dt: datetime) -> str:
