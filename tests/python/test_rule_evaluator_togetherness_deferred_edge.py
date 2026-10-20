@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.api.schemas import (
+    RuleConditionOut,
     RuleConditionsOut,
     RuleDeviceActionOut,
     RuleOut,
@@ -61,7 +62,7 @@ def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
     return cast(KasaDeviceManager, mgr)
 
 
-def _rule(*, extra_conditions: tuple = ()) -> RuleOut:
+def _rule(*, extra_conditions: tuple[RuleConditionOut, ...] = ()) -> RuleOut:
     return RuleOut(
         accuracy_edge_grace_s=120,
         conditions=RuleConditionsOut(
