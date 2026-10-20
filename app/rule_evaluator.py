@@ -219,8 +219,9 @@ class _DeferredAccuracyEdge:
     expires_at: float
     geofence_id: str
     observed_at: float
-    rule_id: str
-    user_id: str
+    reason: str = "location_accuracy"
+    rule_id: str = ""
+    user_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -1083,26 +1084,56 @@ class RuleEvaluator:
         now: float,
     ) -> set[str]:
         fired_rule_ids: set[str] = set()
-        keys_for_user = [key for key in self._deferred_accuracy_edges if key[1] == user_id]
+        # A deferred edge belongs to its owner, but the fix that resolves it
+        # usually comes from the other user in a condition (e.g. the peer in a
+        # users_together pair), so an update from any user the rule references
+        # re-attempts the owner's edges.
+        locations = list_user_locations(self._cache_path) if self._cache_path is not None else {}
+        geofences = list_geofences(self._cache_path) if self._cache_path is not None else []
+        keys_for_user = [
+            key
+            for key, deferred in self._deferred_accuracy_edges.items()
+            if key[1] == user_id
+            or (
+                (deferred_rule := _automation_rule_by_id(deferred.rule_id)) is not None
+                and user_id in collect_rule_user_ids(deferred_rule)
+            )
+        ]
         for key in keys_for_user:
             deferred = self._deferred_accuracy_edges.get(key)
-            if deferred is None or now > deferred.expires_at:
+            if deferred is None:
+                continue
+            if now > deferred.expires_at:
+                self._deferred_accuracy_edges.pop(key, None)
+                _log_deferred_edge_expired(
+                    rule_id=deferred.rule_id,
+                    user_id=deferred.user_id,
+                    geofence_id=deferred.geofence_id,
+                    event=deferred.event,
+                )
                 continue
             rule = _automation_rule_by_id(deferred.rule_id)
             if rule is None or not rule.enabled or RuleTrigger.EDGE_TRUE not in rule.triggers:
                 self._deferred_accuracy_edges.pop(key, None)
                 continue
-            if not _accuracy_passes(rule, location):
+            owner_id = deferred.user_id
+            owner_location = location if owner_id == user_id else locations.get(owner_id)
+            if owner_location is None:
                 continue
+            if not _accuracy_passes(rule, owner_location):
+                continue
+            owner_inside_ids = (
+                inside_ids if owner_id == user_id else set(geofence_ids_containing_location(owner_location, geofences))
+            )
             if not _deferred_state_matches(
                 deferred.event,
                 deferred.geofence_id,
-                inside_ids,
+                owner_inside_ids,
             ):
                 self._deferred_accuracy_edges.pop(key, None)
                 _log_deferred_edge_cancelled(
                     rule_id=deferred.rule_id,
-                    user_id=user_id,
+                    user_id=owner_id,
                     geofence_id=deferred.geofence_id,
                     event=deferred.event,
                 )
@@ -1114,12 +1145,12 @@ class RuleEvaluator:
                     ctx=ctx,
                     evaluation=evaluation,
                     fire_source="deferred",
-                    log_user_ids=user_id,
+                    log_user_ids=owner_id,
                 )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
             if self._skip_if_daily_cap(
-                log_user_ids=user_id,
+                log_user_ids=owner_id,
                 now_epoch=now,
                 rule=rule,
                 runtime=runtime,
@@ -1130,7 +1161,7 @@ class RuleEvaluator:
                 remaining_s = rule.cooldown_s - (now - (runtime.last_fired_at or 0.0))
                 _log_rule_skipped(
                     rule.id,
-                    user_id,
+                    owner_id,
                     reason="cooldown",
                     detail=f"remaining_s={max(0.0, remaining_s):.0f}",
                 )
@@ -1148,10 +1179,10 @@ class RuleEvaluator:
                 noticed_at = max(noticed_at, eligible_since)
             await self._execute_rule(
                 rule,
-                edge_user_id=user_id,
+                edge_user_id=owner_id,
                 evaluation=evaluation,
                 fire_source="deferred",
-                log_user_ids=user_id,
+                log_user_ids=owner_id,
                 noticed_at=noticed_at,
                 transitions=transitions,
             )
@@ -1197,6 +1228,63 @@ class RuleEvaluator:
         if state.last_fired_at is None:
             return True
         return self._now_fn() - state.last_fired_at >= rule.cooldown_s
+
+    def _defer_edge_for_unknown_togetherness(
+        self,
+        *,
+        ctx: RuleEvaluationContext,
+        expired_keys: set[tuple[str, str, str, str]],
+        location: UserLocationRecord,
+        now: float,
+        rule: RuleOut,
+        transitions: dict[str, GeofenceTransition],
+        user_id: str,
+    ) -> None:
+        """Defer an edge whose only blocker may be a stale peer fix, and ask the peer for a fresh one.
+
+        The edge is re-evaluated when either user reports (see
+        :meth:`_attempt_deferred_accuracy_edge_fires`); it fires only if every
+        condition is met before the grace expires, so deferring an edge that
+        later turns out to be genuinely unmet is harmless.
+        """
+        grace_s = _accuracy_edge_grace_s(rule)
+        if grace_s is None:
+            return
+        peer_ids = _unknown_together_peer_ids(rule, ctx, user_id)
+        if not peer_ids:
+            return
+        intents = _dedupe_geofence_intents(_collect_geofence_edge_intents(rule.conditions.all, user_id, transitions))
+        if not intents:
+            return
+        self._register_deferred_accuracy_edges(
+            expired_keys=expired_keys,
+            rule=rule,
+            user_id=user_id,
+            intents=intents,
+            grace_s=grace_s,
+            now=now,
+            location=location,
+            reason="togetherness_unknown",
+        )
+        if self._cache_path is None:
+            return
+        locations = list_user_locations(self._cache_path)
+        for peer_id in sorted(peer_ids):
+            peer_location = locations.get(peer_id)
+            if peer_location is None:
+                continue
+            self._location_request_coordinator.schedule_request_with_reason(
+                peer_id,
+                reason="togetherness_unknown",
+                context=LocationRequestContext(
+                    deferred_edges=(),
+                    location=peer_location,
+                    now=now,
+                ),
+                geofence_id=intents[0][0],
+                require_edge_rules=True,
+                rule_id=rule.id,
+            )
 
     async def _deferred_device_actions_loop(self) -> None:
         while not self._stop.is_set():
@@ -1844,6 +1932,7 @@ class RuleEvaluator:
         grace_s: int,
         now: float,
         location: UserLocationRecord,
+        reason: str = "location_accuracy",
     ) -> None:
         for geofence_id, event in intents:
             key = (rule.id, user_id, geofence_id, event)
@@ -1857,6 +1946,7 @@ class RuleEvaluator:
                 expires_at=now + grace_s,
                 geofence_id=geofence_id,
                 observed_at=location.reported_at,
+                reason=reason,
                 rule_id=rule.id,
                 user_id=user_id,
             )
@@ -1869,6 +1959,7 @@ class RuleEvaluator:
                     grace_s=grace_s,
                     accuracy_m=location.accuracy_m,
                     accuracy_limit_m=rule.min_location_accuracy_m,
+                    reason=reason,
                 )
 
     def _reconcile_geofence_outside_since_from_history(
@@ -2032,6 +2123,15 @@ class RuleEvaluator:
                     evaluation=evaluation,
                     fire_source="immediate",
                     log_user_ids=user_id,
+                )
+                self._defer_edge_for_unknown_togetherness(
+                    ctx=ctx,
+                    expired_keys=expired_deferred_keys,
+                    location=location,
+                    now=now,
+                    rule=rule,
+                    transitions=transitions,
+                    user_id=user_id,
                 )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
@@ -4242,10 +4342,11 @@ def _log_deferred_edge_registered(
     grace_s: int,
     accuracy_m: int | None,
     accuracy_limit_m: int,
+    reason: str = "location_accuracy",
 ) -> None:
     _LOGGER.info(
         "[rules] deferred edge registered rule_id=%s user_id=%s geofence_id=%s "
-        "event=%s grace_s=%d accuracy_m=%s accuracy_limit_m=%d",
+        "event=%s grace_s=%d accuracy_m=%s accuracy_limit_m=%d reason=%s",
         rule_id,
         user_id,
         geofence_id,
@@ -4253,6 +4354,7 @@ def _log_deferred_edge_registered(
         grace_s,
         accuracy_m,
         accuracy_limit_m,
+        reason,
     )
 
 
@@ -4452,6 +4554,32 @@ def _togetherness_detail_lines(evaluation: RuleEvaluationResult) -> list[str]:
         for row in evaluation.conditions
         if row.met and isinstance(row.condition, UsersArrivedTogetherCondition | UsersTogetherCondition)
     ]
+
+
+def _unknown_together_peer_ids(
+    rule: RuleOut,
+    ctx: RuleEvaluationContext,
+    user_id: str,
+) -> set[str]:
+    """Roster ids (other than ``user_id``) in a ``users_together`` pair whose verdict is unknown.
+
+    A verdict is unknown when the estimate cannot be made at all (a peer has no
+    usable fix, the newest usable fix is too old, or too few instants can be
+    compared) — as opposed to known-together or known-apart, which settle the
+    condition either way and must not defer the edge.
+    """
+    peer_ids: set[str] = set()
+    for condition in iter_users_together_conditions(rule.conditions.all):
+        for pair in users_together_pairs(condition, rule, ctx):
+            verdict = (
+                pair.estimate.is_together(condition.min_confidence)
+                if condition.expected
+                else pair.estimate.is_apart(condition.min_confidence)
+            )
+            if verdict is None:
+                peer_ids.update(pair.roster_user_ids)
+    peer_ids.discard(user_id)
+    return peer_ids
 
 
 def _user_triggered_geofence_edge(

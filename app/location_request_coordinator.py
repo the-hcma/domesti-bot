@@ -41,6 +41,7 @@ _LOCATION_REQUEST_REASON = Literal[
     "boundary_proximity",
     "deferred_edge",
     "stale_watchdog",
+    "togetherness_unknown",
 ]
 DeferredGeofenceEvent = Literal["entered", "left"]
 
