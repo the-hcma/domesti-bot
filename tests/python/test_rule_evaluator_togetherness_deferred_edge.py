@@ -511,6 +511,42 @@ async def test_accuracy_deferred_edge_survives_known_unmet_nested_togetherness(
 
 
 @pytest.mark.asyncio
+async def test_persisted_outcome_tracks_deferred_then_fired(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.rule_fire_state_store import list_rule_fire_states
+    from app.rules_status import build_rules_status
+
+    rig = _Rig(tmp_path, monkeypatch)
+    await _drive_to_stale_peer_arrival(rig)
+
+    record = list_rule_fire_states(rig.db)["henrique-enters-alone"]
+    assert record.last_outcome == "deferred"
+    assert record.last_skip_reason == "togetherness_unknown"
+    assert record.last_evaluated_at == _T0 + 360.0
+    assert record.last_fired_at is None
+
+    status = build_rules_status(cache_path=rig.db, evaluator=rig.evaluator)
+    (row,) = [item for item in status.rules if item.id == "henrique-enters-alone"]
+    assert row.last_outcome is not None and row.last_outcome.value == "deferred"
+    assert row.last_skip_reason == "togetherness_unknown"
+    assert row.last_evaluated_at is not None
+
+    await rig.report("kristen", 380.0, north_m=-800.0)
+    await rig.report("henrique", 395.0, north_m=10.0)
+    await rig.report("kristen", 400.0, north_m=-790.0)
+    await rig.report("henrique", 415.0, north_m=10.0)
+    await rig.report("kristen", 420.0, north_m=-780.0)
+
+    assert rig.device.calls == ["on"]
+    record = list_rule_fire_states(rig.db)["henrique-enters-alone"]
+    assert record.last_outcome == "fired"
+    assert record.last_skip_reason is None
+    assert record.last_fired_at == _T0 + 420.0
+
+
+@pytest.mark.asyncio
 async def test_deferred_edge_expires_when_peer_stays_silent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -527,6 +563,35 @@ async def test_deferred_edge_expires_when_peer_stays_silent(
 
     assert rig.device.calls == []
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+
+
+@pytest.mark.asyncio
+async def test_persisted_outcome_records_skip_when_pair_known_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.rule_fire_state_store import list_rule_fire_states
+
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=790.0)
+    await rig.report("henrique", 100.0, north_m=650.0)
+    await rig.report("kristen", 100.0, north_m=640.0)
+    await rig.report("henrique", 240.0, north_m=400.0)
+    await rig.report("kristen", 260.0, north_m=390.0)
+    await rig.report("henrique", 280.0, north_m=280.0)
+    await rig.report("kristen", 285.0, north_m=270.0)
+    await rig.report("kristen", 305.0, north_m=200.0)
+    await rig.report("kristen", 318.0, north_m=160.0)
+    await rig.report("henrique", 320.0, north_m=150.0)
+
+    # Known together is a settled verdict: no deferral, and the skip is recorded.
+    assert rig.device.calls == []
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+    record = list_rule_fire_states(rig.db)["henrique-enters-alone"]
+    assert record.last_outcome == "skipped"
+    assert record.last_skip_reason == "conditions_not_met"
+    assert record.last_skip_detail is not None and "Not travelling together" in record.last_skip_detail
 
 
 @pytest.mark.asyncio

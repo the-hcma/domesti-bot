@@ -71,6 +71,7 @@ from app.device_enums import (
     DeviceFamilyId,
     Ep1ReadingMetric,
     RuleEvaluationCause,
+    RuleEvaluationOutcome,
     RuleTrigger,
 )
 from app.device_rule_wake import DeviceBoolTransition, format_bool_state_label
@@ -191,6 +192,7 @@ RULE_SKIP_REASON_MANUAL_OFF_HOLD = "held_off_manual_off"
 # Minimum gap before retrying a held-off notice whose send failed, so an SMTP
 # outage does not stall evaluation with a blocked send on every trigger.
 _HELD_OFF_RETRY_AFTER_S = 300.0
+_LAST_SKIP_DETAIL_MAX_CHARS = 1000
 # Rows of deleted rules are pruned at most this often.
 _HELD_OFF_PRUNE_EVERY_S = 3600.0
 _GEOFENCE_SEED_MAX_HISTORY_LOOKBACK_S = 86_400.0 * 7
@@ -246,7 +248,11 @@ class GeofenceTransition:
 class RuleEvaluatorFireState:
     effective_schedule_cron: str | None = None
     last_error: str | None = None
+    last_evaluated_at: float | None = None
     last_fired_at: float | None = None
+    last_outcome: str | None = None
+    last_skip_detail: str | None = None
+    last_skip_reason: str | None = None
     next_evaluate_at: float | None = None
 
 
@@ -254,7 +260,11 @@ class RuleEvaluatorFireState:
 class _RuleRuntimeState:
     effective_schedule_cron: str | None = None
     last_error: str | None = None
+    last_evaluated_at: float | None = None
     last_fired_at: float | None = None
+    last_outcome: str | None = None
+    last_skip_detail: str | None = None
+    last_skip_reason: str | None = None
     next_evaluate_at: float | None = None
     schedule_materialized_for: date | None = None
 
@@ -406,7 +416,11 @@ class RuleEvaluator:
         return RuleEvaluatorFireState(
             effective_schedule_cron=state.effective_schedule_cron,
             last_error=state.last_error,
+            last_evaluated_at=state.last_evaluated_at,
             last_fired_at=state.last_fired_at,
+            last_outcome=state.last_outcome,
+            last_skip_detail=state.last_skip_detail,
+            last_skip_reason=state.last_skip_reason,
             next_evaluate_at=state.next_evaluate_at,
         )
 
@@ -1158,7 +1172,8 @@ class RuleEvaluator:
                     # condition (e.g. they arrived together when this rule
                     # wants a solo arrival): the arrival is settled, so the
                     # edge must not survive to fire on a later separation —
-                    # whichever reason deferred it.
+                    # whichever reason deferred it. The interim skip recorded
+                    # above stays the outcome of record.
                     self._deferred_accuracy_edges.pop(key, None)
                     _log_deferred_edge_cancelled(
                         rule_id=deferred.rule_id,
@@ -1179,6 +1194,15 @@ class RuleEvaluator:
                             geofence_id=deferred.geofence_id,
                             now=now,
                         )
+                    # The edge is still pending, so the deferred outcome — not
+                    # the interim skip — is the state of record until it fires
+                    # or expires.
+                    self._record_rule_evaluation(
+                        rule.id,
+                        outcome=RuleEvaluationOutcome.DEFERRED,
+                        skip_detail=f"deferred {deferred.event} at {deferred.geofence_id}",
+                        skip_reason=deferred.reason,
+                    )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
             if self._skip_if_daily_cap(
@@ -1575,6 +1599,10 @@ class RuleEvaluator:
                 runtime.last_error,
             )
         runtime.last_fired_at = fire_at
+        runtime.last_evaluated_at = fire_at
+        runtime.last_outcome = RuleEvaluationOutcome.FIRED.value
+        runtime.last_skip_detail = None
+        runtime.last_skip_reason = None
         if fire_source in ("device_state", "dwell_satisfied", "eligibility", "scheduled") and _rule_has_dwell_condition(
             rule
         ):
@@ -1748,7 +1776,11 @@ class RuleEvaluator:
             self._rule_state[record.rule_id] = _RuleRuntimeState(
                 effective_schedule_cron=record.effective_schedule_cron,
                 last_error=record.last_error,
+                last_evaluated_at=record.last_evaluated_at,
                 last_fired_at=record.last_fired_at,
+                last_outcome=record.last_outcome,
+                last_skip_detail=record.last_skip_detail,
+                last_skip_reason=record.last_skip_reason,
                 next_evaluate_at=record.next_evaluate_at,
                 schedule_materialized_for=parse_schedule_materialized_for(
                     record.schedule_materialized_for,
@@ -1816,9 +1848,36 @@ class RuleEvaluator:
         upsert_rule_fire_state(
             cache_path,
             last_error=state.last_error,
+            last_evaluated_at=state.last_evaluated_at,
             last_fired_at=state.last_fired_at,
+            last_outcome=state.last_outcome,
+            last_skip_detail=state.last_skip_detail,
+            last_skip_reason=state.last_skip_reason,
             rule_id=rule_id,
+            update_outcome_fields=True,
         )
+
+    def _record_rule_evaluation(
+        self,
+        rule_id: str,
+        *,
+        outcome: RuleEvaluationOutcome,
+        skip_detail: str | None = None,
+        skip_reason: str | None = None,
+    ) -> None:
+        """Persist the latest recorded evaluation outcome for ``rule_id``.
+
+        This is the durable counterpart of the ``[rules] fired`` / ``[rules]
+        skipped`` log lines: log files rotate within hours, while this row
+        keeps the most recent outcome (and, for a skip, why) until the next
+        recorded evaluation replaces it.
+        """
+        runtime = self._rule_state.setdefault(rule_id, _RuleRuntimeState())
+        runtime.last_evaluated_at = self._now_fn()
+        runtime.last_outcome = outcome.value
+        runtime.last_skip_detail = skip_detail[:_LAST_SKIP_DETAIL_MAX_CHARS] if skip_detail is not None else None
+        runtime.last_skip_reason = skip_reason
+        self._persist_rule_state(rule_id)
 
     def _prune_stale_deferred_device_actions(self) -> None:
         if not self._deferred_device_actions:
@@ -1985,6 +2044,12 @@ class RuleEvaluator:
                     accuracy_m=location.accuracy_m,
                     accuracy_limit_m=rule.min_location_accuracy_m,
                     reason=reason,
+                )
+                self._record_rule_evaluation(
+                    rule.id,
+                    outcome=RuleEvaluationOutcome.DEFERRED,
+                    skip_detail=f"deferred {event} at {geofence_id}; grace_s={grace_s}",
+                    skip_reason=reason,
                 )
 
     def _reconcile_geofence_outside_since_from_history(
@@ -3507,11 +3572,19 @@ class RuleEvaluator:
     ) -> None:
         """Log why a triggered rule did not fire and, when only a manual-off hold blocks it, say so by email."""
         holds = manual_off_holds(rule, evaluation, ctx)
+        skip_reason = RULE_SKIP_REASON_MANUAL_OFF_HOLD if holds else "conditions_not_met"
+        skip_detail = _format_unmet_conditions_for_log(evaluation)
         _log_rule_skipped(
             rule.id,
             log_user_ids,
-            reason=RULE_SKIP_REASON_MANUAL_OFF_HOLD if holds else "conditions_not_met",
-            detail=_format_unmet_conditions_for_log(evaluation),
+            reason=skip_reason,
+            detail=skip_detail,
+        )
+        self._record_rule_evaluation(
+            rule.id,
+            outcome=RuleEvaluationOutcome.SKIPPED,
+            skip_detail=skip_detail,
+            skip_reason=skip_reason,
         )
         if holds:
             await self._notify_rule_held_off(
@@ -3548,6 +3621,12 @@ class RuleEvaluator:
             log_user_ids,
             reason="daily_cap",
             detail=f"last_fired_local_date={fired_date.isoformat()}",
+        )
+        self._record_rule_evaluation(
+            rule.id,
+            outcome=RuleEvaluationOutcome.SKIPPED,
+            skip_detail=f"last_fired_local_date={fired_date.isoformat()}",
+            skip_reason="daily_cap",
         )
         return True
 
