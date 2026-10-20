@@ -4608,8 +4608,10 @@ def _togetherness_known_unmet(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> bool:
-    """Whether some ``users_together`` pair has a known verdict that fails its condition."""
-    for condition in iter_users_together_conditions(rule.conditions.all):
+    """Whether some top-level ``users_together`` pair has a known verdict that fails its condition."""
+    for condition in rule.conditions.all:
+        if not isinstance(condition, UsersTogetherCondition):
+            continue
         for pair in users_together_pairs(condition, rule, ctx):
             if not pair.estimate.known:
                 continue

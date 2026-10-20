@@ -20,6 +20,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.api.schemas import (
+    AfterLocalTimeCondition,
+    AnyConditionsCondition,
     RuleConditionOut,
     RuleConditionsOut,
     RuleDeviceActionOut,
@@ -352,6 +354,73 @@ async def test_accuracy_deferred_edge_cancelled_when_pair_arrives_together_then_
     await rig.report("henrique", 510.0, north_m=10.0)
 
     assert rig.device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_accuracy_deferred_edge_survives_known_unmet_nested_togetherness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed ``users_together`` inside ``any`` does not settle the whole rule."""
+    base_rule = _rule()
+    inside_condition, together_condition = base_rule.conditions.all
+    rule = base_rule.model_copy(
+        update={
+            "conditions": RuleConditionsOut(
+                all=[
+                    inside_condition,
+                    AnyConditionsCondition(
+                        type="any",
+                        conditions=[
+                            together_condition,
+                            AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),
+                        ],
+                    ),
+                ],
+            ),
+        },
+    )
+    rig = _Rig(tmp_path, monkeypatch, rule=rule)
+    await rig.report("kristen", 0.0, north_m=800.0)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 120.0, north_m=650.0)
+    await rig.report("henrique", 120.0, north_m=650.0)
+    await rig.report("kristen", 240.0, north_m=450.0)
+    await rig.report("henrique", 240.0, north_m=450.0)
+    await rig.report("kristen", 330.0, north_m=300.0)
+    await rig.report("henrique", 330.0, north_m=300.0)
+    await rig.report("kristen", 360.0, north_m=100.0)
+    await rig.report("henrique", 360.0, north_m=100.0)
+    await rig.report("kristen", 380.0, north_m=15.0)
+    await rig.report("henrique", 380.0, north_m=10.0)
+    await rig.report("kristen", 400.0, north_m=15.0)
+    await rig.report("henrique", 400.0, north_m=10.0)
+    assert rig.device.calls == []
+
+    arrived_at = _T0 + 400.0
+    rig.evaluator._deferred_accuracy_edges[("henrique-enters-alone", "henrique", "house", "entered")] = (
+        _DeferredAccuracyEdge(
+            event="entered",
+            expires_at=arrived_at + 20_000.0,
+            geofence_id="house",
+            observed_at=arrived_at,
+            reason="location_accuracy",
+            rule_id="henrique-enters-alone",
+            user_id="henrique",
+        )
+    )
+
+    # The nested verdict is known and failing before 21:00, but the ``any``
+    # can still pass later through its time branch, so the edge survives.
+    await rig.report("henrique", 420.0, north_m=10.0)
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") != ()
+
+    # At 21:01 local, the time branch satisfies the ``any`` and the retained
+    # edge fires.
+    await rig.report("kristen", 13_680.0, north_m=15.0)
+    await rig.report("henrique", 13_690.0, north_m=10.0)
+
+    assert rig.device.calls == ["on"]
 
 
 @pytest.mark.asyncio
