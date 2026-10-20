@@ -455,6 +455,41 @@ async def test_togetherness_unknown_request_bypasses_wifi_home_skip(
 
 
 @pytest.mark.asyncio
+async def test_togetherness_unknown_request_without_peer_location_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A peer that has never reported has no location row, but can still be asked for one."""
+    bundle = tmp_path / "rules.json"
+    db = tmp_path / "discovery.sqlite"
+    _write_edge_rule(bundle)
+    _seed_db(db)
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(bundle))
+
+    now = 1_700_000_000.0
+    coordinator = LocationRequestCoordinator(cache_path=db, now_fn=lambda: now)
+    request_mock = AsyncMock(return_value=RequestLocationResult(status="accepted"))
+    with patch(
+        "app.location_request_coordinator.request_user_location",
+        request_mock,
+    ):
+        await coordinator._maybe_request_async(
+            "henrique",
+            context=LocationRequestContext(
+                deferred_edges=(),
+                location=None,
+                now=now,
+            ),
+            geofence_id="house",
+            reason="togetherness_unknown",
+            rule_id="arrive-home",
+        )
+    request_mock.assert_awaited_once()
+    assert request_mock.await_args is not None
+    assert request_mock.await_args.kwargs["reason"] == "togetherness_unknown"
+
+
+@pytest.mark.asyncio
 async def test_deferred_edge_trigger_respects_grace_fraction(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

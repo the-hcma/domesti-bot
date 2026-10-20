@@ -1291,6 +1291,11 @@ class RuleEvaluator:
         grace_s = _accuracy_edge_grace_s(rule)
         if grace_s is None:
             return
+        if _togetherness_known_unmet(rule, ctx):
+            # Another pair's verdict is already known and failing: this
+            # arrival is settled even though a different peer is stale, so
+            # there is nothing to defer and no peer to wake.
+            return
         peer_ids = _unknown_together_peer_ids(rule, ctx, user_id)
         if not peer_ids:
             return
@@ -2350,15 +2355,12 @@ class RuleEvaluator:
             return
         locations = list_user_locations(self._cache_path)
         for peer_id in sorted(_unknown_together_peer_ids(rule, ctx, user_id)):
-            peer_location = locations.get(peer_id)
-            if peer_location is None:
-                continue
             self._location_request_coordinator.schedule_request_with_reason(
                 peer_id,
                 reason="togetherness_unknown",
                 context=LocationRequestContext(
                     deferred_edges=(),
-                    location=peer_location,
+                    location=locations.get(peer_id),
                     now=now,
                 ),
                 geofence_id=geofence_id,

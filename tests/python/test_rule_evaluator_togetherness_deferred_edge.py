@@ -106,7 +106,14 @@ def _rule(*, extra_conditions: tuple[RuleConditionOut, ...] = ()) -> RuleOut:
 class _Rig:
     """Two users, one geofence and the alone-entry rule, on a simulated clock."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, rule: RuleOut | None = None) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        rule: RuleOut | None = None,
+        user_ids: tuple[str, ...] = ("henrique", "kristen"),
+    ) -> None:
         bundle = tmp_path / "rules.json"
         payload = {
             "version": 1,
@@ -134,7 +141,7 @@ class _Rig:
                     tracking_device_label="Phone",
                     enabled=True,
                 )
-                for user_id in ("henrique", "kristen")
+                for user_id in user_ids
             ],
         )
         replace_geofences(
@@ -236,6 +243,49 @@ async def test_no_deferral_when_another_condition_also_fails(
     rule = _rule(extra_conditions=(AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),))
     rig = _Rig(tmp_path, monkeypatch, rule=rule)
     await _drive_to_stale_peer_arrival(rig)
+
+    assert rig.device.calls == []
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+
+
+@pytest.mark.asyncio
+async def test_no_deferral_when_another_together_pair_is_known_unmet(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One stale peer must not defer an arrival another pair already settles.
+
+    Henrique arrives with Sam (a second ``users_together`` pair, expected
+    apart, is known-unmet) while Kristen's fix is stale (the first pair is
+    unknown). The arrival is already known not to qualify, so no edge is
+    deferred and Kristen's phone is not woken.
+    """
+    base_rule = _rule()
+    inside_condition, together_condition = base_rule.conditions.all
+    together_with_sam = together_condition.model_copy(update={"user_ids": ["henrique", "sam"]})
+    rule = base_rule.model_copy(
+        update={"conditions": RuleConditionsOut(all=[inside_condition, together_condition, together_with_sam])},
+    )
+    rig = _Rig(tmp_path, monkeypatch, rule=rule, user_ids=("henrique", "kristen", "sam"))
+    await rig.report("kristen", 0.0, north_m=-800.0)
+    await rig.report("sam", 0.0, north_m=800.0)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 120.0, north_m=-800.0)
+    await rig.report("sam", 120.0, north_m=650.0)
+    await rig.report("henrique", 120.0, north_m=650.0)
+    await rig.report("kristen", 240.0, north_m=-800.0)
+    await rig.report("sam", 240.0, north_m=450.0)
+    await rig.report("henrique", 240.0, north_m=450.0)
+    await rig.report("kristen", 310.0, north_m=-810.0)
+    await rig.report("sam", 330.0, north_m=300.0)
+    await rig.report("henrique", 330.0, north_m=300.0)
+    await rig.report("sam", 360.0, north_m=15.0)
+    await rig.report("henrique", 360.0, north_m=10.0)
+    await rig.report("sam", 380.0, north_m=15.0)
+    await rig.report("henrique", 380.0, north_m=10.0)
+    await rig.report("sam", 400.0, north_m=15.0)
+    await rig.report("henrique", 400.0, north_m=10.0)
 
     assert rig.device.calls == []
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
