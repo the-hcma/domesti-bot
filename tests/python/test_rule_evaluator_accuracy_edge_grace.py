@@ -19,6 +19,7 @@ from app.api.schemas import (
     RuleOut,
     UsersInsideGeofenceCondition,
 )
+from app.automation_rules_loader import list_automation_rules
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
@@ -463,6 +464,7 @@ async def test_deferred_edge_noticed_at_clamped_to_after_local_time_gate(
         return_value=RuleNotificationEmailOutcome.sent_to(["ops@example.com"]),
     ) as send_mock:
         fired_rule_ids = await evaluator._attempt_deferred_accuracy_edge_fires(
+            rules=list_automation_rules(),
             user_id="henrique",
             location=location,
             inside_ids={"house"},

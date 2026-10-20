@@ -1079,6 +1079,7 @@ class RuleEvaluator:
     async def _attempt_deferred_accuracy_edge_fires(
         self,
         *,
+        rules: list[RuleOut],
         user_id: str,
         location: UserLocationRecord,
         inside_ids: set[str],
@@ -1086,10 +1087,13 @@ class RuleEvaluator:
         now: float,
     ) -> set[str]:
         fired_rule_ids: set[str] = set()
+        if not self._deferred_accuracy_edges:
+            return fired_rule_ids
         # A deferred edge belongs to its owner, but the fix that resolves it
         # usually comes from the other user in a condition (e.g. the peer in a
         # users_together pair), so an update from any user the rule references
         # re-attempts the owner's edges.
+        rules_by_id = {rule.id: rule for rule in rules}
         locations = list_user_locations(self._cache_path) if self._cache_path is not None else {}
         geofences = list_geofences(self._cache_path) if self._cache_path is not None else []
         keys_for_user = [
@@ -1097,7 +1101,7 @@ class RuleEvaluator:
             for key, deferred in self._deferred_accuracy_edges.items()
             if key[1] == user_id
             or (
-                (deferred_rule := _automation_rule_by_id(deferred.rule_id)) is not None
+                (deferred_rule := rules_by_id.get(deferred.rule_id)) is not None
                 and user_id in collect_rule_user_ids(deferred_rule)
             )
         ]
@@ -1114,7 +1118,7 @@ class RuleEvaluator:
                     event=deferred.event,
                 )
                 continue
-            rule = _automation_rule_by_id(deferred.rule_id)
+            rule = rules_by_id.get(deferred.rule_id)
             if rule is None or not rule.enabled or RuleTrigger.EDGE_TRUE not in rule.triggers:
                 self._deferred_accuracy_edges.pop(key, None)
                 continue
@@ -2082,6 +2086,7 @@ class RuleEvaluator:
         )
         self._track_togetherness(user_id, rules, ctx)
         deferred_fired_rule_ids = await self._attempt_deferred_accuracy_edge_fires(
+            rules=rules,
             user_id=user_id,
             location=location,
             inside_ids=inside_ids,
@@ -3772,13 +3777,6 @@ def _accuracy_edge_grace_s(rule: RuleOut) -> int | None:
     if grace is None or grace <= 0:
         return None
     return grace
-
-
-def _automation_rule_by_id(rule_id: str) -> RuleOut | None:
-    for rule in list_automation_rules():
-        if rule.id == rule_id:
-            return rule
-    return None
 
 
 def _collect_geofence_edge_intents(
