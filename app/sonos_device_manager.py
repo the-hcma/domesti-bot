@@ -333,6 +333,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             backend="sonos",
             devices=[(sd.mac_address, sd.preferred_label) for sd in devices],
         )
+        self._failed_polls = {}
         self._alias_to_device = self._expand_lookup(devices)
 
     def _persist_cache(self, devices: list[SonosSpeakerDevice]) -> None:

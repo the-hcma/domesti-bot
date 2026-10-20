@@ -766,3 +766,19 @@ async def test_flagged_speaker_that_answers_a_poll_again_is_announced_as_reappea
     assert mgr.players[0].unresponsive is False
     (notice,) = store.notices()
     assert notice.kind == DevicePresenceKind.REAPPEARED
+
+
+@pytest.mark.asyncio
+async def test_rediscover_resets_the_failed_poll_count_of_a_healthy_speaker() -> None:
+    store = DevicePresenceStore()
+    mgr, zone = await _polled_manager(store)
+    zone.get_current_transport_info.side_effect = TimeoutError("no answer")
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS - 1):
+        await mgr.is_playing("Living room")
+    zone.get_current_transport_info.side_effect = None
+    with patch("app.sonos_device_manager.soco_discover", return_value={zone}):
+        await mgr.rediscover()
+    zone.get_current_transport_info.side_effect = TimeoutError("no answer")
+    await mgr.is_playing("Living room")
+    assert mgr.players[0].unresponsive is False
+    assert store.notices() == ()
