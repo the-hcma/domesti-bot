@@ -64,7 +64,7 @@ def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
     return cast(KasaDeviceManager, mgr)
 
 
-def _rule(*, extra_conditions: tuple[RuleConditionOut, ...] = ()) -> RuleOut:
+def _rule(*, cooldown_s: int = 0, extra_conditions: tuple[RuleConditionOut, ...] = ()) -> RuleOut:
     return RuleOut(
         accuracy_edge_grace_s=120,
         conditions=RuleConditionsOut(
@@ -85,7 +85,7 @@ def _rule(*, extra_conditions: tuple[RuleConditionOut, ...] = ()) -> RuleOut:
                 *extra_conditions,
             ],
         ),
-        cooldown_s=0,
+        cooldown_s=cooldown_s,
         device_actions=[
             RuleDeviceActionOut(
                 family_id=DeviceFamilyId.KASA,
@@ -563,6 +563,58 @@ async def test_deferred_edge_expires_when_peer_stays_silent(
 
     assert rig.device.calls == []
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+
+    from app.rule_fire_state_store import list_rule_fire_states
+
+    record = list_rule_fire_states(rig.db)["henrique-enters-alone"]
+    assert record.last_outcome == "skipped"
+    assert record.last_skip_reason == "deferred_edge_expired"
+
+
+@pytest.mark.asyncio
+async def test_persisted_outcome_records_cooldown_skip_after_fire(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.rule_fire_state_store import list_rule_fire_states
+
+    rig = _Rig(tmp_path, monkeypatch, rule=_rule(cooldown_s=3600))
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=-800.0)
+    await rig.report("henrique", 100.0, north_m=650.0)
+    await rig.report("henrique", 180.0, north_m=520.0)
+    await rig.report("henrique", 240.0, north_m=400.0)
+    await rig.report("kristen", 260.0, north_m=-800.0)
+    await rig.report("henrique", 280.0, north_m=280.0)
+    await rig.report("kristen", 285.0, north_m=-800.0)
+    await rig.report("kristen", 305.0, north_m=-800.0)
+    await rig.report("kristen", 318.0, north_m=-800.0)
+    await rig.report("henrique", 320.0, north_m=150.0)
+    assert rig.device.calls == ["on"]
+
+    # Henrique leaves long enough for a genuine re-entry, then returns while
+    # the hour-long cooldown from the first fire is still running.
+    await rig.report("henrique", 350.0, north_m=300.0)
+    await rig.report("kristen", 360.0, north_m=-800.0)
+    await rig.report("henrique", 500.0, north_m=600.0)
+    await rig.report("kristen", 520.0, north_m=-800.0)
+    await rig.report("henrique", 700.0, north_m=800.0)
+    await rig.report("kristen", 720.0, north_m=-800.0)
+    await rig.report("henrique", 740.0, north_m=600.0)
+    await rig.report("kristen", 750.0, north_m=-800.0)
+    await rig.report("henrique", 760.0, north_m=400.0)
+    await rig.report("kristen", 770.0, north_m=-800.0)
+    await rig.report("henrique", 780.0, north_m=300.0)
+    await rig.report("kristen", 790.0, north_m=-800.0)
+    await rig.report("henrique", 800.0, north_m=280.0)
+    await rig.report("kristen", 810.0, north_m=-800.0)
+    await rig.report("henrique", 820.0, north_m=150.0)
+
+    assert rig.device.calls == ["on"]
+    record = list_rule_fire_states(rig.db)["henrique-enters-alone"]
+    assert record.last_outcome == "skipped"
+    assert record.last_skip_reason == "cooldown"
+    assert record.last_fired_at == _T0 + 320.0
 
 
 @pytest.mark.asyncio

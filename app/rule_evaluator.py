@@ -1060,6 +1060,11 @@ class RuleEvaluator:
                         reason="dwell_episode_consumed",
                         detail="dwell already fired this away/inside episode",
                     )
+                    self._record_rule_skipped(
+                        rule.id,
+                        detail="dwell already fired this away/inside episode",
+                        reason="dwell_episode_consumed",
+                    )
                 elif self._cooldown_elapsed(rule, runtime):
                     await self._execute_rule(
                         rule,
@@ -1071,12 +1076,14 @@ class RuleEvaluator:
                     )
                 else:
                     remaining_s = rule.cooldown_s - (now_epoch - (runtime.last_fired_at or 0.0))
+                    cooldown_detail = f"remaining_s={max(0.0, remaining_s):.0f}"
                     _log_rule_skipped(
                         rule.id,
                         log_user_ids,
                         reason="cooldown",
-                        detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                        detail=cooldown_detail,
                     )
+                    self._record_rule_skipped(rule.id, detail=cooldown_detail, reason="cooldown")
             else:
                 await self._skip_rule_conditions_not_met(
                     rule,
@@ -1131,6 +1138,11 @@ class RuleEvaluator:
                     geofence_id=deferred.geofence_id,
                     event=deferred.event,
                 )
+                self._record_rule_skipped(
+                    deferred.rule_id,
+                    detail=f"deferred {deferred.event} at {deferred.geofence_id} expired",
+                    reason="deferred_edge_expired",
+                )
                 continue
             rule = rules_by_id.get(deferred.rule_id)
             if rule is None or not rule.enabled or RuleTrigger.EDGE_TRUE not in rule.triggers:
@@ -1160,20 +1172,22 @@ class RuleEvaluator:
                 continue
             evaluation = evaluate_rule(rule, ctx)
             if not evaluation.all_met:
-                await self._skip_rule_conditions_not_met(
+                skip_reason, skip_detail = await self._skip_rule_conditions_not_met(
                     rule,
                     ctx=ctx,
                     evaluation=evaluation,
                     fire_source="deferred",
                     log_user_ids=owner_id,
+                    record_evaluation=False,
                 )
                 if _togetherness_known_unmet(rule, ctx):
                     # The togetherness verdict is known and fails the
                     # condition (e.g. they arrived together when this rule
                     # wants a solo arrival): the arrival is settled, so the
                     # edge must not survive to fire on a later separation —
-                    # whichever reason deferred it. The interim skip recorded
-                    # above stays the outcome of record.
+                    # whichever reason deferred it. The interim skip becomes
+                    # the outcome of record.
+                    self._record_rule_skipped(rule.id, detail=skip_detail, reason=skip_reason)
                     self._deferred_accuracy_edges.pop(key, None)
                     _log_deferred_edge_cancelled(
                         rule_id=deferred.rule_id,
@@ -1215,12 +1229,14 @@ class RuleEvaluator:
                 continue
             if not self._cooldown_elapsed(rule, runtime):
                 remaining_s = rule.cooldown_s - (now - (runtime.last_fired_at or 0.0))
+                cooldown_detail = f"remaining_s={max(0.0, remaining_s):.0f}"
                 _log_rule_skipped(
                     rule.id,
                     owner_id,
                     reason="cooldown",
-                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                    detail=cooldown_detail,
                 )
+                self._record_rule_skipped(rule.id, detail=cooldown_detail, reason="cooldown")
                 continue
             self._deferred_accuracy_edges.pop(key, None)
             transitions = {
@@ -1676,6 +1692,11 @@ class RuleEvaluator:
                 geofence_id=deferred.geofence_id,
                 event=deferred.event,
             )
+            self._record_rule_skipped(
+                deferred.rule_id,
+                detail=f"deferred {deferred.event} at {deferred.geofence_id} expired",
+                reason="deferred_edge_expired",
+            )
         return expired_keys
 
     async def _flush_ready_pending_fire_notifications(self) -> None:
@@ -1878,6 +1899,21 @@ class RuleEvaluator:
         runtime.last_skip_detail = skip_detail[:_LAST_SKIP_DETAIL_MAX_CHARS] if skip_detail is not None else None
         runtime.last_skip_reason = skip_reason
         self._persist_rule_state(rule_id)
+
+    def _record_rule_skipped(
+        self,
+        rule_id: str,
+        *,
+        detail: str,
+        reason: str,
+    ) -> None:
+        """Record a non-condition skip (cooldown, daily cap, …) as the latest outcome."""
+        self._record_rule_evaluation(
+            rule_id,
+            outcome=RuleEvaluationOutcome.SKIPPED,
+            skip_detail=detail,
+            skip_reason=reason,
+        )
 
     def _prune_stale_deferred_device_actions(self) -> None:
         if not self._deferred_device_actions:
@@ -2191,12 +2227,18 @@ class RuleEvaluator:
                     user_id,
                     transitions,
                 ):
+                    accuracy_detail = f"accuracy_m={location.accuracy_m} limit={rule.min_location_accuracy_m}"
                     _log_rule_skipped(
                         rule.id,
                         user_id,
                         reason="location_accuracy",
-                        detail=(f"accuracy_m={location.accuracy_m} limit={rule.min_location_accuracy_m}"),
+                        detail=accuracy_detail,
                     )
+                    if not intents:
+                        # With intents the edge was deferred above and the
+                        # deferred outcome is the state of record; without
+                        # them this skip settles the evaluation.
+                        self._record_rule_skipped(rule.id, detail=accuracy_detail, reason="location_accuracy")
                 continue
             if not transitions:
                 continue
@@ -2237,12 +2279,14 @@ class RuleEvaluator:
                 continue
             if not self._cooldown_elapsed(rule, runtime):
                 remaining_s = rule.cooldown_s - (now - (runtime.last_fired_at or 0.0))
+                cooldown_detail = f"remaining_s={max(0.0, remaining_s):.0f}"
                 _log_rule_skipped(
                     rule.id,
                     user_id,
                     reason="cooldown",
-                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                    detail=cooldown_detail,
                 )
+                self._record_rule_skipped(rule.id, detail=cooldown_detail, reason="cooldown")
                 continue
             await self._execute_rule(
                 rule,
@@ -2856,14 +2900,20 @@ class RuleEvaluator:
                     and rule.ignore_expected_device_changes
                     and is_expected_device_change(family_id, device_id)
                 ):
+                    expected_change_detail = (
+                        f"family_id={family_id.value} device_id={device_id} "
+                        "(UI/rule-attributed; ignore_expected_device_changes)"
+                    )
                     _log_rule_skipped(
                         rule.id,
                         log_user_ids,
                         reason="expected_device_change",
-                        detail=(
-                            f"family_id={family_id.value} device_id={device_id} "
-                            "(UI/rule-attributed; ignore_expected_device_changes)"
-                        ),
+                        detail=expected_change_detail,
+                    )
+                    self._record_rule_skipped(
+                        rule.id,
+                        detail=expected_change_detail,
+                        reason="expected_device_change",
                     )
                     continue
                 evaluation = evaluate_rule(rule, evaluation_ctx)
@@ -2897,15 +2947,22 @@ class RuleEvaluator:
                         reason="dwell_episode_consumed",
                         detail="dwell already fired this away/inside episode",
                     )
+                    self._record_rule_skipped(
+                        rule.id,
+                        detail="dwell already fired this away/inside episode",
+                        reason="dwell_episode_consumed",
+                    )
                     continue
                 if not self._cooldown_elapsed(rule, runtime):
                     remaining_s = rule.cooldown_s - (now_epoch - (runtime.last_fired_at or 0.0))
+                    cooldown_detail = f"remaining_s={max(0.0, remaining_s):.0f}"
                     _log_rule_skipped(
                         rule.id,
                         log_user_ids,
                         reason="cooldown",
-                        detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                        detail=cooldown_detail,
                     )
+                    self._record_rule_skipped(rule.id, detail=cooldown_detail, reason="cooldown")
                     continue
                 streak_since = (
                     None if reading_metric is not None else self._device_bool_since.get((family_id, device_id))
@@ -2991,16 +3048,23 @@ class RuleEvaluator:
                     reason="dwell_episode_consumed",
                     detail="dwell already fired this away/inside episode",
                 )
+                self._record_rule_skipped(
+                    rule.id,
+                    detail="dwell already fired this away/inside episode",
+                    reason="dwell_episode_consumed",
+                )
                 attempted_rule_ids.add(rule.id)
                 continue
             if not self._cooldown_elapsed(rule, runtime):
                 remaining_s = rule.cooldown_s - (now_epoch - (runtime.last_fired_at or 0.0))
+                cooldown_detail = f"remaining_s={max(0.0, remaining_s):.0f}"
                 _log_rule_skipped(
                     rule.id,
                     log_user_ids,
                     reason="cooldown",
-                    detail=f"remaining_s={max(0.0, remaining_s):.0f}",
+                    detail=cooldown_detail,
                 )
+                self._record_rule_skipped(rule.id, detail=cooldown_detail, reason="cooldown")
                 continue
             timing = None if timing_by_rule_id is None else timing_by_rule_id.get(rule.id)
             noticed_at = now_epoch if timing is None else timing[0]
@@ -3569,8 +3633,15 @@ class RuleEvaluator:
         evaluation: RuleEvaluationResult,
         fire_source: RuleFireSource,
         log_user_ids: str,
-    ) -> None:
-        """Log why a triggered rule did not fire and, when only a manual-off hold blocks it, say so by email."""
+        record_evaluation: bool = True,
+    ) -> tuple[str, str]:
+        """Log why a triggered rule did not fire and, when only a manual-off hold blocks it, say so by email.
+
+        Returns ``(skip_reason, skip_detail)``. With ``record_evaluation``
+        false the caller takes over recording the final outcome (a deferred
+        retry records ``deferred`` instead of this interim skip), so the rule
+        state is written once per evaluation.
+        """
         holds = manual_off_holds(rule, evaluation, ctx)
         skip_reason = RULE_SKIP_REASON_MANUAL_OFF_HOLD if holds else "conditions_not_met"
         skip_detail = _format_unmet_conditions_for_log(evaluation)
@@ -3580,12 +3651,13 @@ class RuleEvaluator:
             reason=skip_reason,
             detail=skip_detail,
         )
-        self._record_rule_evaluation(
-            rule.id,
-            outcome=RuleEvaluationOutcome.SKIPPED,
-            skip_detail=skip_detail,
-            skip_reason=skip_reason,
-        )
+        if record_evaluation:
+            self._record_rule_evaluation(
+                rule.id,
+                outcome=RuleEvaluationOutcome.SKIPPED,
+                skip_detail=skip_detail,
+                skip_reason=skip_reason,
+            )
         if holds:
             await self._notify_rule_held_off(
                 rule,
@@ -3594,6 +3666,7 @@ class RuleEvaluator:
                 log_user_ids=log_user_ids,
                 user_display_names=ctx.user_display_names,
             )
+        return skip_reason, skip_detail
 
     def _skip_if_daily_cap(
         self,

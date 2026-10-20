@@ -59,7 +59,7 @@ from app.rule_conditions import (
     evaluate_rule,
 )
 from app.rule_evaluator import RuleEvaluator, RuleEvaluatorFireState
-from app.rule_fire_state_store import list_rule_fire_states
+from app.rule_fire_state_store import RuleFireStateRecord, list_rule_fire_states
 from app.rule_validation import (
     RosterUserRow,
     RuleValidationContext,
@@ -152,6 +152,7 @@ def build_rules_status(
     )
 
     rules = list_automation_rules()
+    persisted_fire_states = list_rule_fire_states(cache_path) if evaluator is None and cache_path is not None else {}
     rule_rows: list[RuleStatusSummaryOut] = []
     for rule in rules:
         rule_ctx = eval_ctx
@@ -161,7 +162,12 @@ def build_rules_status(
                 triggered_by=RuleEvaluationCause.SCHEDULED,
             )
         evaluation = evaluate_rule(rule, rule_ctx)
-        fire_state = _fire_state_for_rule(evaluator, rule.id, cache_path=cache_path)
+        fire_state = _fire_state_for_rule(
+            evaluator,
+            rule.id,
+            cache_path=cache_path,
+            persisted_record=persisted_fire_states.get(rule.id),
+        )
         next_evaluate_at: str | None = None
         scheduled_detail: str | None = None
         if (
@@ -371,11 +377,12 @@ def _fire_state_for_rule(
     rule_id: str,
     *,
     cache_path: Path | None = None,
+    persisted_record: RuleFireStateRecord | None = None,
 ) -> RuleEvaluatorFireState:
     if evaluator is not None:
         return evaluator.fire_state_for_rule(rule_id)
     if cache_path is not None:
-        record = list_rule_fire_states(cache_path).get(rule_id)
+        record = persisted_record if persisted_record is not None else list_rule_fire_states(cache_path).get(rule_id)
         if record is not None:
             return RuleEvaluatorFireState(
                 effective_schedule_cron=record.effective_schedule_cron,
