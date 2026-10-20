@@ -8,6 +8,11 @@ from typing import Generic, Protocol, Self, TypeVar, runtime_checkable
 
 from app.rule_engine import Device, DoorDevice, SpeakerDevice, SwitchDevice
 
+# Consecutive failed state polls after which a live device is treated as unresponsive: three
+# polls (30 s at the default cadence, 15 s for a fast-polled plug) ride out a Wi-Fi blip
+# without hiding a real outage.
+UNRESPONSIVE_AFTER_FAILED_POLLS = 3
+
 
 class AlreadyInitializedError(Exception):
     """Raised when ``fetch`` is called again without resetting the manager."""

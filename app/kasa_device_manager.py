@@ -82,14 +82,14 @@ from app.device_display import format_device_display
 from app.device_enums import DeviceFamilyId
 from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
 from app.device_mac import lookup_ip_via_arp_for_mac, lookup_mac_via_arp, mac_alive_on_lan, try_normalize_mac
-from app.device_manager import AlreadyInitializedError, NotInitializedError, SwitchDeviceManager
+from app.device_manager import (
+    UNRESPONSIVE_AFTER_FAILED_POLLS,
+    AlreadyInitializedError,
+    NotInitializedError,
+    SwitchDeviceManager,
+)
 from app.device_presence import DevicePresenceStore, device_presence_store
 from app.rule_engine import DeviceUnresponsiveError, SwitchDevice
-
-# Consecutive failed state polls after which a live plug is treated as unresponsive: three
-# polls (30 s at the default cadence, 15 s for a fast-polled plug) ride out a Wi-Fi blip
-# without hiding a real outage.
-UNRESPONSIVE_AFTER_FAILED_POLLS = 3
 
 _LOGGER = logging.getLogger(__name__)
 
