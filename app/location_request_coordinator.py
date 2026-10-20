@@ -41,6 +41,7 @@ _LOCATION_REQUEST_REASON = Literal[
     "boundary_proximity",
     "deferred_edge",
     "stale_watchdog",
+    "togetherness_unknown",
 ]
 DeferredGeofenceEvent = Literal["entered", "left"]
 
@@ -69,7 +70,7 @@ class DeferredAccuracyEdgeSnapshot:
 @dataclass(frozen=True)
 class LocationRequestContext:
     deferred_edges: tuple[DeferredAccuracyEdgeSnapshot, ...]
-    location: UserLocationRecord
+    location: UserLocationRecord | None
     now: float
 
 
@@ -123,6 +124,8 @@ class LocationRequestCoordinator:
         geofence_by_id: dict[str, GeofenceRecord],
     ) -> tuple[str | None, str | None, _LOCATION_REQUEST_REASON] | None:
         location = context.location
+        if location is None:
+            return None
         accuracy_m = location.accuracy_m
         if accuracy_m is None:
             return None
@@ -174,7 +177,10 @@ class LocationRequestCoordinator:
             grace_s = rule.accuracy_edge_grace_s
             if grace_s is None or grace_s <= 0:
                 continue
-            if _location_accuracy_passes(context.location, rule.min_location_accuracy_m):
+            if context.location is not None and _location_accuracy_passes(
+                context.location,
+                rule.min_location_accuracy_m,
+            ):
                 continue
             registered_at = deferred.expires_at - float(grace_s)
             elapsed_fraction = (context.now - registered_at) / float(grace_s)
@@ -323,7 +329,15 @@ class LocationRequestCoordinator:
         if not require_edge_rules and trimmed not in _monitored_user_ids():
             return None
         location = context.location
-        if _user_confidently_inside_via_home_wifi(cache_path, trimmed, location):
+        # A togetherness request is the exception to the home-Wi-Fi skip:
+        # Wi-Fi proves the peer is home, but the togetherness estimate needs a
+        # fresh GPS fix from that peer, so being confidently inside is exactly
+        # the case where a fresh fix resolves the unknown verdict.
+        if (
+            location is not None
+            and reason != "togetherness_unknown"
+            and _user_confidently_inside_via_home_wifi(cache_path, trimmed, location)
+        ):
             if log_skips:
                 _LOGGER.debug(
                     "location request skipped user=%s reason=wifi_home_ssid",
