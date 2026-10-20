@@ -1167,16 +1167,18 @@ class RuleEvaluator:
                         event=deferred.event,
                     )
                 else:
-                    # Still waiting on peer data (or on an unrelated
-                    # condition): nudge any peer whose missing fix leaves the
-                    # verdict unknown, whatever deferred this edge.
-                    self._request_unknown_together_peers(
-                        rule,
-                        ctx,
-                        owner_id,
-                        geofence_id=deferred.geofence_id,
-                        now=now,
-                    )
+                    # Still waiting on peer data: nudge any peer whose missing
+                    # fix leaves the verdict unknown, whatever deferred this
+                    # edge — unless another steady condition also blocks the
+                    # rule, in which case a fresh fix cannot make it fire.
+                    if not _has_non_togetherness_steady_blocker(evaluation):
+                        self._request_unknown_together_peers(
+                            rule,
+                            ctx,
+                            owner_id,
+                            geofence_id=deferred.geofence_id,
+                            now=now,
+                        )
                 continue
             runtime = self._rule_state.setdefault(rule.id, _RuleRuntimeState())
             if self._skip_if_daily_cap(
@@ -1281,12 +1283,7 @@ class RuleEvaluator:
         :meth:`_attempt_deferred_accuracy_edge_fires`); it fires only if every
         condition is met before the grace expires.
         """
-        if any(
-            not row.met
-            and not isinstance(row.condition, UsersTogetherCondition)
-            and _counts_for_steady_armed_state(row.condition)
-            for row in evaluation.conditions
-        ):
+        if _has_non_togetherness_steady_blocker(evaluation):
             return
         grace_s = _accuracy_edge_grace_s(rule)
         if grace_s is None:
@@ -4121,6 +4118,21 @@ def _geofence_record_to_out(record: GeofenceRecord) -> GeofenceOut:
         label=record.label,
         owntracks_rid=record.owntracks_rid,
         radius_m=record.radius_m,
+    )
+
+
+def _has_non_togetherness_steady_blocker(evaluation: RuleEvaluationResult) -> bool:
+    """Whether an unmet top-level condition other than ``users_together`` blocks the rule.
+
+    Such a blocker (a closed time window, an already-open door) cannot be
+    cleared by a fresh peer fix, so it suppresses both deferring an edge for
+    unknown togetherness and nudging the stale peer on deferred retries.
+    """
+    return any(
+        not row.met
+        and not isinstance(row.condition, UsersTogetherCondition)
+        and _counts_for_steady_armed_state(row.condition)
+        for row in evaluation.conditions
     )
 
 

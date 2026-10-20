@@ -293,6 +293,43 @@ async def test_no_deferral_when_another_together_pair_is_known_unmet(
 
 
 @pytest.mark.asyncio
+async def test_deferred_retry_does_not_request_peer_when_another_condition_blocks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deferred retry must not wake the peer while a time gate also blocks the rule."""
+    from app.api.schemas import AfterLocalTimeCondition
+
+    rule = _rule(extra_conditions=(AfterLocalTimeCondition(type="after_local_time", time_hhmm="21:00"),))
+    rig = _Rig(tmp_path, monkeypatch, rule=rule)
+    await _drive_to_stale_peer_arrival(rig)
+    # The closed time gate already suppressed deferral at arrival; stage an
+    # accuracy-deferred edge directly to exercise the retry path.
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+    arrived_at = _T0 + 360.0
+    rig.evaluator._deferred_accuracy_edges[("henrique-enters-alone", "henrique", "house", "entered")] = (
+        _DeferredAccuracyEdge(
+            event="entered",
+            expires_at=arrived_at + 120.0,
+            geofence_id="house",
+            observed_at=arrived_at,
+            reason="location_accuracy",
+            rule_id="henrique-enters-alone",
+            user_id="henrique",
+        )
+    )
+    rig.coordinator.schedule_request_with_reason.reset_mock()
+
+    await rig.report("henrique", 380.0, north_m=10.0)
+
+    # The edge stays pending, but no fresh peer fix could open the time gate,
+    # so Kristen's phone is left alone.
+    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+    assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
+    assert rig.device.calls == []
+
+
+@pytest.mark.asyncio
 async def test_deferred_edge_fires_when_peer_reports_fresh_fixes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
