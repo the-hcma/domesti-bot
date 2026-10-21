@@ -64,6 +64,7 @@ def _fake_ep1_mgr(identifiers: list[str]) -> Ep1DeviceManager:
         device = MagicMock(spec=Ep1Device)
         device.identifier = ident
         device.occupancy_state = "unknown"
+        device.unresponsive = False
         devices.append(device)
     mgr = MagicMock(spec=Ep1DeviceManager)
     mgr.devices = tuple(devices)
