@@ -27,6 +27,7 @@ from soco.exceptions import SoCoUPnPException
 
 from app import device_discovery_store
 from app.device_display import format_device_display
+from app.device_enums import DeviceFamilyId
 from app.device_label_conflicts import note_display_name_rename, record_duplicate_preferred_labels
 from app.device_mac import (
     lookup_ip_via_arp_for_mac,
@@ -35,7 +36,13 @@ from app.device_mac import (
     mac_from_sonos_rincon,
     try_normalize_mac,
 )
-from app.device_manager import AlreadyInitializedError, NotInitializedError, SpeakerDeviceManager
+from app.device_manager import (
+    UNRESPONSIVE_AFTER_FAILED_POLLS,
+    AlreadyInitializedError,
+    NotInitializedError,
+    SpeakerDeviceManager,
+)
+from app.device_presence import DevicePresenceStore, device_presence_store
 from app.rule_engine import SpeakerDevice
 from app.sonos_stream_favorites import SonosStreamFavorite, load_sonos_stream_favorites
 
@@ -207,11 +214,30 @@ class SonosSpeakerDevice(SpeakerDevice):
         """
 
         try:
-            info = self._soco.get_current_transport_info()
-            raw = (info or {}).get("current_transport_state") or ""
-            raw = str(raw).strip()
+            return self._read_transport_state()
         except Exception:
             return "unknown"
+
+    async def update_playback_state(self) -> None:
+        """Refresh :attr:`is_playing` from a live UPnP transport read.
+
+        Used by post-action syncs and any code that needs to know "is this
+        speaker currently making noise" without committing to the verbose
+        label. Failures are swallowed; the cache keeps its last known value
+        so transient LAN blips don't flicker the tile. The state watcher
+        uses :meth:`poll_playback_state` instead, which reports the failure.
+        """
+
+        await asyncio.to_thread(self.transport_state_summary)
+
+    async def poll_playback_state(self) -> None:
+        """Like :meth:`update_playback_state`, but raise when the UPnP read fails."""
+
+        await asyncio.to_thread(self._read_transport_state)
+
+    def _read_transport_state(self) -> str:
+        info = self._soco.get_current_transport_info()
+        raw = str((info or {}).get("current_transport_state") or "").strip()
         if not raw:
             return "unknown"
         label = _SONOS_TRANSPORT_LABELS.get(raw, raw.replace("_", " ").lower())
@@ -225,21 +251,6 @@ class SonosSpeakerDevice(SpeakerDevice):
         elif label != "unknown":
             self._is_playing = False
         return label
-
-    async def update_playback_state(self) -> None:
-        """Refresh :attr:`is_playing` from a live UPnP transport read.
-
-        Used by :class:`app.device_state_watcher.SonosPollingWatcher` and
-        any code that needs to know "is this speaker currently making
-        noise" without committing to the verbose label. Failures are
-        swallowed (logged by the caller); the cache keeps its last
-        known value so transient LAN blips don't flicker the tile.
-        """
-
-        # ``transport_state_summary`` already runs the UPnP call in the
-        # event-loop thread (it's synchronous), so push it to a worker
-        # to avoid blocking the loop for slow speakers.
-        await asyncio.to_thread(self.transport_state_summary)
 
 
 class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
@@ -256,8 +267,12 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         discovery_timeout: float = 5.0,
         discovery_cache_path: Path | str | None = None,
         force_discovery: bool = False,
+        presence_store: DevicePresenceStore | None = None,
     ) -> None:
         self._discovery_timeout = discovery_timeout
+        # Consecutive failed state polls per MAC; see :data:`UNRESPONSIVE_AFTER_FAILED_POLLS`.
+        self._failed_polls: dict[str, int] = {}
+        self._presence = presence_store if presence_store is not None else device_presence_store
         self._alias_to_device: dict[str, SonosSpeakerDevice] | None = None
         self._discovery_cache_path = Path(discovery_cache_path).expanduser().resolve() if discovery_cache_path else None
         self._force_discovery = bool(force_discovery)
@@ -266,6 +281,26 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         # with a matching UID, no UDP traffic) or ``"discovery"`` (full
         # ``soco_discover`` UDP sweep). ``None`` before the first ``fetch``.
         self._last_discovery_source: str | None = None
+
+    def _announce_responsive(self, sd: SonosSpeakerDevice) -> None:
+        notice = self._presence.note_reappeared(
+            device_id=sd.mac_address,
+            family_id=DeviceFamilyId.SONOS.value,
+            host=sd.host or None,
+            label=sd.preferred_label,
+        )
+        if notice is not None:
+            _LOGGER.info("Sonos: %s is responding again", format_device_display(sd.mac_address, sd.preferred_label))
+
+    def _announce_unresponsive(self, sd: SonosSpeakerDevice) -> None:
+        notice = self._presence.note_disappeared(
+            device_id=sd.mac_address,
+            family_id=DeviceFamilyId.SONOS.value,
+            host=sd.host or None,
+            label=sd.preferred_label,
+        )
+        if notice is not None:
+            _LOGGER.warning("Sonos: %s stopped responding", format_device_display(sd.mac_address, sd.preferred_label))
 
     def _device_for(self, identifier: str) -> SonosSpeakerDevice:
         if self._alias_to_device is None:
@@ -298,6 +333,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             backend="sonos",
             devices=[(sd.mac_address, sd.preferred_label) for sd in devices],
         )
+        self._failed_polls = {}
         self._alias_to_device = self._expand_lookup(devices)
 
     def _persist_cache(self, devices: list[SonosSpeakerDevice]) -> None:
@@ -375,6 +411,18 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 format_device_display(sd.identifier, sd.preferred_label),
                 "on the LAN (ARP)" if on_lan else "not on the LAN (powered off?)",
             )
+
+    def _record_failed_poll(self, sd: SonosSpeakerDevice) -> None:
+        failures = self._failed_polls.get(sd.mac_address, 0) + 1
+        self._failed_polls[sd.mac_address] = failures
+        if failures >= UNRESPONSIVE_AFTER_FAILED_POLLS and not sd.unresponsive:
+            sd.set_unresponsive(True)
+            self._announce_unresponsive(sd)
+
+    def _record_successful_poll(self, sd: SonosSpeakerDevice) -> None:
+        self._failed_polls.pop(sd.mac_address, None)
+        sd.set_unresponsive(False)
+        self._announce_responsive(sd)
 
     async def _prime_playback_states(self, devices: list[SonosSpeakerDevice]) -> None:
         """One concurrent UPnP transport read per speaker after discovery.
@@ -526,7 +574,13 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         """
 
         device = self._device_for(identifier)
-        await device.update_playback_state()
+        try:
+            await device.poll_playback_state()
+        except Exception:
+            _LOGGER.debug("Sonos: transport read for %s failed", identifier, exc_info=True)
+            self._record_failed_poll(device)
+        else:
+            self._record_successful_poll(device)
         return device.is_playing
 
     @property

@@ -10,7 +10,9 @@ import pytest
 from soco.exceptions import SoCoUPnPException
 
 from app import device_discovery_store
+from app.device_presence import DevicePresenceKind, DevicePresenceStore
 from app.sonos_device_manager import (
+    UNRESPONSIVE_AFTER_FAILED_POLLS,
     SonosDeviceManager,
     SonosSpeakerDevice,
     SonosTransitionUnavailableError,
@@ -707,3 +709,76 @@ def test_speaker_device_uses_mac_from_rincon(
     assert sd.mac_address == "5c:aa:fd:0a:12:34"
     assert sd.identifier == "5c:aa:fd:0a:12:34"
     assert sd.rincon_uid == "RINCON_5CAAFD0A123401400"
+
+
+async def _polled_manager(store: DevicePresenceStore) -> tuple[SonosDeviceManager, MagicMock]:
+    zone = MagicMock(uid="RINCON_AA112233445501400", player_name="Living room", ip_address="192.168.1.10")
+    zone.get_current_transport_info.return_value = {"current_transport_state": "PLAYING"}
+    mgr = SonosDeviceManager(discovery_timeout=0.1, presence_store=store)
+    with patch("app.sonos_device_manager.soco_discover", return_value={zone}):
+        await mgr.fetch()
+    return mgr, zone
+
+
+@pytest.mark.asyncio
+async def test_speaker_is_flagged_after_consecutive_failed_polls_and_announced() -> None:
+    store = DevicePresenceStore()
+    mgr, zone = await _polled_manager(store)
+    zone.get_current_transport_info.side_effect = TimeoutError("no answer")
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS - 1):
+        assert await mgr.is_playing("Living room") is True
+    assert store.notices() == ()
+    assert mgr.players[0].unresponsive is False
+    await mgr.is_playing("Living room")
+    assert mgr.players[0].unresponsive is True
+    (notice,) = store.notices()
+    assert (notice.kind, notice.device_id, notice.label) == (
+        DevicePresenceKind.DISAPPEARED,
+        "aa:11:22:33:44:55",
+        "Living room",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_successful_speaker_poll_resets_the_failure_count() -> None:
+    store = DevicePresenceStore()
+    mgr, zone = await _polled_manager(store)
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS - 1):
+        zone.get_current_transport_info.side_effect = TimeoutError("no answer")
+        await mgr.is_playing("Living room")
+    zone.get_current_transport_info.side_effect = None
+    await mgr.is_playing("Living room")
+    zone.get_current_transport_info.side_effect = TimeoutError("no answer")
+    await mgr.is_playing("Living room")
+    assert mgr.players[0].unresponsive is False
+    assert store.notices() == ()
+
+
+@pytest.mark.asyncio
+async def test_flagged_speaker_that_answers_a_poll_again_is_announced_as_reappeared() -> None:
+    store = DevicePresenceStore()
+    mgr, zone = await _polled_manager(store)
+    zone.get_current_transport_info.side_effect = TimeoutError("no answer")
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS):
+        await mgr.is_playing("Living room")
+    zone.get_current_transport_info.side_effect = None
+    await mgr.is_playing("Living room")
+    assert mgr.players[0].unresponsive is False
+    (notice,) = store.notices()
+    assert notice.kind == DevicePresenceKind.REAPPEARED
+
+
+@pytest.mark.asyncio
+async def test_rediscover_resets_the_failed_poll_count_of_a_healthy_speaker() -> None:
+    store = DevicePresenceStore()
+    mgr, zone = await _polled_manager(store)
+    zone.get_current_transport_info.side_effect = TimeoutError("no answer")
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS - 1):
+        await mgr.is_playing("Living room")
+    zone.get_current_transport_info.side_effect = None
+    with patch("app.sonos_device_manager.soco_discover", return_value={zone}):
+        await mgr.rediscover()
+    zone.get_current_transport_info.side_effect = TimeoutError("no answer")
+    await mgr.is_playing("Living room")
+    assert mgr.players[0].unresponsive is False
+    assert store.notices() == ()

@@ -328,6 +328,20 @@ async def test_sonos_watcher_keeps_going_when_one_zone_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sonos_watcher_keeps_polling_a_speaker_flagged_unresponsive() -> None:
+    mgr = _fake_sonos_mgr(["RINCON_A"])
+    cast(MagicMock, mgr.players[0]).unresponsive = True
+    watcher = SonosPollingWatcher(mgr, interval_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    is_playing = cast(AsyncMock, mgr.is_playing)
+    await _wait_for_await_count(is_playing, 2)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    assert {c.args[0] for c in is_playing.await_args_list} == {"RINCON_A"}
+
+
+@pytest.mark.asyncio
 async def test_tailwind_watcher_calls_is_open_per_door_per_cycle() -> None:
     mgr = _fake_tailwind_mgr(["door-1", "door-2"])
     watcher = TailwindPollingWatcher(mgr, interval_s=0.01)

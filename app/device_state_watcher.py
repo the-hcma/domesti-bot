@@ -358,8 +358,7 @@ class SonosPollingWatcher(DeviceStateWatcher):
             task_name = f"state-watcher-{DeviceFamilyId.SONOS.value}-{sp.identifier}"
 
             async def _refresh_player(device: Any = sp) -> None:
-                if getattr(device, "unresponsive", False) is True:
-                    return
+                # A flagged speaker is polled too: one answered read is what clears the flag.
                 try:
                     if not await _await_with_stop(
                         stop,
