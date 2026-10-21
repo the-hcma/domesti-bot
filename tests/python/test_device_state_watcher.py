@@ -581,13 +581,15 @@ def test_build_default_watchers_includes_every_configured_backend() -> None:
     state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
-    assert len(watchers) == 5
+    assert len(watchers) == 6
     assert isinstance(watchers[0], KasaPollingWatcher)
     assert isinstance(watchers[1], UnresponsiveRecoveryWatcher)
     assert watchers[1].family == DeviceFamilyId.KASA
     assert isinstance(watchers[2], Ep1SubscriptionWatcher)
     assert isinstance(watchers[3], SonosPollingWatcher)
-    assert isinstance(watchers[4], TailwindPollingWatcher)
+    assert isinstance(watchers[4], UnresponsiveRecoveryWatcher)
+    assert watchers[4].family == DeviceFamilyId.SONOS
+    assert isinstance(watchers[5], TailwindPollingWatcher)
 
 
 def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> None:
@@ -601,8 +603,10 @@ def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> N
     state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
-    assert len(watchers) == 3
+    assert len(watchers) == 4
     assert isinstance(watchers[2], SonosPollingWatcher)
+    assert isinstance(watchers[3], UnresponsiveRecoveryWatcher)
+    assert watchers[3].family == DeviceFamilyId.SONOS
 
 
 def _fake_kasa_recovery_mgr() -> MagicMock:
