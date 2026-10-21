@@ -18,6 +18,12 @@ module therefore works on whole tracks:
 5. The confidence is the weighted mean of the known windows' closeness. The
    windows overlap, so they are averaged, never multiplied.
 
+A track with no good fix at all is unknown, with one exception: when its newest
+fix, however coarse, is farther from the other user's position than both
+accuracy circles and the ground a car could have covered since (``max_speed_mps``)
+allow within ``far_m``, the pair is apart. A phone on Wi-Fi hundreds of
+kilometers away reports only coarse fixes and would otherwise never settle.
+
 The module is pure: it knows nothing about rules, users or geofences.
 """
 
@@ -142,6 +148,11 @@ class TogetherEstimate:
     unknown_reason: UnknownReason | None
     unknown_track: int | None
     windows: tuple[WindowEstimate, ...]
+
+    @property
+    def from_coarse_fixes(self) -> bool:
+        """Whether the pair is apart because of fixes too coarse for the windows, which are then empty."""
+        return self.confidence is not None and not self.windows
 
     @property
     def known(self) -> bool:
@@ -286,7 +297,24 @@ def estimate_together(
 
     for index in (0, 1):
         if newest[index] is None:
-            return unknown(UnknownReason.NO_GOOD_FIXES, index)
+            coarse = _apart_by_coarse_fixes((track_a, track_b), cleaned, now=now, params=settings)
+            if coarse is None:
+                return unknown(UnknownReason.NO_GOOD_FIXES, index)
+            return TogetherEstimate(
+                anchor=min(now, coarse[0].at, coarse[1].at),
+                anchor_lag_s=max(0.0, now - min(now, coarse[0].at, coarse[1].at)),
+                apart_for_s=0.0,
+                confidence=0.0,
+                distance_now_m=coarse[2],
+                dropped_quality=dropped_quality,
+                dropped_speed=dropped_speed,
+                newest_fix_age_s=(max(0.0, now - coarse[0].at), max(0.0, now - coarse[1].at)),
+                recent_closeness=0.0,
+                together_for_s=0.0,
+                unknown_reason=None,
+                unknown_track=None,
+                windows=(),
+            )
     for index in (0, 1):
         age = ages[index]
         if age is not None and age > settings.freshness_s:
@@ -387,6 +415,31 @@ _EARTH_RADIUS_M: Final[float] = 6_371_000.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
 
+def _apart_by_coarse_fixes(
+    tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
+    cleaned: tuple[CleanTrack, CleanTrack],
+    *,
+    now: float,
+    params: TogetherParams,
+) -> tuple[TrackFix, TrackFix, float] | None:
+    """Return both newest fixes and their distance when they are clearly apart whatever their quality, else ``None``.
+
+    "Clearly" means the distance beyond both accuracy circles and the ground a car
+    could have covered since each fix is still at least ``far_m``. A coarse fix near
+    the other user, or an old one that a car could have driven in from, stays unknown.
+    """
+    newest = (_newest_fix(tracks[0], cleaned[0]), _newest_fix(tracks[1], cleaned[1]))
+    first, second = newest
+    if first is None or second is None:
+        return None
+    distance_m = _haversine_m(first.lat, first.lon, second.lat, second.lon)
+    slack_m = (first.accuracy_m or 0.0) + (second.accuracy_m or 0.0)
+    reach_m = params.max_speed_mps * (max(0.0, now - first.at) + max(0.0, now - second.at))
+    if distance_m - slack_m - reach_m < params.far_m:
+        return None
+    return first, second, distance_m
+
+
 def _apart_for_s(closeness_at: Sequence[float | None], params: TogetherParams) -> float:
     """Seconds back from the anchor over which every sampled instant is known and below half closeness.
 
@@ -418,6 +471,25 @@ def _is_good_quality(fix: TrackFix, params: TogetherParams) -> bool:
     if fix.accuracy_m is None or not math.isfinite(fix.accuracy_m):
         return False
     return 0.0 <= fix.accuracy_m <= params.accuracy_limit_m
+
+
+def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack) -> TrackFix | None:
+    """The newest good fix, else the newest fix with a position and a reported accuracy of any size."""
+    if cleaned.fixes:
+        return cleaned.fixes[-1]
+    usable = [
+        fix
+        for fix in fixes
+        if math.isfinite(fix.at)
+        and math.isfinite(fix.lat)
+        and math.isfinite(fix.lon)
+        and -90.0 <= fix.lat <= 90.0
+        and -180.0 <= fix.lon <= 180.0
+        and fix.accuracy_m is not None
+        and math.isfinite(fix.accuracy_m)
+        and fix.accuracy_m >= 0.0
+    ]
+    return max(usable, key=lambda fix: fix.at, default=None)
 
 
 def _speed_mps(first: TrackFix, second: TrackFix) -> float:

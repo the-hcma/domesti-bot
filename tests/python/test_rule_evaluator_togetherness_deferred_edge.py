@@ -178,7 +178,7 @@ class _Rig:
         self.coordinator = MagicMock()
         self.evaluator._location_request_coordinator = self.coordinator
 
-    async def report(self, user_id: str, at_s: float, *, north_m: float) -> None:
+    async def report(self, user_id: str, at_s: float, *, north_m: float, accuracy_m: int = 5) -> None:
         at = _T0 + at_s
         self.clock["now"] = at
         upsert_user_location(
@@ -187,7 +187,7 @@ class _Rig:
                 user_id=user_id,
                 lat=_HOME_LAT + north_m / _M_PER_DEG_LAT,
                 lon=_HOME_LON,
-                accuracy_m=5,
+                accuracy_m=accuracy_m,
                 fix_at=at,
                 reported_at=at,
                 source="test",
@@ -667,3 +667,35 @@ async def test_known_apart_arrival_fires_immediately_without_deferring(
     assert rig.device.calls == ["on"]
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
     assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+
+
+async def test_far_away_user_with_coarse_fixes_does_not_defer_the_alone_arrival(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Field case: the peer's phone reported 100 m Wi-Fi fixes from hundreds of kilometers away."""
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=-400_000.0, accuracy_m=100)
+    await rig.report("henrique", 200.0, north_m=400.0)
+    await rig.report("kristen", 310.0, north_m=-400_000.0, accuracy_m=100)
+    await rig.report("henrique", 360.0, north_m=10.0)
+
+    assert rig.device.calls == ["on"]
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+
+
+async def test_coarse_fixes_near_home_still_defer_the_alone_arrival(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=-800.0, accuracy_m=100)
+    await rig.report("henrique", 200.0, north_m=400.0)
+    await rig.report("kristen", 310.0, north_m=-810.0, accuracy_m=100)
+    await rig.report("henrique", 360.0, north_m=10.0)
+
+    assert rig.device.calls == []
+    assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1

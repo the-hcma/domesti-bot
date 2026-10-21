@@ -3106,6 +3106,12 @@ def _together_detail(condition: UsersTogetherCondition, pair: TogetherPair, rule
             counts = f" ({recent.usable} of {recent.total} instants)" if recent is not None else ""
             reason = f"too few usable fixes in the last minute to compare them{counts}"
         return f"{who}: unknown, {reason}"
+    if estimate.from_coarse_fixes:
+        return (
+            f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
+            f"(one has no reported accuracy of {params.accuracy_limit_m:g} m or better, "
+            f"but is too far away for that to matter)"
+        )
     windows = ", ".join(
         f"{_format_dwell_duration_s(window.length_s)} "
         f"{'n/a' if window.closeness is None else f'{window.closeness:.2f}'}"

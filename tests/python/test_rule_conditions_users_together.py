@@ -186,6 +186,38 @@ def test_a_user_without_any_location_makes_the_condition_unmet_in_both_forms() -
         assert "USER-B has no fix with a reported accuracy of 50 m or better" in row.detail
 
 
+def _far_coarse_history() -> list[UserLocationOut]:
+    """A phone on Wi-Fi hundreds of kilometers away: a 100 m fix every 15 minutes."""
+    return [
+        _location(_NOW - 60.0 - 900.0 * index, accuracy_m=100).model_copy(update={"lat": _LAT0 + 4.0})
+        for index in range(4)
+    ]
+
+
+def test_a_far_away_user_with_coarse_fixes_is_apart_in_both_forms() -> None:
+    ctx = _ctx({"user-a": _history(), "user-b": _far_coarse_history()})
+
+    alone = _row(_rule(expected=False), ctx)
+    together = _row(_rule(expected=True), ctx)
+
+    assert alone.met is True
+    assert together.met is False
+    assert "unknown" not in alone.detail
+    assert "unknown" not in together.detail
+    assert "USER-A and USER-B: apart" in together.detail
+    assert "too far away for that to matter" in together.detail
+
+
+def test_a_coarse_fix_near_the_other_user_stays_unknown_in_both_forms() -> None:
+    near = [_location(_NOW - 60.0, accuracy_m=100, lateral_m=40.0)]
+    ctx = _ctx({"user-a": _history(), "user-b": near})
+
+    for expected in (True, False):
+        row = _row(_rule(expected=expected), ctx)
+        assert row.met is False
+        assert "USER-B has no fix with a reported accuracy of 50 m or better" in row.detail
+
+
 def test_a_stale_second_phone_is_reported_with_its_age() -> None:
     ctx = _ctx(_pair(b_last_at=_NOW - 120.0))
 
