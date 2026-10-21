@@ -355,6 +355,9 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         self._devices: dict[str, Ep1Device] = {}
         # Consecutive failed subscription sessions per MAC; see :data:`UNRESPONSIVE_AFTER_FAILED_POLLS`.
         self._failed_sessions: dict[str, int] = {}
+        # MACs the operator forgot; a watcher stops for these (and only these), because the roster is
+        # briefly empty during a rediscover and "not in the roster" alone would end every watcher.
+        self._forgotten: set[str] = set()
         self._presence = presence_store if presence_store is not None else device_presence_store
         self._clients: list[APIClient] = []
         self._fetched = False
@@ -423,6 +426,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             self._devices[device.identifier] = device
             # A sensor that answered the sweep starts a fresh streak; one the sweep did not touch keeps its own.
             self._failed_sessions.pop(device.identifier, None)
+            self._forgotten.discard(device.identifier)
             self._announce_responsive(device)
             if self._discovery_cache_path is not None and not self._force_discovery:
                 device_discovery_store.upsert_ep1_device(
@@ -467,9 +471,14 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             device_discovery_store.delete_ep1_device(self._discovery_cache_path, mac=wanted)
         self._devices.pop(wanted, None)
         self._failed_sessions.pop(wanted, None)
+        self._forgotten.add(wanted)
         self._presence.forget(DeviceFamilyId.EP1.value, wanted)
         _LOGGER.info("EP1: forgot %s", format_device_display(wanted, target.preferred_label))
         return True
+
+    def forgotten(self, device: Ep1Device) -> bool:
+        """True once the operator forgot ``device``'s sensor and it has not been discovered again."""
+        return device.identifier in self._forgotten
 
     def owns(self, device: Ep1Device) -> bool:
         """True while ``device`` is the manager's live object for its MAC (not forgotten or replaced)."""
@@ -809,6 +818,10 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             found = await self._zeroconf_discover_fn(timeout=self._zeroconf_timeout)
         except Ep1DiscoveryError as exc:
             _LOGGER.debug("EP1: recovery sweep found nothing: %s", exc)
+            return
+        except Exception:
+            # The sensors the direct probes already recovered must still be committed.
+            _LOGGER.warning("EP1: recovery sweep failed", exc_info=True)
             return
         for host, port in found:
             if (host, port) in tried:

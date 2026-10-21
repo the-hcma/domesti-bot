@@ -158,8 +158,9 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
 
     async def _watch_device(self, device: Ep1Device, *, stop: asyncio.Event) -> None:
         # A flagged sensor is still watched, so one session that subscribes clears the flag; the
-        # loop ends when the operator forgets the sensor (the manager no longer owns the object).
-        while not stop.is_set() and self._mgr.owns(device):
+        # loop ends only when the operator forgets the sensor: during a rediscover the roster is briefly
+        # empty, and the sensor must keep being watched through it.
+        while not stop.is_set() and not self._mgr.forgotten(device):
             try:
                 await self._mgr.run_subscription_session(
                     device,

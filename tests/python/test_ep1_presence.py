@@ -334,8 +334,46 @@ async def test_a_forgotten_sensor_is_no_longer_owned_and_its_session_does_not_an
     assert mgr.owns(device) is True
     await mgr.forget_device(_MAC)
     assert mgr.owns(device) is False
+    assert mgr.forgotten(device) is True
     await _session(mgr, device)
     assert store.notices() == ()
+
+
+@pytest.mark.asyncio
+async def test_a_sensor_missing_from_the_roster_during_a_rediscover_is_not_forgotten(tmp_path: Path) -> None:
+    lan = _Lan()
+    mgr, device = await _running_manager(tmp_path, DevicePresenceStore(), lan)
+    del lan.clients[_HOST]
+    await mgr.rediscover()
+    assert mgr.devices == []
+    assert mgr.owns(device) is False
+    assert mgr.forgotten(device) is False
+
+
+@pytest.mark.asyncio
+async def test_a_forgotten_sensor_that_is_discovered_again_is_no_longer_forgotten(tmp_path: Path) -> None:
+    lan = _Lan()
+    mgr, device = await _running_manager(tmp_path, DevicePresenceStore(), lan)
+    await mgr.forget_device(_MAC)
+    assert mgr.forgotten(device) is True
+    await mgr.rediscover(hosts=[(_HOST, 6053)])
+    assert mgr.forgotten(device) is False
+
+
+@pytest.mark.asyncio
+async def test_a_failed_mdns_sweep_still_commits_the_sensors_the_direct_probes_recovered(tmp_path: Path) -> None:
+    store = DevicePresenceStore()
+    lan = _Lan()
+    mgr, device = await _flagged(tmp_path, store, lan)
+    silent = Ep1Device(_OTHER_MAC, host="192.0.2.20", mac_address=_OTHER_MAC)
+    silent.set_unresponsive(True)
+    mgr._devices[_OTHER_MAC] = silent
+    lan.clients[_HOST] = _client(_MAC)
+    mgr._zeroconf_discovery = True
+    mgr._zeroconf_discover_fn = AsyncMock(side_effect=OSError("network is down"))
+    assert await mgr.recover_unresponsive(sweep=True) == (_MAC,)
+    assert device.unresponsive is False
+    assert silent.unresponsive is True
 
 
 @pytest.mark.asyncio

@@ -68,7 +68,7 @@ def _fake_ep1_mgr(identifiers: list[str]) -> Ep1DeviceManager:
     mgr = MagicMock(spec=Ep1DeviceManager)
     mgr.devices = tuple(devices)
     mgr.run_subscription_session = AsyncMock()
-    mgr.owns = MagicMock(return_value=True)
+    mgr.forgotten = MagicMock(return_value=False)
     return cast(Ep1DeviceManager, mgr)
 
 
@@ -572,7 +572,7 @@ def test_ep1_watcher_retries_a_flagged_sensor_less_often() -> None:
 @pytest.mark.asyncio
 async def test_ep1_watcher_stops_watching_a_sensor_the_manager_forgot() -> None:
     mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01"])
-    cast(MagicMock, mgr.owns).side_effect = [True, False]
+    cast(MagicMock, mgr.forgotten).side_effect = [False, True]
     session = cast(AsyncMock, mgr.run_subscription_session)
     watcher = Ep1SubscriptionWatcher(mgr, reconnect_delay_s=0.01)
     stop = asyncio.Event()
