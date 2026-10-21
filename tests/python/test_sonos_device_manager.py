@@ -932,3 +932,20 @@ async def test_recover_unresponsive_does_not_trust_a_stale_cached_uid_at_a_reuse
     ):
         assert await mgr.recover_unresponsive() == ()
     assert mgr.players[0].unresponsive is True
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_sweep_does_not_trust_a_stale_cached_uid(tmp_path: Path) -> None:
+    mgr, _db = await _manager_with_a_missing_speaker(tmp_path, DevicePresenceStore())
+    reused = _speaker_zone("RINCON_BBBBBBBBBBBB01400", "192.168.1.10", "Kitchen")
+    reused.uid = _LIVING_ROOM_UID
+    silent = MagicMock(ip_address="192.168.1.10")
+    silent.get_speaker_info.side_effect = TimeoutError("no answer")
+    with (
+        patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
+        patch("app.sonos_device_manager.SoCo", return_value=silent),
+        patch("app.sonos_device_manager.soco_discover", return_value={reused}),
+    ):
+        assert await mgr.recover_unresponsive(sweep=True) == ()
+    assert mgr.players[0].unresponsive is True
+    assert mgr.players[0].rincon_uid == _LIVING_ROOM_UID

@@ -415,26 +415,33 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 "on the LAN (ARP)" if on_lan else "not on the LAN (powered off?)",
             )
 
-    async def _probe_speaker(self, host: str, expected_mac: str) -> tuple[Any, str] | None:
-        """Return ``(zone, room_name)`` when the speaker at ``host`` has ``expected_mac``, else ``None``.
+    async def _live_identity(self, zone: Any) -> tuple[str, str] | None:
+        """Return ``(mac, room_name)`` read live from ``zone``'s device description, else ``None``.
 
-        The identity comes from a live read of the device description (its serial number carries
-        the MAC), not from ``SoCo.uid``: SoCo keeps one cached instance per address, so a cached
-        uid could still match after DHCP handed the address to another speaker.
+        The identity comes from the device description (its serial number carries the MAC),
+        not from ``SoCo.uid``: SoCo keeps one cached instance per address, so a cached uid
+        could still match after DHCP handed the address to another speaker.
         """
 
-        def _probe() -> tuple[Any, str] | None:
-            zone = SoCo(host)
+        def _read() -> tuple[str, str] | None:
             info = zone.get_speaker_info(refresh=True) or {}
-            if try_normalize_mac(str(info.get("mac_address") or "").replace("-", ":")) != expected_mac:
-                return None
-            return zone, str(info.get("zone_name") or "").strip()
+            mac = try_normalize_mac(str(info.get("mac_address") or "").replace("-", ":"))
+            return None if mac is None else (mac, str(info.get("zone_name") or "").strip())
 
         try:
-            return await asyncio.wait_for(asyncio.to_thread(_probe), timeout=_RECOVERY_ATTEMPT_TIMEOUT_S)
+            return await asyncio.wait_for(asyncio.to_thread(_read), timeout=_RECOVERY_ATTEMPT_TIMEOUT_S)
         except Exception:
-            _LOGGER.debug("Sonos: recovery probe of %s for %s failed", host, expected_mac, exc_info=True)
+            _LOGGER.debug("Sonos: live identity read of %s failed", getattr(zone, "ip_address", "?"), exc_info=True)
             return None
+
+    async def _probe_speaker(self, host: str, expected_mac: str) -> tuple[Any, str] | None:
+        """Return ``(zone, room_name)`` when the speaker at ``host`` has ``expected_mac``, else ``None``."""
+
+        zone = SoCo(host)
+        identity = await self._live_identity(zone)
+        if identity is None or identity[0] != expected_mac:
+            return None
+        return zone, identity[1]
 
     async def _recover_stub(
         self,
@@ -468,16 +475,16 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         timeout = max(1, int(round(self._discovery_timeout)))
         zones = await asyncio.to_thread(lambda: soco_discover(timeout=timeout) or set())
         for zone in zones:
-            uid = str(getattr(zone, "uid", "") or "").strip()
-            for mac, stub in missing.items():
-                if mac in recovered or uid.upper() != stub.rincon_uid.strip().upper():
-                    continue
-                name = str(getattr(zone, "player_name", None) or "").strip()
-                sd = self._speaker_device(
-                    stub.rincon_uid, zone, display_name=name or stub.preferred_label, cached_mac=mac
-                )
-                if sd is not None:
-                    recovered[mac] = sd
+            identity = await self._live_identity(zone)
+            if identity is None:
+                continue
+            mac, name = identity
+            stub = missing.get(mac)
+            if stub is None or mac in recovered:
+                continue
+            sd = self._speaker_device(stub.rincon_uid, zone, display_name=name or stub.preferred_label, cached_mac=mac)
+            if sd is not None:
+                recovered[mac] = sd
 
     def _record_failed_poll(self, sd: SonosSpeakerDevice) -> None:
         failures = self._failed_polls.get(sd.mac_address, 0) + 1
@@ -715,7 +722,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
 
         A speaker that lost power or moved address stays in the manager as a silent stub
         (domesti-bot#876). Each stub is probed at its last known address and at the address
-        ARP reports for its MAC; a speaker that answers with the expected UID replaces its
+        ARP reports for its MAC; a speaker that answers with the expected MAC replaces its
         stub and the discovery cache follows it to the new address. A speaker that still does
         not answer is left exactly as it was. With ``sweep=True`` one SSDP sweep also looks
         for stubs ARP does not know. The result is dropped when a concurrent
