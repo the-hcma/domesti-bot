@@ -428,7 +428,7 @@ def _apart_by_coarse_fixes(
     could have covered since each fix is still at least ``far_m``. A coarse fix near
     the other user, or an old one that a car could have driven in from, stays unknown.
     """
-    newest = (_newest_fix(tracks[0], cleaned[0]), _newest_fix(tracks[1], cleaned[1]))
+    newest = (_newest_fix(tracks[0], cleaned[0], params), _newest_fix(tracks[1], cleaned[1], params))
     first, second = newest
     if first is None or second is None:
         return None
@@ -473,14 +473,18 @@ def _is_good_quality(fix: TrackFix, params: TogetherParams) -> bool:
     return 0.0 <= fix.accuracy_m <= params.accuracy_limit_m
 
 
-def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack) -> TrackFix | None:
-    """The newest good fix, else the newest fix with a position and a reported accuracy of any size."""
-    if cleaned.fixes:
-        return cleaned.fixes[-1]
-    usable = [
+def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack, params: TogetherParams) -> TrackFix | None:
+    """The newest fix, good or coarse, with a valid position and a reported accuracy of any size.
+
+    Good fixes come from the cleaned track, so a spike stays out; the rest come from the raw
+    fixes that only failed the accuracy limit. Equal times prefer the more accurate fix, so
+    the input order cannot change the verdict.
+    """
+    coarse = [
         fix
         for fix in fixes
-        if math.isfinite(fix.at)
+        if not _is_good_quality(fix, params)
+        and math.isfinite(fix.at)
         and math.isfinite(fix.lat)
         and math.isfinite(fix.lon)
         and -90.0 <= fix.lat <= 90.0
@@ -489,7 +493,7 @@ def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack) -> TrackFix | No
         and math.isfinite(fix.accuracy_m)
         and fix.accuracy_m >= 0.0
     ]
-    return max(usable, key=lambda fix: fix.at, default=None)
+    return max((*cleaned.fixes, *coarse), key=lambda fix: (fix.at, -(fix.accuracy_m or 0.0)), default=None)
 
 
 def _speed_mps(first: TrackFix, second: TrackFix) -> float:

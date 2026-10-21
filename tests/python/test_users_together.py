@@ -208,6 +208,23 @@ def test_the_newest_coarse_fix_decides_not_an_older_far_one() -> None:
     assert estimate_together(_phone_a(), fixes, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
 
 
+def test_a_newer_coarse_fix_near_the_other_user_beats_an_older_good_fix_far_away() -> None:
+    first = [_coarse_fix(_NOW - 1.0, north_m=0.0)]
+    old_good = TrackFix(accuracy_m=5.0, at=_NOW - 10.0, lat=_LAT0 + 1_000.0 / _M_PER_DEG, lon=_LON0)
+    second = [old_good, _coarse_fix(_NOW - 1.0, north_m=20.0)]
+
+    assert estimate_together(first, second, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+    assert estimate_together(first, [old_good], now=_NOW).is_apart(0.8) is True
+
+
+def test_equal_coarse_timestamps_prefer_the_more_accurate_fix_whatever_the_order() -> None:
+    far = _coarse_fix(_NOW - 5.0, north_m=400_000.0, accuracy_m=100.0)
+    near = _coarse_fix(_NOW - 5.0, north_m=10.0, accuracy_m=60.0)
+
+    for fixes in ([far, near], [near, far]):
+        assert estimate_together(_phone_a(), fixes, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+
+
 def test_a_coarse_fix_with_nonsense_coordinates_is_ignored() -> None:
     bad = [TrackFix(accuracy_m=100.0, at=_NOW - 60.0, lat=float("nan"), lon=_LON0)]
 
