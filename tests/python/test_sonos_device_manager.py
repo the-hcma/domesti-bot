@@ -12,6 +12,7 @@ from soco.exceptions import SoCoUPnPException
 from app import device_discovery_store
 from app.device_presence import DevicePresenceKind, DevicePresenceStore
 from app.sonos_device_manager import (
+    _RECOVERY_ATTEMPT_TIMEOUT_S,
     UNRESPONSIVE_AFTER_FAILED_POLLS,
     SonosDeviceManager,
     SonosSpeakerDevice,
@@ -991,3 +992,15 @@ def test_persist_cache_falls_back_to_the_known_label_when_the_live_name_read_fai
     assert device_discovery_store.load_sonos_zones(db) == [
         (_LIVING_ROOM_UID, "192.168.1.10", "Living Room", _LIVING_ROOM_MAC)
     ]
+
+
+@pytest.mark.asyncio
+async def test_recovery_probe_bounds_the_device_description_read_with_the_attempt_timeout(tmp_path: Path) -> None:
+    mgr, _db = await _manager_with_a_missing_speaker(tmp_path, DevicePresenceStore())
+    probed = _speaker_zone(_LIVING_ROOM_UID, "192.168.1.20")
+    with (
+        patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.20"),
+        patch("app.sonos_device_manager.SoCo", return_value=probed),
+    ):
+        await mgr.recover_unresponsive()
+    probed.get_speaker_info.assert_called_with(refresh=True, timeout=_RECOVERY_ATTEMPT_TIMEOUT_S)

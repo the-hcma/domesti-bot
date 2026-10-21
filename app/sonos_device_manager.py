@@ -428,7 +428,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         """
 
         def _read() -> tuple[str, str] | None:
-            info = zone.get_speaker_info(refresh=True) or {}
+            info = zone.get_speaker_info(refresh=True, timeout=_RECOVERY_ATTEMPT_TIMEOUT_S) or {}
             mac = try_normalize_mac(str(info.get("mac_address") or "").replace("-", ":"))
             return None if mac is None else (mac, str(info.get("zone_name") or "").strip())
 
