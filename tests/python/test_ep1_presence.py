@@ -130,6 +130,34 @@ async def test_flagged_sensor_that_subscribes_again_is_announced_as_reappeared(t
 
 
 @pytest.mark.asyncio
+async def test_a_rediscover_that_reconnects_a_sensor_starts_a_fresh_failure_streak(tmp_path: Path) -> None:
+    store = DevicePresenceStore()
+    lan = _Lan()
+    mgr, device = await _running_manager(tmp_path, store, lan)
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS - 1):
+        await _failed_session(mgr, device, lan)
+    lan.clients[_HOST] = _client(_MAC)
+    await mgr.rediscover()
+    (fresh,) = mgr.devices
+    await _failed_session(mgr, fresh, lan)
+    assert fresh.unresponsive is False
+    assert store.notices() == ()
+
+
+@pytest.mark.asyncio
+async def test_a_rediscover_keeps_the_streak_of_a_sensor_it_did_not_reconnect(tmp_path: Path) -> None:
+    store = DevicePresenceStore()
+    lan = _Lan()
+    mgr, device = await _running_manager(tmp_path, store, lan)
+    for _ in range(UNRESPONSIVE_AFTER_FAILED_POLLS - 1):
+        await _failed_session(mgr, device, lan)
+    streak = dict(mgr._failed_sessions)
+    del lan.clients[_HOST]
+    await mgr.rediscover()
+    assert mgr._failed_sessions == streak
+
+
+@pytest.mark.asyncio
 async def test_a_stopped_session_is_not_a_failure(tmp_path: Path) -> None:
     store = DevicePresenceStore()
     lan = _Lan()

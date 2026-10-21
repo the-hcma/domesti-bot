@@ -392,7 +392,6 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if self._fetched:
             raise AlreadyInitializedError("Ep1DeviceManager.fetch() already completed")
         psk = self._resolved_noise_psk()
-        self._failed_sessions.clear()
         targets, used_cache_only = await self._resolve_targets()
         if not targets:
             self._fetched = True
@@ -422,6 +421,8 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 continue
             connected_any = True
             self._devices[device.identifier] = device
+            # A sensor that answered the sweep starts a fresh streak; one the sweep did not touch keeps its own.
+            self._failed_sessions.pop(device.identifier, None)
             self._announce_responsive(device)
             if self._discovery_cache_path is not None and not self._force_discovery:
                 device_discovery_store.upsert_ep1_device(
