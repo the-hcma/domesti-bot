@@ -685,6 +685,7 @@ def build_default_watchers(
                 interval_s=interval_s,
             )
         )
+        watchers.append(UnresponsiveRecoveryWatcher(state.sonos_mgr, family=DeviceFamilyId.SONOS))
     if state.tailwind_mgr is not None:
         watchers.append(
             TailwindPollingWatcher(

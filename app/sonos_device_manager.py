@@ -48,6 +48,9 @@ from app.sonos_stream_favorites import SonosStreamFavorite, load_sonos_stream_fa
 
 _LOGGER = logging.getLogger(__name__)
 
+# Bound on one UPnP identity probe during recovery; a silent address must not stall the cycle.
+_RECOVERY_ATTEMPT_TIMEOUT_S = 3.0
+
 _SONOS_TRANSPORT_LABELS: dict[str, str] = {
     "PAUSED_PLAYBACK": "paused",
     "PLAYING": "playing",
@@ -412,6 +415,64 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 "on the LAN (ARP)" if on_lan else "not on the LAN (powered off?)",
             )
 
+    async def _probe_speaker(self, host: str, expected_uid: str) -> tuple[Any, str] | None:
+        """Return ``(zone, player_name)`` when the speaker at ``host`` is ``expected_uid``, else ``None``."""
+
+        def _probe() -> tuple[Any, str] | None:
+            zone = SoCo(host)
+            if str(zone.uid or "").strip().upper() != expected_uid.strip().upper():
+                return None
+            return zone, str(getattr(zone, "player_name", None) or "").strip()
+
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(_probe), timeout=_RECOVERY_ATTEMPT_TIMEOUT_S)
+        except Exception:
+            _LOGGER.debug("Sonos: recovery probe of %s for %s failed", host, expected_uid, exc_info=True)
+            return None
+
+    async def _recover_stub(
+        self,
+        mac: str,
+        stub: SonosSpeakerDevice,
+        recovered: dict[str, SonosSpeakerDevice],
+    ) -> None:
+        arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac)
+        for host in dict.fromkeys(h for h in (stub.host, arp_ip) if h):
+            found = await self._probe_speaker(host, stub.rincon_uid)
+            if found is None:
+                continue
+            zone, name = found
+            sd = self._speaker_device(stub.rincon_uid, zone, display_name=name or stub.preferred_label, cached_mac=mac)
+            if sd is not None:
+                recovered[mac] = sd
+                return
+
+    def _replace_roster(self, devices: list[SonosSpeakerDevice], *, reset: set[str]) -> None:
+        """Swap the speaker map, keeping failed-poll counts except for the MACs in ``reset``."""
+
+        counts = {mac: count for mac, count in self._failed_polls.items() if mac not in reset}
+        self._finalize(devices)
+        self._failed_polls = counts
+
+    async def _sweep_for_unresponsive(
+        self,
+        missing: dict[str, SonosSpeakerDevice],
+        recovered: dict[str, SonosSpeakerDevice],
+    ) -> None:
+        timeout = max(1, int(round(self._discovery_timeout)))
+        zones = await asyncio.to_thread(lambda: soco_discover(timeout=timeout) or set())
+        for zone in zones:
+            uid = str(getattr(zone, "uid", "") or "").strip()
+            for mac, stub in missing.items():
+                if mac in recovered or uid.upper() != stub.rincon_uid.strip().upper():
+                    continue
+                name = str(getattr(zone, "player_name", None) or "").strip()
+                sd = self._speaker_device(
+                    stub.rincon_uid, zone, display_name=name or stub.preferred_label, cached_mac=mac
+                )
+                if sd is not None:
+                    recovered[mac] = sd
+
     def _record_failed_poll(self, sd: SonosSpeakerDevice) -> None:
         failures = self._failed_polls.get(sd.mac_address, 0) + 1
         self._failed_polls[sd.mac_address] = failures
@@ -557,6 +618,28 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         self._last_discovery_source = "discovery"
         await self._prime_playback_states(devices)
 
+    async def forget_device(self, mac: str) -> bool:
+        """Remove the speaker with ``mac`` from the manager and the discovery cache.
+
+        The operator chose to clean up after a speaker that stopped responding
+        (domesti-bot#876). Its display name and UI preferences are kept, so a speaker
+        that is added back later gets its name and settings again. Returns ``False``
+        when no such speaker is known.
+        """
+
+        wanted = try_normalize_mac(mac)
+        if self._alias_to_device is None or wanted is None:
+            return False
+        target = next((sd for sd in self.players if sd.mac_address == wanted), None)
+        if target is None:
+            return False
+        remaining = [sd for sd in self.players if sd is not target]
+        self._replace_roster(remaining, reset={wanted})
+        self._persist_cache(remaining)
+        self._presence.forget(DeviceFamilyId.SONOS.value, wanted)
+        _LOGGER.info("Sonos: forgot %s", format_device_display(wanted, target.preferred_label))
+        return True
+
     def get_device_by_alias(self, identifier: str) -> SonosSpeakerDevice | None:
         if self._alias_to_device is None:
             raise NotInitializedError
@@ -620,6 +703,44 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         uniq = list({id(p): p for p in self._alias_to_device.values()}.values())
         uniq.sort(key=lambda p: p.preferred_label.lower())
         return tuple(uniq)
+
+    async def recover_unresponsive(self, *, sweep: bool = False) -> tuple[str, ...]:
+        """Reconnect unresponsive tiles whose speaker answers again; return the recovered MACs.
+
+        A speaker that lost power or moved address stays in the manager as a silent stub
+        (domesti-bot#876). Each stub is probed at its last known address and at the address
+        ARP reports for its MAC; a speaker that answers with the expected UID replaces its
+        stub and the discovery cache follows it to the new address. A speaker that still does
+        not answer is left exactly as it was. With ``sweep=True`` one SSDP sweep also looks
+        for stubs ARP does not know. The result is dropped when a concurrent
+        :meth:`rediscover` replaced the speaker map meanwhile.
+        """
+
+        current = self._alias_to_device
+        if current is None:
+            return ()
+        stubs = {sd.mac_address: sd for sd in self.players if sd.unresponsive}
+        if not stubs:
+            return ()
+        recovered: dict[str, SonosSpeakerDevice] = {}
+        await asyncio.gather(*(self._recover_stub(mac, stub, recovered) for mac, stub in stubs.items()))
+        if sweep and len(recovered) < len(stubs):
+            await self._sweep_for_unresponsive({m: s for m, s in stubs.items() if m not in recovered}, recovered)
+        if not recovered or self._alias_to_device is not current:
+            return ()
+        # Judged now, with no await since the identity check: a poll that revived the stub while
+        # recovery was probing keeps its own session.
+        swaps = {mac: sd for mac, sd in recovered.items() if stubs[mac].unresponsive}
+        if not swaps:
+            return ()
+        devices = [swaps.get(sd.mac_address, sd) if sd.unresponsive else sd for sd in self.players]
+        self._replace_roster(devices, reset=set(swaps))
+        self._persist_cache(devices)
+        new_devices = list(swaps.values())
+        await self._prime_playback_states(new_devices)
+        for sd in new_devices:
+            self._announce_responsive(sd)
+        return tuple(sorted(swaps))
 
     async def rediscover(self) -> None:
         """Force a fresh UDP sweep, ignoring the cache; subsequent ``fetch`` calls keep using the cache."""
