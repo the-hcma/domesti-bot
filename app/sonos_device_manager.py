@@ -415,19 +415,25 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
                 "on the LAN (ARP)" if on_lan else "not on the LAN (powered off?)",
             )
 
-    async def _probe_speaker(self, host: str, expected_uid: str) -> tuple[Any, str] | None:
-        """Return ``(zone, player_name)`` when the speaker at ``host`` is ``expected_uid``, else ``None``."""
+    async def _probe_speaker(self, host: str, expected_mac: str) -> tuple[Any, str] | None:
+        """Return ``(zone, room_name)`` when the speaker at ``host`` has ``expected_mac``, else ``None``.
+
+        The identity comes from a live read of the device description (its serial number carries
+        the MAC), not from ``SoCo.uid``: SoCo keeps one cached instance per address, so a cached
+        uid could still match after DHCP handed the address to another speaker.
+        """
 
         def _probe() -> tuple[Any, str] | None:
             zone = SoCo(host)
-            if str(zone.uid or "").strip().upper() != expected_uid.strip().upper():
+            info = zone.get_speaker_info(refresh=True) or {}
+            if try_normalize_mac(str(info.get("mac_address") or "").replace("-", ":")) != expected_mac:
                 return None
-            return zone, str(getattr(zone, "player_name", None) or "").strip()
+            return zone, str(info.get("zone_name") or "").strip()
 
         try:
             return await asyncio.wait_for(asyncio.to_thread(_probe), timeout=_RECOVERY_ATTEMPT_TIMEOUT_S)
         except Exception:
-            _LOGGER.debug("Sonos: recovery probe of %s for %s failed", host, expected_uid, exc_info=True)
+            _LOGGER.debug("Sonos: recovery probe of %s for %s failed", host, expected_mac, exc_info=True)
             return None
 
     async def _recover_stub(
@@ -438,7 +444,7 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
     ) -> None:
         arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac)
         for host in dict.fromkeys(h for h in (stub.host, arp_ip) if h):
-            found = await self._probe_speaker(host, stub.rincon_uid)
+            found = await self._probe_speaker(host, mac)
             if found is None:
                 continue
             zone, name = found

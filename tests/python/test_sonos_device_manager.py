@@ -790,6 +790,12 @@ _LIVING_ROOM_MAC = "aa:aa:aa:aa:aa:aa"
 
 def _speaker_zone(uid: str, host: str, name: str = "Living Room") -> MagicMock:
     zone = MagicMock(uid=uid, player_name=name, ip_address=host)
+    # The live device description names the speaker by its serial number, which carries the MAC.
+    hex12 = uid.removeprefix("RINCON_")[:12]
+    zone.get_speaker_info.return_value = {
+        "mac_address": "-".join(hex12[i : i + 2] for i in range(0, 12, 2)).upper(),
+        "zone_name": name,
+    }
     zone.get_current_transport_info.return_value = {"current_transport_state": "PAUSED_PLAYBACK"}
     return zone
 
@@ -848,7 +854,7 @@ async def test_recover_unresponsive_announces_the_return(tmp_path: Path) -> None
 async def test_recover_unresponsive_leaves_a_silent_speaker_untouched(tmp_path: Path) -> None:
     mgr, db = await _manager_with_a_missing_speaker(tmp_path, DevicePresenceStore())
     silent = MagicMock(ip_address="192.168.1.10")
-    type(silent).uid = property(lambda _self: (_ for _ in ()).throw(TimeoutError("no answer")))
+    silent.get_speaker_info.side_effect = TimeoutError("no answer")
     before = device_discovery_store.load_sonos_zones(db)
     with (
         patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.10"),
@@ -877,7 +883,7 @@ async def test_recover_unresponsive_sweep_finds_a_speaker_arp_does_not_know(tmp_
     mgr, _db = await _manager_with_a_missing_speaker(tmp_path, DevicePresenceStore())
     moved = _speaker_zone(_LIVING_ROOM_UID, "192.168.1.30")
     silent = MagicMock(ip_address="192.168.1.10")
-    type(silent).uid = property(lambda _self: (_ for _ in ()).throw(TimeoutError("no answer")))
+    silent.get_speaker_info.side_effect = TimeoutError("no answer")
     with (
         patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value=None),
         patch("app.sonos_device_manager.SoCo", return_value=silent),
@@ -911,3 +917,18 @@ async def test_forget_device_keeps_the_other_speakers(tmp_path: Path) -> None:
     assert await mgr.forget_device("bb:bb:bb:bb:bb:bb") is True
     assert [p.mac_address for p in mgr.players] == [_LIVING_ROOM_MAC]
     assert [row[0] for row in device_discovery_store.load_sonos_zones(db)] == [_LIVING_ROOM_UID]
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_does_not_trust_a_stale_cached_uid_at_a_reused_address(tmp_path: Path) -> None:
+    mgr, _db = await _manager_with_a_missing_speaker(tmp_path, DevicePresenceStore())
+    # SoCo keeps one instance per address, so ``uid`` can still hold the old speaker's value
+    # while the live device description already belongs to the speaker that took the address.
+    reused = _speaker_zone("RINCON_BBBBBBBBBBBB01400", "192.168.1.10", "Kitchen")
+    reused.uid = _LIVING_ROOM_UID
+    with (
+        patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.10"),
+        patch("app.sonos_device_manager.SoCo", return_value=reused),
+    ):
+        assert await mgr.recover_unresponsive() == ()
+    assert mgr.players[0].unresponsive is True
