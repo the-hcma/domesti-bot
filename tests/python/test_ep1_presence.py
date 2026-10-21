@@ -282,6 +282,24 @@ async def test_recovery_sweep_finds_a_sensor_through_mdns(tmp_path: Path, monkey
 
 
 @pytest.mark.asyncio
+async def test_recovery_sweep_connects_to_each_discovered_host_once(tmp_path: Path) -> None:
+    store = DevicePresenceStore()
+    lan = _Lan()
+    mgr, device = await _flagged(tmp_path, store, lan)
+    silent = Ep1Device(_OTHER_MAC, host="192.0.2.20", mac_address=_OTHER_MAC)
+    silent.set_unresponsive(True)
+    mgr._devices[_OTHER_MAC] = silent
+    del lan.clients[_HOST]
+    lan.clients[_MOVED_HOST] = _client(_MAC)
+    mgr._zeroconf_discovery = True
+    mgr._zeroconf_discover_fn = AsyncMock(return_value=[(_MOVED_HOST, 6053)])
+    lan.hosts_tried.clear()
+    assert await mgr.recover_unresponsive(sweep=True) == (_MAC,)
+    assert lan.hosts_tried.count(_MOVED_HOST) == 1
+    assert device.host == _MOVED_HOST
+
+
+@pytest.mark.asyncio
 async def test_forget_removes_the_sensor_its_cache_row_and_its_notice(tmp_path: Path) -> None:
     store = DevicePresenceStore()
     lan = _Lan()

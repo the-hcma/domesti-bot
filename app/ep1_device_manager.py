@@ -764,18 +764,23 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
     async def _probe_for_mac(self, host: str, port: int, expected_mac: str) -> Ep1Device | None:
         """Connect to ``host`` and return its snapshot only when it is the sensor with ``expected_mac``."""
 
+        snapshot = await self._probe_host(host, port)
+        # The MAC comes from the live device_info, so another sensor at a reused address is rejected.
+        if snapshot is None or snapshot.identifier != expected_mac:
+            return None
+        return snapshot
+
+    async def _probe_host(self, host: str, port: int) -> Ep1Device | None:
+        """One bounded connect and read; ``None`` when nothing usable answers."""
+
         try:
-            snapshot = await asyncio.wait_for(
+            return await asyncio.wait_for(
                 self._connect_and_read(host=host, port=port, noise_psk=self._resolved_noise_psk()),
                 timeout=_RECOVERY_ATTEMPT_TIMEOUT_S,
             )
         except Exception:
             _LOGGER.debug("EP1: recovery probe of %s:%s failed", host, port, exc_info=True)
             return None
-        # The MAC comes from the live device_info, so another sensor at a reused address is rejected.
-        if snapshot is None or snapshot.identifier != expected_mac:
-            return None
-        return snapshot
 
     def _record_failed_session(self, device: Ep1Device) -> None:
         if not self.owns(device):
@@ -830,11 +835,10 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             if (host, port) in tried:
                 continue
             tried.add((host, port))
-            for mac in [m for m in missing if m not in recovered]:
-                snapshot = await self._probe_for_mac(host, port, mac)
-                if snapshot is not None:
-                    recovered[mac] = snapshot
-                    break
+            # One connection per discovered host, matched against every missing MAC.
+            snapshot = await self._probe_host(host, port)
+            if snapshot is not None and snapshot.identifier in missing and snapshot.identifier not in recovered:
+                recovered[snapshot.identifier] = snapshot
 
     def _cache_targets(self) -> list[tuple[str, int]]:
         if self._discovery_cache_path is None:
