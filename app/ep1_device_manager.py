@@ -670,6 +670,9 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             key_to_role = _entity_key_to_role(entities)
 
             def _on_state(state: EntityState) -> None:
+                # A sensor the operator forgot mid-session must not update or wake any rule.
+                if self.forgotten(device):
+                    return
                 # Always bump liveness — ESPHome may omit unchanged entities.
                 device.note_heard()
                 role = _apply_entity_state_to_device(

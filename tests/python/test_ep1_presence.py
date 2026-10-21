@@ -51,6 +51,14 @@ class _Lan:
         return self.clients.get(host) or _client(_OTHER_MAC, fail=True)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_arp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every test off the host ARP table; a test that needs an ARP answer overrides these."""
+
+    monkeypatch.setattr("app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda _mac: None)
+    monkeypatch.setattr("app.ep1_device_manager.mac_alive_on_lan", lambda **_k: False)
+
+
 async def _running_manager(tmp_path: Path, store: DevicePresenceStore, lan: _Lan) -> tuple[Ep1DeviceManager, Ep1Device]:
     cache = tmp_path / "cache.sqlite"
     upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
@@ -337,6 +345,37 @@ async def test_a_forgotten_sensor_is_no_longer_owned_and_its_session_does_not_an
     assert mgr.forgotten(device) is True
     await _session(mgr, device)
     assert store.notices() == ()
+
+
+@pytest.mark.asyncio
+async def test_a_state_pushed_after_the_sensor_was_forgotten_is_ignored(tmp_path: Path) -> None:
+    lan = _Lan()
+    mgr, device = await _running_manager(tmp_path, DevicePresenceStore(), lan)
+    client = _client(_MAC)
+    subscribed = asyncio.Event()
+    callbacks: list[Any] = []
+
+    def _subscribe(on_state: Any) -> None:
+        callbacks.append(on_state)
+        subscribed.set()
+
+    client.subscribe_states = MagicMock(side_effect=_subscribe)
+    lan.clients[_HOST] = client
+    readings: list[object] = []
+    stop = asyncio.Event()
+    session = asyncio.create_task(
+        mgr.run_subscription_session(device, stop=stop, on_reading_updated=lambda *_a: readings.append(_a))
+    )
+    await asyncio.wait_for(subscribed.wait(), timeout=5.0)
+    callbacks[0](BinarySensorState(key=1, state=True))
+    assert device.occupancy_state == "occupied"
+    assert len(readings) == 1
+    await mgr.forget_device(_MAC)
+    callbacks[0](BinarySensorState(key=1, state=False))
+    assert device.occupancy_state == "occupied"
+    assert len(readings) == 1
+    stop.set()
+    await asyncio.wait_for(session, timeout=5.0)
 
 
 @pytest.mark.asyncio
