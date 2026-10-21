@@ -34,9 +34,15 @@ from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZerocon
 
 from app import device_discovery_store
 from app.device_display import format_device_display
-from app.device_enums import DeviceConditionState, Ep1EntityRole
+from app.device_enums import DeviceConditionState, DeviceFamilyId, Ep1EntityRole
 from app.device_mac import lookup_ip_via_arp_for_mac, mac_alive_on_lan, try_normalize_mac
-from app.device_manager import AlreadyInitializedError, DeviceManager, NotInitializedError
+from app.device_manager import (
+    UNRESPONSIVE_AFTER_FAILED_POLLS,
+    AlreadyInitializedError,
+    DeviceManager,
+    NotInitializedError,
+)
+from app.device_presence import DevicePresenceStore, device_presence_store
 from app.ep1_credentials import resolve_ep1_noise_psk
 from app.ep1_header_freshness import EP1_HEADER_EXPECTED_REFRESH_PERIOD_S
 from app.rule_engine import Device
@@ -59,6 +65,7 @@ _ENTITY_NAME_ALIASES: dict[Ep1EntityRole, tuple[str, ...]] = {
     Ep1EntityRole.OCCUPANCY: ("occupancy",),
     Ep1EntityRole.TEMPERATURE: ("temperature", "temperature_sensor"),
 }
+_RECOVERY_ATTEMPT_TIMEOUT_S = 15.0
 _STATE_COLLECT_TIMEOUT_S = 8.0
 
 
@@ -333,6 +340,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         zeroconf_discovery: bool = True,
         zeroconf_timeout: float = DEFAULT_EP1_ZEROCONF_TIMEOUT_S,
         zeroconf_discover_fn: Callable[..., Awaitable[list[tuple[str, int]]]] | None = None,
+        presence_store: DevicePresenceStore | None = None,
     ) -> None:
         self._configured_hosts = [(h.strip(), int(p)) for h, p in (configured_hosts or ()) if h.strip()]
         self._discovery_cache_path = discovery_cache_path
@@ -345,6 +353,9 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         self._zeroconf_timeout = float(zeroconf_timeout)
         self._zeroconf_discover_fn = zeroconf_discover_fn or discover_ep1_hosts
         self._devices: dict[str, Ep1Device] = {}
+        # Consecutive failed subscription sessions per MAC; see :data:`UNRESPONSIVE_AFTER_FAILED_POLLS`.
+        self._failed_sessions: dict[str, int] = {}
+        self._presence = presence_store if presence_store is not None else device_presence_store
         self._clients: list[APIClient] = []
         self._fetched = False
         self._last_discovery_source: str | None = None
@@ -381,6 +392,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if self._fetched:
             raise AlreadyInitializedError("Ep1DeviceManager.fetch() already completed")
         psk = self._resolved_noise_psk()
+        self._failed_sessions.clear()
         targets, used_cache_only = await self._resolve_targets()
         if not targets:
             self._fetched = True
@@ -410,6 +422,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 continue
             connected_any = True
             self._devices[device.identifier] = device
+            self._announce_responsive(device)
             if self._discovery_cache_path is not None and not self._force_discovery:
                 device_discovery_store.upsert_ep1_device(
                     self._discovery_cache_path,
@@ -434,6 +447,32 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             self._last_discovery_source = "discovery"
         else:
             self._last_discovery_source = None
+
+    async def forget_device(self, mac: str) -> bool:
+        """Remove the sensor with ``mac`` from the manager and the discovery cache.
+
+        The operator chose to clean up after a sensor that stopped responding
+        (domesti-bot#876). Its display name and UI preferences are kept, so a sensor
+        that is added back later gets its name and settings again. Returns ``False``
+        when no such sensor is known.
+        """
+
+        wanted = try_normalize_mac(mac)
+        target = self._devices.get(wanted) if wanted is not None else None
+        if wanted is None or target is None:
+            return False
+        # Persist first: a storage failure then leaves the roster and the notice as they were.
+        if self._discovery_cache_path is not None:
+            device_discovery_store.delete_ep1_device(self._discovery_cache_path, mac=wanted)
+        self._devices.pop(wanted, None)
+        self._failed_sessions.pop(wanted, None)
+        self._presence.forget(DeviceFamilyId.EP1.value, wanted)
+        _LOGGER.info("EP1: forgot %s", format_device_display(wanted, target.preferred_label))
+        return True
+
+    def owns(self, device: Ep1Device) -> bool:
+        """True while ``device`` is the manager's live object for its MAC (not forgotten or replaced)."""
+        return self._devices.get(device.identifier) is device
 
     async def rediscover(
         self,
@@ -506,6 +545,52 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         )
         return True
 
+    async def recover_unresponsive(self, *, sweep: bool = False) -> tuple[str, ...]:
+        """Reconnect unresponsive sensors that answer again; return the recovered MACs.
+
+        A sensor that lost power or moved address stays in the manager as a silent tile
+        (domesti-bot#876). Each one is probed at its last known address and at the address ARP
+        reports for its MAC; a sensor that answers with the expected MAC is updated in place (the
+        subscription watcher holds the object) and the discovery cache follows it to the new
+        address. A sensor that still does not answer is left exactly as it was. With
+        ``sweep=True`` one mDNS browse also looks for sensors ARP does not know. A sensor
+        that a concurrent :meth:`rediscover` replaced meanwhile is left to that result.
+        """
+
+        stubs = {mac: device for mac, device in self._devices.items() if device.unresponsive}
+        if not stubs:
+            return ()
+        recovered: dict[str, Ep1Device] = {}
+        tried: set[tuple[str, int]] = set()
+        await asyncio.gather(*(self._recover_stub(mac, stub, recovered, tried) for mac, stub in stubs.items()))
+        if sweep and self._zeroconf_discovery and len(recovered) < len(stubs):
+            await self._sweep_for_unresponsive({m: s for m, s in stubs.items() if m not in recovered}, recovered, tried)
+        # Judged now, with no await since the last probe finished: a session that revived the stub
+        # while recovery was probing keeps its own result.
+        back: list[str] = []
+        for mac, snapshot in recovered.items():
+            stub = stubs[mac]
+            if self._devices.get(mac) is not stub or not stub.unresponsive:
+                continue
+            if self._discovery_cache_path is not None:
+                try:
+                    device_discovery_store.upsert_ep1_device(
+                        self._discovery_cache_path,
+                        host=snapshot.host,
+                        port=snapshot.port,
+                        mac=mac,
+                        friendly_name=stub.display_name or snapshot.display_name,
+                    )
+                except Exception:
+                    _LOGGER.warning("EP1: could not save the new address of %s", mac, exc_info=True)
+                    continue
+            stub.merge_readings_from(snapshot)
+            stub.set_unresponsive(False)
+            self._failed_sessions.pop(mac, None)
+            self._announce_responsive(stub)
+            back.append(mac)
+        return tuple(sorted(back))
+
     async def refresh_device_readings(self, identifier: str) -> None:
         """Re-read one device in place (Settings test / ``read-ep1`` / one-shot paths).
 
@@ -566,8 +651,12 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         )
         self._clients.append(client)
         try:
-            await client.connect(on_stop=_on_stop, login=True)
-            entities, _services = await client.list_entities_services()
+            try:
+                await client.connect(on_stop=_on_stop, login=True)
+                entities, _services = await client.list_entities_services()
+            except Exception:
+                self._record_failed_session(device)
+                raise
             key_to_role = _entity_key_to_role(entities)
 
             def _on_state(state: EntityState) -> None:
@@ -584,6 +673,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             client.subscribe_states(_on_state)
             # Arm liveness only once the subscription is registered — not on bare connect.
             device.note_heard()
+            self._record_successful_session(device)
             stop_task = asyncio.create_task(stop.wait())
             disc_task = asyncio.create_task(disconnected.wait())
             heartbeat_stop = asyncio.Event()
@@ -634,6 +724,101 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         finally:
             await self._discard_client(client)
 
+    def _announce_responsive(self, device: Ep1Device) -> None:
+        notice = self._presence.note_reappeared(
+            device_id=device.identifier,
+            family_id=DeviceFamilyId.EP1.value,
+            host=device.host or None,
+            label=device.preferred_label,
+        )
+        if notice is not None:
+            _LOGGER.info(
+                "EP1: %s is responding again", format_device_display(device.identifier, device.preferred_label)
+            )
+
+    def _announce_unresponsive(self, device: Ep1Device) -> None:
+        notice = self._presence.note_disappeared(
+            device_id=device.identifier,
+            family_id=DeviceFamilyId.EP1.value,
+            host=device.host or None,
+            label=device.preferred_label,
+        )
+        if notice is not None:
+            _LOGGER.warning(
+                "EP1: %s stopped responding", format_device_display(device.identifier, device.preferred_label)
+            )
+
+    async def _probe_for_mac(self, host: str, port: int, expected_mac: str) -> Ep1Device | None:
+        """Connect to ``host`` and return its snapshot only when it is the sensor with ``expected_mac``."""
+
+        try:
+            snapshot = await asyncio.wait_for(
+                self._connect_and_read(host=host, port=port, noise_psk=self._resolved_noise_psk()),
+                timeout=_RECOVERY_ATTEMPT_TIMEOUT_S,
+            )
+        except Exception:
+            _LOGGER.debug("EP1: recovery probe of %s:%s failed", host, port, exc_info=True)
+            return None
+        # The MAC comes from the live device_info, so another sensor at a reused address is rejected.
+        if snapshot is None or snapshot.identifier != expected_mac:
+            return None
+        return snapshot
+
+    def _record_failed_session(self, device: Ep1Device) -> None:
+        if not self.owns(device):
+            return
+        failures = self._failed_sessions.get(device.identifier, 0) + 1
+        self._failed_sessions[device.identifier] = failures
+        if failures >= UNRESPONSIVE_AFTER_FAILED_POLLS and not device.unresponsive:
+            device.set_unresponsive(True)
+            self._announce_unresponsive(device)
+
+    def _record_successful_session(self, device: Ep1Device) -> None:
+        if not self.owns(device):
+            return
+        self._failed_sessions.pop(device.identifier, None)
+        device.set_unresponsive(False)
+        self._announce_responsive(device)
+
+    async def _recover_stub(
+        self,
+        mac: str,
+        stub: Ep1Device,
+        recovered: dict[str, Ep1Device],
+        tried: set[tuple[str, int]],
+    ) -> None:
+        hosts = [stub.host]
+        arp_host = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac)
+        if arp_host and arp_host not in hosts:
+            hosts.append(arp_host)
+        for host in hosts:
+            tried.add((host, stub.port))
+            snapshot = await self._probe_for_mac(host, stub.port, mac)
+            if snapshot is not None:
+                recovered[mac] = snapshot
+                return
+
+    async def _sweep_for_unresponsive(
+        self,
+        missing: dict[str, Ep1Device],
+        recovered: dict[str, Ep1Device],
+        tried: set[tuple[str, int]],
+    ) -> None:
+        try:
+            found = await self._zeroconf_discover_fn(timeout=self._zeroconf_timeout)
+        except Ep1DiscoveryError as exc:
+            _LOGGER.debug("EP1: recovery sweep found nothing: %s", exc)
+            return
+        for host, port in found:
+            if (host, port) in tried:
+                continue
+            tried.add((host, port))
+            for mac in [m for m in missing if m not in recovered]:
+                snapshot = await self._probe_for_mac(host, port, mac)
+                if snapshot is not None:
+                    recovered[mac] = snapshot
+                    break
+
     def _cache_targets(self) -> list[tuple[str, int]]:
         if self._discovery_cache_path is None:
             return []
@@ -662,6 +847,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             )
             device.set_unresponsive(True)
             self._devices[device.identifier] = device
+            self._announce_unresponsive(device)
             seen.add(mac_n)
             _LOGGER.info(
                 "EP1: %s is on the LAN (ARP) but the native API is silent; keeping as unresponsive",

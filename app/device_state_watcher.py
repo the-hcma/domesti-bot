@@ -143,7 +143,6 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
                 name=f"state-watcher-{DeviceFamilyId.EP1.value}-{device.identifier}",
             )
             for device in devices
-            if getattr(device, "unresponsive", False) is not True
         ]
         try:
             await stop.wait()
@@ -155,7 +154,9 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
                     await task
 
     async def _watch_device(self, device: Ep1Device, *, stop: asyncio.Event) -> None:
-        while not stop.is_set():
+        # A flagged sensor is still watched, so one session that subscribes clears the flag; the
+        # loop ends when the operator forgets the sensor (the manager no longer owns the object).
+        while not stop.is_set() and self._mgr.owns(device):
             try:
                 await self._mgr.run_subscription_session(
                     device,
@@ -677,6 +678,7 @@ def build_default_watchers(
                 wake_notifier=wake_notifier,
             )
         )
+        watchers.append(UnresponsiveRecoveryWatcher(state.ep1_mgr, family=DeviceFamilyId.EP1))
     if state.sonos_mgr is not None:
         watchers.append(
             SonosPollingWatcher(

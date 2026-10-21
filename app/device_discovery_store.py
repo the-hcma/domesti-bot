@@ -823,6 +823,19 @@ def delete_display_name(path: Path, *, backend: str, canonical_key: str) -> None
     discovery_write(path, _write)
 
 
+def delete_ep1_device(path: Path, *, mac: str) -> None:
+    """Forget the cached EP1 row of ``mac`` (a no-op when none is cached)."""
+
+    mac_s = try_normalize_mac(mac)
+
+    def _write(session: Session) -> None:
+        if mac_s is None:
+            return
+        session.execute(delete(Ep1KnownDevice).where(Ep1KnownDevice.mac == mac_s))
+
+    discovery_write(path, _write)
+
+
 def delete_ui_preference(path: Path, *, backend: str, canonical_key: str) -> None:
     """Forget a per-device UI preference row.
 

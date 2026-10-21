@@ -68,6 +68,7 @@ def _fake_ep1_mgr(identifiers: list[str]) -> Ep1DeviceManager:
     mgr = MagicMock(spec=Ep1DeviceManager)
     mgr.devices = tuple(devices)
     mgr.run_subscription_session = AsyncMock()
+    mgr.owns = MagicMock(return_value=True)
     return cast(Ep1DeviceManager, mgr)
 
 
@@ -539,6 +540,37 @@ async def test_ep1_watcher_runs_subscription_per_device() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ep1_watcher_keeps_a_session_open_for_a_flagged_sensor() -> None:
+    mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01"])
+    cast(MagicMock, mgr.devices[0]).unresponsive = True
+    session = cast(AsyncMock, mgr.run_subscription_session)
+
+    async def _hold(_device: object, *, stop: asyncio.Event, on_reading_updated: object = None) -> None:
+        del on_reading_updated
+        await stop.wait()
+
+    session.side_effect = _hold
+    watcher = Ep1SubscriptionWatcher(mgr, reconnect_delay_s=0.01)
+    stop = asyncio.Event()
+    task = asyncio.create_task(watcher.run(stop=stop))
+    await _wait_for_await_count(session, 1)
+    stop.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    assert session.await_args_list[0].args[0].identifier == "aa:bb:cc:dd:ee:01"
+
+
+@pytest.mark.asyncio
+async def test_ep1_watcher_stops_watching_a_sensor_the_manager_forgot() -> None:
+    mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01"])
+    cast(MagicMock, mgr.owns).side_effect = [True, False]
+    session = cast(AsyncMock, mgr.run_subscription_session)
+    watcher = Ep1SubscriptionWatcher(mgr, reconnect_delay_s=0.01)
+    stop = asyncio.Event()
+    await asyncio.wait_for(watcher._watch_device(mgr.devices[0], stop=stop), timeout=1.0)
+    assert session.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_ep1_watcher_waits_when_manager_not_initialized() -> None:
     mgr = MagicMock(spec=Ep1DeviceManager)
     type(mgr).devices = PropertyMock(side_effect=NotInitializedError)
@@ -581,15 +613,17 @@ def test_build_default_watchers_includes_every_configured_backend() -> None:
     state.vizio_mgr = None
 
     watchers = build_default_watchers(state, interval_s=5.0)
-    assert len(watchers) == 6
+    assert len(watchers) == 7
     assert isinstance(watchers[0], KasaPollingWatcher)
     assert isinstance(watchers[1], UnresponsiveRecoveryWatcher)
     assert watchers[1].family == DeviceFamilyId.KASA
     assert isinstance(watchers[2], Ep1SubscriptionWatcher)
-    assert isinstance(watchers[3], SonosPollingWatcher)
-    assert isinstance(watchers[4], UnresponsiveRecoveryWatcher)
-    assert watchers[4].family == DeviceFamilyId.SONOS
-    assert isinstance(watchers[5], TailwindPollingWatcher)
+    assert isinstance(watchers[3], UnresponsiveRecoveryWatcher)
+    assert watchers[3].family == DeviceFamilyId.EP1
+    assert isinstance(watchers[4], SonosPollingWatcher)
+    assert isinstance(watchers[5], UnresponsiveRecoveryWatcher)
+    assert watchers[5].family == DeviceFamilyId.SONOS
+    assert isinstance(watchers[6], TailwindPollingWatcher)
 
 
 def test_build_default_watchers_includes_sonos_when_only_sonos_configured() -> None:
