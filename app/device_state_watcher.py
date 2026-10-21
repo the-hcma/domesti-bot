@@ -62,6 +62,9 @@ from app.vizio_device_manager import VizioDeviceManager
 _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_EP1_RECONNECT_DELAY_S = 5.0
+# A flagged sensor is retried this many times less often (5 s becomes 60 s), so a sensor that is
+# off for hours does not log a failed connect every few seconds.
+_UNRESPONSIVE_RECONNECT_FACTOR = 12
 _EP1_ROLE_TO_READING_METRIC: Final[dict[Ep1EntityRole, Ep1ReadingMetric]] = {
     Ep1EntityRole.HUMIDITY: Ep1ReadingMetric.HUMIDITY_PCT,
     Ep1EntityRole.ILLUMINANCE: Ep1ReadingMetric.ILLUMINANCE_LX,
@@ -143,7 +146,6 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
                 name=f"state-watcher-{DeviceFamilyId.EP1.value}-{device.identifier}",
             )
             for device in devices
-            if getattr(device, "unresponsive", False) is not True
         ]
         try:
             await stop.wait()
@@ -155,7 +157,10 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
                     await task
 
     async def _watch_device(self, device: Ep1Device, *, stop: asyncio.Event) -> None:
-        while not stop.is_set():
+        # A flagged sensor is still watched, so one session that subscribes clears the flag; the
+        # loop ends only when the operator forgets the sensor: during a rediscover the roster is briefly
+        # empty, and the sensor must keep being watched through it.
+        while not stop.is_set() and not self._mgr.forgotten(device):
             try:
                 await self._mgr.run_subscription_session(
                     device,
@@ -173,9 +178,12 @@ class Ep1SubscriptionWatcher(DeviceStateWatcher):
             if stop.is_set():
                 return
             try:
-                await asyncio.wait_for(stop.wait(), timeout=self._reconnect_delay_s)
+                await asyncio.wait_for(stop.wait(), timeout=self._reconnect_delay_for(device))
             except TimeoutError:
                 pass
+
+    def _reconnect_delay_for(self, device: Ep1Device) -> float:
+        return self._reconnect_delay_s * (_UNRESPONSIVE_RECONNECT_FACTOR if device.unresponsive else 1)
 
     def _on_entity_role(self, device: Ep1Device, role: Ep1EntityRole) -> None:
         if self._wake_notifier is None:
@@ -677,6 +685,7 @@ def build_default_watchers(
                 wake_notifier=wake_notifier,
             )
         )
+        watchers.append(UnresponsiveRecoveryWatcher(state.ep1_mgr, family=DeviceFamilyId.EP1))
     if state.sonos_mgr is not None:
         watchers.append(
             SonosPollingWatcher(
