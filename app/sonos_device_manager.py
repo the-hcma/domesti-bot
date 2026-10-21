@@ -358,8 +358,12 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
             if sd.unresponsive:
                 label = sd.display_name or sd.preferred_label
             else:
-                display = getattr(zone, "player_name", None)
-                label = (str(display).strip() if display else "") or None
+                try:
+                    display = getattr(zone, "player_name", None)
+                except Exception:
+                    _LOGGER.debug("Sonos: live name read for %s failed", sd.mac_address, exc_info=True)
+                    display = None
+                label = (str(display).strip() if display else "") or sd.display_name or None
             note_display_name_rename(
                 backend="sonos",
                 mac_address=sd.mac_address,
@@ -647,8 +651,10 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         if target is None:
             return False
         remaining = [sd for sd in self.players if sd is not target]
-        self._replace_roster(remaining, reset={wanted})
+        # Persist first: a storage failure then leaves the roster and the notice as they were, and
+        # with no await between the two steps nothing else can interleave.
         self._persist_cache(remaining)
+        self._replace_roster(remaining, reset={wanted})
         self._presence.forget(DeviceFamilyId.SONOS.value, wanted)
         _LOGGER.info("Sonos: forgot %s", format_device_display(wanted, target.preferred_label))
         return True
@@ -747,8 +753,8 @@ class SonosDeviceManager(SpeakerDeviceManager[SonosSpeakerDevice]):
         if not swaps:
             return ()
         devices = [swaps.get(sd.mac_address, sd) if sd.unresponsive else sd for sd in self.players]
-        self._replace_roster(devices, reset=set(swaps))
         self._persist_cache(devices)
+        self._replace_roster(devices, reset=set(swaps))
         new_devices = list(swaps.values())
         await self._prime_playback_states(new_devices)
         for sd in new_devices:

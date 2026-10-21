@@ -949,3 +949,45 @@ async def test_recover_unresponsive_sweep_does_not_trust_a_stale_cached_uid(tmp_
         assert await mgr.recover_unresponsive(sweep=True) == ()
     assert mgr.players[0].unresponsive is True
     assert mgr.players[0].rincon_uid == _LIVING_ROOM_UID
+
+
+@pytest.mark.asyncio
+async def test_forget_device_failing_to_persist_leaves_the_roster_and_the_notice_untouched(tmp_path: Path) -> None:
+    store = DevicePresenceStore()
+    mgr, _db = await _manager_with_a_missing_speaker(tmp_path, store)
+    store.note_disappeared(device_id=_LIVING_ROOM_MAC, family_id="sonos", host="192.168.1.10", label="Living Room")
+    with (
+        patch("app.sonos_device_manager.device_discovery_store.save_sonos_zones", side_effect=OSError("disk full")),
+        pytest.raises(OSError),
+    ):
+        await mgr.forget_device(_LIVING_ROOM_MAC)
+    assert [p.mac_address for p in mgr.players] == [_LIVING_ROOM_MAC]
+    assert len(store.notices()) == 1
+
+
+@pytest.mark.asyncio
+async def test_recover_unresponsive_failing_to_persist_keeps_the_stub(tmp_path: Path) -> None:
+    mgr, _db = await _manager_with_a_missing_speaker(tmp_path, DevicePresenceStore())
+    with (
+        patch("app.sonos_device_manager.lookup_ip_via_arp_for_mac", return_value="192.168.1.20"),
+        patch("app.sonos_device_manager.SoCo", return_value=_speaker_zone(_LIVING_ROOM_UID, "192.168.1.20")),
+        patch("app.sonos_device_manager.device_discovery_store.save_sonos_zones", side_effect=OSError("disk full")),
+        pytest.raises(OSError),
+    ):
+        await mgr.recover_unresponsive()
+    assert mgr.players[0].unresponsive is True
+    assert mgr.players[0].host == "192.168.1.10"
+
+
+def test_persist_cache_falls_back_to_the_known_label_when_the_live_name_read_fails(tmp_path: Path) -> None:
+    db = tmp_path / "sonos.sqlite"
+    mgr = SonosDeviceManager(discovery_timeout=0.1, discovery_cache_path=db, presence_store=DevicePresenceStore())
+    zone = _speaker_zone(_LIVING_ROOM_UID, "192.168.1.10")
+    type(zone).player_name = property(lambda _self: (_ for _ in ()).throw(TimeoutError("no answer")))
+    speaker = SonosSpeakerDevice(
+        _LIVING_ROOM_MAC, zone, display_name="Living Room", mac_address=_LIVING_ROOM_MAC, rincon_uid=_LIVING_ROOM_UID
+    )
+    mgr._persist_cache([speaker])
+    assert device_discovery_store.load_sonos_zones(db) == [
+        (_LIVING_ROOM_UID, "192.168.1.10", "Living Room", _LIVING_ROOM_MAC)
+    ]
