@@ -559,6 +559,16 @@ async def test_ep1_watcher_keeps_a_session_open_for_a_flagged_sensor() -> None:
     assert session.await_args_list[0].args[0].identifier == "aa:bb:cc:dd:ee:01"
 
 
+def test_ep1_watcher_retries_a_flagged_sensor_less_often() -> None:
+    watcher = Ep1SubscriptionWatcher(MagicMock(spec=Ep1DeviceManager), reconnect_delay_s=5.0)
+    healthy = MagicMock(spec=Ep1Device)
+    healthy.unresponsive = False
+    flagged = MagicMock(spec=Ep1Device)
+    flagged.unresponsive = True
+    assert watcher._reconnect_delay_for(healthy) == 5.0
+    assert watcher._reconnect_delay_for(flagged) == 60.0
+
+
 @pytest.mark.asyncio
 async def test_ep1_watcher_stops_watching_a_sensor_the_manager_forgot() -> None:
     mgr = _fake_ep1_mgr(["aa:bb:cc:dd:ee:01"])
