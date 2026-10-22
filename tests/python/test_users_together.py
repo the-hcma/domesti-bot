@@ -789,6 +789,7 @@ def _estimate(confidence: float | None, recent: float | None) -> TogetherEstimat
     return TogetherEstimate(
         anchor=_NOW,
         anchor_lag_s=0.0,
+        apart_basis=None,
         apart_for_s=None,
         confidence=confidence,
         distance_now_m=None,

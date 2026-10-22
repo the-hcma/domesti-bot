@@ -150,6 +150,7 @@ class TogetherEstimate:
 
     anchor: float | None
     anchor_lag_s: float | None
+    apart_basis: ApartBasis | None
     apart_for_s: float | None
     confidence: float | None
     distance_now_m: float | None
@@ -161,7 +162,6 @@ class TogetherEstimate:
     unknown_reason: UnknownReason | None
     unknown_track: int | None
     windows: tuple[WindowEstimate, ...]
-    apart_basis: ApartBasis | None = None
 
     @property
     def known(self) -> bool:
@@ -300,6 +300,7 @@ def estimate_together(
         return TogetherEstimate(
             anchor=None,
             anchor_lag_s=None,
+            apart_basis=None,
             apart_for_s=None,
             confidence=None,
             distance_now_m=None,
@@ -357,6 +358,7 @@ def estimate_together(
     return TogetherEstimate(
         anchor=anchor,
         anchor_lag_s=max(0.0, now - anchor),
+        apart_basis=None,
         apart_for_s=_apart_for_s(closeness_at, settings),
         confidence=min(1.0, max(0.0, confidence)),
         distance_now_m=distance_now_m,
