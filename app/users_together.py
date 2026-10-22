@@ -467,9 +467,13 @@ def _apart_by_stationary_peer(
     peer = cleaned[other].fixes[-1]
     if now - peer.at > params.freshness_s:
         return None
-    if any(_has_position(fix) and fix.at > fixed.at for fix in tracks[stale]):
-        # A newer location of any quality (even one the accuracy filter dropped) means the phone produced a fix
-        # after the cached one, so the repeated report no longer says it has not moved.
+    if any(
+        _has_position(fix)
+        and (fix.at > fixed.at or (fix.at == fixed.at and (fix.lat, fix.lon) != (fixed.lat, fixed.lon)))
+        for fix in tracks[stale]
+    ):
+        # A newer location of any quality (even one the accuracy filter dropped), or the same time at another
+        # position, contradicts the cached fix, so the repeated report no longer says the phone has not moved.
         return None
     reports = [
         fix.reported_at
