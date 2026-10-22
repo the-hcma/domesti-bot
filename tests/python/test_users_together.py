@@ -377,11 +377,12 @@ def test_a_matching_report_without_an_accuracy_is_not_stationary_evidence() -> N
 
 
 def test_a_newer_coarse_fix_of_the_other_user_near_the_stationary_peer_keeps_it_unknown() -> None:
-    peer = _repeated_fix(north_m=1_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
-    stale_good = _track(_times(every_s=10.0, last_at=_NOW - 600.0))
-    near_peer = _coarse_fix(_NOW - 5.0, north_m=1_000.0)
+    peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
+    fresh_good = _track(_times(every_s=10.0, last_at=_NOW - 10.0))
+    near_peer = _coarse_fix(_NOW - 5.0, north_m=190_000.0)
 
-    assert estimate_together([*stale_good, near_peer], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(fresh_good, peer, now=_NOW).apart_basis is ApartBasis.STATIONARY_PEER
+    assert estimate_together([*fresh_good, near_peer], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
 
 
 def test_a_fix_without_report_times_is_never_stationary_evidence() -> None:
@@ -395,9 +396,9 @@ def test_a_fix_without_report_times_is_never_stationary_evidence() -> None:
 
 def test_the_other_user_must_be_fresh_for_a_stationary_peer_to_settle_the_pair() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
-    stale_a = _track(_times(every_s=10.0, last_at=_NOW - 600.0))
+    stale_other = _track(_times(every_s=10.0, last_at=_NOW - 600.0))
 
-    assert estimate_together(stale_a, peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(peer, stale_other, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
 
 
 def test_a_coarse_fix_with_nonsense_coordinates_is_ignored() -> None:
