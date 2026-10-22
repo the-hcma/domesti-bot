@@ -71,6 +71,7 @@ from app.rule_actions import (
 )
 from app.rule_validation import resolve_device_ref_to_backend_id, resolve_roster_user_id
 from app.users_together import (
+    ApartBasis,
     TogetherEstimate,
     TogetherParams,
     TrackFix,
@@ -146,6 +147,11 @@ class RuleEvaluationContext:
     user_home_wifi_bssid: dict[str, str | None] = field(default_factory=dict)
     user_home_wifi_ssid: dict[str, str | None] = field(default_factory=dict)
     user_location_history: dict[str, tuple[UserLocationOut, ...]] = field(
+        default_factory=dict,
+    )
+    # Reports over the longer ``STATIONARY_REPORT_WINDOW_S``, which only ``users_together`` reads: a phone that
+    # re-sends one old fix is recognized by its reports, which can be older than the walkback window.
+    user_location_reports: dict[str, tuple[UserLocationOut, ...]] = field(
         default_factory=dict,
     )
     walkback_max_s: float = LOCATION_HISTORY_WALKBACK_MAX_S
@@ -2396,6 +2402,14 @@ def _location_reported_at_epoch(location: UserLocationOut) -> float:
     ).timestamp()
 
 
+def _location_reported_at_epoch_or_none(location: UserLocationOut) -> float | None:
+    """When the position was reported, or ``None`` if unparsable."""
+    try:
+        return _location_reported_at_epoch(location)
+    except ValueError:
+        return None
+
+
 def _location_usable_for_rule(
     location: UserLocationOut | None,
     min_accuracy_m: int,
@@ -3106,11 +3120,16 @@ def _together_detail(condition: UsersTogetherCondition, pair: TogetherPair, rule
             counts = f" ({recent.usable} of {recent.total} instants)" if recent is not None else ""
             reason = f"too few usable fixes in the last minute to compare them{counts}"
         return f"{who}: unknown, {reason}"
-    if estimate.from_coarse_fixes:
+    if estimate.apart_basis is ApartBasis.COARSE_FIXES:
         return (
             f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
             f"(one has no reported accuracy of {params.accuracy_limit_m:g} m or better, "
             f"but is too far away for that to matter)"
+        )
+    if estimate.apart_basis is ApartBasis.STATIONARY_PEER:
+        return (
+            f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
+            f"(one phone keeps reporting the same old location, which is treated as not having moved)"
         )
     windows = ", ".join(
         f"{_format_dwell_duration_s(window.length_s)} "
@@ -3210,26 +3229,40 @@ def _together_verdict(condition: UsersTogetherCondition, pairs: list[TogetherPai
 
 
 def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[TrackFix]:
-    """The user's stored history plus the latest fix as a track of measured positions."""
+    """The user's stored history plus the latest fix as a track of measured positions.
+
+    Reports older than the history window and fixes dated after now (kept for the stationary-peer
+    exception) are marked ``report_only`` so they never feed the cleaning or the interpolation.
+    """
     locations = list(ctx.user_location_history.get(roster_user_id, ()))
     latest = ctx.user_locations.get(roster_user_id)
     if latest is not None and all(row.fix_at != latest.fix_at for row in locations):
         locations.append(latest)
+    seen = {(row.fix_at, row.reported_at, row.lat, row.lon) for row in locations}
+    extras = [
+        row
+        for row in ctx.user_location_reports.get(roster_user_id, ())
+        if (row.fix_at, row.reported_at, row.lat, row.lon) not in seen
+    ]
     now_epoch = ctx.now.timestamp()
     fixes: list[TrackFix] = []
-    for location in locations:
-        measured_at = _location_fix_at_epoch(location)
-        # A fix dated after now (a phone clock running ahead) is no measurement of the present.
-        if measured_at is None or measured_at > now_epoch:
-            continue
-        fixes.append(
-            TrackFix(
-                accuracy_m=None if location.accuracy_m is None else float(location.accuracy_m),
-                at=measured_at,
-                lat=location.lat,
-                lon=location.lon,
-            ),
-        )
+    for report_only, rows in ((False, locations), (True, extras)):
+        for location in rows:
+            measured_at = _location_fix_at_epoch(location)
+            if measured_at is None:
+                continue
+            fixes.append(
+                TrackFix(
+                    accuracy_m=None if location.accuracy_m is None else float(location.accuracy_m),
+                    at=measured_at,
+                    lat=location.lat,
+                    lon=location.lon,
+                    # A fix dated after now (a phone clock running ahead) is no measurement of the present, but a
+                    # report of another position still says the phone has moved.
+                    report_only=report_only or measured_at > now_epoch,
+                    reported_at=_location_reported_at_epoch_or_none(location),
+                ),
+            )
     return fixes
 
 

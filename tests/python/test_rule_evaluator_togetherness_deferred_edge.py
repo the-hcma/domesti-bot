@@ -178,7 +178,15 @@ class _Rig:
         self.coordinator = MagicMock()
         self.evaluator._location_request_coordinator = self.coordinator
 
-    async def report(self, user_id: str, at_s: float, *, north_m: float, accuracy_m: int = 5) -> None:
+    async def report(
+        self,
+        user_id: str,
+        at_s: float,
+        *,
+        north_m: float,
+        accuracy_m: int = 5,
+        fix_at_s: float | None = None,
+    ) -> None:
         at = _T0 + at_s
         self.clock["now"] = at
         upsert_user_location(
@@ -188,7 +196,7 @@ class _Rig:
                 lat=_HOME_LAT + north_m / _M_PER_DEG_LAT,
                 lon=_HOME_LON,
                 accuracy_m=accuracy_m,
-                fix_at=at,
+                fix_at=at if fix_at_s is None else _T0 + fix_at_s,
                 reported_at=at,
                 source="test",
             ),
@@ -699,3 +707,52 @@ async def test_coarse_fixes_near_home_still_defer_the_alone_arrival(
 
     assert rig.device.calls == []
     assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
+
+
+async def test_peer_re_sending_an_old_fix_far_away_does_not_defer_the_alone_arrival(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Field case: the peer's phone reports on a schedule but each report repeats one old cached fix."""
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=-400_000.0, accuracy_m=19)
+    await rig.report("henrique", 200.0, north_m=400.0)
+    await rig.report("kristen", 100.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=0.0)
+    await rig.report("kristen", 300.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=0.0)
+    await rig.report("henrique", 360.0, north_m=10.0)
+
+    assert rig.device.calls == ["on"]
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
+    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+
+
+async def test_peer_re_sending_an_old_fix_once_still_defers_the_alone_arrival(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=-5000.0)
+    await rig.report("henrique", 200.0, north_m=400.0)
+    await rig.report("kristen", 300.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=0.0)
+    await rig.report("henrique", 360.0, north_m=10.0)
+
+    assert rig.device.calls == []
+    assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
+
+
+async def test_stationary_peer_reports_older_than_the_walkback_window_still_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reports that prove the peer has not moved can be older than the 10 minute interpolation walkback."""
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("kristen", -2000.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=-10_000.0)
+    await rig.report("kristen", -700.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=-10_000.0)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("henrique", 200.0, north_m=400.0)
+    await rig.report("henrique", 360.0, north_m=10.0)
+
+    assert rig.device.calls == ["on"]
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
