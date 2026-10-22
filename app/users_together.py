@@ -24,6 +24,11 @@ accuracy circles and the ground a car could have covered since (``max_speed_mps`
 allow within ``far_m``, the pair is apart. A phone on Wi-Fi hundreds of
 kilometers away reports only coarse fixes and would otherwise never settle.
 
+A user whose phone keeps re-sending one old fix (the fix time never changes while
+reports keep arriving) has not moved. When the newest such report is recent and
+that position is clearly far from the other user, the pair is apart, however old
+the fix is.
+
 The module is pure: it knows nothing about rules, users or geofences.
 """
 
@@ -98,6 +103,13 @@ class TogetherParams:
             raise ValueError(f"Expected positive window weights, got {[w.weight for w in self.windows]}")
 
 
+class ApartBasis(StrEnum):
+    """Why a pair is apart without the interpolated windows."""
+
+    COARSE_FIXES = "coarse_fixes"
+    STATIONARY_PEER = "stationary_peer"
+
+
 @dataclass(frozen=True, slots=True)
 class CleanTrack:
     """A track after quality filtering, oldest fix first, with how many fixes were dropped and why."""
@@ -148,11 +160,7 @@ class TogetherEstimate:
     unknown_reason: UnknownReason | None
     unknown_track: int | None
     windows: tuple[WindowEstimate, ...]
-
-    @property
-    def from_coarse_fixes(self) -> bool:
-        """Whether the pair is apart because of fixes too coarse for the windows, which are then empty."""
-        return self.confidence is not None and not self.windows
+    apart_basis: ApartBasis | None = None
 
     @property
     def known(self) -> bool:
@@ -197,6 +205,7 @@ class TrackFix:
     at: float
     lat: float
     lon: float
+    reported_at: float | None = None
 
 
 class UnknownReason(StrEnum):
@@ -300,25 +309,16 @@ def estimate_together(
             coarse = _apart_by_coarse_fixes((track_a, track_b), cleaned, now=now, params=settings)
             if coarse is None:
                 return unknown(UnknownReason.NO_GOOD_FIXES, index)
-            return TogetherEstimate(
-                anchor=min(now, coarse[0].at, coarse[1].at),
-                anchor_lag_s=max(0.0, now - min(now, coarse[0].at, coarse[1].at)),
-                apart_for_s=0.0,
-                confidence=0.0,
-                distance_now_m=coarse[2],
-                dropped_quality=dropped_quality,
-                dropped_speed=dropped_speed,
-                newest_fix_age_s=(max(0.0, now - coarse[0].at), max(0.0, now - coarse[1].at)),
-                recent_closeness=0.0,
-                together_for_s=0.0,
-                unknown_reason=None,
-                unknown_track=None,
-                windows=(),
-            )
+            return _apart_estimate(ApartBasis.COARSE_FIXES, coarse, now=now, quality=(dropped_quality, dropped_speed))
     for index in (0, 1):
         age = ages[index]
         if age is not None and age > settings.freshness_s:
-            return unknown(UnknownReason.STALE_FIX, index)
+            stationary = _apart_by_stationary_peer((track_a, track_b), cleaned, stale=index, now=now, params=settings)
+            if stationary is None:
+                return unknown(UnknownReason.STALE_FIX, index)
+            return _apart_estimate(
+                ApartBasis.STATIONARY_PEER, stationary, now=now, quality=(dropped_quality, dropped_speed)
+            )
 
     fixes_a, fixes_b = cleaned[0].fixes, cleaned[1].fixes
     anchor = min(now, fixes_a[-1].at, fixes_b[-1].at)
@@ -412,6 +412,8 @@ def pair_closeness(
 
 _COMPARE_TOLERANCE: Final[float] = 1e-9
 _EARTH_RADIUS_M: Final[float] = 6_371_000.0
+_STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
+_STATIONARY_REPORT_WINDOW_S: Final[float] = 3600.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
 
@@ -438,6 +440,77 @@ def _apart_by_coarse_fixes(
     if distance_m - slack_m - reach_m < params.far_m:
         return None
     return first, second, distance_m
+
+
+def _apart_by_stationary_peer(
+    tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
+    cleaned: tuple[CleanTrack, CleanTrack],
+    *,
+    stale: int,
+    now: float,
+    params: TogetherParams,
+) -> tuple[TrackFix, TrackFix, float] | None:
+    """Return both newest fixes and their distance when the stale user has not moved and is clearly far away.
+
+    The stale user counts as stationary when at least two reports in the last
+    ``_STATIONARY_REPORT_WINDOW_S`` carry the same fix and the newest of them is at
+    most ``_STATIONARY_REPORT_FRESH_S`` old: the phone is alive and its position
+    has not changed. The other user must have a fresh fix, and the distance beyond
+    both accuracy circles (and the ground the other user could have covered since
+    their fix) must still be at least ``far_m``. The stationary user's own reach
+    is zero.
+    """
+    other = 1 - stale
+    if not cleaned[stale].fixes or not cleaned[other].fixes:
+        return None
+    fixed = cleaned[stale].fixes[-1]
+    peer = cleaned[other].fixes[-1]
+    if now - peer.at > params.freshness_s:
+        return None
+    reports = [
+        fix.reported_at
+        for fix in tracks[stale]
+        if fix.reported_at is not None
+        and math.isfinite(fix.reported_at)
+        and (fix.at, fix.lat, fix.lon) == (fixed.at, fixed.lat, fixed.lon)
+        and 0.0 <= now - fix.reported_at <= _STATIONARY_REPORT_WINDOW_S
+    ]
+    if len(reports) < 2 or now - max(reports) > _STATIONARY_REPORT_FRESH_S:
+        return None
+    distance_m = _haversine_m(fixed.lat, fixed.lon, peer.lat, peer.lon)
+    slack_m = (fixed.accuracy_m or 0.0) + (peer.accuracy_m or 0.0)
+    reach_m = params.max_speed_mps * max(0.0, now - peer.at)
+    if distance_m - slack_m - reach_m < params.far_m:
+        return None
+    return (fixed, peer, distance_m) if stale == 0 else (peer, fixed, distance_m)
+
+
+def _apart_estimate(
+    basis: ApartBasis,
+    evidence: tuple[TrackFix, TrackFix, float],
+    *,
+    now: float,
+    quality: tuple[tuple[int, int], tuple[int, int]],
+) -> TogetherEstimate:
+    """A known, clearly apart estimate that rests on the newest fix of each user rather than on the windows."""
+    first, second, distance_m = evidence
+    anchor = min(now, first.at, second.at)
+    return TogetherEstimate(
+        anchor=anchor,
+        anchor_lag_s=max(0.0, now - anchor),
+        apart_basis=basis,
+        apart_for_s=0.0,
+        confidence=0.0,
+        distance_now_m=distance_m,
+        dropped_quality=quality[0],
+        dropped_speed=quality[1],
+        newest_fix_age_s=(max(0.0, now - first.at), max(0.0, now - second.at)),
+        recent_closeness=0.0,
+        together_for_s=0.0,
+        unknown_reason=None,
+        unknown_track=None,
+        windows=(),
+    )
 
 
 def _apart_for_s(closeness_at: Sequence[float | None], params: TogetherParams) -> float:

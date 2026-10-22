@@ -488,3 +488,31 @@ def test_the_togetherness_facts_come_from_the_evaluation_that_made_the_decision(
 
     assert _togetherness_detail_lines(decided) != []
     assert _togetherness_detail_lines(later) == []
+
+
+def _stationary_peer_history() -> list[UserLocationOut]:
+    """A phone on non-home Wi-Fi far away that re-sends one cached fix in every report."""
+    fix_at = _NOW - 11_000.0
+    cached = _location(fix_at, accuracy_m=19).model_copy(update={"lat": _LAT0 + 1.7})
+    return [cached.model_copy(update={"reported_at": _iso(_NOW - age)}) for age in (950.0, 2_750.0, 4_600.0)]
+
+
+def test_a_peer_re_sending_an_old_fix_far_away_is_apart_in_both_forms() -> None:
+    ctx = _ctx({"user-a": _history(), "user-b": _stationary_peer_history()})
+
+    alone = _row(_rule(expected=False), ctx)
+    together = _row(_rule(expected=True), ctx)
+
+    assert alone.met is True
+    assert together.met is False
+    assert "unknown" not in alone.detail
+    assert "has not moved" in together.detail
+
+
+def test_a_peer_re_sending_an_old_fix_stays_unknown_with_a_single_report() -> None:
+    ctx = _ctx({"user-a": _history(), "user-b": _stationary_peer_history()[:1]})
+
+    row = _row(_rule(expected=False), ctx)
+
+    assert row.met is False
+    assert "unknown" in row.detail
