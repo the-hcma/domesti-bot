@@ -524,3 +524,23 @@ async def test_forgetting_a_kept_sensor_removes_it_and_its_cache_row(tmp_path: P
     assert await mgr.forget_device(_MAC) is True
     assert mgr.devices == []
     assert load_ep1_devices(cache) == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_keeps_a_silent_sensor_that_moved_while_another_sensor_took_its_old_address(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    monkeypatch.setattr(
+        "app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda mac: _MOVED_HOST if mac == _MAC else None
+    )
+    lan = _Lan()
+    lan.clients[_HOST] = _client(_OTHER_MAC, name="Hall")
+    mgr = _sweeping_manager(cache, DevicePresenceStore(), lan, configured_hosts=[(_HOST, 6053)])
+    await mgr.fetch()
+    assert {d.mac_address: (d.host, d.unresponsive) for d in mgr.devices} == {
+        _MAC: (_MOVED_HOST, True),
+        _OTHER_MAC: (_HOST, False),
+    }
+    assert sorted(row[0] for row in load_ep1_devices(cache)) == sorted([_HOST, _MOVED_HOST])

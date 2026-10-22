@@ -864,8 +864,10 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
             mac_n = try_normalize_mac(mac or "")
             if mac_n is None or mac_n in seen:
                 continue
-            on_lan = await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host)
-            kept_host = (await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) if on_lan else None) or host
+            # The ARP address comes first: a sensor that moved is found there even though its old address is taken.
+            arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n)
+            on_lan = arp_ip is not None or await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host)
+            kept_host = arp_ip or host
             device = Ep1Device(
                 mac_n,
                 display_name=name,
