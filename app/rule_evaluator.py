@@ -619,12 +619,11 @@ class RuleEvaluator:
                     wifi_bssid=location.wifi_bssid,
                     wifi_ssid=location.wifi_ssid,
                 )
+                converted = [(row.reported_at, _location_record_out(row)) for row in reports_by_user.get(uid, ())]
                 user_location_history[uid] = tuple(
-                    _location_record_out(row)
-                    for row in reports_by_user.get(uid, ())
-                    if row.reported_at >= walkback_since
+                    out for reported_at, out in converted if reported_at >= walkback_since
                 )
-                user_location_reports[uid] = tuple(_location_record_out(row) for row in reports_by_user.get(uid, ()))
+                user_location_reports[uid] = tuple(out for _, out in converted)
         roster_user_id_lookup = build_roster_user_id_lookup(list(user_display_names))
         return RuleEvaluationContext(
             geofences=tuple(geofences),
