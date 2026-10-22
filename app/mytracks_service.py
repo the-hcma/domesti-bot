@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from http import HTTPStatus
-from typing import Any, Literal
+from typing import Any, Final, Literal
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -33,6 +33,11 @@ _DOMESTI_BOT_PAIR_ACTIVATE_PATH = "/api/admin/domesti-bot/pair/activate/"
 _DOMESTI_BOT_PAIR_PATH = "/api/admin/domesti-bot/pair/"
 _DOMESTI_BOT_PAIR_STATE_PATH = "/api/admin/domesti-bot/pair/state/"
 _DOMESTI_BOT_TEST_UPDATE_PATH = "/api/admin/domesti-bot/test-location-update/"
+_MY_TRACKS_REQUEST_REASONS: Final[dict[str, str]] = {
+    # My Tracks accepts a fixed list of reasons and answers HTTP 400 to any other; a peer asked for a
+    # fresh fix so that a deferred rule edge can settle is, to it, a deferred edge.
+    "togetherness_unknown": "deferred_edge",
+}
 _PROBE_TIMEOUT_S = 15.0
 _REQUEST_LOCATION_PATH = "/api/domesti-bot/users/{user_id}/request-location/"
 _USERS_WITH_DEVICES_PATH = "/api/admin/users-with-devices/"
@@ -580,7 +585,7 @@ async def request_user_location(
     if refusal is not None:
         # The relay key goes in a header; never send it over plain HTTP to a public host, even for a stored address.
         return RequestLocationResult(status="error", detail=refusal)
-    payload: dict[str, str] = {"reason": reason.strip()}
+    payload: dict[str, str] = {"reason": _MY_TRACKS_REQUEST_REASONS.get(reason.strip(), reason.strip())}
     if rule_id is not None and rule_id.strip() != "":
         payload["rule_id"] = rule_id.strip()
     if geofence_id is not None and geofence_id.strip() != "":

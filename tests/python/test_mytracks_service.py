@@ -436,3 +436,40 @@ def test_a_stage_answer_object_without_a_version_still_means_protocol_1() -> Non
     assert _stage_result({"detail": "ok"}).protocol_version == 1
     assert _stage_result({"protocol_version": 2, "status": "staged"}).protocol_version == 2
     assert _stage_result({"protocol_version": True}).protocol_version == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason", "wire_reason"),
+    [
+        ("togetherness_unknown", "deferred_edge"),
+        ("approach_monitoring", "approach_monitoring"),
+        ("stale_watchdog", "stale_watchdog"),
+    ],
+)
+async def test_request_user_location_sends_only_reasons_my_tracks_accepts(reason: str, wire_reason: str) -> None:
+    posted: list[object] = []
+
+    class _RecordingClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            _ = args, kwargs
+
+        async def __aenter__(self) -> _RecordingClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def post(self, url: str, **kwargs: object) -> httpx.Response:
+            _ = url
+            posted.append(kwargs["json"])
+            return httpx.Response(HTTPStatus.ACCEPTED, json={"user_id": "henrique"}, request=MagicMock())
+
+    with patch("app.mytracks_service.httpx.AsyncClient", _RecordingClient):
+        await request_user_location(
+            base_url="https://tracks.example.com",
+            relay_api_key="relay-secret",
+            user_id="henrique",
+            reason=reason,
+        )
+    assert posted == [{"reason": wire_reason}]
