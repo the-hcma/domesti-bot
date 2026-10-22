@@ -544,3 +544,24 @@ async def test_sweep_keeps_a_silent_sensor_that_moved_while_another_sensor_took_
         _OTHER_MAC: (_HOST, False),
     }
     assert sorted(row[0] for row in load_ep1_devices(cache)) == sorted([_HOST, _MOVED_HOST])
+
+
+@pytest.mark.asyncio
+async def test_cache_first_startup_lists_a_powered_off_sensor_as_unresponsive(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    store = DevicePresenceStore()
+    mgr = Ep1DeviceManager(
+        discovery_cache_path=cache,
+        noise_psk=None,
+        presence_store=store,
+        zeroconf_discovery=False,
+        api_client_factory=_Lan().factory,
+    )
+    await mgr.fetch()
+    (device,) = mgr.devices
+    assert (device.mac_address, device.host, device.unresponsive) == (_MAC, _HOST, True)
+    assert mgr.last_discovery_source == "cache"
+    assert load_ep1_devices(cache) == [(_HOST, 6053, _MAC, "Office")]
+    (notice,) = store.notices()
+    assert (notice.kind, notice.device_id) == (DevicePresenceKind.DISAPPEARED, _MAC)

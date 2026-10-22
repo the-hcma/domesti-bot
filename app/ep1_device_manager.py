@@ -437,8 +437,8 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                     friendly_name=device.display_name,
                 )
 
-        if self._force_discovery:
-            await self._retain_cached_devices()
+        # Cache-first startup keeps a silent cached sensor too: its row is never rewritten, only its tile is at stake.
+        await self._retain_cached_devices()
 
         self._fetched = True
         if self._discovery_cache_path is not None and self._force_discovery:
@@ -449,7 +449,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if connected_any:
             self._last_discovery_source = "cache" if used_cache_only else "discovery"
         elif self._devices:
-            self._last_discovery_source = "discovery"
+            self._last_discovery_source = "cache" if used_cache_only else "discovery"
         else:
             self._last_discovery_source = None
 
