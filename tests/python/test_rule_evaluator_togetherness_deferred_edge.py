@@ -740,3 +740,19 @@ async def test_peer_re_sending_an_old_fix_once_still_defers_the_alone_arrival(
 
     assert rig.device.calls == []
     assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
+
+
+async def test_stationary_peer_reports_older_than_the_walkback_window_still_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reports that prove the peer has not moved can be older than the 10 minute interpolation walkback."""
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("kristen", -2000.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=-10_000.0)
+    await rig.report("kristen", -700.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=-10_000.0)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("henrique", 200.0, north_m=400.0)
+    await rig.report("henrique", 360.0, north_m=10.0)
+
+    assert rig.device.calls == ["on"]
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()

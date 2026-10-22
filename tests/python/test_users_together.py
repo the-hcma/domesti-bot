@@ -295,6 +295,15 @@ def test_a_stationary_peer_near_the_other_user_stays_unknown() -> None:
     assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
 
 
+def test_a_newer_coarse_fix_means_the_peer_has_moved() -> None:
+    peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
+    peer.append(
+        TrackFix(accuracy_m=400.0, at=_NOW - 900.0, lat=_LAT0 + 1.7, lon=_LON0 + 0.01, reported_at=_NOW - 900.0),
+    )
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
 def test_a_fix_without_report_times_is_never_stationary_evidence() -> None:
     peer = [
         replace(fix, reported_at=None)

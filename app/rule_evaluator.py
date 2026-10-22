@@ -175,7 +175,7 @@ from app.rule_validation import (
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.stale_device_display_name_email import maybe_send_stale_display_name_digest
 from app.together_tracker import TogetherKey, TogetherTracker, format_together_event
-from app.users_together import UnknownReason
+from app.users_together import STATIONARY_REPORT_WINDOW_S, UnknownReason
 from app.vacation_mode import tick_vacation_mode
 from app.wifi_home_presence import (
     history_row_geofence_inside,
@@ -585,6 +585,7 @@ class RuleEvaluator:
         user_home_wifi_bssid: dict[str, str | None] = {}
         user_home_wifi_ssid: dict[str, str | None] = {}
         user_location_history: dict[str, tuple[UserLocationOut, ...]] = {}
+        user_location_reports: dict[str, tuple[UserLocationOut, ...]] = {}
         user_locations: dict[str, UserLocationOut] = {}
         if cache_path is not None:
             geofences = [_geofence_record_to_out(row) for row in list_geofences(cache_path)]
@@ -601,6 +602,12 @@ class RuleEvaluator:
                 now_epoch=now_epoch,
                 walkback_max_s=walkback_max_s,
             )
+            reports_by_user = list_user_location_history_for_walkback_by_user(
+                cache_path,
+                list(stored.keys()),
+                now_epoch=now_epoch,
+                walkback_max_s=STATIONARY_REPORT_WINDOW_S,
+            )
             for uid, location in stored.items():
                 user_locations[uid] = UserLocationOut(
                     accuracy_m=location.accuracy_m,
@@ -616,24 +623,8 @@ class RuleEvaluator:
                     wifi_bssid=location.wifi_bssid,
                     wifi_ssid=location.wifi_ssid,
                 )
-                history_rows = walkback_by_user.get(uid, ())
-                user_location_history[uid] = tuple(
-                    UserLocationOut(
-                        accuracy_m=row.accuracy_m,
-                        battery_level=row.battery_level,
-                        connection_type=row.connection_type,
-                        fix_source=row.fix_source,
-                        fix_at=_location_fix_at_iso(row),
-                        lat=row.lat,
-                        lon=row.lon,
-                        reported_at=_location_reported_at_iso(row),
-                        source=row.source,
-                        trigger=row.trigger,
-                        wifi_bssid=row.wifi_bssid,
-                        wifi_ssid=row.wifi_ssid,
-                    )
-                    for row in history_rows
-                )
+                user_location_history[uid] = tuple(_location_record_out(row) for row in walkback_by_user.get(uid, ()))
+                user_location_reports[uid] = tuple(_location_record_out(row) for row in reports_by_user.get(uid, ()))
         roster_user_id_lookup = build_roster_user_id_lookup(list(user_display_names))
         return RuleEvaluationContext(
             geofences=tuple(geofences),
@@ -659,6 +650,7 @@ class RuleEvaluator:
                 self._scheduled_outside_dwell_consumed,
             ),
             user_location_history=user_location_history,
+            user_location_reports=user_location_reports,
             walkback_max_s=walkback_max_s,
         )
 
@@ -4340,6 +4332,23 @@ def _location_accuracy_passes(
 def _location_fix_at_iso(location: UserLocationRecord) -> str:
     """Format ``location.fix_at`` as a UTC ISO-8601 string with a ``Z`` suffix."""
     return location_epoch_to_iso_z(location.fix_at)
+
+
+def _location_record_out(row: UserLocationRecord) -> UserLocationOut:
+    return UserLocationOut(
+        accuracy_m=row.accuracy_m,
+        battery_level=row.battery_level,
+        connection_type=row.connection_type,
+        fix_source=row.fix_source,
+        fix_at=_location_fix_at_iso(row),
+        lat=row.lat,
+        lon=row.lon,
+        reported_at=_location_reported_at_iso(row),
+        source=row.source,
+        trigger=row.trigger,
+        wifi_bssid=row.wifi_bssid,
+        wifi_ssid=row.wifi_ssid,
+    )
 
 
 def _location_reported_at_iso(location: UserLocationRecord) -> str:

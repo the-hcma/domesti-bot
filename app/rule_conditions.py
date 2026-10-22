@@ -149,6 +149,11 @@ class RuleEvaluationContext:
     user_location_history: dict[str, tuple[UserLocationOut, ...]] = field(
         default_factory=dict,
     )
+    # Reports over the longer ``STATIONARY_REPORT_WINDOW_S``, which only ``users_together`` reads: a phone that
+    # re-sends one old fix is recognized by its reports, which can be older than the walkback window.
+    user_location_reports: dict[str, tuple[UserLocationOut, ...]] = field(
+        default_factory=dict,
+    )
     walkback_max_s: float = LOCATION_HISTORY_WALKBACK_MAX_S
     # Why this pass is running; edge-triggered passes evaluate geofence rows as
     # enter/leave edges, while scheduled passes treat them as steady state.
@@ -3226,6 +3231,12 @@ def _together_verdict(condition: UsersTogetherCondition, pairs: list[TogetherPai
 def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[TrackFix]:
     """The user's stored history plus the latest fix as a track of measured positions."""
     locations = list(ctx.user_location_history.get(roster_user_id, ()))
+    seen = {(row.fix_at, row.reported_at, row.lat, row.lon) for row in locations}
+    locations.extend(
+        row
+        for row in ctx.user_location_reports.get(roster_user_id, ())
+        if (row.fix_at, row.reported_at, row.lat, row.lon) not in seen
+    )
     latest = ctx.user_locations.get(roster_user_id)
     if latest is not None and all(row.fix_at != latest.fix_at for row in locations):
         locations.append(latest)

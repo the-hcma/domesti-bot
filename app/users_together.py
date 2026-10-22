@@ -55,6 +55,7 @@ DEFAULT_WINDOWS: Final[tuple[WindowSpec, ...]] = (
     WindowSpec(length_s=300.0, weight=0.3),
     WindowSpec(length_s=600.0, weight=0.2),
 )
+STATIONARY_REPORT_WINDOW_S: Final[float] = 3600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,7 +414,6 @@ def pair_closeness(
 _COMPARE_TOLERANCE: Final[float] = 1e-9
 _EARTH_RADIUS_M: Final[float] = 6_371_000.0
 _STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
-_STATIONARY_REPORT_WINDOW_S: Final[float] = 3600.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
 
@@ -453,7 +453,7 @@ def _apart_by_stationary_peer(
     """Return both newest fixes and their distance when the stale user has not moved and is clearly far away.
 
     The stale user counts as stationary when at least two reports in the last
-    ``_STATIONARY_REPORT_WINDOW_S`` carry the same fix and the newest of them is at
+    ``STATIONARY_REPORT_WINDOW_S`` carry the same fix and the newest of them is at
     most ``_STATIONARY_REPORT_FRESH_S`` old: the phone is alive and its position
     has not changed. The other user must have a fresh fix, and the distance beyond
     both accuracy circles (and the ground the other user could have covered since
@@ -467,13 +467,17 @@ def _apart_by_stationary_peer(
     peer = cleaned[other].fixes[-1]
     if now - peer.at > params.freshness_s:
         return None
+    if any(_has_position(fix) and fix.at > fixed.at for fix in tracks[stale]):
+        # A newer location of any quality (even one the accuracy filter dropped) means the phone produced a fix
+        # after the cached one, so the repeated report no longer says it has not moved.
+        return None
     reports = [
         fix.reported_at
         for fix in tracks[stale]
         if fix.reported_at is not None
         and math.isfinite(fix.reported_at)
         and (fix.at, fix.lat, fix.lon) == (fixed.at, fixed.lat, fixed.lon)
-        and 0.0 <= now - fix.reported_at <= _STATIONARY_REPORT_WINDOW_S
+        and 0.0 <= now - fix.reported_at <= STATIONARY_REPORT_WINDOW_S
     ]
     if len(reports) < 2 or now - max(reports) > _STATIONARY_REPORT_FRESH_S:
         return None
@@ -528,6 +532,17 @@ def _apart_for_s(closeness_at: Sequence[float | None], params: TogetherParams) -
     return reach * params.step_s
 
 
+def _has_position(fix: TrackFix) -> bool:
+    """Whether the fix has a finite time and an in-range position, whatever its accuracy."""
+    return (
+        math.isfinite(fix.at)
+        and math.isfinite(fix.lat)
+        and math.isfinite(fix.lon)
+        and -90.0 <= fix.lat <= 90.0
+        and -180.0 <= fix.lon <= 180.0
+    )
+
+
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     d_phi = math.radians(lat2 - lat1)
@@ -557,11 +572,7 @@ def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack, params: Together
         fix
         for fix in fixes
         if not _is_good_quality(fix, params)
-        and math.isfinite(fix.at)
-        and math.isfinite(fix.lat)
-        and math.isfinite(fix.lon)
-        and -90.0 <= fix.lat <= 90.0
-        and -180.0 <= fix.lon <= 180.0
+        and _has_position(fix)
         and fix.accuracy_m is not None
         and math.isfinite(fix.accuracy_m)
         and fix.accuracy_m >= 0.0
