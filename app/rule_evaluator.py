@@ -596,18 +596,14 @@ class RuleEvaluator:
             stored = list_user_locations(cache_path)
             now_epoch = effective_now.timestamp()
             walkback_max_s = LOCATION_HISTORY_WALKBACK_MAX_S
-            walkback_by_user = list_user_location_history_for_walkback_by_user(
-                cache_path,
-                list(stored.keys()),
-                now_epoch=now_epoch,
-                walkback_max_s=walkback_max_s,
-            )
+            # One read covers the longer report window; the walkback history is the recent part of it.
             reports_by_user = list_user_location_history_for_walkback_by_user(
                 cache_path,
                 list(stored.keys()),
                 now_epoch=now_epoch,
-                walkback_max_s=STATIONARY_REPORT_WINDOW_S,
+                walkback_max_s=max(walkback_max_s, STATIONARY_REPORT_WINDOW_S),
             )
+            walkback_since = now_epoch - walkback_max_s
             for uid, location in stored.items():
                 user_locations[uid] = UserLocationOut(
                     accuracy_m=location.accuracy_m,
@@ -623,7 +619,11 @@ class RuleEvaluator:
                     wifi_bssid=location.wifi_bssid,
                     wifi_ssid=location.wifi_ssid,
                 )
-                user_location_history[uid] = tuple(_location_record_out(row) for row in walkback_by_user.get(uid, ()))
+                user_location_history[uid] = tuple(
+                    _location_record_out(row)
+                    for row in reports_by_user.get(uid, ())
+                    if row.reported_at >= walkback_since
+                )
                 user_location_reports[uid] = tuple(_location_record_out(row) for row in reports_by_user.get(uid, ()))
         roster_user_id_lookup = build_roster_user_id_lookup(list(user_display_names))
         return RuleEvaluationContext(
