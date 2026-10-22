@@ -11,7 +11,7 @@ def test_action_toast_variants_use_explicit_tone_classes() -> None:
     assert ".action-toast-success" in css
     assert ".action-toast-info" in css
     # Danger red must not live only on bare .action-toast (fragile default).
-    assert "action-toast-error { border-color: var(--danger)" in css
+    assert "action-toast-error { border-color: var(--danger-solid)" in css
     toast_ts = _UI_TOAST_TS.read_text(encoding="utf-8")
     assert 'return "action-toast action-toast-error"' in toast_ts
     assert 'return "action-toast action-toast-success"' in toast_ts

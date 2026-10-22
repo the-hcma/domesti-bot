@@ -29,6 +29,7 @@ from app.operator_alerts import operator_alert_store
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EXAMPLE_BUNDLE = _REPO_ROOT / "automation-rules.json.example"
+_INDEX_HTML_PATH = _REPO_ROOT / "app" / "api" / "static" / "index.html"
 _MAIN_JS_PATH = _REPO_ROOT / "app" / "api" / "static" / "dist" / "main.js"
 
 _ALERT_MESSAGE = "SMTP delivery failed: connection refused by smtp.example.com"
@@ -270,5 +271,187 @@ def test_presence_notice_button_stays_readable_on_hover_and_keyboard_focus(
         assert ratio >= _MIN_CONTRAST_RATIO, f"focus contrast {ratio:.2f}:1 ({kind}, {scheme})"
         # The tinted background is not the only focus cue: there is a visible outline too.
         assert button.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+    finally:
+        context.close()
+
+
+# Components that fill with a solid status color under their own text (domesti-bot#881). Each entry is
+# ``(name, fixture markup, selector of the filled element, selector of the text element)``; a tile needs its
+# ``#app[data-layout]`` ancestor because the page styles it only there.
+_FILLED_COMPONENTS: list[tuple[str, str, str, str]] = [
+    (
+        "pwa-install-button",
+        '<button class="btn pwa-install-btn">Install</button>',
+        ".pwa-install-btn",
+        ".pwa-install-btn",
+    ),
+    ("tile-error", '<div class="tile-error">Could not load</div>', ".tile-error", ".tile-error"),
+    (
+        "action-toast-error",
+        '<div class="action-toast action-toast-error"><span class="action-toast-message">Failed</span></div>',
+        ".action-toast-error",
+        ".action-toast-message",
+    ),
+    ("danger-button", '<button class="btn btn-danger">Delete</button>', ".btn-danger", ".btn-danger"),
+    (
+        "rules-broken-badge",
+        '<span class="rules-broken-badge">Broken</span>',
+        ".rules-broken-badge",
+        ".rules-broken-badge",
+    ),
+    (
+        "rules-warning-badge",
+        '<span class="rules-broken-badge rules-warning-badge">Warning</span>',
+        ".rules-warning-badge",
+        ".rules-warning-badge",
+    ),
+    (
+        "toggle-off-action",
+        '<button class="tile-toggle" data-on="false">Turn on</button>',
+        ".tile-toggle",
+        ".tile-toggle",
+    ),
+    (
+        "toggle-on-action",
+        '<button class="tile-toggle" data-on="true">Turn off</button>',
+        ".tile-toggle",
+        ".tile-toggle",
+    ),
+]
+for _layout, _hit in (("compact", "tile-compact-hit"), ("comfortable", "tile-rich-hit")):
+    for _tone in (None, "active", "inactive", "unknown"):
+        _attr = "" if _tone is None else f' data-tone="{_tone}"'
+        _text = (
+            '<span class="tile-saturated-text"><span class="tile-saturated-label">Lamp</span></span>'
+            if _layout == "compact"
+            else '<span class="tile-saturated-label">Lamp</span><span class="tile-saturated-state">On</span>'
+        )
+        _FILLED_COMPONENTS.append(
+            (
+                f"{_layout}-tile-{_tone or 'default'}",
+                f'<div id="app" data-layout="{_layout}"><button class="{_hit}"{_attr}>{_text}</button></div>',
+                f".{_hit}",
+                ".tile-saturated-label",
+            ),
+        )
+        if _layout == "comfortable":
+            _FILLED_COMPONENTS.append(
+                (
+                    f"comfortable-tile-{_tone or 'default'}-state",
+                    f'<div id="app" data-layout="comfortable"><button class="{_hit}"{_attr}>{_text}</button></div>',
+                    f".{_hit}",
+                    ".tile-saturated-state",
+                ),
+            )
+
+
+_RULE_BLOCK = re.compile(r"([^{}]+)\{([^{}]*)\}")
+_BRIGHTENED_FILL = re.compile(r"background(?:-color)?\s*:\s*var\(--(?:accent|danger)\)\s*(?:;|$)")
+_WHITE_TEXT = re.compile(r"(?<![-\w])color\s*:\s*(?:#fff(?:fff)?|white)\s*(?:;|$)")
+
+
+def _brightened_fills_under_white_text(css: str) -> list[str]:
+    """Selectors of rules that paint white text on ``--accent`` or ``--danger``, which dark mode brightens."""
+
+    return [
+        " ".join(selector.split())
+        for selector, body in _RULE_BLOCK.findall(css)
+        if _BRIGHTENED_FILL.search(body) and _WHITE_TEXT.search(body)
+    ]
+
+
+def test_no_rule_paints_white_text_on_a_color_that_dark_mode_brightens() -> None:
+    offenders = _brightened_fills_under_white_text(_INDEX_HTML_PATH.read_text(encoding="utf-8"))
+
+    assert offenders == [], f"Expected --danger-solid / --accent-solid under white text, got {offenders}"
+
+
+def test_the_stylesheet_check_flags_a_white_text_fill_on_a_brightened_color() -> None:
+    css = ".bad { background: var(--danger); color: white; } .ok { background: var(--danger-solid); color: white; }"
+
+    assert _brightened_fills_under_white_text(css) == [".bad"]
+
+
+def _static_page_html() -> str:
+    """The landing page's own HTML with scripts and external stylesheets removed, so its CSS can be measured offline."""
+
+    html = _INDEX_HTML_PATH.read_text(encoding="utf-8")
+    html = re.sub(r"<script\b.*?</script>", "", html, flags=re.DOTALL)
+    return re.sub(r"<link\b[^>]*>", "", html)
+
+
+def _effective_text_color(element: Any) -> str:
+    """The element's computed text color with its own opacity folded into the alpha channel."""
+
+    return element.evaluate(
+        """el => {
+            const style = getComputedStyle(el);
+            const parts = style.color.match(/[\\d.]+/g).map(Number);
+            const alpha = (parts.length === 4 ? parts[3] : 1) * Number(style.opacity);
+            return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`;
+        }""",
+    )
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize(("scheme", "stored_theme"), _THEME_CASES)
+@pytest.mark.parametrize(
+    ("name", "markup", "fill_selector", "text_selector"),
+    [pytest.param(*entry, id=entry[0]) for entry in _FILLED_COMPONENTS],
+)
+def test_filled_component_text_meets_contrast_in_both_color_schemes(
+    chromium_browser: Any,
+    name: str,
+    markup: str,
+    fill_selector: str,
+    text_selector: str,
+    scheme: str,
+    stored_theme: str | None,
+) -> None:
+    context = _new_context(chromium_browser, os_scheme=scheme, stored_theme=None)
+    page = context.new_page()
+    try:
+        page.set_content(_static_page_html(), wait_until="domcontentloaded")
+        page.evaluate(
+            """([markup, theme]) => {
+                if (theme) { document.documentElement.setAttribute('data-theme', theme); }
+                document.body.innerHTML = markup;
+            }""",
+            [markup, stored_theme],
+        )
+        fill = page.locator(fill_selector).first
+        background = fill.evaluate("el => getComputedStyle(el).backgroundColor")
+        color = _effective_text_color(page.locator(text_selector).first)
+        ratio = _contrast_ratio(color, background)
+        label = f"{name}, {scheme}, saved theme {stored_theme}"
+        assert ratio >= _MIN_CONTRAST_RATIO, f"contrast {ratio:.2f}:1 of {color} on {background} ({label})"
+    finally:
+        context.close()
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize(("scheme", "stored_theme"), _THEME_CASES)
+def test_discovery_progress_bar_stands_out_from_its_track_in_both_color_schemes(
+    chromium_browser: Any,
+    scheme: str,
+    stored_theme: str | None,
+) -> None:
+    context = _new_context(chromium_browser, os_scheme=scheme, stored_theme=None)
+    page = context.new_page()
+    try:
+        page.set_content(_static_page_html(), wait_until="domcontentloaded")
+        page.evaluate(
+            """([theme]) => {
+                if (theme) { document.documentElement.setAttribute('data-theme', theme); }
+                document.body.innerHTML =
+                    '<div class="discovery-progress-track"><div class="discovery-progress-bar"></div></div>';
+            }""",
+            [stored_theme],
+        )
+        bar = page.locator(".discovery-progress-bar").evaluate("el => getComputedStyle(el).backgroundColor")
+        track = page.locator(".discovery-progress-track").evaluate("el => getComputedStyle(el).backgroundColor")
+        ratio = _contrast_ratio(bar, track)
+        # A graphical object needs 3:1 against what it sits on (WCAG 1.4.11).
+        assert ratio >= 3.0, f"contrast {ratio:.2f}:1 of {bar} on {track} ({scheme}, saved theme {stored_theme})"
     finally:
         context.close()
