@@ -475,19 +475,34 @@ def _apart_by_stationary_peer(
         # A newer location of any quality (even one the accuracy filter dropped), or the same time at another
         # position, contradicts the cached fix, so the repeated report no longer says the phone has not moved.
         return None
-    reports = {
-        fix.reported_at
+    matching = [
+        fix
         for fix in tracks[stale]
         if fix.reported_at is not None
         and math.isfinite(fix.reported_at)
         and (fix.at, fix.lat, fix.lon) == (fixed.at, fixed.lat, fixed.lon)
         and 0.0 <= now - fix.reported_at <= STATIONARY_REPORT_WINDOW_S
-    }
+    ]
     # Distinct report times: one delivery stored twice is still one observation.
+    reports = {fix.reported_at for fix in matching if fix.reported_at is not None}
     if len(reports) < 2 or now - max(reports) > _STATIONARY_REPORT_FRESH_S:
         return None
+    first_report = min(reports)
+    if any(
+        _has_position(fix)
+        and fix.reported_at is not None
+        and fix.reported_at > first_report
+        and (fix.lat, fix.lon) != (fixed.lat, fixed.lon)
+        for fix in tracks[stale]
+    ):
+        # A report at another position after the repeated ones began, whatever its fix time or accuracy, says the
+        # phone is not where the cached fix puts it.
+        return None
+    accuracies = [fix.accuracy_m for fix in matching]
+    if any(accuracy is None or not math.isfinite(accuracy) or accuracy < 0.0 for accuracy in accuracies):
+        return None
     distance_m = _haversine_m(fixed.lat, fixed.lon, peer.lat, peer.lon)
-    slack_m = (fixed.accuracy_m or 0.0) + (peer.accuracy_m or 0.0)
+    slack_m = max(accuracy for accuracy in accuracies if accuracy is not None) + (peer.accuracy_m or 0.0)
     reach_m = params.max_speed_mps * max(0.0, now - peer.at)
     if distance_m - slack_m - reach_m < params.far_m:
         return None

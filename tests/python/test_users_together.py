@@ -319,6 +319,38 @@ def test_a_coarse_report_at_the_same_fix_time_but_another_position_means_the_pee
     assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
 
 
+def test_a_later_report_at_another_position_with_an_earlier_fix_time_means_the_peer_has_moved() -> None:
+    peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
+    peer.append(
+        TrackFix(accuracy_m=400.0, at=_NOW - 20_000.0, lat=_LAT0 + 0.5, lon=_LON0, reported_at=_NOW - 100.0),
+    )
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_report_at_another_position_before_the_repeated_ones_does_not_cancel_them() -> None:
+    peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
+    peer.append(
+        TrackFix(accuracy_m=400.0, at=_NOW - 20_000.0, lat=_LAT0 + 0.5, lon=_LON0, reported_at=_NOW - 5_000.0),
+    )
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is ApartBasis.STATIONARY_PEER
+
+
+def test_the_largest_accuracy_among_the_matching_reports_sets_the_uncertainty() -> None:
+    peer = _repeated_fix(north_m=1_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
+    peer[1] = replace(peer[1], accuracy_m=900.0)
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_matching_report_without_an_accuracy_is_not_stationary_evidence() -> None:
+    peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
+    peer[1] = replace(peer[1], accuracy_m=None)
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
 def test_a_fix_without_report_times_is_never_stationary_evidence() -> None:
     peer = [
         replace(fix, reported_at=None)
