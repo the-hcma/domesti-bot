@@ -200,12 +200,17 @@ class TogetherEstimate:
 
 @dataclass(frozen=True, slots=True)
 class TrackFix:
-    """One reported position of a user: seconds since the epoch, degrees, and accuracy in meters."""
+    """One reported position of a user: seconds since the epoch, degrees, and accuracy in meters.
+
+    ``report_only`` marks a fix kept as evidence of a report (see the stationary-peer exception) that
+    is older than the history the track is built from; it is never cleaned or interpolated.
+    """
 
     accuracy_m: float | None
     at: float
     lat: float
     lon: float
+    report_only: bool = False
     reported_at: float | None = None
 
 
@@ -279,7 +284,10 @@ def estimate_together(
 ) -> TogetherEstimate:
     """Estimate how likely the two tracks belong to people travelling together at ``now``."""
     settings = params if params is not None else TogetherParams()
-    cleaned = (clean_track(track_a, params=settings), clean_track(track_b, params=settings))
+    cleaned = (
+        clean_track([fix for fix in track_a if not fix.report_only], params=settings),
+        clean_track([fix for fix in track_b if not fix.report_only], params=settings),
+    )
     dropped_quality = (cleaned[0].dropped_quality, cleaned[1].dropped_quality)
     dropped_speed = (cleaned[0].dropped_speed, cleaned[1].dropped_speed)
     newest = tuple(clean.fixes[-1].at if clean.fixes else None for clean in cleaned)

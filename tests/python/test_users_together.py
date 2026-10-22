@@ -242,6 +242,15 @@ def _repeated_fix(*, north_m: float, fix_age_s: float, report_ages_s: list[float
     ]
 
 
+def test_report_only_fixes_do_not_change_the_estimate() -> None:
+    extra = TrackFix(accuracy_m=10.0, at=_NOW - 2_000.0, lat=_LAT0 + 0.5, lon=_LON0, report_only=True)
+
+    with_extra = estimate_together(_phone_a(), [*_phone_a(), extra], now=_NOW)
+    without = estimate_together(_phone_a(), _phone_a(), now=_NOW)
+
+    assert with_extra == without
+
+
 def test_a_peer_that_keeps_re_reporting_an_old_fix_far_away_is_apart() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0, 4_600.0])
 

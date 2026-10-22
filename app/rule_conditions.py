@@ -3229,33 +3229,39 @@ def _together_verdict(condition: UsersTogetherCondition, pairs: list[TogetherPai
 
 
 def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[TrackFix]:
-    """The user's stored history plus the latest fix as a track of measured positions."""
+    """The user's stored history plus the latest fix as a track of measured positions.
+
+    Reports older than the history window (kept for the stationary-peer exception) are marked
+    ``report_only`` so they never feed the cleaning or the interpolation.
+    """
     locations = list(ctx.user_location_history.get(roster_user_id, ()))
-    seen = {(row.fix_at, row.reported_at, row.lat, row.lon) for row in locations}
-    locations.extend(
-        row
-        for row in ctx.user_location_reports.get(roster_user_id, ())
-        if (row.fix_at, row.reported_at, row.lat, row.lon) not in seen
-    )
     latest = ctx.user_locations.get(roster_user_id)
     if latest is not None and all(row.fix_at != latest.fix_at for row in locations):
         locations.append(latest)
+    seen = {(row.fix_at, row.reported_at, row.lat, row.lon) for row in locations}
+    extras = [
+        row
+        for row in ctx.user_location_reports.get(roster_user_id, ())
+        if (row.fix_at, row.reported_at, row.lat, row.lon) not in seen
+    ]
     now_epoch = ctx.now.timestamp()
     fixes: list[TrackFix] = []
-    for location in locations:
-        measured_at = _location_fix_at_epoch(location)
-        # A fix dated after now (a phone clock running ahead) is no measurement of the present.
-        if measured_at is None or measured_at > now_epoch:
-            continue
-        fixes.append(
-            TrackFix(
-                accuracy_m=None if location.accuracy_m is None else float(location.accuracy_m),
-                at=measured_at,
-                lat=location.lat,
-                lon=location.lon,
-                reported_at=_location_reported_at_epoch_or_none(location),
-            ),
-        )
+    for report_only, rows in ((False, locations), (True, extras)):
+        for location in rows:
+            measured_at = _location_fix_at_epoch(location)
+            # A fix dated after now (a phone clock running ahead) is no measurement of the present.
+            if measured_at is None or measured_at > now_epoch:
+                continue
+            fixes.append(
+                TrackFix(
+                    accuracy_m=None if location.accuracy_m is None else float(location.accuracy_m),
+                    at=measured_at,
+                    lat=location.lat,
+                    lon=location.lon,
+                    report_only=report_only,
+                    reported_at=_location_reported_at_epoch_or_none(location),
+                ),
+            )
     return fixes
 
 

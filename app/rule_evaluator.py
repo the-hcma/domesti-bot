@@ -4335,6 +4335,7 @@ def _location_fix_at_iso(location: UserLocationRecord) -> str:
 
 
 def _location_record_out(row: UserLocationRecord) -> UserLocationOut:
+    """A stored location row in the shape the rule conditions read."""
     return UserLocationOut(
         accuracy_m=row.accuracy_m,
         battery_level=row.battery_level,
