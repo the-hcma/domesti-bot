@@ -475,14 +475,15 @@ def _apart_by_stationary_peer(
         # A newer location of any quality (even one the accuracy filter dropped), or the same time at another
         # position, contradicts the cached fix, so the repeated report no longer says the phone has not moved.
         return None
-    reports = [
+    reports = {
         fix.reported_at
         for fix in tracks[stale]
         if fix.reported_at is not None
         and math.isfinite(fix.reported_at)
         and (fix.at, fix.lat, fix.lon) == (fixed.at, fixed.lat, fixed.lon)
         and 0.0 <= now - fix.reported_at <= STATIONARY_REPORT_WINDOW_S
-    ]
+    }
+    # Distinct report times: one delivery stored twice is still one observation.
     if len(reports) < 2 or now - max(reports) > _STATIONARY_REPORT_FRESH_S:
         return None
     distance_m = _haversine_m(fixed.lat, fixed.lon, peer.lat, peer.lon)

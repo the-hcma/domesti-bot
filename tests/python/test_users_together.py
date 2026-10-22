@@ -268,6 +268,12 @@ def test_a_single_report_of_an_old_fix_is_still_stale() -> None:
     assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
 
 
+def test_one_report_delivered_twice_is_a_single_observation() -> None:
+    peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 950.0])
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
 def test_re_reports_that_are_not_recent_leave_the_peer_stale() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[1_500.0, 2_750.0])
 
