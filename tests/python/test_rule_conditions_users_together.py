@@ -516,3 +516,15 @@ def test_a_peer_re_sending_an_old_fix_stays_unknown_with_a_single_report() -> No
 
     assert row.met is False
     assert "unknown" in row.detail
+
+
+def test_a_future_dated_report_elsewhere_keeps_a_re_sent_fix_from_counting_as_stationary() -> None:
+    ahead = _location(_NOW + 3_600.0, accuracy_m=19).model_copy(
+        update={"lat": _LAT0 + 0.5, "reported_at": _iso(_NOW - 100.0)}
+    )
+    ctx = _ctx({"user-a": _history(), "user-b": [*_stationary_peer_history(), ahead]})
+
+    row = _row(_rule(expected=False), ctx)
+
+    assert row.met is False
+    assert "unknown" in row.detail

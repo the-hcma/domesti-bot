@@ -3231,8 +3231,8 @@ def _together_verdict(condition: UsersTogetherCondition, pairs: list[TogetherPai
 def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[TrackFix]:
     """The user's stored history plus the latest fix as a track of measured positions.
 
-    Reports older than the history window (kept for the stationary-peer exception) are marked
-    ``report_only`` so they never feed the cleaning or the interpolation.
+    Reports older than the history window and fixes dated after now (kept for the stationary-peer
+    exception) are marked ``report_only`` so they never feed the cleaning or the interpolation.
     """
     locations = list(ctx.user_location_history.get(roster_user_id, ()))
     latest = ctx.user_locations.get(roster_user_id)
@@ -3249,8 +3249,7 @@ def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[Tra
     for report_only, rows in ((False, locations), (True, extras)):
         for location in rows:
             measured_at = _location_fix_at_epoch(location)
-            # A fix dated after now (a phone clock running ahead) is no measurement of the present.
-            if measured_at is None or measured_at > now_epoch:
+            if measured_at is None:
                 continue
             fixes.append(
                 TrackFix(
@@ -3258,7 +3257,9 @@ def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[Tra
                     at=measured_at,
                     lat=location.lat,
                     lon=location.lon,
-                    report_only=report_only,
+                    # A fix dated after now (a phone clock running ahead) is no measurement of the present, but a
+                    # report of another position still says the phone has moved.
+                    report_only=report_only or measured_at > now_epoch,
                     reported_at=_location_reported_at_epoch_or_none(location),
                 ),
             )
