@@ -565,3 +565,49 @@ async def test_cache_first_startup_lists_a_powered_off_sensor_as_unresponsive(tm
     assert load_ep1_devices(cache) == [(_HOST, 6053, _MAC, "Office")]
     (notice,) = store.notices()
     assert (notice.kind, notice.device_id) == (DevicePresenceKind.DISAPPEARED, _MAC)
+
+
+@pytest.mark.asyncio
+async def test_cache_first_startup_keeps_a_sensor_whose_cached_address_now_answers_as_another_sensor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    monkeypatch.setattr(
+        "app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda mac: _MOVED_HOST if mac == _MAC else None
+    )
+    lan = _Lan()
+    lan.clients[_HOST] = _client(_OTHER_MAC, name="Hall")
+    mgr = Ep1DeviceManager(
+        discovery_cache_path=cache,
+        noise_psk=None,
+        presence_store=DevicePresenceStore(),
+        zeroconf_discovery=False,
+        api_client_factory=lan.factory,
+    )
+    await mgr.fetch()
+    assert {d.mac_address: (d.host, d.unresponsive) for d in mgr.devices} == {
+        _MAC: (_MOVED_HOST, True),
+        _OTHER_MAC: (_HOST, False),
+    }
+    assert {row[2]: row[0] for row in load_ep1_devices(cache)} == {_MAC: _MOVED_HOST, _OTHER_MAC: _HOST}
+
+
+@pytest.mark.asyncio
+async def test_sweep_falls_back_to_the_cached_address_when_the_arp_address_is_taken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    monkeypatch.setattr(
+        "app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda mac: _MOVED_HOST if mac == _MAC else None
+    )
+    lan = _Lan()
+    lan.clients[_MOVED_HOST] = _client(_OTHER_MAC, name="Hall")
+    mgr = _sweeping_manager(cache, DevicePresenceStore(), lan, configured_hosts=[(_MOVED_HOST, 6053)])
+    await mgr.fetch()
+    assert {d.mac_address: (d.host, d.unresponsive) for d in mgr.devices} == {
+        _MAC: (_HOST, True),
+        _OTHER_MAC: (_MOVED_HOST, False),
+    }
+    assert {row[2]: row[0] for row in load_ep1_devices(cache)} == {_MAC: _HOST, _OTHER_MAC: _MOVED_HOST}

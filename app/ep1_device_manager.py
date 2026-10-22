@@ -395,11 +395,17 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if self._fetched:
             raise AlreadyInitializedError("Ep1DeviceManager.fetch() already completed")
         psk = self._resolved_noise_psk()
+        # Taken before any connect: a cache-first upsert can overwrite a row whose host now answers as another sensor.
+        cached_rows = (
+            device_discovery_store.load_ep1_devices(self._discovery_cache_path)
+            if self._discovery_cache_path is not None
+            else []
+        )
         targets, used_cache_only = await self._resolve_targets()
         if not targets:
             self._fetched = True
             if self._force_discovery:
-                await self._retain_cached_devices()
+                await self._retain_cached_devices(cached_rows)
                 if self._discovery_cache_path is not None:
                     device_discovery_store.save_ep1_devices(
                         self._discovery_cache_path,
@@ -437,8 +443,17 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                     friendly_name=device.display_name,
                 )
 
-        # Cache-first startup keeps a silent cached sensor too: its row is never rewritten, only its tile is at stake.
-        await self._retain_cached_devices()
+        # Cache-first startup keeps a silent cached sensor too; a forced sweep rewrites the whole cache below.
+        kept = await self._retain_cached_devices(cached_rows)
+        if self._discovery_cache_path is not None and not self._force_discovery:
+            for device in kept:
+                device_discovery_store.upsert_ep1_device(
+                    self._discovery_cache_path,
+                    host=device.host,
+                    port=device.port,
+                    mac=device.mac_address,
+                    friendly_name=device.display_name,
+                )
 
         self._fetched = True
         if self._discovery_cache_path is not None and self._force_discovery:
@@ -846,45 +861,52 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         rows = device_discovery_store.load_ep1_devices(self._discovery_cache_path)
         return [(host, port) for host, port, _mac, _name in rows]
 
-    async def _retain_cached_devices(self) -> None:
+    async def _retain_cached_devices(
+        self, cached_rows: Sequence[tuple[str, int, str | None, str | None]]
+    ) -> list[Ep1Device]:
         """Keep every cached sensor the sweep missed as an unresponsive tile (domesti-bot#903).
 
-        A sensor that still answers ARP is kept at its ARP address. One that answers nothing
-        (powered off, or off Wi-Fi) is kept at its cached address: switching a sensor off must
-        not remove its tile or its cache row, so the sweep never rewrites the cache without it.
-        The one exception is a sensor whose address now belongs to a sensor that answered: the
-        table is keyed by host and cannot hold both, so a WARNING names the missing one and drops it.
+        ``cached_rows`` is the cache as it was before the sweep connected to anything. A sensor
+        that still answers ARP is kept at its ARP address. One that answers nothing (powered off,
+        or off Wi-Fi) is kept at its cached address: switching a sensor off must not remove its
+        tile or its cache row, so the sweep never rewrites the cache without it. The one
+        exception is a sensor whose every candidate address now belongs to a sensor that
+        answered: the table is keyed by host and cannot hold both, so a WARNING names the
+        missing one and drops it. Returns the sensors it kept.
         """
 
-        if self._discovery_cache_path is None:
-            return
+        kept: list[Ep1Device] = []
         seen = {device.mac_address for device in self._devices.values() if device.mac_address}
         taken_hosts = {device.host for device in self._devices.values()}
-        for host, port, mac, name in device_discovery_store.load_ep1_devices(self._discovery_cache_path):
+        for host, port, mac, name in cached_rows:
             mac_n = try_normalize_mac(mac or "")
             if mac_n is None or mac_n in seen:
                 continue
             # The ARP address comes first: a sensor that moved is found there even though its old address is taken.
             arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n)
             on_lan = arp_ip is not None or await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host)
-            kept_host = arp_ip or host
             device = Ep1Device(
                 mac_n,
                 display_name=name,
-                host=kept_host,
+                host=host,
                 port=port,
                 mac_address=mac_n,
             )
-            if kept_host in taken_hosts:
+            kept_host = next(
+                (candidate for candidate in (arp_ip, host) if candidate and candidate not in taken_hosts), None
+            )
+            if kept_host is None:
                 _LOGGER.warning(
                     "EP1: %s was last seen at %s, which now belongs to another sensor; dropping it",
                     format_device_display(device.identifier, device.preferred_label),
-                    kept_host,
+                    arp_ip or host,
                 )
                 continue
+            device.set_endpoint(host=kept_host, port=port)
             device.set_unresponsive(True)
             self._devices[device.identifier] = device
             self._announce_unresponsive(device)
+            kept.append(device)
             seen.add(mac_n)
             taken_hosts.add(kept_host)
             _LOGGER.info(
@@ -892,6 +914,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 format_device_display(device.identifier, device.preferred_label),
                 "on the LAN (ARP)" if on_lan else "not on the LAN (powered off?)",
             )
+        return kept
 
     async def _collect_states(
         self,
