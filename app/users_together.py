@@ -594,12 +594,14 @@ def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack, params: Together
 
     Good fixes come from the cleaned track, so a spike stays out; the rest come from the raw
     fixes that only failed the accuracy limit. Equal times prefer the more accurate fix, so
-    the input order cannot change the verdict.
+    the input order cannot change the verdict. A ``report_only`` fix is evidence of a report,
+    never a current position.
     """
     coarse = [
         fix
         for fix in fixes
-        if not _is_good_quality(fix, params)
+        if not fix.report_only
+        and not _is_good_quality(fix, params)
         and _has_position(fix)
         and fix.accuracy_m is not None
         and math.isfinite(fix.accuracy_m)

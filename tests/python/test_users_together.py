@@ -251,6 +251,22 @@ def test_report_only_fixes_do_not_change_the_estimate() -> None:
     assert with_extra == without
 
 
+def test_a_report_only_coarse_fix_is_not_the_current_position() -> None:
+    live = _coarse_fix(_NOW - 30.0, north_m=80.0)
+    kept = TrackFix(
+        accuracy_m=100.0,
+        at=_NOW - 5.0,
+        lat=_LAT0 + 0.5,
+        lon=_LON0,
+        report_only=True,
+    )
+
+    estimate = estimate_together(_phone_a(), [live, kept], now=_NOW)
+
+    assert not estimate.known
+    assert estimate.apart_basis is None
+
+
 def test_a_peer_that_keeps_re_reporting_an_old_fix_far_away_is_apart() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0, 4_600.0])
 
