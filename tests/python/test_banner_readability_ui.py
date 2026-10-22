@@ -477,3 +477,44 @@ def test_discovery_progress_bar_stands_out_from_its_track_in_both_color_schemes(
         assert ratio >= 3.0, f"contrast {ratio:.2f}:1 of {bar} on {track} ({scheme}, saved theme {stored_theme})"
     finally:
         context.close()
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize(("scheme", "stored_theme"), _THEME_CASES)
+def test_pwa_install_button_is_filled_with_the_solid_accent_in_both_color_schemes(
+    chromium_browser: Any,
+    scheme: str,
+    stored_theme: str | None,
+) -> None:
+    """The generic ``.btn`` rule comes later in the stylesheet, so the install button must out-rank it."""
+
+    context = _new_context(chromium_browser, os_scheme=scheme, stored_theme=None)
+    page = context.new_page()
+    try:
+        page.set_content(_static_page_html(), wait_until="domcontentloaded")
+        page.evaluate(
+            """([theme]) => {
+                if (theme) { document.documentElement.setAttribute('data-theme', theme); }
+                document.body.innerHTML = '<button class="btn pwa-install-btn">Install</button>';
+            }""",
+            [stored_theme],
+        )
+        button = page.locator(".pwa-install-btn")
+        solid = page.evaluate(
+            "() => getComputedStyle(document.documentElement).getPropertyValue('--accent-solid').trim()"
+        )
+        probe = page.evaluate(
+            """(color) => {
+                const el = document.createElement('i');
+                el.style.color = color;
+                document.body.append(el);
+                return getComputedStyle(el).color;
+            }""",
+            solid,
+        )
+        background = button.evaluate("el => getComputedStyle(el).backgroundColor")
+        assert background == probe, (
+            f"install button fill {background} != --accent-solid {probe} ({scheme}, {stored_theme})"
+        )
+    finally:
+        context.close()
