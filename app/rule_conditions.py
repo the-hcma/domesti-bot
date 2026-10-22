@@ -2396,18 +2396,18 @@ def _location_fix_at_epoch(location: UserLocationOut) -> float | None:
     return None
 
 
+def _location_reported_at_epoch(location: UserLocationOut) -> float:
+    return datetime.fromisoformat(
+        location.reported_at.replace("Z", "+00:00"),
+    ).timestamp()
+
+
 def _location_reported_at_epoch_or_none(location: UserLocationOut) -> float | None:
     """When the position was reported, or ``None`` if unparsable."""
     try:
         return _location_reported_at_epoch(location)
     except ValueError:
         return None
-
-
-def _location_reported_at_epoch(location: UserLocationOut) -> float:
-    return datetime.fromisoformat(
-        location.reported_at.replace("Z", "+00:00"),
-    ).timestamp()
 
 
 def _location_usable_for_rule(
