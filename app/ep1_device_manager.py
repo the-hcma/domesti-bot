@@ -399,7 +399,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         if not targets:
             self._fetched = True
             if self._force_discovery:
-                await self._retain_arp_visible_cached_devices()
+                await self._retain_cached_devices()
                 if self._discovery_cache_path is not None:
                     device_discovery_store.save_ep1_devices(
                         self._discovery_cache_path,
@@ -438,7 +438,7 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                 )
 
         if self._force_discovery:
-            await self._retain_arp_visible_cached_devices()
+            await self._retain_cached_devices()
 
         self._fetched = True
         if self._discovery_cache_path is not None and self._force_discovery:
@@ -846,33 +846,49 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
         rows = device_discovery_store.load_ep1_devices(self._discovery_cache_path)
         return [(host, port) for host, port, _mac, _name in rows]
 
-    async def _retain_arp_visible_cached_devices(self) -> None:
-        """Keep cached EP1 MACs that still answer ARP when the native API is silent."""
+    async def _retain_cached_devices(self) -> None:
+        """Keep every cached sensor the sweep missed as an unresponsive tile (domesti-bot#903).
+
+        A sensor that still answers ARP is kept at its ARP address. One that answers nothing
+        (powered off, or off Wi-Fi) is kept at its cached address: switching a sensor off must
+        not remove its tile or its cache row, so the sweep never rewrites the cache without it.
+        The one exception is a sensor whose address now belongs to a sensor that answered: the
+        table is keyed by host and cannot hold both, so a WARNING names the missing one and drops it.
+        """
 
         if self._discovery_cache_path is None:
             return
         seen = {device.mac_address for device in self._devices.values() if device.mac_address}
+        taken_hosts = {device.host for device in self._devices.values()}
         for host, port, mac, name in device_discovery_store.load_ep1_devices(self._discovery_cache_path):
             mac_n = try_normalize_mac(mac or "")
             if mac_n is None or mac_n in seen:
                 continue
-            if not await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host):
-                continue
-            arp_ip = await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) or host
+            on_lan = await asyncio.to_thread(mac_alive_on_lan, mac=mac_n, host=host)
+            kept_host = (await asyncio.to_thread(lookup_ip_via_arp_for_mac, mac_n) if on_lan else None) or host
             device = Ep1Device(
                 mac_n,
                 display_name=name,
-                host=arp_ip,
+                host=kept_host,
                 port=port,
                 mac_address=mac_n,
             )
+            if kept_host in taken_hosts:
+                _LOGGER.warning(
+                    "EP1: %s was last seen at %s, which now belongs to another sensor; dropping it",
+                    format_device_display(device.identifier, device.preferred_label),
+                    kept_host,
+                )
+                continue
             device.set_unresponsive(True)
             self._devices[device.identifier] = device
             self._announce_unresponsive(device)
             seen.add(mac_n)
+            taken_hosts.add(kept_host)
             _LOGGER.info(
-                "EP1: %s is on the LAN (ARP) but the native API is silent; keeping as unresponsive",
+                "EP1: %s is %s but the native API is silent; keeping as unresponsive",
                 format_device_display(device.identifier, device.preferred_label),
+                "on the LAN (ARP)" if on_lan else "not on the LAN (powered off?)",
             )
 
     async def _collect_states(

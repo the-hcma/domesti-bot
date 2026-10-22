@@ -174,6 +174,8 @@ async def test_force_discovery_prefers_configured_hosts_over_cache(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("EP1_NOISE_PSK", "test-psk")
+    monkeypatch.setattr("app.ep1_device_manager.mac_alive_on_lan", lambda **_k: False)
+    monkeypatch.setattr("app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda _mac: None)
     cache = tmp_path / "cache.sqlite"
     upsert_ep1_device(
         cache,
@@ -210,7 +212,8 @@ async def test_force_discovery_prefers_configured_hosts_over_cache(
     )
     await mgr.fetch()
     assert called_hosts == [("192.0.2.10", 6053)]
-    assert [d.host for d in mgr.devices] == ["192.0.2.10"]
+    # The cached sensor the configured host did not reach stays, as an unresponsive tile.
+    assert {d.host: d.unresponsive for d in mgr.devices} == {"192.0.2.10": False, "192.0.2.99": True}
     await mgr.disconnect()
 
 
@@ -573,7 +576,11 @@ async def test_rediscover_restores_devices_when_fetch_raises(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_rediscover_clears_roster_when_all_connects_fail(tmp_path: Path) -> None:
+async def test_rediscover_keeps_roster_as_unresponsive_when_all_connects_fail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("app.ep1_device_manager.mac_alive_on_lan", lambda **_k: False)
+    monkeypatch.setattr("app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda _mac: None)
     cache = tmp_path / "cache.sqlite"
     upsert_ep1_device(
         cache,
@@ -619,13 +626,18 @@ async def test_rediscover_clears_roster_when_all_connects_fail(tmp_path: Path) -
     assert mgr.devices[0].host == "192.0.2.99"
 
     await mgr.rediscover(hosts=[("192.0.2.55", 6053)])
-    assert mgr.devices == []
-    assert load_ep1_devices(cache) == []
+    (kept,) = mgr.devices
+    assert (kept.host, kept.unresponsive) == ("192.0.2.99", True)
+    assert load_ep1_devices(cache) == [("192.0.2.99", 6053, "aa:bb:cc:dd:ee:01", "Cached")]
     await mgr.disconnect()
 
 
 @pytest.mark.asyncio
-async def test_rediscover_drops_missing_sensor_when_subset_reconnects(tmp_path: Path) -> None:
+async def test_rediscover_keeps_missing_sensor_as_unresponsive_when_subset_reconnects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("app.ep1_device_manager.mac_alive_on_lan", lambda **_k: False)
+    monkeypatch.setattr("app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda _mac: None)
     cache = tmp_path / "cache.sqlite"
     for host, mac, name in (
         ("192.0.2.10", "aa:bb:cc:dd:ee:01", "Office"),
@@ -673,10 +685,8 @@ async def test_rediscover_drops_missing_sensor_when_subset_reconnects(tmp_path: 
 
     clients["192.0.2.20"].connect = AsyncMock(side_effect=RuntimeError("hall offline"))
     await mgr.rediscover()
-    assert [d.host for d in mgr.devices] == ["192.0.2.10"]
-    rows = load_ep1_devices(cache)
-    assert len(rows) == 1
-    assert rows[0][0] == "192.0.2.10"
+    assert {d.host: d.unresponsive for d in mgr.devices} == {"192.0.2.10": False, "192.0.2.20": True}
+    assert [row[0] for row in load_ep1_devices(cache)] == ["192.0.2.10", "192.0.2.20"]
     await mgr.disconnect()
 
 
