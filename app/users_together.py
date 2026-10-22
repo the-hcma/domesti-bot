@@ -461,11 +461,11 @@ def _apart_by_stationary_peer(
     is zero.
     """
     other = 1 - stale
-    if not cleaned[stale].fixes or not cleaned[other].fixes:
+    if not cleaned[stale].fixes:
         return None
     fixed = cleaned[stale].fixes[-1]
-    peer = cleaned[other].fixes[-1]
-    if now - peer.at > params.freshness_s:
+    peer = _newest_fix(tracks[other], cleaned[other], params)
+    if peer is None or now - peer.at > params.freshness_s:
         return None
     if any(
         _has_position(fix)

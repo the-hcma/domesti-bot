@@ -3129,7 +3129,7 @@ def _together_detail(condition: UsersTogetherCondition, pair: TogetherPair, rule
     if estimate.apart_basis is ApartBasis.STATIONARY_PEER:
         return (
             f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
-            f"(one phone keeps reporting the same old location, so it has not moved)"
+            f"(one phone keeps reporting the same old location, which is treated as not having moved)"
         )
     windows = ", ".join(
         f"{_format_dwell_duration_s(window.length_s)} "

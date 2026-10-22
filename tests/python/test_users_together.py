@@ -351,6 +351,14 @@ def test_a_matching_report_without_an_accuracy_is_not_stationary_evidence() -> N
     assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
 
 
+def test_a_newer_coarse_fix_of_the_other_user_near_the_stationary_peer_keeps_it_unknown() -> None:
+    peer = _repeated_fix(north_m=1_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
+    stale_good = _track(_times(every_s=10.0, last_at=_NOW - 600.0))
+    near_peer = _coarse_fix(_NOW - 5.0, north_m=1_000.0)
+
+    assert estimate_together([*stale_good, near_peer], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
 def test_a_fix_without_report_times_is_never_stationary_evidence() -> None:
     peer = [
         replace(fix, reported_at=None)

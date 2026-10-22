@@ -506,7 +506,7 @@ def test_a_peer_re_sending_an_old_fix_far_away_is_apart_in_both_forms() -> None:
     assert alone.met is True
     assert together.met is False
     assert "unknown" not in alone.detail
-    assert "has not moved" in together.detail
+    assert "treated as not having moved" in together.detail
 
 
 def test_a_peer_re_sending_an_old_fix_stays_unknown_with_a_single_report() -> None:
