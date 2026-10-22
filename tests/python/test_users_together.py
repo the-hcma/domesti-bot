@@ -141,6 +141,96 @@ def test_a_user_without_any_good_fix_is_unknown() -> None:
     assert estimate_together(_phone_a(), [], now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
 
 
+def _coarse_fix(at: float, *, north_m: float, accuracy_m: float | None = 100.0) -> TrackFix:
+    """A fix ``north_m`` meters north of the start of the road, regardless of the road's own motion."""
+    return TrackFix(accuracy_m=accuracy_m, at=at, lat=_LAT0 + north_m / _M_PER_DEG, lon=_LON0)
+
+
+def test_a_coarse_fix_hundreds_of_kilometers_away_is_apart_not_unknown() -> None:
+    far = [_coarse_fix(_NOW - 900.0 + 300.0 * index, north_m=400_000.0) for index in range(4)]
+
+    estimate = estimate_together(_phone_a(), far, now=_NOW)
+
+    assert estimate.known
+    assert estimate.unknown_reason is None
+    assert estimate.is_apart(0.8) is True
+    assert estimate.is_together(0.5) is False
+    assert estimate.is_recently_apart(0.8) is True
+    assert estimate.distance_now_m == pytest.approx(400_000.0, rel=0.01)
+    assert estimate.windows == ()
+    assert estimate.dropped_quality[1] == len(far)
+
+
+def test_a_coarse_fix_near_the_other_user_stays_unknown() -> None:
+    near = [_coarse_fix(_NOW - 900.0, north_m=80.0)]
+
+    estimate = estimate_together(_phone_a(), near, now=_NOW)
+
+    assert estimate.unknown_reason is UnknownReason.NO_GOOD_FIXES
+    assert estimate.unknown_track == 1
+    assert estimate.is_apart(0.8) is None
+
+
+def test_a_coarse_fix_whose_circle_reaches_the_other_user_stays_unknown() -> None:
+    far = [_coarse_fix(_NOW - 5.0, north_m=300.0, accuracy_m=200.0)]
+
+    assert estimate_together(_phone_a(), far, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+
+
+def test_an_old_coarse_fix_could_have_driven_to_the_other_user_so_it_stays_unknown() -> None:
+    maximum_reach_m = TogetherParams().max_speed_mps * 900.0
+    reachable = [_coarse_fix(_NOW - 900.0, north_m=0.5 * maximum_reach_m)]
+    unreachable = [_coarse_fix(_NOW - 900.0, north_m=2.0 * maximum_reach_m)]
+
+    assert estimate_together(_phone_a(), reachable, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+    assert estimate_together(_phone_a(), unreachable, now=_NOW).is_apart(0.8) is True
+
+
+def test_a_coarse_fix_without_a_reported_accuracy_is_not_trusted() -> None:
+    far = [_coarse_fix(_NOW - 60.0, north_m=400_000.0, accuracy_m=None)]
+
+    assert estimate_together(_phone_a(), far, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+
+
+def test_two_coarse_tracks_far_from_each_other_are_apart() -> None:
+    first = [_coarse_fix(_NOW - 60.0, north_m=0.0)]
+    second = [_coarse_fix(_NOW - 120.0, north_m=400_000.0)]
+
+    estimate = estimate_together(first, second, now=_NOW)
+
+    assert estimate.is_apart(0.8) is True
+    assert estimate.newest_fix_age_s == (pytest.approx(60.0), pytest.approx(120.0))
+
+
+def test_the_newest_coarse_fix_decides_not_an_older_far_one() -> None:
+    fixes = [_coarse_fix(_NOW - 900.0, north_m=400_000.0), _coarse_fix(_NOW - 30.0, north_m=50.0)]
+
+    assert estimate_together(_phone_a(), fixes, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+
+
+def test_a_newer_coarse_fix_near_the_other_user_beats_an_older_good_fix_far_away() -> None:
+    first = [_coarse_fix(_NOW - 1.0, north_m=0.0)]
+    old_good = TrackFix(accuracy_m=5.0, at=_NOW - 10.0, lat=_LAT0 + 1_000.0 / _M_PER_DEG, lon=_LON0)
+    second = [old_good, _coarse_fix(_NOW - 1.0, north_m=20.0)]
+
+    assert estimate_together(first, second, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+    assert estimate_together(first, [old_good], now=_NOW).is_apart(0.8) is True
+
+
+def test_equal_coarse_timestamps_prefer_the_more_accurate_fix_whatever_the_order() -> None:
+    far = _coarse_fix(_NOW - 5.0, north_m=400_000.0, accuracy_m=100.0)
+    near = _coarse_fix(_NOW - 5.0, north_m=10.0, accuracy_m=60.0)
+
+    for fixes in ([far, near], [near, far]):
+        assert estimate_together(_phone_a(), fixes, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+
+
+def test_a_coarse_fix_with_nonsense_coordinates_is_ignored() -> None:
+    bad = [TrackFix(accuracy_m=100.0, at=_NOW - 60.0, lat=float("nan"), lon=_LON0)]
+
+    assert estimate_together(_phone_a(), bad, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+
+
 def test_a_long_gap_in_one_track_in_the_last_minute_is_too_little_coverage() -> None:
     old = _track(_times(every_s=19.0, last_at=_NOW - 100.0), lateral_m=3.0)
     phone_b = [*old, _fix(_NOW - 3.0, lateral_m=3.0)]
