@@ -292,6 +292,7 @@ _FILLED_COMPONENTS: list[tuple[str, str, str, str]] = [
         ".action-toast-error",
         ".action-toast-message",
     ),
+    ("bulk-button", '<button class="btn btn-bulk">Turn off all</button>', ".btn-bulk", ".btn-bulk"),
     ("danger-button", '<button class="btn btn-danger">Delete</button>', ".btn-danger", ".btn-danger"),
     (
         "rules-broken-badge",
@@ -318,58 +319,79 @@ _FILLED_COMPONENTS: list[tuple[str, str, str, str]] = [
         ".tile-toggle",
     ),
 ]
-for _layout, _hit in (("compact", "tile-compact-hit"), ("comfortable", "tile-rich-hit")):
-    for _tone in (None, "active", "inactive", "unknown"):
-        _attr = "" if _tone is None else f' data-tone="{_tone}"'
-        _text = (
-            '<span class="tile-saturated-text"><span class="tile-saturated-label">Lamp</span></span>'
-            if _layout == "compact"
-            else '<span class="tile-saturated-label">Lamp</span><span class="tile-saturated-state">On</span>'
-        )
-        _FILLED_COMPONENTS.append(
-            (
-                f"{_layout}-tile-{_tone or 'default'}",
-                f'<div id="app" data-layout="{_layout}"><button class="{_hit}"{_attr}>{_text}</button></div>',
-                f".{_hit}",
-                ".tile-saturated-label",
-            ),
-        )
-        if _layout == "comfortable":
-            _FILLED_COMPONENTS.append(
+
+
+def _tile_components() -> list[tuple[str, str, str, str]]:
+    """The device tile in both layouts and every tone, for its label and (comfortable layout) its state caption."""
+
+    components: list[tuple[str, str, str, str]] = []
+    for _layout, _hit in (("compact", "tile-compact-hit"), ("comfortable", "tile-rich-hit")):
+        for _tone in (None, "active", "inactive", "unknown"):
+            _attr = "" if _tone is None else f' data-tone="{_tone}"'
+            _text = (
+                '<span class="tile-saturated-text"><span class="tile-saturated-label">Lamp</span></span>'
+                if _layout == "compact"
+                else '<span class="tile-saturated-label">Lamp</span><span class="tile-saturated-state">On</span>'
+            )
+            components.append(
                 (
-                    f"comfortable-tile-{_tone or 'default'}-state",
-                    f'<div id="app" data-layout="comfortable"><button class="{_hit}"{_attr}>{_text}</button></div>',
+                    f"{_layout}-tile-{_tone or 'default'}",
+                    f'<div id="app" data-layout="{_layout}"><button class="{_hit}"{_attr}>{_text}</button></div>',
                     f".{_hit}",
-                    ".tile-saturated-state",
+                    ".tile-saturated-label",
                 ),
             )
+            if _layout == "comfortable":
+                components.append(
+                    (
+                        f"comfortable-tile-{_tone or 'default'}-state",
+                        f'<div id="app" data-layout="comfortable"><button class="{_hit}"{_attr}>{_text}</button></div>',
+                        f".{_hit}",
+                        ".tile-saturated-state",
+                    ),
+                )
+    return components
+
+
+_FILLED_COMPONENTS.extend(_tile_components())
 
 
 _RULE_BLOCK = re.compile(r"([^{}]+)\{([^{}]*)\}")
-_BRIGHTENED_FILL = re.compile(r"background(?:-color)?\s*:\s*var\(--(?:accent|danger)\)\s*(?:;|$)")
-_WHITE_TEXT = re.compile(r"(?<![-\w])color\s*:\s*(?:#fff(?:fff)?|white)\s*(?:;|$)")
+_BRIGHTENED_FILL = re.compile(r"background(?:-color)?\s*:\s*var\(--(?:accent|danger)\)", re.IGNORECASE)
+# Rules that may fill with the brightened colors because no text sits on them (a progress bar against its track).
+_BRIGHTENED_FILL_ALLOWED = frozenset({".discovery-progress-bar"})
 
 
-def _brightened_fills_under_white_text(css: str) -> list[str]:
-    """Selectors of rules that paint white text on ``--accent`` or ``--danger``, which dark mode brightens."""
+def _brightened_fills(css: str) -> list[str]:
+    """Selectors of rules whose background is a plain ``--accent`` or ``--danger``, which dark mode brightens.
 
-    return [
-        " ".join(selector.split())
-        for selector, body in _RULE_BLOCK.findall(css)
-        if _BRIGHTENED_FILL.search(body) and _WHITE_TEXT.search(body)
+    Text on such a fill cannot reach 4.5:1 in dark mode, and a tone rule often sets only the background while the
+    white text comes from its base rule, so any rule that fills with them is flagged unless it is allowed.
+    """
+
+    selectors = [
+        " ".join(selector.split()) for selector, body in _RULE_BLOCK.findall(css) if _BRIGHTENED_FILL.search(body)
     ]
+    return [selector for selector in selectors if selector not in _BRIGHTENED_FILL_ALLOWED]
 
 
-def test_no_rule_paints_white_text_on_a_color_that_dark_mode_brightens() -> None:
-    offenders = _brightened_fills_under_white_text(_INDEX_HTML_PATH.read_text(encoding="utf-8"))
+def test_no_rule_fills_with_a_color_that_dark_mode_brightens() -> None:
+    offenders = _brightened_fills(_INDEX_HTML_PATH.read_text(encoding="utf-8"))
 
-    assert offenders == [], f"Expected --danger-solid / --accent-solid under white text, got {offenders}"
+    assert offenders == [], f"Expected --danger-solid / --accent-solid fills, got {offenders}"
 
 
-def test_the_stylesheet_check_flags_a_white_text_fill_on_a_brightened_color() -> None:
-    css = ".bad { background: var(--danger); color: white; } .ok { background: var(--danger-solid); color: white; }"
+def test_the_stylesheet_check_flags_a_brightened_fill_however_it_is_written() -> None:
+    css = (
+        ".a { background: var(--danger); color: white; }"
+        ' .b[data-tone="active"] { background: var(--accent) !important; }'
+        " .c { BACKGROUND-COLOR: var(--accent); }"
+        " .ok { background: var(--danger-solid); color: white; }"
+        " .mix { background: color-mix(in srgb, var(--accent) 12%, transparent); }"
+        " .discovery-progress-bar { background: var(--accent); }"
+    )
 
-    assert _brightened_fills_under_white_text(css) == [".bad"]
+    assert _brightened_fills(css) == [".a", '.b[data-tone="active"]', ".c"]
 
 
 def _static_page_html() -> str:
