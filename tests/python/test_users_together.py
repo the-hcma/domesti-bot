@@ -1052,3 +1052,20 @@ def test_a_dropped_report_stays_inconclusive_when_the_other_user_has_no_position
 
     assert estimate_together(without_the_coarse_report, peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
     assert estimate_together(quiet, peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_closeness_at_a_recorded_fix_time_between_the_regular_samples_counts() -> None:
+    # The arriving car (45 m/s, fixes 5 s off the 10 s sampling grid) passes the quiet peer's spot exactly at the
+    # fix 55 s ago and is 225 m away five seconds either side of it, so no regular sample sees them close.
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 15.0), speed_mps=45.0)
+    peer = [
+        TrackFix(
+            accuracy_m=19.0,
+            at=_NOW - 100.0,
+            lat=_LAT0 - 45.0 * 55.0 / _M_PER_DEG,
+            lon=_LON0,
+            reported_at=_NOW - 90.0,
+        ),
+    ]
+
+    assert estimate_together(arriving, peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX

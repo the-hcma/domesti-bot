@@ -564,8 +564,11 @@ def _apart_by_no_recent_closeness(
         return None
     if _newer_dropped_fix_may_be_close(tracks, cleaned, now=now, params=params):
         return None
-    for index in range(int(params.recent_close_window_s // params.step_s) + 1):
-        instant = now - index * params.step_s
+    window_start = now - params.recent_close_window_s
+    # The regular samples end at now; two fast users can also be close only at a moment a fix was recorded.
+    instants = {now - index * params.step_s for index in range(int(params.recent_close_window_s // params.step_s) + 1)}
+    instants.update(fix.at for fixes in (first, second) for fix in fixes if window_start <= fix.at <= now)
+    for instant in sorted(instants, reverse=True):
         position_a = _position_at(first, instant)
         position_b = _position_at(second, instant)
         if position_a is None or position_b is None:
