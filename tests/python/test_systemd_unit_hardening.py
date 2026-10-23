@@ -69,6 +69,12 @@ def test_user_unit_restricts_address_families_to_what_the_service_uses() -> None
     )
 
 
+def test_user_unit_pins_the_system_call_architecture_so_the_address_family_filter_holds() -> None:
+    # On a host that also runs 32-bit x86 code, RestrictAddressFamilies does not cover those calls (and systemd ignores
+    # it on a few other ABIs), so systemd recommends pairing it with SystemCallArchitectures=native.
+    assert _single(_USER_UNIT, "SystemCallArchitectures") == "native"
+
+
 def test_user_unit_keeps_the_home_directory_writable_and_the_syscalls_unfiltered() -> None:
     # The service writes its log, discovery cache and rules under the home directory and its checkout,
     # and a syscall filter can break a service at runtime.
