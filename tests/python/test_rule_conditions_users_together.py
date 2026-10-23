@@ -599,9 +599,15 @@ def test_a_home_wifi_report_with_a_fix_far_from_home_is_not_evidence() -> None:
     assert "home Wi-Fi" not in _row(_rule(expected=False), ctx).detail
 
 
-def test_an_unreadable_settings_file_only_removes_the_home_wifi_basis(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "failure",
+    [AutomationRulesLoadError("Expected a readable rules file, got none"), OSError("Expected a rules file, got EIO")],
+)
+def test_an_unreadable_settings_file_only_removes_the_home_wifi_basis(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
     def _unreadable() -> Any:
-        raise AutomationRulesLoadError("Expected a readable rules file, got none")
+        raise failure
 
     monkeypatch.setattr("app.rule_conditions.load_settings_location", _unreadable)
     ctx = _ctx({"user-a": _history(), "user-b": _home_wifi_peer_history()}, home_ssid={"user-b": "HomeNet"})

@@ -3213,7 +3213,7 @@ def _together_pairs(
     wanted = [pair for pair in roster_pairs if reporting_user_id is None or reporting_user_id in pair]
     try:
         home_ids = wifi_home_geofence_ids(load_settings_location(), ctx.geofences)
-    except AutomationRulesLoadError:
+    except (AutomationRulesLoadError, OSError):
         # Without readable settings there is no home area, so only the Wi-Fi basis is lost.
         home_ids = frozenset()
     home_areas = [area for area in ctx.geofences if area.geofence_id in home_ids]
