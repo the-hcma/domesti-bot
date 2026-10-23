@@ -22,7 +22,11 @@ def _assignments(path: Path) -> dict[str, list[str]]:
     joined: list[str] = []
     pending = ""
     for raw in path.read_text(encoding="utf-8").splitlines():
-        line = (pending + raw.strip()) if pending else raw.strip()
+        stripped = raw.strip()
+        if pending and (not stripped or stripped.startswith(("#", ";"))):
+            # systemd skips comment and blank lines inside a continued value and keeps joining.
+            continue
+        line = (pending + stripped) if pending else stripped
         if line.endswith("\\"):
             pending = line[:-1].rstrip() + " "
             continue
@@ -98,3 +102,12 @@ def test_a_repeated_pinned_directive_is_rejected(tmp_path: Path) -> None:
         assert "exactly one" in str(exc)
     else:
         raise AssertionError("Expected a repeated directive to be rejected")
+
+
+def test_the_parser_skips_comment_lines_inside_a_continued_value(tmp_path: Path) -> None:
+    unit = tmp_path / "x.service"
+    unit.write_text(
+        "[Service]\nRestrictAddressFamilies=AF_INET \\\n# a comment between the lines\n  AF_UNIX\n",
+        encoding="utf-8",
+    )
+    assert _assignments(unit) == {"RestrictAddressFamilies": ["AF_INET AF_UNIX"]}
