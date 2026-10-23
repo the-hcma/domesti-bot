@@ -37,17 +37,21 @@ StandardOutput=append:%h/scratch/domesti-bot/domesti-bot.log
 StandardError=append:%h/scratch/domesti-bot/domesti-bot.log
 ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
 
-# Baseline hardening (domesti-bot#879, #909). ``NoNewPrivileges`` and ``RestrictAddressFamilies`` are enforced
-# everywhere. ``PrivateTmp`` and ``ProtectSystem`` need a mount namespace, which a user manager builds inside an
-# unprivileged user namespace: where that is not allowed (``kernel.apparmor_restrict_unprivileged_userns=1``) systemd
-# starts the unit without them and without an error, so they take effect only on hosts that allow it (see the unit
-# hardening note in docs/AGENTS.md for how to check). ``ProtectHome`` and ``ProtectSystem=strict`` stay off on
-# purpose: the service writes its log, discovery cache and rules under the home directory and its checkout.
-# ``AF_NETLINK`` is the C library's interface listing (mDNS, SSDP and UDP discovery); raw packet sockets are not used.
+# Baseline hardening (domesti-bot#879, #909). ``NoNewPrivileges`` is enforced everywhere.
+# ``RestrictAddressFamilies`` is enforced on x86-64 and aarch64 but ignored on 32-bit x86, s390, mips and ppc ABIs,
+# and it does not cover 32-bit calls on a host that also runs 32-bit x86 code, so it is paired with
+# ``SystemCallArchitectures=native``. ``PrivateTmp`` and ``ProtectSystem`` need a mount namespace, which a user
+# manager builds inside an unprivileged user namespace: where that is not allowed
+# (``kernel.apparmor_restrict_unprivileged_userns=1``) systemd starts the unit without them and without an error, so
+# they take effect only on hosts that allow it (see the unit hardening note in docs/AGENTS.md for how to check).
+# ``ProtectHome`` and ``ProtectSystem=strict`` stay off on purpose: the service writes its log, discovery cache and
+# rules under the home directory and its checkout. ``AF_NETLINK`` is the C library's interface listing (mDNS, SSDP
+# and UDP discovery); raw packet sockets are not used.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=default.target
