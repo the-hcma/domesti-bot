@@ -611,3 +611,19 @@ async def test_sweep_falls_back_to_the_cached_address_when_the_arp_address_is_ta
         _OTHER_MAC: (_MOVED_HOST, False),
     }
     assert {row[2]: row[0] for row in load_ep1_devices(cache)} == {_MAC: _HOST, _OTHER_MAC: _MOVED_HOST}
+
+
+@pytest.mark.asyncio
+async def test_a_sensor_dropped_by_an_address_conflict_leaves_no_stale_notice(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    store = DevicePresenceStore()
+    lan = _Lan()
+    mgr = _sweeping_manager(cache, store, lan)
+    await mgr.fetch()
+    (notice,) = store.notices()
+    assert (notice.kind, notice.device_id) == (DevicePresenceKind.DISAPPEARED, _MAC)
+    lan.clients[_HOST] = _client(_OTHER_MAC, name="Hall")
+    await mgr.rediscover(hosts=[(_HOST, 6053)])
+    assert [device.mac_address for device in mgr.devices] == [_OTHER_MAC]
+    assert store.notices() == ()

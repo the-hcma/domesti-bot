@@ -901,6 +901,9 @@ class Ep1DeviceManager(DeviceManager[Ep1Device]):
                     format_device_display(device.identifier, device.preferred_label),
                     arp_ip or host,
                 )
+                # Gone for good: forget_device needs a roster entry, so a notice left here could never be cleared.
+                self._failed_sessions.pop(mac_n, None)
+                self._presence.forget(DeviceFamilyId.EP1.value, mac_n)
                 continue
             device.set_endpoint(host=kept_host, port=port)
             device.set_unresponsive(True)
