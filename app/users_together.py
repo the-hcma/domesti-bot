@@ -494,7 +494,8 @@ def _apart_by_home_wifi(
     The user at home is the one whose newest report, at most ``_HOME_WIFI_REPORT_FRESH_S`` old, was made on the
     home network (a repeated old fix still counts: the report says where the phone is). The other user needs a
     fresh good fix that is not on the home network, and the distance beyond both accuracy circles must be at least
-    ``far_m``. Nobody arrives in the same vehicle as a person who is already home.
+    ``far_m``, and the other user's track must not have been near the reported position (they may have left it
+    together). Nobody arrives in the same vehicle as a person who is already home.
     """
     for home in (0, 1):
         reports = [
@@ -519,6 +520,13 @@ def _apart_by_home_wifi(
         distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
         slack_m = newest.accuracy_m + (away.accuracy_m or 0.0)
         if distance_m - slack_m < params.far_m:
+            continue
+        if any(
+            _haversine_m(newest.lat, newest.lon, fix.lat, fix.lon) - newest.accuracy_m - (fix.accuracy_m or 0.0)
+            < params.far_m
+            for fix in cleaned[1 - home].fixes
+        ):
+            # The other user was recently at the reported position, so the two may have left it together.
             continue
         return (newest, away, distance_m) if home == 0 else (away, newest, distance_m)
     return None
@@ -547,8 +555,8 @@ def _apart_by_no_recent_closeness(
         return None
     for index in range(int(params.recent_close_window_s // params.step_s) + 1):
         instant = now - index * params.step_s
-        position_a = _position_at(first, instant, params)
-        position_b = _position_at(second, instant, params)
+        position_a = _position_at(first, instant)
+        position_b = _position_at(second, instant)
         if position_a is None or position_b is None:
             continue
         if pair_closeness(position_a, position_b, params=params)[1] > 0.0:
@@ -710,7 +718,7 @@ def _newer_dropped_fix_may_be_close(
         for fix in tracks[index]:
             if fix.report_only or not _has_position(fix) or not newest_good_at < fix.at <= now or fix.at < window_start:
                 continue
-            other = _position_at(cleaned[1 - index].fixes, fix.at, params)
+            other = _position_at(cleaned[1 - index].fixes, fix.at)
             if other is None:
                 continue
             if fix.accuracy_m is None or not math.isfinite(fix.accuracy_m) or fix.accuracy_m < 0.0:
@@ -719,18 +727,6 @@ def _newer_dropped_fix_may_be_close(
             if distance_m - fix.accuracy_m - other.accuracy_m < params.far_m:
                 return True
     return False
-
-
-def _position_at(fixes: Sequence[TrackFix], instant: float, params: TogetherParams) -> InterpolatedPosition | None:
-    """The interpolated position at ``instant``, else the newest fix at or before it, else ``None``."""
-    between = interpolate_position(fixes, instant, max_gap_s=params.max_gap_s)
-    if between is not None:
-        return between
-    index = bisect.bisect_right([fix.at for fix in fixes], instant) - 1
-    if index < 0:
-        return None
-    fix = fixes[index]
-    return InterpolatedPosition(accuracy_m=fix.accuracy_m or 0.0, lat=fix.lat, lon=fix.lon)
 
 
 def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack, params: TogetherParams) -> TrackFix | None:
@@ -752,6 +748,22 @@ def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack, params: Together
         and fix.accuracy_m >= 0.0
     ]
     return max((*cleaned.fixes, *coarse), key=lambda fix: (fix.at, -(fix.accuracy_m or 0.0)), default=None)
+
+
+def _position_at(fixes: Sequence[TrackFix], instant: float) -> InterpolatedPosition | None:
+    """The position at ``instant``: interpolated between its bracketing fixes, else the newest fix once it has passed.
+
+    A gap between two fixes is bridged however long it is (two phones in one moving car reporting once a minute
+    still track each other), while a phone that stopped reporting is assumed to stay where it was. An instant
+    before the first fix has no position.
+    """
+    between = interpolate_position(fixes, instant, max_gap_s=math.inf)
+    if between is not None:
+        return between
+    if not fixes or instant < fixes[0].at:
+        return None
+    fix = fixes[-1]
+    return InterpolatedPosition(accuracy_m=fix.accuracy_m or 0.0, lat=fix.lat, lon=fix.lon)
 
 
 def _speed_mps(first: TrackFix, second: TrackFix) -> float:

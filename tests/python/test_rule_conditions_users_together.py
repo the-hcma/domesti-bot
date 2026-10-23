@@ -20,6 +20,7 @@ from app.api.schemas import (
     UserLocationOut,
     UsersTogetherCondition,
 )
+from app.automation_rules_loader import AutomationRulesLoadError
 from app.device_enums import RuleTrigger
 from app.rule_conditions import (
     RuleEvaluationContext,
@@ -596,3 +597,16 @@ def test_a_home_wifi_report_with_a_fix_far_from_home_is_not_evidence() -> None:
     )
 
     assert "home Wi-Fi" not in _row(_rule(expected=False), ctx).detail
+
+
+def test_an_unreadable_settings_file_only_removes_the_home_wifi_basis(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _unreadable() -> Any:
+        raise AutomationRulesLoadError("Expected a readable rules file, got none")
+
+    monkeypatch.setattr("app.rule_conditions.load_settings_location", _unreadable)
+    ctx = _ctx({"user-a": _history(), "user-b": _home_wifi_peer_history()}, home_ssid={"user-b": "HomeNet"})
+
+    row = _row(_rule(expected=False), ctx)
+
+    assert "home Wi-Fi" not in row.detail
+    assert row.met is True

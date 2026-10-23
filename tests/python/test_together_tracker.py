@@ -13,7 +13,7 @@ from app.together_tracker import (
     TogetherTracker,
     format_together_event,
 )
-from app.users_together import TogetherEstimate, TrackFix, estimate_together
+from app.users_together import ApartBasis, TogetherEstimate, TrackFix, estimate_together
 
 _M_PER_DEG = 2 * math.pi * 6_371_000.0 / 360.0
 _LAT0 = 41.0
@@ -130,6 +130,19 @@ def test_missing_or_stale_data_never_ends_an_episode_and_is_counted() -> None:
     ended = tracker.observe(_KEY, _estimate(_START + 830.0, apart_after=_START + 700.0))
     assert isinstance(ended, TogetherEnded)
     assert ended.unknown_evaluations == 3
+
+
+def test_an_estimate_that_rests_on_stale_data_never_ends_an_episode() -> None:
+    tracker = TogetherTracker()
+    assert isinstance(tracker.observe(_KEY, _estimate(_START + 700.0)), TogetherBegan)
+
+    quiet = _estimate(_START + 1200.0, stale_b_s=400.0)
+    assert quiet.apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert tracker.observe(_KEY, quiet) is None
+
+    ended = tracker.observe(_KEY, _estimate(_START + 1300.0, apart_after=_START + 1200.0))
+    assert isinstance(ended, TogetherEnded)
+    assert ended.unknown_evaluations == 1
 
 
 def test_unknown_data_before_any_episode_starts_nothing() -> None:

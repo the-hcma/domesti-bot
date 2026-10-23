@@ -49,7 +49,7 @@ from app.api.schemas import (
     UsersTogetherCondition,
 )
 from app.astronomical_phrasing import anchor_clause, parse_local_iso, unreachable_window_reason
-from app.automation_rules_loader import load_settings_location
+from app.automation_rules_loader import AutomationRulesLoadError, load_settings_location
 from app.device_display import format_device_display
 from app.device_enums import (
     DeviceConditionState,
@@ -3211,7 +3211,11 @@ def _together_pairs(
     params = _together_params(condition, rule)
     now = ctx.now.timestamp()
     wanted = [pair for pair in roster_pairs if reporting_user_id is None or reporting_user_id in pair]
-    home_ids = wifi_home_geofence_ids(load_settings_location(), ctx.geofences)
+    try:
+        home_ids = wifi_home_geofence_ids(load_settings_location(), ctx.geofences)
+    except AutomationRulesLoadError:
+        # Without readable settings there is no home area, so only the Wi-Fi basis is lost.
+        home_ids = frozenset()
     home_areas = [area for area in ctx.geofences if area.geofence_id in home_ids]
     tracks = {
         roster_user_id: _track_for_user(ctx, roster_user_id, home_areas) for pair in wanted for roster_user_id in pair

@@ -993,3 +993,25 @@ def test_a_newer_coarse_fix_far_from_the_other_user_does_not_block_the_verdict()
     coarse_far = _coarse_fix(_NOW - 5.0, north_m=-3_000.0)
 
     assert estimate_together([*arriving, coarse_far], peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+
+
+def test_two_sparse_phones_in_one_moving_car_are_not_called_apart() -> None:
+    # Each phone reports once a minute, offset by half a minute: no instant has two bracketing fixes within 45 s.
+    phone_a = _track(_times(every_s=60.0, last_at=_NOW - 5.0), lateral_m=3.0, speed_mps=15.0)
+    phone_b = _track(_times(every_s=60.0, last_at=_NOW - 35.0), lateral_m=3.0, speed_mps=15.0)
+
+    estimate = estimate_together(phone_a, phone_b, now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate.unknown_reason is UnknownReason.TOO_LITTLE_COVERAGE
+
+
+def test_a_home_wifi_peer_is_not_apart_when_the_other_user_was_just_near_its_reported_position() -> None:
+    # The other user drifted in from the peer's own position a moment ago: they left together, not independently.
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    just_left_the_peer = _track(_times(every_s=10.0, last_at=_NOW, span_s=600.0), speed_mps=-2.5)
+
+    estimate = estimate_together(just_left_the_peer, peer, now=_NOW)
+
+    assert estimate.apart_basis is None
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
