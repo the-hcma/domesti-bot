@@ -397,13 +397,12 @@ async def test_a_state_pushed_after_the_sensor_was_forgotten_is_ignored(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_a_sensor_missing_from_the_roster_during_a_rediscover_is_not_forgotten(tmp_path: Path) -> None:
+async def test_a_sensor_the_rediscover_missed_is_kept_and_not_forgotten(tmp_path: Path) -> None:
     lan = _Lan()
     mgr, device = await _running_manager(tmp_path, DevicePresenceStore(), lan)
     del lan.clients[_HOST]
     await mgr.rediscover()
-    assert mgr.devices == []
-    assert mgr.owns(device) is False
+    assert [(d.mac_address, d.unresponsive) for d in mgr.devices] == [(_MAC, True)]
     assert mgr.forgotten(device) is False
 
 
@@ -453,3 +452,178 @@ async def test_fetch_announces_a_cached_sensor_that_only_arp_sees(
     await mgr.fetch()
     (notice,) = store.notices()
     assert (notice.kind, notice.device_id) == (DevicePresenceKind.DISAPPEARED, _MAC)
+
+
+def _sweeping_manager(cache: Path, store: DevicePresenceStore, lan: _Lan, **kwargs: Any) -> Ep1DeviceManager:
+    return Ep1DeviceManager(
+        discovery_cache_path=cache,
+        force_discovery=True,
+        noise_psk=None,
+        presence_store=store,
+        zeroconf_discovery=False,
+        api_client_factory=lan.factory,
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sweep_keeps_a_cached_sensor_that_answers_neither_the_api_nor_arp(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    store = DevicePresenceStore()
+    mgr = _sweeping_manager(cache, store, _Lan())
+    await mgr.fetch()
+    (device,) = mgr.devices
+    assert (device.mac_address, device.host, device.unresponsive) == (_MAC, _HOST, True)
+    assert device.preferred_label == "Office"
+    assert load_ep1_devices(cache) == [(_HOST, 6053, _MAC, "Office")]
+    (notice,) = store.notices()
+    assert (notice.kind, notice.device_id) == (DevicePresenceKind.DISAPPEARED, _MAC)
+
+
+@pytest.mark.asyncio
+async def test_rediscover_keeps_a_silent_sensor_and_lists_it_again_when_it_answers(tmp_path: Path) -> None:
+    store = DevicePresenceStore()
+    lan = _Lan()
+    mgr, _device = await _running_manager(tmp_path, store, lan)
+    cache = tmp_path / "cache.sqlite"
+    del lan.clients[_HOST]
+    await mgr.rediscover()
+    (kept,) = mgr.devices
+    assert (kept.mac_address, kept.unresponsive) == (_MAC, True)
+    assert load_ep1_devices(cache) == [(_HOST, 6053, _MAC, "Office")]
+    lan.clients[_HOST] = _client(_MAC)
+    assert await mgr.recover_unresponsive() == (_MAC,)
+    (back,) = mgr.devices
+    assert back.unresponsive is False
+    assert {notice.kind for notice in store.notices()} == {DevicePresenceKind.REAPPEARED}
+
+
+@pytest.mark.asyncio
+async def test_sweep_drops_a_silent_sensor_whose_address_now_belongs_to_another_sensor(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    lan = _Lan()
+    lan.clients[_HOST] = _client(_OTHER_MAC, name="Hall")
+    mgr = _sweeping_manager(cache, DevicePresenceStore(), lan, configured_hosts=[(_HOST, 6053)])
+    with caplog.at_level("WARNING"):
+        await mgr.fetch()
+    assert [device.mac_address for device in mgr.devices] == [_OTHER_MAC]
+    assert load_ep1_devices(cache) == [(_HOST, 6053, _OTHER_MAC, "Hall")]
+    assert any(_MAC in record.getMessage() for record in caplog.records if record.levelname == "WARNING")
+
+
+@pytest.mark.asyncio
+async def test_forgetting_a_kept_sensor_removes_it_and_its_cache_row(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    mgr = _sweeping_manager(cache, DevicePresenceStore(), _Lan())
+    await mgr.fetch()
+    assert await mgr.forget_device(_MAC) is True
+    assert mgr.devices == []
+    assert load_ep1_devices(cache) == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_keeps_a_silent_sensor_that_moved_while_another_sensor_took_its_old_address(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    monkeypatch.setattr(
+        "app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda mac: _MOVED_HOST if mac == _MAC else None
+    )
+    lan = _Lan()
+    lan.clients[_HOST] = _client(_OTHER_MAC, name="Hall")
+    mgr = _sweeping_manager(cache, DevicePresenceStore(), lan, configured_hosts=[(_HOST, 6053)])
+    await mgr.fetch()
+    assert {d.mac_address: (d.host, d.unresponsive) for d in mgr.devices} == {
+        _MAC: (_MOVED_HOST, True),
+        _OTHER_MAC: (_HOST, False),
+    }
+    assert sorted(row[0] for row in load_ep1_devices(cache)) == sorted([_HOST, _MOVED_HOST])
+
+
+@pytest.mark.asyncio
+async def test_cache_first_startup_lists_a_powered_off_sensor_as_unresponsive(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    store = DevicePresenceStore()
+    mgr = Ep1DeviceManager(
+        discovery_cache_path=cache,
+        noise_psk=None,
+        presence_store=store,
+        zeroconf_discovery=False,
+        api_client_factory=_Lan().factory,
+    )
+    await mgr.fetch()
+    (device,) = mgr.devices
+    assert (device.mac_address, device.host, device.unresponsive) == (_MAC, _HOST, True)
+    assert mgr.last_discovery_source == "cache"
+    assert load_ep1_devices(cache) == [(_HOST, 6053, _MAC, "Office")]
+    (notice,) = store.notices()
+    assert (notice.kind, notice.device_id) == (DevicePresenceKind.DISAPPEARED, _MAC)
+
+
+@pytest.mark.asyncio
+async def test_cache_first_startup_keeps_a_sensor_whose_cached_address_now_answers_as_another_sensor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    monkeypatch.setattr(
+        "app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda mac: _MOVED_HOST if mac == _MAC else None
+    )
+    lan = _Lan()
+    lan.clients[_HOST] = _client(_OTHER_MAC, name="Hall")
+    mgr = Ep1DeviceManager(
+        discovery_cache_path=cache,
+        noise_psk=None,
+        presence_store=DevicePresenceStore(),
+        zeroconf_discovery=False,
+        api_client_factory=lan.factory,
+    )
+    await mgr.fetch()
+    assert {d.mac_address: (d.host, d.unresponsive) for d in mgr.devices} == {
+        _MAC: (_MOVED_HOST, True),
+        _OTHER_MAC: (_HOST, False),
+    }
+    assert {row[2]: row[0] for row in load_ep1_devices(cache)} == {_MAC: _MOVED_HOST, _OTHER_MAC: _HOST}
+
+
+@pytest.mark.asyncio
+async def test_sweep_falls_back_to_the_cached_address_when_the_arp_address_is_taken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    monkeypatch.setattr(
+        "app.ep1_device_manager.lookup_ip_via_arp_for_mac", lambda mac: _MOVED_HOST if mac == _MAC else None
+    )
+    lan = _Lan()
+    lan.clients[_MOVED_HOST] = _client(_OTHER_MAC, name="Hall")
+    mgr = _sweeping_manager(cache, DevicePresenceStore(), lan, configured_hosts=[(_MOVED_HOST, 6053)])
+    await mgr.fetch()
+    assert {d.mac_address: (d.host, d.unresponsive) for d in mgr.devices} == {
+        _MAC: (_HOST, True),
+        _OTHER_MAC: (_MOVED_HOST, False),
+    }
+    assert {row[2]: row[0] for row in load_ep1_devices(cache)} == {_MAC: _HOST, _OTHER_MAC: _MOVED_HOST}
+
+
+@pytest.mark.asyncio
+async def test_a_sensor_dropped_by_an_address_conflict_leaves_no_stale_notice(tmp_path: Path) -> None:
+    cache = tmp_path / "cache.sqlite"
+    upsert_ep1_device(cache, host=_HOST, port=6053, mac=_MAC, friendly_name="Office")
+    store = DevicePresenceStore()
+    lan = _Lan()
+    mgr = _sweeping_manager(cache, store, lan)
+    await mgr.fetch()
+    (notice,) = store.notices()
+    assert (notice.kind, notice.device_id) == (DevicePresenceKind.DISAPPEARED, _MAC)
+    lan.clients[_HOST] = _client(_OTHER_MAC, name="Hall")
+    await mgr.rediscover(hosts=[(_HOST, 6053)])
+    assert [device.mac_address for device in mgr.devices] == [_OTHER_MAC]
+    assert store.notices() == ()
