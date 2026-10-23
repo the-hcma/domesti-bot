@@ -382,7 +382,7 @@ def test_a_newer_coarse_fix_of_the_other_user_near_the_stationary_peer_keeps_it_
     near_peer = _coarse_fix(_NOW - 5.0, north_m=190_000.0)
 
     assert estimate_together(fresh_good, peer, now=_NOW).apart_basis is ApartBasis.STATIONARY_PEER
-    assert estimate_together([*fresh_good, near_peer], peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
+    assert estimate_together([*fresh_good, near_peer], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
 
 
 def test_a_fix_without_report_times_is_never_stationary_evidence() -> None:
@@ -967,3 +967,29 @@ def test_sparse_reports_close_together_stay_unknown() -> None:
 def test_the_recent_closeness_window_must_be_positive_and_finite(window_s: float) -> None:
     with pytest.raises(ValueError, match="recent_close_window_s"):
         TogetherParams(recent_close_window_s=window_s)
+
+
+def test_a_home_wifi_report_without_an_accuracy_is_not_evidence() -> None:
+    peer = [
+        replace(fix, accuracy_m=None)
+        for fix in _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    ]
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_newer_coarse_fix_near_the_other_user_keeps_a_stale_pair_unknown() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=120.0, report_ages_s=[100.0])
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 30.0))
+    coarse_near_peer = _coarse_fix(_NOW - 5.0, north_m=5_000.0)
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate_together([*arriving, coarse_near_peer], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_newer_coarse_fix_far_from_the_other_user_does_not_block_the_verdict() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=120.0, report_ages_s=[100.0])
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 30.0))
+    coarse_far = _coarse_fix(_NOW - 5.0, north_m=-3_000.0)
+
+    assert estimate_together([*arriving, coarse_far], peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE

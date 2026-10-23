@@ -80,7 +80,11 @@ from app.users_together import (
     UnknownReason,
     estimate_together,
 )
-from app.wifi_home_presence import wifi_home_presence_applies
+from app.wifi_home_presence import (
+    location_within_wifi_home_proximity,
+    wifi_home_geofence_ids,
+    wifi_home_presence_applies,
+)
 
 if TYPE_CHECKING:
     from app.domesti_bot_cli import DeviceManagersState
@@ -2398,13 +2402,24 @@ def _location_fix_at_epoch(location: UserLocationOut) -> float | None:
     return None
 
 
-def _location_on_home_wifi(location: UserLocationOut, ctx: RuleEvaluationContext, roster_user_id: str) -> bool:
-    """Whether this report was made on the user's configured home Wi-Fi (the network name is what matters)."""
+def _location_on_home_wifi(
+    location: UserLocationOut,
+    ctx: RuleEvaluationContext,
+    roster_user_id: str,
+    home_areas: Sequence[GeofenceOut],
+) -> bool:
+    """Whether this report was made on the user's configured home Wi-Fi from a position that fits being home.
+
+    The network name decides, but the reported coordinates must also lie in the home area (the Wi-Fi-home
+    radius): a phone re-sending an old fix from elsewhere says nothing about where it is, so its coordinates
+    cannot be used to measure a separation.
+    """
     home_ssid = normalize_wifi_ssid(ctx.user_home_wifi_ssid.get(roster_user_id))
     return (
         home_ssid is not None
         and connection_type_is_wifi(location.connection_type)
         and wifi_ssids_match(location.wifi_ssid, home_ssid)
+        and any(location_within_wifi_home_proximity(location.lat, location.lon, area) for area in home_areas)
     )
 
 
@@ -3196,7 +3211,11 @@ def _together_pairs(
     params = _together_params(condition, rule)
     now = ctx.now.timestamp()
     wanted = [pair for pair in roster_pairs if reporting_user_id is None or reporting_user_id in pair]
-    tracks = {roster_user_id: _track_for_user(ctx, roster_user_id) for pair in wanted for roster_user_id in pair}
+    home_ids = wifi_home_geofence_ids(load_settings_location(), ctx.geofences)
+    home_areas = [area for area in ctx.geofences if area.geofence_id in home_ids]
+    tracks = {
+        roster_user_id: _track_for_user(ctx, roster_user_id, home_areas) for pair in wanted for roster_user_id in pair
+    }
     pairs = [
         TogetherPair(
             estimate=estimate_together(tracks[first], tracks[second], now=now, params=params),
@@ -3251,7 +3270,9 @@ def _together_verdict(condition: UsersTogetherCondition, pairs: list[TogetherPai
     return True
 
 
-def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[TrackFix]:
+def _track_for_user(
+    ctx: RuleEvaluationContext, roster_user_id: str, home_areas: Sequence[GeofenceOut]
+) -> list[TrackFix]:
     """The user's stored history plus the latest fix as a track of measured positions.
 
     Reports older than the history window and fixes dated after now (kept for the stationary-peer
@@ -3278,7 +3299,7 @@ def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[Tra
                 TrackFix(
                     accuracy_m=None if location.accuracy_m is None else float(location.accuracy_m),
                     at=measured_at,
-                    home_wifi=_location_on_home_wifi(location, ctx, roster_user_id),
+                    home_wifi=_location_on_home_wifi(location, ctx, roster_user_id, home_areas),
                     lat=location.lat,
                     lon=location.lon,
                     # A fix dated after now (a phone clock running ahead) is no measurement of the present, but a

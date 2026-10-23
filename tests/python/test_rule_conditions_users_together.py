@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from app.api.schemas import (
     AnyConditionsCondition,
+    GeofenceOut,
     RuleConditionOut,
     RuleConditionsOut,
     RuleOut,
@@ -76,13 +77,24 @@ def _history(
     return [_location(last_at - index * every_s, **kwargs) for index in range(count + 1)]
 
 
+_HOME_AREA = GeofenceOut(
+    center_lat=_LAT0, center_lon=_LON0, enabled=True, geofence_id="home", label="Home", radius_m=250
+)
+
+
+@pytest.fixture(autouse=True)
+def _settings_without_file_io(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The togetherness pairs read the home settings; keep the tests off the operator's rules file."""
+    monkeypatch.setattr("app.rule_conditions.load_settings_location", lambda: _SETTINGS)
+
+
 def _ctx(
     histories: dict[str, list[UserLocationOut]], *, home_ssid: dict[str, str | None] | None = None
 ) -> RuleEvaluationContext:
     """A context whose per-user history is newest-first and whose latest location is the newest fix."""
     names = {user_id: user_id.upper() for user_id in histories}
     return RuleEvaluationContext(
-        geofences=(),
+        geofences=(_HOME_AREA,),
         now=datetime.fromtimestamp(_NOW, tz=_TZ),
         roster_user_id_lookup=build_roster_user_id_lookup(list(names)),
         sun=compute_rules_sun_out(_SETTINGS, now=datetime.fromtimestamp(_NOW, tz=_TZ)),
@@ -575,3 +587,12 @@ def test_a_peer_that_was_never_close_recently_is_apart_and_the_detail_says_why()
     assert alone.met is True
     assert "not within" in alone.detail
     assert "unknown" not in alone.detail
+
+
+def test_a_home_wifi_report_with_a_fix_far_from_home_is_not_evidence() -> None:
+    # The phone is on the home network but its cached fix is 600 m away, so the coordinates cannot show where it is.
+    ctx = _ctx(
+        {"user-a": _history(), "user-b": _home_wifi_peer_history(north_m=600.0)}, home_ssid={"user-b": "HomeNet"}
+    )
+
+    assert "home Wi-Fi" not in _row(_rule(expected=False), ctx).detail
