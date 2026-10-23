@@ -514,8 +514,17 @@ def _apart_by_home_wifi(
         if newest.accuracy_m is None or not math.isfinite(newest.accuracy_m) or newest.accuracy_m < 0.0:
             # Without a usable accuracy the cached position proves no separation (a missing value is not zero).
             continue
-        away = _newest_fix(tracks[1 - home], cleaned[1 - home], params)
-        if away is None or away.home_wifi or now - away.at > params.freshness_s:
+        good_fixes = cleaned[1 - home].fixes
+        if not good_fixes:
+            continue
+        away = good_fixes[-1]
+        if away.home_wifi or now - away.at > params.freshness_s:
+            continue
+        if any(
+            fix.at > away.at and not fix.report_only and _has_position(fix) and not _is_good_quality(fix, params)
+            for fix in tracks[1 - home]
+        ):
+            # A newer report that quality filtering dropped may put the user somewhere else.
             continue
         distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
         slack_m = newest.accuracy_m + (away.accuracy_m or 0.0)
@@ -716,7 +725,12 @@ def _newer_dropped_fix_may_be_close(
     for index in (0, 1):
         newest_good_at = cleaned[index].fixes[-1].at
         for fix in tracks[index]:
-            if fix.report_only or not _has_position(fix) or not newest_good_at < fix.at <= now or fix.at < window_start:
+            if (
+                fix.report_only
+                or not _has_position(fix)
+                or not newest_good_at <= fix.at <= now
+                or fix.at < window_start
+            ):
                 continue
             other = _position_at(cleaned[1 - index].fixes, fix.at)
             if other is None:

@@ -1015,3 +1015,21 @@ def test_a_home_wifi_peer_is_not_apart_when_the_other_user_was_just_near_its_rep
 
     assert estimate.apart_basis is None
     assert estimate.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_coarse_newest_fix_of_the_away_user_is_not_the_position_for_the_home_wifi_check() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 20.0))
+    coarse_newer = _coarse_fix(_NOW - 5.0, north_m=5_000.0)
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together([*arriving, coarse_newer], peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_dropped_fix_at_the_newest_fix_time_is_still_checked_for_closeness() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=120.0, report_ages_s=[100.0])
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 30.0))
+    twin = TrackFix(accuracy_m=30.0, at=arriving[-1].at, lat=_LAT0 + 5_000.0 / _M_PER_DEG, lon=_LON0)
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate_together([*arriving, twin], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
