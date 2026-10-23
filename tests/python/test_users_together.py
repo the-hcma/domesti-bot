@@ -290,25 +290,25 @@ def test_a_peer_re_reporting_an_old_fix_in_either_position_of_the_pair_is_apart(
 def test_a_single_report_of_an_old_fix_is_still_stale() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0])
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_one_report_delivered_twice_is_a_single_observation() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 950.0])
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_re_reports_that_are_not_recent_leave_the_peer_stale() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[1_500.0, 2_750.0])
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_re_reports_older_than_an_hour_do_not_count() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 3_700.0])
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_reports_with_different_fixes_are_not_a_stationary_peer() -> None:
@@ -317,7 +317,7 @@ def test_reports_with_different_fixes_are_not_a_stationary_peer() -> None:
         TrackFix(accuracy_m=19.0, at=_NOW - 12_000.0, lat=_LAT0 + 1.7, lon=_LON0, reported_at=_NOW - 2_750.0),
     ]
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_a_stationary_peer_near_the_other_user_stays_unknown() -> None:
@@ -332,7 +332,7 @@ def test_a_newer_coarse_fix_means_the_peer_has_moved() -> None:
         TrackFix(accuracy_m=400.0, at=_NOW - 900.0, lat=_LAT0 + 1.7, lon=_LON0 + 0.01, reported_at=_NOW - 900.0),
     )
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_a_coarse_report_at_the_same_fix_time_but_another_position_means_the_peer_has_moved() -> None:
@@ -341,7 +341,7 @@ def test_a_coarse_report_at_the_same_fix_time_but_another_position_means_the_pee
         TrackFix(accuracy_m=400.0, at=_NOW - 11_000.0, lat=_LAT0 + 1.9, lon=_LON0, reported_at=_NOW - 900.0),
     )
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_a_later_report_at_another_position_with_an_earlier_fix_time_means_the_peer_has_moved() -> None:
@@ -350,7 +350,7 @@ def test_a_later_report_at_another_position_with_an_earlier_fix_time_means_the_p
         TrackFix(accuracy_m=400.0, at=_NOW - 20_000.0, lat=_LAT0 + 0.5, lon=_LON0, reported_at=_NOW - 100.0),
     )
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_a_report_at_another_position_before_the_repeated_ones_does_not_cancel_them() -> None:
@@ -366,14 +366,14 @@ def test_the_largest_accuracy_among_the_matching_reports_sets_the_uncertainty() 
     peer = _repeated_fix(north_m=1_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
     peer[1] = replace(peer[1], accuracy_m=900.0)
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_a_matching_report_without_an_accuracy_is_not_stationary_evidence() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
     peer[1] = replace(peer[1], accuracy_m=None)
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_a_newer_coarse_fix_of_the_other_user_near_the_stationary_peer_keeps_it_unknown() -> None:
@@ -391,14 +391,14 @@ def test_a_fix_without_report_times_is_never_stationary_evidence() -> None:
         for fix in _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
     ]
 
-    assert estimate_together(_phone_a(), peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_the_other_user_must_be_fresh_for_a_stationary_peer_to_settle_the_pair() -> None:
     peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0])
     stale_other = _track(_times(every_s=10.0, last_at=_NOW - 600.0))
 
-    assert estimate_together(peer, stale_other, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(peer, stale_other, now=_NOW).apart_basis is not ApartBasis.STATIONARY_PEER
 
 
 def test_a_coarse_fix_with_nonsense_coordinates_is_ignored() -> None:
@@ -842,3 +842,230 @@ def test_apart_for_s_counts_back_over_known_clearly_apart_instants_only() -> Non
     assert now_apart.apart_for_s is not None and 80.0 <= now_apart.apart_for_s <= 110.0
     assert together_now.apart_for_s == 0.0
     assert short.apart_for_s is not None and short.apart_for_s <= 70.0
+
+
+def _home_wifi(fixes: list[TrackFix], *, on: bool = True) -> list[TrackFix]:
+    return [replace(fix, home_wifi=on) for fix in fixes]
+
+
+def test_a_peer_on_the_home_network_is_apart_from_a_user_arriving_from_outside() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0, 1_500.0, 2_400.0]))
+
+    estimate = estimate_together(_phone_a(), peer, now=_NOW)
+
+    assert estimate.known
+    assert estimate.apart_basis is ApartBasis.HOME_WIFI
+    assert estimate.is_apart(0.8) is True
+    assert estimate.distance_now_m == pytest.approx(250.0, abs=2.0)
+
+
+def test_one_recent_report_on_the_home_network_is_enough() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+
+
+def test_the_home_network_may_be_the_first_user() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+
+    assert estimate_together(peer, _phone_a(), now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+
+
+def test_a_home_network_report_older_than_twenty_minutes_is_not_evidence() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[1_300.0]))
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_two_users_on_the_home_network_are_not_apart_by_it() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+
+    estimate = estimate_together(_home_wifi(_phone_a()), peer, now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_peer_close_to_the_other_user_is_not_apart_by_the_home_network() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=100.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+
+    estimate = estimate_together(_phone_a(), peer, now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.HOME_WIFI
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_the_newest_report_decides_whether_the_peer_is_on_the_home_network() -> None:
+    older = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[1_100.0]))
+    newer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]), on=False)
+
+    assert estimate_together(_phone_a(), [*older, *newer], now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_an_arriving_user_whose_fix_is_stale_is_not_apart_by_the_home_network() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 120.0))
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_stale_peer_that_was_not_close_in_the_last_minutes_is_apart() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=120.0, report_ages_s=[100.0])
+
+    estimate = estimate_together(_phone_a(), peer, now=_NOW)
+
+    assert estimate.known
+    assert estimate.apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate.is_apart(0.8) is True
+    assert estimate.is_together(0.8) is False
+
+
+def test_a_stale_peer_that_was_close_within_the_window_stays_unknown() -> None:
+    peer = _repeated_fix(north_m=0.0, fix_age_s=120.0, report_ages_s=[100.0])
+
+    estimate = estimate_together(_phone_a(), peer, now=_NOW)
+
+    assert not estimate.known
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_closeness_older_than_the_window_does_not_count() -> None:
+    # The user drove past this spot about 350 s ago: outside the default 300 s window.
+    passed_long_ago = _repeated_fix(north_m=-7_000.0, fix_age_s=11_000.0, report_ages_s=[100.0])
+    passed_inside_window = _repeated_fix(north_m=-4_000.0, fix_age_s=11_000.0, report_ages_s=[100.0])
+
+    assert estimate_together(_phone_a(), passed_long_ago, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate_together(_phone_a(), passed_inside_window, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_the_recent_closeness_window_is_a_parameter() -> None:
+    passed_inside_window = _repeated_fix(north_m=-4_000.0, fix_age_s=11_000.0, report_ages_s=[100.0])
+
+    estimate = estimate_together(
+        _phone_a(), passed_inside_window, now=_NOW, params=TogetherParams(recent_close_window_s=60.0)
+    )
+
+    assert estimate.apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+
+
+def test_sparse_reports_far_apart_are_apart_not_unknown() -> None:
+    sparse = _track(_times(every_s=60.0, last_at=_NOW - 5.0), lateral_m=500.0)
+
+    estimate = estimate_together(_phone_a(), sparse, now=_NOW)
+
+    assert estimate.apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+
+
+def test_sparse_reports_close_together_stay_unknown() -> None:
+    sparse = _track(_times(every_s=60.0, last_at=_NOW - 5.0), lateral_m=3.0)
+
+    estimate = estimate_together(_phone_a(), sparse, now=_NOW)
+
+    assert estimate.unknown_reason is UnknownReason.TOO_LITTLE_COVERAGE
+
+
+@pytest.mark.parametrize("window_s", [0.0, -1.0, math.nan, math.inf])
+def test_the_recent_closeness_window_must_be_positive_and_finite(window_s: float) -> None:
+    with pytest.raises(ValueError, match="recent_close_window_s"):
+        TogetherParams(recent_close_window_s=window_s)
+
+
+def test_a_home_wifi_report_without_an_accuracy_is_not_evidence() -> None:
+    peer = [
+        replace(fix, accuracy_m=None)
+        for fix in _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    ]
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_newer_coarse_fix_near_the_other_user_keeps_a_stale_pair_unknown() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=120.0, report_ages_s=[100.0])
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 30.0))
+    coarse_near_peer = _coarse_fix(_NOW - 5.0, north_m=5_000.0)
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate_together([*arriving, coarse_near_peer], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_newer_coarse_fix_far_from_the_other_user_does_not_block_the_verdict() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=120.0, report_ages_s=[100.0])
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 30.0))
+    coarse_far = _coarse_fix(_NOW - 5.0, north_m=-3_000.0)
+
+    assert estimate_together([*arriving, coarse_far], peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+
+
+def test_two_sparse_phones_in_one_moving_car_are_not_called_apart() -> None:
+    # Each phone reports once a minute, offset by half a minute: no instant has two bracketing fixes within 45 s.
+    phone_a = _track(_times(every_s=60.0, last_at=_NOW - 5.0), lateral_m=3.0, speed_mps=15.0)
+    phone_b = _track(_times(every_s=60.0, last_at=_NOW - 35.0), lateral_m=3.0, speed_mps=15.0)
+
+    estimate = estimate_together(phone_a, phone_b, now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate.unknown_reason is UnknownReason.TOO_LITTLE_COVERAGE
+
+
+def test_a_home_wifi_peer_is_not_apart_when_the_other_user_was_just_near_its_reported_position() -> None:
+    # The other user drifted in from the peer's own position a moment ago: they left together, not independently.
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    just_left_the_peer = _track(_times(every_s=10.0, last_at=_NOW, span_s=600.0), speed_mps=-2.5)
+
+    estimate = estimate_together(just_left_the_peer, peer, now=_NOW)
+
+    assert estimate.apart_basis is None
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_coarse_newest_fix_of_the_away_user_is_not_the_position_for_the_home_wifi_check() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 20.0))
+    coarse_newer = _coarse_fix(_NOW - 5.0, north_m=5_000.0)
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together([*arriving, coarse_newer], peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_dropped_fix_at_the_newest_fix_time_is_still_checked_for_closeness() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=120.0, report_ages_s=[100.0])
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 30.0))
+    twin = TrackFix(accuracy_m=30.0, at=arriving[-1].at, lat=_LAT0 + 5_000.0 / _M_PER_DEG, lon=_LON0)
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate_together([*arriving, twin], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_dropped_twin_at_the_away_users_fix_time_vetoes_the_home_wifi_basis() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 20.0))
+    # A less accurate fix at the same instant is dropped by the cleaning but sits next to the peer.
+    twin = TrackFix(accuracy_m=30.0, at=arriving[-1].at, lat=_LAT0 + 250.0 / _M_PER_DEG, lon=_LON0)
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together([*arriving, twin], peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_dropped_report_stays_inconclusive_when_the_other_user_has_no_position_yet() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=90.0, report_ages_s=[80.0])
+    quiet = [_fix(_NOW - 200.0), _coarse_fix(_NOW - 100.0, north_m=5_000.0)]
+    without_the_coarse_report = quiet[:1]
+
+    assert estimate_together(without_the_coarse_report, peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate_together(quiet, peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_closeness_at_a_recorded_fix_time_between_the_regular_samples_counts() -> None:
+    # The arriving car (45 m/s, fixes 5 s off the 10 s sampling grid) passes the quiet peer's spot exactly at the
+    # fix 55 s ago and is 225 m away five seconds either side of it, so no regular sample sees them close.
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 15.0), speed_mps=45.0)
+    peer = [
+        TrackFix(
+            accuracy_m=19.0,
+            at=_NOW - 100.0,
+            lat=_LAT0 - 45.0 * 55.0 / _M_PER_DEG,
+            lon=_LON0,
+            reported_at=_NOW - 90.0,
+        ),
+    ]
+
+    assert estimate_together(arriving, peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX

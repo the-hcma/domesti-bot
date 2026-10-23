@@ -29,6 +29,16 @@ reports keep arriving) has not moved. When the newest such report is recent and
 that position is clearly far from the other user, the pair is apart, however old
 the fix is.
 
+A user whose newest report (at most ``_HOME_WIFI_REPORT_FRESH_S`` old) was made on the home Wi-Fi is at home. When
+the other user's fresh fix is not on that network and is clearly far from the reported position, the pair is apart:
+nobody arrives in the same vehicle as a person who is already home. Which reports count as on the home Wi-Fi is the
+caller's decision (``TrackFix.home_wifi``).
+
+When the estimate would otherwise be unknown because a fix is stale or the tracks are too sparse, the pair is apart
+unless the two users were close at some moment in the last ``recent_close_window_s``, with each user's newest good fix
+carried forward. A pair that has not been close for minutes is simply not together. A user with no good fix at all
+stays unknown: there is no position to say they were not close.
+
 The module is pure: it knows nothing about rules, users or geofences.
 """
 
@@ -69,6 +79,7 @@ class TogetherParams:
     max_gap_s: float = 45.0
     max_speed_mps: float = 50.0
     near_m: float = 30.0
+    recent_close_window_s: float = 300.0
     step_s: float = 10.0
     windows: tuple[WindowSpec, ...] = DEFAULT_WINDOWS
 
@@ -80,6 +91,7 @@ class TogetherParams:
             "freshness_s": self.freshness_s,
             "max_gap_s": self.max_gap_s,
             "max_speed_mps": self.max_speed_mps,
+            "recent_close_window_s": self.recent_close_window_s,
             "step_s": self.step_s,
         }
         for name, value in positives.items():
@@ -108,6 +120,8 @@ class ApartBasis(StrEnum):
     """Why a pair is apart without the interpolated windows."""
 
     COARSE_FIXES = "coarse_fixes"
+    HOME_WIFI = "home_wifi"
+    NOT_RECENTLY_CLOSE = "not_recently_close"
     STATIONARY_PEER = "stationary_peer"
 
 
@@ -204,12 +218,14 @@ class TrackFix:
 
     ``report_only`` marks a fix kept as evidence of a report (see the stationary-peer exception) that
     is older than the history the track is built from; it is never cleaned or interpolated.
+    ``home_wifi`` says the phone made the report on the home Wi-Fi network.
     """
 
     accuracy_m: float | None
     at: float
     lat: float
     lon: float
+    home_wifi: bool = False
     report_only: bool = False
     reported_at: float | None = None
 
@@ -314,6 +330,9 @@ def estimate_together(
             windows=windows,
         )
 
+    at_home = _apart_by_home_wifi((track_a, track_b), cleaned, now=now, params=settings)
+    if at_home is not None:
+        return _apart_estimate(ApartBasis.HOME_WIFI, at_home, now=now, quality=(dropped_quality, dropped_speed))
     for index in (0, 1):
         if newest[index] is None:
             coarse = _apart_by_coarse_fixes((track_a, track_b), cleaned, now=now, params=settings)
@@ -325,7 +344,12 @@ def estimate_together(
         if age is not None and age > settings.freshness_s:
             stationary = _apart_by_stationary_peer((track_a, track_b), cleaned, stale=index, now=now, params=settings)
             if stationary is None:
-                return unknown(UnknownReason.STALE_FIX, index)
+                not_close = _apart_by_no_recent_closeness((track_a, track_b), cleaned, now=now, params=settings)
+                if not_close is None:
+                    return unknown(UnknownReason.STALE_FIX, index)
+                return _apart_estimate(
+                    ApartBasis.NOT_RECENTLY_CLOSE, not_close, now=now, quality=(dropped_quality, dropped_speed)
+                )
             return _apart_estimate(
                 ApartBasis.STATIONARY_PEER, stationary, now=now, quality=(dropped_quality, dropped_speed)
             )
@@ -351,7 +375,12 @@ def estimate_together(
     windows = tuple(_window_estimate(spec, closeness_at, settings) for spec in settings.windows)
     recent = windows[0]
     if not recent.known:
-        return unknown(UnknownReason.TOO_LITTLE_COVERAGE, None, windows)
+        not_close = _apart_by_no_recent_closeness((track_a, track_b), cleaned, now=now, params=settings)
+        if not_close is None:
+            return unknown(UnknownReason.TOO_LITTLE_COVERAGE, None, windows)
+        return _apart_estimate(
+            ApartBasis.NOT_RECENTLY_CLOSE, not_close, now=now, quality=(dropped_quality, dropped_speed)
+        )
     known = [window for window in windows if window.closeness is not None]
     total_weight = sum(window.weight for window in known)
     confidence = sum(window.weight * (window.closeness or 0.0) for window in known) / total_weight
@@ -423,6 +452,7 @@ def pair_closeness(
 
 _COMPARE_TOLERANCE: Final[float] = 1e-9
 _EARTH_RADIUS_M: Final[float] = 6_371_000.0
+_HOME_WIFI_REPORT_FRESH_S: Final[float] = 1200.0
 _STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
@@ -450,6 +480,103 @@ def _apart_by_coarse_fixes(
     if distance_m - slack_m - reach_m < params.far_m:
         return None
     return first, second, distance_m
+
+
+def _apart_by_home_wifi(
+    tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
+    cleaned: tuple[CleanTrack, CleanTrack],
+    *,
+    now: float,
+    params: TogetherParams,
+) -> tuple[TrackFix, TrackFix, float] | None:
+    """Return both fixes and their distance when one user is at home on the Wi-Fi and the other is clearly away.
+
+    The user at home is the one whose newest report, at most ``_HOME_WIFI_REPORT_FRESH_S`` old, was made on the
+    home network (a repeated old fix still counts: the report says where the phone is). The other user needs a
+    fresh good fix that is not on the home network, and the distance beyond both accuracy circles must be at least
+    ``far_m``, and the other user's track must not have been near the reported position (they may have left it
+    together). Nobody arrives in the same vehicle as a person who is already home.
+    """
+    for home in (0, 1):
+        reports = [
+            fix
+            for fix in tracks[home]
+            if fix.reported_at is not None
+            and math.isfinite(fix.reported_at)
+            and fix.reported_at <= now
+            and _has_position(fix)
+        ]
+        if not reports:
+            continue
+        newest = max(reports, key=lambda fix: fix.reported_at or 0.0)
+        if not newest.home_wifi or now - (newest.reported_at or 0.0) > _HOME_WIFI_REPORT_FRESH_S:
+            continue
+        if newest.accuracy_m is None or not math.isfinite(newest.accuracy_m) or newest.accuracy_m < 0.0:
+            # Without a usable accuracy the cached position proves no separation (a missing value is not zero).
+            continue
+        good_fixes = cleaned[1 - home].fixes
+        if not good_fixes:
+            continue
+        away = good_fixes[-1]
+        if away.home_wifi or now - away.at > params.freshness_s:
+            continue
+        retained = set(good_fixes)
+        if any(
+            fix.at >= away.at and not fix.report_only and _has_position(fix) and fix not in retained
+            for fix in tracks[1 - home]
+        ):
+            # A report that cleaning dropped (too coarse, or the less accurate twin of an equal-time pair) and is
+            # not older than the fix used here may put the user somewhere else.
+            continue
+        distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
+        slack_m = newest.accuracy_m + (away.accuracy_m or 0.0)
+        if distance_m - slack_m < params.far_m:
+            continue
+        if any(
+            _haversine_m(newest.lat, newest.lon, fix.lat, fix.lon) - newest.accuracy_m - (fix.accuracy_m or 0.0)
+            < params.far_m
+            for fix in cleaned[1 - home].fixes
+        ):
+            # The other user was recently at the reported position, so the two may have left it together.
+            continue
+        return (newest, away, distance_m) if home == 0 else (away, newest, distance_m)
+    return None
+
+
+def _apart_by_no_recent_closeness(
+    tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
+    cleaned: tuple[CleanTrack, CleanTrack],
+    *,
+    now: float,
+    params: TogetherParams,
+) -> tuple[TrackFix, TrackFix, float] | None:
+    """Return both newest fixes and their distance when the users were never close in the last few minutes.
+
+    Each instant of the last ``recent_close_window_s`` takes a user's interpolated position, or their newest good
+    fix at or before it (a phone that stopped reporting is assumed to stay where it was). Any instant with some
+    closeness is evidence the pair may still be together, so the estimate stays unknown. A user without a good fix
+    has no position to compare, so that stays unknown too. A newer fix that quality filtering dropped is still a
+    sign of where its user is: when its circle reaches within ``far_m`` of the other user, or it has no usable
+    accuracy to rule that out, the pair stays unknown.
+    """
+    first, second = cleaned[0].fixes, cleaned[1].fixes
+    if not first or not second:
+        return None
+    if _newer_dropped_fix_may_be_close(tracks, cleaned, now=now, params=params):
+        return None
+    window_start = now - params.recent_close_window_s
+    # The regular samples end at now; two fast users can also be close only at a moment a fix was recorded.
+    instants = {now - index * params.step_s for index in range(int(params.recent_close_window_s // params.step_s) + 1)}
+    instants.update(fix.at for fixes in (first, second) for fix in fixes if window_start <= fix.at <= now)
+    for instant in sorted(instants, reverse=True):
+        position_a = _position_at(first, instant)
+        position_b = _position_at(second, instant)
+        if position_a is None or position_b is None:
+            continue
+        if pair_closeness(position_a, position_b, params=params)[1] > 0.0:
+            return None
+    newest_a, newest_b = first[-1], second[-1]
+    return newest_a, newest_b, _haversine_m(newest_a.lat, newest_a.lon, newest_b.lat, newest_b.lon)
 
 
 def _apart_by_stationary_peer(
@@ -591,6 +718,40 @@ def _is_good_quality(fix: TrackFix, params: TogetherParams) -> bool:
     return 0.0 <= fix.accuracy_m <= params.accuracy_limit_m
 
 
+def _newer_dropped_fix_may_be_close(
+    tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
+    cleaned: tuple[CleanTrack, CleanTrack],
+    *,
+    now: float,
+    params: TogetherParams,
+) -> bool:
+    """Whether a fix newer than a user's newest good one, within the window, may put that user near the other."""
+    window_start = now - params.recent_close_window_s
+    for index in (0, 1):
+        newest_good_at = cleaned[index].fixes[-1].at
+        retained = set(cleaned[index].fixes)
+        for fix in tracks[index]:
+            if (
+                fix.report_only
+                or not _has_position(fix)
+                or not newest_good_at <= fix.at <= now
+                or fix.at < window_start
+            ):
+                continue
+            other = _position_at(cleaned[1 - index].fixes, fix.at)
+            if other is None:
+                if fix in retained:
+                    continue
+                # The other user has no position yet at that moment, so a dropped report cannot be ruled out.
+                return True
+            if fix.accuracy_m is None or not math.isfinite(fix.accuracy_m) or fix.accuracy_m < 0.0:
+                return True
+            distance_m = _haversine_m(fix.lat, fix.lon, other.lat, other.lon)
+            if distance_m - fix.accuracy_m - other.accuracy_m < params.far_m:
+                return True
+    return False
+
+
 def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack, params: TogetherParams) -> TrackFix | None:
     """The newest fix, good or coarse, with a valid position and a reported accuracy of any size.
 
@@ -610,6 +771,22 @@ def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack, params: Together
         and fix.accuracy_m >= 0.0
     ]
     return max((*cleaned.fixes, *coarse), key=lambda fix: (fix.at, -(fix.accuracy_m or 0.0)), default=None)
+
+
+def _position_at(fixes: Sequence[TrackFix], instant: float) -> InterpolatedPosition | None:
+    """The position at ``instant``: interpolated between its bracketing fixes, else the newest fix once it has passed.
+
+    A gap between two fixes is bridged however long it is (two phones in one moving car reporting once a minute
+    still track each other), while a phone that stopped reporting is assumed to stay where it was. An instant
+    before the first fix has no position.
+    """
+    between = interpolate_position(fixes, instant, max_gap_s=math.inf)
+    if between is not None:
+        return between
+    if not fixes or instant < fixes[0].at:
+        return None
+    fix = fixes[-1]
+    return InterpolatedPosition(accuracy_m=fix.accuracy_m or 0.0, lat=fix.lat, lon=fix.lon)
 
 
 def _speed_mps(first: TrackFix, second: TrackFix) -> float:

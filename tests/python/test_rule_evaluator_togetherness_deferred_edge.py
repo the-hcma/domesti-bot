@@ -206,15 +206,16 @@ class _Rig:
 
 
 async def _drive_to_stale_peer_arrival(rig: _Rig) -> None:
-    """Henrique walks home from 800 m north; Kristen stays 800 m south but goes quiet.
+    """Henrique walks home from 800 m north with Kristen right behind him, but her phone goes quiet.
 
-    The walk takes 360 s so the geofence enter is not dwell-suppressed (a user
-    must have been outside for at least 300 s for an enter to count).
+    Kristen was beside him within the last five minutes, so her stale fix leaves the pair unknown instead of
+    apart. The walk takes 360 s so the geofence enter is not dwell-suppressed (a user must have been outside
+    for at least 300 s for an enter to count).
     """
     await rig.report("henrique", 0.0, north_m=800.0)
-    await rig.report("kristen", 0.0, north_m=-800.0)
+    await rig.report("kristen", 0.0, north_m=790.0)
     await rig.report("henrique", 200.0, north_m=400.0)
-    await rig.report("kristen", 310.0, north_m=-810.0)
+    await rig.report("kristen", 310.0, north_m=130.0)
     await rig.report("henrique", 360.0, north_m=10.0)
 
 
@@ -727,7 +728,7 @@ async def test_peer_re_sending_an_old_fix_far_away_does_not_defer_the_alone_arri
     assert rig.coordinator.schedule_request_with_reason.call_args_list == []
 
 
-async def test_peer_re_sending_an_old_fix_once_still_defers_the_alone_arrival(
+async def test_peer_re_sending_an_old_fix_once_that_was_never_close_settles_the_alone_arrival(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -738,8 +739,8 @@ async def test_peer_re_sending_an_old_fix_once_still_defers_the_alone_arrival(
     await rig.report("kristen", 300.0, north_m=-400_000.0, accuracy_m=19, fix_at_s=0.0)
     await rig.report("henrique", 360.0, north_m=10.0)
 
-    assert rig.device.calls == []
-    assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
+    assert rig.device.calls == ["on"]
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
 
 
 async def test_stationary_peer_reports_older_than_the_walkback_window_still_count(

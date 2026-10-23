@@ -23,10 +23,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Final, NamedTuple
 
 from app.location_report import location_epoch_to_iso_z
-from app.users_together import TogetherEstimate
+from app.users_together import ApartBasis, TogetherEstimate
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +93,8 @@ class TogetherTracker:
         """Update the pair's state with ``estimate`` and return the event it caused, if any."""
         users, min_confidence = key.users, key.min_confidence
         episode = self._episodes.get(key)
-        if estimate.confidence is None or estimate.anchor is None:
+        if estimate.confidence is None or estimate.anchor is None or estimate.apart_basis in _EVIDENCE_LIGHT_BASES:
+            # Missing or stale data (including "not close for minutes" judged from it) is not a separation.
             if episode is not None:
                 episode.unknown_evaluations += 1
             return None
@@ -185,6 +186,10 @@ def format_together_event(
         f"min_confidence={event.min_confidence:.2f} near_m={event.near_m:g} far_m={event.far_m:g} "
         f"reason=clearly_apart rules={rules}"
     )
+
+
+# Apart verdicts that rest on missing or stale data rather than on a measured separation.
+_EVIDENCE_LIGHT_BASES: Final = frozenset({ApartBasis.HOME_WIFI, ApartBasis.NOT_RECENTLY_CLOSE})
 
 
 @dataclass(slots=True)

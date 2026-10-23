@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from app.api.schemas import (
     AnyConditionsCondition,
+    GeofenceOut,
     RuleConditionOut,
     RuleConditionsOut,
     RuleOut,
@@ -19,6 +20,7 @@ from app.api.schemas import (
     UserLocationOut,
     UsersTogetherCondition,
 )
+from app.automation_rules_loader import AutomationRulesLoadError
 from app.device_enums import RuleTrigger
 from app.rule_conditions import (
     RuleEvaluationContext,
@@ -76,13 +78,24 @@ def _history(
     return [_location(last_at - index * every_s, **kwargs) for index in range(count + 1)]
 
 
+_HOME_AREA = GeofenceOut(
+    center_lat=_LAT0, center_lon=_LON0, enabled=True, geofence_id="home", label="Home", radius_m=250
+)
+
+
+@pytest.fixture(autouse=True)
+def _settings_without_file_io(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The togetherness pairs read the home settings; keep the tests off the operator's rules file."""
+    monkeypatch.setattr("app.rule_conditions.load_settings_location", lambda: _SETTINGS)
+
+
 def _ctx(
     histories: dict[str, list[UserLocationOut]], *, home_ssid: dict[str, str | None] | None = None
 ) -> RuleEvaluationContext:
     """A context whose per-user history is newest-first and whose latest location is the newest fix."""
     names = {user_id: user_id.upper() for user_id in histories}
     return RuleEvaluationContext(
-        geofences=(),
+        geofences=(_HOME_AREA,),
         now=datetime.fromtimestamp(_NOW, tz=_TZ),
         roster_user_id_lookup=build_roster_user_id_lookup(list(names)),
         sun=compute_rules_sun_out(_SETTINGS, now=datetime.fromtimestamp(_NOW, tz=_TZ)),
@@ -509,13 +522,14 @@ def test_a_peer_re_sending_an_old_fix_far_away_is_apart_in_both_forms() -> None:
     assert "treated as not having moved" in together.detail
 
 
-def test_a_peer_re_sending_an_old_fix_stays_unknown_with_a_single_report() -> None:
+def test_a_peer_re_sending_an_old_fix_with_a_single_report_is_apart_because_it_was_never_close() -> None:
     ctx = _ctx({"user-a": _history(), "user-b": _stationary_peer_history()[:1]})
 
     row = _row(_rule(expected=False), ctx)
 
-    assert row.met is False
-    assert "unknown" in row.detail
+    assert row.met is True
+    assert "treated as not having moved" not in row.detail
+    assert "not within" in row.detail
 
 
 def test_a_future_dated_report_elsewhere_keeps_a_re_sent_fix_from_counting_as_stationary() -> None:
@@ -526,5 +540,79 @@ def test_a_future_dated_report_elsewhere_keeps_a_re_sent_fix_from_counting_as_st
 
     row = _row(_rule(expected=False), ctx)
 
-    assert row.met is False
-    assert "unknown" in row.detail
+    assert row.met is True
+    assert "treated as not having moved" not in row.detail
+
+
+def _home_wifi_peer_history(*, ssid: str = "HomeNet", north_m: float = 250.0) -> list[UserLocationOut]:
+    """A phone at home on Wi-Fi that re-sends one cached fix in every periodic report."""
+    cached = _location(_NOW - 11_000.0, accuracy_m=19, connection_type="w", wifi_ssid=ssid).model_copy(
+        update={"lat": _LAT0 + north_m / _M_PER_DEG, "lon": _LON0}
+    )
+    return [cached.model_copy(update={"reported_at": _iso(_NOW - age)}) for age in (600.0, 1_500.0)]
+
+
+def test_a_peer_on_the_home_wifi_is_apart_from_a_user_arriving_from_outside() -> None:
+    ctx = _ctx({"user-a": _history(), "user-b": _home_wifi_peer_history()}, home_ssid={"user-b": "HomeNet"})
+
+    alone = _row(_rule(expected=False), ctx)
+    together = _row(_rule(expected=True), ctx)
+
+    assert alone.met is True
+    assert together.met is False
+    assert "home Wi-Fi" in alone.detail
+    assert "unknown" not in alone.detail
+
+
+def test_a_peer_on_another_wifi_is_not_apart_by_the_home_wifi() -> None:
+    ctx = _ctx(
+        {"user-a": _history(), "user-b": _home_wifi_peer_history(ssid="Elsewhere")},
+        home_ssid={"user-b": "HomeNet"},
+    )
+
+    assert "home Wi-Fi" not in _row(_rule(expected=False), ctx).detail
+
+
+def test_a_peer_without_a_configured_home_wifi_is_not_apart_by_the_home_wifi() -> None:
+    ctx = _ctx({"user-a": _history(), "user-b": _home_wifi_peer_history()})
+
+    assert "home Wi-Fi" not in _row(_rule(expected=False), ctx).detail
+
+
+def test_a_peer_that_was_never_close_recently_is_apart_and_the_detail_says_why() -> None:
+    peer = [_location(_NOW - 120.0, accuracy_m=19).model_copy(update={"lat": _LAT0 + 5_000.0 / _M_PER_DEG})]
+    ctx = _ctx({"user-a": _history(), "user-b": peer})
+
+    alone = _row(_rule(expected=False), ctx)
+
+    assert alone.met is True
+    assert "not within" in alone.detail
+    assert "unknown" not in alone.detail
+
+
+def test_a_home_wifi_report_with_a_fix_far_from_home_is_not_evidence() -> None:
+    # The phone is on the home network but its cached fix is 600 m away, so the coordinates cannot show where it is.
+    ctx = _ctx(
+        {"user-a": _history(), "user-b": _home_wifi_peer_history(north_m=600.0)}, home_ssid={"user-b": "HomeNet"}
+    )
+
+    assert "home Wi-Fi" not in _row(_rule(expected=False), ctx).detail
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [AutomationRulesLoadError("Expected a readable rules file, got none"), OSError("Expected a rules file, got EIO")],
+)
+def test_an_unreadable_settings_file_only_removes_the_home_wifi_basis(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    def _unreadable() -> Any:
+        raise failure
+
+    monkeypatch.setattr("app.rule_conditions.load_settings_location", _unreadable)
+    ctx = _ctx({"user-a": _history(), "user-b": _home_wifi_peer_history()}, home_ssid={"user-b": "HomeNet"})
+
+    row = _row(_rule(expected=False), ctx)
+
+    assert "home Wi-Fi" not in row.detail
+    assert row.met is True
