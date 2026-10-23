@@ -42,8 +42,9 @@ ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-dela
 # and it does not cover 32-bit calls on a host that also runs 32-bit x86 code, so it is paired with
 # ``SystemCallArchitectures=native``. ``PrivateTmp`` and ``ProtectSystem`` need a mount namespace, which a user
 # manager builds inside an unprivileged user namespace: where that is not allowed
-# (``kernel.apparmor_restrict_unprivileged_userns=1``) systemd starts the unit without them and without an error, so
-# they take effect only on hosts that allow it (see the unit hardening note in docs/AGENTS.md for how to check).
+# (``kernel.apparmor_restrict_unprivileged_userns=1``) the Ubuntu 24.04 host with systemd 255 where this was measured
+# starts the unit without them and without an error, so verify the effective behavior on each target host (see the
+# unit hardening note in docs/AGENTS.md for how to check).
 # ``ProtectHome`` and ``ProtectSystem=strict`` stay off on purpose: the service writes its log, discovery cache and
 # rules under the home directory and its checkout. ``AF_NETLINK`` is the C library's interface listing (mDNS, SSDP
 # and UDP discovery); raw packet sockets are not used.
