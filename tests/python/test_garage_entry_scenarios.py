@@ -16,12 +16,23 @@ from app.automation_rules_loader import load_automation_rules_bundle
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
-from app.location_history_retention import default_location_history_retention
+from app.location_history_retention import (
+    DEFAULT_LOCATION_HISTORY_MAX_AGE_S,
+    DEFAULT_LOCATION_HISTORY_MIN_KEEP_COUNT,
+    LocationHistoryRetention,
+)
 from app.presence_store import UserLocationRecord, upsert_user_location
 from app.rule_actions import RuleNotificationEmailOutcome
 from app.rule_evaluator import RuleEvaluator
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
 
+# The simulated clock is years in the past, so the default 24 hour window would prune every reading but the newest
+# 20; production keeps the whole day, and the recent-closeness rule reads the last few minutes of both tracks.
+_FULL_HISTORY = LocationHistoryRetention(
+    max_age_s=DEFAULT_LOCATION_HISTORY_MAX_AGE_S,
+    min_keep_count=DEFAULT_LOCATION_HISTORY_MIN_KEEP_COUNT,
+    unlimited=True,
+)
 _EXAMPLE = Path(__file__).resolve().parents[2] / "automation-rules.json.example"
 _HENRIQUE_ALONE = "garage-entry-alone-open-henriques-side"
 _HOME = (41.194072, -73.888325)
@@ -157,7 +168,7 @@ class _Rig:
                     reported_at=at,
                     source="test",
                 ),
-                retention=default_location_history_retention(),
+                retention=_FULL_HISTORY,
             )
             await self.evaluator.on_location_update(user_id)
 
@@ -246,7 +257,11 @@ async def test_henrique_arriving_alone_opens_his_side_when_kristen_is_already_ho
     at_home = _car(_T0, arrives_at=_T0, lateral_m=20.0)
     try:
         await rig.drive(
-            [(_T0 + 30.0 * index, "kristen", at_home) for index in range(int((until - _T0) // 30.0) + 1)]
+            # Kristen has been home for a while: her first report is well before Henrique's drive.
+            [
+                (_T0 - 600.0 + 30.0 * index, "kristen", at_home)
+                for index in range(int((until - _T0 + 600.0) // 30.0) + 1)
+            ]
             + _approach(
                 "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
             ),
@@ -278,6 +293,28 @@ async def test_a_passenger_phone_that_went_quiet_leaves_the_entry_undecided_and_
 
 
 @pytest.mark.asyncio
+async def test_a_passenger_phone_quiet_for_longer_than_the_window_counts_as_not_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accepted trade-off: no closeness for 5 minutes means not together, so the driver's side opens."""
+    rig = _Rig(tmp_path, monkeypatch)
+    arrives_at = _T0 + 700.0
+    until = arrives_at + 120.0
+    try:
+        await rig.drive(
+            _approach(
+                "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
+            )
+            + _approach("kristen", arrives_at=arrives_at, every_s=19.0, offset_s=3.0, lateral_m=3.0, until=_T0 + 300.0),
+        )
+        assert [rule_id for rule_id, _line in rig.opened] == [_HENRIQUE_ALONE]
+        assert rig.opened[0][1].startswith("Open Main garage left")
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
 async def test_a_slow_driver_phone_delays_the_together_rule_to_the_drivers_own_entry_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -301,22 +338,25 @@ async def test_a_slow_driver_phone_delays_the_together_rule_to_the_drivers_own_e
 
 
 @pytest.mark.asyncio
-async def test_a_home_phone_with_no_recent_fix_leaves_an_arrival_alone_undecided_and_opens_nothing(
+async def test_a_home_phone_with_no_recent_fix_still_lets_an_arrival_alone_open_the_drivers_side(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Known gap: a phone that stopped reporting cannot be told apart from one in the car, so nothing opens."""
+    """A phone that stopped reporting at home has not been close to the arriving car for minutes: they are apart."""
     rig = _Rig(tmp_path, monkeypatch)
     arrives_at = _T0 + 700.0
     until = arrives_at + 120.0
     at_home = _car(_T0, arrives_at=_T0, lateral_m=20.0)
     try:
         await rig.drive(
-            [(_T0, "kristen", at_home)]
+            [(_T0 - 600.0, "kristen", at_home)]
             + _approach(
                 "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
             ),
         )
-        assert rig.opened == []
+        assert [rule_id for rule_id, _line in rig.opened] == [_HENRIQUE_ALONE]
+        assert rig.opened[0][1].startswith("Open Main garage left")
+        crossing = arrives_at - 250.0 / _SPEED_MPS
+        assert crossing <= rig.opened_at[0] <= crossing + _REPORT_EVERY_S + 2.0
     finally:
         await rig.close()

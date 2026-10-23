@@ -60,6 +60,8 @@ from app.device_enums import (
 )
 from app.device_rule_wake import DeviceBoolTransition, format_bool_state_label
 from app.home_location import try_resolve_home_location
+from app.presence_connection_type import connection_type_is_wifi
+from app.presence_wifi import normalize_wifi_ssid, wifi_ssids_match
 from app.rule_actions import (
     cached_ep1_is_occupied,
     cached_ep1_reading,
@@ -2396,6 +2398,16 @@ def _location_fix_at_epoch(location: UserLocationOut) -> float | None:
     return None
 
 
+def _location_on_home_wifi(location: UserLocationOut, ctx: RuleEvaluationContext, roster_user_id: str) -> bool:
+    """Whether this report was made on the user's configured home Wi-Fi (the network name is what matters)."""
+    home_ssid = normalize_wifi_ssid(ctx.user_home_wifi_ssid.get(roster_user_id))
+    return (
+        home_ssid is not None
+        and connection_type_is_wifi(location.connection_type)
+        and wifi_ssids_match(location.wifi_ssid, home_ssid)
+    )
+
+
 def _location_reported_at_epoch(location: UserLocationOut) -> float:
     return datetime.fromisoformat(
         location.reported_at.replace("Z", "+00:00"),
@@ -3126,6 +3138,17 @@ def _together_detail(condition: UsersTogetherCondition, pair: TogetherPair, rule
             f"(one has no reported accuracy of {params.accuracy_limit_m:g} m or better, "
             f"but is too far away for that to matter)"
         )
+    if estimate.apart_basis is ApartBasis.HOME_WIFI:
+        return (
+            f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
+            f"(one phone reported on the home Wi-Fi, so that person is already home, and the other is away from it)"
+        )
+    if estimate.apart_basis is ApartBasis.NOT_RECENTLY_CLOSE:
+        return (
+            f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
+            f"(not within {_format_distance_m(params.far_m)} of each other in the last "
+            f"{_format_dwell_duration_s(params.recent_close_window_s)})"
+        )
     if estimate.apart_basis is ApartBasis.STATIONARY_PEER:
         return (
             f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
@@ -3255,6 +3278,7 @@ def _track_for_user(ctx: RuleEvaluationContext, roster_user_id: str) -> list[Tra
                 TrackFix(
                     accuracy_m=None if location.accuracy_m is None else float(location.accuracy_m),
                     at=measured_at,
+                    home_wifi=_location_on_home_wifi(location, ctx, roster_user_id),
                     lat=location.lat,
                     lon=location.lon,
                     # A fix dated after now (a phone clock running ahead) is no measurement of the present, but a
