@@ -38,7 +38,7 @@ StandardError=append:%h/scratch/domesti-bot/domesti-bot.log
 ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
 
 # Baseline hardening (domesti-bot#879, #909). ``NoNewPrivileges`` is enforced everywhere.
-# ``RestrictAddressFamilies`` is enforced on x86-64 and aarch64 but ignored on 32-bit x86, s390, mips and ppc ABIs,
+# ``RestrictAddressFamilies`` is enforced on x86-64 and aarch64 but ignored on 32-bit x86, s390, s390x, mips and ppc ABIs,
 # and it does not cover 32-bit calls on a host that also runs 32-bit x86 code, so it is paired with
 # ``SystemCallArchitectures=native``. ``PrivateTmp`` and ``ProtectSystem`` need a mount namespace, which a user
 # manager builds inside an unprivileged user namespace: where that is not allowed
