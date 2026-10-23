@@ -1033,3 +1033,22 @@ def test_a_dropped_fix_at_the_newest_fix_time_is_still_checked_for_closeness() -
 
     assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
     assert estimate_together([*arriving, twin], peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_dropped_twin_at_the_away_users_fix_time_vetoes_the_home_wifi_basis() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    arriving = _track(_times(every_s=10.0, last_at=_NOW - 20.0))
+    # A less accurate fix at the same instant is dropped by the cleaning but sits next to the peer.
+    twin = TrackFix(accuracy_m=30.0, at=arriving[-1].at, lat=_LAT0 + 250.0 / _M_PER_DEG, lon=_LON0)
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together([*arriving, twin], peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_dropped_report_stays_inconclusive_when_the_other_user_has_no_position_yet() -> None:
+    peer = _repeated_fix(north_m=5_000.0, fix_age_s=90.0, report_ages_s=[80.0])
+    quiet = [_fix(_NOW - 200.0), _coarse_fix(_NOW - 100.0, north_m=5_000.0)]
+    without_the_coarse_report = quiet[:1]
+
+    assert estimate_together(without_the_coarse_report, peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
+    assert estimate_together(quiet, peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX

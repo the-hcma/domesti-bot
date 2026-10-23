@@ -520,11 +520,13 @@ def _apart_by_home_wifi(
         away = good_fixes[-1]
         if away.home_wifi or now - away.at > params.freshness_s:
             continue
+        retained = set(good_fixes)
         if any(
-            fix.at > away.at and not fix.report_only and _has_position(fix) and not _is_good_quality(fix, params)
+            fix.at >= away.at and not fix.report_only and _has_position(fix) and fix not in retained
             for fix in tracks[1 - home]
         ):
-            # A newer report that quality filtering dropped may put the user somewhere else.
+            # A report that cleaning dropped (too coarse, or the less accurate twin of an equal-time pair) and is
+            # not older than the fix used here may put the user somewhere else.
             continue
         distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
         slack_m = newest.accuracy_m + (away.accuracy_m or 0.0)
@@ -724,6 +726,7 @@ def _newer_dropped_fix_may_be_close(
     window_start = now - params.recent_close_window_s
     for index in (0, 1):
         newest_good_at = cleaned[index].fixes[-1].at
+        retained = set(cleaned[index].fixes)
         for fix in tracks[index]:
             if (
                 fix.report_only
@@ -734,7 +737,10 @@ def _newer_dropped_fix_may_be_close(
                 continue
             other = _position_at(cleaned[1 - index].fixes, fix.at)
             if other is None:
-                continue
+                if fix in retained:
+                    continue
+                # The other user has no position yet at that moment, so a dropped report cannot be ruled out.
+                return True
             if fix.accuracy_m is None or not math.isfinite(fix.accuracy_m) or fix.accuracy_m < 0.0:
                 return True
             distance_m = _haversine_m(fix.lat, fix.lon, other.lat, other.lon)
