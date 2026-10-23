@@ -37,5 +37,14 @@ StandardOutput=append:%h/scratch/domesti-bot/domesti-bot.log
 StandardError=append:%h/scratch/domesti-bot/domesti-bot.log
 ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
 
+# Baseline hardening (domesti-bot#879). ``ProtectHome`` and ``ProtectSystem=strict`` stay off on
+# purpose: the service writes its log, discovery cache and rules under the home directory and
+# its checkout. ``AF_NETLINK`` is the C library's interface listing (mDNS, SSDP and UDP
+# discovery); raw packet sockets are not used.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+
 [Install]
 WantedBy=default.target
