@@ -35,7 +35,7 @@ Restart=always
 RestartSec=5
 StandardOutput=append:%h/scratch/domesti-bot/domesti-bot.log
 StandardError=append:%h/scratch/domesti-bot/domesti-bot.log
-ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
+ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 20 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
 
 # Baseline hardening (domesti-bot#879, #909). ``NoNewPrivileges`` is enforced everywhere.
 # ``RestrictAddressFamilies`` is enforced on x86-64 and aarch64 but ignored on 32-bit x86, s390, s390x, mips and ppc ABIs,
