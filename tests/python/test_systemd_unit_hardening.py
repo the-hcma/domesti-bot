@@ -5,8 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_SYSTEM_TEMPLATE = _REPO_ROOT / "production" / "systemd" / "domesti-bot-server.service.template"
 _USER_UNIT = _REPO_ROOT / "etc" / "systemd" / "domesti-bot.service"
+_DEFAULT_START_TIMEOUT_S = 90
+_MIN_HEALTH_WINDOW_S = 20
 # What the process needs: sockets for HTTP, mDNS/SSDP and UDP discovery (AF_INET*), the C library's
 # interface listing (AF_NETLINK) and local IPC (AF_UNIX). Raw packet sockets are not used.
 _REQUIRED_ADDRESS_FAMILIES = frozenset({"AF_INET", "AF_INET6", "AF_NETLINK", "AF_UNIX"})
@@ -84,15 +89,20 @@ def test_user_unit_keeps_the_home_directory_writable_and_the_syscalls_unfiltered
     assert assignments.get("ProtectSystem") != ["strict"]
 
 
-def test_user_unit_waits_at_least_twenty_seconds_for_the_health_check_to_answer() -> None:
+@pytest.mark.parametrize("unit", [_USER_UNIT, _SYSTEM_TEMPLATE], ids=["user-unit", "system-template"])
+def test_unit_waits_twenty_seconds_without_outlasting_the_start_timeout_for_the_health_check(unit: Path) -> None:
     # A start that is slower than the health window is reported as failed and restarted although nothing is wrong
-    # (domesti-bot#911), so the retries times the delay between them must cover a slow start.
-    command = _single(_USER_UNIT, "ExecStartPost")
+    # (domesti-bot#911), so the retries times the delay between them must cover a slow start. A refused connection
+    # is only retried with --retry-connrefused, and systemd's default start timeout (90 s) must stay out of reach.
+    command = _single(unit, "ExecStartPost")
     retries = re.search(r"--retry\s+(\d+)", command)
     delay = re.search(r"--retry-delay\s+(\d+)", command)
     assert retries is not None and delay is not None, f"Expected --retry and --retry-delay in {command!r}"
+    assert "--retry-connrefused" in command.split(), f"Expected --retry-connrefused in {command!r}"
     window_s = int(retries.group(1)) * int(delay.group(1))
-    assert window_s >= 20, f"Expected a health window of at least 20 seconds, got {window_s}"
+    assert _MIN_HEALTH_WINDOW_S <= window_s < _DEFAULT_START_TIMEOUT_S, (
+        f"Expected a health window of {_MIN_HEALTH_WINDOW_S} to {_DEFAULT_START_TIMEOUT_S - 1} seconds, got {window_s}"
+    )
 
 
 def test_the_parser_ignores_other_sections_and_comments(tmp_path: Path) -> None:

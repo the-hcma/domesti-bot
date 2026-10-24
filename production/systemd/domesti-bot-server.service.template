@@ -38,7 +38,7 @@ Restart=on-failure
 RestartSec=5
 
 # Smoke the bound port after the process starts (mirrors fpdf's ExecStartPost pattern).
-ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 12 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
+ExecStartPost=/usr/bin/curl --silent --fail --max-time 5 --retry 20 --retry-delay 1 --retry-connrefused http://127.0.0.1:8003/health
 
 # Hardening (safe for this workload; adjust if you add writable paths outside the repo).
 NoNewPrivileges=yes
