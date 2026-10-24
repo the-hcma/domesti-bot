@@ -84,6 +84,17 @@ def test_user_unit_keeps_the_home_directory_writable_and_the_syscalls_unfiltered
     assert assignments.get("ProtectSystem") != ["strict"]
 
 
+def test_user_unit_waits_at_least_twenty_seconds_for_the_health_check_to_answer() -> None:
+    # A start that is slower than the health window is reported as failed and restarted although nothing is wrong
+    # (domesti-bot#911), so the retries times the delay between them must cover a slow start.
+    command = _single(_USER_UNIT, "ExecStartPost")
+    retries = re.search(r"--retry\s+(\d+)", command)
+    delay = re.search(r"--retry-delay\s+(\d+)", command)
+    assert retries is not None and delay is not None, f"Expected --retry and --retry-delay in {command!r}"
+    window_s = int(retries.group(1)) * int(delay.group(1))
+    assert window_s >= 20, f"Expected a health window of at least 20 seconds, got {window_s}"
+
+
 def test_the_parser_ignores_other_sections_and_comments(tmp_path: Path) -> None:
     unit = tmp_path / "x.service"
     unit.write_text("[Unit]\nNoNewPrivileges=false\n[Service]\n# PrivateTmp=false\nPrivateTmp=true\n", encoding="utf-8")
