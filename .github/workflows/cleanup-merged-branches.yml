@@ -19,20 +19,6 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
-          is_graphite_mq_branch() {
-            case "${1}" in
-              gtmq_batch_*|gtmq_merge_*|gtmq_base_no_ci_batch_*) return 0 ;;
-              *) return 1 ;;
-            esac
-          }
-
-          is_graphite_base_branch() {
-            case "${1}" in
-              graphite-base/*) return 0 ;;
-              *) return 1 ;;
-            esac
-          }
-
           is_repo_practices_branch() {
             case "${1}" in
               repo-practices/*) return 0 ;;
@@ -123,9 +109,6 @@ jobs:
 
               if [[ "${pr_merged}" == "true" ]]; then
                 delete_branch=1
-              elif is_graphite_mq_branch "${branch}"; then
-                # Graphite MQ staging branches are ephemeral once their PR closes.
-                delete_branch=1
               elif is_repo_practices_branch "${branch}" \
                 && [[ "${pr_closed_at}" < "${repo_practices_cutoff}" ]]; then
                 # github-repo-lint candidate branches superseded by newer apply-fix PRs.
@@ -133,9 +116,6 @@ jobs:
               elif [[ "${pr_closed_at}" < "${stale_cutoff}" ]]; then
                 delete_branch=1
               fi
-            elif is_graphite_base_branch "${branch}" || is_graphite_mq_branch "${branch}"; then
-              # Graphite restack / MQ branches with no open PR are safe to remove.
-              delete_branch=1
             fi
 
             if [[ "${delete_branch}" -eq 1 ]]; then

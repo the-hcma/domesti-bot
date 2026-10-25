@@ -25,9 +25,10 @@ ${red}refusing direct push to ${protected_branch}${reset} (remote: ${remote_name
 
 ${yellow}Open a PR instead:${reset}
 
-  # Graphite (preferred):
-  gt create feat/<slug> --all --message "<title>"
-  gt submit --no-interactive --publish
+  # Stacked PRs (preferred):
+  gh stack init feat/<slug>
+  git add -A && git commit -m "<title>"
+  gh stack submit --auto --open --remote origin
 
   # Or plain git + gh:
   git checkout -b feat/<slug>

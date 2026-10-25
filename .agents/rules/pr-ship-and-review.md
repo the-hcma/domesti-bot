@@ -43,7 +43,8 @@ Only after §1 quality gates pass. **Read** `.github/stacking-tool` (`graphite` 
 # gt submit --publish --no-interactive
 
 # When marker is gh-stack:
-gh stack init <stack>/<topic>   # or gh stack add for a higher layer
+gh stack init <stack>/<topic>   # or gh stack add <branch> for a higher layer
+#   (the branch argument keeps it non-interactive)
 git add -A && git commit -m 'feat: …'
 gh stack submit --auto --open --remote origin
 ```
@@ -72,6 +73,16 @@ Patch title/body if stale. For multi-paragraph bodies use `--body-file` (see `${
 "${rh}/scripts/gh-issue" create --title '…' --body-file /tmp/issue.md
 ```
 
+### Closing the issue
+
+Say in the PR description whether the merge should close the issue. Default, unless the repository's own `AGENTS.md` states a different convention (that wins):
+
+1. A PR that completes an issue puts `Closes #N.` in its description as its own sentence, so the merge closes the issue. For an issue in another repository, qualify it: `Closes OWNER/REPOSITORY#N.`, because a bare `#N` means an issue in the PR's own repository.
+2. A PR that is only one step of a larger issue says `Part of #N.` and does not close it (for an issue in another repository write `Part of OWNER/REPOSITORY#N.`). The last PR of the series closes the issue, and it must target the default branch when it merges: GitHub ignores a closing keyword on a PR into any other branch (for example a lower layer of a stack), so close the issue explicitly after the work lands.
+3. A PR with a closing keyword is merged only after the user agrees the issue is done, because the merge closes it. The merge confirmation this workflow already requires covers that.
+
+Avoid applying a "no closing keywords" convention to every PR regardless of whether it finishes the issue: finished issues then stay open and need a manual close pass. Spell the keyword the way the "Unlinked closing keywords" failure mode in `${rh}/.agents/rules/github-content-formatting.md` requires.
+
 ## 3. Agent review loop
 
 > **Reply before resolve (required):** For every valid agent review thread (Copilot, Bugbot, CodeRabbit, …), post an **on-thread human reply** as the authenticated operator **before** resolving. Exit code **3** means threads **lack a human reply** — resolving without replying is non-compliant.
@@ -83,6 +94,8 @@ Prefer the built-in loop:
 ```bash
 "${rh}/scripts/wait-for-agent-review" loop --pr <n>
 ```
+
+Run the loop directly as its own tracked background command (for example `run_in_background` in Claude Code), never through a launcher that detaches it, so its own exit notifies the caller; a notification naming a launcher or wrapper is not a loop result (confirm with the process list and the log tail), a wrapper `echo` exit code is not the loop's (read the result it recorded, for example a `loop exit=` line in its log; no first-party script writes such a line), and waiters longer than the harness's background cap must be chunked and re-armed with a clock check at each chunk end. The loop exits **3** when feedback needs a reply or resolve and nothing else pushes that to anyone, so triage immediately on exit 3 (read `check` and `list-feedback`, fix or decline, then reply and resolve by feedback kind — `reply-thread` for review threads, `reply-comment` for issue comments and review bodies — and push). Full detail: canonical Skill §3.
 
 **Early complete:** when all threads are addressed, CI is green, there is **no** pending requested Copilot/Bugbot review, and CodeRabbit’s workflow is **not** running, the loop finishes — no mandatory idle dwell. **12h PR cap** (`AGENT_REVIEW_PR_TIMEOUT`) when review cycles never converge (exit **6** give-up). Per-agent quota caches skip exhausted agents (CodeRabbit, Copilot, Bugbot).
 
@@ -113,4 +126,4 @@ When `check` reports `complete_ready: true`:
 
 `complete_ready` requires an agent sign-off on the current head (not a bare CodeRabbit commit status / rate-limit stub). This emails `AGENT_REVIEW_REPORT_TO`. It does **not** run `gh pr review --approve` (self-approve is skipped; merge stays an explicit operator step).
 
-Do **not** add `merge-it` unless the user explicitly confirms. Org merge path is GitHub auto-merge (`gh pr merge --auto --squash` / Enable auto-merge) when the operator asks to merge.
+Never add the `merge-it` label: it is ignored and the org no longer uses Graphite merge queue. Org merge path is GitHub auto-merge (`gh pr merge --auto --squash` / Enable auto-merge) when the operator asks to merge; a PR that belongs to a gh stack cannot use auto-merge (`Auto-merge is not supported for stacked pull requests`) and is landed with `gh stack merge --yes --squash` with no argument (from the stack's worktree; it lands the whole stack bottom-up, so confirm the user wants every layer merged) or with `scripts/dev/merge-stack --pr <n>`. Check the command's exit status and output, never pipe it through `tail`, and confirm `autoMergeRequest` or the queue entry before waiting.

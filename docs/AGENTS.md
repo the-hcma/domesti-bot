@@ -647,7 +647,7 @@ When adding a new backend, follow the same pattern: a dedicated table, a `load_<
 
 CI lives in `.github/workflows/`:
 
-- **`ci.yml`** — runs on every PR and on `merge_group` (GitHub merge queue; skips legacy Graphite staging branches and already-merged PRs). Jobs after `Guard` run **in parallel**:
+- **`ci.yml`** — runs on every PR and on `merge_group` (GitHub merge queue; skips already-merged PRs). Jobs after `Guard` run **in parallel**:
   - `Python lint & format checks` — one `uv sync --group dev`, then ruff check/format + pyright (via `.github/ci/python-static`)
   - `Pytest (hermetic)` — `uv sync --group dev`, then `uv run pytest -m "not integration and not browser" -n auto --durations=20` (**pytest-xdist**; job `timeout-minutes: 15`; per-test `pytest-timeout` 60s)
   - `Pytest (browser layout)` — `uv sync --group dev`, `playwright install --with-deps chromium`, then `uv run pytest -m "browser and not integration"` (single process; parallel to hermetic job; job `timeout-minutes: 15`)

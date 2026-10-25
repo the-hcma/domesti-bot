@@ -1,9 +1,11 @@
 name: Merged PR Closer
 
-# Open PRs can remain OPEN even after their commits land on main — either
-# because Graphite merged a stack (leaving child PRs open), because GitHub
-# merged the PR but didn't update its state, or because Graphite MQ left
-# behind an open draft group PR after the included PRs already landed.
+# Closes open PRs whose changes already landed on the default branch: either GitHub reports
+# the PR as merged (its head branch is then deleted too), or the PR targets the default branch
+# and its head commit is strictly behind it (the compare API reports "behind"). In that second
+# case the branch is left for the daily stale-branch sweep, because a push can land between the
+# check and a delete. PRs that target another branch (stack children), empty branches and PRs
+# with commits that are not on the default branch are never closed here.
 on:
   push:
     branches: [main]
@@ -16,12 +18,14 @@ permissions:
 jobs:
   close-merged-prs:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Close open PRs that have already been merged
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           open_prs=$(gh api "repos/${REPO}/pulls?state=open&per_page=100" \
@@ -51,56 +55,49 @@ jobs:
                 merged_at: .merged_at,
                 draft: .draft,
                 head_ref: .head.ref,
-                body: .body
+                head_sha: .head.sha,
+                head_repo: (.head.repo.full_name // ""),
+                base_ref: .base.ref
               }')
             title=$(echo "${pr_data}" | jq -r '.title')
             is_merged=$(echo "${pr_data}" | jq -r '.merged')
             merge_time=$(echo "${pr_data}" | jq -r '.merged_at // empty')
             close_reason=""
+            delete_branch=false
 
             if [ "${is_merged}" = "true" ]; then
               close_reason="merged at ${merge_time:-unknown time}"
-            elif [ "$(echo "${pr_data}" | jq -r '.draft')" = "true" ] \
-              && { [[ "$(echo "${pr_data}" | jq -r '.head_ref')" == gtmq_batch_* ]] \
-                || [[ "${title}" == *"[Graphite MQ] Draft PR GROUP:"* ]]; }; then
-              pr_body=$(echo "${pr_data}" | jq -r '.body // ""')
-              included_prs=$(
-                printf '%s\n%s\n' "${title}" "${pr_body}" \
-                  | grep -oE '#[0-9]+|\(PRs [0-9, ]+\)' \
-                  | grep -oE '[0-9]+' \
-                  | sort -u \
-                  | tr '\n' ' '
-              )
-              if [ -z "${included_prs// /}" ]; then
-                echo "PR #${pr}: Graphite MQ draft with no referenced PRs — skipping."
-                continue
-              fi
-              stale_draft=true
-              for included in ${included_prs}; do
-                included_state=$(gh pr view "${included}" --repo "${REPO}" --json state --jq .state)
-                if [ "${included_state}" = "OPEN" ]; then
-                  stale_draft=false
-                  break
-                fi
-              done
-              if [ "${stale_draft}" != "true" ]; then
-                echo "PR #${pr}: Graphite MQ draft still has open included PR(s) — skipping."
-                continue
-              fi
-              close_reason="Graphite MQ draft — included PR(s) already merged or closed"
+              delete_branch=true
             else
-              merge_comment=$(gh api "repos/${REPO}/issues/${pr}/comments" \
-                --jq '[.[] | select(
-                  .performed_via_github_app.slug == "graphite-app" and
-                  (.body | test("Merged by the \\[Graphite merge queue\\]"))
-                )] | first // empty')
-              if [ -z "${merge_comment}" ]; then
+              head_sha=$(echo "${pr_data}" | jq -r '.head_sha')
+              base_ref=$(echo "${pr_data}" | jq -r '.base_ref')
+              compare_status=""
+              if [ "${base_ref}" = "${DEFAULT_BRANCH}" ]; then
+                if ! compare_status=$(gh api "repos/${REPO}/compare/${base_ref}...${head_sha}" \
+                  --jq '.status'); then
+                  echo "PR #${pr}: could not compare ${head_sha} with ${base_ref} — skipping."
+                  continue
+                fi
+              fi
+              if [ "${compare_status}" = "behind" ]; then
+                close_reason="head commit already on ${base_ref}"
+              else
                 echo "PR #${pr}: open and not yet merged — skipping."
                 continue
               fi
-              merge_time=$(echo "${merge_comment}" | jq -r '.body' \
-                | grep -oP '\*\*[^*]+\*\*(?=: Merged)' | tr -d '*' || echo "unknown time")
-              close_reason="merged at ${merge_time}"
+            fi
+
+            # Never act on a fork PR's branch name (it could match an unrelated branch here), and
+            # skip when the head moved while we were comparing.
+            head_repo=$(echo "${pr_data}" | jq -r '.head_repo')
+            if [ "${head_repo}" != "${REPO}" ]; then
+              echo "PR #${pr}: head is not in ${REPO} — skipping."
+              continue
+            fi
+            current_sha=$(gh api "repos/${REPO}/pulls/${pr}" --jq '.head.sha')
+            if [ "${current_sha}" != "$(echo "${pr_data}" | jq -r '.head_sha')" ]; then
+              echo "PR #${pr}: head changed while checking — skipping."
+              continue
             fi
 
             echo "Closing PR #${pr}: \"${title}\" (${close_reason})"
@@ -112,7 +109,9 @@ jobs:
               --method PATCH \
               --field state=closed \
               --silent
-            delete_head_branch "$(echo "${pr_data}" | jq -r '.head_ref')"
+            if [ "${delete_branch}" = "true" ]; then
+              delete_head_branch "$(echo "${pr_data}" | jq -r '.head_ref')"
+            fi
 
             closed_count=$((closed_count + 1))
             summary_rows="${summary_rows}| #${pr} | ${title} | ${close_reason} |\n"

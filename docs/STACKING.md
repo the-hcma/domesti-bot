@@ -2,14 +2,12 @@
 
 Reference for **`gh-stack`** stacked PRs and **GitHub’s native merge queue** on `main`.
 
-Stacking backend is selected by `.github/stacking-tool` (this repo: `gh-stack`). Canonical
-skills live in [repository-helpers](https://github.com/the-hcma/repository-helpers):
+Stacking backend is selected by `.github/stacking-tool` (this repo: `gh-stack`). Canonical skills live in [repository-helpers](https://github.com/the-hcma/repository-helpers):
 
 - [gh-stack skill](https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/gh-stack/SKILL.md)
 - [ship-and-review skill](https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/ship-and-review/SKILL.md)
 
-> **Session start:** run `~/work/ai/repository-helpers/scripts/dev/start-development --refresh`
-> then `start-development` (see `docs/AGENTS.md`).
+> **Session start:** run `~/work/ai/repository-helpers/scripts/dev/start-development --refresh` then `start-development` (see `docs/AGENTS.md`).
 
 ## Quick reference
 
@@ -23,9 +21,7 @@ skills live in [repository-helpers](https://github.com/the-hcma/repository-helpe
 | View stack (agents) | `gh stack view --json` |
 | Enqueue after approval | `gh pr merge <pr> --auto --squash` |
 
-Install the extension once: `gh extension install github/gh-stack`. Prefer
-`scripts/dev/submit-stack` from repository-helpers over bare `gh stack submit`
-(it runs local gates, then `gh stack submit --auto --open --remote origin`).
+Install the extension once: `gh extension install github/gh-stack`. Prefer `scripts/dev/submit-stack` from repository-helpers over bare `gh stack submit` (it runs local gates, then `gh stack submit --auto --open --remote origin`).
 
 ---
 
@@ -41,18 +37,15 @@ After CI is green and the user approves:
 gh pr merge <pr-number> --auto --squash
 ```
 
-Or use **Enable auto-merge** / **Merge when ready** in the GitHub UI. Squash is required
-(Release Please — see [`docs/RELEASING.md`](RELEASING.md)).
+Or use **Enable auto-merge** / **Merge when ready** in the GitHub UI. Squash is required (Release Please — see [`docs/RELEASING.md`](RELEASING.md)).
 
-Do **not** add the `merge-it` label — that enqueues Graphite MQ on other org repos.
+Do **not** add the `merge-it` label: it is ignored, and the org no longer uses the Graphite merge queue.
 
-Dependabot PRs get auto-merge enabled automatically
-(`.github/workflows/dependabot-auto-merge.yml`).
+Dependabot PRs get auto-merge enabled automatically (`.github/workflows/dependabot-auto-merge.yml`).
 
 ### Disable Graphite merge queue
 
-Turn this repo **off** in [Graphite merge queue settings](https://app.graphite.com/settings/merge-queue)
-so Graphite and GitHub do not both try to land PRs.
+Turn this repo **off** in [Graphite merge queue settings](https://app.graphite.com/settings/merge-queue) so Graphite and GitHub do not both try to land PRs.
 
 ### GitHub ruleset (`protect-main`)
 
@@ -110,17 +103,12 @@ gh api -X PUT repos/the-hcma/domesti-bot/rulesets/16365386 --input - <<'JSON'
 JSON
 ```
 
-Repair classic protection / related wiring with
-`~/work/ai/repository-helpers/scripts/github-repo-lint --repo the-hcma/domesti-bot --apply-fix`
-from a clone once the merge queue is enabled.
+Repair classic protection / related wiring with `~/work/ai/repository-helpers/scripts/github-repo-lint --repo the-hcma/domesti-bot --apply-fix` from a clone once the merge queue is enabled.
 
 ### CI and merge queue
 
-- CI **runs** on `merge_group` (required status checks for GitHub’s merge queue) and
-  **ignores pushes** to `gh-readonly-queue/**` so those temporary branches do not
-  double-trigger via the `push` event.
-- Guard still skips legacy Graphite staging (`gtmq_merge_*`) only — do **not** skip
-  `merge_group` / `gh-readonly-queue/*` in Guard or required checks never pass in queue.
+- CI **runs** on `merge_group` (required status checks for GitHub’s merge queue) and **ignores pushes** to `gh-readonly-queue/**` so those temporary branches do not double-trigger via the `push` event.
+- Guard skips only PRs that are already merged — do **not** skip `merge_group` / `gh-readonly-queue/*` in Guard or required checks never pass in queue.
 - `merged-pr-closer.yml` still closes child PRs left open after a stack lands.
 
 ---
