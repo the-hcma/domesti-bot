@@ -19,7 +19,7 @@ Stacking backend is selected by `.github/stacking-tool` (this repo: `gh-stack`).
 | Commit | `git add … && git commit -m 'feat: …'` |
 | Submit / update PRs | `~/work/ai/repository-helpers/scripts/dev/submit-stack` |
 | View stack (agents) | `gh stack view --json` |
-| Enqueue after approval | `gh pr merge <pr> --auto --squash` |
+| Enqueue after approval | `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr>` (`gh pr merge <pr> --auto --squash` outside a stack, `gh stack merge --yes --squash` for a stacked PR) |
 
 Install the extension once: `gh extension install github/gh-stack`. Prefer `scripts/dev/submit-stack` from repository-helpers over bare `gh stack submit` (it runs local gates, then `gh stack submit --auto --open --remote origin`).
 
@@ -36,6 +36,8 @@ After CI is green and the user approves:
 ```bash
 gh pr merge <pr-number> --auto --squash
 ```
+
+A PR that belongs to a gh stack cannot use auto-merge (GitHub answers `Auto-merge is not supported for stacked pull requests`). Land it from the stack's worktree with `gh stack merge --yes --squash` once its required checks have passed (the command fails at once if a check is still running, it does not wait), or let `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr-number>` pick the right command.
 
 Or use **Enable auto-merge** / **Merge when ready** in the GitHub UI. Squash is required (Release Please — see [`docs/RELEASING.md`](RELEASING.md)).
 
@@ -119,7 +121,7 @@ Repair classic protection / related wiring with `~/work/ai/repository-helpers/sc
 2. `gh stack init <name>/<topic>` (then `git commit`); never commit on `main`.
 3. Pre-PR gates in `docs/AGENTS.md` (pyright, pytest, shellcheck, …).
 4. `~/work/ai/repository-helpers/scripts/dev/submit-stack`.
-5. Wait for CI; get user approval; `gh pr merge <pr> --auto --squash`.
+5. Wait for CI; get user approval; merge with `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr>`.
 
 ---
 
