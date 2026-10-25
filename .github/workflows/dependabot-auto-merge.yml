@@ -1,8 +1,7 @@
 name: Dependabot Auto Merge
 
 # Enable GitHub auto-merge (squash) so Dependabot PRs enter the native
-# merge queue once required checks pass. Do not use the merge-it label —
-# that enqueues Graphite MQ on other org repos.
+# merge queue once required checks pass. Do not use the merge-it label.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]

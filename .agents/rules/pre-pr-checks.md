@@ -15,7 +15,7 @@ rh="${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}"
 
 Before submitting a PR:
 
-1. Run **`"${rh}/scripts/dev/pre-pr-checks"`** from this repo's feature worktree (must exit 0), then submit from the same worktree. Prefer **`"${rh}/scripts/dev/submit-stack"`**: it reruns pre-pr-checks, submits with the backend named in `.github/stacking-tool`, and waits for PR CI. For a bare submit when the marker is `gh-stack`, use **`gh stack submit --auto --open`** (without `--open` the PRs are drafts). When the marker is `graphite`, follow `.agents/rules/stacking-tool.md` / the Graphite skill (do not paste a Graphite-only submit into this rule).
+1. Run **`"${rh}/scripts/dev/pre-pr-checks"`** from this repo's feature worktree (must exit 0), then submit from the same worktree. Prefer **`"${rh}/scripts/dev/submit-stack"`**: it reruns pre-pr-checks, submits with the backend named in `.github/stacking-tool`, and waits for PR CI. For a bare submit when the marker is `gh-stack`, use **`gh stack submit --auto --open`** (without `--open` the PRs are drafts). Graphite is retired: a `graphite` marker is refused by the tooling, so stop and migrate it to `gh-stack` first (see `.agents/rules/stacking-tool.md`).
 
 2. Do **not** submit if pre-pr-checks failed or was skipped. A skipped job is allowed **only** when the user has approved it for this PR: pass `PRE_PR_CHECKS_SKIP=job1,job2` (never a silent skip) and record the skipped jobs and the reason in the PR **Test plan**.
 

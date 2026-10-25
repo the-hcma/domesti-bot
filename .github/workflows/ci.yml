@@ -9,7 +9,6 @@ on:
   push:
     branches-ignore:
       - main
-      - '**/graphite-base/**'
       # GitHub merge queue temporary branches — use merge_group, not push.
       - 'gh-readonly-queue/**'
   merge_group:
@@ -65,14 +64,13 @@ jobs:
           HEAD_REF: ${{ github.head_ref || github.ref_name }}
           PR_STATE: ${{ steps.pr-state.outputs.state }}
         run: |
-          # Skip Graphite MQ staging branches only (gtmq_merge_*). GitHub's
-          # native merge queue uses merge_group events — those MUST run CI
+          # GitHub's native merge queue uses merge_group events — those MUST run CI
           # (required checks). Pushes to gh-readonly-queue/** are ignored via
           # branches-ignore above so they do not double-trigger.
-          # Skip when the PR is already merged — Graphite may push a restack
-          # commit to the next branch after a merge lands, which would otherwise
-          # trigger a redundant CI run on an already-validated diff.
-          if [[ "$HEAD_REF" == gtmq_merge_* ]] || [[ "$PR_STATE" == "MERGED" ]]; then
+          # Skip when the PR is already merged — a stack rebase can push a commit to the
+          # next branch after a merge lands, which would otherwise trigger a redundant CI
+          # run on an already-validated diff.
+          if [[ "$PR_STATE" == "MERGED" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi

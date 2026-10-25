@@ -1,5 +1,5 @@
 ---
-description: Choose Graphite vs GitHub Stacked PRs from .github/stacking-tool
+description: Stack PRs with GitHub Stacked PRs (gh-stack) from .github/stacking-tool
 alwaysApply: true
 ---
 

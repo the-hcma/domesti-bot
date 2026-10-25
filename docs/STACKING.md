@@ -2,14 +2,12 @@
 
 Reference for **`gh-stack`** stacked PRs and **GitHub’s native merge queue** on `main`.
 
-Stacking backend is selected by `.github/stacking-tool` (this repo: `gh-stack`). Canonical
-skills live in [repository-helpers](https://github.com/the-hcma/repository-helpers):
+Stacking backend is selected by `.github/stacking-tool` (this repo: `gh-stack`). Canonical skills live in [repository-helpers](https://github.com/the-hcma/repository-helpers):
 
 - [gh-stack skill](https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/gh-stack/SKILL.md)
 - [ship-and-review skill](https://github.com/the-hcma/repository-helpers/blob/main/.cursor/skills/ship-and-review/SKILL.md)
 
-> **Session start:** run `~/work/ai/repository-helpers/scripts/dev/start-development --refresh`
-> then `start-development` (see `docs/AGENTS.md`).
+> **Session start:** run `~/work/ai/repository-helpers/scripts/dev/start-development --refresh` then `start-development` (see `docs/AGENTS.md`).
 
 ## Quick reference
 
@@ -21,11 +19,9 @@ skills live in [repository-helpers](https://github.com/the-hcma/repository-helpe
 | Commit | `git add … && git commit -m 'feat: …'` |
 | Submit / update PRs | `~/work/ai/repository-helpers/scripts/dev/submit-stack` |
 | View stack (agents) | `gh stack view --json` |
-| Enqueue after approval | `gh pr merge <pr> --auto --squash` |
+| Enqueue after approval | `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr>` (`gh pr merge <pr> --auto --squash` outside a stack, `gh stack merge --yes --squash` for a stacked PR) |
 
-Install the extension once: `gh extension install github/gh-stack`. Prefer
-`scripts/dev/submit-stack` from repository-helpers over bare `gh stack submit`
-(it runs local gates, then `gh stack submit --auto --open --remote origin`).
+Install the extension once: `gh extension install github/gh-stack`. Prefer `scripts/dev/submit-stack` from repository-helpers over bare `gh stack submit` (it runs local gates, then `gh stack submit --auto --open --remote origin`).
 
 ---
 
@@ -41,18 +37,17 @@ After CI is green and the user approves:
 gh pr merge <pr-number> --auto --squash
 ```
 
-Or use **Enable auto-merge** / **Merge when ready** in the GitHub UI. Squash is required
-(Release Please — see [`docs/RELEASING.md`](RELEASING.md)).
+A PR that belongs to a gh stack cannot use auto-merge (GitHub answers `Auto-merge is not supported for stacked pull requests`). Land it from the stack's worktree with `gh stack merge --yes --squash` once its required checks have passed (the command fails at once if a check is still running, it does not wait), or let `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr-number>` pick the right command.
 
-Do **not** add the `merge-it` label — that enqueues Graphite MQ on other org repos.
+Or use **Enable auto-merge** / **Merge when ready** in the GitHub UI. Squash is required (Release Please — see [`docs/RELEASING.md`](RELEASING.md)).
 
-Dependabot PRs get auto-merge enabled automatically
-(`.github/workflows/dependabot-auto-merge.yml`).
+Do **not** add the `merge-it` label: it is ignored, and the org no longer uses the Graphite merge queue.
+
+Dependabot PRs get auto-merge enabled automatically (`.github/workflows/dependabot-auto-merge.yml`).
 
 ### Disable Graphite merge queue
 
-Turn this repo **off** in [Graphite merge queue settings](https://app.graphite.com/settings/merge-queue)
-so Graphite and GitHub do not both try to land PRs.
+Turn this repo **off** in [Graphite merge queue settings](https://app.graphite.com/settings/merge-queue) so Graphite and GitHub do not both try to land PRs.
 
 ### GitHub ruleset (`protect-main`)
 
@@ -110,17 +105,12 @@ gh api -X PUT repos/the-hcma/domesti-bot/rulesets/16365386 --input - <<'JSON'
 JSON
 ```
 
-Repair classic protection / related wiring with
-`~/work/ai/repository-helpers/scripts/github-repo-lint --repo the-hcma/domesti-bot --apply-fix`
-from a clone once the merge queue is enabled.
+Repair classic protection / related wiring with `~/work/ai/repository-helpers/scripts/github-repo-lint --repo the-hcma/domesti-bot --apply-fix` from a clone once the merge queue is enabled.
 
 ### CI and merge queue
 
-- CI **runs** on `merge_group` (required status checks for GitHub’s merge queue) and
-  **ignores pushes** to `gh-readonly-queue/**` so those temporary branches do not
-  double-trigger via the `push` event.
-- Guard still skips legacy Graphite staging (`gtmq_merge_*`) only — do **not** skip
-  `merge_group` / `gh-readonly-queue/*` in Guard or required checks never pass in queue.
+- CI **runs** on `merge_group` (required status checks for GitHub’s merge queue) and **ignores pushes** to `gh-readonly-queue/**` so those temporary branches do not double-trigger via the `push` event.
+- Guard skips only PRs that are already merged — do **not** skip `merge_group` / `gh-readonly-queue/*` in Guard or required checks never pass in queue.
 - `merged-pr-closer.yml` still closes child PRs left open after a stack lands.
 
 ---
@@ -131,7 +121,7 @@ from a clone once the merge queue is enabled.
 2. `gh stack init <name>/<topic>` (then `git commit`); never commit on `main`.
 3. Pre-PR gates in `docs/AGENTS.md` (pyright, pytest, shellcheck, …).
 4. `~/work/ai/repository-helpers/scripts/dev/submit-stack`.
-5. Wait for CI; get user approval; `gh pr merge <pr> --auto --squash`.
+5. Wait for CI; get user approval; merge with `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr>`.
 
 ---
 
