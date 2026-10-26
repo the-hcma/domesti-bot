@@ -1172,12 +1172,13 @@ class RuleEvaluator:
                     record_evaluation=False,
                 )
                 if _togetherness_known_unmet(rule, ctx):
-                    # The togetherness verdict is known and fails the
+                    # The togetherness verdict is clearly opposite the
                     # condition (e.g. they arrived together when this rule
                     # wants a solo arrival): the arrival is settled, so the
                     # edge must not survive to fire on a later separation —
-                    # whichever reason deferred it. The interim skip becomes
-                    # the outcome of record.
+                    # whichever reason deferred it. An in-between confidence
+                    # keeps waiting. The interim skip becomes the outcome of
+                    # record.
                     self._record_rule_skipped(rule.id, detail=skip_detail, reason=skip_reason)
                     self._deferred_accuracy_edges.pop(key, None)
                     _log_deferred_edge_cancelled(
@@ -1304,13 +1305,15 @@ class RuleEvaluator:
         transitions: dict[str, GeofenceTransition],
         user_id: str,
     ) -> None:
-        """Defer an edge whose only blocker may be a stale peer fix, and ask the peer for a fresh one.
+        """Defer an edge whose only blocker is unknown togetherness, and ask peers for denser fixes.
 
-        Only a top-level ``users_together`` row may be the unmet condition:
-        when anything else also fails (the door is already open, a time window
-        is closed), a fresh peer fix cannot make the rule fire, so there is
-        nothing to wait for and no reason to wake the peer's phone. The edge is
-        re-evaluated when either user reports (see
+        Covers a stale or missing peer fix and too-little last-minute coverage
+        (both phones still fresh, but a brief reporting gap left the tracks too
+        thin to compare). Only a top-level ``users_together`` row may be the
+        unmet condition: when anything else also fails (the door is already
+        open, a time window is closed), denser peer fixes cannot make the rule
+        fire, so there is nothing to wait for and no reason to wake the peer's
+        phone. The edge is re-evaluated when either user reports (see
         :meth:`_attempt_deferred_accuracy_edge_fires`); it fires only if every
         condition is met before the grace expires.
         """
@@ -4783,19 +4786,26 @@ def _togetherness_known_unmet(
     rule: RuleOut,
     ctx: RuleEvaluationContext,
 ) -> bool:
-    """Whether some top-level ``users_together`` pair has a known verdict that fails its condition."""
+    """Whether some top-level ``users_together`` pair is clearly settled against the condition.
+
+    Only a *clear* opposite verdict settles the edge (clearly together when the
+    rule wants apart, or clearly apart when it wants together). An in-between
+    confidence is real evidence that is not yet decisive, so a deferred edge
+    must keep waiting — otherwise a sparse-coverage arrival that climbs through
+    0.75 on the way to 0.80 would cancel before it could fire (#916).
+    """
     for condition in rule.conditions.all:
         if not isinstance(condition, UsersTogetherCondition):
             continue
         for pair in users_together_pairs(condition, rule, ctx):
             if not pair.estimate.known:
                 continue
-            verdict = (
-                pair.estimate.is_together(condition.min_confidence)
+            opposite = (
+                pair.estimate.is_apart(condition.min_confidence)
                 if condition.expected
-                else pair.estimate.is_apart(condition.min_confidence)
+                else pair.estimate.is_together(condition.min_confidence)
             )
-            if verdict is False:
+            if opposite is True:
                 return True
     return False
 
@@ -4807,19 +4817,26 @@ def _unknown_together_peer_ids(
 ) -> set[str]:
     """Roster ids (other than ``user_id``) whose missing data makes a ``users_together`` verdict unknown.
 
-    Only the missing-data unknowns qualify: the peer has no usable fix at all,
-    or its newest usable fix is older than the estimator's freshness window.
-    Those resolve when the peer's phone reports again. The other unknowns do
-    not: a known-but-in-between confidence settles nothing yet but is real
-    evidence, and too-little-coverage with both phones actively reporting
-    (e.g. tracks that just started) must not replay an edge later — a user who
-    was already inside when reporting began would otherwise open a door once
-    the pair became comparable, long after any arrival.
+    Missing-data unknowns qualify for edge deferral: the peer has no usable fix
+    at all, its newest usable fix is older than the estimator's freshness
+    window, or the last-minute window has too few paired instants
+    (``TOO_LITTLE_COVERAGE`` — both phones are still fresh, but a brief gap or
+    dropped coarse fixes left the tracks too thin to compare). Those resolve
+    when denser reports arrive. A known-but-in-between confidence is real
+    evidence and does not defer. Deferral only runs on a real geofence
+    enter/leave edge (see :meth:`RuleEvaluator._defer_edge_for_unknown_togetherness`),
+    so a phone that starts reporting while already inside cannot invent an
+    arrival once coverage improves.
     """
     peer_ids: set[str] = set()
+    deferrable = (
+        UnknownReason.NO_GOOD_FIXES,
+        UnknownReason.STALE_FIX,
+        UnknownReason.TOO_LITTLE_COVERAGE,
+    )
     for condition in iter_users_together_conditions(rule.conditions.all):
         for pair in users_together_pairs(condition, rule, ctx):
-            if pair.estimate.unknown_reason not in (UnknownReason.NO_GOOD_FIXES, UnknownReason.STALE_FIX):
+            if pair.estimate.unknown_reason not in deferrable:
                 continue
             verdict = (
                 pair.estimate.is_together(condition.min_confidence)

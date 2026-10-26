@@ -1,23 +1,32 @@
 """Hermetic tests for deferring a geofence edge when ``users_together`` is unknown.
 
-Yesterday's field case (2026-10-19 15:43): Henrique arrived home with a good
-fix while Kristen's newest usable fix was almost two minutes old, so the
-"not travelling together" condition was unknown and the dry-run garage rule
-was skipped with no retry. The edge must now be deferred for the rule's
-accuracy-edge grace, the stale peer must be asked for a fresh location, and a
-later report from either user must re-attempt the fire.
+Field cases this covers:
+
+- 2026-10-19: Henrique arrived with a good fix while Kristen's newest usable fix
+  was almost two minutes old (stale peer), so the alone garage entry rule was
+  skipped with no retry.
+- 2026-10-25 (#916): they arrived together, but Kristen's phone briefly reported
+  only coarse network fixes the estimator drops, leaving too-little last-minute
+  coverage at Henrique's enter; together and alone garage entry rules both
+  skipped and never retried.
+
+The edge must be deferred for the rule's accuracy-edge grace, peers must be
+asked for denser fixes, and a later report from either user must re-attempt
+the fire.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import math
 from pathlib import Path
-from typing import cast
-from unittest.mock import MagicMock
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from cryptography.fernet import Fernet
 
 from app.api.schemas import (
     AfterLocalTimeCondition,
@@ -29,10 +38,19 @@ from app.api.schemas import (
     UsersInsideGeofenceCondition,
     UsersTogetherCondition,
 )
+from app.db.secrets import save_mytracks_relay_api_key_to_db
 from app.device_enums import DeviceFamilyId, RuleDeviceActionType, RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.kasa_device_manager import KasaDeviceManager
 from app.location_history_retention import default_location_history_retention
+from app.mytracks_service import RequestLocationResult
+from app.mytracks_store import (
+    MyTracksConfigSave,
+    MyTracksPairingSave,
+    save_mytracks_config,
+    save_mytracks_pairing,
+    set_remote_request_location_enabled,
+)
 from app.presence_store import UserLocationRecord, upsert_user_location
 from app.rule_evaluator import RuleEvaluator, _DeferredAccuracyEdge
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
@@ -64,7 +82,15 @@ def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
     return cast(KasaDeviceManager, mgr)
 
 
-def _rule(*, cooldown_s: int = 0, extra_conditions: tuple[RuleConditionOut, ...] = ()) -> RuleOut:
+def _rule(
+    *,
+    cooldown_s: int = 0,
+    expected_together: bool = False,
+    extra_conditions: tuple[RuleConditionOut, ...] = (),
+    rule_id: str | None = None,
+    rule_label: str | None = None,
+) -> RuleOut:
+    alone = not expected_together
     return RuleOut(
         accuracy_edge_grace_s=120,
         conditions=RuleConditionsOut(
@@ -76,7 +102,7 @@ def _rule(*, cooldown_s: int = 0, extra_conditions: tuple[RuleConditionOut, ...]
                 ),
                 UsersTogetherCondition(
                     type="users_together",
-                    expected=False,
+                    expected=expected_together,
                     far_m=150.0,
                     min_confidence=0.8,
                     near_m=30.0,
@@ -94,8 +120,8 @@ def _rule(*, cooldown_s: int = 0, extra_conditions: tuple[RuleConditionOut, ...]
             ),
         ],
         enabled=True,
-        id="henrique-enters-alone",
-        label="Henrique enters alone",
+        id=rule_id or ("henrique-enters-alone" if alone else "henrique-enters-together"),
+        label=rule_label or ("Henrique enters alone" if alone else "Henrique enters together"),
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
@@ -103,8 +129,17 @@ def _rule(*, cooldown_s: int = 0, extra_conditions: tuple[RuleConditionOut, ...]
     )
 
 
+def _togetherness_unknown_requests(request_mock: AsyncMock) -> list[Any]:
+    """Outbound ``request_user_location`` calls admitted for ``togetherness_unknown``."""
+    return [c for c in request_mock.await_args_list if c.kwargs.get("reason") == "togetherness_unknown"]
+
+
 class _Rig:
-    """Two users, one geofence and the alone-entry rule, on a simulated clock."""
+    """Two users, one geofence and the alone-entry rule, on a simulated clock.
+
+    Uses the real :class:`LocationRequestCoordinator` (admission + scheduling) and
+    mocks only the outbound my-tracks ``request_user_location`` call.
+    """
 
     def __init__(
         self,
@@ -114,6 +149,7 @@ class _Rig:
         rule: RuleOut | None = None,
         user_ids: tuple[str, ...] = ("henrique", "kristen"),
     ) -> None:
+        monkeypatch.setenv("DOMESTI_BOT_SECRETS_KEY", Fernet.generate_key().decode("ascii"))
         bundle = tmp_path / "rules.json"
         payload = {
             "version": 1,
@@ -158,6 +194,22 @@ class _Rig:
                 ),
             ],
         )
+        save_mytracks_config(
+            self.db,
+            MyTracksConfigSave(domain="https://tracks.example.com", username="admin"),
+        )
+        save_mytracks_pairing(
+            self.db,
+            MyTracksPairingSave(
+                domain="https://tracks.example.com",
+                username="admin",
+                domesti_public_base_url="https://domesti.example.com",
+                user_location_update_url="https://domesti.example.com/v1/webhooks/location_update",
+                user_location_test_url="https://domesti.example.com/v1/webhooks/location_update/test",
+            ),
+        )
+        save_mytracks_relay_api_key_to_db(self.db, "relay-secret")
+        set_remote_request_location_enabled(self.db, enabled=True)
         self.device = _FakeKasa("192.168.1.10", "Garage")
         device = self.device
         db = self.db
@@ -175,8 +227,12 @@ class _Rig:
             ),
             now_fn=lambda: self.clock["now"],
         )
-        self.coordinator = MagicMock()
-        self.evaluator._location_request_coordinator = self.coordinator
+        self.coordinator = self.evaluator._location_request_coordinator
+        self.request_mock = AsyncMock(return_value=RequestLocationResult(status="accepted"))
+        monkeypatch.setattr(
+            "app.location_request_coordinator.request_user_location",
+            self.request_mock,
+        )
 
     async def report(
         self,
@@ -203,6 +259,15 @@ class _Rig:
             retention=default_location_history_retention(),
         )
         await self.evaluator.on_location_update(user_id)
+        await self._drain_location_requests()
+
+    async def _drain_location_requests(self) -> None:
+        """Let fire-and-forget coordinator tasks reach the mocked outbound call."""
+        for _ in range(20):
+            pending = [task for task in asyncio.all_tasks() if not task.done()]
+            if len(pending) <= 1 and not self.coordinator._in_flight_user_ids:
+                return
+            await asyncio.sleep(0)
 
 
 async def _drive_to_stale_peer_arrival(rig: _Rig) -> None:
@@ -219,6 +284,36 @@ async def _drive_to_stale_peer_arrival(rig: _Rig) -> None:
     await rig.report("henrique", 360.0, north_m=10.0)
 
 
+async def _drive_to_sparse_coverage_joint_arrival(rig: _Rig) -> None:
+    """Both phones travel home together; Kristen's usable track briefly thins out before Henrique enters.
+
+    Mirrors 2026-10-25 (#916): dense co-travel, then Kristen goes quiet for longer than
+    ``max_gap_s`` while Henrique keeps reporting, then she lands one fresh fix a few seconds
+    before his enter. Both newest usable fixes are still fresh, but the last-minute window
+    has too few paired instants (the gap cannot be interpolated).
+    """
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=800.0)
+    # Stay outside the 250 m house geofence until the final enter.
+    for at_s, north_m in (
+        (120.0, 650.0),
+        (240.0, 500.0),
+        (300.0, 400.0),
+        (320.0, 350.0),
+    ):
+        await rig.report("henrique", at_s, north_m=north_m)
+        await rig.report("kristen", at_s, north_m=north_m)
+    # > max_gap_s (45 s) with only Henrique reporting; Kristen stays silent.
+    await rig.report("henrique", 330.0, north_m=330.0)
+    await rig.report("henrique", 340.0, north_m=310.0)
+    await rig.report("henrique", 350.0, north_m=290.0)
+    await rig.report("henrique", 360.0, north_m=280.0)
+    await rig.report("henrique", 370.0, north_m=270.0)
+    # One fresh Kristen fix (~5 s before enter) keeps the pair out of STALE_FIX.
+    await rig.report("kristen", 375.0, north_m=260.0)
+    await rig.report("henrique", 380.0, north_m=10.0)
+
+
 @pytest.mark.asyncio
 async def test_unknown_togetherness_defers_edge_and_requests_peer_location(
     tmp_path: Path,
@@ -232,11 +327,56 @@ async def test_unknown_togetherness_defers_edge_and_requests_peer_location(
     snapshots = rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")
     assert len(snapshots) == 1
     assert snapshots[0].rule_id == "henrique-enters-alone"
-    requests = rig.coordinator.schedule_request_with_reason.call_args_list
+    requests = _togetherness_unknown_requests(rig.request_mock)
     assert len(requests) == 1
-    assert requests[0].args[0] == "kristen"
+    assert requests[0].kwargs["user_id"] == "kristen"
     assert requests[0].kwargs["reason"] == "togetherness_unknown"
     assert requests[0].kwargs["rule_id"] == "henrique-enters-alone"
+
+
+@pytest.mark.asyncio
+async def test_too_little_coverage_defers_together_edge_and_requests_peer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Joint arrival with a brief peer reporting gap must defer, not drop, the together entry (#916)."""
+    rule = _rule(expected_together=True)
+    rig = _Rig(tmp_path, monkeypatch, rule=rule)
+    await _drive_to_sparse_coverage_joint_arrival(rig)
+
+    assert rig.device.calls == []
+    snapshots = rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")
+    assert len(snapshots) == 1
+    assert snapshots[0].rule_id == "henrique-enters-together"
+    requests = _togetherness_unknown_requests(rig.request_mock)
+    assert len(requests) == 1
+    assert requests[0].kwargs["user_id"] == "kristen"
+    assert requests[0].kwargs["reason"] == "togetherness_unknown"
+    assert requests[0].kwargs["rule_id"] == "henrique-enters-together"
+
+
+@pytest.mark.asyncio
+async def test_too_little_coverage_deferred_together_edge_fires_when_peer_track_fills_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After a sparse-coverage deferral, denser peer fixes beside the arriver must fire together (#916)."""
+    rule = _rule(expected_together=True)
+    rig = _Rig(tmp_path, monkeypatch, rule=rule)
+    await _drive_to_sparse_coverage_joint_arrival(rig)
+    assert rig.device.calls == []
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") != ()
+
+    # Kristen resumes next to Henrique inside the fence; overlapping reports rebuild coverage.
+    await rig.report("kristen", 390.0, north_m=12.0)
+    await rig.report("henrique", 400.0, north_m=10.0)
+    await rig.report("kristen", 410.0, north_m=12.0)
+    await rig.report("henrique", 420.0, north_m=10.0)
+    await rig.report("kristen", 430.0, north_m=12.0)
+    await rig.report("henrique", 440.0, north_m=10.0)
+
+    assert rig.device.calls == ["on"]
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
 
 
 @pytest.mark.asyncio
@@ -255,7 +395,7 @@ async def test_no_deferral_when_another_condition_also_fails(
 
     assert rig.device.calls == []
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
-    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+    assert _togetherness_unknown_requests(rig.request_mock) == []
 
 
 @pytest.mark.asyncio
@@ -298,7 +438,7 @@ async def test_no_deferral_when_another_together_pair_is_known_unmet(
 
     assert rig.device.calls == []
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
-    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+    assert _togetherness_unknown_requests(rig.request_mock) == []
 
 
 @pytest.mark.asyncio
@@ -327,13 +467,13 @@ async def test_deferred_retry_does_not_request_peer_when_another_condition_block
             user_id="henrique",
         )
     )
-    rig.coordinator.schedule_request_with_reason.reset_mock()
+    rig.request_mock.reset_mock()
 
     await rig.report("henrique", 380.0, north_m=10.0)
 
     # The edge stays pending, but no fresh peer fix could open the time gate,
     # so Kristen's phone is left alone.
-    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+    assert _togetherness_unknown_requests(rig.request_mock) == []
     assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
     assert rig.device.calls == []
 
@@ -675,7 +815,7 @@ async def test_known_apart_arrival_fires_immediately_without_deferring(
 
     assert rig.device.calls == ["on"]
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
-    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+    assert _togetherness_unknown_requests(rig.request_mock) == []
 
 
 async def test_far_away_user_with_coarse_fixes_does_not_defer_the_alone_arrival(
@@ -692,7 +832,7 @@ async def test_far_away_user_with_coarse_fixes_does_not_defer_the_alone_arrival(
 
     assert rig.device.calls == ["on"]
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
-    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+    assert _togetherness_unknown_requests(rig.request_mock) == []
 
 
 async def test_coarse_fixes_near_home_still_defer_the_alone_arrival(
@@ -725,7 +865,7 @@ async def test_peer_re_sending_an_old_fix_far_away_does_not_defer_the_alone_arri
 
     assert rig.device.calls == ["on"]
     assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
-    assert rig.coordinator.schedule_request_with_reason.call_args_list == []
+    assert _togetherness_unknown_requests(rig.request_mock) == []
 
 
 async def test_peer_re_sending_an_old_fix_once_that_was_never_close_settles_the_alone_arrival(
