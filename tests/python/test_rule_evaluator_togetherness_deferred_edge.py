@@ -1,11 +1,18 @@
 """Hermetic tests for deferring a geofence edge when ``users_together`` is unknown.
 
-Yesterday's field case (2026-10-19 15:43): Henrique arrived home with a good
-fix while Kristen's newest usable fix was almost two minutes old, so the
-"not travelling together" condition was unknown and the dry-run garage rule
-was skipped with no retry. The edge must now be deferred for the rule's
-accuracy-edge grace, the stale peer must be asked for a fresh location, and a
-later report from either user must re-attempt the fire.
+Field cases this covers:
+
+- 2026-10-19: Henrique arrived with a good fix while Kristen's newest usable fix
+  was almost two minutes old (stale peer), so the alone garage entry rule was
+  skipped with no retry.
+- 2026-10-25 (#916): they arrived together, but Kristen's phone briefly reported
+  only coarse network fixes the estimator drops, leaving too-little last-minute
+  coverage at Henrique's enter; together and alone garage entry rules both
+  skipped and never retried.
+
+The edge must be deferred for the rule's accuracy-edge grace, peers must be
+asked for denser fixes, and a later report from either user must re-attempt
+the fire.
 """
 
 from __future__ import annotations
@@ -64,7 +71,15 @@ def _kasa_mgr(device: _FakeKasa) -> KasaDeviceManager:
     return cast(KasaDeviceManager, mgr)
 
 
-def _rule(*, cooldown_s: int = 0, extra_conditions: tuple[RuleConditionOut, ...] = ()) -> RuleOut:
+def _rule(
+    *,
+    cooldown_s: int = 0,
+    expected_together: bool = False,
+    extra_conditions: tuple[RuleConditionOut, ...] = (),
+    rule_id: str | None = None,
+    rule_label: str | None = None,
+) -> RuleOut:
+    alone = not expected_together
     return RuleOut(
         accuracy_edge_grace_s=120,
         conditions=RuleConditionsOut(
@@ -76,7 +91,7 @@ def _rule(*, cooldown_s: int = 0, extra_conditions: tuple[RuleConditionOut, ...]
                 ),
                 UsersTogetherCondition(
                     type="users_together",
-                    expected=False,
+                    expected=expected_together,
                     far_m=150.0,
                     min_confidence=0.8,
                     near_m=30.0,
@@ -94,8 +109,8 @@ def _rule(*, cooldown_s: int = 0, extra_conditions: tuple[RuleConditionOut, ...]
             ),
         ],
         enabled=True,
-        id="henrique-enters-alone",
-        label="Henrique enters alone",
+        id=rule_id or ("henrique-enters-alone" if alone else "henrique-enters-together"),
+        label=rule_label or ("Henrique enters alone" if alone else "Henrique enters together"),
         min_location_accuracy_m=50,
         notification_emails=[],
         notify_on_fire=False,
@@ -219,6 +234,36 @@ async def _drive_to_stale_peer_arrival(rig: _Rig) -> None:
     await rig.report("henrique", 360.0, north_m=10.0)
 
 
+async def _drive_to_sparse_coverage_joint_arrival(rig: _Rig) -> None:
+    """Both phones travel home together; Kristen's usable track briefly thins out before Henrique enters.
+
+    Mirrors 2026-10-25 (#916): dense co-travel, then Kristen goes quiet for longer than
+    ``max_gap_s`` while Henrique keeps reporting, then she lands one fresh fix a few seconds
+    before his enter. Both newest usable fixes are still fresh, but the last-minute window
+    has too few paired instants (the gap cannot be interpolated).
+    """
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=800.0)
+    # Stay outside the 250 m house geofence until the final enter.
+    for at_s, north_m in (
+        (120.0, 650.0),
+        (240.0, 500.0),
+        (300.0, 400.0),
+        (320.0, 350.0),
+    ):
+        await rig.report("henrique", at_s, north_m=north_m)
+        await rig.report("kristen", at_s, north_m=north_m)
+    # > max_gap_s (45 s) with only Henrique reporting; Kristen stays silent.
+    await rig.report("henrique", 330.0, north_m=330.0)
+    await rig.report("henrique", 340.0, north_m=310.0)
+    await rig.report("henrique", 350.0, north_m=290.0)
+    await rig.report("henrique", 360.0, north_m=280.0)
+    await rig.report("henrique", 370.0, north_m=270.0)
+    # One fresh Kristen fix (~5 s before enter) keeps the pair out of STALE_FIX.
+    await rig.report("kristen", 375.0, north_m=260.0)
+    await rig.report("henrique", 380.0, north_m=10.0)
+
+
 @pytest.mark.asyncio
 async def test_unknown_togetherness_defers_edge_and_requests_peer_location(
     tmp_path: Path,
@@ -237,6 +282,51 @@ async def test_unknown_togetherness_defers_edge_and_requests_peer_location(
     assert requests[0].args[0] == "kristen"
     assert requests[0].kwargs["reason"] == "togetherness_unknown"
     assert requests[0].kwargs["rule_id"] == "henrique-enters-alone"
+
+
+@pytest.mark.asyncio
+async def test_too_little_coverage_defers_together_edge_and_requests_peer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Joint arrival with a brief peer reporting gap must defer, not drop, the together entry (#916)."""
+    rule = _rule(expected_together=True)
+    rig = _Rig(tmp_path, monkeypatch, rule=rule)
+    await _drive_to_sparse_coverage_joint_arrival(rig)
+
+    assert rig.device.calls == []
+    snapshots = rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")
+    assert len(snapshots) == 1
+    assert snapshots[0].rule_id == "henrique-enters-together"
+    requests = rig.coordinator.schedule_request_with_reason.call_args_list
+    assert len(requests) == 1
+    assert requests[0].args[0] == "kristen"
+    assert requests[0].kwargs["reason"] == "togetherness_unknown"
+    assert requests[0].kwargs["rule_id"] == "henrique-enters-together"
+
+
+@pytest.mark.asyncio
+async def test_too_little_coverage_deferred_together_edge_fires_when_peer_track_fills_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After a sparse-coverage deferral, denser peer fixes beside the arriver must fire together (#916)."""
+    rule = _rule(expected_together=True)
+    rig = _Rig(tmp_path, monkeypatch, rule=rule)
+    await _drive_to_sparse_coverage_joint_arrival(rig)
+    assert rig.device.calls == []
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") != ()
+
+    # Kristen resumes next to Henrique inside the fence; overlapping reports rebuild coverage.
+    await rig.report("kristen", 390.0, north_m=12.0)
+    await rig.report("henrique", 400.0, north_m=10.0)
+    await rig.report("kristen", 410.0, north_m=12.0)
+    await rig.report("henrique", 420.0, north_m=10.0)
+    await rig.report("kristen", 430.0, north_m=12.0)
+    await rig.report("henrique", 440.0, north_m=10.0)
+
+    assert rig.device.calls == ["on"]
+    assert rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique") == ()
 
 
 @pytest.mark.asyncio
