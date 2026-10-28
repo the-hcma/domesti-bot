@@ -532,7 +532,7 @@ New senders must comply from day one and ship hermetic tests for provenance (and
 4. **Verify title and description** against the actual diff — titles written before a rebase go stale fast. Update via `~/work/ai/repository-helpers/scripts/gh-api pr edit …` (throttled wrapper — see `.cursor/rules/github-api-throttle.mdc`).
 5. **Wait for CI** to pass. Do not ask the user to test before CI is green. Prefer `~/work/ai/repository-helpers/scripts/dev/post-pr-submission-checks --pr <pr>`.
 6. **User testing & approval** — explicit user approval is required before merge.
-7. **Merge**: enqueue on **GitHub’s merge queue** with `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr>`: it runs `gh pr merge <pr> --auto --squash` outside a stack and `gh stack merge --yes --squash` for a stacked PR (or use Enable auto-merge in the UI for a PR outside a stack). See `docs/STACKING.md`. Do **not** use the `merge-it` label. **Always ask the user for explicit confirmation before enabling auto-merge.**
+7. **Merge**: Merge only after the user explicitly confirms, and only with `${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/dev/merge-stack --pr <n>` from the PR's worktree: it picks the right command for the repository's merge setup (`gh stack merge` for a stacked PR, the merge queue or auto-merge otherwise) and confirms the enqueue. For a PR in a gh stack it lands the top PR and every open PR below it, so name those PRs and get confirmation for the whole stack first. Do not call `gh pr merge` or `gh stack merge` by hand, do not add the `merge-it` label, and do not pipe the command through `tail` or `head`: read its exit status and output. See `docs/STACKING.md`.
 
 ### Single Responsibility per PR
 

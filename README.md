@@ -251,7 +251,7 @@ git add -A && git commit -m "feat: short description"
 
 For larger changes, stack the work into focused PRs so each one is independently reviewable. The [stack of PRs](https://github.com/the-hcma/domesti-bot/pulls) visible on this repo is itself an example of the pattern.
 
-The full Git / commit / PR conventions, including GitHub merge-queue enqueue (`gh pr merge --auto --squash`) and the protected-`main` ruleset, live in [`docs/AGENTS.md`](docs/AGENTS.md) and [`docs/STACKING.md`](docs/STACKING.md).
+The full Git / commit / PR conventions, including GitHub merge-queue enqueue (`scripts/dev/merge-stack --pr <n>`) and the protected-`main` ruleset, live in [`docs/AGENTS.md`](docs/AGENTS.md) and [`docs/STACKING.md`](docs/STACKING.md).
 
 ## License
 
