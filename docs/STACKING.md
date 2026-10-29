@@ -31,15 +31,13 @@ This repo uses **GitHub’s native merge queue** on **`main`** (not the Graphite
 
 ### Enqueue a PR
 
-After CI is green and the user approves:
+After CI is green and the user explicitly confirms (name every PR of a stack first):
 
 ```bash
-gh pr merge <pr-number> --auto --squash
+"${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/dev/merge-stack" --pr <pr-number>
 ```
 
-A PR that belongs to a gh stack cannot use auto-merge (GitHub answers `Auto-merge is not supported for stacked pull requests`). Land it from the stack's worktree with `gh stack merge --yes --squash` once its required checks have passed (the command fails at once if a check is still running, it does not wait), or let `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr-number>` pick the right command.
-
-Or use **Enable auto-merge** / **Merge when ready** in the GitHub UI. Squash is required (Release Please — see [`docs/RELEASING.md`](RELEASING.md)).
+It picks the right command for the repository's merge setup: `gh stack merge --yes --squash` for a PR in a gh stack (GitHub answers `Auto-merge is not supported for stacked pull requests` there, and the command lands the top PR and every open PR below it) and the merge queue or auto-merge otherwise, then confirms the enqueue. Do **not** call `gh pr merge` or `gh stack merge` by hand, and do **not** pipe the command through `tail` or `head`: read its exit status and output. Squash is required (Release Please — see [`docs/RELEASING.md`](RELEASING.md)).
 
 Do **not** add the `merge-it` label: it is ignored, and the org no longer uses the Graphite merge queue.
 
