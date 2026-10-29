@@ -19,7 +19,7 @@ Stacking backend is selected by `.github/stacking-tool` (this repo: `gh-stack`).
 | Commit | `git add … && git commit -m 'feat: …'` |
 | Submit / update PRs | `~/work/ai/repository-helpers/scripts/dev/submit-stack` |
 | View stack (agents) | `gh stack view --json` |
-| Enqueue after approval | `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr>` (`gh pr merge <pr> --auto --squash` outside a stack, `gh stack merge --yes --squash` for a stacked PR) |
+| Enqueue after approval | `~/work/ai/repository-helpers/scripts/dev/merge-stack --pr <pr>` after the user confirms (it picks the right command; do not run `gh pr merge` or `gh stack merge` by hand) |
 
 Install the extension once: `gh extension install github/gh-stack`. Prefer `scripts/dev/submit-stack` from repository-helpers over bare `gh stack submit` (it runs local gates, then `gh stack submit --auto --open --remote origin`).
 
