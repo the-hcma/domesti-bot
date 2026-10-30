@@ -55,7 +55,7 @@ dependencies = [
     "click>=8.5.0",
     "croniter>=6.2.4",
     "cryptography>=50.0.0",
-    "fastapi>=0.156.4",
+    "fastapi>=0.156.8",
     "gotailwind[cli]",
     "greenlet>=3.5.6",
     "httptools>=0.9.0",
@@ -147,7 +147,7 @@ known-first-party = ["app", "config"]
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.15.1",
+    "httpx2>=2.16.0",
     "icecream>=2.2.0",
     "playwright>=1.64.0",
     "pyright>=1.1.414",
