@@ -152,9 +152,7 @@ def _patch_klap_transport_plain_http_ssl() -> None:
     _original_post = HttpClient.post
 
     async def _post_plain_http_ssl_false(self: HttpClient, url: Any, **kwargs: Any) -> Any:
-        scheme = getattr(url, "scheme", None) or (
-            "http" if str(url).startswith("http://") else ""
-        )
+        scheme = getattr(url, "scheme", None) or ("http" if str(url).startswith("http://") else "")
         if scheme == "http":
             kwargs["ssl"] = False
         return await _original_post(self, url, **kwargs)
