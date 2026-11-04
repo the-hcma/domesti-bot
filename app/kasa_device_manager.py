@@ -13,10 +13,11 @@ SMART discovery may advertise **HTTPS** and/or pin ``http_port=443`` while the d
 answers **plain HTTP KLAP on port 80**. We reconnect with ``https=False``, clear
 ``http_port``, and drop ``port_override``. ``KlapTransport`` (python-kasa) always passed an
 ``SSLContext`` into aiohttp even for ``http://`` URLs, which can still produce TLS connects
-(e.g. port 443); we patch ``KlapTransport._get_ssl_context`` to return ``False`` when
-``connection_type.https`` is false. On ``AuthenticationError``,
-``_ConnectionError``, or ``TimeoutError``, we retry that LAN profile for
-``SmartDevice`` instances, then XOR sweep.
+(e.g. port 443). On python-kasa ``<0.12`` we patch ``KlapTransport._get_ssl_context`` to
+return ``False`` when ``connection_type.https`` is false; on ``>=0.12`` SSL moved to a
+module-level ``get_ssl_context`` and we force ``ssl=False`` on ``HttpClient.post`` for
+``http://`` URLs instead. On ``AuthenticationError``, ``_ConnectionError``, or
+``TimeoutError``, we retry that LAN profile for ``SmartDevice`` instances, then XOR sweep.
 
 Newer KLAP devices that were linked to the Kasa/Tapo cloud **require** your **account**
 email and password for the LAN KLAP handshake — there is no anonymous LAN mode for
@@ -131,16 +132,32 @@ def _klap_auth_recovery_hint(
 
 def _patch_klap_transport_plain_http_ssl() -> None:
     """Use aiohttp ``ssl=False`` for cleartext KLAP (library always built an SSLContext)."""
+    from kasa.httpclient import HttpClient
     from kasa.transports.klaptransport import KlapTransport
 
-    _original = KlapTransport._get_ssl_context
+    # python-kasa < 0.12 kept SSL on the transport instance.
+    _legacy_get_ssl = getattr(KlapTransport, "_get_ssl_context", None)
+    if _legacy_get_ssl is not None:
 
-    async def _get_ssl_context(self: KlapTransport):  # type: ignore[override]
-        if not self._config.connection_type.https:
-            return False
-        return await _original(self)
+        async def _get_ssl_context(self: KlapTransport):  # type: ignore[override]
+            if not self._config.connection_type.https:
+                return False
+            return await _legacy_get_ssl(self)
 
-    KlapTransport._get_ssl_context = _get_ssl_context  # type: ignore[method-assign]
+        KlapTransport._get_ssl_context = _get_ssl_context  # type: ignore[attr-defined, method-assign]
+        return
+
+    # python-kasa >= 0.12: SSL lives in ``kasa.transports.sslcontext.get_ssl_context``
+    # and KLAP still passes that context for ``http://`` posts. Force cleartext off.
+    _original_post = HttpClient.post
+
+    async def _post_plain_http_ssl_false(self: HttpClient, url: Any, **kwargs: Any) -> Any:
+        scheme = getattr(url, "scheme", None) or ("http" if str(url).startswith("http://") else "")
+        if scheme == "http":
+            kwargs["ssl"] = False
+        return await _original_post(self, url, **kwargs)
+
+    HttpClient.post = _post_plain_http_ssl_false  # type: ignore[method-assign]
 
 
 _patch_klap_transport_plain_http_ssl()
