@@ -136,15 +136,15 @@ def _patch_klap_transport_plain_http_ssl() -> None:
     from kasa.transports.klaptransport import KlapTransport
 
     # python-kasa < 0.12 kept SSL on the transport instance.
-    if hasattr(KlapTransport, "_get_ssl_context"):
-        _original = KlapTransport._get_ssl_context
+    _legacy_get_ssl = getattr(KlapTransport, "_get_ssl_context", None)
+    if _legacy_get_ssl is not None:
 
         async def _get_ssl_context(self: KlapTransport):  # type: ignore[override]
             if not self._config.connection_type.https:
                 return False
-            return await _original(self)
+            return await _legacy_get_ssl(self)
 
-        KlapTransport._get_ssl_context = _get_ssl_context  # type: ignore[method-assign]
+        KlapTransport._get_ssl_context = _get_ssl_context  # type: ignore[attr-defined, method-assign]
         return
 
     # python-kasa >= 0.12: SSL lives in ``kasa.transports.sslcontext.get_ssl_context``
