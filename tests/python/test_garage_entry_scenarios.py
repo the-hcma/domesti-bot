@@ -273,10 +273,15 @@ async def test_henrique_arriving_alone_opens_his_side_when_kristen_is_already_ho
 
 
 @pytest.mark.asyncio
-async def test_a_passenger_phone_that_went_quiet_leaves_the_entry_undecided_and_opens_nothing(
+async def test_a_passenger_phone_that_went_quiet_shortly_before_arrival_still_opens_the_together_door(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Field case 2026-11-04 20:14: the passenger's phone went quiet about 90 s before the crossing.
+
+    The pair was close for the whole last minute before the silence, so the verdict is carried forward (within the
+    180 s carry window) instead of staying unknown until the deferred edge expires.
+    """
     rig = _Rig(tmp_path, monkeypatch)
     arrives_at = _T0 + 700.0
     until = arrives_at + 120.0
@@ -287,7 +292,8 @@ async def test_a_passenger_phone_that_went_quiet_leaves_the_entry_undecided_and_
             )
             + _approach("kristen", arrives_at=arrives_at, every_s=19.0, offset_s=3.0, lateral_m=3.0, until=_T0 + 600.0),
         )
-        assert rig.opened == []
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+        assert rig.opened[0][1].startswith("Open Main garage right")
     finally:
         await rig.close()
 

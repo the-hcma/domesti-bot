@@ -232,14 +232,42 @@ def test_a_coarse_fix_near_the_other_user_stays_unknown_in_both_forms() -> None:
 
 
 def test_a_stale_second_phone_is_reported_with_its_age() -> None:
-    ctx = _ctx(_pair(b_last_at=_NOW - 120.0))
+    ctx = _ctx(_pair(b_last_at=_NOW - 200.0))
 
     row = _row(_rule(), ctx)
 
     assert row.met is False
     assert "unknown" in row.detail
-    assert "USER-B's newest usable fix is 2 min old" in row.detail
+    assert "USER-B's newest usable fix is 3 min 20 sec old" in row.detail
     assert "at most 45 sec allowed" in row.detail
+
+
+def test_a_second_phone_that_went_quiet_a_moment_ago_is_together_and_the_status_says_why() -> None:
+    ctx = _ctx(_pair(b_last_at=_NOW - 120.0))
+
+    row = _row(_rule(), ctx)
+
+    assert row.met is True
+    assert "confidence 1.00" in row.detail
+    assert "close for the last 1 min before the newest shared fix, 2 min ago" in row.detail
+    assert "one phone has gone quiet since, so they are assumed to still be together" in row.detail
+    assert "needs 0.80" in row.detail
+    assert _row(_rule(expected=False), ctx).met is False
+    assert "apart needs at most 0.20" in _row(_rule(expected=False), ctx).detail
+
+
+def test_a_carried_verdict_below_a_stricter_rules_minimum_stays_unknown_so_the_edge_can_defer() -> None:
+    # 50 m of lateral offset before the phone went quiet gives a mean closeness of about 0.92: enough for the default
+    # carry minimum (0.9) but below this rule's 0.95, where a known "in between" verdict would end the deferral.
+    ctx = _ctx(_pair(lateral_m=50.0, b_last_at=_NOW - 100.0))
+
+    default_rule = _row(_rule(), ctx)
+    strict_rule = _row(_rule(min_confidence=0.95), ctx)
+
+    assert "assumed to still be together" in default_rule.detail
+    assert strict_rule.met is False
+    assert "unknown" in strict_rule.detail
+    assert "newest usable fix is 1 min 40 sec old" in strict_rule.detail
 
 
 def test_a_fix_dated_in_the_future_is_ignored() -> None:
@@ -448,7 +476,7 @@ def test_inside_an_any_group_an_unknown_condition_does_not_satisfy_the_group_but
     unknown_together = UsersTogetherCondition(type="users_together", user_ids=["user-a", "user-b"])
     sibling = UsersTogetherCondition(type="users_together", user_ids=["user-a", "user-c"])
     histories = {**_pair(), "user-c": _history(every_s=15.0, last_at=_NOW - 2.0, lateral_m=5.0)}
-    stale_b = {**histories, "user-b": _history(every_s=19.0, last_at=_NOW - 120.0, lateral_m=3.0)}
+    stale_b = {**histories, "user-b": _history(every_s=19.0, last_at=_NOW - 200.0, lateral_m=3.0)}
     rule = _rule(AnyConditionsCondition(type="any", conditions=[unknown_together, sibling]))
 
     assert evaluate_rule(rule, _ctx(stale_b)).all_met is True
@@ -562,6 +590,19 @@ def test_a_peer_on_the_home_wifi_is_apart_from_a_user_arriving_from_outside() ->
     assert together.met is False
     assert "home Wi-Fi" in alone.detail
     assert "unknown" not in alone.detail
+
+
+def test_a_user_arriving_next_to_a_home_wifi_peer_is_apart_whatever_the_distance_to_its_cached_fix() -> None:
+    # Field case 2026-11-04 12:24: the arriving user entered the geofence about 135 m from the cached 48 m fix.
+    peer = [fix.model_copy(update={"accuracy_m": 48}) for fix in _home_wifi_peer_history(north_m=135.0)]
+    ctx = _ctx({"user-a": _history(), "user-b": peer}, home_ssid={"user-b": "HomeNet"})
+
+    alone = _row(_rule(expected=False), ctx)
+
+    assert alone.met is True
+    assert "home Wi-Fi" in alone.detail
+    assert "135 m" in alone.detail
+    assert _row(_rule(expected=True), ctx).met is False
 
 
 def test_a_peer_on_another_wifi_is_not_apart_by_the_home_wifi() -> None:

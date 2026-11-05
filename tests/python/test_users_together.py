@@ -12,6 +12,7 @@ import pytest
 from app.users_together import (
     ApartBasis,
     InterpolatedPosition,
+    TogetherBasis,
     TogetherEstimate,
     TogetherParams,
     TrackFix,
@@ -120,8 +121,8 @@ def test_one_noisy_instant_lowers_the_score_slightly_without_flipping_it() -> No
     assert estimate.is_together(0.8) is True
 
 
-def test_a_stale_second_phone_is_unknown_not_apart() -> None:
-    phone_b = _track(_times(every_s=19.0, last_at=_NOW - 120.0), lateral_m=3.0)
+def test_a_second_phone_silent_past_the_carry_window_is_unknown_not_apart() -> None:
+    phone_b = _track(_times(every_s=19.0, last_at=_NOW - 200.0), lateral_m=3.0)
 
     estimate = estimate_together(_phone_a(), phone_b, now=_NOW)
 
@@ -129,7 +130,7 @@ def test_a_stale_second_phone_is_unknown_not_apart() -> None:
     assert estimate.unknown_reason is UnknownReason.STALE_FIX
     assert estimate.unknown_track == 1
     assert estimate.is_together(0.5) is None
-    assert estimate.newest_fix_age_s[1] == pytest.approx(120.0)
+    assert estimate.newest_fix_age_s[1] == pytest.approx(200.0)
 
 
 def test_a_user_without_any_good_fix_is_unknown() -> None:
@@ -408,8 +409,8 @@ def test_a_coarse_fix_with_nonsense_coordinates_is_ignored() -> None:
 
 
 def test_a_long_gap_in_one_track_in_the_last_minute_is_too_little_coverage() -> None:
-    old = _track(_times(every_s=19.0, last_at=_NOW - 100.0), lateral_m=3.0)
-    phone_b = [*old, _fix(_NOW - 3.0, lateral_m=3.0)]
+    # Two lone fixes are not enough history to carry a verdict across the gap.
+    phone_b = [_fix(_NOW - 100.0, lateral_m=3.0), _fix(_NOW - 3.0, lateral_m=3.0)]
 
     estimate = estimate_together(_phone_a(), phone_b, now=_NOW)
 
@@ -751,9 +752,13 @@ def test_the_anchor_lag_is_exposed_when_one_phone_reported_a_while_ago() -> None
 def test_freshness_is_inclusive_at_the_limit_and_stale_just_past_it() -> None:
     at_limit = _track(_times(every_s=10.0, last_at=_NOW - 45.0), lateral_m=3.0)
     past_limit = _track(_times(every_s=10.0, last_at=_NOW - 46.0), lateral_m=3.0)
+    no_carry = TogetherParams(carry_window_s=1.0)
 
-    assert estimate_together(_phone_a(), at_limit, now=_NOW).known
-    assert estimate_together(_phone_a(), past_limit, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), at_limit, now=_NOW, params=no_carry).known
+    assert estimate_together(_phone_a(), at_limit, now=_NOW).together_basis is None
+    stale = estimate_together(_phone_a(), past_limit, now=_NOW, params=no_carry)
+    assert stale.unknown_reason is UnknownReason.STALE_FIX
+    assert estimate_together(_phone_a(), past_limit, now=_NOW).together_basis is TogetherBasis.CARRIED_HISTORY
 
 
 def test_the_window_instant_counts_are_pinned() -> None:
@@ -885,13 +890,44 @@ def test_two_users_on_the_home_network_are_not_apart_by_it() -> None:
     assert estimate.apart_basis is not ApartBasis.HOME_WIFI
 
 
-def test_a_peer_close_to_the_other_user_is_not_apart_by_the_home_network() -> None:
-    peer = _home_wifi(_repeated_fix(north_m=100.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+def test_a_user_arriving_next_to_a_peer_at_home_is_apart_by_the_home_network() -> None:
+    # Field case 2026-11-04: the user entered the geofence about 135 m from the phone at rest at home, whose cached
+    # fix has a 48 m accuracy. She was kilometers away when that phone reported on the home Wi-Fi.
+    peer = [
+        replace(fix, accuracy_m=48.0)
+        for fix in _home_wifi(_repeated_fix(north_m=135.0, fix_age_s=11_000.0, report_ages_s=[580.0, 1_480.0]))
+    ]
 
     estimate = estimate_together(_phone_a(), peer, now=_NOW)
 
-    assert estimate.apart_basis is not ApartBasis.HOME_WIFI
-    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+    assert estimate.apart_basis is ApartBasis.HOME_WIFI
+    assert estimate.is_apart(0.8) is True
+    assert estimate.distance_now_m == pytest.approx(135.0, abs=2.0)
+
+
+def test_a_user_arriving_at_the_peers_exact_position_is_still_apart_by_the_home_network() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=5.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+
+
+def test_a_home_wifi_peer_is_not_apart_when_the_other_user_has_no_fix_near_the_report_time() -> None:
+    # The arriving user's track starts 100 s ago, 500 s after the peer's report: there is no telling where they were.
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    late_start = _track(_times(every_s=10.0, last_at=_NOW, span_s=100.0))
+
+    assert estimate_together(late_start, peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_the_other_users_position_at_the_report_time_is_the_closest_fix_within_five_minutes() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    # The closest fix to the report must be within 300 s of it: the track starts 290 s (inside) or 310 s (outside)
+    # after the report.
+    just_inside = _track(_times(every_s=10.0, last_at=_NOW, span_s=310.0))
+    just_outside = _track(_times(every_s=10.0, last_at=_NOW, span_s=290.0))
+
+    assert estimate_together(just_inside, peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together(just_outside, peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
 
 
 def test_the_newest_report_decides_whether_the_peer_is_on_the_home_network() -> None:
@@ -955,12 +991,14 @@ def test_sparse_reports_far_apart_are_apart_not_unknown() -> None:
     assert estimate.apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
 
 
-def test_sparse_reports_close_together_stay_unknown() -> None:
+def test_sparse_reports_close_together_are_carried_as_together() -> None:
     sparse = _track(_times(every_s=60.0, last_at=_NOW - 5.0), lateral_m=3.0)
 
     estimate = estimate_together(_phone_a(), sparse, now=_NOW)
 
-    assert estimate.unknown_reason is UnknownReason.TOO_LITTLE_COVERAGE
+    assert estimate.known
+    assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
+    assert estimate.is_together(0.8) is True
 
 
 @pytest.mark.parametrize("window_s", [0.0, -1.0, math.nan, math.inf])
@@ -995,26 +1033,44 @@ def test_a_newer_coarse_fix_far_from_the_other_user_does_not_block_the_verdict()
     assert estimate_together([*arriving, coarse_far], peer, now=_NOW).apart_basis is ApartBasis.NOT_RECENTLY_CLOSE
 
 
-def test_two_sparse_phones_in_one_moving_car_are_not_called_apart() -> None:
+def test_two_sparse_phones_in_one_moving_car_are_together_by_carried_history() -> None:
     # Each phone reports once a minute, offset by half a minute: no instant has two bracketing fixes within 45 s.
     phone_a = _track(_times(every_s=60.0, last_at=_NOW - 5.0), lateral_m=3.0, speed_mps=15.0)
     phone_b = _track(_times(every_s=60.0, last_at=_NOW - 35.0), lateral_m=3.0, speed_mps=15.0)
 
     estimate = estimate_together(phone_a, phone_b, now=_NOW)
 
-    assert estimate.apart_basis is not ApartBasis.NOT_RECENTLY_CLOSE
-    assert estimate.unknown_reason is UnknownReason.TOO_LITTLE_COVERAGE
+    assert estimate.apart_basis is None
+    assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
+    assert estimate.anchor_lag_s == pytest.approx(35.0)
 
 
-def test_a_home_wifi_peer_is_not_apart_when_the_other_user_was_just_near_its_reported_position() -> None:
-    # The other user drifted in from the peer's own position a moment ago: they left together, not independently.
+def test_a_home_wifi_peer_is_not_apart_when_the_other_user_was_near_its_reported_position_then() -> None:
+    # The other user was at the peer's position when the peer reported (600 s ago) and has barely moved since: they
+    # may have left together, with the peer's phone quiet since.
     peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
-    just_left_the_peer = _track(_times(every_s=10.0, last_at=_NOW, span_s=600.0), speed_mps=-2.5)
+    leaving = [
+        TrackFix(
+            accuracy_m=5.0,
+            at=_NOW - age,
+            lat=_LAT0 + (250.0 - max(0.0, 600.0 - age) * 0.1) / _M_PER_DEG,
+            lon=_LON0,
+        )
+        for age in range(700, -1, -10)
+    ]
 
-    estimate = estimate_together(just_left_the_peer, peer, now=_NOW)
+    estimate = estimate_together(leaving, peer, now=_NOW)
 
     assert estimate.apart_basis is None
     assert estimate.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_user_who_passed_the_peers_position_after_its_report_is_apart_by_the_home_network() -> None:
+    # Approaching the peer's position after the report is an arrival, not a departure together.
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    approaching = _track(_times(every_s=10.0, last_at=_NOW, span_s=600.0), speed_mps=-2.5)
+
+    assert estimate_together(approaching, peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
 
 
 def test_a_coarse_newest_fix_of_the_away_user_is_not_the_position_for_the_home_wifi_check() -> None:
@@ -1069,3 +1125,192 @@ def test_closeness_at_a_recorded_fix_time_between_the_regular_samples_counts() -
     ]
 
     assert estimate_together(arriving, peer, now=_NOW).unknown_reason is UnknownReason.STALE_FIX
+
+
+def _quiet_after(fixes: list[TrackFix], *, last_at: float) -> list[TrackFix]:
+    return [fix for fix in fixes if fix.at <= last_at]
+
+
+def test_a_phone_that_goes_quiet_after_a_shared_drive_is_carried_as_together() -> None:
+    # Field case 2026-11-04 20:14: both phones drove together, then one stopped reporting as the car neared the house.
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 120.0)
+
+    estimate = estimate_together(_phone_a(), quiet, now=_NOW)
+
+    assert estimate.known
+    assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
+    assert estimate.apart_basis is None
+    assert estimate.unknown_reason is None
+    assert estimate.is_together(0.8) is True
+    assert estimate.is_apart(0.8) is False
+    assert estimate.anchor == pytest.approx(_NOW - 120.0)
+    assert estimate.anchor_lag_s == pytest.approx(120.0)
+    assert estimate.newest_fix_age_s[1] == pytest.approx(120.0)
+    assert estimate.windows == ()
+
+
+def test_a_phone_quiet_past_the_carry_window_is_unknown() -> None:
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 181.0)
+
+    estimate = estimate_together(_phone_a(), quiet, now=_NOW)
+
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+    assert estimate.together_basis is None
+
+
+def test_the_carry_window_is_a_parameter() -> None:
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 181.0)
+
+    estimate = estimate_together(_phone_a(), quiet, now=_NOW, params=TogetherParams(carry_window_s=200.0))
+
+    assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
+
+
+def test_a_gap_in_the_last_minute_with_fresh_fixes_is_carried_as_together() -> None:
+    # Both phones are fresh, but one skipped 100 s: too little coverage for the windows, plenty of history to bridge.
+    before = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 100.0)
+    phone_b = [*before, _fix(_NOW - 2.0, lateral_m=3.0)]
+
+    estimate = estimate_together(_phone_a(), phone_b, now=_NOW)
+
+    assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
+    assert estimate.is_together(0.8) is True
+
+
+def test_a_pair_that_was_only_partly_close_before_the_silence_stays_unknown() -> None:
+    # 70 m of lateral offset is inside the ramp between near and far, so the mean closeness stays below 0.9.
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=70.0), last_at=_NOW - 100.0)
+
+    estimate = estimate_together(_phone_a(), quiet, now=_NOW)
+
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+    assert estimate.together_basis is None
+
+
+def test_a_pair_that_drifted_apart_in_the_last_minute_before_the_silence_stays_unknown() -> None:
+    # From 170 s ago one phone veers east at about 3 m/s: 235 m away when it goes quiet 100 s ago.
+    drifting = [
+        replace(fix, lon=fix.lon + max(0.0, fix.at - (_NOW - 170.0)) * 4e-5)
+        for fix in _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=0.0), last_at=_NOW - 100.0)
+    ]
+
+    estimate = estimate_together(_phone_a(), drifting, now=_NOW)
+
+    assert estimate.together_basis is None
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_too_few_recent_fixes_are_not_carried() -> None:
+    sparse = [_fix(_NOW - 400.0, lateral_m=3.0), _fix(_NOW - 100.0, lateral_m=3.0)]
+
+    estimate = estimate_together(_phone_a(), sparse, now=_NOW)
+
+    assert estimate.together_basis is None
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_dropped_coarse_fix_far_from_the_other_user_vetoes_the_carry() -> None:
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 100.0)
+    far_but_coarse = _coarse_fix(_NOW - 60.0, north_m=-3_000.0, accuracy_m=100.0)
+
+    assert estimate_together(_phone_a(), quiet, now=_NOW).together_basis is TogetherBasis.CARRIED_HISTORY
+    vetoed = estimate_together(_phone_a(), [*quiet, far_but_coarse], now=_NOW)
+    assert vetoed.together_basis is None
+
+
+def test_a_dropped_coarse_fix_near_the_other_user_does_not_veto_the_carry() -> None:
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 100.0)
+    coarse_near = _fix(_NOW - 60.0, accuracy_m=100.0, lateral_m=3.0)
+
+    estimate = estimate_together(_phone_a(), [*quiet, coarse_near], now=_NOW)
+
+    assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
+
+
+def test_a_user_without_any_good_fix_is_never_carried() -> None:
+    coarse_only = _track(_times(every_s=10.0, last_at=_NOW - 100.0), lateral_m=3.0, accuracy_m=200.0)
+
+    assert estimate_together(_phone_a(), coarse_only, now=_NOW).unknown_reason is UnknownReason.NO_GOOD_FIXES
+
+
+def test_a_stationary_peer_far_away_is_apart_by_the_peer_basis_not_carried() -> None:
+    peer = _repeated_fix(north_m=190_000.0, fix_age_s=11_000.0, report_ages_s=[950.0, 2_750.0, 4_600.0])
+
+    assert estimate_together(_phone_a(), peer, now=_NOW).apart_basis is ApartBasis.STATIONARY_PEER
+
+
+@pytest.mark.parametrize("confidence", [0.0, -0.1, 1.1, math.nan, math.inf])
+def test_the_carry_minimum_confidence_must_be_in_zero_exclusive_to_one(confidence: float) -> None:
+    with pytest.raises(ValueError, match="carry_min_confidence"):
+        TogetherParams(carry_min_confidence=confidence)
+
+
+@pytest.mark.parametrize("window_s", [0.0, -1.0, math.nan, math.inf])
+def test_the_carry_window_must_be_positive_and_finite(window_s: float) -> None:
+    with pytest.raises(ValueError, match="carry_window_s"):
+        TogetherParams(carry_window_s=window_s)
+
+
+def test_a_home_wifi_run_that_began_when_the_user_was_at_the_reported_position_is_not_apart_by_it() -> None:
+    # The peer has re-reported its position from home since 1100 s ago; the other user was at that position then.
+    # Judging only by the newest report (60 s ago, when the user was 20 km away) would call the pair apart.
+    reports = [60.0, 500.0, 1_100.0]
+    peer = _home_wifi(_repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=reports))
+    long_track = _track(_times(every_s=10.0, last_at=_NOW, span_s=1_200.0))
+
+    assert estimate_together(long_track, peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+    newest_only = _home_wifi(_repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=[60.0]))
+    assert estimate_together(long_track, newest_only, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+
+
+def test_two_equally_close_fixes_to_the_report_time_count_as_near_when_either_is_near() -> None:
+    peer = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    far_before = TrackFix(accuracy_m=5.0, at=_NOW - 700.0, lat=_LAT0 - 8_000.0 / _M_PER_DEG, lon=_LON0)
+    at_peer_after = TrackFix(accuracy_m=5.0, at=_NOW - 500.0, lat=_LAT0 + 250.0 / _M_PER_DEG, lon=_LON0)
+    arriving = [far_before, at_peer_after, _fix(_NOW - 10.0)]
+
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def _with_reports(fixes: list[TrackFix], *, home_wifi: bool) -> list[TrackFix]:
+    return [replace(fix, home_wifi=home_wifi, reported_at=fix.at + 1.0) for fix in fixes]
+
+
+def test_a_phone_that_went_quiet_on_the_home_wifi_is_never_carried_as_together() -> None:
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 100.0)
+
+    assert estimate_together(_phone_a(), _with_reports(quiet, home_wifi=False), now=_NOW).together_basis is (
+        TogetherBasis.CARRIED_HISTORY
+    )
+    at_home = estimate_together(_phone_a(), _with_reports(quiet, home_wifi=True), now=_NOW)
+    assert at_home.together_basis is None
+    assert at_home.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_stale_home_wifi_report_does_not_stop_the_carry() -> None:
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 100.0)
+    old_reports = [replace(fix, home_wifi=True, reported_at=_NOW - 1_300.0) for fix in quiet]
+
+    assert estimate_together(_phone_a(), old_reports, now=_NOW).together_basis is TogetherBasis.CARRIED_HISTORY
+
+
+def test_each_user_needs_a_real_fix_inside_the_minute_that_is_carried() -> None:
+    # The fresh user's only recent fix came after the quiet phone's last one, so the minute before that last fix
+    # would be a straight line drawn between old points.
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 100.0)
+    old_cluster = [_fix(_NOW - 390.0), _fix(_NOW - 385.0), _fix(_NOW - 380.0), _fix(_NOW - 5.0)]
+
+    estimate = estimate_together(old_cluster, quiet, now=_NOW)
+
+    assert estimate.together_basis is None
+    assert estimate.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_the_distance_of_a_carried_estimate_is_the_distance_at_the_anchor() -> None:
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=20.0), last_at=_NOW - 100.0)
+
+    estimate = estimate_together(_phone_a(), quiet, now=_NOW)
+
+    assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
+    assert estimate.distance_now_m == pytest.approx(20.0, abs=1.0)
+    assert estimate.anchor_lag_s == pytest.approx(100.0)

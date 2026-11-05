@@ -30,14 +30,21 @@ that position is clearly far from the other user, the pair is apart, however old
 the fix is.
 
 A user whose newest report (at most ``_HOME_WIFI_REPORT_FRESH_S`` old) was made on the home Wi-Fi is at home. When
-the other user's fresh fix is not on that network and is clearly far from the reported position, the pair is apart:
-nobody arrives in the same vehicle as a person who is already home. Which reports count as on the home Wi-Fi is the
-caller's decision (``TrackFix.home_wifi``).
+the other user's fresh fix is not on that network and that user was clearly far from the reported position when the
+report was made, the pair is apart: nobody arrives in the same vehicle as a person who is already home. How close
+the two are now does not matter, so the evidence does not weaken as the arriving user nears the house. Which reports
+count as on the home Wi-Fi is the caller's decision (``TrackFix.home_wifi``).
 
 When the estimate would otherwise be unknown because a fix is stale or the tracks are too sparse, the pair is apart
 unless the two users were close at some moment in the last ``recent_close_window_s``, with each user's newest good fix
 carried forward. A pair that has not been close for minutes is simply not together. A user with no good fix at all
 stays unknown: there is no position to say they were not close.
+
+When the estimate would still be unknown for that reason and the pair was clearly together until a moment ago, the
+verdict is carried forward (``TogetherBasis.CARRIED_HISTORY``): the last minute before the newest shared fix, with
+gaps bridged, shows the two close all the way, each has several recent good fixes, and the newest shared fix is at
+most ``carry_window_s`` old. A phone that goes quiet when the car stops is the usual cause. The estimate is then
+only as good as that last minute, so consumers must not start or end a together episode from it.
 
 The module is pure: it knows nothing about rules, users or geofences.
 """
@@ -60,6 +67,7 @@ class WindowSpec:
     weight: float
 
 
+DEFAULT_CARRY_MIN_CONFIDENCE: Final[float] = 0.9
 DEFAULT_WINDOWS: Final[tuple[WindowSpec, ...]] = (
     WindowSpec(length_s=60.0, weight=0.5),
     WindowSpec(length_s=300.0, weight=0.3),
@@ -73,6 +81,8 @@ class TogetherParams:
     """Thresholds for :func:`estimate_together`; the defaults are proposals to tune."""
 
     accuracy_limit_m: float = 50.0
+    carry_min_confidence: float = DEFAULT_CARRY_MIN_CONFIDENCE
+    carry_window_s: float = 180.0
     coverage_floor: float = 0.5
     far_m: float = 150.0
     freshness_s: float = 45.0
@@ -88,6 +98,7 @@ class TogetherParams:
             raise ValueError("Expected at least one window, got none")
         positives = {
             "accuracy_limit_m": self.accuracy_limit_m,
+            "carry_window_s": self.carry_window_s,
             "freshness_s": self.freshness_s,
             "max_gap_s": self.max_gap_s,
             "max_speed_mps": self.max_speed_mps,
@@ -103,6 +114,8 @@ class TogetherParams:
             or self.far_m <= self.near_m
         ):
             raise ValueError(f"Expected 0 <= near_m < far_m, got near_m={self.near_m} far_m={self.far_m}")
+        if not (math.isfinite(self.carry_min_confidence) and 0.0 < self.carry_min_confidence <= 1.0):
+            raise ValueError(f"Expected carry_min_confidence in (0, 1], got {self.carry_min_confidence}")
         if not 0.0 <= self.coverage_floor <= 1.0:
             raise ValueError(f"Expected coverage_floor in [0, 1], got {self.coverage_floor}")
         lengths = [window.length_s for window in self.windows]
@@ -143,6 +156,12 @@ class InterpolatedPosition:
     lon: float
 
 
+class TogetherBasis(StrEnum):
+    """Why a pair is together without the interpolated windows."""
+
+    CARRIED_HISTORY = "carried_history"
+
+
 @dataclass(frozen=True, slots=True)
 class TogetherEstimate:
     """The outcome of :func:`estimate_together`.
@@ -151,6 +170,10 @@ class TogetherEstimate:
     then says why and ``unknown_track`` (0 or 1) which track it concerns, when
     one track is to blame (``windows`` is empty for ``NO_GOOD_FIXES`` and
     ``STALE_FIX``).
+
+    An estimate that rests on a ``together_basis`` or an ``apart_basis`` has no ``windows``, so code that reads
+    ``windows[0]`` must check for an empty tuple. A carried-history estimate's ``distance_now_m`` is the distance at
+    the anchor, which can be up to ``carry_window_s`` before ``now``.
 
     ``together_for_s`` and ``apart_for_s`` are how far back from the anchor the
     instants stay known and together (closeness of at least 0.5), or known and
@@ -176,6 +199,8 @@ class TogetherEstimate:
     unknown_reason: UnknownReason | None
     unknown_track: int | None
     windows: tuple[WindowEstimate, ...]
+    # Last because it has a default: ``None`` unless the verdict rests on carried history, not on the windows.
+    together_basis: TogetherBasis | None = None
 
     @property
     def known(self) -> bool:
@@ -346,7 +371,10 @@ def estimate_together(
             if stationary is None:
                 not_close = _apart_by_no_recent_closeness((track_a, track_b), cleaned, now=now, params=settings)
                 if not_close is None:
-                    return unknown(UnknownReason.STALE_FIX, index)
+                    carried = _together_by_carried_history((track_a, track_b), cleaned, now=now, params=settings)
+                    if carried is None:
+                        return unknown(UnknownReason.STALE_FIX, index)
+                    return _carried_estimate(carried, now=now, ages=ages, quality=(dropped_quality, dropped_speed))
                 return _apart_estimate(
                     ApartBasis.NOT_RECENTLY_CLOSE, not_close, now=now, quality=(dropped_quality, dropped_speed)
                 )
@@ -377,7 +405,10 @@ def estimate_together(
     if not recent.known:
         not_close = _apart_by_no_recent_closeness((track_a, track_b), cleaned, now=now, params=settings)
         if not_close is None:
-            return unknown(UnknownReason.TOO_LITTLE_COVERAGE, None, windows)
+            carried = _together_by_carried_history((track_a, track_b), cleaned, now=now, params=settings)
+            if carried is None:
+                return unknown(UnknownReason.TOO_LITTLE_COVERAGE, None, windows)
+            return _carried_estimate(carried, now=now, ages=ages, quality=(dropped_quality, dropped_speed))
         return _apart_estimate(
             ApartBasis.NOT_RECENTLY_CLOSE, not_close, now=now, quality=(dropped_quality, dropped_speed)
         )
@@ -450,9 +481,12 @@ def pair_closeness(
     return distance_m, (far_m - distance_m) / (far_m - near_m)
 
 
+_CARRY_HISTORY_S: Final[float] = 300.0
+_CARRY_MIN_FIXES: Final[int] = 3
 _COMPARE_TOLERANCE: Final[float] = 1e-9
 _EARTH_RADIUS_M: Final[float] = 6_371_000.0
 _HOME_WIFI_REPORT_FRESH_S: Final[float] = 1200.0
+_HOME_WIFI_TRACK_TOLERANCE_S: Final[float] = 300.0
 _STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
@@ -489,26 +523,21 @@ def _apart_by_home_wifi(
     now: float,
     params: TogetherParams,
 ) -> tuple[TrackFix, TrackFix, float] | None:
-    """Return both fixes and their distance when one user is at home on the Wi-Fi and the other is clearly away.
+    """Return both fixes and their distance when one user is at home on the Wi-Fi and the other was away from it.
 
     The user at home is the one whose newest report, at most ``_HOME_WIFI_REPORT_FRESH_S`` old, was made on the
     home network (a repeated old fix still counts: the report says where the phone is). The other user needs a
-    fresh good fix that is not on the home network, and the distance beyond both accuracy circles must be at least
-    ``far_m``, and the other user's track must not have been near the reported position (they may have left it
-    together). Nobody arrives in the same vehicle as a person who is already home.
+    fresh good fix that is not on the home network, and must have been clearly away from the reported position at
+    every report of the unbroken run of home-network reports there (see :func:`_was_near_when_reported`): a user
+    who was there then may have left with the person at home. How far the two are now does not matter: the closer
+    the arriving user gets to a phone that sits at home, the more the verdict is needed. Nobody arrives in the same
+    vehicle as a person who is already
+    home.
     """
     for home in (0, 1):
-        reports = [
-            fix
-            for fix in tracks[home]
-            if fix.reported_at is not None
-            and math.isfinite(fix.reported_at)
-            and fix.reported_at <= now
-            and _has_position(fix)
-        ]
-        if not reports:
+        newest = _newest_report(tracks[home], now)
+        if newest is None:
             continue
-        newest = max(reports, key=lambda fix: fix.reported_at or 0.0)
         if not newest.home_wifi or now - (newest.reported_at or 0.0) > _HOME_WIFI_REPORT_FRESH_S:
             continue
         if newest.accuracy_m is None or not math.isfinite(newest.accuracy_m) or newest.accuracy_m < 0.0:
@@ -528,17 +557,9 @@ def _apart_by_home_wifi(
             # A report that cleaning dropped (too coarse, or the less accurate twin of an equal-time pair) and is
             # not older than the fix used here may put the user somewhere else.
             continue
+        if _was_near_when_reported(_home_wifi_report_times(tracks[home], newest, now), newest, good_fixes, params):
+            continue
         distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
-        slack_m = newest.accuracy_m + (away.accuracy_m or 0.0)
-        if distance_m - slack_m < params.far_m:
-            continue
-        if any(
-            _haversine_m(newest.lat, newest.lon, fix.lat, fix.lon) - newest.accuracy_m - (fix.accuracy_m or 0.0)
-            < params.far_m
-            for fix in cleaned[1 - home].fixes
-        ):
-            # The other user was recently at the reported position, so the two may have left it together.
-            continue
         return (newest, away, distance_m) if home == 0 else (away, newest, distance_m)
     return None
 
@@ -689,6 +710,64 @@ def _apart_for_s(closeness_at: Sequence[float | None], params: TogetherParams) -
     return reach * params.step_s
 
 
+def _carried_estimate(
+    evidence: tuple[float, float, float],
+    *,
+    now: float,
+    ages: tuple[float | None, float | None],
+    quality: tuple[tuple[int, int], tuple[int, int]],
+) -> TogetherEstimate:
+    """A known, together estimate that rests on the last minute before the newest shared fix, not on the windows."""
+    anchor, closeness, distance_m = evidence
+    return TogetherEstimate(
+        anchor=anchor,
+        anchor_lag_s=max(0.0, now - anchor),
+        apart_basis=None,
+        apart_for_s=0.0,
+        confidence=min(1.0, max(0.0, closeness)),
+        distance_now_m=distance_m,
+        dropped_quality=quality[0],
+        dropped_speed=quality[1],
+        newest_fix_age_s=ages,
+        recent_closeness=min(1.0, max(0.0, closeness)),
+        together_for_s=0.0,
+        unknown_reason=None,
+        unknown_track=None,
+        windows=(),
+        together_basis=TogetherBasis.CARRIED_HISTORY,
+    )
+
+
+def _dropped_fix_contradicts_together(
+    tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
+    cleaned: tuple[CleanTrack, CleanTrack],
+    *,
+    since: float,
+    now: float,
+    params: TogetherParams,
+) -> bool:
+    """Whether a fix that quality filtering dropped puts its user clearly away from the other user.
+
+    A coarse fix still says something about where its user is. When its accuracy circle stays at least ``far_m``
+    from the other user's position at that moment, carrying the pair's togetherness forward would ignore it.
+    A fix without a usable accuracy proves nothing either way.
+    """
+    for index in (0, 1):
+        retained = set(cleaned[index].fixes)
+        for fix in tracks[index]:
+            if fix.report_only or fix in retained or not _has_position(fix) or not since <= fix.at <= now:
+                continue
+            if fix.accuracy_m is None or not math.isfinite(fix.accuracy_m) or fix.accuracy_m < 0.0:
+                continue
+            other = _position_at(cleaned[1 - index].fixes, fix.at)
+            if other is None:
+                continue
+            distance_m = _haversine_m(fix.lat, fix.lon, other.lat, other.lon)
+            if distance_m - fix.accuracy_m - other.accuracy_m >= params.far_m:
+                return True
+    return False
+
+
 def _has_position(fix: TrackFix) -> bool:
     """Whether the fix has a finite time and an in-range position, whatever its accuracy."""
     return (
@@ -706,6 +785,26 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     d_lambda = math.radians(lon2 - lon1)
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     return 2 * _EARTH_RADIUS_M * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _home_wifi_report_times(fixes: Sequence[TrackFix], newest: TrackFix, now: float) -> tuple[float, ...]:
+    """When the unbroken run of fresh home-network reports at ``newest``'s position began, and when it last reported.
+
+    A phone at rest reports again and again, so the newest report alone says little about when the user was last
+    seen away from home. The run is every fresh report on the home network at the same position.
+    """
+    times = [
+        fix.reported_at
+        for fix in fixes
+        if fix.reported_at is not None
+        and math.isfinite(fix.reported_at)
+        and fix.reported_at <= now
+        and now - fix.reported_at <= _HOME_WIFI_REPORT_FRESH_S
+        and fix.home_wifi
+        and _has_position(fix)
+        and (fix.lat, fix.lon) == (newest.lat, newest.lon)
+    ]
+    return tuple(sorted({min(times), max(times)})) if times else ()
 
 
 def _is_good_quality(fix: TrackFix, params: TogetherParams) -> bool:
@@ -773,6 +872,19 @@ def _newest_fix(fixes: Sequence[TrackFix], cleaned: CleanTrack, params: Together
     return max((*cleaned.fixes, *coarse), key=lambda fix: (fix.at, -(fix.accuracy_m or 0.0)), default=None)
 
 
+def _newest_report(fixes: Sequence[TrackFix], now: float) -> TrackFix | None:
+    """The fix with the newest finite report time not after ``now`` and a valid position, else ``None``."""
+    reports = [
+        fix
+        for fix in fixes
+        if fix.reported_at is not None
+        and math.isfinite(fix.reported_at)
+        and fix.reported_at <= now
+        and _has_position(fix)
+    ]
+    return max(reports, key=lambda fix: fix.reported_at or 0.0) if reports else None
+
+
 def _position_at(fixes: Sequence[TrackFix], instant: float) -> InterpolatedPosition | None:
     """The position at ``instant``: interpolated between its bracketing fixes, else the newest fix once it has passed.
 
@@ -796,6 +908,67 @@ def _speed_mps(first: TrackFix, second: TrackFix) -> float:
     return max(0.0, distance_m - explained_m) / max(second.at - first.at, 1.0)
 
 
+def _together_by_carried_history(
+    tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
+    cleaned: tuple[CleanTrack, CleanTrack],
+    *,
+    now: float,
+    params: TogetherParams,
+) -> tuple[float, float, float] | None:
+    """Return ``(anchor, closeness, distance_m)`` when the pair was clearly together until a moment ago, else ``None``.
+
+    The anchor is the newest instant both users have a good fix, which must be at most ``carry_window_s`` before
+    ``now``. Each user needs ``_CARRY_MIN_FIXES`` good fixes in the ``_CARRY_HISTORY_S`` before it, so a long gap is
+    never bridged between two lone fixes. Every sampled instant of the shortest window ending at the anchor takes
+    each user's position with gaps bridged (:func:`_position_at`); the mean closeness must reach
+    ``carry_min_confidence`` and no instant may be clearly apart. Each user also needs a real fix inside that
+    minute. A user whose newest report was made on the home Wi-Fi is at rest at home, so nothing is carried. A
+    dropped fix that puts a user clearly away from the other vetoes the verdict, and a user with no good fix has
+    nothing to carry. Where the users are after the anchor is not known, so ``distance_m`` is the distance at the
+    anchor.
+    """
+    first, second = cleaned[0].fixes, cleaned[1].fixes
+    if not first or not second:
+        return None
+    anchor = min(now, first[-1].at, second[-1].at)
+    if now - anchor > params.carry_window_s:
+        return None
+    for index in (0, 1):
+        newest = _newest_report(tracks[index], now)
+        if newest is not None and newest.home_wifi and now - (newest.reported_at or 0.0) <= _HOME_WIFI_REPORT_FRESH_S:
+            # A phone that went quiet on the home Wi-Fi is at rest at home, not riding in a car.
+            return None
+    history_start = anchor - _CARRY_HISTORY_S
+    window_s = params.windows[0].length_s
+    for fixes in (first, second):
+        if sum(1 for fix in fixes if history_start <= fix.at <= anchor) < _CARRY_MIN_FIXES:
+            return None
+        if not any(anchor - window_s <= fix.at <= anchor for fix in fixes):
+            # Every fix is older than the window: the whole minute would be a line drawn between old points.
+            return None
+    closeness_values: list[float] = []
+    distance_at_anchor = 0.0
+    for index in range(round(window_s / params.step_s) + 1):
+        instant = anchor - index * params.step_s
+        position_a = _position_at(first, instant)
+        position_b = _position_at(second, instant)
+        if position_a is None or position_b is None:
+            return None
+        distance_m, closeness = pair_closeness(position_a, position_b, params=params)
+        if index == 0:
+            distance_at_anchor = distance_m
+        closeness_values.append(closeness)
+    mean = sum(closeness_values) / len(closeness_values)
+    if (
+        mean < params.carry_min_confidence - _COMPARE_TOLERANCE
+        or min(closeness_values) < _TOGETHER_RUN_CLOSENESS - _COMPARE_TOLERANCE
+    ):
+        return None
+    if _dropped_fix_contradicts_together(tracks, cleaned, since=anchor - window_s, now=now, params=params):
+        return None
+    return anchor, mean, distance_at_anchor
+
+
 def _together_for_s(closeness_at: Sequence[float | None], params: TogetherParams) -> float:
     """Seconds back from the anchor over which every sampled instant is known and not clearly apart.
 
@@ -809,6 +982,32 @@ def _together_for_s(closeness_at: Sequence[float | None], params: TogetherParams
             break
         reach = index
     return reach * params.step_s
+
+
+def _was_near_when_reported(
+    report_times: Sequence[float],
+    home_fix: TrackFix,
+    away_fixes: Sequence[TrackFix],
+    params: TogetherParams,
+) -> bool:
+    """Whether the other user was, or may have been, near the home phone's position at any of ``report_times``.
+
+    At each time the fix closest in time stands for where the other user was. Without one within
+    ``_HOME_WIFI_TRACK_TOLERANCE_S`` of the time there is no telling, so the answer is yes, and so it is when two
+    fixes are equally close and either one is near. A user who was at the reported position then may have left it
+    together with the person at home; one who was far away at every report could not have.
+    """
+    for reported_at in report_times:
+        distance_to_reported_at = min(abs(fix.at - reported_at) for fix in away_fixes)
+        if distance_to_reported_at > _HOME_WIFI_TRACK_TOLERANCE_S:
+            return True
+        for fix in away_fixes:
+            if abs(fix.at - reported_at) != distance_to_reported_at:
+                continue
+            slack_m = (home_fix.accuracy_m or 0.0) + (fix.accuracy_m or 0.0)
+            if _haversine_m(home_fix.lat, home_fix.lon, fix.lat, fix.lon) - slack_m < params.far_m:
+                return True
+    return False
 
 
 def _window_estimate(

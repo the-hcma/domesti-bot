@@ -1128,6 +1128,8 @@ class RuleEvaluator:
                     user_id=deferred.user_id,
                     geofence_id=deferred.geofence_id,
                     event=deferred.event,
+                    reason=deferred.reason,
+                    since_report_s=now - deferred.observed_at,
                 )
                 self._record_rule_skipped(
                     deferred.rule_id,
@@ -1685,6 +1687,8 @@ class RuleEvaluator:
                 user_id=deferred.user_id,
                 geofence_id=deferred.geofence_id,
                 event=deferred.event,
+                reason=deferred.reason,
+                since_report_s=now - deferred.observed_at,
             )
             self._record_rule_skipped(
                 deferred.rule_id,
@@ -4549,13 +4553,17 @@ def _log_deferred_edge_expired(
     user_id: str,
     geofence_id: str,
     event: DeferredGeofenceEvent,
+    reason: str,
+    since_report_s: float,
 ) -> None:
     _LOGGER.info(
-        "[rules] deferred edge expired rule_id=%s user_id=%s geofence_id=%s event=%s",
+        "[rules] deferred edge expired rule_id=%s user_id=%s geofence_id=%s event=%s reason=%s since_report_s=%.0f",
         rule_id,
         user_id,
         geofence_id,
         event,
+        reason,
+        max(0.0, since_report_s),
     )
 
 

@@ -73,7 +73,9 @@ from app.rule_actions import (
 )
 from app.rule_validation import resolve_device_ref_to_backend_id, resolve_roster_user_id
 from app.users_together import (
+    DEFAULT_CARRY_MIN_CONFIDENCE,
     ApartBasis,
+    TogetherBasis,
     TogetherEstimate,
     TogetherParams,
     TrackFix,
@@ -3169,6 +3171,18 @@ def _together_detail(condition: UsersTogetherCondition, pair: TogetherPair, rule
             f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
             f"(one phone keeps reporting the same old location, which is treated as not having moved)"
         )
+    if estimate.together_basis is TogetherBasis.CARRIED_HISTORY:
+        needs = (
+            f"needs {condition.min_confidence:.2f}"
+            if condition.expected
+            else f"apart needs at most {1.0 - condition.min_confidence:.2f}"
+        )
+        return (
+            f"{who}: confidence {estimate.confidence or 0.0:.2f} "
+            f"(close for the last {_format_dwell_duration_s(params.windows[0].length_s)} before the newest shared fix, "
+            f"{_format_dwell_elapsed_s(estimate.anchor_lag_s or 0.0)} ago; one phone has gone quiet since, "
+            f"so they are assumed to still be together), {needs}"
+        )
     windows = ", ".join(
         f"{_format_dwell_duration_s(window.length_s)} "
         f"{'n/a' if window.closeness is None else f'{window.closeness:.2f}'}"
@@ -3252,6 +3266,9 @@ def _together_roster_pairs(
 def _together_params(condition: UsersTogetherCondition, rule: RuleOut) -> TogetherParams:
     return TogetherParams(
         accuracy_limit_m=float(rule.min_location_accuracy_m),
+        # A carried verdict is known, so it must not fall in the dead zone of a stricter rule: that would settle the
+        # condition as unmet and lose the deferred edge an unknown verdict keeps alive.
+        carry_min_confidence=min(1.0, max(DEFAULT_CARRY_MIN_CONFIDENCE, condition.min_confidence)),
         far_m=condition.far_m,
         near_m=condition.near_m,
     )
