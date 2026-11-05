@@ -738,7 +738,7 @@ async def test_deferred_edge_expiry_log_names_why_it_was_deferred(
     assert len(expired) == 1
     assert "rule_id=henrique-enters-alone" in expired[0]
     assert "reason=togetherness_unknown" in expired[0]
-    assert "since_report_s=" in expired[0]
+    assert "since_report_s=300" in expired[0]
 
 
 @pytest.mark.asyncio

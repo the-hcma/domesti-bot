@@ -81,6 +81,7 @@ class TogetherParams:
     """Thresholds for :func:`estimate_together`; the defaults are proposals to tune."""
 
     accuracy_limit_m: float = 50.0
+    carry_enabled: bool = True
     carry_min_confidence: float = DEFAULT_CARRY_MIN_CONFIDENCE
     carry_window_s: float = 180.0
     coverage_floor: float = 0.5
@@ -788,23 +789,29 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _home_wifi_report_times(fixes: Sequence[TrackFix], newest: TrackFix, now: float) -> tuple[float, ...]:
-    """When the unbroken run of fresh home-network reports at ``newest``'s position began, and when it last reported.
+    """Every report time of the unbroken run of fresh home-network reports at ``newest``'s position, oldest first.
 
     A phone at rest reports again and again, so the newest report alone says little about when the user was last
-    seen away from home. The run is every fresh report on the home network at the same position.
+    seen away from home. Walking back from the newest report, a report extends the run while it is fresh (at most
+    ``_HOME_WIFI_REPORT_FRESH_S`` old), on the home network and at the same position; the first report that is not
+    ends the run, so an older visit before a report from elsewhere never counts. Rows sharing one report time
+    extend the run only when every one of them qualifies.
     """
-    times = [
-        fix.reported_at
-        for fix in fixes
-        if fix.reported_at is not None
-        and math.isfinite(fix.reported_at)
-        and fix.reported_at <= now
-        and now - fix.reported_at <= _HOME_WIFI_REPORT_FRESH_S
-        and fix.home_wifi
-        and _has_position(fix)
-        and (fix.lat, fix.lon) == (newest.lat, newest.lon)
-    ]
-    return tuple(sorted({min(times), max(times)})) if times else ()
+    by_time: dict[float, list[TrackFix]] = {}
+    for fix in fixes:
+        if fix.reported_at is not None and math.isfinite(fix.reported_at) and fix.reported_at <= now:
+            by_time.setdefault(fix.reported_at, []).append(fix)
+    times: list[float] = []
+    for reported_at in sorted(by_time, reverse=True):
+        if now - reported_at > _HOME_WIFI_REPORT_FRESH_S:
+            break
+        if not all(
+            fix.home_wifi and _has_position(fix) and (fix.lat, fix.lon) == (newest.lat, newest.lon)
+            for fix in by_time[reported_at]
+        ):
+            break
+        times.append(reported_at)
+    return tuple(reversed(times))
 
 
 def _is_good_quality(fix: TrackFix, params: TogetherParams) -> bool:
@@ -921,14 +928,15 @@ def _together_by_carried_history(
     ``now``. Each user needs ``_CARRY_MIN_FIXES`` good fixes in the ``_CARRY_HISTORY_S`` before it, so a long gap is
     never bridged between two lone fixes. Every sampled instant of the shortest window ending at the anchor takes
     each user's position with gaps bridged (:func:`_position_at`); the mean closeness must reach
-    ``carry_min_confidence`` and no instant may be clearly apart. Each user also needs a real fix inside that
+    ``carry_min_confidence`` and no instant may be clearly apart. ``carry_enabled`` switches the whole rule off (the
+    rule layer does so for evaluations that are not a geofence edge). Each user also needs a real fix inside that
     minute. A user whose newest report was made on the home Wi-Fi is at rest at home, so nothing is carried. A
     dropped fix that puts a user clearly away from the other vetoes the verdict, and a user with no good fix has
     nothing to carry. Where the users are after the anchor is not known, so ``distance_m`` is the distance at the
     anchor.
     """
     first, second = cleaned[0].fixes, cleaned[1].fixes
-    if not first or not second:
+    if not params.carry_enabled or not first or not second:
         return None
     anchor = min(now, first[-1].at, second[-1].at)
     if now - anchor > params.carry_window_s:

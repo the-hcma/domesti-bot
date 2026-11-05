@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -21,7 +22,7 @@ from app.api.schemas import (
     UsersTogetherCondition,
 )
 from app.automation_rules_loader import AutomationRulesLoadError
-from app.device_enums import RuleTrigger
+from app.device_enums import RuleEvaluationCause, RuleTrigger
 from app.rule_conditions import (
     RuleEvaluationContext,
     compute_rules_sun_out,
@@ -251,6 +252,7 @@ def test_a_second_phone_that_went_quiet_a_moment_ago_is_together_and_the_status_
     assert "confidence 1.00" in row.detail
     assert "close for the last 1 min before the newest shared fix, 2 min ago" in row.detail
     assert "one phone has gone quiet since, so they are assumed to still be together" in row.detail
+    assert "apart at the latest shared fix" in row.detail
     assert "needs 0.80" in row.detail
     assert _row(_rule(expected=False), ctx).met is False
     assert "apart needs at most 0.20" in _row(_rule(expected=False), ctx).detail
@@ -268,6 +270,33 @@ def test_a_carried_verdict_below_a_stricter_rules_minimum_stays_unknown_so_the_e
     assert strict_rule.met is False
     assert "unknown" in strict_rule.detail
     assert "newest usable fix is 1 min 40 sec old" in strict_rule.detail
+
+
+def test_a_carried_verdict_between_two_fresh_phones_does_not_claim_one_went_quiet() -> None:
+    # Both phones report within the freshness limit, but B skipped 100 s, so the last minute is too sparse to compare.
+    sparse_b = [
+        *_history(every_s=10.0, last_at=_NOW - 100.0, lateral_m=3.0),
+        _location(_NOW - 50.0, accuracy_m=200, lateral_m=3.0),
+        _location(_NOW - 3.0, lateral_m=3.0),
+    ]
+
+    row = _row(_rule(), _ctx({"user-a": _history(), "user-b": sparse_b}))
+
+    assert row.met is True
+    assert "both phones report, but the last minute is too sparse to compare" in row.detail
+    assert "gone quiet" not in row.detail
+    assert "apart at the latest shared fix" in row.detail
+    assert "1 low-quality fix ignored" in row.detail
+
+
+def test_only_a_geofence_edge_evaluation_may_use_a_carried_verdict() -> None:
+    ctx = _ctx(_pair(b_last_at=_NOW - 120.0))
+
+    assert _row(_rule(), ctx).met is True
+    for cause in (RuleEvaluationCause.SCHEDULED, RuleEvaluationCause.DEVICE_STATE, RuleEvaluationCause.DWELL):
+        row = _row(_rule(), replace(ctx, triggered_by=cause))
+        assert row.met is False
+        assert "unknown" in row.detail
 
 
 def test_a_fix_dated_in_the_future_is_ignored() -> None:

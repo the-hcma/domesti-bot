@@ -1314,3 +1314,35 @@ def test_the_distance_of_a_carried_estimate_is_the_distance_at_the_anchor() -> N
     assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
     assert estimate.distance_now_m == pytest.approx(20.0, abs=1.0)
     assert estimate.anchor_lag_s == pytest.approx(100.0)
+
+
+def test_a_near_report_inside_the_run_vetoes_the_home_wifi_basis_even_when_both_ends_are_far() -> None:
+    # The user was at the peer's position 400 s ago, between a report 1100 s ago and one 60 s ago, when both ends
+    # of the run find them far away. The first version checked only the ends.
+    peer_at = _home_wifi(_repeated_fix(north_m=-8_000.0, fix_age_s=11_000.0, report_ages_s=[60.0, 400.0, 1_100.0]))
+    ends_only = _home_wifi(_repeated_fix(north_m=-8_000.0, fix_age_s=11_000.0, report_ages_s=[60.0, 1_100.0]))
+    long_track = _track(_times(every_s=10.0, last_at=_NOW, span_s=1_200.0))
+
+    assert estimate_together(long_track, ends_only, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together(long_track, peer_at, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_report_from_elsewhere_ends_the_run_so_an_older_visit_cannot_veto_the_home_wifi_basis() -> None:
+    # The user was at the position 1100 s ago, but the phone reported off the home network 300 s ago, so only the
+    # reports since then belong to the run and the user was far from the position during all of them.
+    reports = _home_wifi(_repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=[60.0, 1_100.0]))
+    interruption = replace(
+        _repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=[300.0])[0], home_wifi=False
+    )
+    long_track = _track(_times(every_s=10.0, last_at=_NOW, span_s=1_200.0))
+
+    assert estimate_together(long_track, reports, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+    assert estimate_together(long_track, [*reports, interruption], now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+
+
+def test_the_carry_can_be_switched_off() -> None:
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 100.0)
+
+    assert estimate_together(_phone_a(), quiet, now=_NOW).together_basis is TogetherBasis.CARRIED_HISTORY
+    off = estimate_together(_phone_a(), quiet, now=_NOW, params=TogetherParams(carry_enabled=False))
+    assert off.unknown_reason is UnknownReason.STALE_FIX
