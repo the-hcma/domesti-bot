@@ -93,8 +93,14 @@ class TogetherTracker:
         """Update the pair's state with ``estimate`` and return the event it caused, if any."""
         users, min_confidence = key.users, key.min_confidence
         episode = self._episodes.get(key)
-        if estimate.confidence is None or estimate.anchor is None or estimate.apart_basis in _EVIDENCE_LIGHT_BASES:
-            # Missing or stale data (including "not close for minutes" judged from it) is not a separation.
+        if (
+            estimate.confidence is None
+            or estimate.anchor is None
+            or estimate.apart_basis in _EVIDENCE_LIGHT_BASES
+            or estimate.together_basis is not None
+        ):
+            # Missing or stale data (including "not close for minutes" judged from it, or togetherness carried
+            # across a silent phone) is neither a pairing nor a separation.
             if episode is not None:
                 episode.unknown_evaluations += 1
             return None

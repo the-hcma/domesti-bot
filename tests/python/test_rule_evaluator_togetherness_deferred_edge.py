@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import math
 from pathlib import Path
 from typing import Any, cast
@@ -718,6 +719,26 @@ async def test_deferred_edge_expires_when_peer_stays_silent(
     record = list_rule_fire_states(rig.db)["henrique-enters-alone"]
     assert record.last_outcome == "skipped"
     assert record.last_skip_reason == "deferred_edge_expired"
+
+
+@pytest.mark.asyncio
+async def test_deferred_edge_expiry_log_names_why_it_was_deferred(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Field cases 2026-11-04: the expiry line alone must say what the edge was waiting for."""
+    caplog.set_level(logging.INFO, logger="app.rule_evaluator")
+    rig = _Rig(tmp_path, monkeypatch)
+    await _drive_to_stale_peer_arrival(rig)
+    await rig.report("kristen", 660.0, north_m=-800.0)
+
+    expired = [record.getMessage() for record in caplog.records if "deferred edge expired" in record.getMessage()]
+
+    assert len(expired) == 1
+    assert "rule_id=henrique-enters-alone" in expired[0]
+    assert "reason=togetherness_unknown" in expired[0]
+    assert "since_report_s=300" in expired[0]
 
 
 @pytest.mark.asyncio

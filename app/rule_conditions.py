@@ -7,7 +7,7 @@ import logging
 import math
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
@@ -73,7 +73,9 @@ from app.rule_actions import (
 )
 from app.rule_validation import resolve_device_ref_to_backend_id, resolve_roster_user_id
 from app.users_together import (
+    DEFAULT_CARRY_MIN_CONFIDENCE,
     ApartBasis,
+    TogetherBasis,
     TogetherEstimate,
     TogetherParams,
     TrackFix,
@@ -3169,6 +3171,30 @@ def _together_detail(condition: UsersTogetherCondition, pair: TogetherPair, rule
             f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
             f"(one phone keeps reporting the same old location, which is treated as not having moved)"
         )
+    if estimate.together_basis is TogetherBasis.CARRIED_HISTORY:
+        quiet = any(age is not None and age > params.freshness_s for age in estimate.newest_fix_age_s)
+        why = (
+            "one phone has gone quiet since"
+            if quiet
+            else "both phones report, but the last minute is too sparse to compare"
+        )
+        parts = [
+            f"{who}: confidence {estimate.confidence or 0.0:.2f} "
+            f"(close for the last {_format_dwell_duration_s(params.windows[0].length_s)} before the newest shared fix, "
+            f"{_format_dwell_elapsed_s(estimate.anchor_lag_s or 0.0)} ago; {why}, "
+            f"so they are assumed to still be together)"
+        ]
+        if estimate.distance_now_m is not None:
+            parts.append(f"{_format_distance_m(estimate.distance_now_m)} apart at the latest shared fix")
+        dropped = sum(estimate.dropped_quality) + sum(estimate.dropped_speed)
+        if dropped:
+            parts.append(f"{dropped} low-quality fix{'es' if dropped != 1 else ''} ignored")
+        parts.append(
+            f"needs {condition.min_confidence:.2f}"
+            if condition.expected
+            else f"apart needs at most {1.0 - condition.min_confidence:.2f}"
+        )
+        return ", ".join(parts)
     windows = ", ".join(
         f"{_format_dwell_duration_s(window.length_s)} "
         f"{'n/a' if window.closeness is None else f'{window.closeness:.2f}'}"
@@ -3208,7 +3234,9 @@ def _together_pairs(
     roster_pairs, missing = _together_roster_pairs(condition, ctx)
     if missing:
         return [], missing
-    params = _together_params(condition, rule)
+    # A carried verdict is only for a real geofence edge, where waiting for a quiet phone is not an option; a
+    # scheduled, device-state or dwell pass should not act on missing data.
+    params = replace(_together_params(condition, rule), carry_enabled=ctx.triggered_by is RuleEvaluationCause.EDGE)
     now = ctx.now.timestamp()
     wanted = [pair for pair in roster_pairs if reporting_user_id is None or reporting_user_id in pair]
     try:
@@ -3252,6 +3280,9 @@ def _together_roster_pairs(
 def _together_params(condition: UsersTogetherCondition, rule: RuleOut) -> TogetherParams:
     return TogetherParams(
         accuracy_limit_m=float(rule.min_location_accuracy_m),
+        # A carried verdict is known, so it must not fall in the dead zone of a stricter rule: that would settle the
+        # condition as unmet and lose the deferred edge an unknown verdict keeps alive.
+        carry_min_confidence=min(1.0, max(DEFAULT_CARRY_MIN_CONFIDENCE, condition.min_confidence)),
         far_m=condition.far_m,
         near_m=condition.near_m,
     )
