@@ -1346,3 +1346,12 @@ def test_the_carry_can_be_switched_off() -> None:
     assert estimate_together(_phone_a(), quiet, now=_NOW).together_basis is TogetherBasis.CARRIED_HISTORY
     off = estimate_together(_phone_a(), quiet, now=_NOW, params=TogetherParams(carry_enabled=False))
     assert off.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_report_time_shared_with_a_row_that_does_not_qualify_leaves_the_home_wifi_basis_unproven() -> None:
+    # A batched delivery: one row on the home network at home, an older fix from elsewhere with the same report time.
+    home = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    elsewhere = replace(home[0], home_wifi=False, lat=_LAT0 + 5_000.0 / _M_PER_DEG)
+
+    assert estimate_together(_phone_a(), home, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together(_phone_a(), [*home, elsewhere], now=_NOW).apart_basis is not ApartBasis.HOME_WIFI

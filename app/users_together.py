@@ -558,7 +558,9 @@ def _apart_by_home_wifi(
             # A report that cleaning dropped (too coarse, or the less accurate twin of an equal-time pair) and is
             # not older than the fix used here may put the user somewhere else.
             continue
-        if _was_near_when_reported(_home_wifi_report_times(tracks[home], newest, now), newest, good_fixes, params):
+        report_times = _home_wifi_report_times(tracks[home], newest, now)
+        if not report_times or _was_near_when_reported(report_times, newest, good_fixes, params):
+            # An empty run means a row sharing the newest report time does not qualify: nothing is proven.
             continue
         distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
         return (newest, away, distance_m) if home == 0 else (away, newest, distance_m)
