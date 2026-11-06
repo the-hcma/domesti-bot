@@ -117,6 +117,10 @@ testpaths = ["tests/python"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+# Explicit fixture loop scope (silences the pytest-asyncio deprecation warning that
+# appeared when xdist replaced a crashed worker, issue #936); ``function`` is the
+# current default, so behavior is unchanged.
+asyncio_default_fixture_loop_scope = "function"
 # Per-test hang guard (issue #675). ``thread`` works under pytest-xdist; ``signal``
 # does not interrupt stuck worker threads reliably. Override locally with
 # ``--timeout=0`` when debugging under pdb. Note: ``thread`` only raises at a
