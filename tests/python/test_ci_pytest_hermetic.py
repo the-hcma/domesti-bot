@@ -120,6 +120,16 @@ def test_ordinary_failure_of_the_crashed_test_itself_is_not_retried(tmp_path: Pa
     assert "besides the worker crash" in run.stdout
 
 
+def test_crash_summary_line_trimmed_to_nothing_is_still_rerun(tmp_path: Path) -> None:
+    for tail in ("", " - ...", " - worker 'gw2' c..."):
+        output = f"worker 'gw2' crashed while running '{_CRASH_ID}'\nFAILED {_CRASH_ID}{tail}\n"
+        case_dir = tmp_path / f"case{len(tail)}"
+        case_dir.mkdir()
+        run = _run_script(case_dir, [(1, output), (0, "1 passed\n")])
+        assert run.returncode == 0, tail
+        assert len(run.calls) == 2, tail
+
+
 def test_crash_alongside_ordinary_failure_is_not_retried(tmp_path: Path) -> None:
     other = "FAILED tests/python/test_other.py::test_real_bug - assert 1 == 2\n"
     run = _run_script(tmp_path, [(1, _CRASH_LINES + other), (0, "")])

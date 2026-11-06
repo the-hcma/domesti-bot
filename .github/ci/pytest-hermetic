@@ -37,22 +37,32 @@ if [[ "${#crashed_ids[@]}" -eq 0 ]]; then
   exit "$status"
 fi
 
-# A failure counts as the crash only when its summary line has the crash shape,
-# "FAILED <crashed id> - worker '...", so an ordinary failure of the same test (for
-# example an assertion that failed before the worker died in teardown) still counts as
-# an ordinary failure and blocks the rerun. The id is matched as a prefix instead of
-# being cut out of the line, because a parametrized id may itself contain " - ", and
-# the message is truncated to the terminal width ("FAILED <id> - worker 'gw0' c...").
+# A crash produces exactly one summary line for its test. Count the lines per crashed id:
+# the first is the crash, any further FAILED or ERROR line for the same test (for example
+# an assertion that failed before the worker died in teardown) is an ordinary failure and
+# blocks the rerun. The message is not read at all, because pytest trims it to the
+# terminal width and, for a long parametrized id, can cut it to "..." or drop it
+# ("FAILED <id> - worker 'gw0' c...", "FAILED <id> - ...", "FAILED <id>"). The id is
+# matched as a prefix instead of being cut out of the line, because a parametrized id may
+# itself contain " - ".
+declare -A lines_per_crashed_id=()
 other_failures=0
 while IFS= read -r summary_line; do
-  is_crash=0
-  for crashed_id in "${crashed_ids[@]}"; do
-    if [[ "$summary_line" == "FAILED $crashed_id - worker '"* ]]; then
-      is_crash=1
-      break
-    fi
-  done
-  if [[ "$is_crash" -eq 0 ]]; then
+  matched_id=""
+  if [[ "$summary_line" == FAILED\ * ]]; then
+    for crashed_id in "${crashed_ids[@]}"; do
+      if [[ "$summary_line" == "FAILED $crashed_id - "* || "$summary_line" == "FAILED $crashed_id" ]]; then
+        matched_id="$crashed_id"
+        break
+      fi
+    done
+  fi
+  if [[ -z "$matched_id" ]]; then
+    other_failures=$((other_failures + 1))
+    continue
+  fi
+  lines_per_crashed_id["$matched_id"]=$(( ${lines_per_crashed_id["$matched_id"]:-0} + 1 ))
+  if (( lines_per_crashed_id["$matched_id"] > 1 )); then
     other_failures=$((other_failures + 1))
   fi
 done < <(grep -E '^(FAILED|ERROR) ' "$log" || true)
