@@ -117,9 +117,12 @@ testpaths = ["tests/python"]
 python_files = ["test_*.py"]
 pythonpath = ["."]
 asyncio_mode = "auto"
-# Explicit fixture loop scope (silences the pytest-asyncio deprecation warning that
-# appeared when xdist replaced a crashed worker, issue #936); ``function`` is the
-# current default, so behavior is unchanged.
+# Explicit fixture loop scope. Left unset, pytest-asyncio emits a
+# PytestDeprecationWarning from ``pytest_configure`` in every process (the controller
+# and each xdist worker; Python's default filters hide it unless PYTHONWARNINGS=default)
+# and today falls back to each async fixture's own caching scope, with ``function`` the
+# announced future default. The suite has no async fixtures, so ``function`` behaves
+# the same; revisit this if one is added with a wider scope (issue #936).
 asyncio_default_fixture_loop_scope = "function"
 # Per-test hang guard (issue #675). ``thread`` works under pytest-xdist; ``signal``
 # does not interrupt stuck worker threads reliably. Override locally with

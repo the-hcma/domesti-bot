@@ -650,7 +650,7 @@ CI lives in `.github/workflows/`:
 
 - **`ci.yml`** — runs on every PR and on `merge_group` (GitHub merge queue; skips already-merged PRs). Jobs after `Guard` run **in parallel**:
   - `Python lint & format checks` — one `uv sync --group dev`, then ruff check/format + pyright (via `.github/ci/python-static`)
-  - `Pytest (hermetic)` — `uv sync --group dev`, then `uv run pytest -m "not integration and not browser" -n auto --durations=20` (**pytest-xdist**; job `timeout-minutes: 15`; per-test `pytest-timeout` 60s)
+  - `Pytest (hermetic)` — `uv sync --group dev`, then `uv run pytest -m "not integration and not browser" -n auto --durations=20` (**pytest-xdist**; job `timeout-minutes: 15`; per-test `pytest-timeout` 60s). `.github/ci/pytest-hermetic` reruns the failed tests once, and only when the log shows an xdist worker crash (`crashed while running` / `Not properly terminated`, issue #936) so a runner-level flake does not discard the run; an ordinary failure is never retried and a test that fails again on the rerun keeps the job red
   - `Pytest (browser layout)` — `uv sync --group dev`, `playwright install --with-deps chromium`, then `uv run pytest -m "browser and not integration"` (single process; parallel to hermetic job; job `timeout-minutes: 15`)
   - `Shellcheck` — every no-extension script under `scripts/`
   - `Web (typecheck + build)` — `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm run build`, asserts `app/api/static/dist/main.js` exists

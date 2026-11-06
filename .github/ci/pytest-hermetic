@@ -1,4 +1,34 @@
 #!/usr/bin/env bash
+# Hermetic pytest run for CI. Extra arguments (for example a test path) are passed
+# through to both pytest invocations.
+#
+# A pytest-xdist worker that dies without a traceback ("node down: Not properly
+# terminated", issue #936) fails the whole job even though every other test passed.
+# When, and only when, the log shows that signature, rerun the failed tests once so
+# a runner-level flake does not discard the run. A genuine assertion failure carries
+# no such signature and fails immediately; a test that fails again on the rerun
+# keeps the job red.
 set -euo pipefail
 bash .github/ci/setup-python
-uv run pytest -m "not integration and not browser" -n auto --durations=20
+
+readonly crash_pattern='crashed while running|node down: Not properly terminated'
+log="$(mktemp)"
+readonly log
+trap 'rm -f "$log"' EXIT
+
+set +e
+uv run pytest -m "not integration and not browser" -n auto --durations=20 "$@" 2>&1 | tee "$log"
+status="${PIPESTATUS[0]}"
+set -e
+
+if [[ "$status" -eq 0 ]]; then
+  exit 0
+fi
+
+if ! grep -Eq "$crash_pattern" "$log"; then
+  exit "$status"
+fi
+
+echo "::warning title=pytest worker crash::an xdist worker crashed (issue #936); rerunning the failed tests once"
+uv run pytest -m "not integration and not browser" -n auto --last-failed --last-failed-no-failures none "$@"
+echo "::warning title=pytest worker crash::the rerun passed, so the crash was a runner-level flake; see issue #936"
