@@ -37,13 +37,20 @@ if [[ "${#crashed_ids[@]}" -eq 0 ]]; then
   exit "$status"
 fi
 
-# The short summary truncates the message of a long line ("FAILED <id> - worker 'gw0' c..."),
-# so a failure counts as the crash by its node id, not by its text.
+# A failure counts as the crash when its summary line starts with "FAILED <crashed id> - ".
+# The id is matched as a prefix instead of being cut out of the line, because a
+# parametrized id may itself contain " - ", and the message after it is truncated to the
+# terminal width ("FAILED <id> - worker 'gw0' c...").
 other_failures=0
 while IFS= read -r summary_line; do
-  failed_id="${summary_line#* }"
-  failed_id="${failed_id%% - *}"
-  if ! printf '%s\n' "${crashed_ids[@]}" | grep -Fxq -- "$failed_id"; then
+  is_crash=0
+  for crashed_id in "${crashed_ids[@]}"; do
+    if [[ "$summary_line" == "FAILED $crashed_id - "* || "$summary_line" == "FAILED $crashed_id" ]]; then
+      is_crash=1
+      break
+    fi
+  done
+  if [[ "$is_crash" -eq 0 ]]; then
     other_failures=$((other_failures + 1))
   fi
 done < <(grep -E '^(FAILED|ERROR) ' "$log" || true)

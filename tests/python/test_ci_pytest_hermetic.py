@@ -87,6 +87,27 @@ def _run_script(tmp_path: Path, runs: list[tuple[int, str]]) -> _Run:
     return _Run(calls=calls, returncode=result.returncode, stdout=result.stdout)
 
 
+def test_crashed_test_id_containing_a_spaced_hyphen_is_rerun_whole(tmp_path: Path) -> None:
+    crash_id = "tests/python/test_x.py::test_y[a - b]"
+    output = f"worker 'gw1' crashed while running '{crash_id}'\nFAILED {crash_id} - worker 'gw1' c...\n"
+    run = _run_script(tmp_path, [(1, output), (0, "1 passed\n")])
+    assert run.returncode == 0
+    assert len(run.calls) == 2
+    assert run.calls[1].endswith(crash_id)
+
+
+def test_ordinary_failure_beside_a_spaced_hyphen_crash_is_not_retried(tmp_path: Path) -> None:
+    crash_id = "tests/python/test_x.py::test_y[a - b]"
+    output = (
+        f"worker 'gw1' crashed while running '{crash_id}'\n"
+        f"FAILED {crash_id} - worker 'gw1' c...\n"
+        "FAILED tests/python/test_x.py::test_y[a] - assert 1 == 2\n"
+    )
+    run = _run_script(tmp_path, [(1, output), (0, "")])
+    assert run.returncode == 1
+    assert len(run.calls) == 1
+
+
 def test_crash_alongside_ordinary_failure_is_not_retried(tmp_path: Path) -> None:
     other = "FAILED tests/python/test_other.py::test_real_bug - assert 1 == 2\n"
     run = _run_script(tmp_path, [(1, _CRASH_LINES + other), (0, "")])
