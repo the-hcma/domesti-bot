@@ -108,6 +108,18 @@ def test_ordinary_failure_beside_a_spaced_hyphen_crash_is_not_retried(tmp_path: 
     assert len(run.calls) == 1
 
 
+def test_ordinary_failure_of_the_crashed_test_itself_is_not_retried(tmp_path: Path) -> None:
+    output = (
+        f"worker 'gw2' crashed while running '{_CRASH_ID}'\n"
+        f"FAILED {_CRASH_ID} - assert 1 == 2\n"
+        f"FAILED {_CRASH_ID} - worker 'gw2' c...\n"
+    )
+    run = _run_script(tmp_path, [(1, output), (0, "")])
+    assert run.returncode == 1
+    assert len(run.calls) == 1
+    assert "besides the worker crash" in run.stdout
+
+
 def test_crash_alongside_ordinary_failure_is_not_retried(tmp_path: Path) -> None:
     other = "FAILED tests/python/test_other.py::test_real_bug - assert 1 == 2\n"
     run = _run_script(tmp_path, [(1, _CRASH_LINES + other), (0, "")])

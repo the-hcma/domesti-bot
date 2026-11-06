@@ -37,15 +37,17 @@ if [[ "${#crashed_ids[@]}" -eq 0 ]]; then
   exit "$status"
 fi
 
-# A failure counts as the crash when its summary line starts with "FAILED <crashed id> - ".
-# The id is matched as a prefix instead of being cut out of the line, because a
-# parametrized id may itself contain " - ", and the message after it is truncated to the
-# terminal width ("FAILED <id> - worker 'gw0' c...").
+# A failure counts as the crash only when its summary line has the crash shape,
+# "FAILED <crashed id> - worker '...", so an ordinary failure of the same test (for
+# example an assertion that failed before the worker died in teardown) still counts as
+# an ordinary failure and blocks the rerun. The id is matched as a prefix instead of
+# being cut out of the line, because a parametrized id may itself contain " - ", and
+# the message is truncated to the terminal width ("FAILED <id> - worker 'gw0' c...").
 other_failures=0
 while IFS= read -r summary_line; do
   is_crash=0
   for crashed_id in "${crashed_ids[@]}"; do
-    if [[ "$summary_line" == "FAILED $crashed_id - "* || "$summary_line" == "FAILED $crashed_id" ]]; then
+    if [[ "$summary_line" == "FAILED $crashed_id - worker '"* ]]; then
       is_crash=1
       break
     fi
