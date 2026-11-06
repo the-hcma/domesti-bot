@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
-# Hermetic pytest run for CI. Extra arguments (for example a test path) are passed
-# through to both pytest invocations.
+# Hermetic pytest run for CI.
 #
-# A pytest-xdist worker that dies without a traceback ("node down: Not properly
-# terminated", issue #936) fails the whole job even though every other test passed.
-# When, and only when, the log shows that signature, rerun the failed tests once so
-# a runner-level flake does not discard the run. A genuine assertion failure carries
-# no such signature and fails immediately; a test that fails again on the rerun
-# keeps the job red.
+# A pytest-xdist worker that dies without a traceback ("worker 'gw2' crashed while
+# running '<node id>'", issue #936) fails the whole job even though every other test
+# passed. When every failure in the log is such a crash, rerun exactly those tests
+# once, by node id, so a runner-level flake does not discard the run. The job stays
+# red when any ordinary failure or error is present (those are never retried, so a
+# real failure cannot be hidden by a lucky rerun), when no crashed node id can be
+# read from the log, and when a crashed test fails again. The rerun spends time from
+# the job's 15-minute budget, so it is limited to the crashed tests.
 set -euo pipefail
 bash .github/ci/setup-python
 
-readonly crash_pattern='crashed while running|node down: Not properly terminated'
+readonly marker_filter='not integration and not browser'
 log="$(mktemp)"
 readonly log
 trap 'rm -f "$log"' EXIT
 
 set +e
-uv run pytest -m "not integration and not browser" -n auto --durations=20 "$@" 2>&1 | tee "$log"
+uv run pytest -m "$marker_filter" -n auto --durations=20 2>&1 | tee "$log"
 status="${PIPESTATUS[0]}"
 set -e
 
@@ -25,10 +26,27 @@ if [[ "$status" -eq 0 ]]; then
   exit 0
 fi
 
-if ! grep -Eq "$crash_pattern" "$log"; then
+mapfile -t crashed_ids < <(grep -oE "crashed while running '[^']+'" "$log" | sed -E "s/^crashed while running '(.*)'\$/\\1/" | sort -u)
+if [[ "${#crashed_ids[@]}" -eq 0 ]]; then
   exit "$status"
 fi
 
-echo "::warning title=pytest worker crash::an xdist worker crashed (issue #936); rerunning the failed tests once"
-uv run pytest -m "not integration and not browser" -n auto --last-failed --last-failed-no-failures none "$@"
+# The short summary truncates the message of a long line ("FAILED <id> - worker 'gw0' c..."),
+# so a failure counts as the crash by its node id, not by its text.
+other_failures=0
+while IFS= read -r summary_line; do
+  failed_id="${summary_line#* }"
+  failed_id="${failed_id%% - *}"
+  if ! printf '%s\n' "${crashed_ids[@]}" | grep -Fxq -- "$failed_id"; then
+    other_failures=$((other_failures + 1))
+  fi
+done < <(grep -E '^(FAILED|ERROR) ' "$log" || true)
+
+if [[ "$other_failures" -ne 0 ]]; then
+  echo "pytest-hermetic: $other_failures failure(s) besides the worker crash, not rerunning (issue #936)"
+  exit "$status"
+fi
+
+echo "::warning title=pytest worker crash::an xdist worker crashed (issue #936); rerunning ${#crashed_ids[@]} test(s) once"
+uv run pytest -m "$marker_filter" -n 0 "${crashed_ids[@]}"
 echo "::warning title=pytest worker crash::the rerun passed, so the crash was a runner-level flake; see issue #936"
