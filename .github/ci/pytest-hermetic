@@ -5,10 +5,16 @@
 # running '<node id>'", issue #936) fails the whole job even though every other test
 # passed. When every failure in the log is such a crash, rerun exactly those tests
 # once, by node id, so a runner-level flake does not discard the run. The job stays
-# red when any ordinary failure or error is present (those are never retried, so a
-# real failure cannot be hidden by a lucky rerun), when no crashed node id can be
-# read from the log, and when a crashed test fails again. The rerun spends time from
-# the job's 15-minute budget, so it is limited to the crashed tests.
+# red when any ordinary failure or error is present (those are never retried), when no
+# crashed node id can be read from the log, and when a crashed test fails again.
+#
+# Known limit: a test killed by the pytest-timeout "thread" method (pyproject.toml,
+# issue #675) is indistinguishable here. The worker exits through os._exit, the
+# timeout banner stays on the worker's own terminal, and the controller log reads
+# exactly like a native crash. Such a hang is therefore retried once too: a hang that
+# repeats fails the rerun and keeps the job red, and the warning annotation names every
+# retried test so it stays visible. The rerun spends time from the job's 15-minute
+# budget, so it is limited to the crashed tests.
 set -euo pipefail
 bash .github/ci/setup-python
 
@@ -47,6 +53,6 @@ if [[ "$other_failures" -ne 0 ]]; then
   exit "$status"
 fi
 
-echo "::warning title=pytest worker crash::an xdist worker crashed (issue #936); rerunning ${#crashed_ids[@]} test(s) once"
+echo "::warning title=pytest worker crash::an xdist worker crashed or was killed by pytest-timeout (issue #936); rerunning once: ${crashed_ids[*]}"
 uv run pytest -m "$marker_filter" -n 0 "${crashed_ids[@]}"
 echo "::warning title=pytest worker crash::the rerun passed, so the crash was a runner-level flake; see issue #936"

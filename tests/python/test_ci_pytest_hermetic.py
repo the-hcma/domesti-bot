@@ -115,6 +115,7 @@ def test_crashed_test_is_rerun_once_by_node_id_and_passes(tmp_path: Path) -> Non
     assert "-n 0" in run.calls[1]
     assert "--last-failed" not in run.calls[1]
     assert "::warning title=pytest worker crash::the rerun passed" in run.stdout
+    assert f"rerunning once: {_CRASH_ID}" in run.stdout
 
 
 def test_green_run_is_not_retried(tmp_path: Path) -> None:
