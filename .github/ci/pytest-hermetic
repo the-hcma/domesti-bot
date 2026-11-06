@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 bash .github/ci/setup-python
-# A crashed xdist worker ("Not properly terminated", issue #936) leaves no traceback;
-# faulthandler dumps the native/Python stack to the job log if it reproduces.
-export PYTHONFAULTHANDLER=1
 uv run pytest -m "not integration and not browser" -n auto --durations=20
