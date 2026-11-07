@@ -561,6 +561,56 @@ async def test_a_home_phone_re_sending_a_stale_coarse_fix_from_the_wifi_lets_an_
         await rig.close()
 
 
+@pytest.mark.asyncio
+async def test_a_phone_joining_the_home_wifi_before_the_pair_settles_still_opens_only_the_together_door(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """domesti-bot#940: one car, and the driver's phone joins the home Wi-Fi while the pair is still unknown.
+
+    The passenger's phone starts reporting only 15 s before the crossing, so the pair is unknown when the driver
+    crosses and the rules wait out their grace. The driver's phone joins the home Wi-Fi on its first report at
+    least 10 s after the crossing (12.5 s, on the 10 s report grid), right next to the passenger's phone, which is
+    still on mobile data. That report is no evidence that the pair was apart, so the alone door must not open and
+    the together door opens once the pair settles.
+    """
+    rig = _Rig(tmp_path, monkeypatch, home_wifi_ssid=_HOME_SSID)
+    arrives_at = _T0 + 700.0
+    until = arrives_at + 150.0
+    crossing = arrives_at - 250.0 / _SPEED_MPS
+    drive = [
+        _Report(
+            accuracy_m=5,
+            connection_type="w" if at >= crossing + 10.0 else "m",
+            position=position,
+            reported_at=at,
+            user_id="henrique",
+            wifi_ssid=_HOME_SSID if at >= crossing + 10.0 else None,
+        )
+        for at, _user, position in _approach(
+            "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
+        )
+    ]
+    passenger = [
+        _Report(
+            accuracy_m=5,
+            connection_type="m",
+            position=_car(at, arrives_at=arrives_at, lateral_m=3.0),
+            reported_at=at,
+            user_id="kristen",
+        )
+        for at in (crossing - 15.0 + _REPORT_EVERY_S * index for index in range(int((until - crossing) // 10.0) + 2))
+        if at <= until
+    ]
+    try:
+        await rig.drive_reports([*drive, *passenger])
+        assert [rule_id for rule_id, _line in rig.opened] == [_TOGETHER]
+        assert rig.opened[0][1].startswith("Open Main garage right")
+        assert crossing + 10.0 < rig.opened_at[0] <= crossing + 120.0
+    finally:
+        await rig.close()
+
+
 def _users_together_rule(*, expected: bool) -> RuleOut:
     """A rule holding only the pair condition, so its status row is the verdict the garage entry rules wait on."""
     return RuleOut(

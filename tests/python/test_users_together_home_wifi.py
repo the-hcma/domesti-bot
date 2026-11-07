@@ -96,6 +96,7 @@ class Scenario:
 
 
 def _estimate(scenario: Scenario, *, peer_first: bool = False):  # noqa: ANN202 - the estimate type is internal
+    """Estimate the pair of ``scenario``, with the peer as the first or the second member."""
     arriving, peer = scenario.arriving_track(), scenario.peer_track()
     pair = (peer, arriving) if peer_first else (arriving, peer)
     return estimate_together(pair[0], pair[1], now=_NOW)
@@ -117,6 +118,7 @@ _SPANS = [60.0, 100.0, 600.0, 1_200.0]
 
 
 def _matrix() -> list[Scenario]:
+    """Every combination of the axes the contract depends on."""
     scenarios: list[Scenario] = []
     for ages, accuracy, distance, span, fix_age in itertools.product(
         _REPORT_AGE_SETS, _ACCURACIES, _DISTANCES, _SPANS, (_STALE_FIX_AGE_S, _FRESH_FIX_AGE_S)
@@ -134,6 +136,7 @@ def _matrix() -> list[Scenario]:
 
 
 def _scenario_id(scenario: Scenario) -> str:
+    """A readable test id naming the axes of ``scenario``."""
     kind = "stale" if scenario.peer_fix_age_s > _FRESH_FIX_AGE_S else "fresh"
     return (
         f"reports{'+'.join(str(int(a)) for a in scenario.report_ages_s)}-acc{scenario.peer_accuracy_m}-{kind}"
@@ -259,6 +262,7 @@ def test_a_coarse_fix_far_from_the_peer_at_the_report_time_does_not_block_the_ba
 
 
 def _random_scenario(rng: random.Random) -> Scenario:
+    """A scenario drawn from ``rng`` across the same axes as the matrix, with moving tracks as well."""
     ages = sorted({round(rng.uniform(5.0, 1_400.0), 1) for _ in range(rng.randint(1, 4))})
     return Scenario(
         arriving_speed_mps=rng.choice([0.0, 2.5, 12.0, 20.0]),
