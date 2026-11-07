@@ -174,7 +174,9 @@ jobs:
         run: bash .github/ci/python-static
 
       - name: Pytest (hermetic)
-        run: bash .github/ci/pytest-hermetic
+        run: |
+          layout="$REPOSITORY_HELPERS_DIR/scripts/dev/with-tmp-layout"
+          "$layout" uv -- "$layout" pytest -- uv run pytest -m "not integration and not browser" -n auto
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
