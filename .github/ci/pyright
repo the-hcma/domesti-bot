@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Temp files and caches follow $TMPDIR/<project>/<branch>/<tool> (repository-helpers#832).
+# CI exports REPOSITORY_HELPERS_DIR through the setup-tmp-layout action; without a clone, run unchanged.
+layout_bin="${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/dev/with-tmp-layout"
+if [[ -z "${CI_TMP_LAYOUT:-}" ]]; then
+  if [[ -x "$layout_bin" ]]; then
+    CI_TMP_LAYOUT=1 exec "$layout_bin" uv -- bash "$0" "$@"
+  elif [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    echo 'ERROR: with-tmp-layout missing; add the setup-tmp-layout action step before this one' >&2
+    exit 1
+  fi
+fi
 bash .github/ci/setup-python
 uv run pyright

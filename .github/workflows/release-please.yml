@@ -167,12 +167,16 @@ jobs:
 
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
+      - uses: the-hcma/repository-helpers/actions/setup-tmp-layout@bfee0e1f2d682e83c6207a0d6a0f7feefa576fd8
+
       # python-static asserts uv.lock before sync, then setup-python (uv sync) + lints.
       - name: Python lint & format checks
         run: bash .github/ci/python-static
 
       - name: Pytest (hermetic)
-        run: uv run pytest -m "not integration and not browser" -n auto
+        run: |
+          layout="$REPOSITORY_HELPERS_DIR/scripts/dev/with-tmp-layout"
+          "$layout" uv -- "$layout" pytest -- uv run pytest -m "not integration and not browser" -n auto
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -186,8 +190,9 @@ jobs:
       - name: Build web bundle
         working-directory: web
         run: |
-          pnpm install --frozen-lockfile
-          pnpm run build
+          layout="$REPOSITORY_HELPERS_DIR/scripts/dev/with-tmp-layout"
+          "$layout" pnpm -- pnpm install --frozen-lockfile
+          "$layout" pnpm -- pnpm run build
 
       - name: Embed build metadata
         run: |

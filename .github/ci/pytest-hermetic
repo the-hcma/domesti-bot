@@ -16,10 +16,21 @@
 # retried test so it stays visible. The rerun spends time from the job's 15-minute
 # budget, so it is limited to the crashed tests.
 set -euo pipefail
+# Temp files and caches follow $TMPDIR/<project>/<branch>/<tool> (repository-helpers#832).
+# CI exports REPOSITORY_HELPERS_DIR through the setup-tmp-layout action; without a clone, run unchanged.
+layout_bin="${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/dev/with-tmp-layout"
+if [[ -z "${CI_TMP_LAYOUT:-}" ]]; then
+  if [[ -x "$layout_bin" ]]; then
+    CI_TMP_LAYOUT=1 exec "$layout_bin" uv -- "$layout_bin" pytest -- bash "$0" "$@"
+  elif [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    echo 'ERROR: with-tmp-layout missing; add the setup-tmp-layout action step before this one' >&2
+    exit 1
+  fi
+fi
 bash .github/ci/setup-python
 
 readonly marker_filter='not integration and not browser'
-log="$(mktemp)"
+log="$(mktemp "${TMP_LAYOUT_DIR:-${TMPDIR:-/tmp}}/pytest-log.XXXXXX")"
 readonly log
 trap 'rm -f "$log"' EXIT
 

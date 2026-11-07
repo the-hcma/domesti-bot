@@ -51,10 +51,15 @@ exit 99
 class _Run:
     calls: list[str]
     returncode: int
+    stderr: str
     stdout: str
 
 
-def _run_script(tmp_path: Path, runs: list[tuple[int, str]]) -> _Run:
+def _run_script(
+    tmp_path: Path,
+    runs: list[tuple[int, str]],
+    env_overrides: dict[str, str | None] | None = None,
+) -> _Run:
     """Run the script with a stub ``uv`` that replays ``runs`` as (exit code, output)."""
 
     stub_dir = tmp_path / "stub"
@@ -73,7 +78,15 @@ def _run_script(tmp_path: Path, runs: list[tuple[int, str]]) -> _Run:
         "STUB_DIR": str(stub_dir),
         "STUB_PYTHON_VERSION": python_version,
         "TMPDIR": str(tmp_path),
+        # The wrapper re-execs through with-tmp-layout unless this is set; keep the test independent of
+        # any repository-helpers clone on the host. The re-exec branch has its own tests below.
+        "CI_TMP_LAYOUT": "1",
     }
+    for key, value in (env_overrides or {}).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     result = subprocess.run(
         ["bash", _SCRIPT],
         cwd=_REPO_ROOT,
@@ -84,7 +97,7 @@ def _run_script(tmp_path: Path, runs: list[tuple[int, str]]) -> _Run:
         check=False,
     )
     calls = (stub_dir / "calls").read_text().splitlines()
-    return _Run(calls=calls, returncode=result.returncode, stdout=result.stdout)
+    return _Run(calls=calls, returncode=result.returncode, stderr=result.stderr, stdout=result.stdout)
 
 
 def test_crashed_test_id_containing_a_spaced_hyphen_is_rerun_whole(tmp_path: Path) -> None:
@@ -171,3 +184,36 @@ def test_ordinary_failure_is_not_retried(tmp_path: Path) -> None:
     run = _run_script(tmp_path, [(1, "FAILED tests/python/test_other.py::test_real_bug - x\n")])
     assert run.returncode == 1
     assert len(run.calls) == 1
+
+
+def _without_helpers(tmp_path: Path, **extra: str | None) -> dict[str, str | None]:
+    """Environment with the layout re-exec enabled and no repository-helpers clone to find."""
+
+    empty = tmp_path / "no-helpers"
+    empty.mkdir()
+    return {"CI_TMP_LAYOUT": None, "HOME": str(empty), "REPOSITORY_HELPERS_DIR": str(empty), **extra}
+
+
+def test_ci_without_the_layout_helper_fails_with_a_pointer_to_the_action(tmp_path: Path) -> None:
+    run = _run_script(tmp_path, [(0, "")], _without_helpers(tmp_path, GITHUB_ACTIONS="true"))
+    assert run.returncode == 1
+    assert "setup-tmp-layout" in run.stderr
+    assert run.calls == []
+
+
+def test_a_host_without_the_layout_helper_runs_the_tests_unchanged(tmp_path: Path) -> None:
+    run = _run_script(tmp_path, [(0, "1 passed\n")], _without_helpers(tmp_path, GITHUB_ACTIONS=None))
+    assert run.returncode == 0
+    assert len(run.calls) == 1
+
+
+def test_the_layout_helper_wraps_the_run_in_the_uv_and_pytest_layouts(tmp_path: Path) -> None:
+    helpers = tmp_path / "helpers"
+    (helpers / "scripts" / "dev").mkdir(parents=True)
+    fake = helpers / "scripts" / "dev" / "with-tmp-layout"
+    fake.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$1" >> "$TMPDIR/layout-tools"\nshift 2\nexec "$@"\n')
+    fake.chmod(0o755)
+    env = _without_helpers(tmp_path, GITHUB_ACTIONS=None, REPOSITORY_HELPERS_DIR=str(helpers))
+    run = _run_script(tmp_path, [(0, "1 passed\n")], env)
+    assert run.returncode == 0
+    assert (tmp_path / "layout-tools").read_text().split() == ["uv", "pytest"]
