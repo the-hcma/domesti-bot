@@ -798,7 +798,7 @@ requires-dist = [
     { name = "playwright", specifier = ">=1.64.1" },
     { name = "prompt-toolkit", specifier = ">=3.0.43" },
     { name = "protobuf", specifier = ">=7.36.2" },
-    { name = "pychromecast", specifier = ">=14.0.10" },
+    { name = "pychromecast", specifier = ">=14.1.0" },
     { name = "pyproj" },
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "python-kasa", specifier = ">=0.12.0" },
@@ -808,7 +808,7 @@ requires-dist = [
     { name = "starlette", specifier = ">=1.10.0" },
     { name = "typer", specifier = ">=0.27.3" },
     { name = "typing-extensions", specifier = "==4.16.0" },
-    { name = "tzdata", specifier = ">=2026.5" },
+    { name = "tzdata", specifier = ">=2026.6" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
     { name = "watchfiles", specifier = ">=1.3.0" },
     { name = "wcwidth", specifier = ">=0.9.4" },
@@ -823,7 +823,7 @@ dev = [
     { name = "icecream", specifier = ">=2.2.0" },
     { name = "playwright", specifier = ">=1.64.1" },
     { name = "pyright", specifier = ">=1.1.414" },
-    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.1" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
@@ -1787,16 +1787,16 @@ wheels = [
 
 [[package]]
 name = "pychromecast"
-version = "14.0.10"
+version = "14.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "casttube" },
     { name = "protobuf" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3a/1f/d78497441334d24740cce0a92394c33972a9d6a17b607d0ec976f0f48a35/pychromecast-14.0.10.tar.gz", hash = "sha256:f05a1c8d727d4f104c8c731688053033e05157f2ab81bc8eef50ec0c62f9373c", size = 61588, upload-time = "2026-03-07T16:37:42.833Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/f4/fc470f134fe482d76e8a5bc2e54d5c9b1792b569915eacccdcfb2487de21/pychromecast-14.1.0.tar.gz", hash = "sha256:17f672c5ccf8aa3ccb6ba261e51d60224d28efcc0f225c8d2ec0509eeda52efd", size = 69849, upload-time = "2026-10-28T13:27:25.702Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/61/f0f176622e2b4df06318a3abb2a27cc4c2fee8d40d7a0db8d60034785c09/pychromecast-14.0.10-py2.py3-none-any.whl", hash = "sha256:f5ea52b1db0edc3019ec72c9f5354c7e77c2564ecd44f809a6d2f4f518a02e67", size = 77467, upload-time = "2026-03-07T16:37:41.527Z" },
+    { url = "https://files.pythonhosted.org/packages/58/35/6616953221609c6277a6e7cc4bb57059209f8571bb3eead9b6db2eda2454/pychromecast-14.1.0-py2.py3-none-any.whl", hash = "sha256:53888d5c38fc03f2c9621e48ddc1ba7ccd56514b4479445ec8878ce42e182c58", size = 79638, upload-time = "2026-10-28T13:27:24.466Z" },
 ]
 
 [[package]]
@@ -1999,7 +1999,7 @@ wheels = [
 
 [[package]]
 name = "pytest"
-version = "9.1.1"
+version = "9.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
@@ -2008,9 +2008,9 @@ dependencies = [
     { name = "pluggy" },
     { name = "pygments" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz", hash = "sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313", size = 1636369, upload-time = "2026-06-19T10:58:32.857Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/42/bb4641652e58dedeac2ec51abc1f8cae4fee4ec63899a0999016229a0f2a/pytest-9.2.0.tar.gz", hash = "sha256:97c4f3b1f3c7414aa36465e09b8220f1d03627993bd51b1282e193753c80557b", size = 1797555, upload-time = "2026-10-27T21:30:20.728Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
+    { url = "https://files.pythonhosted.org/packages/51/39/1f5d8c8877a0fa327db959c19341d4be61660de1ab6b7391f9eb805bcd67/pytest-9.2.0-py3-none-any.whl", hash = "sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588", size = 411776, upload-time = "2026-10-27T21:30:19.131Z" },
 ]
 
 [[package]]
@@ -2354,11 +2354,11 @@ wheels = [
 
 [[package]]
 name = "tzdata"
-version = "2026.5"
+version = "2026.6"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d9/68/f1b440335057bfce71b6e50a9d09445aa2ecbd08359a337976627b8409e7/tzdata-2026.5.tar.gz", hash = "sha256:8cc73c0a0bfca7dbfa59235d60b2eff82231dee33f53d206db1acd9173cfc0a7", size = 200404, upload-time = "2026-10-03T09:23:14.143Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/29/6a1391d31cd00ff9e927215a224a880e1e84e826b64ba80a499e51c074d8/tzdata-2026.6.tar.gz", hash = "sha256:85d2cd9c09f81f0bb29db27759fc83af4f1e620efb814f8c5bf8b4cc4feece6d", size = 201017, upload-time = "2026-10-28T09:57:09.137Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10e7ed03ab25e006cd741092b718/tzdata-2026.5-py2.py3-none-any.whl", hash = "sha256:b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac", size = 347996, upload-time = "2026-10-03T09:23:12.535Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/66/9a06c2227fedfd4919f0eaaa8b94377d9730882a7e4f95823c9a331ab5e1/tzdata-2026.6-py2.py3-none-any.whl", hash = "sha256:0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec", size = 348210, upload-time = "2026-10-28T09:57:07.276Z" },
 ]
 
 [[package]]
