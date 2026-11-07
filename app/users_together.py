@@ -30,10 +30,12 @@ that position is clearly far from the other user, the pair is apart, however old
 the fix is.
 
 A user whose newest report (at most ``_HOME_WIFI_REPORT_FRESH_S`` old) was made on the home Wi-Fi is at home. When
-the other user's fresh fix is not on that network and that user was clearly far from the reported position when the
-report was made, the pair is apart: nobody arrives in the same vehicle as a person who is already home. How close
-the two are now does not matter, so the evidence does not weaken as the arriving user nears the house. Which reports
-count as on the home Wi-Fi is the caller's decision (``TrackFix.home_wifi``).
+the other user's fresh fix is not on that network and that user was clearly far from the reported position when that
+newest report was made, the pair is apart: nobody arrives in the same vehicle as a person who is already home. Only
+the newest report is judged, because a phone still on the home Wi-Fi then, which may be re-sending one old fix and so
+has not moved, did not leave with anyone, and because the other user's track rarely reaches back to older reports.
+How close the two are now does not matter, so the evidence does not weaken as the arriving user nears the house.
+Which reports count as on the home Wi-Fi is the caller's decision (``TrackFix.home_wifi``).
 
 When the estimate would otherwise be unknown because a fix is stale or the tracks are too sparse, the pair is apart
 unless the two users were close at some moment in the last ``recent_close_window_s``, with each user's newest good fix
@@ -492,6 +494,12 @@ _STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
 
+def _accuracy_or_infinite(fix: TrackFix) -> float:
+    """The fix's accuracy in meters, or infinity when it is missing, not finite or negative."""
+    accuracy = fix.accuracy_m
+    return accuracy if accuracy is not None and math.isfinite(accuracy) and accuracy >= 0.0 else math.inf
+
+
 def _apart_by_coarse_fixes(
     tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
     cleaned: tuple[CleanTrack, CleanTrack],
@@ -528,12 +536,13 @@ def _apart_by_home_wifi(
 
     The user at home is the one whose newest report, at most ``_HOME_WIFI_REPORT_FRESH_S`` old, was made on the
     home network (a repeated old fix still counts: the report says where the phone is). The other user needs a
-    fresh good fix that is not on the home network, and must have been clearly away from the reported position at
-    every report of the unbroken run of home-network reports there (see :func:`_was_near_when_reported`): a user
-    who was there then may have left with the person at home. How far the two are now does not matter: the closer
-    the arriving user gets to a phone that sits at home, the more the verdict is needed. Nobody arrives in the same
-    vehicle as a person who is already
-    home.
+    fresh good fix that is not on the home network, and must have been clearly away from the reported position when
+    the newest report was made (see :func:`_was_near_when_reported`): a user who was there then may have left with the
+    person at home, and one who joins the home network in the driveway after arriving together is not evidence. Older
+    reports of the same run are not judged: a phone still on the home network at its newest report did not leave, and
+    the other user's track seldom reaches back far enough to place an older one. How far the two are now does not
+    matter: the closer the arriving user gets to a phone that sits at home, the more the verdict is needed. Nobody
+    arrives in the same vehicle as a person who is already home.
     """
     for home in (0, 1):
         newest = _newest_report(tracks[home], now)
@@ -558,9 +567,10 @@ def _apart_by_home_wifi(
             # A report that cleaning dropped (too coarse, or the less accurate twin of an equal-time pair) and is
             # not older than the fix used here may put the user somewhere else.
             continue
-        report_times = _home_wifi_report_times(tracks[home], newest, now)
-        if not report_times or _was_near_when_reported(report_times, newest, good_fixes, params):
-            # An empty run means a row sharing the newest report time does not qualify: nothing is proven.
+        reported_at = _home_wifi_report_time(tracks[home], newest, now)
+        measured = [fix for fix in tracks[1 - home] if not fix.report_only and _has_position(fix)]
+        if reported_at is None or _was_near_when_reported(reported_at, newest, measured, params):
+            # No report time means a row sharing the newest report time does not qualify: nothing is proven.
             continue
         distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
         return (newest, away, distance_m) if home == 0 else (away, newest, distance_m)
@@ -790,30 +800,30 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * _EARTH_RADIUS_M * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _home_wifi_report_times(fixes: Sequence[TrackFix], newest: TrackFix, now: float) -> tuple[float, ...]:
-    """Every report time of the unbroken run of fresh home-network reports at ``newest``'s position, oldest first.
+def _home_wifi_report_time(fixes: Sequence[TrackFix], newest: TrackFix, now: float) -> float | None:
+    """The time of the newest report when it is a fresh home-network report at ``newest``'s position, else ``None``.
 
-    A phone at rest reports again and again, so the newest report alone says little about when the user was last
-    seen away from home. Walking back from the newest report, a report extends the run while it is fresh (at most
-    ``_HOME_WIFI_REPORT_FRESH_S`` old), on the home network and at the same position; the first report that is not
-    ends the run, so an older visit before a report from elsewhere never counts. Rows sharing one report time
-    extend the run only when every one of them qualifies.
+    A report counts when it is at most ``_HOME_WIFI_REPORT_FRESH_S`` old, was made on the home network and has a
+    position, and the position is the one of ``newest``. Rows sharing the newest report time qualify only when every
+    one of them does (a batched delivery with an older fix from elsewhere proves nothing). A report with no usable
+    position that is newer than ``newest`` is the latest report of the phone, so it disqualifies the run as well.
     """
-    by_time: dict[float, list[TrackFix]] = {}
-    for fix in fixes:
-        if fix.reported_at is not None and math.isfinite(fix.reported_at) and fix.reported_at <= now:
-            by_time.setdefault(fix.reported_at, []).append(fix)
-    times: list[float] = []
-    for reported_at in sorted(by_time, reverse=True):
-        if now - reported_at > _HOME_WIFI_REPORT_FRESH_S:
-            break
-        if not all(
-            fix.home_wifi and _has_position(fix) and (fix.lat, fix.lon) == (newest.lat, newest.lon)
-            for fix in by_time[reported_at]
-        ):
-            break
-        times.append(reported_at)
-    return tuple(reversed(times))
+    reported_times = [
+        fix.reported_at
+        for fix in fixes
+        if fix.reported_at is not None and math.isfinite(fix.reported_at) and fix.reported_at <= now
+    ]
+    if not reported_times:
+        return None
+    latest = max(reported_times)
+    if now - latest > _HOME_WIFI_REPORT_FRESH_S:
+        return None
+    qualifies = all(
+        fix.home_wifi and _has_position(fix) and (fix.lat, fix.lon) == (newest.lat, newest.lon)
+        for fix in fixes
+        if fix.reported_at == latest
+    )
+    return latest if qualifies else None
 
 
 def _is_good_quality(fix: TrackFix, params: TogetherParams) -> bool:
@@ -891,7 +901,9 @@ def _newest_report(fixes: Sequence[TrackFix], now: float) -> TrackFix | None:
         and fix.reported_at <= now
         and _has_position(fix)
     ]
-    return max(reports, key=lambda fix: fix.reported_at or 0.0) if reports else None
+    # Among rows tied at the newest report time the least precise one stands for the report (a missing or invalid
+    # accuracy is the least precise of all), so a sharper twin cannot establish a separation the report cannot.
+    return max(reports, key=lambda fix: (fix.reported_at or 0.0, _accuracy_or_infinite(fix))) if reports else None
 
 
 def _position_at(fixes: Sequence[TrackFix], instant: float) -> InterpolatedPosition | None:
@@ -995,29 +1007,30 @@ def _together_for_s(closeness_at: Sequence[float | None], params: TogetherParams
 
 
 def _was_near_when_reported(
-    report_times: Sequence[float],
+    reported_at: float,
     home_fix: TrackFix,
     away_fixes: Sequence[TrackFix],
     params: TogetherParams,
 ) -> bool:
-    """Whether the other user was, or may have been, near the home phone's position at any of ``report_times``.
+    """Whether the other user was, or may have been, near the home phone's position when it reported.
 
-    At each time the fix closest in time stands for where the other user was. Without one within
-    ``_HOME_WIFI_TRACK_TOLERANCE_S`` of the time there is no telling, so the answer is yes, and so it is when two
-    fixes are equally close and either one is near. A user who was at the reported position then may have left it
-    together with the person at home; one who was far away at every report could not have.
+    The fix closest in time to ``reported_at`` stands for where the other user was. ``away_fixes`` holds every
+    measured fix of that user, including those cleaning dropped for poor accuracy: a coarse fix near the phone at
+    the report time must not be outvoted by a sharper one that happens to lie farther away. Without one within
+    ``_HOME_WIFI_TRACK_TOLERANCE_S`` there is no telling, so the answer is yes, and so it is when two fixes are
+    equally close and either one is near. A user who was at the reported position then may have left it together
+    with the person at home; one who was far away could not have.
     """
-    for reported_at in report_times:
-        distance_to_reported_at = min(abs(fix.at - reported_at) for fix in away_fixes)
-        if distance_to_reported_at > _HOME_WIFI_TRACK_TOLERANCE_S:
-            return True
-        for fix in away_fixes:
-            if abs(fix.at - reported_at) != distance_to_reported_at:
-                continue
-            slack_m = (home_fix.accuracy_m or 0.0) + (fix.accuracy_m or 0.0)
-            if _haversine_m(home_fix.lat, home_fix.lon, fix.lat, fix.lon) - slack_m < params.far_m:
-                return True
-    return False
+    distance_to_reported_at = min(abs(fix.at - reported_at) for fix in away_fixes)
+    if distance_to_reported_at > _HOME_WIFI_TRACK_TOLERANCE_S:
+        return True
+    return any(
+        abs(fix.at - reported_at) == distance_to_reported_at
+        and _haversine_m(home_fix.lat, home_fix.lon, fix.lat, fix.lon)
+        - (_accuracy_or_infinite(home_fix) + _accuracy_or_infinite(fix))
+        < params.far_m
+        for fix in away_fixes
+    )
 
 
 def _window_estimate(

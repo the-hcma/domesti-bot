@@ -1251,16 +1251,15 @@ def test_the_carry_window_must_be_positive_and_finite(window_s: float) -> None:
         TogetherParams(carry_window_s=window_s)
 
 
-def test_a_home_wifi_run_that_began_when_the_user_was_at_the_reported_position_is_not_apart_by_it() -> None:
-    # The peer has re-reported its position from home since 1100 s ago; the other user was at that position then.
-    # Judging only by the newest report (60 s ago, when the user was 20 km away) would call the pair apart.
+def test_only_the_newest_home_wifi_report_has_to_find_the_user_far_away() -> None:
+    # The peer has re-reported its position from home since 1100 s ago, and the other user was at that position
+    # then. The newest report (60 s ago, when the user was 20 km away) decides: the phone was still on the home
+    # Wi-Fi after that, so it did not leave with the user.
     reports = [60.0, 500.0, 1_100.0]
     peer = _home_wifi(_repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=reports))
     long_track = _track(_times(every_s=10.0, last_at=_NOW, span_s=1_200.0))
 
-    assert estimate_together(long_track, peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
-    newest_only = _home_wifi(_repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=[60.0]))
-    assert estimate_together(long_track, newest_only, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together(long_track, peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
 
 
 def test_two_equally_close_fixes_to_the_report_time_count_as_near_when_either_is_near() -> None:
@@ -1316,28 +1315,32 @@ def test_the_distance_of_a_carried_estimate_is_the_distance_at_the_anchor() -> N
     assert estimate.anchor_lag_s == pytest.approx(100.0)
 
 
-def test_a_near_report_inside_the_run_vetoes_the_home_wifi_basis_even_when_both_ends_are_far() -> None:
-    # The user was at the peer's position 400 s ago, between a report 1100 s ago and one 60 s ago, when both ends
-    # of the run find them far away. The first version checked only the ends.
-    peer_at = _home_wifi(_repeated_fix(north_m=-8_000.0, fix_age_s=11_000.0, report_ages_s=[60.0, 400.0, 1_100.0]))
-    ends_only = _home_wifi(_repeated_fix(north_m=-8_000.0, fix_age_s=11_000.0, report_ages_s=[60.0, 1_100.0]))
+def test_a_near_report_older_than_the_newest_does_not_veto_the_home_wifi_basis() -> None:
+    # The user was at the peer's position 400 s ago, between a report 1100 s ago and one 60 s ago. Only the newest
+    # report is judged and the user was far from the phone then.
+    peer = _home_wifi(_repeated_fix(north_m=-8_000.0, fix_age_s=11_000.0, report_ages_s=[60.0, 400.0, 1_100.0]))
     long_track = _track(_times(every_s=10.0, last_at=_NOW, span_s=1_200.0))
 
-    assert estimate_together(long_track, ends_only, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
-    assert estimate_together(long_track, peer_at, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+    assert estimate_together(long_track, peer, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
 
 
-def test_a_report_from_elsewhere_ends_the_run_so_an_older_visit_cannot_veto_the_home_wifi_basis() -> None:
-    # The user was at the position 1100 s ago, but the phone reported off the home network 300 s ago, so only the
-    # reports since then belong to the run and the user was far from the position during all of them.
-    reports = _home_wifi(_repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=[60.0, 1_100.0]))
-    interruption = replace(
-        _repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=[300.0])[0], home_wifi=False
-    )
+def test_a_near_newest_home_wifi_report_vetoes_the_basis_whatever_the_older_reports_found() -> None:
+    # The user stands at the peer's position when the newest report is made, even though they were far away for the
+    # older ones: the phone may be about to leave with them.
+    peer = _home_wifi(_repeated_fix(north_m=0.0, fix_age_s=11_000.0, report_ages_s=[60.0, 400.0, 1_100.0]))
+    standing_there = _track(_times(every_s=10.0, last_at=_NOW, span_s=1_200.0), speed_mps=0.0)
+
+    assert estimate_together(standing_there, peer, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_newer_report_from_elsewhere_means_the_peer_is_no_longer_known_to_be_home() -> None:
+    # The newest report decides: a report from off the home network 30 s ago replaces the home Wi-Fi ones.
+    reports = _home_wifi(_repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=[300.0, 1_100.0]))
+    elsewhere = replace(_repeated_fix(north_m=-22_000.0, fix_age_s=11_000.0, report_ages_s=[30.0])[0], home_wifi=False)
     long_track = _track(_times(every_s=10.0, last_at=_NOW, span_s=1_200.0))
 
-    assert estimate_together(long_track, reports, now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
-    assert estimate_together(long_track, [*reports, interruption], now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together(long_track, reports, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together(long_track, [*reports, elsewhere], now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
 
 
 def test_the_carry_can_be_switched_off() -> None:
@@ -1346,6 +1349,15 @@ def test_the_carry_can_be_switched_off() -> None:
     assert estimate_together(_phone_a(), quiet, now=_NOW).together_basis is TogetherBasis.CARRIED_HISTORY
     off = estimate_together(_phone_a(), quiet, now=_NOW, params=TogetherParams(carry_enabled=False))
     assert off.unknown_reason is UnknownReason.STALE_FIX
+
+
+def test_a_newer_report_without_a_position_leaves_the_home_wifi_basis_unproven() -> None:
+    # The phone's latest report carries no usable position, so the older report at home says nothing about now.
+    home = _home_wifi(_repeated_fix(north_m=250.0, fix_age_s=11_000.0, report_ages_s=[600.0]))
+    positionless = replace(home[0], lat=math.nan, lon=math.nan, reported_at=_NOW - 100.0)
+
+    assert estimate_together(_phone_a(), home, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
+    assert estimate_together(_phone_a(), [*home, positionless], now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
 
 
 def test_a_report_time_shared_with_a_row_that_does_not_qualify_leaves_the_home_wifi_basis_unproven() -> None:
