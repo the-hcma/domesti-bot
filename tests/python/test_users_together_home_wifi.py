@@ -195,6 +195,69 @@ def test_the_other_user_on_the_home_wifi_too_is_never_apart_by_it() -> None:
     assert estimate.apart_basis is not ApartBasis.HOME_WIFI
 
 
+@pytest.mark.parametrize("sharp_first", [True, False], ids=["sharp-listed-first", "coarse-listed-first"])
+def test_rows_tied_at_the_newest_report_time_are_judged_by_the_least_precise_one(sharp_first: bool) -> None:
+    # One delivery stored twice with different accuracies: the 1000 m row cannot establish a separation from a user
+    # 400 m away, so the 5 m row must not either.
+    scenario = Scenario(distance_m=400.0, peer_accuracy_m=5.0, peer_fix_age_s=_FRESH_FIX_AGE_S, report_ages_s=(240.0,))
+    (sharp,) = scenario.peer_track()
+    coarse = replace(sharp, accuracy_m=1_000.0)
+    peer = [sharp, coarse] if sharp_first else [coarse, sharp]
+
+    tied = estimate_together(scenario.arriving_track(), peer, now=_NOW)
+    alone = estimate_together(scenario.arriving_track(), [sharp], now=_NOW)
+
+    assert alone.apart_basis is ApartBasis.HOME_WIFI
+    assert tied.apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_tied_report_without_an_accuracy_leaves_the_basis_unproven() -> None:
+    scenario = Scenario(distance_m=400.0, peer_accuracy_m=5.0, peer_fix_age_s=_FRESH_FIX_AGE_S, report_ages_s=(240.0,))
+    (sharp,) = scenario.peer_track()
+
+    tied = estimate_together(scenario.arriving_track(), [sharp, replace(sharp, accuracy_m=None)], now=_NOW)
+
+    assert tied.apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_coarse_fix_near_the_peer_at_the_report_time_is_not_outvoted_by_a_sharper_far_one() -> None:
+    # The arriving user's good fixes put them 600 m away, but a 200 m fix made at the report time, which cleaning
+    # drops for its accuracy, puts them at the peer's position: the evidence conflicts, so nothing is proven.
+    scenario = Scenario(distance_m=600.0, peer_accuracy_m=5.0, peer_fix_age_s=_FRESH_FIX_AGE_S, report_ages_s=(240.0,))
+    coarse_near = TrackFix(accuracy_m=200.0, at=_NOW - 240.0, lat=_LAT0, lon=_LON0, reported_at=_NOW - 239.0)
+    arriving = [*scenario.arriving_track(), coarse_near]
+
+    assert estimate_together(scenario.arriving_track(), scenario.peer_track(), now=_NOW).apart_basis is (
+        ApartBasis.HOME_WIFI
+    )
+    assert estimate_together(arriving, scenario.peer_track(), now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+@pytest.mark.parametrize("accuracy", [None, math.nan, -1.0, math.inf], ids=["missing", "nan", "negative", "infinite"])
+def test_a_dropped_fix_at_the_report_time_with_an_unusable_accuracy_counts_as_possibly_near(
+    accuracy: float | None,
+) -> None:
+    # Cleaning drops a fix with no usable accuracy, and nothing is known about how far off it is, so a position near
+    # the peer at the report time must never be read as far.
+    scenario = Scenario(distance_m=600.0, peer_accuracy_m=5.0, peer_fix_age_s=_FRESH_FIX_AGE_S, report_ages_s=(240.0,))
+    unknown_near = TrackFix(accuracy_m=accuracy, at=_NOW - 240.0, lat=_LAT0, lon=_LON0, reported_at=_NOW - 239.0)
+
+    estimate = estimate_together([*scenario.arriving_track(), unknown_near], scenario.peer_track(), now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.HOME_WIFI
+
+
+def test_a_coarse_fix_far_from_the_peer_at_the_report_time_does_not_block_the_basis() -> None:
+    scenario = Scenario(distance_m=600.0, peer_accuracy_m=5.0, peer_fix_age_s=_FRESH_FIX_AGE_S, report_ages_s=(240.0,))
+    coarse_far = TrackFix(
+        accuracy_m=200.0, at=_NOW - 240.0, lat=_LAT0 + 5_000.0 / _M_PER_DEG, lon=_LON0, reported_at=_NOW - 239.0
+    )
+
+    estimate = estimate_together([*scenario.arriving_track(), coarse_far], scenario.peer_track(), now=_NOW)
+
+    assert estimate.apart_basis is ApartBasis.HOME_WIFI
+
+
 def _random_scenario(rng: random.Random) -> Scenario:
     ages = sorted({round(rng.uniform(5.0, 1_400.0), 1) for _ in range(rng.randint(1, 4))})
     return Scenario(

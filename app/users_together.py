@@ -494,6 +494,12 @@ _STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 
 
+def _accuracy_or_infinite(fix: TrackFix) -> float:
+    """The fix's accuracy in meters, or infinity when it is missing, not finite or negative."""
+    accuracy = fix.accuracy_m
+    return accuracy if accuracy is not None and math.isfinite(accuracy) and accuracy >= 0.0 else math.inf
+
+
 def _apart_by_coarse_fixes(
     tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
     cleaned: tuple[CleanTrack, CleanTrack],
@@ -562,7 +568,8 @@ def _apart_by_home_wifi(
             # not older than the fix used here may put the user somewhere else.
             continue
         reported_at = _home_wifi_report_time(tracks[home], newest, now)
-        if reported_at is None or _was_near_when_reported(reported_at, newest, good_fixes, params):
+        measured = [fix for fix in tracks[1 - home] if not fix.report_only and _has_position(fix)]
+        if reported_at is None or _was_near_when_reported(reported_at, newest, measured, params):
             # No report time means a row sharing the newest report time does not qualify: nothing is proven.
             continue
         distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
@@ -894,7 +901,9 @@ def _newest_report(fixes: Sequence[TrackFix], now: float) -> TrackFix | None:
         and fix.reported_at <= now
         and _has_position(fix)
     ]
-    return max(reports, key=lambda fix: fix.reported_at or 0.0) if reports else None
+    # Among rows tied at the newest report time the least precise one stands for the report (a missing or invalid
+    # accuracy is the least precise of all), so a sharper twin cannot establish a separation the report cannot.
+    return max(reports, key=lambda fix: (fix.reported_at or 0.0, _accuracy_or_infinite(fix))) if reports else None
 
 
 def _position_at(fixes: Sequence[TrackFix], instant: float) -> InterpolatedPosition | None:
@@ -1005,7 +1014,9 @@ def _was_near_when_reported(
 ) -> bool:
     """Whether the other user was, or may have been, near the home phone's position when it reported.
 
-    The fix closest in time to ``reported_at`` stands for where the other user was. Without one within
+    The fix closest in time to ``reported_at`` stands for where the other user was. ``away_fixes`` holds every
+    measured fix of that user, including those cleaning dropped for poor accuracy: a coarse fix near the phone at
+    the report time must not be outvoted by a sharper one that happens to lie farther away. Without one within
     ``_HOME_WIFI_TRACK_TOLERANCE_S`` there is no telling, so the answer is yes, and so it is when two fixes are
     equally close and either one is near. A user who was at the reported position then may have left it together
     with the person at home; one who was far away could not have.
@@ -1016,7 +1027,7 @@ def _was_near_when_reported(
     return any(
         abs(fix.at - reported_at) == distance_to_reported_at
         and _haversine_m(home_fix.lat, home_fix.lon, fix.lat, fix.lon)
-        - ((home_fix.accuracy_m or 0.0) + (fix.accuracy_m or 0.0))
+        - (_accuracy_or_infinite(home_fix) + _accuracy_or_infinite(fix))
         < params.far_m
         for fix in away_fixes
     )
