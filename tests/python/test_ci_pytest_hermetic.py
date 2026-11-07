@@ -211,12 +211,7 @@ def test_the_layout_helper_wraps_the_run_in_the_uv_and_pytest_layouts(tmp_path: 
     helpers = tmp_path / "helpers"
     (helpers / "scripts" / "dev").mkdir(parents=True)
     fake = helpers / "scripts" / "dev" / "with-tmp-layout"
-    fake.write_text(
-        "#!/usr/bin/env bash\n"
-        'printf \'%s\\n\' "$1" >> "$TMPDIR/layout-tools"\n'
-        "shift 2\n"
-        'exec "$@"\n'
-    )
+    fake.write_text('#!/usr/bin/env bash\nprintf \'%s\\n\' "$1" >> "$TMPDIR/layout-tools"\nshift 2\nexec "$@"\n')
     fake.chmod(0o755)
     env = _without_helpers(tmp_path, GITHUB_ACTIONS=None, REPOSITORY_HELPERS_DIR=str(helpers))
     run = _run_script(tmp_path, [(0, "1 passed\n")], env)
