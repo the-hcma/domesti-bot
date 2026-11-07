@@ -621,6 +621,39 @@ def test_a_peer_on_the_home_wifi_is_apart_from_a_user_arriving_from_outside() ->
     assert "unknown" not in alone.detail
 
 
+def test_a_stale_coarse_fix_re_sent_from_the_home_wifi_settles_an_arrival_with_ten_minutes_of_track() -> None:
+    # Field case 2026-11-06 21:23 EST (domesti-bot#940): the peer's phone re-sent a 32-hour-old 100 m fix from the
+    # home Wi-Fi 19 and 4 minutes before the arrival, and the evaluator reads 10 minutes of the arriving user's track.
+    cached = _location(_NOW - 117_800.0, accuracy_m=100, connection_type="w", wifi_ssid="HomeNet").model_copy(
+        update={"lat": _LAT0 + 250.0 / _M_PER_DEG, "lon": _LON0}
+    )
+    peer = [cached.model_copy(update={"reported_at": _iso(_NOW - age)}) for age in (240.0, 1_140.0)]
+    ctx = _ctx({"user-a": _history(span_s=600.0), "user-b": peer}, home_ssid={"user-b": "HomeNet"})
+
+    alone = _row(_rule(expected=False), ctx)
+
+    assert alone.met is True
+    assert "home Wi-Fi" in alone.detail
+    assert "unknown" not in alone.detail
+    assert _row(_rule(expected=True), ctx).met is False
+
+
+def test_a_phone_that_joins_the_home_wifi_after_arriving_together_does_not_make_the_pair_apart() -> None:
+    # Field case 2026-10-13 17:06 EDT: one car in the driveway, one phone joined the home Wi-Fi first, and the other
+    # phone, still on mobile data and 14 m away, was the fresh fix off the network. The report that joined was made
+    # with the other user right next to it, so it is no evidence that the pair was ever apart.
+    ssid_only_now = [_location(_NOW - 10.0 * index, connection_type="w", wifi_ssid="HomeNet") for index in range(3)]
+    mobile_before = [_location(_NOW - 30.0 - 10.0 * index, connection_type="m") for index in range(60)]
+    joined = [*ssid_only_now, *mobile_before]
+    ctx = _ctx(
+        {"user-a": _history(every_s=19.0, last_at=_NOW - 3.0, lateral_m=5.0), "user-b": joined},
+        home_ssid={"user-b": "HomeNet"},
+    )
+
+    assert _row(_rule(expected=False), ctx).met is False
+    assert "home Wi-Fi" not in _row(_rule(expected=False), ctx).detail
+
+
 def test_a_user_arriving_next_to_a_home_wifi_peer_is_apart_whatever_the_distance_to_its_cached_fix() -> None:
     # Field case 2026-11-04 12:24: the arriving user entered the geofence about 135 m from the cached 48 m fix.
     peer = [fix.model_copy(update={"accuracy_m": 48}) for fix in _home_wifi_peer_history(north_m=135.0)]

@@ -5,14 +5,17 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.api.schemas import RuleOut
+from app.api.schemas import RuleConditionsOut, RuleOut, UsersTogetherCondition
 from app.automation_rules_loader import load_automation_rules_bundle
+from app.device_enums import RuleTrigger
 from app.domesti_bot_cli import DeviceManagersState
 from app.gotailwind_device_manager import GotailwindDeviceManager
 from app.kasa_device_manager import KasaDeviceManager
@@ -23,8 +26,9 @@ from app.location_history_retention import (
 )
 from app.presence_store import UserLocationRecord, upsert_user_location
 from app.rule_actions import RuleNotificationEmailOutcome
+from app.rule_conditions import evaluate_rule
 from app.rule_evaluator import RuleEvaluator
-from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
+from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users, set_user_home_wifi
 
 # The simulated clock is years in the past, so the default 24 hour window would prune every reading but the newest
 # 20; production keeps the whole day, and the recent-closeness rule reads the last few minutes of both tracks.
@@ -34,6 +38,8 @@ _FULL_HISTORY = LocationHistoryRetention(
     unlimited=True,
 )
 _EXAMPLE = Path(__file__).resolve().parents[2] / "automation-rules.json.example"
+_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "togetherness"
+_HOME_SSID = "HomeNet"
 _HENRIQUE_ALONE = "garage-entry-alone-open-henriques-side"
 _HOME = (41.194072, -73.888325)
 _KRISTEN_ALONE = "garage-entry-alone-open-kristens-side"
@@ -53,10 +59,27 @@ class _Door:
         self.is_open = False
 
 
+@dataclass(frozen=True)
+class _Report:
+    """One stored report: where the phone says it is, how good the fix is and what network it was on."""
+
+    position: tuple[float, float]
+    reported_at: float
+    user_id: str
+    accuracy_m: int | None = 5
+    connection_type: str | None = None
+    fix_at: float = 0.0
+    wifi_ssid: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.fix_at == 0.0:
+            object.__setattr__(self, "fix_at", self.reported_at)
+
+
 class _Rig:
     """An evaluator loaded with the example garage entry rules, enabled, and two closed doors."""
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, home_wifi_ssid: str | None = None) -> None:
         monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(_EXAMPLE))
         example = load_automation_rules_bundle()
         rules = [
@@ -99,6 +122,9 @@ class _Rig:
                 for user_id in ("henrique", "kristen")
             ],
         )
+        if home_wifi_ssid is not None:
+            for user_id in ("henrique", "kristen"):
+                set_user_home_wifi(self.db, user_id, wifi_ssid=home_wifi_ssid)
         replace_geofences(
             self.db,
             [
@@ -171,6 +197,34 @@ class _Rig:
                 retention=_FULL_HISTORY,
             )
             await self.evaluator.on_location_update(user_id)
+
+    async def togetherness_at(self, report: _Report) -> tuple[bool, bool]:
+        """Whether the pair is clearly alone (apart) and clearly together, as the rules would see it at ``report``."""
+        ctx = await self.evaluator._build_evaluation_context(now=datetime.fromtimestamp(report.reported_at, tz=UTC))
+        apart = evaluate_rule(_users_together_rule(expected=False), ctx).conditions[0].met
+        together = evaluate_rule(_users_together_rule(expected=True), ctx).conditions[0].met
+        return bool(apart), bool(together)
+
+    async def drive_reports(self, reports: list[_Report]) -> None:
+        """Report each stored fix in report-time order, with the clock at the report time."""
+        for report in sorted(reports, key=lambda item: item.reported_at):
+            self.clock["now"] = report.reported_at
+            upsert_user_location(
+                self.db,
+                UserLocationRecord(
+                    user_id=report.user_id,
+                    lat=report.position[0],
+                    lon=report.position[1],
+                    accuracy_m=report.accuracy_m,
+                    connection_type=report.connection_type,
+                    fix_at=report.fix_at,
+                    reported_at=report.reported_at,
+                    source="test",
+                    wifi_ssid=report.wifi_ssid,
+                ),
+                retention=_FULL_HISTORY,
+            )
+            await self.evaluator.on_location_update(report.user_id)
 
 
 def _approach(
@@ -366,3 +420,160 @@ async def test_a_home_phone_with_no_recent_fix_still_lets_an_arrival_alone_open_
         assert crossing <= rig.opened_at[0] <= crossing + _REPORT_EVERY_S + 2.0
     finally:
         await rig.close()
+
+
+def _fixture_reports(name: str) -> tuple[list[_Report], float]:
+    """The reports of a recorded arrival and the report time of the first fix inside the geofence."""
+    data = json.loads((_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
+    columns = data["columns"]
+    reports = []
+    for row in data["rows"]:
+        record = dict(zip(columns, row, strict=True))
+        reports.append(
+            _Report(
+                accuracy_m=record["accuracy_m"],
+                connection_type=record["connection_type"],
+                fix_at=record["fix_at"],
+                position=(record["lat"], record["lon"]),
+                reported_at=record["reported_at"],
+                user_id=record["user"],
+                wifi_ssid=record["wifi_ssid"],
+            )
+        )
+    return reports, data["crossing_reported_at"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "expected_rule", "expected_line"),
+    [
+        # 2026-11-06 21:23 EST: the peer's phone re-sent a 32-hour-old 100 m fix from the home Wi-Fi (domesti-bot#940).
+        ("nov6_alone_arrival_with_stale_coarse_peer", _HENRIQUE_ALONE, "Open Main garage left"),
+        ("oct13_together_arrival_evening", _TOGETHER, "Open Main garage right"),
+        ("oct13_alone_arrival_with_peer_home_on_wifi", _HENRIQUE_ALONE, "Open Main garage left"),
+    ],
+)
+async def test_a_recorded_arrival_opens_exactly_the_right_door_within_the_grace(
+    name: str,
+    expected_rule: str,
+    expected_line: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replays the stored reports of both phones through the real evaluator, report by report."""
+    reports, crossing = _fixture_reports(name)
+    rig = _Rig(tmp_path, monkeypatch, home_wifi_ssid=_HOME_SSID)
+    try:
+        await rig.drive_reports(reports)
+        # The trace starts an hour earlier so the phones' recent reports are all there; only what follows the
+        # crossing is judged (an earlier, separate arrival in the window may legitimately have opened a door).
+        after = [
+            (rule_id, line, at)
+            for (rule_id, line), at in zip(rig.opened, rig.opened_at, strict=True)
+            if at >= crossing - 1.0
+        ]
+        assert [rule_id for rule_id, _line, _at in after] == [expected_rule]
+        assert after[0][1].startswith(expected_line)
+        assert crossing <= after[0][2] <= crossing + 120.0
+    finally:
+        await rig.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "phones_were_together"),
+    [
+        # 2026-10-13 17:04 EDT: one car, and one phone joined the home Wi-Fi in the driveway 90 s after the crossing.
+        # The evaluator's bounce guard suppresses this crossing (the car had been out of the geofence for 200 s), so
+        # the pair verdict is what is pinned here, not a door.
+        ("oct13_together_arrival_with_driveway_wifi_join", True),
+        ("oct13_together_arrival_evening", True),
+        ("nov6_alone_arrival_with_stale_coarse_peer", False),
+        ("oct13_alone_arrival_with_peer_home_on_wifi", False),
+    ],
+)
+async def test_the_pair_verdict_after_a_recorded_crossing_never_contradicts_what_the_phones_did(
+    name: str,
+    phones_were_together: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At every report from just before the crossing to 3 minutes after it, the rules must not be told the opposite."""
+    reports, crossing = _fixture_reports(name)
+    rig = _Rig(tmp_path, monkeypatch, home_wifi_ssid=_HOME_SSID)
+    timeline: list[tuple[float, bool, bool]] = []
+    try:
+        for report in sorted(reports, key=lambda item: item.reported_at):
+            await rig.drive_reports([report])
+            offset = report.reported_at - crossing
+            if -30.0 <= offset <= 180.0:
+                apart, together = await rig.togetherness_at(report)
+                timeline.append((offset, apart, together))
+    finally:
+        await rig.close()
+    assert timeline
+    wrong = [
+        (offset, apart, together)
+        for offset, apart, together in timeline
+        if (apart if phones_were_together else together)
+    ]
+    assert wrong == []
+    settled = [offset for offset, apart, together in timeline if (together if phones_were_together else apart)]
+    assert settled
+    assert min(settled) <= 120.0
+
+
+@pytest.mark.asyncio
+async def test_a_home_phone_re_sending_a_stale_coarse_fix_from_the_wifi_lets_an_arrival_alone_open_the_drivers_side(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """domesti-bot#940: both rules waited out their grace because the home phone had no good fix at all."""
+    rig = _Rig(tmp_path, monkeypatch, home_wifi_ssid=_HOME_SSID)
+    arrives_at = _T0 + 700.0
+    until = arrives_at + 120.0
+    crossing = arrives_at - 250.0 / _SPEED_MPS
+    stale_fix_at = _T0 - 117_800.0
+    home_reports = [
+        _Report(
+            accuracy_m=100,
+            connection_type="w",
+            fix_at=stale_fix_at,
+            position=_HOME,
+            reported_at=crossing - age,
+            user_id="kristen",
+            wifi_ssid=_HOME_SSID,
+        )
+        for age in (246.0, 1_146.0, 2_046.0)
+    ]
+    drive = [
+        _Report(position=position, reported_at=at, user_id="henrique", accuracy_m=5, connection_type="m")
+        for at, _user, position in _approach(
+            "henrique", arrives_at=arrives_at, every_s=_REPORT_EVERY_S, offset_s=0.0, lateral_m=0.0, until=until
+        )
+    ]
+    try:
+        await rig.drive_reports([*home_reports, *drive])
+        assert [rule_id for rule_id, _line in rig.opened] == [_HENRIQUE_ALONE]
+        assert rig.opened[0][1].startswith("Open Main garage left")
+        assert crossing <= rig.opened_at[0] <= crossing + _REPORT_EVERY_S + 2.0
+    finally:
+        await rig.close()
+
+
+def _users_together_rule(*, expected: bool) -> RuleOut:
+    """A rule holding only the pair condition, so its status row is the verdict the garage entry rules wait on."""
+    return RuleOut(
+        conditions=RuleConditionsOut(
+            all=[UsersTogetherCondition(type="users_together", user_ids=["henrique", "kristen"], expected=expected)]
+        ),
+        cooldown_s=0,
+        device_actions=[],
+        enabled=True,
+        id="timeline",
+        label="Timeline",
+        min_location_accuracy_m=50,
+        notification_emails=[],
+        notify_on_fire=False,
+        triggers=[RuleTrigger.EDGE_TRUE],
+    )
