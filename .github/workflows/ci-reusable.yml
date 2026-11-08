@@ -162,9 +162,7 @@ jobs:
           ref: ${{ inputs.ref }}
 
       - name: Install actionlint
-        run: |
-          curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
-          sudo mv actionlint /usr/local/bin/
+        uses: the-hcma/repository-helpers/actions/setup-actionlint@c9531539876a5757eced4a6beb1a15c2adc45506
 
       - id: run
         name: Workflow Lint (actionlint)
