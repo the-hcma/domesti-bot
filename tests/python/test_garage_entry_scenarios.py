@@ -1,4 +1,7 @@
-"""The sample garage entry rules open one door as the car crosses the geofence (dry run, nothing moves)."""
+"""The sample garage entry rules open one door as the car crosses the geofence.
+
+Hermetic scenarios force ``dry_run`` so the planned open is observed via the fire email, without moving a door.
+"""
 
 from __future__ import annotations
 
@@ -83,7 +86,7 @@ class _Rig:
         monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(_EXAMPLE))
         example = load_automation_rules_bundle()
         rules = [
-            rule.model_copy(update={"enabled": True})
+            rule.model_copy(update={"dry_run": True, "enabled": True})
             for rule in example.rules
             if rule.id in (_TOGETHER, _HENRIQUE_ALONE, _KRISTEN_ALONE)
         ]
