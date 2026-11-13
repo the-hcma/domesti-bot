@@ -72,7 +72,7 @@ dependencies = [
     "python-kasa>=0.12.0",
     "requests>=2.34.2",
     "soco>=0.32.1",
-    "sqlalchemy>=2.1.6",
+    "sqlalchemy>=2.1.8",
     "starlette>=1.10.0",
     "typer>=0.27.3",
     "typing-extensions==4.16.0",
