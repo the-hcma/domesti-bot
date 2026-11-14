@@ -1,0 +1,7 @@
+---
+description: CodeRabbit CLI skills are installed user-level with coderabbit skills; the review run caps and the no-credits rule stay in force
+alwaysApply: true
+---
+
+<!-- agents-rule-shim: coderabbit-skills -->
+Canonical rule: [`.agents/rules/coderabbit-skills.md`](../../.agents/rules/coderabbit-skills.md)
