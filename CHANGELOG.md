@@ -1,5 +1,63 @@
 # Changelog
 
+## [2.1.0](https://github.com/the-hcma/domesti-bot/compare/domesti-bot-v2.0.0...domesti-bot-v2.1.0) (2026-11-14)
+
+
+### Features
+
+* add device_not_manually_off_within rule condition ([#835](https://github.com/the-hcma/domesti-bot/issues/835)) ([#836](https://github.com/the-hcma/domesti-bot/issues/836)) ([9da4c15](https://github.com/the-hcma/domesti-bot/commit/9da4c15474f41b1db9e6e69bc76e8761d675559e))
+* add dry_run mode for rules that emails what they would do ([#840](https://github.com/the-hcma/domesti-bot/issues/840)) ([#841](https://github.com/the-hcma/domesti-bot/issues/841)) ([9b0f9e0](https://github.com/the-hcma/domesti-bot/commit/9b0f9e0842d41753122a4390097e26d103491f79))
+* add max_inside_s window to users_inside_geofence_for_s and bound the garage alone rules ([#833](https://github.com/the-hcma/domesti-bot/issues/833)) ([#845](https://github.com/the-hcma/domesti-bot/issues/845)) ([cea9ee7](https://github.com/the-hcma/domesti-bot/commit/cea9ee7cd9c2a6370f1e38e8403c4a539de50a5d))
+* add sample garage arrival rules that pick the door to open ([#833](https://github.com/the-hcma/domesti-bot/issues/833)) ([#844](https://github.com/the-hcma/domesti-bot/issues/844)) ([dd54a8e](https://github.com/the-hcma/domesti-bot/commit/dd54a8e34f361c0107eafed89335949f86e544dc))
+* add users_arrived_together rule condition ([#834](https://github.com/the-hcma/domesti-bot/issues/834)) ([#842](https://github.com/the-hcma/domesti-bot/issues/842)) ([f1a1b02](https://github.com/the-hcma/domesti-bot/commit/f1a1b02ebae3ac214be712996a169e036a79293d))
+* add users_together rule condition scored from interpolated tracks ([#856](https://github.com/the-hcma/domesti-bot/issues/856)) ([#858](https://github.com/the-hcma/domesti-bot/issues/858)) ([bca4373](https://github.com/the-hcma/domesti-bot/commit/bca43735404d0fdb560c55115b1f3a5b102a1bbf))
+* defer geofence edges when togetherness is unknown ([#887](https://github.com/the-hcma/domesti-bot/issues/887)) ([412e3d6](https://github.com/the-hcma/domesti-bot/commit/412e3d621f2133082ba7acc0a6a2965c456765dd))
+* email the reason when a rule is held off by a manual turn-off ([#838](https://github.com/the-hcma/domesti-bot/issues/838)) ([#839](https://github.com/the-hcma/domesti-bot/issues/839)) ([c6c907f](https://github.com/the-hcma/domesti-bot/commit/c6c907f3ffb5042213c8ac77e51e7466efdd9691))
+* flag a Sonos speaker that stops answering and raise presence notices ([#876](https://github.com/the-hcma/domesti-bot/issues/876)) ([#884](https://github.com/the-hcma/domesti-bot/issues/884)) ([ebba50e](https://github.com/the-hcma/domesti-bot/commit/ebba50e272142ef50cadd0c96a53981d91ed568e))
+* flag, recover and forget unresponsive EP1 sensors ([#876](https://github.com/the-hcma/domesti-bot/issues/876)) ([#893](https://github.com/the-hcma/domesti-bot/issues/893)) ([bfcc4e2](https://github.com/the-hcma/domesti-bot/commit/bfcc4e2510f8cc37ff61f4ba173a30e35ce28b69))
+* include the togetherness facts in the rule fire email ([#865](https://github.com/the-hcma/domesti-bot/issues/865)) ([abcef31](https://github.com/the-hcma/domesti-bot/commit/abcef31edd4dd73f8495b90b04d9dd1111d413aa))
+* log when users begin and stop travelling together ([#860](https://github.com/the-hcma/domesti-bot/issues/860)) ([#861](https://github.com/the-hcma/domesti-bot/issues/861)) ([928496d](https://github.com/the-hcma/domesti-bot/commit/928496d4f425ed588c5a77e32a297e80c4285536))
+* persist last rule evaluation outcome in rule status ([#888](https://github.com/the-hcma/domesti-bot/issues/888)) ([a021a84](https://github.com/the-hcma/domesti-bot/commit/a021a843e001441a10d653d9c00b47cbe0e28c48))
+* persist the keep-checking answer for missing devices across restarts ([#874](https://github.com/the-hcma/domesti-bot/issues/874)) ([#877](https://github.com/the-hcma/domesti-bot/issues/877)) ([1b46579](https://github.com/the-hcma/domesti-bot/commit/1b46579dd4eb8a901cb2f0572a8c255ffb2b344d))
+* poll devices watched by turn-on rules every 5 s while their time window is open ([#854](https://github.com/the-hcma/domesti-bot/issues/854)) ([#855](https://github.com/the-hcma/domesti-bot/issues/855)) ([2709bcd](https://github.com/the-hcma/domesti-bot/commit/2709bcd6507c9b88ee3c0d5aae6c272a126d3353))
+* raise device presence notices when a Kasa plug stops or resumes responding ([#867](https://github.com/the-hcma/domesti-bot/issues/867)) ([#870](https://github.com/the-hcma/domesti-bot/issues/870)) ([2c0b436](https://github.com/the-hcma/domesti-bot/commit/2c0b436c9c9d4472bca3247b540f902d29eab68d))
+* reconnect unresponsive Kasa plugs on their own when they answer again ([#867](https://github.com/the-hcma/domesti-bot/issues/867)) ([#869](https://github.com/the-hcma/domesti-bot/issues/869)) ([8211bad](https://github.com/the-hcma/domesti-bot/commit/8211bad954056888fecdeea218508fe2911d3ba1))
+* recover and forget unresponsive Sonos speakers ([#876](https://github.com/the-hcma/domesti-bot/issues/876)) ([#891](https://github.com/the-hcma/domesti-bot/issues/891)) ([c5033df](https://github.com/the-hcma/domesti-bot/commit/c5033df3811945c6c252f0c82dbcb2b720f86519))
+* **rules:** add devices_any_transitioned_to_state edge condition ([#850](https://github.com/the-hcma/domesti-bot/issues/850)) ([0e4743e](https://github.com/the-hcma/domesti-bot/commit/0e4743ea06566aede1178ad0bec381e8a17071e1))
+* **rules:** allow several time windows on device transition rules ([#851](https://github.com/the-hcma/domesti-bot/issues/851)) ([f0d0812](https://github.com/the-hcma/domesti-bot/commit/f0d0812d47c05ea25b6d86b48268befaf6982912))
+* **rules:** take garage-entry samples live (drop dry-run) ([#949](https://github.com/the-hcma/domesti-bot/issues/949)) ([9a21649](https://github.com/the-hcma/domesti-bot/commit/9a21649334f205f208bd35f5ec911197d0bbc4ad))
+* sample garage entry rules that open a door at the geofence crossing ([#856](https://github.com/the-hcma/domesti-bot/issues/856)) ([#862](https://github.com/the-hcma/domesti-bot/issues/862)) ([1caa263](https://github.com/the-hcma/domesti-bot/commit/1caa263e1f45d91806761968d5aaff19dd98fca3))
+* score whether two users travel together from interpolated tracks ([#856](https://github.com/the-hcma/domesti-bot/issues/856)) ([#857](https://github.com/the-hcma/domesti-bot/issues/857)) ([e2eeead](https://github.com/the-hcma/domesti-bot/commit/e2eeead9abbcb6bc088b4d46a90182fd08c222d2))
+* show device presence notices in the web UI with keep-checking and forget actions ([#867](https://github.com/the-hcma/domesti-bot/issues/867)) ([#871](https://github.com/the-hcma/domesti-bot/issues/871)) ([375651b](https://github.com/the-hcma/domesti-bot/commit/375651b700b60c1596ddb5e084a64e0150aabad6))
+* spell out sunrise/sunset times and offsets in rule emails, logs and status text ([#830](https://github.com/the-hcma/domesti-bot/issues/830)) ([577b0ef](https://github.com/the-hcma/domesti-bot/commit/577b0eff724e1b3e21b070ca115fb0f54ab51428))
+* treat a peer that keeps re-reporting an old fix as stationary in users_together ([#896](https://github.com/the-hcma/domesti-bot/issues/896)) ([#898](https://github.com/the-hcma/domesti-bot/issues/898)) ([a4d309c](https://github.com/the-hcma/domesti-bot/commit/a4d309c1bee22cb8de5f9242ea9fc84f5af7d246))
+
+
+### Bug Fixes
+
+* **deps:** batch updates including CVE fixes ([#892](https://github.com/the-hcma/domesti-bot/issues/892)) ([e524bde](https://github.com/the-hcma/domesti-bot/commit/e524bde3d105f9de8de1aec74f05bb703dad9e2c))
+* **kasa:** support python-kasa 0.12 plain-HTTP SSL patch ([#931](https://github.com/the-hcma/domesti-bot/issues/931)) ([cb3362d](https://github.com/the-hcma/domesti-bot/commit/cb3362dc29e4076f399946180fdb2cd9f317f938))
+* keep a cached EP1 sensor that answers neither the API nor ARP on a sweep ([#904](https://github.com/the-hcma/domesti-bot/issues/904)) ([8147147](https://github.com/the-hcma/domesti-bot/commit/8147147152387b5ddaef9546ec3bcd97ef04f843))
+* keep a cached Kasa plug as an unresponsive tile when it loses power ([#867](https://github.com/the-hcma/domesti-bot/issues/867)) ([#868](https://github.com/the-hcma/domesti-bot/issues/868)) ([2eadde8](https://github.com/the-hcma/domesti-bot/commit/2eadde8ab106884d3ef90f53b0e672482627499b))
+* keep an unreachable cached Sonos speaker as an unresponsive tile ([#876](https://github.com/the-hcma/domesti-bot/issues/876)) ([#882](https://github.com/the-hcma/domesti-bot/issues/882)) ([d375368](https://github.com/the-hcma/domesti-bot/commit/d3753680a47756d82f864d6e45bb549ac16db556))
+* make the operator alert and presence notice banners readable in both color schemes ([#875](https://github.com/the-hcma/domesti-bot/issues/875)) ([#880](https://github.com/the-hcma/domesti-bot/issues/880)) ([4621fbc](https://github.com/the-hcma/domesti-bot/commit/4621fbc5b16f9f55170070481cd41c6af9bfeff4))
+* read arrivals for users_arrived_together from observed entries at the rule's own accuracy limit ([#847](https://github.com/the-hcma/domesti-bot/issues/847)) ([#863](https://github.com/the-hcma/domesti-bot/issues/863)) ([b1e9376](https://github.com/the-hcma/domesti-bot/commit/b1e93769b7428b2a83cb3c18f34c14c80b29c5d4))
+* **rules:** defer garage entry when users_together coverage is sparse ([#918](https://github.com/the-hcma/domesti-bot/issues/918)) ([e501adb](https://github.com/the-hcma/domesti-bot/commit/e501adbe200d94df57bb4c169171792e5dc09f38))
+* **rules:** judge only the newest home Wi-Fi report for the pair verdict ([#941](https://github.com/the-hcma/domesti-bot/issues/941)) ([23f3ed8](https://github.com/the-hcma/domesti-bot/commit/23f3ed89c89f43a335af57d5b86491c6a1760fa0))
+* **rules:** settle garage entry togetherness for a home Wi-Fi peer and a phone that goes quiet ([#933](https://github.com/the-hcma/domesti-bot/issues/933)) ([a949af6](https://github.com/the-hcma/domesti-bot/commit/a949af6799943f5db175301d800717b7ce14ca06))
+* send My Tracks a reason it accepts for the unknown-togetherness location request ([#895](https://github.com/the-hcma/domesti-bot/issues/895)) ([#897](https://github.com/the-hcma/domesti-bot/issues/897)) ([c55911a](https://github.com/the-hcma/domesti-bot/commit/c55911a0a17f61cb3f687147c53ba7c99c5a498d))
+* **systemd:** widen the ExecStartPost health window to 20 seconds ([#911](https://github.com/the-hcma/domesti-bot/issues/911)) ([#912](https://github.com/the-hcma/domesti-bot/issues/912)) ([8ae5f0c](https://github.com/the-hcma/domesti-bot/commit/8ae5f0c2cc2118eaf207d04cc1e68af01e8a2ca7))
+* treat a far-away user with coarse fixes as apart, not unknown ([#890](https://github.com/the-hcma/domesti-bot/issues/890)) ([#894](https://github.com/the-hcma/domesti-bot/issues/894)) ([ae36bf4](https://github.com/the-hcma/domesti-bot/commit/ae36bf44cf06423de048b63908a48876a08f40ee))
+* treat unknown togetherness as apart when not recently close ([#907](https://github.com/the-hcma/domesti-bot/issues/907)) ([88e790e](https://github.com/the-hcma/domesti-bot/commit/88e790e41b3a8f5ad873c09bfb4d682cf9b8affc))
+* use the solid status fills under white text so dark mode meets 4.5:1 ([#881](https://github.com/the-hcma/domesti-bot/issues/881)) ([#902](https://github.com/the-hcma/domesti-bot/issues/902)) ([28bd2d8](https://github.com/the-hcma/domesti-bot/commit/28bd2d8a93dfd983c1429d7c7710d4e07f3ce67f))
+
+
+### Documentation
+
+* **agents:** point the merge instructions at scripts/dev/merge-stack ([#920](https://github.com/the-hcma/domesti-bot/issues/920)) ([0b90420](https://github.com/the-hcma/domesti-bot/commit/0b904200bf3f8efad0ae46819ad705f79d8663bc))
+* **agents:** say merge-stack takes the top PR of a stack and forbid a hand-run gh stack merge ([#922](https://github.com/the-hcma/domesti-bot/issues/922)) ([989500d](https://github.com/the-hcma/domesti-bot/commit/989500d0332655ad7220087670725d74f9d4f7b1))
+* **stacking:** keep only the merge-stack command in the quick reference ([#921](https://github.com/the-hcma/domesti-bot/issues/921)) ([73eb164](https://github.com/the-hcma/domesti-bot/commit/73eb1647d70bb28c7823310a0b2064d447cf7db6))
+
 ## [2.0.0](https://github.com/the-hcma/domesti-bot/compare/domesti-bot-v1.15.0...domesti-bot-v2.0.0) (2026-10-11)
 
 
