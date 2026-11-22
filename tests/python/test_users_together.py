@@ -1227,6 +1227,93 @@ def test_a_dropped_coarse_fix_near_the_other_user_does_not_veto_the_carry() -> N
     assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
 
 
+#   (seconds before the evaluation, accuracy in meters, latitude, longitude): the stored fixes of 2026-11-21 19:10 EST,
+#   when the two phones drove home together and the garage-entry rules reported "unknown" for 2 minutes.
+_NOV21_HENRIQUE = (
+    (-129.0, 4.0, 41.199565, -73.886009),
+    (-123.0, 3.0, 41.199093, -73.885799),
+    (-121.0, 4.0, 41.198931, -73.885897),
+    (-111.0, 4.0, 41.198714, -73.887017),
+    (-105.0, 3.0, 41.198596, -73.887401),
+    (-101.0, 3.0, 41.198552, -73.887473),
+    (-99.0, 3.0, 41.198506, -73.887553),
+    (-91.0, 3.0, 41.198203, -73.887955),
+    (-81.0, 3.0, 41.197715, -73.887856),
+    (-75.0, 4.0, 41.197609, -73.887781),
+    (-69.0, 7.0, 41.197585, -73.887795),
+    (-67.0, 9.0, 41.197567, -73.887750),
+    (-60.0, 3.0, 41.197364, -73.887646),
+    (-54.0, 3.0, 41.197053, -73.887670),
+    (-40.0, 2.0, 41.196385, -73.887765),
+    (-10.0, 4.0, 41.195130, -73.888232),
+    (-2.0, 4.0, 41.194845, -73.888341),
+)
+_NOV21_KRISTEN = (
+    (-123.0, 5.0, 41.199089, -73.885778),
+    (-115.0, 100.0, 41.199332, -73.886194),
+    (-104.0, 4.0, 41.198581, -73.887402),
+    (-97.0, 5.0, 41.198436, -73.887654),
+    (-91.0, 4.0, 41.198187, -73.887928),
+    (-73.0, 5.0, 41.197610, -73.887780),
+    (-67.0, 4.0, 41.197582, -73.887754),
+    (-53.0, 5.0, 41.197071, -73.887647),
+    (-37.0, 200.0, 41.190905, -73.885091),
+    (-6.0, 4.0, 41.195029, -73.888242),
+    (-1.0, 5.0, 41.194828, -73.888327),
+)
+
+
+def _recorded_track(rows: tuple[tuple[float, float, float, float], ...]) -> list[TrackFix]:
+    return [TrackFix(accuracy_m=acc, at=_NOW + offset, lat=lat, lon=lon) for offset, acc, lat, lon in rows]
+
+
+def test_a_coarse_outlier_between_good_fixes_does_not_veto_the_carry_field_case_2026_11_21() -> None:
+    # Kristen's 200 m network fix 37 s before the evaluation lies 650 m from where both phones were; her good fixes
+    # 16 s before and 31 s after it show the phones side by side, so it must not cancel the carried verdict.
+    estimate = estimate_together(_recorded_track(_NOV21_HENRIQUE), _recorded_track(_NOV21_KRISTEN), now=_NOW)
+
+    assert estimate.together_basis is TogetherBasis.CARRIED_HISTORY
+    assert estimate.is_together(0.8) is True
+    assert estimate.dropped_quality == (0, 2)
+
+
+@pytest.mark.parametrize(
+    ("good_before_s", "good_after_s", "carried"),
+    [(50.0, 50.0, True), (70.0, 50.0, False), (50.0, 70.0, False)],
+    ids=["good_fixes_within_a_minute_each_side", "none_within_a_minute_before", "none_within_a_minute_after"],
+)
+def test_a_coarse_fix_vetoes_the_carry_unless_good_fixes_bracket_it_within_a_minute(
+    good_before_s: float, good_after_s: float, carried: bool
+) -> None:
+    coarse_at = _NOW - 80.0
+    phone_a = [
+        fix
+        for fix in _phone_a()
+        if not (coarse_at - good_before_s < fix.at < coarse_at or coarse_at < fix.at < coarse_at + good_after_s)
+    ]
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 30.0)
+    far_but_coarse = _coarse_fix(coarse_at, north_m=-3_000.0, accuracy_m=100.0)
+
+    control = estimate_together(phone_a, quiet, now=_NOW)
+    estimate = estimate_together([*phone_a, far_but_coarse], quiet, now=_NOW)
+
+    assert control.together_basis is TogetherBasis.CARRIED_HISTORY
+    assert (estimate.together_basis is TogetherBasis.CARRIED_HISTORY) is carried
+
+
+def test_a_coarse_fix_between_good_fixes_that_drove_away_still_vetoes_the_carry() -> None:
+    # Phone B went quiet 60 s ago; phone A kept reporting and is now hundreds of meters up the road. A's coarse fix
+    # sits between good fixes that are far from B, so it is evidence of a split, not an outlier.
+    quiet = _quiet_after(_track(_times(every_s=10.0, last_at=_NOW), lateral_m=3.0), last_at=_NOW - 60.0)
+    coarse_where_a_is = _coarse_fix(_NOW - 35.0, north_m=-700.0, accuracy_m=100.0)
+
+    control = estimate_together(_phone_a(), quiet, now=_NOW)
+    vetoed = estimate_together([*_phone_a(), coarse_where_a_is], quiet, now=_NOW)
+
+    assert control.together_basis is TogetherBasis.CARRIED_HISTORY
+    assert vetoed.together_basis is None
+
+
 def test_a_user_without_any_good_fix_is_never_carried() -> None:
     coarse_only = _track(_times(every_s=10.0, last_at=_NOW - 100.0), lateral_m=3.0, accuracy_m=200.0)
 

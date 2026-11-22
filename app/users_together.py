@@ -492,6 +492,7 @@ _HOME_WIFI_REPORT_FRESH_S: Final[float] = 1200.0
 _HOME_WIFI_TRACK_TOLERANCE_S: Final[float] = 300.0
 _STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
+_VETO_BRACKET_S: Final[float] = 60.0
 
 
 def _accuracy_or_infinite(fix: TrackFix) -> float:
@@ -763,7 +764,8 @@ def _dropped_fix_contradicts_together(
 
     A coarse fix still says something about where its user is. When its accuracy circle stays at least ``far_m``
     from the other user's position at that moment, carrying the pair's togetherness forward would ignore it.
-    A fix without a usable accuracy proves nothing either way.
+    A fix without a usable accuracy proves nothing either way. A fix that the same user's good fixes bracket within
+    ``_VETO_BRACKET_S`` on both sides, and that are themselves near the other user, is an outlier, not evidence.
     """
     for index in (0, 1):
         retained = set(cleaned[index].fixes)
@@ -771,6 +773,8 @@ def _dropped_fix_contradicts_together(
             if fix.report_only or fix in retained or not _has_position(fix) or not since <= fix.at <= now:
                 continue
             if fix.accuracy_m is None or not math.isfinite(fix.accuracy_m) or fix.accuracy_m < 0.0:
+                continue
+            if _is_outlier_between_agreeing_fixes(cleaned[index].fixes, cleaned[1 - index].fixes, fix.at, params):
                 continue
             other = _position_at(cleaned[1 - index].fixes, fix.at)
             if other is None:
@@ -824,6 +828,31 @@ def _home_wifi_report_time(fixes: Sequence[TrackFix], newest: TrackFix, now: flo
         if fix.reported_at == latest
     )
     return latest if qualifies else None
+
+
+def _is_outlier_between_agreeing_fixes(
+    good: Sequence[TrackFix], other: Sequence[TrackFix], at: float, params: TogetherParams
+) -> bool:
+    """Whether the user's good fixes on both sides of ``at`` are near the other user, so a fix at ``at`` is an outlier.
+
+    There must be a good fix within ``_VETO_BRACKET_S`` before ``at`` and another within it after, and neither may be
+    clearly away (``far_m`` beyond both accuracy circles) from the other user's position at its own time. A user who
+    keeps reporting and drives away from a phone that went quiet is therefore never exempted. A phone that has gone
+    quiet is taken to stay where it last reported (:func:`_position_at`), so a fix after the anchor is compared with
+    that position.
+    """
+    before = [fix for fix in good if at - _VETO_BRACKET_S <= fix.at < at]
+    after = [fix for fix in good if at < fix.at <= at + _VETO_BRACKET_S]
+    if not before or not after:
+        return False
+    for fix in (before[-1], after[0]):
+        position = _position_at(other, fix.at)
+        if position is None:
+            return False
+        distance_m = _haversine_m(fix.lat, fix.lon, position.lat, position.lon)
+        if distance_m - (fix.accuracy_m or 0.0) - position.accuracy_m >= params.far_m:
+            return False
+    return True
 
 
 def _is_good_quality(fix: TrackFix, params: TogetherParams) -> bool:
@@ -945,9 +974,10 @@ def _together_by_carried_history(
     ``carry_min_confidence`` and no instant may be clearly apart. ``carry_enabled`` switches the whole rule off (the
     rule layer does so for evaluations that are not a geofence edge). Each user also needs a real fix inside that
     minute. A user whose newest report was made on the home Wi-Fi is at rest at home, so nothing is carried. A
-    dropped fix that puts a user clearly away from the other vetoes the verdict, and a user with no good fix has
-    nothing to carry. Where the users are after the anchor is not known, so ``distance_m`` is the distance at the
-    anchor.
+    dropped fix that puts a user clearly away from the other vetoes the verdict unless that user has good fixes within
+    ``_VETO_BRACKET_S`` on both sides of it (an outlier between good fixes that are near the other user), and a user
+    with no good fix has nothing to carry. Where the users are after the anchor is not known, so ``distance_m`` is
+    the distance at the anchor.
     """
     first, second = cleaned[0].fixes, cleaned[1].fixes
     if not params.carry_enabled or not first or not second:
