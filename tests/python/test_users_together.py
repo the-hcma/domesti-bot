@@ -1533,6 +1533,40 @@ def test_a_silent_gap_between_home_wifi_reports_means_the_phone_is_not_resident(
     assert steady.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
 
 
+def test_a_resident_phones_newest_report_must_be_recent() -> None:
+    # The phone may have left with the other user after a report 10 minutes ago and gone quiet.
+    old = estimate_together(_arriving(), _resident_peer(report_ages_s=[1_190.0, 600.0]), now=_NOW)
+    recent = estimate_together(_arriving(), _resident_peer(report_ages_s=[1_190.0, 600.0, 290.0]), now=_NOW)
+
+    assert old.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert recent.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_fresh_measured_fixes_are_not_replaced_by_the_resident_basis() -> None:
+    # Both phones are fresh and the pair is neither near nor far: the measured verdict stands.
+    fresh = [
+        TrackFix(accuracy_m=5.0, at=_NOW - 5.0 - 10.0 * index, lat=_LAT0 - 100.0 / _M_PER_DEG, lon=_LON0)
+        for index in range(30, -1, -1)
+    ]
+
+    peer = [
+        TrackFix(
+            accuracy_m=6.0,
+            at=_NOW - 10.0 * index,
+            home_wifi=True,
+            lat=_LAT0,
+            lon=_LON0,
+            reported_at=_NOW - 10.0 * index,
+        )
+        for index in range(60, -1, -1)
+    ]
+
+    estimate = estimate_together(fresh, peer, now=_NOW)
+
+    assert estimate.apart_basis is None
+    assert estimate.confidence is not None
+
+
 def test_a_report_from_elsewhere_in_the_last_twenty_minutes_means_the_phone_is_not_resident() -> None:
     peer = _resident_peer()
     away = replace(_resident_peer(report_ages_s=[400.0])[0], home_wifi=False, reported_at=_NOW - 500.0)
