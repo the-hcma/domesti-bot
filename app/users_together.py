@@ -33,7 +33,7 @@ A user whose phone has reported only from the home Wi-Fi, over a span of at leas
 whose newest report is at most ``_HOME_WIFI_REPORT_FRESH_S`` old), is resident: nobody travels with a person who has
 been home for minutes, so another user whose newest good fix is off the home network, at most five minutes old, and
 who was never within ``near_m`` of that phone (accuracy circles subtracted, coarse fixes included) is apart
-(``ApartBasis.RESIDENT_HOME_PHONE``), where the other bases need a fix at most 45 s old.
+(``ApartBasis.RESIDENT_HOME_PHONE``), where the home-Wi-Fi basis needs a fix at most 45 s old.
 
 A user whose newest report (at most ``_HOME_WIFI_REPORT_FRESH_S`` old) was made on the home Wi-Fi is at home. When
 the other user's fresh fix is not on that network and that user was clearly far from the reported position when that
@@ -503,6 +503,7 @@ _EARTH_RADIUS_M: Final[float] = 6_371_000.0
 _HOME_WIFI_REPORT_FRESH_S: Final[float] = 1200.0
 _HOME_WIFI_TRACK_TOLERANCE_S: Final[float] = 300.0
 _RESIDENT_HOME_PHONE_S: Final[float] = 300.0
+_RESIDENT_REPORT_GAP_S: Final[float] = 960.0
 _STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 _VETO_BRACKET_S: Final[float] = 60.0
@@ -871,7 +872,9 @@ def _home_phone_resident(fixes: Sequence[TrackFix], now: float) -> bool:
 
     A report made elsewhere, or one with no usable position, in that span means the phone may have arrived only just
     now (or moved), so it is not resident. The reports must also span ``_RESIDENT_HOME_PHONE_S`` from oldest to
-    newest: a phone that joined the home Wi-Fi at the arrival, or one lone report, has no such history.
+    newest, and no two neighbouring reports may be more than ``_RESIDENT_REPORT_GAP_S`` apart (an idle phone reports
+    about every 15 minutes): a phone that joined the home Wi-Fi at the arrival, one lone report, or a phone that
+    fell silent and then reported from home again has no such history.
     """
     in_span = [
         fix
@@ -882,8 +885,10 @@ def _home_phone_resident(fixes: Sequence[TrackFix], now: float) -> bool:
     ]
     if not in_span or not all(fix.home_wifi and _has_position(fix) for fix in in_span):
         return False
-    times = [fix.reported_at or 0.0 for fix in in_span]
-    return max(times) - min(times) >= _RESIDENT_HOME_PHONE_S
+    times = sorted(fix.reported_at or 0.0 for fix in in_span)
+    if any(later - earlier > _RESIDENT_REPORT_GAP_S for earlier, later in zip(times, times[1:], strict=False)):
+        return False
+    return times[-1] - times[0] >= _RESIDENT_HOME_PHONE_S
 
 
 def _home_wifi_report_time(fixes: Sequence[TrackFix], newest: TrackFix, now: float) -> float | None:

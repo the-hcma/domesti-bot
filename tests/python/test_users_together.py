@@ -1523,6 +1523,16 @@ def test_one_lone_home_wifi_report_is_not_a_span_of_residency() -> None:
     assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
 
 
+def test_a_silent_gap_between_home_wifi_reports_means_the_phone_is_not_resident() -> None:
+    # Reports at both ends of the 20-minute span but nothing for 19 minutes between them: the phone may have left with
+    # the other user and come back with them, so only the ends say nothing about the time in between.
+    gap = estimate_together(_arriving(), _resident_peer(report_ages_s=[1_190.0, 30.0]), now=_NOW)
+    steady = estimate_together(_arriving(), _resident_peer(report_ages_s=[1_190.0, 300.0, 30.0]), now=_NOW)
+
+    assert gap.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert steady.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
 def test_a_report_from_elsewhere_in_the_last_twenty_minutes_means_the_phone_is_not_resident() -> None:
     peer = _resident_peer()
     away = replace(_resident_peer(report_ages_s=[400.0])[0], home_wifi=False, reported_at=_NOW - 500.0)
