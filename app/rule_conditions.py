@@ -3166,6 +3166,12 @@ def _together_detail(condition: UsersTogetherCondition, pair: TogetherPair, rule
             f"(not within {_format_distance_m(params.far_m)} of each other in the last "
             f"{_format_dwell_duration_s(params.recent_close_window_s)})"
         )
+    if estimate.apart_basis is ApartBasis.RESIDENT_HOME_PHONE:
+        return (
+            f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "
+            f"(one phone has been on the home Wi-Fi for minutes, so that person is home, "
+            f"and the other was never near it)"
+        )
     if estimate.apart_basis is ApartBasis.STATIONARY_PEER:
         return (
             f"{who}: apart, {_format_distance_m(estimate.distance_now_m or 0.0)} between the latest fixes "

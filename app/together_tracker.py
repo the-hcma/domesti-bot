@@ -195,7 +195,9 @@ def format_together_event(
 
 
 # Apart verdicts that rest on missing or stale data rather than on a measured separation.
-_EVIDENCE_LIGHT_BASES: Final = frozenset({ApartBasis.HOME_WIFI, ApartBasis.NOT_RECENTLY_CLOSE})
+_EVIDENCE_LIGHT_BASES: Final = frozenset(
+    {ApartBasis.HOME_WIFI, ApartBasis.NOT_RECENTLY_CLOSE, ApartBasis.RESIDENT_HOME_PHONE}
+)
 
 
 @dataclass(slots=True)
