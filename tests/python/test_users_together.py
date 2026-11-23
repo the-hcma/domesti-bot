@@ -1571,6 +1571,15 @@ def test_a_coarse_fix_that_may_be_next_to_the_resident_phone_leaves_the_pair_unk
     assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
 
 
+def test_a_newer_fix_that_cleaning_dropped_leaves_the_pair_unknown_even_when_it_is_far_away() -> None:
+    # The newest good fix is 55 s old, but a 100 m accurate report 30 s ago was dropped: where the user is now is open.
+    dropped = TrackFix(accuracy_m=100.0, at=_NOW - 30.0, lat=_LAT0 - 1_000.0 / _M_PER_DEG, lon=_LON0)
+    arriving = [*_arriving(), dropped]
+
+    assert estimate_together(arriving, _resident_peer(), now=_NOW).apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate_together(_arriving(), _resident_peer(), now=_NOW).apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
 def test_a_user_who_is_not_heard_from_for_five_minutes_is_not_judged_by_the_resident_phone() -> None:
     inside = estimate_together(_arriving(last_age_s=290.0), _resident_peer(), now=_NOW)
     outside = estimate_together(_arriving(last_age_s=310.0), _resident_peer(), now=_NOW)
