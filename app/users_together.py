@@ -667,6 +667,10 @@ def _apart_by_resident_home_phone(
             continue
         if newest.accuracy_m is None or not math.isfinite(newest.accuracy_m) or newest.accuracy_m < 0.0:
             continue
+        if _home_wifi_report_time(tracks[home], newest, now) is None:
+            # Rows sharing the newest report time must all be home-network rows at one position: row order must
+            # not pick which of two conflicting positions stands for the report.
+            continue
         if not _home_phone_resident(tracks[home], now):
             continue
         good_fixes = cleaned[1 - home].fixes

@@ -1624,6 +1624,18 @@ def test_a_newer_fix_that_cleaning_dropped_leaves_the_pair_unknown_even_when_it_
     assert estimate_together(_arriving(), _resident_peer(), now=_NOW).apart_basis is ApartBasis.RESIDENT_HOME_PHONE
 
 
+def test_conflicting_positions_at_the_newest_report_time_do_not_depend_on_row_order() -> None:
+    # Two rows share the newest report time at positions 100 m apart: the arriving fix is 140 m from one and 40 m
+    # from the other, so the verdict must not hinge on which row comes first.
+    peer = _resident_peer()
+    first = replace(peer[-1], lat=_LAT0 + 100.0 / _M_PER_DEG)
+    arriving = _arriving(last_distance_m=140.0)
+
+    assert estimate_together(arriving, [*peer, first], now=_NOW).apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate_together(arriving, [first, *peer], now=_NOW).apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
 def test_a_user_who_is_not_heard_from_for_five_minutes_is_not_judged_by_the_resident_phone() -> None:
     inside = estimate_together(_arriving(last_age_s=290.0), _resident_peer(), now=_NOW)
     outside = estimate_together(_arriving(last_age_s=310.0), _resident_peer(), now=_NOW)
