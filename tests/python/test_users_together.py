@@ -1516,6 +1516,13 @@ def test_a_phone_that_joined_the_home_wifi_within_five_minutes_is_not_resident()
     assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
 
 
+def test_one_lone_home_wifi_report_is_not_a_span_of_residency() -> None:
+    # A single report 400 s ago says where the phone was then, not that it stayed for five minutes.
+    estimate = estimate_together(_arriving(), _resident_peer(report_ages_s=[400.0]), now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
 def test_a_report_from_elsewhere_in_the_last_twenty_minutes_means_the_phone_is_not_resident() -> None:
     peer = _resident_peer()
     away = replace(_resident_peer(report_ages_s=[400.0])[0], home_wifi=False, reported_at=_NOW - 500.0)

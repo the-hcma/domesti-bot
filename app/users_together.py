@@ -29,10 +29,11 @@ reports keep arriving) has not moved. When the newest such report is recent and
 that position is clearly far from the other user, the pair is apart, however old
 the fix is.
 
-A user whose phone has reported only from the home Wi-Fi for at least ``_RESIDENT_HOME_PHONE_S`` (and whose newest
-report is at most ``_HOME_WIFI_REPORT_FRESH_S`` old) is resident: nobody travels with a person who has been home for
-minutes, so another user with a good off-network fix who was never within ``near_m`` of that phone is apart
-(``ApartBasis.RESIDENT_HOME_PHONE``), whatever the age (up to five minutes) and the accuracy of their fix.
+A user whose phone has reported only from the home Wi-Fi, over a span of at least ``_RESIDENT_HOME_PHONE_S`` (and
+whose newest report is at most ``_HOME_WIFI_REPORT_FRESH_S`` old), is resident: nobody travels with a person who has
+been home for minutes, so another user whose newest good fix is off the home network, at most five minutes old, and
+who was never within ``near_m`` of that phone (accuracy circles subtracted, coarse fixes included) is apart
+(``ApartBasis.RESIDENT_HOME_PHONE``), where the other bases need a fix at most 45 s old.
 
 A user whose newest report (at most ``_HOME_WIFI_REPORT_FRESH_S`` old) was made on the home Wi-Fi is at home. When
 the other user's fresh fix is not on that network and that user was clearly far from the reported position when that
@@ -636,9 +637,9 @@ def _apart_by_resident_home_phone(
     """Return both fixes and their distance when one phone has been home for minutes and the other was never near.
 
     The resident phone's newest report is a fresh home-network report with a usable accuracy, and every report it made
-    in the last ``_HOME_WIFI_REPORT_FRESH_S`` was on the home network too, the oldest at least
-    ``_RESIDENT_HOME_PHONE_S`` ago (see :func:`_home_phone_resident`). Nobody is travelling with a person who has been
-    home for minutes, so the other user only has to have been elsewhere: a good fix off the home network at most
+    in the last ``_HOME_WIFI_REPORT_FRESH_S`` was on the home network too, the oldest and the newest at
+    least ``_RESIDENT_HOME_PHONE_S`` apart (see :func:`_home_phone_resident`). Nobody is travelling with a person who
+    has been home for minutes, so the other user only has to have been elsewhere: a good fix off the home network at most
     ``_HOME_WIFI_TRACK_TOLERANCE_S`` old, and not one measured fix of that user, including those cleaning dropped for
     poor accuracy, within ``near_m`` of the resident phone once both accuracy circles are subtracted. That is the margin
     of two phones in one vehicle, where :func:`_apart_by_home_wifi` keeps the wider ``far_m`` because its home phone may
@@ -866,11 +867,11 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _home_phone_resident(fixes: Sequence[TrackFix], now: float) -> bool:
-    """Whether every report of the last ``_HOME_WIFI_REPORT_FRESH_S`` was on the home Wi-Fi, the oldest long enough ago.
+    """Whether every report of the last ``_HOME_WIFI_REPORT_FRESH_S`` was on the home Wi-Fi, over a long enough span.
 
     A report made elsewhere, or one with no usable position, in that span means the phone may have arrived only just
-    now (or moved), so it is not resident. The span must also reach back ``_RESIDENT_HOME_PHONE_S``: a phone that
-    joined the home Wi-Fi at the arrival has no such history.
+    now (or moved), so it is not resident. The reports must also span ``_RESIDENT_HOME_PHONE_S`` from oldest to
+    newest: a phone that joined the home Wi-Fi at the arrival, or one lone report, has no such history.
     """
     in_span = [
         fix
@@ -881,7 +882,8 @@ def _home_phone_resident(fixes: Sequence[TrackFix], now: float) -> bool:
     ]
     if not in_span or not all(fix.home_wifi and _has_position(fix) for fix in in_span):
         return False
-    return now - min(fix.reported_at or 0.0 for fix in in_span) >= _RESIDENT_HOME_PHONE_S
+    times = [fix.reported_at or 0.0 for fix in in_span]
+    return max(times) - min(times) >= _RESIDENT_HOME_PHONE_S
 
 
 def _home_wifi_report_time(fixes: Sequence[TrackFix], newest: TrackFix, now: float) -> float | None:
