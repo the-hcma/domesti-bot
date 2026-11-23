@@ -175,7 +175,7 @@ from app.rule_validation import (
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.stale_device_display_name_email import maybe_send_stale_display_name_digest
 from app.together_tracker import TogetherKey, TogetherTracker, format_together_event
-from app.users_together import STATIONARY_REPORT_WINDOW_S, UnknownReason
+from app.users_together import STATIONARY_REPORT_WINDOW_S, TogetherParams, UnknownReason
 from app.vacation_mode import tick_vacation_mode
 from app.wifi_home_presence import (
     history_row_geofence_inside,
@@ -4823,7 +4823,13 @@ def _unknown_together_peer_ids(
     ctx: RuleEvaluationContext,
     user_id: str,
 ) -> set[str]:
-    """Roster ids (other than ``user_id``) whose missing data makes a ``users_together`` verdict unknown.
+    """Roster ids whose missing data makes a ``users_together`` verdict unknown (``user_id`` only when it is to blame).
+
+    An estimate that names the track at fault (``unknown_track``: no good fix, or a stale one) asks that user, even when
+    it is ``user_id``, the user who crossed the geofence: a phone whose own newest fix is stale is the one a fresh fix
+    must come from (domesti-bot#970), and so is any other user of the pair whose newest fix is missing or older than the
+    freshness window, because the estimate names only the first such track. An estimate that blames no track (thin
+    coverage) asks the other users of the pair only.
 
     Missing-data unknowns qualify for edge deferral: the peer has no usable fix
     at all, its newest usable fix is older than the estimator's freshness
@@ -4836,6 +4842,8 @@ def _unknown_together_peer_ids(
     so a phone that starts reporting while already inside cannot invent an
     arrival once coverage improves.
     """
+    asked: set[str] = set()
+    freshness_s = TogetherParams().freshness_s
     peer_ids: set[str] = set()
     deferrable = (
         UnknownReason.NO_GOOD_FIXES,
@@ -4851,10 +4859,20 @@ def _unknown_together_peer_ids(
                 if condition.expected
                 else pair.estimate.is_apart(condition.min_confidence)
             )
-            if verdict is None:
+            if verdict is not None:
+                continue
+            track = pair.estimate.unknown_track
+            if track is not None:
+                # The estimate names the first stale track only, so ask that user, the edge owner included, and
+                # any other user of the pair whose newest fix is missing or past the freshness window too.
+                for index, age_s in enumerate(pair.estimate.newest_fix_age_s):
+                    if index == track or age_s is None or age_s > freshness_s:
+                        asked.add(pair.roster_user_ids[index])
+            else:
+                # Both tracks are fresh but thin: the peers can still fill in, as before.
                 peer_ids.update(pair.roster_user_ids)
     peer_ids.discard(user_id)
-    return peer_ids
+    return peer_ids | asked
 
 
 def _user_triggered_geofence_edge(
