@@ -4823,7 +4823,12 @@ def _unknown_together_peer_ids(
     ctx: RuleEvaluationContext,
     user_id: str,
 ) -> set[str]:
-    """Roster ids (other than ``user_id``) whose missing data makes a ``users_together`` verdict unknown.
+    """Roster ids whose missing data makes a ``users_together`` verdict unknown (``user_id`` only when it is to blame).
+
+    An estimate that names the track at fault (``unknown_track``: no good fix, or a stale one) asks that user, even
+    when it is ``user_id``, the user who crossed the geofence: a phone whose own newest fix is stale is the one a
+    fresh fix must come from (domesti-bot#970). An estimate that blames no track (thin coverage) asks the other users
+    of the pair only.
 
     Missing-data unknowns qualify for edge deferral: the peer has no usable fix
     at all, its newest usable fix is older than the estimator's freshness
@@ -4836,6 +4841,7 @@ def _unknown_together_peer_ids(
     so a phone that starts reporting while already inside cannot invent an
     arrival once coverage improves.
     """
+    asked: set[str] = set()
     peer_ids: set[str] = set()
     deferrable = (
         UnknownReason.NO_GOOD_FIXES,
@@ -4851,10 +4857,17 @@ def _unknown_together_peer_ids(
                 if condition.expected
                 else pair.estimate.is_apart(condition.min_confidence)
             )
-            if verdict is None:
+            if verdict is not None:
+                continue
+            track = pair.estimate.unknown_track
+            if track is not None:
+                # One user's track is to blame: ask that user, the edge owner included.
+                asked.add(pair.roster_user_ids[track])
+            else:
+                # Both tracks are fresh but thin: the peers can still fill in, as before.
                 peer_ids.update(pair.roster_user_ids)
     peer_ids.discard(user_id)
-    return peer_ids
+    return peer_ids | asked
 
 
 def _user_triggered_geofence_edge(

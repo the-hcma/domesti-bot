@@ -336,6 +336,26 @@ async def test_unknown_togetherness_defers_edge_and_requests_peer_location(
 
 
 @pytest.mark.asyncio
+async def test_unknown_togetherness_requests_the_arriving_user_when_their_own_fix_is_stale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Henrique's enter is delivered with a fix 60 s old while Kristen reports fresh: he is the one to ask (#970)."""
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=790.0)
+    await rig.report("henrique", 200.0, north_m=400.0)
+    await rig.report("kristen", 300.0, north_m=130.0)
+    await rig.report("kristen", 340.0, north_m=60.0)
+    await rig.report("henrique", 360.0, north_m=10.0, fix_at_s=300.0)
+
+    assert rig.device.calls == []
+    assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
+    requests = _togetherness_unknown_requests(rig.request_mock)
+    assert [call.kwargs["user_id"] for call in requests] == ["henrique"]
+
+
+@pytest.mark.asyncio
 async def test_too_little_coverage_defers_together_edge_and_requests_peer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
