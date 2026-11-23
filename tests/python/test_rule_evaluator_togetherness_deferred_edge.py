@@ -90,6 +90,7 @@ def _rule(
     extra_conditions: tuple[RuleConditionOut, ...] = (),
     rule_id: str | None = None,
     rule_label: str | None = None,
+    together_user_ids: tuple[str, str] = ("henrique", "kristen"),
 ) -> RuleOut:
     alone = not expected_together
     return RuleOut(
@@ -107,7 +108,7 @@ def _rule(
                     far_m=150.0,
                     min_confidence=0.8,
                     near_m=30.0,
-                    user_ids=["henrique", "kristen"],
+                    user_ids=list(together_user_ids),
                 ),
                 *extra_conditions,
             ],
@@ -353,6 +354,36 @@ async def test_unknown_togetherness_requests_the_arriving_user_when_their_own_fi
     assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
     requests = _togetherness_unknown_requests(rig.request_mock)
     assert [call.kwargs["user_id"] for call in requests] == ["henrique"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_togetherness_requests_both_users_when_both_fixes_are_stale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The estimate names only one stale track, but a peer whose fix is stale too is still asked."""
+    rig = _Rig(tmp_path, monkeypatch)
+    await rig.report("henrique", 0.0, north_m=800.0)
+    await rig.report("kristen", 0.0, north_m=790.0)
+    await rig.report("henrique", 200.0, north_m=400.0)
+    await rig.report("kristen", 250.0, north_m=130.0)
+    await rig.report("henrique", 360.0, north_m=10.0, fix_at_s=300.0)
+
+    assert len(rig.evaluator.deferred_accuracy_edge_snapshots_for_user("henrique")) == 1
+    requests = _togetherness_unknown_requests(rig.request_mock)
+    assert sorted(call.kwargs["user_id"] for call in requests) == ["henrique", "kristen"]
+
+
+@pytest.mark.asyncio
+async def test_the_stale_user_is_asked_whatever_order_the_condition_lists_its_users(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rig = _Rig(tmp_path, monkeypatch, rule=_rule(together_user_ids=("kristen", "henrique")))
+    await _drive_to_stale_peer_arrival(rig)
+
+    requests = _togetherness_unknown_requests(rig.request_mock)
+    assert [call.kwargs["user_id"] for call in requests] == ["kristen"]
 
 
 @pytest.mark.asyncio
