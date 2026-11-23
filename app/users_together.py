@@ -639,8 +639,8 @@ def _apart_by_resident_home_phone(
     The resident phone's newest report is a fresh home-network report with a usable accuracy, and every report it made
     in the last ``_HOME_WIFI_REPORT_FRESH_S`` was on the home network too, the oldest and the newest at
     least ``_RESIDENT_HOME_PHONE_S`` apart (see :func:`_home_phone_resident`). Nobody is travelling with a person who
-    has been home for minutes, so the other user only has to have been elsewhere: a good fix off the home network at most
-    ``_HOME_WIFI_TRACK_TOLERANCE_S`` old, and not one measured fix of that user, including those cleaning dropped for
+    has been home for minutes, so the other user only has to have been elsewhere: a good fix off the home network at
+    most ``_HOME_WIFI_TRACK_TOLERANCE_S`` old, and not one measured fix of that user, including those cleaning dropped for
     poor accuracy, within ``near_m`` of the resident phone once both accuracy circles are subtracted. That is the margin
     of two phones in one vehicle, where :func:`_apart_by_home_wifi` keeps the wider ``far_m`` because its home phone may
     have joined the Wi-Fi only at the arrival. A user who was near the resident phone at any measured moment, or whose
