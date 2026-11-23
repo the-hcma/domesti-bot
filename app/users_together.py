@@ -29,6 +29,12 @@ reports keep arriving) has not moved. When the newest such report is recent and
 that position is clearly far from the other user, the pair is apart, however old
 the fix is.
 
+A user whose phone has reported only from the home Wi-Fi, over a span of at least ``_RESIDENT_HOME_PHONE_S`` (and
+whose newest report is at most ``_HOME_WIFI_TRACK_TOLERANCE_S`` old), is resident: nobody travels with a person who has
+been home for minutes, so another user whose newest good fix is off the home network, at most five minutes old, and
+who was never within ``near_m`` of that phone (accuracy circles subtracted, coarse fixes included) is apart
+(``ApartBasis.RESIDENT_HOME_PHONE``), where the home-Wi-Fi basis needs a fix at most 45 s old.
+
 A user whose newest report (at most ``_HOME_WIFI_REPORT_FRESH_S`` old) was made on the home Wi-Fi is at home. When
 the other user's fresh fix is not on that network and that user was clearly far from the reported position when that
 newest report was made, the pair is apart: nobody arrives in the same vehicle as a person who is already home. Only
@@ -138,6 +144,7 @@ class ApartBasis(StrEnum):
     COARSE_FIXES = "coarse_fixes"
     HOME_WIFI = "home_wifi"
     NOT_RECENTLY_CLOSE = "not_recently_close"
+    RESIDENT_HOME_PHONE = "resident_home_phone"
     STATIONARY_PEER = "stationary_peer"
 
 
@@ -361,15 +368,30 @@ def estimate_together(
     at_home = _apart_by_home_wifi((track_a, track_b), cleaned, now=now, params=settings)
     if at_home is not None:
         return _apart_estimate(ApartBasis.HOME_WIFI, at_home, now=now, quality=(dropped_quality, dropped_speed))
+
+    def resident_estimate() -> TogetherEstimate | None:
+        evidence = _apart_by_resident_home_phone((track_a, track_b), cleaned, now=now, params=settings)
+        if evidence is None:
+            return None
+        return _apart_estimate(
+            ApartBasis.RESIDENT_HOME_PHONE, evidence, now=now, quality=(dropped_quality, dropped_speed)
+        )
+
     for index in (0, 1):
         if newest[index] is None:
             coarse = _apart_by_coarse_fixes((track_a, track_b), cleaned, now=now, params=settings)
             if coarse is None:
+                resident = resident_estimate()
+                if resident is not None:
+                    return resident
                 return unknown(UnknownReason.NO_GOOD_FIXES, index)
             return _apart_estimate(ApartBasis.COARSE_FIXES, coarse, now=now, quality=(dropped_quality, dropped_speed))
     for index in (0, 1):
         age = ages[index]
         if age is not None and age > settings.freshness_s:
+            resident = resident_estimate()
+            if resident is not None:
+                return resident
             stationary = _apart_by_stationary_peer((track_a, track_b), cleaned, stale=index, now=now, params=settings)
             if stationary is None:
                 not_close = _apart_by_no_recent_closeness((track_a, track_b), cleaned, now=now, params=settings)
@@ -406,6 +428,9 @@ def estimate_together(
     windows = tuple(_window_estimate(spec, closeness_at, settings) for spec in settings.windows)
     recent = windows[0]
     if not recent.known:
+        resident = resident_estimate()
+        if resident is not None:
+            return resident
         not_close = _apart_by_no_recent_closeness((track_a, track_b), cleaned, now=now, params=settings)
         if not_close is None:
             carried = _together_by_carried_history((track_a, track_b), cleaned, now=now, params=settings)
@@ -490,6 +515,8 @@ _COMPARE_TOLERANCE: Final[float] = 1e-9
 _EARTH_RADIUS_M: Final[float] = 6_371_000.0
 _HOME_WIFI_REPORT_FRESH_S: Final[float] = 1200.0
 _HOME_WIFI_TRACK_TOLERANCE_S: Final[float] = 300.0
+_RESIDENT_HOME_PHONE_S: Final[float] = 300.0
+_RESIDENT_REPORT_GAP_S: Final[float] = 960.0
 _STATIONARY_REPORT_FRESH_S: Final[float] = 1200.0
 _TOGETHER_RUN_CLOSENESS: Final[float] = 0.5
 _VETO_BRACKET_S: Final[float] = 60.0
@@ -612,6 +639,60 @@ def _apart_by_no_recent_closeness(
             return None
     newest_a, newest_b = first[-1], second[-1]
     return newest_a, newest_b, _haversine_m(newest_a.lat, newest_a.lon, newest_b.lat, newest_b.lon)
+
+
+def _apart_by_resident_home_phone(
+    tracks: tuple[Sequence[TrackFix], Sequence[TrackFix]],
+    cleaned: tuple[CleanTrack, CleanTrack],
+    *,
+    now: float,
+    params: TogetherParams,
+) -> tuple[TrackFix, TrackFix, float] | None:
+    """Return both fixes and their distance when one phone has been home for minutes and the other was never near.
+
+    The resident phone's newest report is a home-network report at most ``_HOME_WIFI_TRACK_TOLERANCE_S`` old with a
+    usable accuracy, and every report it made in the last ``_HOME_WIFI_REPORT_FRESH_S`` was on the home network too,
+    the oldest and the newest at least ``_RESIDENT_HOME_PHONE_S`` apart (see :func:`_home_phone_resident`). Nobody
+    is travelling with a person who has been home for minutes, so the other user only has to have been elsewhere: a
+    good fix off the home network at most ``_HOME_WIFI_TRACK_TOLERANCE_S`` old, and not one measured fix of that
+    user, including those cleaning dropped for poor accuracy, within ``near_m`` of the resident phone once both
+    accuracy circles are subtracted. That is the margin of two phones in one vehicle, where
+    :func:`_apart_by_home_wifi` keeps the wider ``far_m`` because its home phone may have joined the Wi-Fi only at
+    the arrival. A user who was near the resident phone at any measured moment, or whose newer fix cleaning dropped,
+    leaves the pair unknown.
+    """
+    for home in (0, 1):
+        newest = _newest_report(tracks[home], now)
+        if newest is None or not newest.home_wifi or now - (newest.reported_at or 0.0) > _HOME_WIFI_TRACK_TOLERANCE_S:
+            continue
+        if newest.accuracy_m is None or not math.isfinite(newest.accuracy_m) or newest.accuracy_m < 0.0:
+            continue
+        if _home_wifi_report_time(tracks[home], newest, now) is None:
+            # Rows sharing the newest report time must all be home-network rows at one position: row order must
+            # not pick which of two conflicting positions stands for the report.
+            continue
+        if not _home_phone_resident(tracks[home], newest, now, params):
+            continue
+        good_fixes = cleaned[1 - home].fixes
+        if not good_fixes:
+            continue
+        away = good_fixes[-1]
+        if away.home_wifi or now - away.at > _HOME_WIFI_TRACK_TOLERANCE_S:
+            continue
+        retained = set(good_fixes)
+        measured = [fix for fix in tracks[1 - home] if not fix.report_only and _has_position(fix)]
+        if any(fix.at >= away.at and fix not in retained for fix in measured):
+            continue
+        if any(
+            _haversine_m(newest.lat, newest.lon, fix.lat, fix.lon)
+            - (_accuracy_or_infinite(newest) + _accuracy_or_infinite(fix))
+            <= params.near_m
+            for fix in measured
+        ):
+            continue
+        distance_m = _haversine_m(newest.lat, newest.lon, away.lat, away.lon)
+        return (newest, away, distance_m) if home == 0 else (away, newest, distance_m)
+    return None
 
 
 def _apart_by_stationary_peer(
@@ -802,6 +883,36 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     d_lambda = math.radians(lon2 - lon1)
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     return 2 * _EARTH_RADIUS_M * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _home_phone_resident(fixes: Sequence[TrackFix], newest: TrackFix, now: float, params: TogetherParams) -> bool:
+    """Whether every report of the last ``_HOME_WIFI_REPORT_FRESH_S`` was on the home Wi-Fi, over a long enough span.
+
+    A report made elsewhere, or one with no usable position, in that span means the phone may have arrived only just
+    now (or moved), so it is not resident. The reports must also span ``_RESIDENT_HOME_PHONE_S`` from oldest to
+    newest, and no two neighbouring reports may be more than ``_RESIDENT_REPORT_GAP_S`` apart (an idle phone reports
+    about every 15 minutes): a phone that joined the home Wi-Fi at the arrival, one lone report, or a phone that
+    fell silent and then reported from home again has no such history. Every report in the span must also be at one
+    position: within ``near_m`` plus the two reports' accuracies (a missing one counts as zero) of ``newest``, so a
+    phone that moved about the home area on the Wi-Fi is not resident at the position the arrival is compared with.
+    """
+    in_span = [
+        fix
+        for fix in fixes
+        if fix.reported_at is not None
+        and math.isfinite(fix.reported_at)
+        and 0.0 <= now - fix.reported_at <= _HOME_WIFI_REPORT_FRESH_S
+    ]
+    if not in_span or not all(fix.home_wifi and _has_position(fix) for fix in in_span):
+        return False
+    for fix in in_span:
+        slack_m = sum(a for a in (fix.accuracy_m, newest.accuracy_m) if a is not None and math.isfinite(a) and a > 0.0)
+        if _haversine_m(newest.lat, newest.lon, fix.lat, fix.lon) > params.near_m + slack_m:
+            return False
+    times = sorted(fix.reported_at or 0.0 for fix in in_span)
+    if any(later - earlier > _RESIDENT_REPORT_GAP_S for earlier, later in zip(times, times[1:], strict=False)):
+        return False
+    return times[-1] - times[0] >= _RESIDENT_HOME_PHONE_S
 
 
 def _home_wifi_report_time(fixes: Sequence[TrackFix], newest: TrackFix, now: float) -> float | None:

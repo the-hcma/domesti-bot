@@ -1454,3 +1454,226 @@ def test_a_report_time_shared_with_a_row_that_does_not_qualify_leaves_the_home_w
 
     assert estimate_together(_phone_a(), home, now=_NOW).apart_basis is ApartBasis.HOME_WIFI
     assert estimate_together(_phone_a(), [*home, elsewhere], now=_NOW).apart_basis is not ApartBasis.HOME_WIFI
+
+
+def _resident_peer(
+    *, report_ages_s: list[float] | None = None, accuracy_m: float = 6.0, home_wifi: bool = True
+) -> list[TrackFix]:
+    """A phone at rest at the origin that keeps reporting from the home Wi-Fi, newest report 30 s ago."""
+    ages = [900.0, 400.0, 30.0] if report_ages_s is None else report_ages_s
+    return [
+        replace(fix, accuracy_m=accuracy_m, home_wifi=home_wifi)
+        for fix in _repeated_fix(north_m=0.0, fix_age_s=60.0, report_ages_s=ages)
+    ]
+
+
+def _arriving(
+    *, last_age_s: float = 55.0, last_distance_m: float = 177.0, accuracy_m: float = 27.0, speed_mps: float = 10.0
+) -> list[TrackFix]:
+    """A user on mobile data driving toward the origin from the south, last heard ``last_age_s`` ago."""
+    fixes = []
+    for index in range(30):
+        distance_m = last_distance_m + speed_mps * 10.0 * index
+        fixes.append(
+            TrackFix(
+                accuracy_m=accuracy_m,
+                at=_NOW - last_age_s - 10.0 * index,
+                lat=_LAT0 - distance_m / _M_PER_DEG,
+                lon=_LON0,
+            )
+        )
+    return list(reversed(fixes))
+
+
+def test_an_arrival_one_stale_fix_away_from_a_phone_resident_at_home_is_apart() -> None:
+    # Field case 2026-11-22 7:39 PM EST (domesti-bot#966): the arriving fix was 177 m out, 27 m accurate and 55 s old
+    # when it was delivered, and the phone at home had been on the Wi-Fi for half an hour.
+    estimate = estimate_together(_arriving(), _resident_peer(), now=_NOW)
+
+    assert estimate.known
+    assert estimate.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate.is_apart(0.8) is True
+    assert estimate.distance_now_m == pytest.approx(177.0, abs=2.0)
+
+
+def test_the_resident_phone_may_be_the_first_user() -> None:
+    estimate = estimate_together(_resident_peer(), _arriving(), now=_NOW)
+
+    assert estimate.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_the_same_arrival_is_unknown_without_the_resident_history() -> None:
+    # Only the newest report is on the home Wi-Fi, 30 s ago: the phone may have joined it at the arrival.
+    estimate = estimate_together(_arriving(), _resident_peer(report_ages_s=[30.0]), now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate.is_apart(0.8) is not True
+
+
+def test_a_phone_that_joined_the_home_wifi_within_five_minutes_is_not_resident() -> None:
+    estimate = estimate_together(_arriving(), _resident_peer(report_ages_s=[250.0, 30.0]), now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_one_lone_home_wifi_report_is_not_a_span_of_residency() -> None:
+    # A single report 400 s ago says where the phone was then, not that it stayed for five minutes.
+    estimate = estimate_together(_arriving(), _resident_peer(report_ages_s=[400.0]), now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_silent_gap_between_home_wifi_reports_means_the_phone_is_not_resident() -> None:
+    # Reports at both ends of the 20-minute span but nothing for 19 minutes between them: the phone may have left with
+    # the other user and come back with them, so only the ends say nothing about the time in between.
+    gap = estimate_together(_arriving(), _resident_peer(report_ages_s=[1_190.0, 30.0]), now=_NOW)
+    steady = estimate_together(_arriving(), _resident_peer(report_ages_s=[1_190.0, 300.0, 30.0]), now=_NOW)
+
+    assert gap.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert steady.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_resident_phones_newest_report_must_be_recent() -> None:
+    # The phone may have left with the other user after a report 10 minutes ago and gone quiet.
+    old = estimate_together(_arriving(), _resident_peer(report_ages_s=[1_190.0, 600.0]), now=_NOW)
+    recent = estimate_together(_arriving(), _resident_peer(report_ages_s=[1_190.0, 600.0, 290.0]), now=_NOW)
+
+    assert old.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert recent.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_fresh_measured_fixes_are_not_replaced_by_the_resident_basis() -> None:
+    # Both phones are fresh and the pair is neither near nor far: the measured verdict stands.
+    fresh = [
+        TrackFix(accuracy_m=5.0, at=_NOW - 5.0 - 10.0 * index, lat=_LAT0 - 100.0 / _M_PER_DEG, lon=_LON0)
+        for index in range(30, -1, -1)
+    ]
+
+    peer = [
+        TrackFix(
+            accuracy_m=6.0,
+            at=_NOW - 10.0 * index,
+            home_wifi=True,
+            lat=_LAT0,
+            lon=_LON0,
+            reported_at=_NOW - 10.0 * index,
+        )
+        for index in range(60, -1, -1)
+    ]
+
+    estimate = estimate_together(fresh, peer, now=_NOW)
+
+    assert estimate.apart_basis is None
+    assert estimate.confidence is not None
+
+
+def test_a_report_from_elsewhere_in_the_last_twenty_minutes_means_the_phone_is_not_resident() -> None:
+    peer = _resident_peer()
+    away = replace(_resident_peer(report_ages_s=[400.0])[0], home_wifi=False, reported_at=_NOW - 500.0)
+
+    assert estimate_together(_arriving(), peer, now=_NOW).apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate_together(_arriving(), [*peer, away], now=_NOW).apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_report_without_a_position_means_the_phone_is_not_resident() -> None:
+    peer = _resident_peer()
+    positionless = replace(peer[0], lat=math.nan, lon=math.nan, reported_at=_NOW - 200.0)
+
+    assert estimate_together(_arriving(), [*peer, positionless], now=_NOW).apart_basis is not (
+        ApartBasis.RESIDENT_HOME_PHONE
+    )
+
+
+def test_reports_older_than_twenty_minutes_do_not_count_against_a_resident_phone() -> None:
+    old_elsewhere = replace(_resident_peer(report_ages_s=[1_500.0])[0], home_wifi=False)
+
+    estimate = estimate_together(_arriving(), [*_resident_peer(), old_elsewhere], now=_NOW)
+
+    assert estimate.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_phone_that_moved_about_the_home_area_on_the_wifi_is_not_resident() -> None:
+    peer = _resident_peer()
+    moved = replace(peer[0], lat=peer[0].lat + 177.0 / _M_PER_DEG)
+
+    assert estimate_together(_arriving(), [moved, *peer[1:]], now=_NOW).apart_basis is not (
+        ApartBasis.RESIDENT_HOME_PHONE
+    )
+
+
+def test_a_resident_phone_without_a_usable_accuracy_proves_nothing() -> None:
+    peer = [replace(fix, accuracy_m=None) for fix in _resident_peer()]
+
+    assert estimate_together(_arriving(), peer, now=_NOW).apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_fix_of_the_arriving_user_next_to_the_resident_phone_leaves_the_pair_unknown() -> None:
+    near = TrackFix(accuracy_m=10.0, at=_NOW - 200.0, lat=_LAT0 + 20.0 / _M_PER_DEG, lon=_LON0)
+
+    estimate = estimate_together(sorted([*_arriving(), near], key=lambda fix: fix.at), _resident_peer(), now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_coarse_fix_that_may_be_next_to_the_resident_phone_leaves_the_pair_unknown() -> None:
+    # Cleaning drops a 300 m fix, but its circle reaches the phone at home, so it cannot be ruled out.
+    coarse = TrackFix(accuracy_m=300.0, at=_NOW - 120.0, lat=_LAT0 - 100.0 / _M_PER_DEG, lon=_LON0)
+
+    estimate = estimate_together(sorted([*_arriving(), coarse], key=lambda fix: fix.at), _resident_peer(), now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_newer_fix_that_cleaning_dropped_leaves_the_pair_unknown_even_when_it_is_far_away() -> None:
+    # The newest good fix is 55 s old, but a 100 m accurate report 30 s ago was dropped: where the user is now is open.
+    dropped = TrackFix(accuracy_m=100.0, at=_NOW - 30.0, lat=_LAT0 - 1_000.0 / _M_PER_DEG, lon=_LON0)
+    arriving = [*_arriving(), dropped]
+
+    assert estimate_together(arriving, _resident_peer(), now=_NOW).apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate_together(_arriving(), _resident_peer(), now=_NOW).apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_conflicting_positions_at_the_newest_report_time_do_not_depend_on_row_order() -> None:
+    # Two rows share the newest report time at positions 100 m apart: the arriving fix is 140 m from one and 40 m
+    # from the other, so the verdict must not hinge on which row comes first.
+    peer = _resident_peer()
+    first = replace(peer[-1], lat=_LAT0 + 100.0 / _M_PER_DEG)
+    arriving = _arriving(last_distance_m=140.0)
+
+    assert estimate_together(arriving, [*peer, first], now=_NOW).apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate_together(arriving, [first, *peer], now=_NOW).apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+    assert estimate_together(arriving, peer, now=_NOW).apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_user_who_is_not_heard_from_for_five_minutes_is_not_judged_by_the_resident_phone() -> None:
+    inside = estimate_together(_arriving(last_age_s=290.0), _resident_peer(), now=_NOW)
+    outside = estimate_together(_arriving(last_age_s=310.0), _resident_peer(), now=_NOW)
+
+    assert inside.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+    assert outside.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_a_user_already_on_the_home_wifi_is_not_apart_by_the_resident_phone() -> None:
+    inside = _home_wifi(_arriving(last_age_s=55.0))
+
+    estimate = estimate_together(inside, _resident_peer(), now=_NOW)
+
+    assert estimate.apart_basis is not ApartBasis.RESIDENT_HOME_PHONE
+
+
+def test_two_phones_in_one_car_that_join_the_home_wifi_at_the_arrival_are_not_apart() -> None:
+    # The driveway case behind the wider far_m margin of the newest-report check (2026-10-13 17:06 EDT): the car's
+    # other phone is 14 m away and the home phone has reported from the network for seconds only.
+    beside = [replace(fix, lat=_LAT0 + 14.0 / _M_PER_DEG, lon=_LON0) for fix in _arriving(last_age_s=20.0)]
+    car_mate = _resident_peer(report_ages_s=[20.0])
+
+    estimate = estimate_together(beside, car_mate, now=_NOW)
+
+    assert estimate.apart_basis is None
+    assert estimate.is_apart(0.8) is not True
+
+
+def test_the_home_wifi_basis_keeps_precedence_over_the_resident_one() -> None:
+    fresh = _arriving(last_age_s=5.0, last_distance_m=250.0, accuracy_m=5.0)
+
+    assert estimate_together(fresh, _resident_peer(), now=_NOW).apart_basis is ApartBasis.HOME_WIFI

@@ -621,6 +621,31 @@ def test_a_peer_on_the_home_wifi_is_apart_from_a_user_arriving_from_outside() ->
     assert "unknown" not in alone.detail
 
 
+def test_a_peer_resident_on_the_home_wifi_settles_an_arrival_whose_last_fix_is_stale() -> None:
+    # Field case 2026-11-22 7:39 PM EST (domesti-bot#966): the arriving fix was 55 s old when delivered, 177 m from
+    # the phone that had reported from the home Wi-Fi for half an hour.
+    peer = [
+        _location(_NOW - 60.0, accuracy_m=6, connection_type="w", wifi_ssid="HomeNet").model_copy(
+            update={"lat": _LAT0, "lon": _LON0, "reported_at": _iso(_NOW - age)}
+        )
+        for age in (900.0, 400.0, 30.0)
+    ]
+    arriving = [
+        _location(_NOW - 55.0 - 10.0 * index, accuracy_m=27).model_copy(
+            update={"lat": _LAT0 - (177.0 + 100.0 * index) / _M_PER_DEG, "lon": _LON0}
+        )
+        for index in range(30)
+    ]
+    ctx = _ctx({"user-a": arriving, "user-b": peer}, home_ssid={"user-b": "HomeNet"})
+
+    alone = _row(_rule(expected=False), ctx)
+
+    assert alone.met is True
+    assert "unknown" not in alone.detail
+    assert "on the home Wi-Fi for minutes" in alone.detail
+    assert _row(_rule(expected=True), ctx).met is False
+
+
 def test_a_stale_coarse_fix_re_sent_from_the_home_wifi_settles_an_arrival_with_ten_minutes_of_track() -> None:
     # Field case 2026-11-06 21:23 EST (domesti-bot#940): the peer's phone re-sent a 32-hour-old 100 m fix from the
     # home Wi-Fi 19 and 4 minutes before the arrival, and the evaluator reads 10 minutes of the arriving user's track.

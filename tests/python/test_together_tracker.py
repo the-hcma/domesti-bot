@@ -145,6 +145,30 @@ def test_an_estimate_that_rests_on_stale_data_never_ends_an_episode() -> None:
     assert ended.unknown_evaluations == 1
 
 
+def test_an_estimate_that_rests_on_a_resident_home_phone_never_ends_an_episode() -> None:
+    tracker = TogetherTracker()
+    assert isinstance(tracker.observe(_KEY, _estimate(_START + 700.0)), TogetherBegan)
+    now = _START + 1500.0
+    home = [
+        TrackFix(accuracy_m=6.0, at=now - 60.0, home_wifi=True, lat=_LAT0, lon=_LON0, reported_at=now - age)
+        for age in (900.0, 400.0, 30.0)
+    ]
+    arriving = [
+        TrackFix(
+            accuracy_m=27.0, at=now - 55.0 - 10.0 * index, lat=_LAT0 - (177.0 + 100.0 * index) / _M_PER_DEG, lon=_LON0
+        )
+        for index in range(30)
+    ]
+
+    resident = estimate_together(sorted(arriving, key=lambda fix: fix.at), home, now=now)
+    assert resident.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
+    assert tracker.observe(_KEY, resident) is None
+
+    ended = tracker.observe(_KEY, _estimate(_START + 1600.0, apart_after=_START + 1500.0))
+    assert isinstance(ended, TogetherEnded)
+    assert ended.unknown_evaluations == 1
+
+
 def test_an_estimate_carried_across_a_quiet_phone_neither_starts_nor_ends_an_episode() -> None:
     tracker = TogetherTracker()
     carried = _estimate(_START + 700.0, stale_b_s=100.0)
