@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/the-hcma/domesti-bot/compare/domesti-bot-v2.1.0...domesti-bot-v2.1.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **rules:** a phone resident on the home Wi-Fi settles an arriving user's togetherness ([#966](https://github.com/the-hcma/domesti-bot/issues/966)) ([#967](https://github.com/the-hcma/domesti-bot/issues/967)) ([4ad0cf7](https://github.com/the-hcma/domesti-bot/commit/4ad0cf7ba8768772b5ac788b46fc0691b81f6da9))
+
 ## [2.1.0](https://github.com/the-hcma/domesti-bot/compare/domesti-bot-v2.0.0...domesti-bot-v2.1.0) (2026-11-22)
 
 
