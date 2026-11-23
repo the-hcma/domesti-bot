@@ -1592,6 +1592,15 @@ def test_reports_older_than_twenty_minutes_do_not_count_against_a_resident_phone
     assert estimate.apart_basis is ApartBasis.RESIDENT_HOME_PHONE
 
 
+def test_a_phone_that_moved_about_the_home_area_on_the_wifi_is_not_resident() -> None:
+    peer = _resident_peer()
+    moved = replace(peer[0], lat=peer[0].lat + 177.0 / _M_PER_DEG)
+
+    assert estimate_together(_arriving(), [moved, *peer[1:]], now=_NOW).apart_basis is not (
+        ApartBasis.RESIDENT_HOME_PHONE
+    )
+
+
 def test_a_resident_phone_without_a_usable_accuracy_proves_nothing() -> None:
     peer = [replace(fix, accuracy_m=None) for fix in _resident_peer()]
 

@@ -671,7 +671,7 @@ def _apart_by_resident_home_phone(
             # Rows sharing the newest report time must all be home-network rows at one position: row order must
             # not pick which of two conflicting positions stands for the report.
             continue
-        if not _home_phone_resident(tracks[home], now):
+        if not _home_phone_resident(tracks[home], newest, now, params):
             continue
         good_fixes = cleaned[1 - home].fixes
         if not good_fixes:
@@ -686,7 +686,7 @@ def _apart_by_resident_home_phone(
         if any(
             _haversine_m(newest.lat, newest.lon, fix.lat, fix.lon)
             - (_accuracy_or_infinite(newest) + _accuracy_or_infinite(fix))
-            < params.near_m
+            <= params.near_m
             for fix in measured
         ):
             continue
@@ -885,14 +885,16 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * _EARTH_RADIUS_M * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _home_phone_resident(fixes: Sequence[TrackFix], now: float) -> bool:
+def _home_phone_resident(fixes: Sequence[TrackFix], newest: TrackFix, now: float, params: TogetherParams) -> bool:
     """Whether every report of the last ``_HOME_WIFI_REPORT_FRESH_S`` was on the home Wi-Fi, over a long enough span.
 
     A report made elsewhere, or one with no usable position, in that span means the phone may have arrived only just
     now (or moved), so it is not resident. The reports must also span ``_RESIDENT_HOME_PHONE_S`` from oldest to
     newest, and no two neighbouring reports may be more than ``_RESIDENT_REPORT_GAP_S`` apart (an idle phone reports
     about every 15 minutes): a phone that joined the home Wi-Fi at the arrival, one lone report, or a phone that
-    fell silent and then reported from home again has no such history.
+    fell silent and then reported from home again has no such history. Every report in the span must also be at one
+    position: within ``near_m`` plus the two reports' accuracies (a missing one counts as zero) of ``newest``, so a
+    phone that moved about the home area on the Wi-Fi is not resident at the position the arrival is compared with.
     """
     in_span = [
         fix
@@ -903,6 +905,10 @@ def _home_phone_resident(fixes: Sequence[TrackFix], now: float) -> bool:
     ]
     if not in_span or not all(fix.home_wifi and _has_position(fix) for fix in in_span):
         return False
+    for fix in in_span:
+        slack_m = sum(a for a in (fix.accuracy_m, newest.accuracy_m) if a is not None and math.isfinite(a) and a > 0.0)
+        if _haversine_m(newest.lat, newest.lon, fix.lat, fix.lon) > params.near_m + slack_m:
+            return False
     times = sorted(fix.reported_at or 0.0 for fix in in_span)
     if any(later - earlier > _RESIDENT_REPORT_GAP_S for earlier, later in zip(times, times[1:], strict=False)):
         return False
