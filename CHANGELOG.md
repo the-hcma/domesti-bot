@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/the-hcma/domesti-bot/compare/domesti-bot-v2.1.1...domesti-bot-v2.1.2) (2026-11-24)
+
+
+### Bug Fixes
+
+* **rules:** ask the user whose stale track leaves togetherness unknown, the arriving user included ([#970](https://github.com/the-hcma/domesti-bot/issues/970)) ([#971](https://github.com/the-hcma/domesti-bot/issues/971)) ([e7a1e16](https://github.com/the-hcma/domesti-bot/commit/e7a1e16e3eb00af5de38e68c0710b246d393d02c))
+
 ## [2.1.1](https://github.com/the-hcma/domesti-bot/compare/domesti-bot-v2.1.0...domesti-bot-v2.1.1) (2026-11-23)
 
 
