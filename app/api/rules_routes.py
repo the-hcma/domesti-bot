@@ -55,6 +55,7 @@ from app.rules_store import (
     user_exists,
 )
 from app.server_runtime import runtime
+from app.time_display import clear_home_timezone_cache
 from app.vacation_mode import (
     send_vacation_mode_anomaly_email,
     send_vacation_mode_transition_email,
@@ -197,9 +198,12 @@ async def get_rules_settings_location() -> SettingsLocationOut:
 async def put_rules_settings_location(body: SettingsLocationIn) -> SettingsLocationOut:
     """Update home coordinates in the operator ``automation-rules.json`` bundle."""
     try:
-        return save_settings_location(body)
+        saved = save_settings_location(body)
     except AutomationRulesLoadError as exc:
         raise _automation_rules_http_error(exc) from exc
+    # A timezone change must show in emails and logs right away, not after the cache TTL.
+    clear_home_timezone_cache()
+    return saved
 
 
 @router.get(
