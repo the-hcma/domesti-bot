@@ -2,7 +2,7 @@
 
 import { api, HttpError } from "./api.js";
 import { ToastVariant } from "./closed-sets.js";
-import { setAuditedTimestampLine } from "./format-timestamp.js";
+import { formatLocalTimestampFromEpoch, setAuditedTimestampLine } from "./format-timestamp.js";
 import { createFieldLabel, preventBrowserAutofill } from "./rules-ui-helpers.js";
 import { createSecretInputRow } from "./settings-secret-field.js";
 import {
@@ -502,7 +502,7 @@ export async function mountMyTracksPairingPanel(
     }
     const previousUntil = pairStatus?.relay_previous_key_expires_at ?? null;
     if (previousUntil !== null) {
-      parts.push(`The previous key is still accepted until ${new Date(previousUntil * 1000).toLocaleTimeString()}.`);
+      parts.push(`The previous key is still accepted until ${formatLocalTimestampFromEpoch(previousUntil)}.`);
     }
     relayProtocolNote.textContent = parts.join(" ");
     relayProtocolNote.hidden = parts.length === 0;

@@ -62,6 +62,7 @@ from app.rule_conditions import (
     users_any_inside_home_geofence,
     users_min_distance_from_home_met,
 )
+from app.time_display import format_local_with_utc
 from app.vacation_mode_store import (
     VacationModeStateRecord,
     load_vacation_mode_state,
@@ -108,7 +109,7 @@ def build_vacation_mode_anomaly_bodies(
     family_label = family_id.display_name()
     prev_label = format_vacation_bool_device_state(family_id, previous)
     next_label = format_vacation_bool_device_state(family_id, current)
-    when_label = observed_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    when_label = format_local_with_utc(observed_at)
     provenance = _provenance_footer(source)
     is_test = source == VacationEmailSource.SETTINGS_TEST
     headline = f"Unexpected {family_label} change while vacation mode is on."

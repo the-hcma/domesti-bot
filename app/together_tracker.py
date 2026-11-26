@@ -25,7 +25,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final, NamedTuple
 
-from app.location_report import location_epoch_to_iso_z
+from app.time_display import format_local_with_utc
 from app.users_together import ApartBasis, TogetherEstimate
 
 
@@ -177,15 +177,15 @@ def format_together_event(
         )
         ages = ",".join("unknown" if age is None else f"{age:.0f}s" for age in event.newest_fix_age_s)
         return (
-            f"[rules] together began users={users} names={names!r} since={location_epoch_to_iso_z(event.since)} "
+            f"[rules] together began users={users} names={names!r} since={format_local_with_utc(event.since)} "
             f"confidence={event.confidence:.2f} {windows} distance_m={distance} fix_ages={ages} "
             f"min_confidence={event.min_confidence:.2f} near_m={event.near_m:g} far_m={event.far_m:g} "
             f"first_sight={str(event.first_sight).lower()} "
             f"horizon_capped={str(event.horizon_capped).lower()} rules={rules}"
         )
     return (
-        f"[rules] together ended users={users} names={names!r} began={location_epoch_to_iso_z(event.began_at)} "
-        f"ended={location_epoch_to_iso_z(event.ended_at)} detected={location_epoch_to_iso_z(event.detected_at)} "
+        f"[rules] together ended users={users} names={names!r} began={format_local_with_utc(event.began_at)} "
+        f"ended={format_local_with_utc(event.ended_at)} detected={format_local_with_utc(event.detected_at)} "
         f"duration_s={event.duration_s:.0f} "
         f"peak={event.peak:.2f} low={event.low:.2f} unknown_evaluations={event.unknown_evaluations} "
         f"confidence={event.confidence:.2f} distance_m={distance} "

@@ -36,14 +36,8 @@ def setup_function() -> None:
 
 
 def test_build_vacation_mode_anomaly_bodies_html_and_plain() -> None:
-    plain, html = build_vacation_mode_anomaly_bodies(
-        family_id=DeviceFamilyId.KASA,
-        device_id="aa:bb:cc:dd:ee:ff",
-        previous=True,
-        current=False,
-        observed_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
-        display_name="Porch lights",
-    )
+    with _home_timezone("America/New_York"):
+        plain, html = _build_anomaly_bodies()
     device_label = format_device_display("aa:bb:cc:dd:ee:ff", "Porch lights")
     assert (
         VACATION_ANOMALY_TRANSITION_WHY.format(
@@ -56,8 +50,35 @@ def test_build_vacation_mode_anomaly_bodies_html_and_plain() -> None:
     assert VACATION_ANOMALY_UNMARKED_ACTION_DETAIL in plain
     assert f"Device: {device_label}" in plain
     assert "Change: on → off" in plain
+    assert "Observed: 2026-01-01 22:04:05 EST (2026-01-02 03:04:05 UTC)" in plain
     assert "<ul>" in html
     assert "Vacation mode (device anomaly)" in plain
+
+
+def test_vacation_anomaly_observed_is_never_bare_utc() -> None:
+    with _home_timezone("America/New_York"):
+        plain, html = _build_anomaly_bodies()
+    for body in (plain, html):
+        assert "Observed: 2026-01-02 03:04:05 UTC" not in body
+        assert "2026-01-02 03:04:05 UTC)" in body
+
+
+def _home_timezone(name: str):  # noqa: ANN202
+    return patch(
+        "app.time_display.load_settings_location",
+        return_value=MagicMock(timezone=name),
+    )
+
+
+def _build_anomaly_bodies() -> tuple[str, str]:
+    return build_vacation_mode_anomaly_bodies(
+        family_id=DeviceFamilyId.KASA,
+        device_id="aa:bb:cc:dd:ee:ff",
+        previous=True,
+        current=False,
+        observed_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+        display_name="Porch lights",
+    )
 
 
 def test_format_vacation_bool_device_state_by_family() -> None:
@@ -313,6 +334,7 @@ def test_send_vacation_mode_anomaly_email_uses_smtp_stack(tmp_path: Path) -> Non
     observed = datetime(2026, 7, 15, 18, 30, tzinfo=UTC)
     device_label = format_device_display("aa:bb:cc:dd:ee:01", "Left garage")
     with (
+        _home_timezone("America/New_York"),
         patch(
             "app.vacation_mode.load_outbound_smtp_params",
             return_value=_smtp_params(),
@@ -350,7 +372,7 @@ def test_send_vacation_mode_anomaly_email_uses_smtp_stack(tmp_path: Path) -> Non
     )
     assert f"Device: {device_label}" in body
     assert "closed → open" in body
-    assert "2026-07-15 18:30:00 UTC" in body
+    assert "Observed: 2026-07-15 14:30:00 EDT (2026-07-15 18:30:00 UTC)" in body
     assert VACATION_ANOMALY_UNMARKED_ACTION_DETAIL in body
     assert "Sent by: domesti-bot · Vacation mode (device anomaly)" in body
     assert VacationEmailSource.ANOMALY.value == "anomaly"

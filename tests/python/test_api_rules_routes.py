@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.rules_store import GeofenceRecord, UserRecord, replace_geofences, replace_users
+from app.time_display import format_local_with_utc
 from app.vacation_mode_store import load_vacation_mode_state, save_vacation_mode_state
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -322,6 +323,31 @@ def test_put_rules_settings_location_updates_operator_bundle(
     listed = client.get("/v1/rules/settings/location")
     assert listed.status_code == HTTPStatus.OK
     assert listed.json()["home_label"] == "Updated Home"
+
+
+def test_put_rules_settings_location_refreshes_the_cached_home_timezone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "automation-rules.json"
+    path.write_text(_EXAMPLE_BUNDLE.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("DOMESTI_AUTOMATION_RULES_FILE", str(path))
+    client = _client(tmp_path / "unused.sqlite")
+    epoch = 1_700_000_000.0  # 2023-11-14 22:13:20 UTC
+
+    put_ny = client.put(
+        "/v1/rules/settings/location",
+        json={"lat": 41.2, "lon": -73.9, "timezone": "America/New_York", "home_label": "Home"},
+    )
+    assert put_ny.status_code == HTTPStatus.OK
+    assert "EST" in format_local_with_utc(epoch)
+
+    put_la = client.put(
+        "/v1/rules/settings/location",
+        json={"lat": 34.0, "lon": -118.2, "timezone": "America/Los_Angeles", "home_label": "Home"},
+    )
+    assert put_la.status_code == HTTPStatus.OK
+    assert "PST" in format_local_with_utc(epoch)
 
 
 def test_get_and_put_vacation_mode_settings(

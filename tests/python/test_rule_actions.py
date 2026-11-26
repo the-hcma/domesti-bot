@@ -589,7 +589,7 @@ def test_send_rule_notification_email_includes_device_states_and_rule_link(
         patch("app.rule_actions.load_outbound_smtp_params", return_value=_smtp_params()),
         patch("app.outbound_email.deliver_email_message", return_value=delivery) as deliver_mock,
         patch(
-            "app.rule_notification.load_settings_location",
+            "app.time_display.load_settings_location",
             return_value=MagicMock(timezone="America/New_York"),
         ),
     ):

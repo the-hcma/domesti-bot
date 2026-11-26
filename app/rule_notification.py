@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,7 +11,6 @@ from zoneinfo import ZoneInfo
 
 from app.api.schemas import RuleDeviceActionOut, RuleOut
 from app.astronomical_phrasing import format_duration_minutes
-from app.automation_rules_loader import AutomationRulesLoadError, load_settings_location
 from app.device_display import format_device_display
 from app.outbound_email import (
     append_provenance_footer,
@@ -23,6 +21,7 @@ from app.outbound_email import (
 )
 from app.rule_device_action_outcome import RuleDeviceActionOutcome
 from app.rule_engine import expected_state_for_action_type
+from app.time_display import format_local_with_utc
 
 if TYPE_CHECKING:
     from app.rule_conditions import ManualOffHold
@@ -321,20 +320,15 @@ def format_completed_at_local(
     *,
     timezone: str | ZoneInfo | None = None,
 ) -> str:
-    """Format an action completion epoch in the home timezone with a zone label.
+    """Format an action completion epoch as home-timezone local time with UTC in parentheses.
 
     Uses ``settings_location.timezone`` when ``timezone`` is omitted (same IANA zone
     as schedules / astronomical windows). The zone label is the abbreviation when
-    available (e.g. ``EDT``), otherwise the IANA name or UTC offset. Includes
-    milliseconds so sub-second reaction / action gaps are visible in mail.
+    available (e.g. ``EDT``), otherwise the IANA name or UTC offset, and the same
+    instant follows in UTC. Includes milliseconds so sub-second reaction / action
+    gaps are visible in mail.
     """
-    tz, tz_name = _resolve_notification_timezone(timezone)
-    dt = datetime.fromtimestamp(completed_at, tz=tz)
-    zone_label = (dt.tzname() or "").strip()
-    if not zone_label:
-        zone_label = tz_name
-    millis = int(dt.microsecond / 1000)
-    return f"{dt.strftime('%Y-%m-%d %H:%M:%S')}.{millis:03d} {zone_label}"
+    return format_local_with_utc(completed_at, timezone=timezone, millis=True)
 
 
 def format_device_action_outcome_line(outcome: RuleDeviceActionOutcome) -> str:
@@ -428,35 +422,3 @@ def _device_state_changed(outcome: RuleDeviceActionOutcome) -> bool:
     if before is None or after is None:
         return before != after
     return before != after
-
-
-def _resolve_notification_timezone(
-    timezone: str | ZoneInfo | None,
-) -> tuple[ZoneInfo, str]:
-    """Return ``(ZoneInfo, display_name)`` for rule-fire email timestamps.
-
-    Falls back to UTC when the home timezone cannot be loaded or is not a valid
-    IANA name so notification formatting never fails solely due to timezone
-    resolution.
-    """
-    if isinstance(timezone, ZoneInfo):
-        key = getattr(timezone, "key", None)
-        return timezone, key if isinstance(key, str) and key else str(timezone)
-    if isinstance(timezone, str):
-        return _zoneinfo_or_utc(timezone)
-    try:
-        name = load_settings_location().timezone
-    except AutomationRulesLoadError:
-        return ZoneInfo("UTC"), "UTC"
-    return _zoneinfo_or_utc(name)
-
-
-def _zoneinfo_or_utc(timezone_name: str) -> tuple[ZoneInfo, str]:
-    """Parse ``timezone_name`` as IANA, or fall back to UTC."""
-    name = timezone_name.strip()
-    if not name:
-        return ZoneInfo("UTC"), "UTC"
-    try:
-        return ZoneInfo(name), name
-    except (KeyError, ValueError):
-        return ZoneInfo("UTC"), "UTC"
