@@ -3,25 +3,33 @@ import { describe, it } from "node:test";
 
 import { formatLocalTimestamp } from "../.test-build/format-timestamp.mjs";
 
-describe("formatLocalTimestamp", () => {
-  it("renders local time with its zone and the same instant in UTC in parentheses", () => {
-    const previous = process.env.TZ;
-    process.env.TZ = "America/New_York";
-    try {
-      const stamp = formatLocalTimestamp("2026-11-26T03:58:45Z");
-      assert.match(stamp, /EST/);
-      assert.ok(stamp.endsWith("(2026-11-26 03:58:45 UTC)"), stamp);
-    } finally {
-      if (previous === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = previous;
-      }
+function withTimeZone(zone, fn) {
+  const previous = process.env.TZ;
+  process.env.TZ = zone;
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previous;
     }
+  }
+}
+
+describe("formatLocalTimestamp", () => {
+  it("renders local time with a zone label and the same instant in UTC in parentheses", () => {
+    const stamp = withTimeZone("America/New_York", () => formatLocalTimestamp("2026-11-26T03:58:45Z"));
+    // The local part is the previous evening in New York; the zone label's spelling is locale-dependent.
+    assert.match(stamp, /11\/25\/2026/);
+    assert.match(stamp, /(EST|GMT-5|UTC-5)/);
+    assert.ok(stamp.endsWith("(2026-11-26 03:58:45 UTC)"), stamp);
   });
 
-  it("never returns a bare UTC ISO string for a valid timestamp", () => {
-    assert.ok(!formatLocalTimestamp("2026-11-26T03:58:45Z").includes("T03:58:45Z"));
+  it("shows the instant once when the local zone is UTC", () => {
+    const stamp = withTimeZone("UTC", () => formatLocalTimestamp("2026-11-26T03:58:45Z"));
+    assert.ok(stamp.endsWith(" UTC"), stamp);
+    assert.ok(!stamp.includes("("), stamp);
   });
 
   it("returns unparseable input unchanged", () => {

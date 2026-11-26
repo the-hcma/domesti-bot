@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -211,6 +212,14 @@ def test_a_pair_judged_by_two_thresholds_is_tracked_independently() -> None:
 
 
 def test_the_log_lines_carry_the_values_an_operator_tunes_from() -> None:
+    with patch(
+        "app.time_display.load_settings_location",
+        return_value=MagicMock(timezone="America/New_York"),
+    ):
+        _assert_log_lines_carry_tuned_values()
+
+
+def _assert_log_lines_carry_tuned_values() -> None:
     tracker = TogetherTracker()
     began = tracker.observe(_KEY, _estimate(_START + 700.0))
     assert isinstance(began, TogetherBegan)
@@ -227,6 +236,10 @@ def test_the_log_lines_carry_the_values_an_operator_tunes_from() -> None:
     assert isinstance(ended, TogetherEnded)
     ended_line = format_together_event(ended, names="User A and User B", rule_ids=["a-rule"])
     assert " detected=" in ended_line
+    # Every stamp in the line is local time with the same instant in UTC in parentheses.
+    assert "1970-01-12 " in ended_line
+    assert " EST (1970-01-12 " in ended_line
+    assert ended_line.count(" UTC)") == 3
     assert "[rules] together ended users=user-a,user-b" in ended_line
     assert "near_m=30 far_m=150 reason=clearly_apart rules=a-rule" in ended_line
     assert "unknown_evaluations=0" in ended_line

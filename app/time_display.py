@@ -11,12 +11,28 @@ module.
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from app.automation_rules_loader import AutomationRulesLoadError, load_settings_location
 
 _UTC_ZONE = ZoneInfo("UTC")
+
+# Log lines call this on hot paths and each uncached call would re-read and
+# re-validate the whole rules file, so the home timezone name is cached briefly.
+# A timezone edit in settings therefore shows up in timestamps within the TTL.
+_HOME_TIMEZONE_TTL_S = 30.0
+_home_timezone_lock = threading.Lock()
+_home_timezone_cache: tuple[float, str] | None = None
+
+
+def clear_home_timezone_cache() -> None:
+    """Drop the cached home timezone name (tests, and after settings are saved)."""
+    global _home_timezone_cache  # noqa: PLW0603
+    with _home_timezone_lock:
+        _home_timezone_cache = None
 
 
 def format_local_with_utc(
@@ -57,11 +73,27 @@ def resolve_display_timezone(
         return timezone, key if isinstance(key, str) and key else str(timezone)
     if isinstance(timezone, str):
         return _zoneinfo_or_utc(timezone)
+    name = _home_timezone_name()
+    if name is None:
+        return _UTC_ZONE, "UTC"
+    return _zoneinfo_or_utc(name)
+
+
+def _home_timezone_name() -> str | None:
+    """Return the cached home timezone name, or ``None`` when rules cannot be loaded."""
+    global _home_timezone_cache  # noqa: PLW0603
+    now = time.monotonic()
+    with _home_timezone_lock:
+        cached = _home_timezone_cache
+        if cached is not None and now < cached[0]:
+            return cached[1]
     try:
         name = load_settings_location().timezone
     except AutomationRulesLoadError:
-        return _UTC_ZONE, "UTC"
-    return _zoneinfo_or_utc(name)
+        return None
+    with _home_timezone_lock:
+        _home_timezone_cache = (now + _HOME_TIMEZONE_TTL_S, name)
+    return name
 
 
 def _as_utc_datetime(when: float | datetime) -> datetime:

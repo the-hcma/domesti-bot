@@ -5,7 +5,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.automation_rules_loader import AutomationRulesLoadError
-from app.time_display import format_local_with_utc
+from app.time_display import clear_home_timezone_cache, format_local_with_utc
 
 _EPOCH = 1_700_000_000.0  # 2023-11-14 22:13:20 UTC
 _NEW_YORK = ZoneInfo("America/New_York")
@@ -63,3 +63,37 @@ def test_missing_rules_file_falls_back_to_utc() -> None:
         side_effect=AutomationRulesLoadError("missing"),
     ):
         assert format_local_with_utc(_EPOCH) == "2023-11-14 22:13:20 UTC"
+
+
+def test_home_timezone_is_cached_so_hot_log_paths_do_not_reread_the_rules_file() -> None:
+    class _Loc:
+        timezone = "America/New_York"
+
+    with patch("app.time_display.load_settings_location", return_value=_Loc()) as loader:
+        for _ in range(5):
+            format_local_with_utc(_EPOCH)
+    assert loader.call_count == 1
+
+
+def test_clearing_the_cache_picks_up_a_changed_timezone() -> None:
+    class _Ny:
+        timezone = "America/New_York"
+
+    class _La:
+        timezone = "America/Los_Angeles"
+
+    with patch("app.time_display.load_settings_location", return_value=_Ny()):
+        assert "EST" in format_local_with_utc(_EPOCH)
+    clear_home_timezone_cache()
+    with patch("app.time_display.load_settings_location", return_value=_La()):
+        assert "PST" in format_local_with_utc(_EPOCH)
+
+
+def test_a_failed_rules_load_is_not_cached() -> None:
+    class _Loc:
+        timezone = "America/New_York"
+
+    with patch("app.time_display.load_settings_location", side_effect=AutomationRulesLoadError("x")):
+        assert format_local_with_utc(_EPOCH) == "2023-11-14 22:13:20 UTC"
+    with patch("app.time_display.load_settings_location", return_value=_Loc()):
+        assert "EST" in format_local_with_utc(_EPOCH)

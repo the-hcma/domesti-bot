@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.device_presence import device_presence_store
+from app.time_display import clear_home_timezone_cache
 
 
 def _hermetic_arp_mac(host: str) -> str:
@@ -20,6 +21,12 @@ def _hermetic_arp_mac(host: str) -> str:
 def _reset_device_presence_store() -> None:
     """Keep presence notices from one test out of the next (the store is process-wide)."""
     device_presence_store.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_home_timezone_cache() -> None:
+    """Keep one test's cached home timezone (or patched loader) out of the next."""
+    clear_home_timezone_cache()
 
 
 @pytest.fixture(autouse=True)
