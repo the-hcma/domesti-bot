@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -225,7 +225,13 @@ def test_device_bool_streak_logs_start_and_reset(
         now_fn=lambda: since,
     )
     key = (DeviceFamilyId.EP1, "aa:bb:cc:dd:ee:01")
-    with caplog.at_level(logging.INFO, logger="app.rule_evaluator"):
+    with (
+        patch(
+            "app.time_display.load_settings_location",
+            return_value=MagicMock(timezone="America/New_York"),
+        ),
+        caplog.at_level(logging.INFO, logger="app.rule_evaluator"),
+    ):
         evaluator._set_device_bool_streak(key, False, since)
         evaluator._drop_device_bool_streak(key)
     assert (
@@ -234,7 +240,7 @@ def test_device_bool_streak_logs_start_and_reset(
             "ep1",
             "aa:bb:cc:dd:ee:01",
             "clear",
-            "2023-11-14T22:13:20Z",
+            "2023-11-14 17:13:20 EST (2023-11-14 22:13:20 UTC)",
         )
         in caplog.text
     )

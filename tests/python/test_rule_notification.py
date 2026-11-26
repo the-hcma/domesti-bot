@@ -48,7 +48,7 @@ def _home_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = MagicMock()
     settings.timezone = _HOME_TIMEZONE
     monkeypatch.setattr(
-        "app.rule_notification.load_settings_location",
+        "app.time_display.load_settings_location",
         lambda: settings,
     )
 
@@ -97,13 +97,13 @@ def test_domesti_public_base_url_reads_mytracks_pair_status(
 
 def test_format_completed_at_local_includes_timezone_abbreviation() -> None:
     stamp = format_completed_at_local(_COMPLETED_AT, timezone=_HOME_TIMEZONE)
-    assert stamp == "2023-11-14 17:13:20.000 EST"
+    assert stamp == "2023-11-14 17:13:20.000 EST (2023-11-14 22:13:20.000 UTC)"
     assert stamp == _COMPLETED_AT_LOCAL
 
 
 def test_format_completed_at_local_includes_milliseconds() -> None:
     stamp = format_completed_at_local(_COMPLETED_AT + 0.158, timezone=_HOME_TIMEZONE)
-    assert stamp == "2023-11-14 17:13:20.158 EST"
+    assert stamp == "2023-11-14 17:13:20.158 EST (2023-11-14 22:13:20.158 UTC)"
 
 
 def test_format_completed_at_local_falls_back_to_utc_for_invalid_timezone() -> None:
@@ -115,7 +115,7 @@ def test_format_completed_at_local_falls_back_when_rules_file_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "app.rule_notification.load_settings_location",
+        "app.time_display.load_settings_location",
         lambda: (_ for _ in ()).throw(AutomationRulesLoadError("missing")),
     )
     stamp = format_completed_at_local(_COMPLETED_AT)

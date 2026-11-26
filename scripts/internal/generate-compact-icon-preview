@@ -112,7 +112,8 @@ def _write_review_html(icon_dir: Path, output_dir: Path) -> Path:
         raise ValueError(msg)
 
     objects, rooms = _categorize_icon_keys(keys)
-    generated_at = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now_utc = datetime.now(tz=UTC)
+    generated_at = f"{now_utc.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')} ({now_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC)"
     object_section = _section_markup(icon_dir, "Object icons", objects)
     room_section = _section_markup(icon_dir, "Room icons", rooms)
     document = f"""<!doctype html>

@@ -1,11 +1,18 @@
-// Locale wall-clock timestamps with UTC tooltips for auditing.
+// Locale wall-clock timestamps with the zone abbreviation and UTC in parentheses,
+// plus an exact-ISO UTC tooltip for auditing. Never a bare UTC or bare local stamp.
 
 export function formatLocalTimestamp(iso: string): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) {
     return iso;
   }
-  return new Date(ms).toLocaleString();
+  const when = new Date(ms);
+  const local = when.toLocaleString(undefined, { timeZoneName: "short" });
+  const utc = `${when.toISOString().slice(0, 19).replace("T", " ")} UTC`;
+  if (local.endsWith(" UTC")) {
+    return local;
+  }
+  return `${local} (${utc})`;
 }
 
 export function formatUtcTimestampTitle(iso: string): string {

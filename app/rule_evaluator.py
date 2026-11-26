@@ -174,6 +174,7 @@ from app.rule_validation import (
 )
 from app.rules_store import GeofenceRecord, list_geofences, list_users
 from app.stale_device_display_name_email import maybe_send_stale_display_name_digest
+from app.time_display import format_local_with_utc
 from app.together_tracker import TogetherKey, TogetherTracker, format_together_event
 from app.users_together import STATIONARY_REPORT_WINDOW_S, TogetherParams, UnknownReason
 from app.vacation_mode import tick_vacation_mode
@@ -1399,14 +1400,14 @@ class RuleEvaluator:
                                 _LOGGER.exception(
                                     "[rules] failed to append pending fire notification outcomes rule_id=%s fire_at=%s",
                                     entry.rule_id,
-                                    location_epoch_to_iso_z(entry.fire_at),
+                                    format_local_with_utc(entry.fire_at),
                                 )
                         if dispatch_result.errors:
                             _LOGGER.warning(
                                 "[rules] delayed device action failed rule_id=%s fire_at=%s "
                                 "delay_s=%s family_id=%s device_id=%s action=%s errors=%s",
                                 entry.rule_id,
-                                location_epoch_to_iso_z(entry.fire_at),
+                                format_local_with_utc(entry.fire_at),
                                 delay_s,
                                 entry.action.family_id.value,
                                 entry.action.device_id,
@@ -1418,7 +1419,7 @@ class RuleEvaluator:
                                 "[rules] delayed device action dispatched rule_id=%s fire_at=%s "
                                 "delay_s=%s family_id=%s device_id=%s action=%s",
                                 entry.rule_id,
-                                location_epoch_to_iso_z(entry.fire_at),
+                                format_local_with_utc(entry.fire_at),
                                 delay_s,
                                 entry.action.family_id.value,
                                 entry.action.device_id,
@@ -1728,7 +1729,7 @@ class RuleEvaluator:
                     _LOGGER.warning(
                         "[rules] dropping pending fire notification for missing rule_id=%s fire_at=%s",
                         pending.rule_id,
-                        location_epoch_to_iso_z(pending.fire_at),
+                        format_local_with_utc(pending.fire_at),
                     )
                 continue
             # Claim the row before SMTP so a crash after a successful send cannot
@@ -1760,7 +1761,7 @@ class RuleEvaluator:
                 _LOGGER.error(
                     "[rules] pending fire notification failed rule_id=%s fire_at=%s: %s",
                     pending.rule_id,
-                    location_epoch_to_iso_z(pending.fire_at),
+                    format_local_with_utc(pending.fire_at),
                     exc,
                 )
                 insert_pending_fire_notification(
@@ -1779,7 +1780,7 @@ class RuleEvaluator:
             _LOGGER.info(
                 "[rules] pending fire notification sent rule_id=%s fire_at=%s outcomes=%d cancelled=%s",
                 pending.rule_id,
-                location_epoch_to_iso_z(pending.fire_at),
+                format_local_with_utc(pending.fire_at),
                 len(pending.outcomes),
                 pending.cancelled_remaining,
             )
@@ -3177,7 +3178,7 @@ class RuleEvaluator:
             key[0].value,
             key[1],
             format_bool_state_label(key[0], value),
-            location_epoch_to_iso_z(since),
+            format_local_with_utc(since),
         )
 
     def _set_geofence_inside_since(self, key: tuple[str, str], since: float) -> None:

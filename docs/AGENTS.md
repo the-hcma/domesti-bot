@@ -428,6 +428,10 @@ When the mail is about a decision involving people, place, distance, or time, in
 
 When the decision depends on how far a user is from **home** or a **geofence**, also report the **observed** distance(s) (and which home point / geofence) when those GPS readings are available — not only the configured threshold.
 
+### Timestamps
+
+Every timestamp a person reads (emails, notifications, human-facing log lines, scripts' operator output, the web UI's visible text) is the home-timezone local time with its zone abbreviation followed by the same instant in UTC in parentheses, for example `2026-11-25 22:58:45 EST (2026-11-26 03:58:45 UTC)`. Never emit a bare UTC or bare local stamp in text a person reads. Use `app.time_display.format_local_with_utc` in Python and `formatLocalTimestamp` in `web/src/format-timestamp.ts`; do not hand-format with `strftime(... UTC)` or `toISOString()`. Machine interfaces (API JSON, SQLite, webhooks, `…_at` fields) stay ISO-8601 UTC with a `Z` suffix, and the UI converts them for display. `LOG_UTC=1` is an explicit operator opt-in for the log-line prefix only.
+
 ### Astronomical events
 
 When copy mentions sunrise or sunset with an offset, state the event time, the offset in words and the resulting clock time (for example "opens at 6:07 PM (25 minutes before sunset), sunset today is at 6:32 PM"). Use the helpers in :mod:`app.astronomical_phrasing` so emails, `[rules] fired` log lines and condition status text stay identical.
