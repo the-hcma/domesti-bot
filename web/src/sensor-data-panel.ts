@@ -444,6 +444,9 @@ function renderSparkline(
   ): void => {
     tooltip.hidden = false;
     tooltip.textContent = tipText;
+    // Measure from the left edge: an absolutely positioned box shrinks to the space right of
+    // its previous `left`, which would wrap the long local-plus-UTC stamp more than needed.
+    tooltip.style.left = "0px";
     const host = tooltip.offsetParent;
     if (!(host instanceof HTMLElement)) {
       return;
