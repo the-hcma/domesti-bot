@@ -93,7 +93,9 @@ def _home_timezone_name() -> str | None:
         generation = _home_timezone_generation
     try:
         name = load_settings_location().timezone
-    except AutomationRulesLoadError:
+    except (AutomationRulesLoadError, OSError, ValueError):
+        # Unreadable or undecodable rules file (UnicodeDecodeError is a ValueError): timestamps
+        # are used from log lines and error paths, so formatting must never raise.
         return None
     with _home_timezone_lock:
         if generation == _home_timezone_generation:

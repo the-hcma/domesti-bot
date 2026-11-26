@@ -115,3 +115,10 @@ def test_a_load_that_raced_a_cache_clear_does_not_repopulate_the_cache() -> None
         assert "EST" in format_local_with_utc(_EPOCH)
     with patch("app.time_display.load_settings_location", return_value=_New()):
         assert "PST" in format_local_with_utc(_EPOCH)
+
+
+def test_an_unreadable_or_undecodable_rules_file_falls_back_to_utc() -> None:
+    for error in (PermissionError("denied"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad byte")):
+        clear_home_timezone_cache()
+        with patch("app.time_display.load_settings_location", side_effect=error):
+            assert format_local_with_utc(_EPOCH) == "2023-11-14 22:13:20 UTC"
