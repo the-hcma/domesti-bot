@@ -1,6 +1,7 @@
 // Automations → Data: per-sensor collection controls + time-window charts.
 
 import { HttpError } from "./api.js";
+import { formatLocalTimestampFromEpoch } from "./format-timestamp.js";
 import {
   SensorChartWindow,
   SensorCollectionFrequencyChoice,
@@ -147,7 +148,7 @@ function formatLastSample(
   if (at === null || value === null) {
     return "No samples yet";
   }
-  const when = new Date(at * 1000).toLocaleString();
+  const when = formatLocalTimestampFromEpoch(at);
   if (sensorKey === SensorCollectionKey.Occupancy) {
     return `Last: ${formatOccupancyReading(value)} · ${when}`;
   }
@@ -159,7 +160,7 @@ function formatSampleTooltip(
   point: SensorCollectionSampleOut,
   sensorKey: SensorCollectionKey,
 ): string {
-  const when = new Date(point.recorded_at * 1000).toLocaleString();
+  const when = formatLocalTimestampFromEpoch(point.recorded_at);
   if (sensorKey === SensorCollectionKey.Occupancy) {
     return `${formatOccupancyReading(point.value)} · ${when}`;
   }

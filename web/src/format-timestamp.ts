@@ -15,6 +15,15 @@ export function formatLocalTimestamp(iso: string): string {
   return `${local} (${utc})`;
 }
 
+/** Same shape as {@link formatLocalTimestamp}, from a Unix epoch in seconds. */
+export function formatLocalTimestampFromEpoch(epochSeconds: number): string {
+  const ms = epochSeconds * 1000;
+  if (!Number.isFinite(ms) || Number.isNaN(new Date(ms).getTime())) {
+    return String(epochSeconds);
+  }
+  return formatLocalTimestamp(new Date(ms).toISOString());
+}
+
 export function formatUtcTimestampTitle(iso: string): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) {

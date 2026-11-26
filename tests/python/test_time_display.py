@@ -97,3 +97,21 @@ def test_a_failed_rules_load_is_not_cached() -> None:
         assert format_local_with_utc(_EPOCH) == "2023-11-14 22:13:20 UTC"
     with patch("app.time_display.load_settings_location", return_value=_Loc()):
         assert "EST" in format_local_with_utc(_EPOCH)
+
+
+def test_a_load_that_raced_a_cache_clear_does_not_repopulate_the_cache() -> None:
+    class _Old:
+        timezone = "America/New_York"
+
+    class _New:
+        timezone = "America/Los_Angeles"
+
+    def _slow_old_load() -> _Old:
+        # A settings save lands (and clears the cache) while this load is in flight.
+        clear_home_timezone_cache()
+        return _Old()
+
+    with patch("app.time_display.load_settings_location", side_effect=_slow_old_load):
+        assert "EST" in format_local_with_utc(_EPOCH)
+    with patch("app.time_display.load_settings_location", return_value=_New()):
+        assert "PST" in format_local_with_utc(_EPOCH)

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatLocalTimestamp } from "../.test-build/format-timestamp.mjs";
+import { formatLocalTimestamp, formatLocalTimestampFromEpoch } from "../.test-build/format-timestamp.mjs";
 
 function withTimeZone(zone, fn) {
   const previous = process.env.TZ;
@@ -30,6 +30,15 @@ describe("formatLocalTimestamp", () => {
     const stamp = withTimeZone("UTC", () => formatLocalTimestamp("2026-11-26T03:58:45Z"));
     assert.ok(stamp.endsWith(" UTC"), stamp);
     assert.ok(!stamp.includes("("), stamp);
+  });
+
+  it("formats an epoch the same way, with UTC in parentheses", () => {
+    const stamp = withTimeZone("America/New_York", () => formatLocalTimestampFromEpoch(1_700_000_000));
+    assert.ok(stamp.endsWith("(2023-11-14 22:13:20 UTC)"), stamp);
+  });
+
+  it("returns a non-finite epoch as text rather than throwing", () => {
+    assert.equal(formatLocalTimestampFromEpoch(Number.NaN), "NaN");
   });
 
   it("returns unparseable input unchanged", () => {

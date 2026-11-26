@@ -26,13 +26,16 @@ _UTC_ZONE = ZoneInfo("UTC")
 _HOME_TIMEZONE_TTL_S = 30.0
 _home_timezone_lock = threading.Lock()
 _home_timezone_cache: tuple[float, str] | None = None
+# Bumped on every clear so a load that started before a settings save cannot repopulate the cache with the old value.
+_home_timezone_generation = 0
 
 
 def clear_home_timezone_cache() -> None:
     """Drop the cached home timezone name (tests, and after settings are saved)."""
-    global _home_timezone_cache  # noqa: PLW0603
+    global _home_timezone_cache, _home_timezone_generation  # noqa: PLW0603
     with _home_timezone_lock:
         _home_timezone_cache = None
+        _home_timezone_generation += 1
 
 
 def format_local_with_utc(
@@ -87,12 +90,14 @@ def _home_timezone_name() -> str | None:
         cached = _home_timezone_cache
         if cached is not None and now < cached[0]:
             return cached[1]
+        generation = _home_timezone_generation
     try:
         name = load_settings_location().timezone
     except AutomationRulesLoadError:
         return None
     with _home_timezone_lock:
-        _home_timezone_cache = (now + _HOME_TIMEZONE_TTL_S, name)
+        if generation == _home_timezone_generation:
+            _home_timezone_cache = (now + _HOME_TIMEZONE_TTL_S, name)
     return name
 
 
