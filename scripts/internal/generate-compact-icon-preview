@@ -113,7 +113,11 @@ def _write_review_html(icon_dir: Path, output_dir: Path) -> Path:
 
     objects, rooms = _categorize_icon_keys(keys)
     now_utc = datetime.now(tz=UTC)
-    generated_at = f"{now_utc.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')} ({now_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC)"
+    now_local = now_utc.astimezone()
+    generated_at = f"{now_local.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+    if now_local.tzname() != "UTC":
+        # Same instant in UTC in parentheses; skipped when the local zone already is UTC.
+        generated_at += f" ({now_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC)"
     object_section = _section_markup(icon_dir, "Object icons", objects)
     room_section = _section_markup(icon_dir, "Room icons", rooms)
     document = f"""<!doctype html>
