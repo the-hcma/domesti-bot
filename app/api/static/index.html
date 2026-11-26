@@ -1130,7 +1130,8 @@
     .rules-sensor-chart-tooltip { position: absolute; z-index: 2; pointer-events: none;
       padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border);
       background: var(--panel); color: var(--fg); font-size: 12px;
-      width: max-content; max-width: calc(100% - 8px); white-space: normal; overflow-wrap: anywhere;
+      box-sizing: border-box; width: max-content; max-width: calc(100% - 8px);
+      white-space: normal; overflow-wrap: anywhere;
       box-shadow: 0 2px 8px color-mix(in srgb, var(--fg) 18%, transparent); }
     .rules-mail-test-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .rules-mail-test-row input { flex: 1 1 12rem; min-width: 0; font: inherit;
