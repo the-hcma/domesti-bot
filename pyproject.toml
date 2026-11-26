@@ -72,7 +72,7 @@ dependencies = [
     "python-kasa>=0.12.0",
     "requests>=2.34.2",
     "soco>=0.32.2",
-    "sqlalchemy>=2.1.8",
+    "sqlalchemy>=2.1.9",
     "starlette>=1.10.0",
     "typer>=0.29.1",
     "typing-extensions==4.16.0",
@@ -154,7 +154,7 @@ known-first-party = ["app", "config"]
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.16.0",
+    "httpx2>=2.16.2",
     "icecream>=2.2.0",
     "playwright>=1.65.2",
     "pyright>=1.1.414",
