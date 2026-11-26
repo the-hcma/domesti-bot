@@ -167,6 +167,24 @@ def test_index_html_includes_rules_hub_css() -> None:
         assert needle in html, needle
 
 
+def _css_rule_body(html: str, selector: str) -> str:
+    """Return the declaration block of the first ``selector { ... }`` rule in ``html``."""
+    start = html.index(f"{selector} {{")
+    return html[html.index("{", start) + 1 : html.index("}", start)]
+
+
+def test_sensor_chart_tooltip_wraps_and_stays_inside_the_chart() -> None:
+    """The local-plus-UTC stamp is long: the tooltip must wrap and its cap must bound padding and border too."""
+
+    html = _INDEX_HTML_PATH.read_text(encoding="utf-8")
+    body = " ".join(_css_rule_body(html, ".rules-sensor-chart-tooltip").split())
+    assert "white-space: normal" in body
+    assert "white-space: nowrap" not in body
+    assert "box-sizing: border-box" in body
+    assert "max-width: calc(100% - 8px)" in body
+    assert "width: max-content" in body
+
+
 @pytest.fixture(scope="module")
 def chromium_browser() -> Iterator[Any]:
     sync_api = pytest.importorskip("playwright.sync_api")
