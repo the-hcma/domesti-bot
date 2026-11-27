@@ -800,7 +800,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.5.1" },
     { name = "croniter", specifier = ">=7.0.0" },
     { name = "cryptography", specifier = ">=50.0.2" },
-    { name = "fastapi", specifier = ">=0.163.1" },
+    { name = "fastapi", specifier = ">=0.163.2" },
     { name = "gotailwind", extras = ["cli"] },
     { name = "greenlet", specifier = ">=3.5.6" },
     { name = "httptools", specifier = ">=0.9.0" },
@@ -816,7 +816,7 @@ requires-dist = [
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "python-kasa", specifier = ">=0.12.0" },
     { name = "requests", specifier = ">=2.34.2" },
-    { name = "soco", specifier = ">=0.32.2" },
+    { name = "soco", specifier = ">=0.32.3" },
     { name = "sqlalchemy", specifier = ">=2.1.9" },
     { name = "starlette", specifier = ">=1.10.0" },
     { name = "typer", specifier = ">=0.29.1" },
@@ -863,7 +863,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.163.1"
+version = "0.163.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -874,9 +874,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a4/62/19000d0f3699cacaeffe8a3c4cc7046d87aac3291163ffeb2ef08b82d859/fastapi-0.163.1.tar.gz", hash = "sha256:3d364b02a68b67292e833ff2dfed3b8dc3aeadf73e271c15316c6c166668792f", size = 544796, upload-time = "2026-11-15T09:51:31.271Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/2f/d173f9bf5aba1285067ff47fd06b7e35bb922e3a1e52588fb7b31319d4ad/fastapi-0.163.2.tar.gz", hash = "sha256:e605c4c9b94be78b43aa8239a62ccf7b6684346cdc9e053633feab0ab21b87c7", size = 547696, upload-time = "2026-11-17T18:29:03.57Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/b6/2424da1e40825d3fc54539621811f34e21472499677c9490e4967270e38e/fastapi-0.163.1-py3-none-any.whl", hash = "sha256:68f2d8050f5c3583121c0d203046cc7def5c16a7d6c43a0e7707a8ea610fe2d3", size = 154541, upload-time = "2026-11-15T09:51:29.726Z" },
+    { url = "https://files.pythonhosted.org/packages/58/ef/bf79bc47e914dfabc56657bb6a2d33340b1faa5a514b0b92e842aa088d1e/fastapi-0.163.2-py3-none-any.whl", hash = "sha256:825a8fdd18d7bfcb1b86735e9805c59b7400d55c4060d3df5331b62ae452f004", size = 154717, upload-time = "2026-11-17T18:29:02.025Z" },
 ]
 
 [[package]]
@@ -2200,7 +2200,7 @@ wheels = [
 
 [[package]]
 name = "soco"
-version = "0.32.2"
+version = "0.32.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "appdirs" },
@@ -2209,9 +2209,9 @@ dependencies = [
     { name = "requests" },
     { name = "xmltodict" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/86/3c49d70cfa895dd52a8506a51cdbe9ac662b14ce9dbe0bf61b3377df455b/soco-0.32.2.tar.gz", hash = "sha256:bd6b95215fa9c7b61158cb7025bcf0259516925af2abc666dbf8e20641be9a61", size = 775559, upload-time = "2026-11-06T08:32:27.974Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/6c/ad5b832e556ffbcca60ee7f89fd5ecb751749ce8362eca4336650c5374cb/soco-0.32.3.tar.gz", hash = "sha256:398a3b03a129721bf101cce008c33879cb1c5046f8d16a4f145d4a03fa92cb8c", size = 777050, upload-time = "2026-11-17T08:48:22.058Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/ff/fb0a8c017d4ce67db041d8ab6857202c7ed7c90393482f612ade6d47b9a6/soco-0.32.2-py3-none-any.whl", hash = "sha256:8cc3923901c0996be9d0fe0ca07e44a6c6972044cc10f2247984389da002004a", size = 172832, upload-time = "2026-11-06T08:32:25.848Z" },
+    { url = "https://files.pythonhosted.org/packages/25/df/b77988d02964f58fc137063f58ea23da7cb690dec5541aea3a2fb691018a/soco-0.32.3-py3-none-any.whl", hash = "sha256:df4b08ee926ba34b1ea2385e7f08bb8a466988b1190b3bba3128864268ad692f", size = 173473, upload-time = "2026-11-17T08:48:20.019Z" },
 ]
 
 [[package]]
