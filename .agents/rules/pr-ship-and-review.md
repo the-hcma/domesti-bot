@@ -35,18 +35,15 @@ Run this repository's quality gates from the stack worktree (tests, linters, etc
 
 ## 2. Commit and submit
 
-Only after §1 quality gates pass. **Read** `.github/stacking-tool` (`graphite` or `gh-stack`) and follow `.cursor/rules/stacking-tool.mdc` — do not mix backends on the same stack.
+Only after §1 quality gates pass. **Read** `.github/stacking-tool` (it must say `gh-stack`) and follow `.cursor/rules/stacking-tool.mdc`.
+
+The block below is a **template, not a script to paste**: every `<…>` is a placeholder to fill in, and every line is commented out so that pasting it runs nothing. Stage the named files of this change, never `git add -A` (it stages everything in the worktree, secrets included). The gh-stack skill (`${rh}/.agents/skills/gh-stack/SKILL.md`) says why `init` and `add` take a branch name.
 
 ```bash
-# When marker is graphite (apply-fix comments the inactive backend):
-# gt create <stack>/<topic> -m 'feat: …'   # or gt modify -m '…'
-# gt submit --publish --no-interactive
-
-# When marker is gh-stack:
-gh stack init <stack>/<topic>   # or gh stack add <branch> for a higher layer
-#   (the branch argument keeps it non-interactive)
-git add -A && git commit -m 'feat: …'
-gh stack submit --auto --open --remote origin
+# gh stack init <stack>/<topic>      # or: gh stack add <branch>, for a higher layer
+# git add <path> [<path> …]          # only the files that belong to this layer
+# git commit -m '<type>: <summary>'
+# gh stack submit --auto --open --remote origin
 ```
 
 Wait for CI:
@@ -83,6 +80,10 @@ Say in the PR description whether the merge should close the issue. Default, unl
 
 Avoid applying a "no closing keywords" convention to every PR regardless of whether it finishes the issue: finished issues then stay open and need a manual close pass. Spell the keyword the way the "Unlinked closing keywords" failure mode in `${rh}/.agents/rules/github-content-formatting.md` requires.
 
+## Flaky tests are never accepted
+
+A test that fails and then passes on the same code is a **bug to fix**, not noise to work around. Never record it as known-flaky, list it in a doc or allowlist, skip or quarantine it, or retry until green. When CI goes green only on a rerun, `post-pr-submission-checks` fails with `CI_FLAKE_DETECTED` (the failed and passing runs are named): find the failing job in the failed attempt, fix the root cause (shared state, ordering, timing, a missing wait or mock), and push the fix. Rerunning the job does not clear it for that head. A flake found in code this PR did not touch still gets fixed: open an issue or a PR for it first, and link it from this PR.
+
 ## 3. Agent review loop
 
 > **Reply before resolve (required):** For every valid agent review thread (Copilot, Bugbot, CodeRabbit, …), post an **on-thread human reply** as the authenticated operator **before** resolving. Exit code **3** means threads **lack a human reply** — resolving without replying is non-compliant.
@@ -98,6 +99,8 @@ Prefer the built-in loop:
 Run the loop directly as its own tracked background command (for example `run_in_background` in Claude Code), never through a launcher that detaches it, so its own exit notifies the caller; a notification naming a launcher or wrapper is not a loop result (confirm with the process list and the log tail), a wrapper `echo` exit code is not the loop's (read the result it recorded, for example a `loop exit=` line in its log; no first-party script writes such a line), and waiters longer than the harness's background cap must be chunked and re-armed with a clock check at each chunk end. The loop exits **3** when feedback needs a reply or resolve and nothing else pushes that to anyone, so triage immediately on exit 3 (read `check` and `list-feedback`, fix or decline, then reply and resolve by feedback kind — `reply-thread` for review threads, `reply-comment` for issue comments and review bodies — and push). Full detail: canonical Skill §3.
 
 **Early complete:** when all threads are addressed, CI is green, there is **no** pending requested Copilot/Bugbot review, and CodeRabbit’s workflow is **not** running, the loop finishes — no mandatory idle dwell. **12h PR cap** (`AGENT_REVIEW_PR_TIMEOUT`) when review cycles never converge (exit **6** give-up). Per-agent quota caches skip exhausted agents (CodeRabbit, Copilot, Bugbot).
+
+**Batch the fix pushes (#865):** CodeRabbit allows only a few reviews per hour and every push starts one, so triage all feedback before pushing, pass the local gates, and push once per round. For a series of pushes run `"${rh}/scripts/wait-for-agent-review" hold --pr <n>` first and `"${rh}/scripts/wait-for-agent-review" release --pr <n>` after: exit **14** means the PR is on hold (nothing is waited for or asked, and it cannot complete while held: `release` lifts the hold and requests the one incremental review of the series). Details: the canonical Skill.
 
 **CodeRabbit is on_push:** a new push starts CodeRabbit — never post `@coderabbitai review`. If quota-limited, wait the cooldown with feedback polls (issue #369; default poll **60s**) + grace (default **60s**); only then, if still no real review on head, the loop may post a one-shot `@coderabbitai full review`. When CodeRabbit says wait, do not re-ask until `retry_after`. Rate-limit stubs are not reviews. Mid-cooldown pending feedback wakes the loop (exit **3**).
 
@@ -126,4 +129,4 @@ When `check` reports `complete_ready: true`:
 
 `complete_ready` requires an agent sign-off on the current head (not a bare CodeRabbit commit status / rate-limit stub). This emails `AGENT_REVIEW_REPORT_TO`. It does **not** run `gh pr review --approve` (self-approve is skipped; merge stays an explicit operator step).
 
-Never add the `merge-it` label: it is ignored and the org no longer uses Graphite merge queue. Merge only after the user explicitly confirms, and only with `scripts/dev/merge-stack --pr <n>` (from the PR's worktree; in a consumer repo `${REPOSITORY_HELPERS_DIR:-$HOME/work/ai/repository-helpers}/scripts/dev/merge-stack --pr <n>`): it picks the right command for the repository's merge setup (`gh stack merge` for a stacked PR, the merge queue or auto-merge otherwise) and confirms the enqueue. For a PR in a gh stack, pass the top PR's number and run it from that stack's worktree: it refuses a lower layer, and it lands the top PR and every open PR below it, so name those PRs and get confirmation for the whole stack first. Do not call `gh pr merge` or `gh stack merge` by hand, do not add the `merge-it` label, and do not pipe the command through `tail` or `head`: read its exit status and output.
+Never add the `merge-it` label: Graphite is retired (repository-helpers#772), so the label does nothing and `merge-stack` refuses a `graphite` marker (see `${rh}/scripts/dev/merge-stack --help`). Merge only after the user explicitly confirms, and only with `${rh}/scripts/dev/merge-stack --pr <n>`, run from the feature worktree of the repository that owns the PR: it picks the right command for the repository's merge setup (`gh stack merge` for a stacked PR, the merge queue or auto-merge otherwise) and confirms the enqueue. For a PR in a gh stack, pass the top PR's number and run it from that stack's worktree: it refuses a lower layer, and it lands the top PR and every open PR below it (as `merge-stack --help` says), so name those PRs and get confirmation for the whole stack first. Do not call `gh pr merge` or `gh stack merge` by hand, do not add the `merge-it` label, and do not pipe the command through `tail` or `head`: read its exit status and output.
